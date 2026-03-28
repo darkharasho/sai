@@ -12,15 +12,18 @@
 
 **Theme Colors (Bearded Black & Gold):**
 ```
---bg-primary: #111418        /* main background */
---bg-secondary: #0e1114      /* sidebar, activity bar */
---bg-mid: #101316            /* terminal background */
---bg-input: #181b1f          /* input fields */
---bg-hover: #24272a          /* hover states */
---border: #0c0e11            /* borders */
+--bg-primary: #111418        /* editor/main background */
+--bg-secondary: #0c0f11      /* sidebar, activity bar, title bar */
+--bg-mid: #0e1114            /* inactive tabs, mid-panels */
+--bg-input: #161a1f          /* input fields */
+--bg-hover: #21292f          /* hover states */
+--bg-elevated: #1c2027       /* dropdowns, overlays */
+--border: #040506            /* borders */
 --accent: #c7910c            /* gold accent/primary */
---text: #c4c4c5              /* primary text */
---text-secondary: #949597    /* secondary text */
+--accent-hover: #f5b832      /* button text / accent lighten */
+--text: #bec6d0              /* primary text */
+--text-secondary: #a0acbb    /* secondary text */
+--text-muted: #475262        /* dim/placeholder text */
 --blue: #11B7D4
 --green: #00a884
 --orange: #d4770c
