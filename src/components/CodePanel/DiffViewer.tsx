@@ -146,6 +146,11 @@ export default function DiffViewer({ projectPath, filePath, staged, mode }: Diff
         .d2h-code-line-prefix {
           color: var(--text-muted);
         }
+        .d2h-code-line-ctn,
+        .d2h-code-side-line {
+          white-space: pre-wrap;
+          word-break: break-all;
+        }
         .d2h-diff-tbody tr {
           border-color: var(--border);
         }
