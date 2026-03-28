@@ -13,9 +13,10 @@ interface ChangedFilesProps {
   files: GitFile[];
   onAction: (file: GitFile) => void;
   actionLabel: string;
+  onFileClick: (file: GitFile) => void;
 }
 
-export default function ChangedFiles({ title, files, onAction, actionLabel }: ChangedFilesProps) {
+export default function ChangedFiles({ title, files, onAction, actionLabel, onFileClick }: ChangedFilesProps) {
   const [hoveredPath, setHoveredPath] = useState<string | null>(null);
 
   if (files.length === 0) return null;
@@ -49,13 +50,14 @@ export default function ChangedFiles({ title, files, onAction, actionLabel }: Ch
             key={file.path}
             onMouseEnter={() => setHoveredPath(file.path)}
             onMouseLeave={() => setHoveredPath(null)}
+            onClick={() => onFileClick(file)}
             style={{
               display: 'flex',
               alignItems: 'center',
               padding: '3px 12px',
               gap: 6,
               background: isHovered ? 'var(--bg-hover)' : 'transparent',
-              cursor: 'default',
+              cursor: 'pointer',
               minWidth: 0,
             }}
           >
@@ -106,7 +108,7 @@ export default function ChangedFiles({ title, files, onAction, actionLabel }: Ch
 
             {/* Action button */}
             <button
-              onClick={() => onAction(file)}
+              onClick={(e) => { e.stopPropagation(); onAction(file); }}
               title={actionLabel}
               style={{
                 flexShrink: 0,
