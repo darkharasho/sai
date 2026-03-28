@@ -14,6 +14,34 @@ const THINKING_WORDS = [
 
 const SPINNER_ICONS = [Dot, Minus, Plus, Asterisk, SunDim, SunMedium, Sun];
 
+function ContextMeter({ used, total }: { used: number; total: number }) {
+  const pct = Math.min((used / total) * 100, 100);
+  const radius = 8;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (pct / 100) * circumference;
+  const color = pct > 80 ? 'var(--red)' : pct > 50 ? 'var(--orange)' : 'var(--accent)';
+
+  if (used === 0) return null;
+
+  return (
+    <div className="context-meter" title={`Context: ${Math.round(pct)}% (${(used / 1000).toFixed(0)}K / ${(total / 1000).toFixed(0)}K tokens)`}>
+      <svg width="22" height="22" viewBox="0 0 22 22">
+        <circle cx="11" cy="11" r={radius} fill="none" stroke="var(--border)" strokeWidth="2.5" />
+        <circle
+          cx="11" cy="11" r={radius} fill="none"
+          stroke={color} strokeWidth="2.5"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          strokeLinecap="round"
+          transform="rotate(-90 11 11)"
+          style={{ transition: 'stroke-dashoffset 0.5s ease' }}
+        />
+      </svg>
+      <span className="context-meter-label">{Math.round(pct)}%</span>
+    </div>
+  );
+}
+
 function ThinkingAnimation({ hasContent }: { hasContent: boolean }) {
   const [wordIndex, setWordIndex] = useState(() => Math.floor(Math.random() * THINKING_WORDS.length));
   const [charIndex, setCharIndex] = useState(0);
@@ -75,6 +103,7 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
   const [ready, setReady] = useState(false);
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
   const [permissionMode, setPermissionMode] = useState<'default' | 'bypass'>('default');
+  const [contextUsage, setContextUsage] = useState<{ used: number; total: number }>({ used: 0, total: 1000000 });
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -162,7 +191,20 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
         }
       }
 
-      // Result — final answer for this turn
+      // Result — final answer for this turn, also has usage data
+      if (msg.type === 'result') {
+        // Update context usage
+        if (msg.usage) {
+          const used = (msg.usage.input_tokens || 0) +
+            (msg.usage.cache_read_input_tokens || 0) +
+            (msg.usage.cache_creation_input_tokens || 0) +
+            (msg.usage.output_tokens || 0);
+          const modelUsage = msg.modelUsage || {};
+          const modelKey = Object.keys(modelUsage)[0];
+          const total = modelKey ? modelUsage[modelKey].contextWindow || 1000000 : 1000000;
+          setContextUsage({ used, total });
+        }
+      }
       if (msg.type === 'result' && msg.result) {
         const text = typeof msg.result === 'string' ? msg.result : '';
         if (text) {
@@ -243,6 +285,9 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
         {isStreaming && <ThinkingAnimation hasContent={messages[messages.length - 1]?.role === 'assistant'} />}
         <div ref={messagesEndRef} />
       </div>
+      <div className="chat-status-bar">
+        <ContextMeter used={contextUsage.used} total={contextUsage.total} />
+      </div>
       <ChatInput
         onSend={handleSend}
         disabled={!ready}
@@ -283,6 +328,24 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
         .chat-empty-subtitle {
           font-size: 14px;
           color: var(--text-secondary);
+        }
+        .chat-status-bar {
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          padding: 0 16px;
+          min-height: 0;
+        }
+        .context-meter {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          cursor: default;
+        }
+        .context-meter-label {
+          font-size: 10px;
+          color: var(--text-muted);
+          font-family: 'JetBrains Mono', monospace;
         }
         .thinking-animation {
           display: flex;
