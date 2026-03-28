@@ -8,7 +8,6 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [ready, setReady] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const currentAssistantRef = useRef<string | null>(null);
 
   useEffect(() => {
     window.vsai.claudeStart(projectPath || '').then(() => setReady(true));
@@ -16,6 +15,17 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
     const cleanup = window.vsai.claudeOnMessage((msg: any) => {
       if (msg.type === 'ready') {
         setReady(true);
+        return;
+      }
+
+      if (msg.type === 'streaming_start') {
+        setIsStreaming(true);
+        return;
+      }
+
+      // Process exited — turn is fully complete
+      if (msg.type === 'done') {
+        setIsStreaming(false);
         return;
       }
 
@@ -35,70 +45,65 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
         return;
       }
 
-      // System messages (init, hooks) — ignore for UI
-      if (msg.type === 'system') {
+      // Skip system/rate_limit noise
+      if (msg.type === 'system' || msg.type === 'rate_limit_event' || msg.type === 'user') {
         return;
       }
 
-      // Rate limit events — could show as warning
-      if (msg.type === 'rate_limit_event') {
-        return;
-      }
-
-      // Assistant message — contains streaming content
+      // Assistant message — streaming content + tool calls
       if (msg.type === 'assistant' && msg.message?.content) {
-        setIsStreaming(true);
-        const textBlocks = msg.message.content
-          .filter((b: any) => b.type === 'text')
-          .map((b: any) => b.text)
-          .join('');
+        const textParts: string[] = [];
+        const tools: ToolCall[] = [];
 
-        const toolBlocks: ToolCall[] = msg.message.content
-          .filter((b: any) => b.type === 'tool_use')
-          .map((b: any) => ({
-            type: b.name?.includes('Edit') || b.name?.includes('Write') ? 'file_edit' as const :
-                  b.name?.includes('Bash') ? 'terminal_command' as const :
-                  b.name?.includes('Read') ? 'file_read' as const : 'other' as const,
-            name: b.name || 'tool',
-            input: typeof b.input === 'string' ? b.input : JSON.stringify(b.input, null, 2),
-          }));
+        for (const block of msg.message.content) {
+          if (block.type === 'text' && block.text) {
+            textParts.push(block.text);
+          }
+          if (block.type === 'tool_use') {
+            tools.push({
+              type: block.name?.includes('Edit') || block.name?.includes('Write') ? 'file_edit' :
+                    block.name?.includes('Bash') ? 'terminal_command' :
+                    block.name?.includes('Read') || block.name?.includes('Glob') || block.name?.includes('Grep') ? 'file_read' : 'other',
+              name: block.name || 'tool',
+              input: typeof block.input === 'string' ? block.input :
+                     typeof block.input === 'object' ? JSON.stringify(block.input, null, 2) : '',
+            });
+          }
+        }
 
-        if (textBlocks || toolBlocks.length > 0) {
+        const text = textParts.join('');
+
+        if (text || tools.length > 0) {
           setMessages(prev => {
-            const last = prev[prev.length - 1];
-            if (last?.role === 'assistant' && currentAssistantRef.current === last.id) {
-              return [...prev.slice(0, -1), {
-                ...last,
-                content: textBlocks || last.content,
-                toolCalls: toolBlocks.length > 0 ? toolBlocks : last.toolCalls,
-              }];
-            }
-            const newId = Date.now().toString();
-            currentAssistantRef.current = newId;
+            // Each assistant message is a new message in the chat
+            // (Claude may send multiple during multi-turn)
             return [...prev, {
-              id: newId,
+              id: `${Date.now()}-${Math.random()}`,
               role: 'assistant',
-              content: textBlocks,
+              content: text,
               timestamp: Date.now(),
-              toolCalls: toolBlocks.length > 0 ? toolBlocks : undefined,
+              toolCalls: tools.length > 0 ? tools : undefined,
             }];
           });
         }
       }
 
-      // Result — final response, marks end of turn
-      if (msg.type === 'result') {
-        setIsStreaming(false);
-        currentAssistantRef.current = null;
-
-        // Update with final text if available
-        if (msg.result && typeof msg.result === 'string') {
+      // Result — final answer for this turn
+      if (msg.type === 'result' && msg.result) {
+        const text = typeof msg.result === 'string' ? msg.result : '';
+        if (text) {
+          // Replace the last assistant message with the final clean result
           setMessages(prev => {
             const last = prev[prev.length - 1];
             if (last?.role === 'assistant') {
-              return [...prev.slice(0, -1), { ...last, content: msg.result }];
+              return [...prev.slice(0, -1), { ...last, content: text }];
             }
-            return prev;
+            return [...prev, {
+              id: `result-${Date.now()}`,
+              role: 'assistant',
+              content: text,
+              timestamp: Date.now(),
+            }];
           });
         }
       }
@@ -118,9 +123,7 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
       content: text,
       timestamp: Date.now(),
     }]);
-    currentAssistantRef.current = null;
     window.vsai.claudeSend(text);
-    setIsStreaming(true);
   };
 
   return (
@@ -139,9 +142,7 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
         {isStreaming && (
           <div className="thinking-indicator">
             <div className="thinking-bar" />
-            <span className="thinking-label">
-              {messages[messages.length - 1]?.role === 'assistant' ? 'Writing...' : 'Thinking...'}
-            </span>
+            <span className="thinking-label">Claude is working...</span>
           </div>
         )}
         <div ref={messagesEndRef} />
