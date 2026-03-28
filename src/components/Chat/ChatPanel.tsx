@@ -101,10 +101,13 @@ interface ChatPanelProps {
   projectPath: string;
   permissionMode: 'default' | 'bypass';
   onPermissionChange: (mode: 'default' | 'bypass') => void;
+  initialMessages?: ChatMessageType[];
+  onMessagesChange?: (messages: ChatMessageType[]) => void;
+  onTurnComplete?: () => void;
 }
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange }: ChatPanelProps) {
-  const [messages, setMessages] = useState<ChatMessageType[]>([]);
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, initialMessages, onMessagesChange, onTurnComplete }: ChatPanelProps) {
+  const [messages, setMessages] = useState<ChatMessageType[]>(initialMessages || []);
   const [isStreaming, setIsStreaming] = useState(false);
   const [ready, setReady] = useState(false);
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
@@ -129,6 +132,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       // Process exited — turn is fully complete
       if (msg.type === 'done') {
         setIsStreaming(false);
+        onTurnComplete?.();
         return;
       }
 
@@ -237,6 +241,10 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isStreaming]);
+
+  useEffect(() => {
+    onMessagesChange?.(messages);
+  }, [messages]);
 
   const handleSend = async (text: string, images?: string[]) => {
     // Handle built-in commands locally
