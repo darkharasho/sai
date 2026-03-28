@@ -106,9 +106,9 @@ export default function DiffViewer({ projectPath, filePath, staged, mode }: Diff
           background: var(--bg-secondary) !important;
           color: var(--text-secondary) !important;
           border-right: 1px solid var(--border);
-          min-width: 40px;
-          width: 40px;
-          padding: 0 8px;
+          min-width: 50px;
+          width: 50px;
+          padding: 0 10px;
           text-align: right;
           position: static;
         }
