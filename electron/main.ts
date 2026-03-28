@@ -27,6 +27,11 @@ function createWindow() {
     },
   });
 
+  mainWindow.on('close', () => {
+    destroyAllTerminals();
+    destroyClaude();
+  });
+
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
