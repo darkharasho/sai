@@ -4,6 +4,7 @@ import { Terminal, FileText, GitBranch, Zap, Settings, MessageSquare, Slash, AtS
 interface ChatInputProps {
   onSend: (message: string) => void;
   disabled?: boolean;
+  slashCommands?: string[];
 }
 
 interface AutocompleteItem {
@@ -14,16 +15,19 @@ interface AutocompleteItem {
   type: 'slash' | 'at';
 }
 
-const SLASH_COMMANDS: AutocompleteItem[] = [
+function getCommandIcon(name: string): React.ReactNode {
+  if (name.includes('commit') || name.includes('git') || name.includes('pr') || name.includes('review') || name.includes('clean_gone')) return <GitBranch size={14} />;
+  if (name.includes('terminal') || name.includes('debug') || name.includes('bash')) return <Terminal size={14} />;
+  if (name.includes('file') || name.includes('init') || name.includes('claude-md') || name.includes('revise')) return <FileText size={14} />;
+  if (name.includes('config') || name.includes('setting') || name.includes('cost')) return <Settings size={14} />;
+  return <Slash size={14} />;
+}
+
+const BUILTIN_COMMANDS: AutocompleteItem[] = [
   { label: '/help', value: '/help', description: 'Show available commands', icon: <MessageSquare size={14} />, type: 'slash' },
   { label: '/clear', value: '/clear', description: 'Clear conversation', icon: <Zap size={14} />, type: 'slash' },
   { label: '/compact', value: '/compact', description: 'Compact conversation history', icon: <Zap size={14} />, type: 'slash' },
-  { label: '/init', value: '/init', description: 'Initialize CLAUDE.md', icon: <FileText size={14} />, type: 'slash' },
-  { label: '/review', value: '/review', description: 'Review code changes', icon: <GitBranch size={14} />, type: 'slash' },
-  { label: '/commit', value: '/commit', description: 'Create a git commit', icon: <GitBranch size={14} />, type: 'slash' },
-  { label: '/pr', value: '/pr', description: 'Create a pull request', icon: <GitBranch size={14} />, type: 'slash' },
   { label: '/cost', value: '/cost', description: 'Show session cost', icon: <Settings size={14} />, type: 'slash' },
-  { label: '/terminal', value: '/terminal', description: 'Run terminal command', icon: <Terminal size={14} />, type: 'slash' },
 ];
 
 const AT_MENTIONS: AutocompleteItem[] = [
@@ -33,7 +37,7 @@ const AT_MENTIONS: AutocompleteItem[] = [
   { label: '@git', value: '@git', description: 'Reference git context', icon: <GitBranch size={14} />, type: 'at' },
 ];
 
-export default function ChatInput({ onSend, disabled }: ChatInputProps) {
+export default function ChatInput({ onSend, disabled, slashCommands = [] }: ChatInputProps) {
   const [value, setValue] = useState('');
   const [suggestions, setSuggestions] = useState<AutocompleteItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -53,8 +57,24 @@ export default function ChatInput({ onSend, disabled }: ChatInputProps) {
 
     if (currentWord.startsWith('/')) {
       const query = currentWord;
-      const matches = SLASH_COMMANDS.filter(c => c.label.toLowerCase().startsWith(query));
-      setSuggestions(matches);
+      // Build dynamic command list from Claude + builtins
+      const dynamicCommands: AutocompleteItem[] = slashCommands.map(name => ({
+        label: `/${name}`,
+        value: `/${name}`,
+        description: name.includes(':') ? name.split(':')[0] : '',
+        icon: getCommandIcon(name),
+        type: 'slash' as const,
+      }));
+      const allCommands = [...BUILTIN_COMMANDS, ...dynamicCommands];
+      // Deduplicate by label
+      const seen = new Set<string>();
+      const unique = allCommands.filter(c => {
+        if (seen.has(c.label)) return false;
+        seen.add(c.label);
+        return true;
+      });
+      const matches = unique.filter(c => c.label.toLowerCase().startsWith(query));
+      setSuggestions(matches.slice(0, 15));
       setSelectedIndex(0);
     } else if (currentWord.startsWith('@')) {
       const query = currentWord;

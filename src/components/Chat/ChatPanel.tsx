@@ -7,6 +7,7 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [ready, setReady] = useState(false);
+  const [slashCommands, setSlashCommands] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -45,7 +46,13 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
         return;
       }
 
-      // Skip system/rate_limit noise
+      // Capture slash commands from init
+      if (msg.type === 'system' && msg.subtype === 'init' && msg.slash_commands) {
+        setSlashCommands(msg.slash_commands);
+        return;
+      }
+
+      // Skip other system/rate_limit noise
       if (msg.type === 'system' || msg.type === 'rate_limit_event' || msg.type === 'user') {
         return;
       }
@@ -147,7 +154,7 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
         )}
         <div ref={messagesEndRef} />
       </div>
-      <ChatInput onSend={handleSend} disabled={!ready} />
+      <ChatInput onSend={handleSend} disabled={!ready} slashCommands={slashCommands} />
       <style>{`
         .chat-panel {
           flex: 1;
