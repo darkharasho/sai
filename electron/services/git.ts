@@ -48,4 +48,10 @@ export function registerGitHandlers() {
       isClaude: entry.author_name.includes('Claude') || entry.message.includes('Co-Authored-By: Claude'),
     }));
   });
+
+  ipcMain.handle('git:diff', async (_event, cwd: string, filepath: string, staged: boolean) => {
+    const git = simpleGit(cwd);
+    const args = staged ? ['--cached', '--', filepath] : ['--', filepath];
+    return await git.diff(args);
+  });
 }

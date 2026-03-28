@@ -25,6 +25,8 @@ contextBridge.exposeInMainWorld('vsai', {
   gitPush: (cwd: string) => ipcRenderer.invoke('git:push', cwd),
   gitPull: (cwd: string) => ipcRenderer.invoke('git:pull', cwd),
   gitLog: (cwd: string, count: number) => ipcRenderer.invoke('git:log', cwd, count),
+  gitDiff: (cwd: string, filepath: string, staged: boolean) =>
+    ipcRenderer.invoke('git:diff', cwd, filepath, staged),
   saveImage: (base64Data: string) => ipcRenderer.invoke('project:saveImage', base64Data),
   selectFolder: () => ipcRenderer.invoke('project:selectFolder'),
   getRecentProjects: () => ipcRenderer.invoke('project:getRecent'),
