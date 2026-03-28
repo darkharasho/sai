@@ -123,7 +123,8 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 
 		activeProcess.stderr?.on('data', (data: Buffer) => {
 			const text = data.toString().trim();
-			if (text && !text.includes('Warning: no stdin')) {
+			if (text) {
+				// Always forward stderr so we can debug
 				safeSend(win, 'claude:message', { type: 'error', text });
 			}
 		});

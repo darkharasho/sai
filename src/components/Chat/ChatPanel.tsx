@@ -291,9 +291,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         {isStreaming && <ThinkingAnimation hasContent={messages[messages.length - 1]?.role === 'assistant'} />}
         <div ref={messagesEndRef} />
       </div>
-      <div className="chat-status-bar">
-        <ContextMeter used={contextUsage.used} total={contextUsage.total} />
-      </div>
       <ChatInput
         onSend={handleSend}
         disabled={!ready}
@@ -302,6 +299,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         onStop={() => window.vsai.claudeStop?.()}
         permissionMode={permissionMode}
         onPermissionChange={onPermissionChange}
+        contextUsage={contextUsage}
       />
       <style>{`
         .chat-panel {
@@ -334,24 +332,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         .chat-empty-subtitle {
           font-size: 14px;
           color: var(--text-secondary);
-        }
-        .chat-status-bar {
-          display: flex;
-          align-items: center;
-          justify-content: flex-end;
-          padding: 0 16px;
-          min-height: 0;
-        }
-        .context-meter {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          cursor: default;
-        }
-        .context-meter-label {
-          font-size: 10px;
-          color: var(--text-muted);
-          font-family: 'JetBrains Mono', monospace;
         }
         .thinking-animation {
           display: flex;

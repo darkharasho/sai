@@ -13,6 +13,7 @@ interface ChatInputProps {
   onStop?: () => void;
   permissionMode: 'default' | 'bypass';
   onPermissionChange: (mode: 'default' | 'bypass') => void;
+  contextUsage?: { used: number; total: number };
 }
 
 interface AutocompleteItem {
@@ -47,7 +48,33 @@ const ADD_MENU_ITEMS: AutocompleteItem[] = [
   { label: 'Add URL', value: '@url ', description: 'Reference a URL', icon: <AtSign size={14} /> },
 ];
 
-export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, permissionMode, onPermissionChange }: ChatInputProps) {
+function ContextRing({ used, total }: { used: number; total: number }) {
+  const pct = Math.min((used / total) * 100, 100);
+  const radius = 9;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (pct / 100) * circumference;
+  const color = pct > 80 ? 'var(--red)' : pct > 50 ? 'var(--orange)' : 'var(--accent)';
+
+  return (
+    <div className="context-ring" title={`Context: ${Math.round(pct)}% (${(used / 1000).toFixed(0)}K / ${(total / 1000).toFixed(0)}K tokens)`}>
+      <svg width="24" height="24" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r={radius} fill="none" stroke="var(--bg-hover)" strokeWidth="2.5" />
+        <circle
+          cx="12" cy="12" r={radius} fill="none"
+          stroke={color} strokeWidth="2.5"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          strokeLinecap="round"
+          transform="rotate(-90 12 12)"
+          style={{ transition: 'stroke-dashoffset 0.5s ease' }}
+        />
+      </svg>
+      <span className="context-ring-label">{Math.round(pct)}%</span>
+    </div>
+  );
+}
+
+export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, permissionMode, onPermissionChange, contextUsage }: ChatInputProps) {
   const [value, setValue] = useState('');
   const [suggestions, setSuggestions] = useState<AutocompleteItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -243,6 +270,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           <button className="toolbar-btn" onClick={() => { setValue(value + '/'); textareaRef.current?.focus(); }} title="Slash commands">
             <Slash size={16} />
           </button>
+          {contextUsage && <ContextRing used={contextUsage.used} total={contextUsage.total} />}
         </div>
 
         <div className="toolbar-center">
@@ -400,6 +428,18 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           padding: 2px 6px;
           border-radius: 3px;
           white-space: nowrap;
+        }
+        .context-ring {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          margin-left: 4px;
+        }
+        .context-ring-label {
+          font-size: 11px;
+          color: var(--text-muted);
+          font-family: 'JetBrains Mono', monospace;
+          font-weight: 500;
         }
         .toolbar-btn {
           background: none;
