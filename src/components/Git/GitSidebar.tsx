@@ -22,6 +22,7 @@ interface GitStatus {
 
 interface GitSidebarProps {
   projectPath: string;
+  onFileClick: (file: GitFile) => void;
 }
 
 function getPath(item: GitStatusItem | string): string {
@@ -56,7 +57,7 @@ function parseStatus(status: GitStatus): { staged: GitFile[]; unstaged: GitFile[
   return { staged, unstaged };
 }
 
-export default function GitSidebar({ projectPath }: GitSidebarProps) {
+export default function GitSidebar({ projectPath, onFileClick }: GitSidebarProps) {
   const [branch, setBranch] = useState('');
   const [ahead, setAhead] = useState(0);
   const [behind, setBehind] = useState(0);
@@ -201,6 +202,7 @@ export default function GitSidebar({ projectPath }: GitSidebarProps) {
           files={stagedFiles}
           onAction={handleUnstage}
           actionLabel="-"
+          onFileClick={onFileClick}
         />
 
         <ChangedFiles
@@ -208,6 +210,7 @@ export default function GitSidebar({ projectPath }: GitSidebarProps) {
           files={unstagedFiles}
           onAction={handleStage}
           actionLabel="+"
+          onFileClick={onFileClick}
         />
 
         <ClaudeActivity commits={commits} />

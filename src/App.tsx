@@ -4,8 +4,9 @@ import ChatPanel from './components/Chat/ChatPanel';
 import TerminalPanel from './components/Terminal/TerminalPanel';
 import GitSidebar from './components/Git/GitSidebar';
 import TitleBar from './components/TitleBar';
+import CodePanel from './components/CodePanel/CodePanel';
 import { loadSessions, saveSessions, createSession, upsertSession } from './sessions';
-import type { ChatSession, ChatMessage } from './types';
+import type { ChatSession, ChatMessage, GitFile, OpenFile } from './types';
 
 type PermissionMode = 'default' | 'bypass';
 
@@ -25,6 +26,43 @@ export default function App() {
 
   const [sessions, setSessions] = useState<ChatSession[]>(loadSessions);
   const [activeSession, setActiveSession] = useState<ChatSession>(createSession);
+
+  const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
+  const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
+
+  const handleFileClick = useCallback((file: GitFile) => {
+    setOpenFiles(prev => {
+      const exists = prev.some(f => f.file.path === file.path);
+      if (exists) return prev;
+      return [...prev, { file, diffMode: 'unified' }];
+    });
+    setActiveFilePath(file.path);
+  }, []);
+
+  const handleFileClose = useCallback((path: string) => {
+    setOpenFiles(prev => {
+      const next = prev.filter(f => f.file.path !== path);
+      if (next.length === 0) {
+        setActiveFilePath(null);
+      } else if (path === activeFilePath) {
+        const idx = prev.findIndex(f => f.file.path === path);
+        const newActive = next[Math.min(idx, next.length - 1)];
+        setActiveFilePath(newActive.file.path);
+      }
+      return next;
+    });
+  }, [activeFilePath]);
+
+  const handleCloseAllFiles = useCallback(() => {
+    setOpenFiles([]);
+    setActiveFilePath(null);
+  }, []);
+
+  const handleDiffModeChange = useCallback((path: string, mode: 'unified' | 'split') => {
+    setOpenFiles(prev =>
+      prev.map(f => f.file.path === path ? { ...f, diffMode: mode } : f)
+    );
+  }, []);
 
   const persistSession = useCallback((session: ChatSession) => {
     setSessions(prev => {
@@ -94,18 +132,32 @@ export default function App() {
       />
       <div className="app-body">
         <NavBar activeSidebar={sidebarOpen} onToggle={toggleSidebar} />
-        {sidebarOpen === 'git' && <GitSidebar projectPath={projectPath} />}
+        {sidebarOpen === 'git' && <GitSidebar projectPath={projectPath} onFileClick={handleFileClick} />}
         <div className="main-content">
-          <ChatPanel
-            key={activeSession.id}
-            projectPath={projectPath}
-            permissionMode={permissionMode}
-            onPermissionChange={handlePermissionChange}
-            initialMessages={activeSession.messages}
-            onMessagesChange={handleMessagesChange}
-            onTurnComplete={handleSessionSave}
-          />
-          <TerminalPanel projectPath={projectPath} />
+          {activeFilePath ? (
+            <CodePanel
+              openFiles={openFiles}
+              activeFilePath={activeFilePath}
+              projectPath={projectPath}
+              onActivate={setActiveFilePath}
+              onClose={handleFileClose}
+              onCloseAll={handleCloseAllFiles}
+              onDiffModeChange={handleDiffModeChange}
+            />
+          ) : (
+            <>
+              <ChatPanel
+                key={activeSession.id}
+                projectPath={projectPath}
+                permissionMode={permissionMode}
+                onPermissionChange={handlePermissionChange}
+                initialMessages={activeSession.messages}
+                onMessagesChange={handleMessagesChange}
+                onTurnComplete={handleSessionSave}
+              />
+              <TerminalPanel projectPath={projectPath} />
+            </>
+          )}
         </div>
       </div>
     </div>
