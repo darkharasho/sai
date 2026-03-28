@@ -22,8 +22,11 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
       } as React.CSSProperties}
     >
       <button
-        onClick={() => {
-          // Will open folder picker in Task 2
+        onClick={async () => {
+          const folder = await window.vsai.selectFolder();
+          if (folder) {
+            onProjectChange(folder);
+          }
         }}
         style={{
           WebkitAppRegion: 'no-drag',

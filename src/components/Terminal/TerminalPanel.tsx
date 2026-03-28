@@ -11,7 +11,8 @@ export default function TerminalPanel({ projectPath }: { projectPath: string }) 
   const termIdRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!termRef.current || !projectPath) return;
+    if (!termRef.current) return;
+    const cwd = projectPath || '';
 
     const xterm = new Terminal({
       theme: {
@@ -45,7 +46,7 @@ export default function TerminalPanel({ projectPath }: { projectPath: string }) 
     fitRef.current = fit;
 
     // Create terminal in main process
-    window.vsai.terminalCreate(projectPath).then((id: number) => {
+    window.vsai.terminalCreate(cwd).then((id: number) => {
       termIdRef.current = id;
 
       xterm.onData((data) => {

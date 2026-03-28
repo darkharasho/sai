@@ -10,9 +10,7 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!projectPath) return;
-
-    window.vsai.claudeStart(projectPath).then(() => {
+    window.vsai.claudeStart(projectPath || '').then(() => {
       setClaudeStarted(true);
     });
 
@@ -85,7 +83,7 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
         )}
         <div ref={messagesEndRef} />
       </div>
-      <ChatInput onSend={handleSend} disabled={!projectPath || !claudeStarted} />
+      <ChatInput onSend={handleSend} disabled={!claudeStarted} />
       <style>{`
         .chat-panel {
           flex: 1;
