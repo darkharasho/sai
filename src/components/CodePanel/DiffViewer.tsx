@@ -100,6 +100,8 @@ export default function DiffViewer({ projectPath, filePath, staged, mode }: Diff
           font-family: 'JetBrains Mono', 'Fira Code', monospace;
           font-size: 12px;
           width: 100%;
+        }
+        .diff-mode-split .d2h-diff-table {
           table-layout: fixed;
         }
         .d2h-code-linenumber,
