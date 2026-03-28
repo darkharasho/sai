@@ -4,13 +4,18 @@ import ChangedFiles from './ChangedFiles';
 import CommitBox from './CommitBox';
 import ClaudeActivity from './ClaudeActivity';
 
+interface GitStatusItem {
+  path: string;
+  status: string;
+}
+
 interface GitStatus {
   branch: string;
-  staged: string[];
-  modified: string[];
-  created: string[];
-  deleted: string[];
-  not_added: string[];
+  staged: GitStatusItem[];
+  modified: GitStatusItem[];
+  created: GitStatusItem[];
+  deleted: GitStatusItem[];
+  not_added: GitStatusItem[];
   ahead: number;
   behind: number;
 }
@@ -19,24 +24,33 @@ interface GitSidebarProps {
   projectPath: string;
 }
 
+function getPath(item: GitStatusItem | string): string {
+  return typeof item === 'string' ? item : item.path;
+}
+
 function parseStatus(status: GitStatus): { staged: GitFile[]; unstaged: GitFile[] } {
   const staged: GitFile[] = [
-    ...(status.staged ?? []).map((p) => ({ path: p, status: 'modified' as const, staged: true })),
-    ...(status.created ?? []).map((p) => ({ path: p, status: 'added' as const, staged: true })),
+    ...(status.staged ?? []).map((p) => ({ path: getPath(p), status: 'modified' as const, staged: true })),
   ];
 
-  // De-duplicate: if a path is already in staged, don't add it to unstaged
   const stagedPaths = new Set(staged.map((f) => f.path));
 
   const unstaged: GitFile[] = [];
   for (const p of status.modified ?? []) {
-    if (!stagedPaths.has(p)) unstaged.push({ path: p, status: 'modified', staged: false });
+    const path = getPath(p);
+    if (!stagedPaths.has(path)) unstaged.push({ path, status: 'modified', staged: false });
+  }
+  for (const p of status.created ?? []) {
+    const path = getPath(p);
+    if (!stagedPaths.has(path)) unstaged.push({ path, status: 'added', staged: false });
   }
   for (const p of status.deleted ?? []) {
-    if (!stagedPaths.has(p)) unstaged.push({ path: p, status: 'deleted', staged: false });
+    const path = getPath(p);
+    if (!stagedPaths.has(path)) unstaged.push({ path, status: 'deleted', staged: false });
   }
   for (const p of status.not_added ?? []) {
-    if (!stagedPaths.has(p)) unstaged.push({ path: p, status: 'added', staged: false });
+    const path = getPath(p);
+    if (!stagedPaths.has(path)) unstaged.push({ path, status: 'added', staged: false });
   }
 
   return { staged, unstaged };
