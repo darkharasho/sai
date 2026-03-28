@@ -37,8 +37,6 @@ function getCommandIcon(name: string): React.ReactNode {
 const BUILTIN_COMMANDS: AutocompleteItem[] = [
   { label: '/help', value: '/help', description: 'Show available commands', icon: <MessageSquare size={14} /> },
   { label: '/clear', value: '/clear', description: 'Clear conversation', icon: <Zap size={14} /> },
-  { label: '/compact', value: '/compact', description: 'Compact conversation history', icon: <Zap size={14} /> },
-  { label: '/cost', value: '/cost', description: 'Show session cost', icon: <Settings size={14} /> },
 ];
 
 const ADD_MENU_ITEMS: AutocompleteItem[] = [

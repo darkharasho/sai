@@ -124,6 +124,24 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
   }, [messages, isStreaming]);
 
   const handleSend = async (text: string, images?: string[]) => {
+    // Handle built-in commands locally
+    if (text === '/clear') {
+      setMessages([]);
+      return;
+    }
+    if (text === '/help') {
+      const cmds = slashCommands.length > 0
+        ? slashCommands.map(c => `  /${c}`).join('\n')
+        : '  No custom commands loaded';
+      setMessages(prev => [...prev,
+        { id: Date.now().toString(), role: 'user', content: text, timestamp: Date.now() },
+        { id: `help-${Date.now()}`, role: 'system', content:
+          `**Available Commands**\n\n**Built-in:**\n  /clear — Clear conversation\n  /help — Show this help\n\n**Claude Skills:**\n${cmds}`,
+          timestamp: Date.now() },
+      ]);
+      return;
+    }
+
     setMessages(prev => [...prev, {
       id: Date.now().toString(),
       role: 'user',
