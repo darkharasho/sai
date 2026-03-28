@@ -1,9 +1,7 @@
 import { spawn, ChildProcess } from 'node:child_process';
 import { BrowserWindow, ipcMain } from 'electron';
 
-let currentCwd: string = '';
-let activeProcess: ChildProcess | null = null;
-let sessionId: string | undefined;
+let claudeProcess: ChildProcess | null = null;
 
 function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
 	try {
@@ -17,86 +15,71 @@ function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
 
 export function registerClaudeHandlers(win: BrowserWindow) {
 	ipcMain.handle('claude:start', (_event, cwd: string) => {
-		currentCwd = cwd || process.env.HOME || '/';
-		sessionId = undefined;
-		safeSend(win, 'claude:message', { type: 'ready' });
-	});
-
-	ipcMain.on('claude:send', (_event, message: string) => {
-		if (activeProcess) {
-			activeProcess.kill();
-			activeProcess = null;
+		if (claudeProcess) {
+			claudeProcess.kill();
+			claudeProcess = null;
 		}
 
-		const args = [
-			'-p', message,
+		// Spawn a persistent interactive Claude process
+		claudeProcess = spawn('claude', [
 			'--output-format', 'stream-json',
+			'--input-format', 'stream-json',
 			'--verbose',
-		];
-
-		// Resume session for conversation continuity
-		if (sessionId) {
-			args.push('--resume', sessionId);
-		}
-
-		activeProcess = spawn('claude', args, {
-			cwd: currentCwd,
+			'--include-partial-messages',
+		], {
+			cwd: cwd || process.env.HOME || '/',
 			env: { ...process.env },
-			stdio: ['ignore', 'pipe', 'pipe'],  // stdin=ignore to avoid the 3s warning
+			stdio: ['pipe', 'pipe', 'pipe'],
 		});
 
 		let buffer = '';
 
-		activeProcess.stdout?.on('data', (data: Buffer) => {
+		claudeProcess.stdout?.on('data', (data: Buffer) => {
 			buffer += data.toString();
 			const lines = buffer.split('\n');
-			buffer = lines.pop() || '';  // Keep incomplete last line in buffer
+			buffer = lines.pop() || '';
 
 			for (const line of lines) {
 				if (!line.trim()) continue;
 				try {
 					const msg = JSON.parse(line);
-
-					// Capture session ID for conversation continuity
-					if (msg.session_id && !sessionId) {
-						sessionId = msg.session_id;
-					}
-
-					// Forward to renderer
 					safeSend(win, 'claude:message', msg);
 				} catch {
-					// Non-JSON line, ignore
+					// Non-JSON line
 				}
 			}
 		});
 
-		activeProcess.stderr?.on('data', (data: Buffer) => {
+		claudeProcess.stderr?.on('data', (data: Buffer) => {
 			const text = data.toString().trim();
-			if (text && !text.includes('Warning: no stdin data')) {
+			if (text) {
 				safeSend(win, 'claude:message', { type: 'error', text });
 			}
 		});
 
-		activeProcess.on('exit', () => {
-			// Flush remaining buffer
-			if (buffer.trim()) {
-				try {
-					const msg = JSON.parse(buffer);
-					safeSend(win, 'claude:message', msg);
-				} catch {
-					// ignore
-				}
-			}
-			buffer = '';
-			safeSend(win, 'claude:message', { type: 'done' });
-			activeProcess = null;
+		claudeProcess.on('exit', (code) => {
+			safeSend(win, 'claude:message', { type: 'process_exit', code });
+			claudeProcess = null;
 		});
+
+		safeSend(win, 'claude:message', { type: 'ready' });
+	});
+
+	ipcMain.on('claude:send', (_event, message: string) => {
+		if (claudeProcess?.stdin?.writable) {
+			// stream-json input format
+			const msg = JSON.stringify({
+				type: 'user_message',
+				content: message,
+			});
+			claudeProcess.stdin.write(msg + '\n');
+		}
 	});
 }
 
 export function destroyClaude() {
-	if (activeProcess) {
-		activeProcess.kill();
-		activeProcess = null;
+	if (claudeProcess) {
+		claudeProcess.kill();
+		claudeProcess = null;
 	}
 }

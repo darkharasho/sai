@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
-import type { ChatMessage as ChatMessageType } from '../../types';
+import type { ChatMessage as ChatMessageType, ToolCall } from '../../types';
 
 export default function ChatPanel({ projectPath }: { projectPath: string }) {
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [ready, setReady] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const currentAssistantRef = useRef<string | null>(null);
 
   useEffect(() => {
     window.vsai.claudeStart(projectPath || '').then(() => setReady(true));
@@ -18,7 +19,8 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
         return;
       }
 
-      if (msg.type === 'done') {
+      if (msg.type === 'process_exit') {
+        setReady(false);
         setIsStreaming(false);
         return;
       }
@@ -33,52 +35,72 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
         return;
       }
 
-      // Claude stream-json format:
-      // {"type":"assistant","message":{"content":[{"type":"text","text":"..."}]}}
-      // {"type":"result","result":"full text here","session_id":"..."}
+      // System messages (init, hooks) — ignore for UI
+      if (msg.type === 'system') {
+        return;
+      }
+
+      // Rate limit events — could show as warning
+      if (msg.type === 'rate_limit_event') {
+        return;
+      }
+
+      // Assistant message — contains streaming content
       if (msg.type === 'assistant' && msg.message?.content) {
+        setIsStreaming(true);
         const textBlocks = msg.message.content
           .filter((b: any) => b.type === 'text')
           .map((b: any) => b.text)
           .join('');
 
-        if (textBlocks) {
+        const toolBlocks: ToolCall[] = msg.message.content
+          .filter((b: any) => b.type === 'tool_use')
+          .map((b: any) => ({
+            type: b.name?.includes('Edit') || b.name?.includes('Write') ? 'file_edit' as const :
+                  b.name?.includes('Bash') ? 'terminal_command' as const :
+                  b.name?.includes('Read') ? 'file_read' as const : 'other' as const,
+            name: b.name || 'tool',
+            input: typeof b.input === 'string' ? b.input : JSON.stringify(b.input, null, 2),
+          }));
+
+        if (textBlocks || toolBlocks.length > 0) {
           setMessages(prev => {
             const last = prev[prev.length - 1];
-            if (last?.role === 'assistant' && isStreaming) {
-              // Replace with updated content (assistant messages are cumulative)
-              return [...prev.slice(0, -1), { ...last, content: textBlocks }];
+            if (last?.role === 'assistant' && currentAssistantRef.current === last.id) {
+              return [...prev.slice(0, -1), {
+                ...last,
+                content: textBlocks || last.content,
+                toolCalls: toolBlocks.length > 0 ? toolBlocks : last.toolCalls,
+              }];
             }
+            const newId = Date.now().toString();
+            currentAssistantRef.current = newId;
             return [...prev, {
-              id: Date.now().toString(),
+              id: newId,
               role: 'assistant',
               content: textBlocks,
               timestamp: Date.now(),
+              toolCalls: toolBlocks.length > 0 ? toolBlocks : undefined,
             }];
           });
-          setIsStreaming(true);
         }
       }
 
-      // Final result — use this as the definitive response
-      if (msg.type === 'result' && msg.result) {
-        const text = typeof msg.result === 'string' ? msg.result : '';
-        if (text) {
+      // Result — final response, marks end of turn
+      if (msg.type === 'result') {
+        setIsStreaming(false);
+        currentAssistantRef.current = null;
+
+        // Update with final text if available
+        if (msg.result && typeof msg.result === 'string') {
           setMessages(prev => {
             const last = prev[prev.length - 1];
             if (last?.role === 'assistant') {
-              // Update final content
-              return [...prev.slice(0, -1), { ...last, content: text }];
+              return [...prev.slice(0, -1), { ...last, content: msg.result }];
             }
-            return [...prev, {
-              id: Date.now().toString(),
-              role: 'assistant',
-              content: text,
-              timestamp: Date.now(),
-            }];
+            return prev;
           });
         }
-        setIsStreaming(false);
       }
     });
 
@@ -87,7 +109,7 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, isStreaming]);
 
   const handleSend = (text: string) => {
     setMessages(prev => [...prev, {
@@ -96,6 +118,7 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
       content: text,
       timestamp: Date.now(),
     }]);
+    currentAssistantRef.current = null;
     window.vsai.claudeSend(text);
     setIsStreaming(true);
   };
@@ -113,12 +136,12 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
         ) : (
           messages.map(msg => <ChatMessage key={msg.id} message={msg} />)
         )}
-        {isStreaming && messages[messages.length - 1]?.role !== 'assistant' && (
+        {isStreaming && (
           <div className="thinking-indicator">
-            <span className="thinking-dot" />
-            <span className="thinking-dot" />
-            <span className="thinking-dot" />
-            <span className="thinking-label">Claude is thinking...</span>
+            <div className="thinking-bar" />
+            <span className="thinking-label">
+              {messages[messages.length - 1]?.role === 'assistant' ? 'Writing...' : 'Thinking...'}
+            </span>
           </div>
         )}
         <div ref={messagesEndRef} />
@@ -159,26 +182,29 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
         .thinking-indicator {
           display: flex;
           align-items: center;
-          gap: 4px;
-          padding: 8px 0;
-          color: var(--text-muted);
-          font-size: 12px;
+          gap: 10px;
+          padding: 12px 0;
+        }
+        .thinking-bar {
+          width: 3px;
+          height: 20px;
+          background: var(--accent);
+          border-radius: 2px;
+          animation: thinking-pulse 1.5s ease-in-out infinite;
         }
         .thinking-label {
-          margin-left: 4px;
+          font-size: 13px;
+          color: var(--accent);
+          font-style: italic;
+          animation: thinking-fade 1.5s ease-in-out infinite;
         }
-        .thinking-dot {
-          width: 6px;
-          height: 6px;
-          background: var(--accent);
-          border-radius: 50%;
-          animation: pulse 1.4s ease-in-out infinite;
+        @keyframes thinking-pulse {
+          0%, 100% { opacity: 0.3; height: 12px; }
+          50% { opacity: 1; height: 20px; }
         }
-        .thinking-dot:nth-child(2) { animation-delay: 0.2s; }
-        .thinking-dot:nth-child(3) { animation-delay: 0.4s; }
-        @keyframes pulse {
-          0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
-          40% { opacity: 1; transform: scale(1); }
+        @keyframes thinking-fade {
+          0%, 100% { opacity: 0.5; }
+          50% { opacity: 1; }
         }
       `}</style>
     </div>
