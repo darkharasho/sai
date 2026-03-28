@@ -105,7 +105,7 @@ export default function TerminalPanel({ projectPath }: { projectPath: string }) 
         }
         .terminal-content {
           flex: 1;
-          padding: 4px 4px 16px 4px;
+          padding: 4px 4px 32px 4px;
           overflow: hidden;
         }
       `}</style>

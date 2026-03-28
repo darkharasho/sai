@@ -8,15 +8,11 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [ready, setReady] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const streamingRef = useRef(false);
 
   useEffect(() => {
     window.vsai.claudeStart(projectPath || '').then(() => setReady(true));
 
     const cleanup = window.vsai.claudeOnMessage((msg: any) => {
-      // Handle stream-json output from `claude -p --output-format stream-json`
-      // Messages come as JSON lines with various types
-
       if (msg.type === 'ready') {
         setReady(true);
         return;
@@ -24,7 +20,6 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
 
       if (msg.type === 'done') {
         setIsStreaming(false);
-        streamingRef.current = false;
         return;
       }
 
@@ -38,47 +33,53 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
         return;
       }
 
-      // Claude stream-json sends result objects with content blocks
-      // Extract text from various possible shapes
-      let text = '';
-      if (msg.type === 'content_block_delta' && msg.delta?.text) {
-        text = msg.delta.text;
-      } else if (msg.type === 'assistant' && msg.content) {
-        text = typeof msg.content === 'string' ? msg.content : '';
-      } else if (msg.type === 'result' && msg.result) {
-        // Final result — extract text from content blocks
-        const content = msg.result;
-        if (typeof content === 'string') {
-          text = content;
-        } else if (Array.isArray(content)) {
-          text = content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
+      // Claude stream-json format:
+      // {"type":"assistant","message":{"content":[{"type":"text","text":"..."}]}}
+      // {"type":"result","result":"full text here","session_id":"..."}
+      if (msg.type === 'assistant' && msg.message?.content) {
+        const textBlocks = msg.message.content
+          .filter((b: any) => b.type === 'text')
+          .map((b: any) => b.text)
+          .join('');
+
+        if (textBlocks) {
+          setMessages(prev => {
+            const last = prev[prev.length - 1];
+            if (last?.role === 'assistant' && isStreaming) {
+              // Replace with updated content (assistant messages are cumulative)
+              return [...prev.slice(0, -1), { ...last, content: textBlocks }];
+            }
+            return [...prev, {
+              id: Date.now().toString(),
+              role: 'assistant',
+              content: textBlocks,
+              timestamp: Date.now(),
+            }];
+          });
+          setIsStreaming(true);
         }
-      } else if (msg.type === 'raw') {
-        text = msg.text || '';
-      } else if (typeof msg.content === 'string') {
-        text = msg.content;
-      } else if (msg.result && typeof msg.result === 'string') {
-        text = msg.result;
       }
 
-      if (!text) return;
-
-      setMessages(prev => {
-        const last = prev[prev.length - 1];
-        if (last?.role === 'assistant' && streamingRef.current) {
-          // Append to existing streaming message
-          return [...prev.slice(0, -1), { ...last, content: last.content + text }];
+      // Final result — use this as the definitive response
+      if (msg.type === 'result' && msg.result) {
+        const text = typeof msg.result === 'string' ? msg.result : '';
+        if (text) {
+          setMessages(prev => {
+            const last = prev[prev.length - 1];
+            if (last?.role === 'assistant') {
+              // Update final content
+              return [...prev.slice(0, -1), { ...last, content: text }];
+            }
+            return [...prev, {
+              id: Date.now().toString(),
+              role: 'assistant',
+              content: text,
+              timestamp: Date.now(),
+            }];
+          });
         }
-        // New assistant message
-        streamingRef.current = true;
-        return [...prev, {
-          id: Date.now().toString(),
-          role: 'assistant',
-          content: text,
-          timestamp: Date.now(),
-        }];
-      });
-      setIsStreaming(true);
+        setIsStreaming(false);
+      }
     });
 
     return cleanup;
@@ -95,7 +96,6 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
       content: text,
       timestamp: Date.now(),
     }]);
-    streamingRef.current = false;
     window.vsai.claudeSend(text);
     setIsStreaming(true);
   };
