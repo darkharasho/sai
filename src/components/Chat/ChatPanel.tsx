@@ -110,7 +110,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
   // permissionMode is now a prop from App
   const [contextUsage, setContextUsage] = useState<{ used: number; total: number }>({ used: 0, total: 1000000 });
-  const [approvalRequest, setApprovalRequest] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -155,34 +154,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         return;
       }
 
-      // Approval request from PTY mode
-      if (msg.type === 'approval_request') {
-        setApprovalRequest(msg.question || 'Claude needs your approval to continue.');
-        return;
-      }
-
-      // PTY output (interactive mode) — render as assistant text
-      if (msg.type === 'pty_output') {
-        // Strip ANSI codes for display
-        const clean = (msg.data || '').replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\r/g, '');
-        if (clean.trim()) {
-          setMessages(prev => {
-            const last = prev[prev.length - 1];
-            if (last?.role === 'assistant') {
-              return [...prev.slice(0, -1), { ...last, content: last.content + clean }];
-            }
-            return [...prev, {
-              id: `pty-${Date.now()}`,
-              role: 'assistant',
-              content: clean,
-              timestamp: Date.now(),
-            }];
-          });
-        }
-        return;
-      }
-
-      // Skip other system/rate_limit noise
+      // Skip system/rate_limit noise
       if (msg.type === 'system' || msg.type === 'rate_limit_event' || msg.type === 'user') {
         return;
       }
@@ -319,21 +291,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         {isStreaming && <ThinkingAnimation hasContent={messages[messages.length - 1]?.role === 'assistant'} />}
         <div ref={messagesEndRef} />
       </div>
-      {approvalRequest && (
-        <div className="approval-banner">
-          <div className="approval-text">{approvalRequest}</div>
-          <div className="approval-buttons">
-            <button className="approval-btn approve" onClick={() => {
-              window.vsai.claudeApprove(true);
-              setApprovalRequest(null);
-            }}>Allow</button>
-            <button className="approval-btn deny" onClick={() => {
-              window.vsai.claudeApprove(false);
-              setApprovalRequest(null);
-            }}>Deny</button>
-          </div>
-        </div>
-      )}
       <div className="chat-status-bar">
         <ContextMeter used={contextUsage.used} total={contextUsage.total} />
       </div>
@@ -377,54 +334,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         .chat-empty-subtitle {
           font-size: 14px;
           color: var(--text-secondary);
-        }
-        .approval-banner {
-          margin: 0 16px;
-          padding: 10px 14px;
-          background: var(--bg-elevated);
-          border: 1px solid var(--orange);
-          border-radius: 8px;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-        .approval-text {
-          flex: 1;
-          font-size: 12px;
-          color: var(--text);
-          white-space: pre-wrap;
-          font-family: 'JetBrains Mono', monospace;
-          max-height: 80px;
-          overflow-y: auto;
-        }
-        .approval-buttons {
-          display: flex;
-          gap: 6px;
-          flex-shrink: 0;
-        }
-        .approval-btn {
-          padding: 5px 14px;
-          border: none;
-          border-radius: 5px;
-          font-size: 12px;
-          font-weight: 600;
-          cursor: pointer;
-        }
-        .approval-btn.approve {
-          background: var(--green);
-          color: #000;
-        }
-        .approval-btn.approve:hover {
-          filter: brightness(1.1);
-        }
-        .approval-btn.deny {
-          background: var(--bg-hover);
-          color: var(--text);
-          border: 1px solid var(--border);
-        }
-        .approval-btn.deny:hover {
-          background: var(--red);
-          color: #fff;
         }
         .chat-status-bar {
           display: flex;
