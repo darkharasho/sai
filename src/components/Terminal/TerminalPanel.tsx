@@ -86,12 +86,13 @@ export default function TerminalPanel({ projectPath }: { projectPath: string }) 
       <div className="terminal-content" ref={termRef} />
       <style>{`
         .terminal-panel {
-          min-height: var(--terminal-min-height);
-          height: 200px;
+          height: 250px;
+          flex-shrink: 0;
           border-top: 1px solid var(--border);
           display: flex;
           flex-direction: column;
           background: var(--bg-mid);
+          overflow: hidden;
         }
         .terminal-header {
           padding: 6px 12px;
@@ -100,10 +101,12 @@ export default function TerminalPanel({ projectPath }: { projectPath: string }) 
           color: var(--text-secondary);
           border-bottom: 1px solid var(--border);
           letter-spacing: 0.5px;
+          flex-shrink: 0;
         }
         .terminal-content {
           flex: 1;
-          padding: 4px;
+          padding: 4px 4px 16px 4px;
+          overflow: hidden;
         }
       `}</style>
     </div>
