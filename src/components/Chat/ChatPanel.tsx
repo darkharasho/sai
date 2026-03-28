@@ -97,12 +97,18 @@ import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import type { ChatMessage as ChatMessageType, ToolCall } from '../../types';
 
-export default function ChatPanel({ projectPath }: { projectPath: string }) {
+interface ChatPanelProps {
+  projectPath: string;
+  permissionMode: 'default' | 'bypass';
+  onPermissionChange: (mode: 'default' | 'bypass') => void;
+}
+
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [ready, setReady] = useState(false);
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
-  const [permissionMode, setPermissionMode] = useState<'default' | 'bypass'>('default');
+  // permissionMode is now a prop from App
   const [contextUsage, setContextUsage] = useState<{ used: number; total: number }>({ used: 0, total: 1000000 });
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -295,7 +301,7 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
         isStreaming={isStreaming}
         onStop={() => window.vsai.claudeStop?.()}
         permissionMode={permissionMode}
-        onPermissionChange={setPermissionMode}
+        onPermissionChange={onPermissionChange}
       />
       <style>{`
         .chat-panel {
