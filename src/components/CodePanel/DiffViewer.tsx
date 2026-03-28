@@ -146,7 +146,11 @@ export default function DiffViewer({ projectPath, filePath, staged, mode }: Diff
           border-color: var(--border);
         }
         .d2h-file-diff {
-          overflow-x: auto;
+          overflow: visible;
+        }
+        .d2h-code-linenumber,
+        .d2h-code-side-linenumber {
+          position: static;
         }
         .d2h-emptyplaceholder {
           background: var(--bg-secondary);
