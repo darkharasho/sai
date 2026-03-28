@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
+import { MessageCirclePlus } from 'lucide-react';
 
 interface TitleBarProps {
   projectPath: string;
   onProjectChange: (path: string) => void;
+  onNewChat: () => void;
 }
 
-export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps) {
+export default function TitleBar({ projectPath, onProjectChange, onNewChat }: TitleBarProps) {
   const [open, setOpen] = useState(false);
   const [recentProjects, setRecentProjects] = useState<string[]>([]);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -76,6 +78,9 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
           </div>
         )}
       </div>
+      <button className="new-chat-btn" onClick={onNewChat} title="New conversation">
+        <MessageCirclePlus size={18} />
+      </button>
       <style>{`
         .titlebar {
           height: var(--titlebar-height);
@@ -90,6 +95,21 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
           z-index: 100;
         }
         .titlebar-drag { flex: 1; }
+        .new-chat-btn {
+          -webkit-app-region: no-drag;
+          background: none;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          padding: 4px 12px;
+          border-radius: 4px;
+          display: flex;
+          align-items: center;
+        }
+        .new-chat-btn:hover {
+          color: var(--accent);
+          background: var(--bg-hover);
+        }
         .project-dropdown-wrapper {
           -webkit-app-region: no-drag;
           position: absolute;
