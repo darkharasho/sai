@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Sparkles } from 'lucide-react';
+import { Star, Sparkle, Sparkles, Asterisk, Sun, Flower2 } from 'lucide-react';
 
 const THINKING_WORDS = [
   'Thinking', 'Pondering', 'Ruminating', 'Cogitating', 'Deliberating',
@@ -12,12 +12,22 @@ const THINKING_WORDS = [
   'Calculating', 'Solving',
 ];
 
+const SPINNER_ICONS = [Star, Sparkle, Sparkles, Asterisk, Sun, Flower2];
+
 function ThinkingAnimation({ hasContent }: { hasContent: boolean }) {
   const [wordIndex, setWordIndex] = useState(() => Math.floor(Math.random() * THINKING_WORDS.length));
   const [charIndex, setCharIndex] = useState(0);
   const [phase, setPhase] = useState<'typing' | 'pause' | 'erasing'>('typing');
+  const [iconIndex, setIconIndex] = useState(0);
 
   const word = THINKING_WORDS[wordIndex];
+  const Icon = SPINNER_ICONS[iconIndex % SPINNER_ICONS.length];
+
+  // Cycle icons
+  useEffect(() => {
+    const interval = setInterval(() => setIconIndex(i => i + 1), 150);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     let timeout: ReturnType<typeof setTimeout>;
@@ -46,7 +56,7 @@ function ThinkingAnimation({ hasContent }: { hasContent: boolean }) {
 
   return (
     <div className="thinking-animation">
-      <Sparkles size={16} className="thinking-icon" />
+      <Icon size={16} className="thinking-icon" />
       <span className="thinking-text">
         {displayText}
         <span className="thinking-cursor">|</span>
@@ -283,7 +293,6 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
         }
         .thinking-icon {
           color: var(--accent);
-          animation: pulse-sparkle 2s ease-in-out infinite;
           flex-shrink: 0;
         }
         .thinking-text {
@@ -296,10 +305,6 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
           animation: blink-cursor 0.6s step-end infinite;
           font-weight: 300;
           color: var(--accent);
-        }
-        @keyframes pulse-sparkle {
-          0%, 100% { opacity: 0.4; transform: scale(0.9); }
-          50% { opacity: 1; transform: scale(1.1); }
         }
         @keyframes blink-cursor {
           0%, 100% { opacity: 1; }
