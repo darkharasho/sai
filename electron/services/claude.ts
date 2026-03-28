@@ -5,11 +5,21 @@ let currentCwd: string = '';
 let activeProcess: ChildProcess | null = null;
 let sessionId: string | undefined;
 
+function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
+	try {
+		if (!win.isDestroyed()) {
+			win.webContents.send(channel, ...args);
+		}
+	} catch {
+		// Window already destroyed
+	}
+}
+
 export function registerClaudeHandlers(win: BrowserWindow) {
 	ipcMain.handle('claude:start', (_event, cwd: string) => {
 		currentCwd = cwd || process.env.HOME || '/';
 		sessionId = undefined;
-		win.webContents.send('claude:message', { type: 'ready' });
+		safeSend(win, 'claude:message', { type: 'ready' });
 	});
 
 	ipcMain.on('claude:send', (_event, message: string) => {
@@ -53,7 +63,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 					}
 
 					// Forward to renderer
-					win.webContents.send('claude:message', msg);
+					safeSend(win, 'claude:message', msg);
 				} catch {
 					// Non-JSON line, ignore
 				}
@@ -63,7 +73,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 		activeProcess.stderr?.on('data', (data: Buffer) => {
 			const text = data.toString().trim();
 			if (text && !text.includes('Warning: no stdin data')) {
-				win.webContents.send('claude:message', { type: 'error', text });
+				safeSend(win, 'claude:message', { type: 'error', text });
 			}
 		});
 
@@ -72,13 +82,13 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 			if (buffer.trim()) {
 				try {
 					const msg = JSON.parse(buffer);
-					win.webContents.send('claude:message', msg);
+					safeSend(win, 'claude:message', msg);
 				} catch {
 					// ignore
 				}
 			}
 			buffer = '';
-			win.webContents.send('claude:message', { type: 'done' });
+			safeSend(win, 'claude:message', { type: 'done' });
 			activeProcess = null;
 		});
 	});

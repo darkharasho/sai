@@ -1,6 +1,16 @@
 import * as pty from 'node-pty';
 import { BrowserWindow, ipcMain } from 'electron';
 
+function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
+	try {
+		if (!win.isDestroyed()) {
+			win.webContents.send(channel, ...args);
+		}
+	} catch {
+		// Window already destroyed
+	}
+}
+
 const terminals = new Map<number, pty.IPty>();
 let nextId = 1;
 
@@ -14,7 +24,7 @@ export function registerTerminalHandlers(win: BrowserWindow) {
       env: process.env as Record<string, string>,
     });
     terminals.set(id, term);
-    term.onData((data) => { win.webContents.send('terminal:data', id, data); });
+    term.onData((data) => { safeSend(win, 'terminal:data', id, data); });
     term.onExit(() => { terminals.delete(id); });
     return id;
   });
