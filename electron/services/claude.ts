@@ -23,6 +23,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 		const args = [
 			'-p', message,
 			'--output-format', 'stream-json',
+			'--verbose',
 		];
 
 		// Resume session if we have one
