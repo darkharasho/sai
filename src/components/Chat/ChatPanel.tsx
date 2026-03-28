@@ -147,7 +147,7 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
         )}
         <div ref={messagesEndRef} />
       </div>
-      <ChatInput onSend={handleSend} disabled={!ready || isStreaming} />
+      <ChatInput onSend={handleSend} disabled={!ready} />
       <style>{`
         .chat-panel {
           flex: 1;
