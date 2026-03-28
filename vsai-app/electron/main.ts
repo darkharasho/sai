@@ -1,5 +1,8 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'node:path';
+import { registerTerminalHandlers, destroyAllTerminals } from './services/pty';
+import { registerClaudeHandlers, destroyClaude } from './services/claude';
+import { registerGitHandlers } from './services/git';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -28,7 +31,23 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
+
+  registerTerminalHandlers(mainWindow);
+  registerClaudeHandlers(mainWindow);
+  registerGitHandlers();
+
+  ipcMain.handle('project:selectFolder', async () => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      properties: ['openDirectory'],
+      title: 'Select Project Folder',
+    });
+    return result.filePaths[0] || null;
+  });
 }
 
 app.whenReady().then(createWindow);
-app.on('window-all-closed', () => app.quit());
+app.on('window-all-closed', () => {
+  destroyAllTerminals();
+  destroyClaude();
+  app.quit();
+});
