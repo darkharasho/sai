@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Star, Sparkle, Sparkles, Asterisk, Sun, Flower2 } from 'lucide-react';
+import { Dot, Minus, Plus, Asterisk, SunDim, SunMedium, Sun } from 'lucide-react';
 
 const THINKING_WORDS = [
   'Thinking', 'Pondering', 'Ruminating', 'Cogitating', 'Deliberating',
@@ -12,7 +12,7 @@ const THINKING_WORDS = [
   'Calculating', 'Solving',
 ];
 
-const SPINNER_ICONS = [Star, Sparkle, Sparkles, Asterisk, Sun, Flower2];
+const SPINNER_ICONS = [Dot, Minus, Plus, Asterisk, SunDim, SunMedium, Sun];
 
 function ThinkingAnimation({ hasContent }: { hasContent: boolean }) {
   const [wordIndex, setWordIndex] = useState(() => Math.floor(Math.random() * THINKING_WORDS.length));
