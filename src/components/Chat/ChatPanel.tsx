@@ -154,7 +154,13 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
         )}
         <div ref={messagesEndRef} />
       </div>
-      <ChatInput onSend={handleSend} disabled={!ready} slashCommands={slashCommands} />
+      <ChatInput
+        onSend={handleSend}
+        disabled={!ready}
+        slashCommands={slashCommands}
+        isStreaming={isStreaming}
+        onStop={() => window.vsai.claudeStop?.()}
+      />
       <style>{`
         .chat-panel {
           flex: 1;

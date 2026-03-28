@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('vsai', {
   },
   claudeStart: (cwd: string) => ipcRenderer.invoke('claude:start', cwd),
   claudeSend: (message: string) => ipcRenderer.send('claude:send', message),
+  claudeStop: () => ipcRenderer.send('claude:stop'),
   claudeOnMessage: (callback: (msg: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, msg: unknown) => callback(msg);
     ipcRenderer.on('claude:message', listener);

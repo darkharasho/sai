@@ -22,6 +22,14 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 		safeSend(win, 'claude:message', { type: 'ready' });
 	});
 
+	ipcMain.on('claude:stop', () => {
+		if (activeProcess) {
+			activeProcess.kill();
+			activeProcess = null;
+			safeSend(win, 'claude:message', { type: 'done' });
+		}
+	});
+
 	ipcMain.on('claude:send', (_event, message: string) => {
 		if (activeProcess) {
 			activeProcess.kill();
