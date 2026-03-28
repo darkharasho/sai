@@ -98,6 +98,8 @@ export default function DiffViewer({ projectPath, filePath, staged, mode }: Diff
         .d2h-diff-table {
           font-family: 'JetBrains Mono', 'Fira Code', monospace;
           font-size: 12px;
+          width: 100%;
+          table-layout: fixed;
         }
         .d2h-code-linenumber,
         .d2h-code-side-linenumber {
@@ -105,8 +107,10 @@ export default function DiffViewer({ projectPath, filePath, staged, mode }: Diff
           color: var(--text-secondary) !important;
           border-right: 1px solid var(--border);
           min-width: 40px;
+          width: 40px;
           padding: 0 8px;
           text-align: right;
+          position: static;
         }
         .d2h-code-line {
           background: var(--bg-primary);
@@ -157,9 +161,16 @@ export default function DiffViewer({ projectPath, filePath, staged, mode }: Diff
         .d2h-file-diff {
           overflow: visible;
         }
-        .d2h-code-linenumber,
-        .d2h-code-side-linenumber {
-          position: static;
+        .d2h-files-diff {
+          display: flex;
+          width: 100%;
+        }
+        .d2h-file-side-diff {
+          width: 50%;
+          overflow: hidden;
+        }
+        .d2h-code-wrapper {
+          overflow: visible;
         }
         .d2h-emptyplaceholder {
           background: var(--bg-secondary);
