@@ -76,6 +76,7 @@ export default function DiffViewer({ projectPath, filePath, staged, mode }: Diff
   return (
     <>
       <div
+        className={`diff-container diff-mode-${mode}`}
         style={{ flex: 1, overflow: 'auto' }}
         dangerouslySetInnerHTML={{ __html: diffHtml }}
       />
@@ -150,8 +151,7 @@ export default function DiffViewer({ projectPath, filePath, staged, mode }: Diff
         .d2h-code-line-prefix {
           color: var(--text-muted);
         }
-        .d2h-code-line-ctn,
-        .d2h-code-side-line {
+        .diff-mode-unified .d2h-code-line-ctn {
           white-space: pre-wrap;
           word-break: break-all;
         }
