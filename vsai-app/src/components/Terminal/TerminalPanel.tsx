@@ -1,36 +1,110 @@
-interface TerminalPanelProps {
-  projectPath: string;
-}
+import { useEffect, useRef } from 'react';
+import { Terminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
+import { WebLinksAddon } from '@xterm/addon-web-links';
+import '@xterm/xterm/css/xterm.css';
 
-export default function TerminalPanel({ projectPath }: TerminalPanelProps) {
+export default function TerminalPanel({ projectPath }: { projectPath: string }) {
+  const termRef = useRef<HTMLDivElement>(null);
+  const xtermRef = useRef<Terminal | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
+  const termIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!termRef.current || !projectPath) return;
+
+    const xterm = new Terminal({
+      theme: {
+        background: '#0e1114',
+        foreground: '#bec6d0',
+        cursor: '#c7910c',
+        selectionBackground: '#c7910c44',
+        black: '#000000',
+        brightBlack: '#475262',
+        red: '#E35535',
+        green: '#00a884',
+        yellow: '#c7910c',
+        blue: '#11B7D4',
+        magenta: '#d46ec0',
+        cyan: '#38c7bd',
+        white: '#FFFFFF',
+        brightWhite: '#dce0e5',
+      },
+      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+      fontSize: 13,
+      cursorBlink: true,
+    });
+
+    const fit = new FitAddon();
+    xterm.loadAddon(fit);
+    xterm.loadAddon(new WebLinksAddon());
+    xterm.open(termRef.current);
+    fit.fit();
+
+    xtermRef.current = xterm;
+    fitRef.current = fit;
+
+    // Create terminal in main process
+    window.vsai.terminalCreate(projectPath).then((id: number) => {
+      termIdRef.current = id;
+
+      xterm.onData((data) => {
+        window.vsai.terminalWrite(id, data);
+      });
+
+      xterm.onResize(({ cols, rows }) => {
+        window.vsai.terminalResize(id, cols, rows);
+      });
+    });
+
+    // Receive pty output
+    const cleanup = window.vsai.terminalOnData((id: number, data: string) => {
+      if (id === termIdRef.current) {
+        xterm.write(data);
+      }
+    });
+
+    // Handle container resize
+    const resizeObserver = new ResizeObserver(() => {
+      fit.fit();
+    });
+    resizeObserver.observe(termRef.current);
+
+    return () => {
+      cleanup();
+      resizeObserver.disconnect();
+      xterm.dispose();
+    };
+  }, [projectPath]);
+
   return (
-    <div
-      style={{
-        height: 200,
-        minHeight: 'var(--terminal-min-height)',
-        background: 'var(--bg-mid)',
-        borderTop: '1px solid var(--border)',
-        display: 'flex',
-        flexDirection: 'column',
-      }}
-    >
-      <div
-        style={{
-          height: 32,
-          display: 'flex',
-          alignItems: 'center',
-          padding: '0 12px',
-          fontSize: 11,
-          fontWeight: 600,
-          textTransform: 'uppercase' as const,
-          letterSpacing: '0.5px',
-          color: 'var(--text-muted)',
-          borderBottom: '1px solid var(--border)',
-        }}
-      >
-        Terminal
+    <div className="terminal-panel">
+      <div className="terminal-header">
+        <span>TERMINAL</span>
       </div>
-      <div style={{ flex: 1 }} />
+      <div className="terminal-content" ref={termRef} />
+      <style>{`
+        .terminal-panel {
+          min-height: var(--terminal-min-height);
+          height: 200px;
+          border-top: 1px solid var(--border);
+          display: flex;
+          flex-direction: column;
+          background: var(--bg-mid);
+        }
+        .terminal-header {
+          padding: 6px 12px;
+          font-size: 11px;
+          text-transform: uppercase;
+          color: var(--text-secondary);
+          border-bottom: 1px solid var(--border);
+          letter-spacing: 0.5px;
+        }
+        .terminal-content {
+          flex: 1;
+          padding: 4px;
+        }
+      `}</style>
     </div>
   );
 }
