@@ -101,9 +101,6 @@ export default function DiffViewer({ projectPath, filePath, staged, mode }: Diff
           font-size: 12px;
           width: 100%;
         }
-        .diff-mode-split .d2h-diff-table {
-          table-layout: fixed;
-        }
         .d2h-code-linenumber,
         .d2h-code-side-linenumber {
           background: var(--bg-secondary) !important;
@@ -169,7 +166,8 @@ export default function DiffViewer({ projectPath, filePath, staged, mode }: Diff
         }
         .d2h-file-side-diff {
           width: 50%;
-          overflow: hidden;
+          flex-shrink: 0;
+          overflow-x: auto;
         }
         .d2h-code-wrapper {
           overflow: visible;
