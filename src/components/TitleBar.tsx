@@ -101,10 +101,11 @@ export default function TitleBar({ projectPath, onProjectChange, onNewChat }: Ti
           border: none;
           color: var(--text-muted);
           cursor: pointer;
-          padding: 4px 12px;
+          padding: 4px;
           border-radius: 4px;
           display: flex;
           align-items: center;
+          margin-right: 140px; /* Space for window controls overlay */
         }
         .new-chat-btn:hover {
           color: var(--accent);

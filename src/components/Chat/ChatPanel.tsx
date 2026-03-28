@@ -21,7 +21,7 @@ function ContextMeter({ used, total }: { used: number; total: number }) {
   const offset = circumference - (pct / 100) * circumference;
   const color = pct > 80 ? 'var(--red)' : pct > 50 ? 'var(--orange)' : 'var(--accent)';
 
-  if (used === 0) return null;
+  // Always show, even at 0%
 
   return (
     <div className="context-meter" title={`Context: ${Math.round(pct)}% (${(used / 1000).toFixed(0)}K / ${(total / 1000).toFixed(0)}K tokens)`}>
