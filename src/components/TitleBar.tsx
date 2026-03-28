@@ -1,16 +1,47 @@
 import { useState, useEffect, useRef } from 'react';
-import { MessageCirclePlus } from 'lucide-react';
+import { MessageCirclePlus, Clock } from 'lucide-react';
+import type { ChatSession } from '../types';
+import { formatSessionDate, formatSessionTime } from '../sessions';
 
 interface TitleBarProps {
   projectPath: string;
   onProjectChange: (path: string) => void;
   onNewChat: () => void;
+  sessions: ChatSession[];
+  activeSessionId: string;
+  onSelectSession: (id: string) => void;
 }
 
-export default function TitleBar({ projectPath, onProjectChange, onNewChat }: TitleBarProps) {
+export default function TitleBar({ projectPath, onProjectChange, onNewChat, sessions, activeSessionId, onSelectSession }: TitleBarProps) {
   const [open, setOpen] = useState(false);
   const [recentProjects, setRecentProjects] = useState<string[]>([]);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const historyRef = useRef<HTMLDivElement>(null);
+
+  // Close history dropdown on outside click
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (historyRef.current && !historyRef.current.contains(e.target as Node)) {
+        setHistoryOpen(false);
+      }
+    };
+    if (historyOpen) document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [historyOpen]);
+
+  // Group sessions by date
+  const groupedSessions = sessions.reduce<{ label: string; sessions: ChatSession[] }[]>((groups, session) => {
+    const label = formatSessionDate(session.updatedAt);
+    const existing = groups.find(g => g.label === label);
+    if (existing) {
+      existing.sessions.push(session);
+    } else {
+      groups.push({ label, sessions: [session] });
+    }
+    return groups;
+  }, []);
 
   const projectName = projectPath
     ? projectPath.split('/').pop() || projectPath
@@ -75,6 +106,44 @@ export default function TitleBar({ projectPath, onProjectChange, onNewChat }: Ti
             <button className="dropdown-item open-new" onClick={handleOpenNew}>
               + Open New Project...
             </button>
+          </div>
+        )}
+      </div>
+      <div className="history-dropdown-wrapper" ref={historyRef}>
+        <button
+          className="new-chat-btn"
+          onClick={() => setHistoryOpen(!historyOpen)}
+          title="Recent conversations"
+        >
+          <Clock size={16} />
+        </button>
+        {historyOpen && (
+          <div className="history-dropdown">
+            {sessions.length === 0 ? (
+              <div className="dropdown-label" style={{ padding: '12px' }}>
+                No recent conversations
+              </div>
+            ) : (
+              groupedSessions.map((group, gi) => (
+                <div key={group.label}>
+                  {gi > 0 && <div className="dropdown-divider" />}
+                  <div className="dropdown-label">{group.label}</div>
+                  {group.sessions.map(session => (
+                    <button
+                      key={session.id}
+                      className={`dropdown-item history-item ${session.id === activeSessionId ? 'active' : ''}`}
+                      onClick={() => {
+                        onSelectSession(session.id);
+                        setHistoryOpen(false);
+                      }}
+                    >
+                      <span className="dropdown-item-name">{session.title || 'Untitled'}</span>
+                      <span className="dropdown-item-path">{formatSessionTime(session.updatedAt)}</span>
+                    </button>
+                  ))}
+                </div>
+              ))
+            )}
           </div>
         )}
       </div>
@@ -193,6 +262,32 @@ export default function TitleBar({ projectPath, onProjectChange, onNewChat }: Ti
           color: var(--accent);
           font-weight: 500;
           padding: 8px 12px;
+        }
+        .history-dropdown-wrapper {
+          -webkit-app-region: no-drag;
+          position: relative;
+        }
+        .history-dropdown {
+          position: absolute;
+          top: 100%;
+          right: 0;
+          margin-top: 4px;
+          background: var(--bg-elevated);
+          border: 1px solid var(--border);
+          border-radius: 6px;
+          min-width: 280px;
+          max-width: 350px;
+          max-height: 400px;
+          overflow-y: auto;
+          box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+          z-index: 200;
+        }
+        .history-item.active {
+          border-left: 2px solid var(--accent);
+          background: rgba(126,184,247,0.05);
+        }
+        .history-item.active .dropdown-item-path {
+          color: var(--text-muted);
         }
       `}</style>
     </div>
