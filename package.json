@@ -24,7 +24,7 @@
     "linux": {
       "target": "AppImage",
       "category": "Development",
-      "icon": "../public/img/vsai.png"
+      "icon": "public/img/vsai.png"
     },
     "asarUnpack": [
       "node_modules/node-pty/**/*"
