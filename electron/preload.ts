@@ -10,7 +10,7 @@ contextBridge.exposeInMainWorld('vsai', {
     return () => ipcRenderer.removeListener('terminal:data', listener);
   },
   claudeStart: (cwd: string) => ipcRenderer.invoke('claude:start', cwd),
-  claudeSend: (message: string, imagePaths?: string[]) => ipcRenderer.send('claude:send', message, imagePaths),
+  claudeSend: (message: string, imagePaths?: string[], permMode?: string) => ipcRenderer.send('claude:send', message, imagePaths, permMode),
   claudeStop: () => ipcRenderer.send('claude:stop'),
   claudeOnMessage: (callback: (msg: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, msg: unknown) => callback(msg);

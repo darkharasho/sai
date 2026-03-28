@@ -8,6 +8,7 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [ready, setReady] = useState(false);
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
+  const [permissionMode, setPermissionMode] = useState<'default' | 'bypass'>('default');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -157,7 +158,7 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
       );
     }
 
-    window.vsai.claudeSend(text, imagePaths);
+    window.vsai.claudeSend(text, imagePaths, permissionMode);
   };
 
   return (
@@ -187,6 +188,8 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
         slashCommands={slashCommands}
         isStreaming={isStreaming}
         onStop={() => window.vsai.claudeStop?.()}
+        permissionMode={permissionMode}
+        onPermissionChange={setPermissionMode}
       />
       <style>{`
         .chat-panel {

@@ -11,6 +11,8 @@ interface ChatInputProps {
   slashCommands?: string[];
   isStreaming?: boolean;
   onStop?: () => void;
+  permissionMode: 'default' | 'bypass';
+  onPermissionChange: (mode: 'default' | 'bypass') => void;
 }
 
 interface AutocompleteItem {
@@ -45,13 +47,13 @@ const ADD_MENU_ITEMS: AutocompleteItem[] = [
   { label: 'Add URL', value: '@url ', description: 'Reference a URL', icon: <AtSign size={14} /> },
 ];
 
-export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop }: ChatInputProps) {
+export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, permissionMode, onPermissionChange }: ChatInputProps) {
   const [value, setValue] = useState('');
   const [suggestions, setSuggestions] = useState<AutocompleteItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [contextItems, setContextItems] = useState<ContextItem[]>([]);
-  const [permissionMode, setPermissionMode] = useState<'default' | 'bypass'>('default');
+  // permissionMode is now a prop
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
@@ -254,8 +256,8 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
 
         <div className="toolbar-right">
           <button
-            className="toolbar-btn permission-btn"
-            onClick={() => setPermissionMode(p => p === 'default' ? 'bypass' : 'default')}
+            className={`toolbar-btn permission-btn ${permissionMode === 'bypass' ? 'bypass-active' : ''}`}
+            onClick={() => onPermissionChange(permissionMode === 'default' ? 'bypass' : 'default')}
             title={permissionMode === 'default' ? 'Default permissions' : 'Bypass permissions'}
           >
             {permissionMode === 'default'
@@ -417,6 +419,16 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
         .permission-btn {
           font-size: 11px;
           padding: 3px 8px;
+          border: 1px solid transparent;
+          transition: all 0.15s;
+        }
+        .permission-btn.bypass-active {
+          color: var(--red);
+          border-color: var(--red);
+          background: rgba(227, 85, 53, 0.1);
+        }
+        .permission-btn.bypass-active:hover {
+          background: rgba(227, 85, 53, 0.2);
         }
         .permission-label {
           font-size: 11px;

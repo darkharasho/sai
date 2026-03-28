@@ -66,7 +66,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 		}
 	});
 
-	ipcMain.on('claude:send', (_event, message: string, imagePaths?: string[]) => {
+	ipcMain.on('claude:send', (_event, message: string, imagePaths?: string[], permMode?: string) => {
 		if (activeProcess) {
 			activeProcess.kill();
 			activeProcess = null;
@@ -81,6 +81,11 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 
 		if (sessionId) {
 			args.push('--resume', sessionId);
+		}
+
+		// Add permission mode
+		if (permMode === 'bypass') {
+			args.push('--permission-mode', 'bypassPermissions');
 		}
 
 		// Add image files
