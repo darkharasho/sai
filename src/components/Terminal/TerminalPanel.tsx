@@ -86,7 +86,7 @@ export default function TerminalPanel({ projectPath }: { projectPath: string }) 
       <div className="terminal-content" ref={termRef} />
       <style>{`
         .terminal-panel {
-          height: 250px;
+          height: 280px;
           flex-shrink: 0;
           border-top: 1px solid var(--border);
           display: flex;
@@ -105,7 +105,7 @@ export default function TerminalPanel({ projectPath }: { projectPath: string }) 
         }
         .terminal-content {
           flex: 1;
-          padding: 4px 4px 32px 4px;
+          margin: 4px 4px 24px 4px;
           overflow: hidden;
         }
       `}</style>

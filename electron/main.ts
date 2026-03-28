@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'node:path';
+import fs from 'node:fs';
 import { registerTerminalHandlers, destroyAllTerminals } from './services/pty';
 import { registerClaudeHandlers, destroyClaude } from './services/claude';
 import { registerGitHandlers } from './services/git';
@@ -36,12 +37,38 @@ function createWindow() {
   registerClaudeHandlers(mainWindow);
   registerGitHandlers();
 
+  // Recent projects persistence
+  const recentProjectsFile = path.join(app.getPath('userData'), 'recent-projects.json');
+
+  function getRecentProjects(): string[] {
+    try {
+      return JSON.parse(fs.readFileSync(recentProjectsFile, 'utf-8'));
+    } catch {
+      return [];
+    }
+  }
+
+  function addRecentProject(projectPath: string) {
+    const recent = getRecentProjects().filter(p => p !== projectPath);
+    recent.unshift(projectPath);
+    fs.writeFileSync(recentProjectsFile, JSON.stringify(recent.slice(0, 10)));
+  }
+
   ipcMain.handle('project:selectFolder', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       properties: ['openDirectory'],
       title: 'Select Project Folder',
     });
-    return result.filePaths[0] || null;
+    const folder = result.filePaths[0] || null;
+    if (folder) addRecentProject(folder);
+    return folder;
+  });
+
+  ipcMain.handle('project:getRecent', () => getRecentProjects());
+
+  ipcMain.handle('project:openRecent', (_event, projectPath: string) => {
+    addRecentProject(projectPath);
+    return projectPath;
   });
 }
 

@@ -113,6 +113,14 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
         ) : (
           messages.map(msg => <ChatMessage key={msg.id} message={msg} />)
         )}
+        {isStreaming && messages[messages.length - 1]?.role !== 'assistant' && (
+          <div className="thinking-indicator">
+            <span className="thinking-dot" />
+            <span className="thinking-dot" />
+            <span className="thinking-dot" />
+            <span className="thinking-label">Claude is thinking...</span>
+          </div>
+        )}
         <div ref={messagesEndRef} />
       </div>
       <ChatInput onSend={handleSend} disabled={!ready || isStreaming} />
@@ -147,6 +155,30 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
         .chat-empty-subtitle {
           font-size: 14px;
           color: var(--text-secondary);
+        }
+        .thinking-indicator {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          padding: 8px 0;
+          color: var(--text-muted);
+          font-size: 12px;
+        }
+        .thinking-label {
+          margin-left: 4px;
+        }
+        .thinking-dot {
+          width: 6px;
+          height: 6px;
+          background: var(--accent);
+          border-radius: 50%;
+          animation: pulse 1.4s ease-in-out infinite;
+        }
+        .thinking-dot:nth-child(2) { animation-delay: 0.2s; }
+        .thinking-dot:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes pulse {
+          0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+          40% { opacity: 1; transform: scale(1); }
         }
       `}</style>
     </div>

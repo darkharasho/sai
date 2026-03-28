@@ -24,4 +24,6 @@ contextBridge.exposeInMainWorld('vsai', {
   gitPull: (cwd: string) => ipcRenderer.invoke('git:pull', cwd),
   gitLog: (cwd: string, count: number) => ipcRenderer.invoke('git:log', cwd, count),
   selectFolder: () => ipcRenderer.invoke('project:selectFolder'),
+  getRecentProjects: () => ipcRenderer.invoke('project:getRecent'),
+  openRecentProject: (path: string) => ipcRenderer.invoke('project:openRecent', path),
 });
