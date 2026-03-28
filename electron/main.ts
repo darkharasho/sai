@@ -60,7 +60,7 @@ function createWindow() {
   }
 
   ipcMain.handle('project:saveImage', async (_event, base64Data: string) => {
-    const tmpDir = path.join(app.getPath('temp'), 'vsai-images');
+    const tmpDir = path.join(app.getPath('temp'), 'sai-images');
     fs.mkdirSync(tmpDir, { recursive: true });
     // Strip data URL prefix
     const matches = base64Data.match(/^data:image\/(\w+);base64,(.+)$/);

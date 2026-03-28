@@ -1,5 +1,5 @@
 {
-  "name": "vsai",
+  "name": "sai",
   "version": "0.1.0",
   "description": "AI-First Code Editor",
   "main": "dist-electron/main.js",
@@ -10,8 +10,8 @@
     "dist": "vite build && electron-builder --linux AppImage"
   },
   "build": {
-    "appId": "com.vsai.app",
-    "productName": "VSAI",
+    "appId": "com.sai.app",
+    "productName": "SAI",
     "directories": {
       "output": "release"
     },
@@ -24,7 +24,7 @@
     "linux": {
       "target": "AppImage",
       "category": "Development",
-      "icon": "public/img/vsai.png"
+      "icon": "public/img/sai.png"
     },
     "asarUnpack": [
       "node_modules/node-pty/**/*"

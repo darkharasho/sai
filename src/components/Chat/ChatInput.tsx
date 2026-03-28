@@ -48,7 +48,7 @@ const ADD_MENU_ITEMS: AutocompleteItem[] = [
   { label: 'Add URL', value: '@url ', description: 'Reference a URL', icon: <AtSign size={14} /> },
 ];
 
-function ContextRing({ used, total }: { used: number; total: number }) {
+function ContextRing({ used, total, onClick }: { used: number; total: number; onClick?: () => void }) {
   const pct = Math.min((used / total) * 100, 100);
   const radius = 9;
   const circumference = 2 * Math.PI * radius;
@@ -56,7 +56,11 @@ function ContextRing({ used, total }: { used: number; total: number }) {
   const color = pct > 80 ? 'var(--red)' : pct > 50 ? 'var(--orange)' : 'var(--accent)';
 
   return (
-    <div className="context-ring" title={`Context: ${Math.round(pct)}% (${(used / 1000).toFixed(0)}K / ${(total / 1000).toFixed(0)}K tokens)`}>
+    <button
+      className="context-ring"
+      title={`Context: ${Math.round(pct)}% — Click to compact`}
+      onClick={onClick}
+    >
       <svg width="24" height="24" viewBox="0 0 24 24">
         <circle cx="12" cy="12" r={radius} fill="none" stroke="var(--bg-hover)" strokeWidth="2.5" />
         <circle
@@ -70,7 +74,7 @@ function ContextRing({ used, total }: { used: number; total: number }) {
         />
       </svg>
       <span className="context-ring-label">{Math.round(pct)}%</span>
-    </div>
+    </button>
   );
 }
 
@@ -116,7 +120,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
       const all = [...BUILTIN_COMMANDS, ...dynamicCommands];
       const seen = new Set<string>();
       const unique = all.filter(c => { if (seen.has(c.label)) return false; seen.add(c.label); return true; });
-      setSuggestions(unique.filter(c => c.label.toLowerCase().startsWith(currentWord)).slice(0, 12));
+      setSuggestions(unique.filter(c => c.label.toLowerCase().startsWith(currentWord)));
       setSelectedIndex(0);
     } else {
       setSuggestions([]);
@@ -270,7 +274,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           <button className="toolbar-btn" onClick={() => { setValue(value + '/'); textareaRef.current?.focus(); }} title="Slash commands">
             <Slash size={16} />
           </button>
-          {contextUsage && <ContextRing used={contextUsage.used} total={contextUsage.total} />}
+          {contextUsage && <ContextRing used={contextUsage.used} total={contextUsage.total} onClick={() => onSend('/compact')} />}
         </div>
 
         <div className="toolbar-center">
@@ -332,7 +336,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           border: 1px solid var(--border);
           border-radius: 8px;
           margin-bottom: 4px;
-          max-height: 260px;
+          max-height: 400px;
           overflow-y: auto;
           box-shadow: 0 -4px 16px rgba(0,0,0,0.3);
           z-index: 50;
@@ -434,6 +438,14 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           align-items: center;
           gap: 4px;
           margin-left: 4px;
+          background: none;
+          border: none;
+          padding: 2px;
+          border-radius: 4px;
+          cursor: pointer;
+        }
+        .context-ring:hover {
+          background: var(--bg-hover);
         }
         .context-ring-label {
           font-size: 11px;

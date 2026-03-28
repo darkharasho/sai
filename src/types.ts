@@ -43,6 +43,6 @@ export interface GitCommit {
 
 declare global {
   interface Window {
-    vsai: Record<string, any>;
+    sai: Record<string, any>;
   }
 }

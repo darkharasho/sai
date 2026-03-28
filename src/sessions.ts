@@ -1,6 +1,6 @@
 import type { ChatSession } from './types';
 
-const STORAGE_KEY = 'vsai-chat-sessions';
+const STORAGE_KEY = 'sai-chat-sessions';
 const MAX_SESSIONS = 10;
 
 export function loadSessions(): ChatSession[] {

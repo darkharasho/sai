@@ -46,20 +46,20 @@ export default function TerminalPanel({ projectPath }: { projectPath: string }) 
     fitRef.current = fit;
 
     // Create terminal in main process
-    window.vsai.terminalCreate(cwd).then((id: number) => {
+    window.sai.terminalCreate(cwd).then((id: number) => {
       termIdRef.current = id;
 
       xterm.onData((data) => {
-        window.vsai.terminalWrite(id, data);
+        window.sai.terminalWrite(id, data);
       });
 
       xterm.onResize(({ cols, rows }) => {
-        window.vsai.terminalResize(id, cols, rows);
+        window.sai.terminalResize(id, cols, rows);
       });
     });
 
     // Receive pty output
-    const cleanup = window.vsai.terminalOnData((id: number, data: string) => {
+    const cleanup = window.sai.terminalOnData((id: number, data: string) => {
       if (id === termIdRef.current) {
         xterm.write(data);
       }

@@ -19,7 +19,7 @@ export default function DiffViewer({ projectPath, filePath, staged, mode }: Diff
     setLoading(true);
     setError(null);
 
-    window.vsai.gitDiff(projectPath, filePath, staged)
+    window.sai.gitDiff(projectPath, filePath, staged)
       .then((raw: string) => {
         if (cancelled) return;
         if (!raw || !raw.trim()) {

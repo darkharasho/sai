@@ -70,8 +70,8 @@ export default function GitSidebar({ projectPath, onFileClick }: GitSidebarProps
     if (!projectPath) return;
     try {
       const [status, log] = await Promise.all([
-        window.vsai.gitStatus(projectPath) as Promise<GitStatus>,
-        window.vsai.gitLog(projectPath, 20) as Promise<GitCommit[]>,
+        window.sai.gitStatus(projectPath) as Promise<GitStatus>,
+        window.sai.gitLog(projectPath, 20) as Promise<GitCommit[]>,
       ]);
       const { staged, unstaged } = parseStatus(status);
       setBranch(status.branch ?? '');
@@ -93,27 +93,27 @@ export default function GitSidebar({ projectPath, onFileClick }: GitSidebarProps
   }, [refresh]);
 
   const handleStage = async (file: GitFile) => {
-    await window.vsai.gitStage(projectPath, file.path);
+    await window.sai.gitStage(projectPath, file.path);
     await refresh();
   };
 
   const handleUnstage = async (file: GitFile) => {
-    await window.vsai.gitUnstage(projectPath, file.path);
+    await window.sai.gitUnstage(projectPath, file.path);
     await refresh();
   };
 
   const handleCommit = async (message: string) => {
-    await window.vsai.gitCommit(projectPath, message);
+    await window.sai.gitCommit(projectPath, message);
     await refresh();
   };
 
   const handlePush = async () => {
-    await window.vsai.gitPush(projectPath);
+    await window.sai.gitPush(projectPath);
     await refresh();
   };
 
   const handlePull = async () => {
-    await window.vsai.gitPull(projectPath);
+    await window.sai.gitPull(projectPath);
     await refresh();
   };
 

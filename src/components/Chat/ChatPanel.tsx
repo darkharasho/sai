@@ -116,9 +116,9 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    window.vsai.claudeStart(projectPath || '').then(() => setReady(true));
+    window.sai.claudeStart(projectPath || '').then(() => setReady(true));
 
-    const cleanup = window.vsai.claudeOnMessage((msg: any) => {
+    const cleanup = window.sai.claudeOnMessage((msg: any) => {
       if (msg.type === 'ready') {
         setReady(true);
         return;
@@ -276,11 +276,11 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     let imagePaths: string[] | undefined;
     if (images && images.length > 0) {
       imagePaths = await Promise.all(
-        images.map(data => window.vsai.saveImage(data))
+        images.map(data => window.sai.saveImage(data))
       );
     }
 
-    window.vsai.claudeSend(text, imagePaths, permissionMode);
+    window.sai.claudeSend(text, imagePaths, permissionMode);
   };
 
   return (
@@ -288,7 +288,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       <div className="chat-messages">
         {messages.length === 0 ? (
           <div className="chat-empty">
-            <div className="chat-empty-title">VSAI</div>
+            <div className="chat-empty-title">SAI</div>
             <div className="chat-empty-subtitle">
               {projectPath ? 'Describe what to build' : 'Select a project to get started'}
             </div>
@@ -304,7 +304,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         disabled={!ready}
         slashCommands={slashCommands}
         isStreaming={isStreaming}
-        onStop={() => window.vsai.claudeStop?.()}
+        onStop={() => window.sai.claudeStop?.()}
         permissionMode={permissionMode}
         onPermissionChange={onPermissionChange}
         contextUsage={contextUsage}

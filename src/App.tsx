@@ -12,7 +12,7 @@ type PermissionMode = 'default' | 'bypass';
 
 function getStoredPermission(): PermissionMode {
   try {
-    const v = localStorage.getItem('vsai-permission-mode');
+    const v = localStorage.getItem('sai-permission-mode');
     return v === 'bypass' ? 'bypass' : 'default';
   } catch {
     return 'default';
@@ -117,7 +117,7 @@ export default function App() {
 
   const handlePermissionChange = (mode: PermissionMode) => {
     setPermissionMode(mode);
-    localStorage.setItem('vsai-permission-mode', mode);
+    localStorage.setItem('sai-permission-mode', mode);
   };
 
   return (
