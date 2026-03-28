@@ -99,10 +99,14 @@ export default function DiffViewer({ projectPath, filePath, staged, mode }: Diff
           font-family: 'JetBrains Mono', 'Fira Code', monospace;
           font-size: 12px;
         }
-        .d2h-code-linenumber {
-          background: var(--bg-secondary);
-          color: var(--text-muted);
+        .d2h-code-linenumber,
+        .d2h-code-side-linenumber {
+          background: var(--bg-secondary) !important;
+          color: var(--text-secondary) !important;
           border-right: 1px solid var(--border);
+          min-width: 40px;
+          padding: 0 8px;
+          text-align: right;
         }
         .d2h-code-line {
           background: var(--bg-primary);
