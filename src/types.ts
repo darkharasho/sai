@@ -27,6 +27,11 @@ export interface GitFile {
   staged: boolean;
 }
 
+export interface OpenFile {
+  file: GitFile;
+  diffMode: 'unified' | 'split';
+}
+
 export interface GitCommit {
   hash: string;
   message: string;
