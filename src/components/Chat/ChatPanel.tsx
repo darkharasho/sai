@@ -1,4 +1,60 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Sparkles } from 'lucide-react';
+
+const THINKING_WORDS = [
+  'Thinking', 'Pondering', 'Ruminating', 'Cogitating', 'Deliberating',
+  'Musing', 'Contemplating', 'Considering', 'Reflecting', 'Computing',
+  'Evaluating', 'Reasoning', 'Noodling', 'Percolating', 'Mulling',
+  'Scheming', 'Plotting', 'Hatching', 'Crafting', 'Concocting',
+  'Formulating', 'Devising', 'Imagining', 'Envisioning', 'Ideating',
+  'Fathoming', 'Deciphering', 'Unraveling', 'Exploring', 'Parsing',
+  'Dissecting', 'Elucidating', 'Illuminating', 'Flibbertigibbeting',
+  'Calculating', 'Solving',
+];
+
+function ThinkingAnimation({ hasContent }: { hasContent: boolean }) {
+  const [wordIndex, setWordIndex] = useState(() => Math.floor(Math.random() * THINKING_WORDS.length));
+  const [charIndex, setCharIndex] = useState(0);
+  const [phase, setPhase] = useState<'typing' | 'pause' | 'erasing'>('typing');
+
+  const word = THINKING_WORDS[wordIndex];
+
+  useEffect(() => {
+    let timeout: ReturnType<typeof setTimeout>;
+
+    if (phase === 'typing') {
+      if (charIndex < word.length) {
+        timeout = setTimeout(() => setCharIndex(c => c + 1), 40 + Math.random() * 30);
+      } else {
+        timeout = setTimeout(() => setPhase('pause'), 800 + Math.random() * 400);
+      }
+    } else if (phase === 'pause') {
+      timeout = setTimeout(() => setPhase('erasing'), 100);
+    } else if (phase === 'erasing') {
+      if (charIndex > 0) {
+        timeout = setTimeout(() => setCharIndex(c => c - 1), 20);
+      } else {
+        setWordIndex(i => (i + 1 + Math.floor(Math.random() * 3)) % THINKING_WORDS.length);
+        setPhase('typing');
+      }
+    }
+
+    return () => clearTimeout(timeout);
+  }, [charIndex, phase, word.length]);
+
+  const displayText = word.slice(0, charIndex);
+
+  return (
+    <div className="thinking-animation">
+      <Sparkles size={16} className="thinking-icon" />
+      <span className="thinking-text">
+        {displayText}
+        <span className="thinking-cursor">|</span>
+        ...
+      </span>
+    </div>
+  );
+}
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import type { ChatMessage as ChatMessageType, ToolCall } from '../../types';
@@ -174,12 +230,7 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
         ) : (
           messages.map(msg => <ChatMessage key={msg.id} message={msg} />)
         )}
-        {isStreaming && (
-          <div className="thinking-indicator">
-            <div className="thinking-bar" />
-            <span className="thinking-label">Claude is working...</span>
-          </div>
-        )}
+        {isStreaming && <ThinkingAnimation hasContent={messages[messages.length - 1]?.role === 'assistant'} />}
         <div ref={messagesEndRef} />
       </div>
       <ChatInput
@@ -223,32 +274,36 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
           font-size: 14px;
           color: var(--text-secondary);
         }
-        .thinking-indicator {
+        .thinking-animation {
           display: flex;
           align-items: center;
-          gap: 10px;
+          gap: 8px;
           padding: 12px 0;
+          min-height: 40px;
         }
-        .thinking-bar {
-          width: 3px;
-          height: 20px;
-          background: var(--accent);
-          border-radius: 2px;
-          animation: thinking-pulse 1.5s ease-in-out infinite;
-        }
-        .thinking-label {
-          font-size: 13px;
+        .thinking-icon {
           color: var(--accent);
-          font-style: italic;
-          animation: thinking-fade 1.5s ease-in-out infinite;
+          animation: spin-sparkle 2s linear infinite;
+          flex-shrink: 0;
         }
-        @keyframes thinking-pulse {
-          0%, 100% { opacity: 0.3; height: 12px; }
-          50% { opacity: 1; height: 20px; }
+        .thinking-text {
+          font-size: 14px;
+          color: var(--accent);
+          font-weight: 500;
+          letter-spacing: 0.3px;
         }
-        @keyframes thinking-fade {
-          0%, 100% { opacity: 0.5; }
-          50% { opacity: 1; }
+        .thinking-cursor {
+          animation: blink-cursor 0.6s step-end infinite;
+          font-weight: 300;
+          color: var(--accent);
+        }
+        @keyframes spin-sparkle {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        @keyframes blink-cursor {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0; }
         }
       `}</style>
     </div>
