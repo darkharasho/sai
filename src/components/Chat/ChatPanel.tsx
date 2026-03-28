@@ -283,7 +283,7 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
         }
         .thinking-icon {
           color: var(--accent);
-          animation: spin-sparkle 2s linear infinite;
+          animation: pulse-sparkle 2s ease-in-out infinite;
           flex-shrink: 0;
         }
         .thinking-text {
@@ -297,9 +297,9 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
           font-weight: 300;
           color: var(--accent);
         }
-        @keyframes spin-sparkle {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
+        @keyframes pulse-sparkle {
+          0%, 100% { opacity: 0.4; transform: scale(0.9); }
+          50% { opacity: 1; transform: scale(1.1); }
         }
         @keyframes blink-cursor {
           0%, 100% { opacity: 1; }
