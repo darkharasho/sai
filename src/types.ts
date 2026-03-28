@@ -6,6 +6,14 @@ export interface ChatMessage {
   toolCalls?: ToolCall[];
 }
 
+export interface ChatSession {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface ToolCall {
   type: 'file_edit' | 'terminal_command' | 'file_read' | 'other';
   name: string;
