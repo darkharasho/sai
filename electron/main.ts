@@ -59,6 +59,19 @@ function createWindow() {
     fs.writeFileSync(recentProjectsFile, JSON.stringify(recent.slice(0, 10)));
   }
 
+  ipcMain.handle('project:saveImage', async (_event, base64Data: string) => {
+    const tmpDir = path.join(app.getPath('temp'), 'vsai-images');
+    fs.mkdirSync(tmpDir, { recursive: true });
+    // Strip data URL prefix
+    const matches = base64Data.match(/^data:image\/(\w+);base64,(.+)$/);
+    const ext = matches?.[1] || 'png';
+    const data = matches?.[2] || base64Data;
+    const filename = `image-${Date.now()}.${ext}`;
+    const filepath = path.join(tmpDir, filename);
+    fs.writeFileSync(filepath, Buffer.from(data, 'base64'));
+    return filepath;
+  });
+
   ipcMain.handle('project:selectFolder', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       properties: ['openDirectory'],

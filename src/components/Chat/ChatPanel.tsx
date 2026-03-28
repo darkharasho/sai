@@ -123,14 +123,23 @@ export default function ChatPanel({ projectPath }: { projectPath: string }) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isStreaming]);
 
-  const handleSend = (text: string) => {
+  const handleSend = async (text: string, images?: string[]) => {
     setMessages(prev => [...prev, {
       id: Date.now().toString(),
       role: 'user',
-      content: text,
+      content: text + (images?.length ? ` [${images.length} image(s)]` : ''),
       timestamp: Date.now(),
     }]);
-    window.vsai.claudeSend(text);
+
+    // Save images to temp files and get paths
+    let imagePaths: string[] | undefined;
+    if (images && images.length > 0) {
+      imagePaths = await Promise.all(
+        images.map(data => window.vsai.saveImage(data))
+      );
+    }
+
+    window.vsai.claudeSend(text, imagePaths);
   };
 
   return (

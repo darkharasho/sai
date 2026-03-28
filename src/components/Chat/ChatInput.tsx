@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 
 interface ChatInputProps {
-  onSend: (message: string) => void;
+  onSend: (message: string, images?: string[]) => void;
   disabled?: boolean;
   slashCommands?: string[];
   isStreaming?: boolean;
@@ -23,6 +23,7 @@ interface AutocompleteItem {
 interface ContextItem {
   label: string;
   type: 'file' | 'url' | 'image';
+  data?: string; // base64 data for images, path for files
 }
 
 function getCommandIcon(name: string): React.ReactNode {
@@ -42,7 +43,7 @@ const BUILTIN_COMMANDS: AutocompleteItem[] = [
 
 const ADD_MENU_ITEMS: AutocompleteItem[] = [
   { label: 'Add File', value: '@file ', description: 'Reference a file', icon: <FileText size={14} /> },
-  { label: 'Add Image', value: '', description: 'Paste or attach an image', icon: <Image size={14} /> },
+  { label: 'Add Image', value: '__IMAGE__', description: 'Attach an image', icon: <Image size={14} /> },
   { label: 'Add URL', value: '@url ', description: 'Reference a URL', icon: <AtSign size={14} /> },
 ];
 
@@ -96,6 +97,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
   }, [value, slashCommands, showAddMenu]);
 
   const applySuggestion = (item: AutocompleteItem) => {
+    if (item.value === '__IMAGE__') { handleAddImage(); setSuggestions([]); setShowAddMenu(false); return; }
     if (!item.value) { setSuggestions([]); setShowAddMenu(false); return; }
     const cursorPos = textareaRef.current?.selectionStart ?? value.length;
     const textBeforeCursor = value.slice(0, cursorPos);
@@ -125,7 +127,8 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       if (value.trim()) {
-        onSend(value.trim());
+        const images = contextItems.filter(c => c.type === 'image' && c.data).map(c => c.data!);
+        onSend(value.trim(), images.length > 0 ? images : undefined);
         setValue('');
         setContextItems([]);
         setSuggestions([]);
@@ -137,10 +140,44 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
     for (const item of e.clipboardData.items) {
       if (item.type.startsWith('image/')) {
         e.preventDefault();
-        setContextItems(prev => [...prev, { label: 'Pasted image', type: 'image' }]);
+        const blob = item.getAsFile();
+        if (blob) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const base64 = reader.result as string;
+            setContextItems(prev => [...prev, {
+              label: `Image (${Math.round(blob.size / 1024)}KB)`,
+              type: 'image',
+              data: base64,
+            }]);
+          };
+          reader.readAsDataURL(blob);
+        }
         return;
       }
     }
+  };
+
+  const handleAddImage = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const base64 = reader.result as string;
+          setContextItems(prev => [...prev, {
+            label: file.name,
+            type: 'image',
+            data: base64,
+          }]);
+        };
+        reader.readAsDataURL(file);
+      }
+    };
+    input.click();
   };
 
   const removeContext = (index: number) => {
@@ -236,7 +273,14 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           ) : (
             <button
               className="send-btn"
-              onClick={() => { if (value.trim()) { onSend(value.trim()); setValue(''); setContextItems([]); } }}
+              onClick={() => {
+                if (value.trim()) {
+                  const images = contextItems.filter(c => c.type === 'image' && c.data).map(c => c.data!);
+                  onSend(value.trim(), images.length > 0 ? images : undefined);
+                  setValue('');
+                  setContextItems([]);
+                }
+              }}
               disabled={disabled || !value.trim()}
               title="Send"
             >

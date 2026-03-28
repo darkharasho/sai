@@ -30,7 +30,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 		}
 	});
 
-	ipcMain.on('claude:send', (_event, message: string) => {
+	ipcMain.on('claude:send', (_event, message: string, imagePaths?: string[]) => {
 		if (activeProcess) {
 			activeProcess.kill();
 			activeProcess = null;
@@ -45,6 +45,13 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 
 		if (sessionId) {
 			args.push('--resume', sessionId);
+		}
+
+		// Add image files
+		if (imagePaths && imagePaths.length > 0) {
+			for (const imgPath of imagePaths) {
+				args.push('--image', imgPath);
+			}
 		}
 
 		safeSend(win, 'claude:message', { type: 'streaming_start' });

@@ -10,7 +10,7 @@ contextBridge.exposeInMainWorld('vsai', {
     return () => ipcRenderer.removeListener('terminal:data', listener);
   },
   claudeStart: (cwd: string) => ipcRenderer.invoke('claude:start', cwd),
-  claudeSend: (message: string) => ipcRenderer.send('claude:send', message),
+  claudeSend: (message: string, imagePaths?: string[]) => ipcRenderer.send('claude:send', message, imagePaths),
   claudeStop: () => ipcRenderer.send('claude:stop'),
   claudeOnMessage: (callback: (msg: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, msg: unknown) => callback(msg);
@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('vsai', {
   gitPush: (cwd: string) => ipcRenderer.invoke('git:push', cwd),
   gitPull: (cwd: string) => ipcRenderer.invoke('git:pull', cwd),
   gitLog: (cwd: string, count: number) => ipcRenderer.invoke('git:log', cwd, count),
+  saveImage: (base64Data: string) => ipcRenderer.invoke('project:saveImage', base64Data),
   selectFolder: () => ipcRenderer.invoke('project:selectFolder'),
   getRecentProjects: () => ipcRenderer.invoke('project:getRecent'),
   openRecentProject: (path: string) => ipcRenderer.invoke('project:openRecent', path),
