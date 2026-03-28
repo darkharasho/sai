@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('vsai', {
   claudeStart: (cwd: string) => ipcRenderer.invoke('claude:start', cwd),
   claudeSend: (message: string, imagePaths?: string[], permMode?: string) => ipcRenderer.send('claude:send', message, imagePaths, permMode),
   claudeStop: () => ipcRenderer.send('claude:stop'),
+  claudeApprove: (approved: boolean) => ipcRenderer.send('claude:approve', approved),
   claudeOnMessage: (callback: (msg: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, msg: unknown) => callback(msg);
     ipcRenderer.on('claude:message', listener);
