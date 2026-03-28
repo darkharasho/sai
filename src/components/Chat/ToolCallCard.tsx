@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { FileEdit, Terminal, FileText, Wrench, ChevronRight, ChevronDown } from 'lucide-react';
+import { FileEdit, Terminal, FileText, Wrench, ChevronRight, ChevronDown, Maximize2, X } from 'lucide-react';
 import type { ToolCall } from '../../types';
 
 // Lazy-load shiki for syntax highlighting
@@ -72,6 +72,12 @@ function formatInput(toolCall: ToolCall): { label: string; code: string } {
   }
 }
 
+function truncateCode(code: string, maxLines: number): { truncated: string; isTruncated: boolean } {
+  const lines = code.split('\n');
+  if (lines.length <= maxLines) return { truncated: code, isTruncated: false };
+  return { truncated: lines.slice(0, maxLines).join('\n'), isTruncated: true };
+}
+
 const iconMap = {
   file_edit: FileEdit,
   terminal_command: Terminal,
@@ -79,105 +85,270 @@ const iconMap = {
   other: Wrench,
 } as const;
 
-export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
-  const [expanded, setExpanded] = useState(false);
-  const Icon = iconMap[toolCall.type] || Wrench;
-  const lang = detectLang(toolCall);
-  const { label, code } = formatInput(toolCall);
+const MAX_PREVIEW_LINES = 20;
+
+// Fullscreen modal
+function FullscreenModal({ code, lang, label, onClose }: { code: string; lang: string; label: string; onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [onClose]);
 
   return (
-    <div className="tool-call-card">
-      <div className="tool-call-header" onClick={() => setExpanded(!expanded)}>
-        <Icon size={14} className="tool-call-icon" />
-        <span className="tool-call-name">{toolCall.name}</span>
-        {label && <span className="tool-call-label">{label}</span>}
-        {expanded ? <ChevronDown size={14} className="tool-call-chevron" /> : <ChevronRight size={14} className="tool-call-chevron" />}
-      </div>
-      {expanded && code && (
-        <div className="tool-call-body">
-          <HighlightedCode code={code} lang={lang} />
-          {toolCall.output && (
-            <div className="tool-call-output">
-              <div className="tool-call-output-label">Output</div>
-              <HighlightedCode code={toolCall.output} lang="text" />
-            </div>
-          )}
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <span className="modal-title">{label || 'Output'}</span>
+          <button className="modal-close" onClick={onClose}><X size={18} /></button>
         </div>
-      )}
+        <div className="modal-body">
+          <HighlightedCode code={code} lang={lang} />
+        </div>
+      </div>
       <style>{`
-        .tool-call-card {
-          margin: 8px 0;
-          background: var(--bg-secondary);
-          border: 1px solid var(--border);
-          border-radius: 6px;
-          overflow: hidden;
-        }
-        .tool-call-header {
-          padding: 8px 12px;
+        .modal-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(0,0,0,0.7);
           display: flex;
           align-items: center;
-          gap: 8px;
-          font-size: 12px;
-          color: var(--text-secondary);
-          cursor: pointer;
+          justify-content: center;
+          z-index: 1000;
+          backdrop-filter: blur(2px);
         }
-        .tool-call-header:hover {
-          background: var(--bg-hover);
+        .modal-content {
+          background: var(--bg-primary);
+          border: 1px solid var(--border);
+          border-radius: 10px;
+          width: 90vw;
+          height: 85vh;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          box-shadow: 0 16px 48px rgba(0,0,0,0.5);
         }
-        .tool-call-icon {
-          color: var(--accent);
+        .modal-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 12px 16px;
+          border-bottom: 1px solid var(--border);
           flex-shrink: 0;
         }
-        .tool-call-name {
+        .modal-title {
           font-family: 'JetBrains Mono', monospace;
-          font-size: 12px;
+          font-size: 13px;
           color: var(--text);
         }
-        .tool-call-label {
+        .modal-close {
+          background: none;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          padding: 4px;
+          border-radius: 4px;
+          display: flex;
+        }
+        .modal-close:hover {
+          color: var(--text);
+          background: var(--bg-hover);
+        }
+        .modal-body {
           flex: 1;
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 11px;
-          color: var(--text-muted);
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-        .tool-call-chevron {
-          color: var(--text-muted);
-          flex-shrink: 0;
-        }
-        .tool-call-body {
-          border-top: 1px solid var(--border);
-          max-height: 400px;
           overflow: auto;
+          font-size: 13px;
         }
-        .tool-call-body .highlighted-code {
-          font-size: 12px;
-        }
-        .tool-call-body .highlighted-code pre {
+        .modal-body .highlighted-code pre,
+        .modal-body .plain-code {
           margin: 0;
-          padding: 10px 12px;
+          padding: 16px;
           background: transparent !important;
           border-radius: 0;
-        }
-        .tool-call-body .plain-code {
-          margin: 0;
-          padding: 10px 12px;
-          font-size: 12px;
-          background: transparent;
-          border-radius: 0;
-        }
-        .tool-call-output {
-          border-top: 1px dashed var(--border);
-        }
-        .tool-call-output-label {
-          padding: 6px 12px 0;
-          font-size: 10px;
-          text-transform: uppercase;
-          color: var(--text-muted);
-          letter-spacing: 0.5px;
+          font-size: 13px;
         }
       `}</style>
     </div>
+  );
+}
+
+export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
+  const [expanded, setExpanded] = useState(true); // Start expanded
+  const [fullscreenCode, setFullscreenCode] = useState<{ code: string; lang: string; label: string } | null>(null);
+  const Icon = iconMap[toolCall.type] || Wrench;
+  const lang = detectLang(toolCall);
+  const { label, code } = formatInput(toolCall);
+  const { truncated, isTruncated } = truncateCode(code, MAX_PREVIEW_LINES);
+
+  return (
+    <>
+      <div className="tool-call-card">
+        <div className="tool-call-header" onClick={() => setExpanded(!expanded)}>
+          <Icon size={14} className="tool-call-icon" />
+          <span className="tool-call-name">{toolCall.name}</span>
+          {label && <span className="tool-call-label">{label}</span>}
+          {code && (
+            <button
+              className="tool-call-fullscreen"
+              onClick={(e) => { e.stopPropagation(); setFullscreenCode({ code, lang, label: label || toolCall.name }); }}
+              title="View full"
+            >
+              <Maximize2 size={12} />
+            </button>
+          )}
+          {expanded ? <ChevronDown size={14} className="tool-call-chevron" /> : <ChevronRight size={14} className="tool-call-chevron" />}
+        </div>
+        {expanded && code && (
+          <div className="tool-call-body">
+            <HighlightedCode code={truncated} lang={lang} />
+            {isTruncated && (
+              <button
+                className="tool-call-show-more"
+                onClick={() => setFullscreenCode({ code, lang, label: label || toolCall.name })}
+              >
+                Show all ({code.split('\n').length} lines)
+              </button>
+            )}
+            {toolCall.output && (
+              <div className="tool-call-output">
+                <div className="tool-call-output-header">
+                  <span className="tool-call-output-label">Output</span>
+                  <button
+                    className="tool-call-fullscreen"
+                    onClick={() => setFullscreenCode({ code: toolCall.output!, lang: 'text', label: 'Output' })}
+                    title="View full output"
+                  >
+                    <Maximize2 size={12} />
+                  </button>
+                </div>
+                <HighlightedCode code={truncateCode(toolCall.output, MAX_PREVIEW_LINES).truncated} lang="text" />
+                {truncateCode(toolCall.output, MAX_PREVIEW_LINES).isTruncated && (
+                  <button
+                    className="tool-call-show-more"
+                    onClick={() => setFullscreenCode({ code: toolCall.output!, lang: 'text', label: 'Output' })}
+                  >
+                    Show all ({toolCall.output.split('\n').length} lines)
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        <style>{`
+          .tool-call-card {
+            margin: 8px 0;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            overflow: hidden;
+          }
+          .tool-call-header {
+            padding: 8px 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            cursor: pointer;
+          }
+          .tool-call-header:hover {
+            background: var(--bg-hover);
+          }
+          .tool-call-icon {
+            color: var(--accent);
+            flex-shrink: 0;
+          }
+          .tool-call-name {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: var(--text);
+          }
+          .tool-call-label {
+            flex: 1;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--text-muted);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+          .tool-call-fullscreen {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 2px;
+            border-radius: 3px;
+            display: flex;
+            flex-shrink: 0;
+          }
+          .tool-call-fullscreen:hover {
+            color: var(--text);
+            background: var(--bg-hover);
+          }
+          .tool-call-chevron {
+            color: var(--text-muted);
+            flex-shrink: 0;
+          }
+          .tool-call-body {
+            border-top: 1px solid var(--border);
+          }
+          .tool-call-body .highlighted-code {
+            font-size: 12px;
+          }
+          .tool-call-body .highlighted-code pre {
+            margin: 0;
+            padding: 10px 12px;
+            background: transparent !important;
+            border-radius: 0;
+          }
+          .tool-call-body .plain-code {
+            margin: 0;
+            padding: 10px 12px;
+            font-size: 12px;
+            background: transparent;
+            border-radius: 0;
+          }
+          .tool-call-show-more {
+            display: block;
+            width: 100%;
+            padding: 6px 12px;
+            background: none;
+            border: none;
+            border-top: 1px solid var(--border);
+            color: var(--accent);
+            font-size: 11px;
+            cursor: pointer;
+            text-align: center;
+          }
+          .tool-call-show-more:hover {
+            background: var(--bg-hover);
+          }
+          .tool-call-output {
+            border-top: 1px dashed var(--border);
+          }
+          .tool-call-output-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 12px 0;
+          }
+          .tool-call-output-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            letter-spacing: 0.5px;
+          }
+        `}</style>
+      </div>
+      {fullscreenCode && (
+        <FullscreenModal
+          code={fullscreenCode.code}
+          lang={fullscreenCode.lang}
+          label={fullscreenCode.label}
+          onClose={() => setFullscreenCode(null)}
+        />
+      )}
+    </>
   );
 }
