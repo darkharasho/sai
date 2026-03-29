@@ -1,32 +1,31 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { X } from 'lucide-react';
 import * as monaco from 'monaco-editor';
+import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
+import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
+import cssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker';
+import htmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker';
+import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
 
 // Monaco environment setup for workers
 self.MonacoEnvironment = {
   getWorker(_workerId: string, label: string) {
-    const getWorkerModule = (moduleUrl: string, label: string) => {
-      return new Worker(new URL(`monaco-editor/esm/vs/${moduleUrl}`, import.meta.url), {
-        type: 'module',
-        name: label,
-      });
-    };
     switch (label) {
       case 'json':
-        return getWorkerModule('language/json/json.worker', label);
+        return new jsonWorker();
       case 'css':
       case 'scss':
       case 'less':
-        return getWorkerModule('language/css/css.worker', label);
+        return new cssWorker();
       case 'html':
       case 'handlebars':
       case 'razor':
-        return getWorkerModule('language/html/html.worker', label);
+        return new htmlWorker();
       case 'typescript':
       case 'javascript':
-        return getWorkerModule('language/typescript/ts.worker', label);
+        return new tsWorker();
       default:
-        return getWorkerModule('editor/editor.worker', label);
+        return new editorWorker();
     }
   },
 };
