@@ -37,6 +37,10 @@ export function registerGitHandlers() {
     await simpleGit(cwd).pull();
   });
 
+  ipcMain.handle('git:fetch', async (_event, cwd: string) => {
+    await simpleGit(cwd).fetch();
+  });
+
   ipcMain.handle('git:log', async (_event, cwd: string, count: number) => {
     const log = await simpleGit(cwd).log({ maxCount: count });
     return log.all.map(entry => ({
