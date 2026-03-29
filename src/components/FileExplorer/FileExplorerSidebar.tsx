@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Folder, FolderOpen, FileText, FileCode2, ChevronRight, ChevronDown } from 'lucide-react';
+import { Folder, FolderOpen, FileText, FileCode2, ChevronRight, ChevronDown, FilePlus, FolderPlus } from 'lucide-react';
 import type { DirEntry } from '../../types';
 import ContextMenu from './ContextMenu';
 
@@ -38,6 +38,8 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
   const [tree, setTree] = useState<Map<string, TreeState>>(new Map());
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; entry: DirEntry | null; parentPath: string } | null>(null);
   const [inlineInput, setInlineInput] = useState<InlineInput | null>(null);
+  const [dragOverPath, setDragOverPath] = useState<string | null>(null);
+  const dragEntryRef = useRef<{ path: string; parentPath: string } | null>(null);
 
   const loadDir = useCallback(async (dirPath: string) => {
     setTree(prev => {
@@ -90,6 +92,47 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
 
   const refreshDir = (dirPath: string) => {
     loadDir(dirPath);
+  };
+
+  const handleDragStart = (e: React.DragEvent, entry: DirEntry, parentPath: string) => {
+    dragEntryRef.current = { path: entry.path, parentPath };
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', entry.path);
+  };
+
+  const handleDragOver = (e: React.DragEvent, targetPath: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverPath(targetPath);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.stopPropagation();
+    setDragOverPath(null);
+  };
+
+  const handleDrop = async (e: React.DragEvent, targetDirPath: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverPath(null);
+    const drag = dragEntryRef.current;
+    if (!drag) return;
+    dragEntryRef.current = null;
+
+    const sourceName = drag.path.split('/').pop()!;
+    const newPath = targetDirPath + '/' + sourceName;
+    if (newPath === drag.path || drag.path === targetDirPath) return;
+    // Don't drop a folder into itself
+    if (targetDirPath.startsWith(drag.path + '/')) return;
+
+    try {
+      await window.sai.fsRename(drag.path, newPath);
+      refreshDir(drag.parentPath);
+      if (drag.parentPath !== targetDirPath) refreshDir(targetDirPath);
+    } catch {
+      // move failed silently
+    }
   };
 
   const handleContextMenu = (e: React.MouseEvent, entry: DirEntry | null, parentPath: string) => {
@@ -167,9 +210,17 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
     }
   };
 
-  const renderInlineInput = (parentPath: string) => {
+  const renderInlineInput = (parentPath: string, depth = 0) => {
     if (!inlineInput || inlineInput.parentPath !== parentPath || inlineInput.renamePath) return null;
-    return <InlineNameInput initialValue={inlineInput.initialValue} onSubmit={handleInlineSubmit} onCancel={() => setInlineInput(null)} />;
+    return (
+      <div className="tree-row" style={{ paddingLeft: depth * 16 + 8 }}>
+        <span style={{ width: 14, flexShrink: 0 }} />
+        {inlineInput.type === 'directory'
+          ? <Folder size={14} className="tree-icon folder" />
+          : <FileText size={14} className="tree-icon file" />}
+        <InlineNameInput initialValue={inlineInput.initialValue} onSubmit={handleInlineSubmit} onCancel={() => setInlineInput(null)} />
+      </div>
+    );
   };
 
   const renderEntry = (entry: DirEntry, depth: number, parentPath: string) => {
@@ -182,8 +233,13 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
       return (
         <div key={entry.path}>
           <div
-            className="tree-row"
+            className={`tree-row ${dragOverPath === entry.path ? 'drag-over' : ''}`}
             style={{ paddingLeft: depth * 16 + 8 }}
+            draggable
+            onDragStart={e => handleDragStart(e, entry, parentPath)}
+            onDragOver={e => handleDragOver(e, entry.path)}
+            onDragLeave={handleDragLeave}
+            onDrop={e => handleDrop(e, entry.path)}
             onClick={() => toggleDir(entry.path)}
             onContextMenu={e => handleContextMenu(e, entry, parentPath)}
           >
@@ -199,7 +255,7 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
             <>
               {state.loading && <div className="tree-row tree-loading" style={{ paddingLeft: (depth + 1) * 16 + 8 }}>Loading...</div>}
               {state.error && <div className="tree-row tree-error" style={{ paddingLeft: (depth + 1) * 16 + 8 }}>{state.error}</div>}
-              {renderInlineInput(entry.path)}
+              {renderInlineInput(entry.path, depth + 1)}
               {state.entries.map(child => renderEntry(child, depth + 1, entry.path))}
             </>
           )}
@@ -213,6 +269,8 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
         key={entry.path}
         className="tree-row"
         style={{ paddingLeft: depth * 16 + 8 }}
+        draggable
+        onDragStart={e => handleDragStart(e, entry, parentPath)}
         onClick={() => onFileOpen(entry.path)}
         onContextMenu={e => handleContextMenu(e, entry, parentPath)}
       >
@@ -275,11 +333,36 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
         }}
       >
         <div
-          className="tree-row"
+          className={`tree-row project-root-row ${dragOverPath === projectPath ? 'drag-over' : ''}`}
           style={{ paddingLeft: 8, fontWeight: 700, fontSize: 11, color: 'var(--text-secondary)' }}
           onContextMenu={e => handleContextMenu(e, null, projectPath)}
+          onDragOver={e => handleDragOver(e, projectPath)}
+          onDragLeave={handleDragLeave}
+          onDrop={e => handleDrop(e, projectPath)}
         >
-          {projectName}
+          <span className="tree-name">{projectName}</span>
+          <div className="project-actions">
+            <button
+              className="project-action-btn"
+              title="New File"
+              onClick={e => {
+                e.stopPropagation();
+                setInlineInput({ parentPath: projectPath, type: 'file', initialValue: '' });
+              }}
+            >
+              <FilePlus size={14} />
+            </button>
+            <button
+              className="project-action-btn"
+              title="New Folder"
+              onClick={e => {
+                e.stopPropagation();
+                setInlineInput({ parentPath: projectPath, type: 'directory', initialValue: '' });
+              }}
+            >
+              <FolderPlus size={14} />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -340,6 +423,34 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
         .tree-error {
           color: var(--red);
           font-size: 11px;
+        }
+        .tree-row.drag-over {
+          background: rgba(199, 145, 12, 0.12);
+          outline: 1px solid rgba(199, 145, 12, 0.4);
+          outline-offset: -1px;
+        }
+        .project-root-row {
+          position: relative;
+        }
+        .project-actions {
+          display: flex;
+          align-items: center;
+          gap: 2px;
+          margin-left: auto;
+        }
+        .project-action-btn {
+          background: none;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          padding: 2px;
+          border-radius: 4px;
+          display: flex;
+          align-items: center;
+        }
+        .project-action-btn:hover {
+          color: var(--accent);
+          background: var(--bg-hover);
         }
       `}</style>
     </div>

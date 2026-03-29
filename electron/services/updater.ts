@@ -6,7 +6,7 @@ import fs from 'node:fs';
 export function registerUpdater(mainWindow: BrowserWindow) {
   // Always register getVersion — it works regardless of update capability
   ipcMain.handle('update:getVersion', () => {
-    return app.getVersion();
+    return process.env.VITE_DEV_SERVER_URL ? 'DEV' : app.getVersion();
   });
 
   const updateConfigPath = path.join(process.resourcesPath, 'app-update.yml');

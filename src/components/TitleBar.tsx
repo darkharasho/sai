@@ -88,7 +88,11 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
         )}
       </div>
       <UpdateNotification />
-      {version && <span className="titlebar-version">v{version}</span>}
+      {version && (
+        version === 'DEV'
+          ? <span className="titlebar-dev-pill">DEV</span>
+          : <span className="titlebar-version">v{version}</span>
+      )}
       <style>{`
         .titlebar {
           height: var(--titlebar-height);
@@ -111,11 +115,22 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
         }
         .titlebar-drag { flex: 1; }
         .titlebar-version {
-          color: var(--text-muted);
+          color: var(--text-secondary);
           font-size: 10px;
           margin-right: 140px;
-          opacity: 0.6;
           font-family: 'JetBrains Mono', monospace;
+        }
+        .titlebar-dev-pill {
+          font-size: 9px;
+          font-weight: 700;
+          font-family: 'JetBrains Mono', monospace;
+          letter-spacing: 0.5px;
+          color: #c7910c;
+          background: rgba(199, 145, 12, 0.12);
+          border: 1px solid rgba(199, 145, 12, 0.35);
+          border-radius: 8px;
+          padding: 1px 8px;
+          margin-right: 140px;
         }
         .project-dropdown-wrapper {
           -webkit-app-region: no-drag;
