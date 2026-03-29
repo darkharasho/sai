@@ -105,16 +105,44 @@ function formatInput(toolCall: ToolCall): { label: string; code: string; langOve
   const input = toolCall.input || '';
   try {
     const parsed = JSON.parse(input);
+
+    // Bash — show command
     if (parsed.command) return { label: 'Command', code: parsed.command };
+
+    // Write — show file path + content
     if (parsed.file_path && parsed.content) return { label: parsed.file_path, code: parsed.content };
+
+    // Edit — show diff
     if (parsed.file_path && parsed.old_string != null) {
       const oldLines = (parsed.old_string || '').split('\n').map((l: string) => `- ${l}`).join('\n');
       const newLines = (parsed.new_string || '').split('\n').map((l: string) => `+ ${l}`).join('\n');
       return { label: parsed.file_path, code: `${oldLines}\n${newLines}`, langOverride: 'diff' };
     }
-    if (parsed.file_path) return { label: parsed.file_path, code: input };
-    if (parsed.pattern) return { label: `grep: ${parsed.pattern}`, code: input };
-    return { label: '', code: JSON.stringify(parsed, null, 2) };
+
+    // Read / Glob with file_path — label only, no body needed
+    if (parsed.file_path) return { label: parsed.file_path, code: '' };
+
+    // Grep / Glob — show pattern + optional path/glob filter
+    if (parsed.pattern) {
+      const parts: string[] = [`pattern: ${parsed.pattern}`];
+      if (parsed.path) parts.push(`path: ${parsed.path}`);
+      if (parsed.glob) parts.push(`glob: ${parsed.glob}`);
+      if (parsed.type) parts.push(`type: ${parsed.type}`);
+      const isGlob = toolCall.name?.toLowerCase().includes('glob');
+      return { label: isGlob ? `glob: ${parsed.pattern}` : `grep: ${parsed.pattern}`, code: parts.length > 1 ? parts.join('\n') : '' };
+    }
+
+    // WebFetch / WebSearch
+    if (parsed.url) return { label: parsed.url, code: '' };
+    if (parsed.query) return { label: parsed.query, code: '' };
+
+    // Fallback — format as key: value pairs instead of raw JSON
+    const lines = Object.entries(parsed).map(([k, v]) => {
+      if (typeof v === 'string') return `${k}: ${v}`;
+      if (typeof v === 'number' || typeof v === 'boolean') return `${k}: ${v}`;
+      return `${k}: ${JSON.stringify(v)}`;
+    });
+    return { label: '', code: lines.join('\n') };
   } catch {
     return { label: '', code: input };
   }
@@ -284,6 +312,68 @@ function FullscreenModal({ code, lang, label, onClose }: { code: string; lang: s
   );
 }
 
+interface Todo {
+  id: string;
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  priority?: string;
+}
+
+function TodoListView({ input }: { input: string }) {
+  let todos: Todo[] = [];
+  try {
+    const parsed = JSON.parse(input);
+    todos = Array.isArray(parsed.todos) ? parsed.todos : [];
+  } catch { /* ignore */ }
+
+  if (!todos.length) return null;
+
+  return (
+    <div className="tool-call-body todo-list-body">
+      {todos.map((todo, i) => (
+        <div key={todo.id || i} className={`todo-item todo-${todo.status}`}>
+          <span className="todo-icon">
+            {todo.status === 'completed' ? '✓' : todo.status === 'in_progress' ? '✦' : '○'}
+          </span>
+          <span className="todo-content">{todo.content}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function BashInOut({ output, onFullscreen }: {
+  output?: string;
+  onFullscreen: (code: string, lang: string, label: string) => void;
+}) {
+  if (!output) return null;
+  const outputLines = output.split('\n').filter(l => l.trim());
+  const MAX_OUT = 8;
+  const truncatedLines = outputLines.slice(0, MAX_OUT);
+  const isTruncated = outputLines.length > MAX_OUT;
+
+  return (
+    <div className="tool-call-body bash-inout-body">
+      <div className="bash-io-row bash-out-row">
+        <span className="bash-io-label bash-out-label">OUT</span>
+        <div className="bash-out-lines">
+          {truncatedLines.map((line, i) => (
+            <div key={i} className="bash-out-line">
+              <span className="bash-out-bullet">•</span>
+              <span>{line}</span>
+            </div>
+          ))}
+          {isTruncated && (
+            <button className="tool-call-show-more bash-show-more" onClick={() => onFullscreen(output, 'bash', 'Output')}>
+              Show all ({outputLines.length} lines)
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
   const [expanded, setExpanded] = useState(true); // Start expanded
   const [fullscreenCode, setFullscreenCode] = useState<{ code: string; lang: string; label: string } | null>(null);
@@ -292,6 +382,11 @@ export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
   const lang = langOverride || detectLang(toolCall);
   const { truncated, isTruncated } = truncateCode(code, MAX_PREVIEW_LINES);
 
+  const isBash = toolCall.type === 'terminal_command';
+  const isTodo = toolCall.name === 'TodoWrite';
+
+  const hasBody = isBash ? !!toolCall.output : isTodo ? true : !!code;
+
   return (
     <>
       <div className="tool-call-card">
@@ -299,8 +394,9 @@ export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
           <Circle size={8} fill="var(--text-muted)" stroke="var(--text-muted)" className="tool-call-dot" />
           <Icon size={14} className="tool-call-icon" />
           <span className="tool-call-name">{toolCall.name}</span>
-          {label && <span className="tool-call-label">{label}</span>}
-          {code && (
+          {!isBash && !isTodo && label && <span className="tool-call-label">{label}</span>}
+          {isBash && code && <span className="tool-call-label">{code}</span>}
+          {!isBash && !isTodo && code && (
             <button
               className="tool-call-fullscreen"
               onClick={(e) => { e.stopPropagation(); setFullscreenCode({ code, lang, label: label || toolCall.name }); }}
@@ -311,41 +407,52 @@ export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
           )}
           {expanded ? <ChevronDown size={14} className="tool-call-chevron" /> : <ChevronRight size={14} className="tool-call-chevron" />}
         </div>
-        {expanded && code && (
-          <div className="tool-call-body">
-            <HighlightedCode code={truncated} lang={lang} />
-            {isTruncated && (
-              <button
-                className="tool-call-show-more"
-                onClick={() => setFullscreenCode({ code, lang, label: label || toolCall.name })}
-              >
-                Show all ({code.split('\n').length} lines)
-              </button>
+        {expanded && hasBody && (
+          <>
+            {isBash && (
+              <BashInOut
+                output={toolCall.output}
+                onFullscreen={(c, l, lb) => setFullscreenCode({ code: c, lang: l, label: lb })}
+              />
             )}
-            {toolCall.output && (
-              <div className="tool-call-output">
-                <div className="tool-call-output-header">
-                  <span className="tool-call-output-label">Output</span>
-                  <button
-                    className="tool-call-fullscreen"
-                    onClick={() => setFullscreenCode({ code: toolCall.output!, lang: 'text', label: 'Output' })}
-                    title="View full output"
-                  >
-                    <Maximize2 size={12} />
-                  </button>
-                </div>
-                <HighlightedCode code={truncateCode(toolCall.output, MAX_PREVIEW_LINES).truncated} lang="text" />
-                {truncateCode(toolCall.output, MAX_PREVIEW_LINES).isTruncated && (
+            {isTodo && <TodoListView input={toolCall.input || ''} />}
+            {!isBash && !isTodo && code && (
+              <div className="tool-call-body">
+                <HighlightedCode code={truncated} lang={lang} />
+                {isTruncated && (
                   <button
                     className="tool-call-show-more"
-                    onClick={() => setFullscreenCode({ code: toolCall.output!, lang: 'text', label: 'Output' })}
+                    onClick={() => setFullscreenCode({ code, lang, label: label || toolCall.name })}
                   >
-                    Show all ({toolCall.output.split('\n').length} lines)
+                    Show all ({code.split('\n').length} lines)
                   </button>
+                )}
+                {toolCall.output && (
+                  <div className="tool-call-output">
+                    <div className="tool-call-output-header">
+                      <span className="tool-call-output-label">Output</span>
+                      <button
+                        className="tool-call-fullscreen"
+                        onClick={() => setFullscreenCode({ code: toolCall.output!, lang: 'text', label: 'Output' })}
+                        title="View full output"
+                      >
+                        <Maximize2 size={12} />
+                      </button>
+                    </div>
+                    <HighlightedCode code={truncateCode(toolCall.output, MAX_PREVIEW_LINES).truncated} lang="text" />
+                    {truncateCode(toolCall.output, MAX_PREVIEW_LINES).isTruncated && (
+                      <button
+                        className="tool-call-show-more"
+                        onClick={() => setFullscreenCode({ code: toolCall.output!, lang: 'text', label: 'Output' })}
+                      >
+                        Show all ({toolCall.output.split('\n').length} lines)
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             )}
-          </div>
+          </>
         )}
         <style>{`
           .tool-call-card {
@@ -463,6 +570,99 @@ export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
             color: var(--text-muted);
             letter-spacing: 0.5px;
           }
+          /* Bash IN/OUT */
+          .bash-inout-body {
+            border-top: 1px solid var(--border);
+            padding: 8px 0;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+          }
+          .bash-io-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 2px 12px;
+          }
+          .bash-out-row {
+            align-items: flex-start;
+          }
+          .bash-io-label {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            flex-shrink: 0;
+            padding-top: 1px;
+            min-width: 24px;
+          }
+          .bash-in-label {
+            color: var(--accent);
+          }
+          .bash-out-label {
+            color: var(--text-muted);
+          }
+          .bash-io-command {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: var(--text);
+            white-space: pre-wrap;
+            word-break: break-all;
+          }
+          .bash-out-lines {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            flex: 1;
+          }
+          .bash-out-line {
+            display: flex;
+            align-items: baseline;
+            gap: 6px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--text-secondary);
+          }
+          .bash-out-bullet {
+            color: var(--text-muted);
+            flex-shrink: 0;
+          }
+          .bash-show-more {
+            margin-top: 4px;
+            border-top: none !important;
+            text-align: left;
+            padding: 2px 0;
+          }
+          /* Todo list */
+          .todo-list-body {
+            border-top: 1px solid var(--border);
+            padding: 6px 0;
+            display: flex;
+            flex-direction: column;
+          }
+          .todo-item {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+            padding: 3px 12px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+          }
+          .todo-icon {
+            flex-shrink: 0;
+            font-size: 11px;
+            width: 14px;
+            text-align: center;
+          }
+          .todo-completed .todo-icon { color: var(--accent); }
+          .todo-completed .todo-content {
+            color: var(--text-muted);
+            text-decoration: line-through;
+          }
+          .todo-in_progress .todo-icon { color: var(--orange, #e6b84f); }
+          .todo-in_progress .todo-content { color: var(--text); }
+          .todo-pending .todo-icon { color: var(--text-muted); }
+          .todo-pending .todo-content { color: var(--text-secondary); }
         `}</style>
       </div>
       {fullscreenCode && (

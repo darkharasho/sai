@@ -118,6 +118,7 @@ function formatResetTime(resetsAt: number): string {
 
 const WINDOW_DURATIONS: Record<string, number> = {
   daily: 24 * 3600,
+  five_hour: 5 * 3600,
   seven_day: 7 * 24 * 3600,
   weekly: 7 * 24 * 3600,
   monthly: 30 * 24 * 3600,
@@ -150,6 +151,7 @@ function UsageBar({ pct, color, label, sublabel, tag }: { pct: number; color: st
 }
 
 function getRateLimitLabel(type: string): string {
+  if (type === 'five_hour') return '5-Hour';
   if (type === 'seven_day' || type === 'weekly') return 'Weekly';
   if (type === 'daily') return 'Daily';
   if (type === 'monthly') return 'Monthly';
@@ -429,15 +431,12 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
             const limits = rateLimits ? Array.from(rateLimits.values()) : [];
             const anyOverage = limits.some(rl => rl.isUsingOverage);
 
-            // Build the 3 bars: daily, weekly, overage
-            // Find daily and weekly from the rate limit events
-            const weekly = limits.find(rl => rl.rateLimitType === 'seven_day' || rl.rateLimitType === 'weekly');
-            const daily = limits.find(rl => rl.rateLimitType === 'daily');
-            // Derive overage bar from whichever limit has overage info
+            // Separate rate limits into usage limits and overage
+            const usageLimits = limits.filter(rl => rl.overageResetsAt === 0 || !rl.isUsingOverage);
             const overageSource = limits.find(rl => rl.overageResetsAt > 0);
 
             // Inline text
-            const primary = weekly || daily || limits[0];
+            const primary = usageLimits[0] || limits[0];
             let inlineText = '';
             if (anyOverage) {
               inlineText = 'Overage';
@@ -455,35 +454,23 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
                   {anyOverage && <span className="overage-dot" />}
                 </span>
                 <div className="usage-tooltip">
-                  {weekly && (() => {
-                    // status "rejected" = 100%, otherwise estimate from time elapsed
-                    const pct = weekly.status === 'rejected' ? 100 : getRateLimitProgress(weekly) * 100;
-                    return (
-                      <div className="usage-tooltip-section">
-                        <div className="usage-tooltip-heading">Plan usage limits</div>
-                        <UsageBar
-                          pct={pct}
-                          color={getBarColor(pct, false)}
-                          label="Current session"
-                          sublabel={`Resets in ${formatResetTime(weekly.resetsAt)}`}
-                        />
-                      </div>
-                    );
-                  })()}
-                  {weekly && (() => {
-                    const pct = weekly.status === 'rejected' ? 100 : getRateLimitProgress(weekly) * 100;
-                    return (
-                      <div className="usage-tooltip-section">
-                        <div className="usage-tooltip-heading">Weekly limits</div>
-                        <UsageBar
-                          pct={pct}
-                          color={getBarColor(pct, false)}
-                          label="All models"
-                          sublabel={`Resets in ${formatResetTime(weekly.resetsAt)}`}
-                        />
-                      </div>
-                    );
-                  })()}
+                  {usageLimits.length > 0 && (
+                    <div className="usage-tooltip-section">
+                      <div className="usage-tooltip-heading">Plan usage limits</div>
+                      {usageLimits.map(rl => {
+                        const pct = rl.status === 'rejected' ? 100 : getRateLimitProgress(rl) * 100;
+                        return (
+                          <UsageBar
+                            key={rl.rateLimitType}
+                            pct={pct}
+                            color={getBarColor(pct, false)}
+                            label={getRateLimitLabel(rl.rateLimitType)}
+                            sublabel={`Resets in ${formatResetTime(rl.resetsAt)}`}
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
                   {overageSource && (() => {
                     const active = overageSource.isUsingOverage;
                     const pct = active ? getRateLimitProgress({ rateLimitType: overageSource.rateLimitType, resetsAt: overageSource.overageResetsAt }) * 100 : 0;

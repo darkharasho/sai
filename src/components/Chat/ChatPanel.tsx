@@ -186,9 +186,43 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       }
 
       // Skip system noise
-      if (msg.type === 'system' || msg.type === 'rate_limit_event' || msg.type === 'user') {
+      if (msg.type === 'system' || msg.type === 'rate_limit_event') {
         return;
       }
+
+      // Tool results come back as user messages with tool_result content blocks
+      if (msg.type === 'user' && msg.message?.content) {
+        const results: Array<{ tool_use_id: string; output: string }> = [];
+        for (const block of msg.message.content) {
+          if (block.type === 'tool_result' && block.tool_use_id) {
+            const text = Array.isArray(block.content)
+              ? block.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('')
+              : typeof block.content === 'string' ? block.content : '';
+            results.push({ tool_use_id: block.tool_use_id, output: text });
+          }
+        }
+        if (results.length > 0) {
+          setMessages(prev => {
+            const next = [...prev];
+            for (let i = next.length - 1; i >= 0; i--) {
+              const msg = next[i];
+              if (msg.role === 'assistant' && msg.toolCalls) {
+                let updated = false;
+                const newToolCalls = msg.toolCalls.map(tc => {
+                  const result = results.find(r => r.tool_use_id === tc.id);
+                  if (result) { updated = true; return { ...tc, output: result.output }; }
+                  return tc;
+                });
+                if (updated) { next[i] = { ...msg, toolCalls: newToolCalls }; }
+              }
+            }
+            return next;
+          });
+        }
+        return;
+      }
+
+      if (msg.type === 'user') return;
 
       // Assistant message — streaming content + tool calls
       if (msg.type === 'assistant' && msg.message?.content) {
@@ -201,6 +235,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           }
           if (block.type === 'tool_use') {
             tools.push({
+              id: block.id,
               type: block.name?.includes('Edit') || block.name?.includes('Write') ? 'file_edit' :
                     block.name?.includes('Bash') ? 'terminal_command' :
                     block.name?.includes('Read') || block.name?.includes('Glob') || block.name?.includes('Grep') ? 'file_read' : 'other',

@@ -24,3 +24,4 @@
 - [ ] tabs with pending changes need to show an icon in the tab name
 - [ ] closing a file with unsaved changes should have a custom modal popup themed like this app to prompt to save or cancel or close anyway
 - [ ] wont let you hit generate commit message unless the changes are staged
+- [ ] periodically check for git pulls
