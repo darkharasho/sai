@@ -110,6 +110,7 @@ export default function UpdateNotification() {
           -webkit-app-region: no-drag;
           display: flex;
           align-items: center;
+          margin-right: 10px;
           transform: translateX(120%);
           opacity: 0;
           transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.35s ease;
