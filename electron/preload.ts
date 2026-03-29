@@ -72,6 +72,7 @@ contextBridge.exposeInMainWorld('sai', {
   },
   workspaceGetAll: () => ipcRenderer.invoke('workspace:getAll'),
   workspaceClose: (projectPath: string) => ipcRenderer.invoke('workspace:close', projectPath),
+  workspaceSuspend: (projectPath: string) => ipcRenderer.invoke('workspace:suspend', projectPath),
   onWorkspaceSuspended: (callback: (projectPath: string) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, projectPath: string) => callback(projectPath);
     ipcRenderer.on('workspace:suspended', listener);
