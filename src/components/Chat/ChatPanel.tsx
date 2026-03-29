@@ -120,6 +120,9 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     window.sai.claudeStart(projectPath || '').then(() => setReady(true));
 
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
+      // Only process messages for this workspace
+      if (msg.projectPath && msg.projectPath !== projectPath) return;
+
       if (msg.type === 'ready') {
         setReady(true);
         return;
@@ -282,7 +285,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       );
     }
 
-    window.sai.claudeSend(text, imagePaths, permissionMode);
+    window.sai.claudeSend(projectPath, text, imagePaths, permissionMode);
   };
 
   return (
@@ -306,7 +309,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         disabled={!ready}
         slashCommands={slashCommands}
         isStreaming={isStreaming}
-        onStop={() => window.sai.claudeStop?.()}
+        onStop={() => window.sai.claudeStop?.(projectPath)}
         permissionMode={permissionMode}
         onPermissionChange={onPermissionChange}
         contextUsage={contextUsage}
