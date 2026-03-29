@@ -34,6 +34,35 @@ contextBridge.exposeInMainWorld('sai', {
   fsDelete: (targetPath: string) => ipcRenderer.invoke('fs:delete', targetPath),
   fsCreateFile: (filePath: string) => ipcRenderer.invoke('fs:createFile', filePath),
   fsCreateDir: (dirPath: string) => ipcRenderer.invoke('fs:createDir', dirPath),
+  // Auto-updater
+  updateCheck: () => ipcRenderer.send('update:check'),
+  updateInstall: () => ipcRenderer.send('update:install'),
+  updateGetVersion: () => ipcRenderer.invoke('update:getVersion'),
+  onUpdateStatus: (callback: (status: string) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, status: string) => callback(status);
+    ipcRenderer.on('update:status', listener);
+    return () => ipcRenderer.removeListener('update:status', listener);
+  },
+  onUpdateAvailable: (callback: (info: any) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, info: any) => callback(info);
+    ipcRenderer.on('update:available', listener);
+    return () => ipcRenderer.removeListener('update:available', listener);
+  },
+  onUpdateProgress: (callback: (progress: any) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, progress: any) => callback(progress);
+    ipcRenderer.on('update:progress', listener);
+    return () => ipcRenderer.removeListener('update:progress', listener);
+  },
+  onUpdateDownloaded: (callback: (info: any) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, info: any) => callback(info);
+    ipcRenderer.on('update:downloaded', listener);
+    return () => ipcRenderer.removeListener('update:downloaded', listener);
+  },
+  onUpdateError: (callback: (err: any) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, err: any) => callback(err);
+    ipcRenderer.on('update:error', listener);
+    return () => ipcRenderer.removeListener('update:error', listener);
+  },
   saveImage: (base64Data: string) => ipcRenderer.invoke('project:saveImage', base64Data),
   selectFolder: () => ipcRenderer.invoke('project:selectFolder'),
   getRecentProjects: () => ipcRenderer.invoke('project:getRecent'),

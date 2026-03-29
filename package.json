@@ -30,6 +30,12 @@
       "target": "nsis",
       "icon": "public/img/sai.png"
     },
+    "publish": {
+      "provider": "github",
+      "owner": "darkharasho",
+      "repo": "sai",
+      "releaseType": "draft"
+    },
     "asarUnpack": [
       "node_modules/node-pty/**/*"
     ]
@@ -39,6 +45,7 @@
     "@xterm/addon-web-links": "^0.11.0",
     "@xterm/xterm": "^5.5.0",
     "diff2html": "^3.4.56",
+    "electron-updater": "^6.8.3",
     "lucide-react": "^1.7.0",
     "monaco-editor": "^0.55.1",
     "node-pty": "^1.0.0",

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { MessageCirclePlus, Clock } from 'lucide-react';
 import type { ChatSession } from '../types';
 import { formatSessionDate, formatSessionTime } from '../sessions';
+import UpdateNotification from './UpdateNotification';
 
 interface TitleBarProps {
   projectPath: string;
@@ -114,6 +115,7 @@ export default function TitleBar({ projectPath, onProjectChange, onNewChat, sess
           </div>
         )}
       </div>
+      <UpdateNotification />
       <div className="titlebar-actions">
         <div className="history-dropdown-wrapper" ref={historyRef}>
           <button
