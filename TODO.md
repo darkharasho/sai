@@ -28,6 +28,6 @@
 - [x] wont let you hit generate commit message unless the changes are staged
 - [x] periodically check for git pulls and whether unstaged/staged changes are still valid
 - [x] manual suspend button on workspaces
-- [ ] localhost links need to be actual links too
-- [ ] files in the current project should have a link to open them in the editor
+- [x] localhost links need to be actual links too
+- [x] files in the current project should have a link to open them in the editor
 - [ ] more flavortext besides "describe what to build" that rotates each time its a fresh session

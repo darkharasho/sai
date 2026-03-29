@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Dot, Minus, Plus, Asterisk, SunDim, SunMedium, Sun, ChevronDown } from 'lucide-react';
 
 const THINKING_WORDS = [
@@ -109,10 +109,162 @@ interface ChatPanelProps {
   onMessagesChange?: (messages: ChatMessageType[]) => void;
   onTurnComplete?: () => void;
   activeFilePath?: string | null;
+  onFileOpen?: (path: string) => void;
 }
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, initialMessages, onMessagesChange, onTurnComplete, activeFilePath }: ChatPanelProps) {
+const EMPTY_PROMPTS = [
+  "Describe what to build",
+  "What are we breaking today?",
+  "Got a bug that's personal? Let's settle it.",
+  "Your wish, my `git commit`.",
+  "No task too cursed.",
+  "Ready to ship something questionable.",
+  "Let's turn coffee into code.",
+  "Tell me your wildest feature request.",
+  "I've seen worse codebases. Probably.",
+  "Bugs fear me. Users... less so.",
+  "What monstrosity are we creating today?",
+  "Let's pretend we planned this.",
+  "Refactor, feature, or chaos — you pick.",
+  "Stack traces are just treasure maps.",
+  "LGTM before you even write it.",
+  "I'm warmed up. Are you?",
+  "No judgment. Just code.",
+  "It works on my machine. Let's make it work on yours.",
+  "Tell me the dream. I'll handle the `catch` block.",
+  "New session, new mistakes.",
+  "Let's ship it and find out.",
+  "I read the docs so you don't have to.",
+  "Paste the error. I won't laugh. (much)",
+  "Every great app starts with a bad idea.",
+  "What fresh hell are we building?",
+  "I'm basically a rubber duck that talks back.",
+  "Chaos is just an untracked feature.",
+  "Your tech debt is safe with me. For now.",
+  "Ready to violate some best practices?",
+  "Let's make the linter cry.",
+  "Commit early, commit often, commit crimes.",
+  "One more feature and we'll refactor. Promise.",
+  "The README will explain everything. Eventually.",
+  "I've already forgotten the last session. Fresh start.",
+  "undefined is not a problem. Yet.",
+  "Type safety? We respect it here. Mostly.",
+  "What are we over-engineering today?",
+  "Production is just staging with consequences.",
+  "We can fix it in post.",
+  "It's not a bug, it's a surprise feature.",
+  "Spaghetti or lasagna? Your architecture, your choice.",
+  "I promise not to introduce new bugs. Statistically.",
+  "Let's write code future-us will yell about.",
+  "The best error message is no error message.",
+  "Let's make something that works. Beautifully.",
+  "Compiles clean. Ship it.",
+  "Ready when you are.",
+  "npm install hope",
+  "No feature is too small to over-architect.",
+  "Have you tried turning the codebase off and on again?",
+  "Tell me what's wrong. We'll fix it together.",
+  "Today's WIP is tomorrow's legacy code.",
+  "What's the plan? (I'll ignore it anyway)",
+  "Every line of code is a love letter to the future.",
+  "Semicolons or not, I don't care. I'll adapt.",
+  "Let's add a dark mode for the soul of this app.",
+  "The tests will pass. Believe.",
+  "I'm like a senior engineer, but faster and less jaded.",
+  "Another day, another abstraction.",
+  "Let's make it scale. Or at least look like it does.",
+  "Your idea, my keyboard.",
+  "Clean code is a feeling, not a rule.",
+  "The diff will be beautiful.",
+  "Write once, debug everywhere.",
+  "Let's avoid the `any` type today. Let's try.",
+  "What's the ticket? (You don't need one here)",
+  "Just vibes and version control.",
+  "One does not simply ship without testing. But we can try.",
+  "Main branch? Never heard of her.",
+  "I'm stateless. Every session is a new me.",
+  "Let's write something you'll actually be proud of.",
+  "Feature flags: the coward's deploy. Let's use them.",
+  "I have infinite patience for your requirements.",
+  "Make it work, make it right, make it fast — pick two.",
+  "What cursed corner of the codebase today?",
+  "Hot take: the bug is in line one.",
+  "This one's going in the portfolio.",
+  "Let's build it before you change your mind.",
+  "The semicolons are load-bearing. Be careful.",
+  "Today we write the code we should have written in v1.",
+  "I work well under pressure. Do you?",
+  "Spec? Vibes? Either works.",
+  "Let's go. The deadline is fake anyway.",
+  "Edge cases are just features we haven't named yet.",
+  "Copy-paste is a valid architecture until it isn't.",
+  "Let's break it down and build it back up.",
+  "The simplest solution is usually the last one you try.",
+  "I've seen the entire internet. Let's build something new.",
+  "No codebase is beyond saving. Mostly.",
+  "What's the one thing users keep asking for?",
+  "Let's make the happy path happy.",
+  "The user experience starts here.",
+  "Small PR or big bang? Your call.",
+  "Ready to make something real.",
+  "Tell me the goal and I'll find the path.",
+  "Every system is just plumbing once you zoom out.",
+  "Let's add the feature everyone secretly wanted.",
+  "Debug mode: on. Let's hunt.",
+  "Describe the behavior, not the implementation.",
+  "The architecture diagrams are in my head. Trust me.",
+  "Let's ship the MVP before it becomes the MLP.",
+  "Good code is deleted code. What are we removing?",
+  "What's the thing you keep putting off?",
+  "Today's the day we fix that one thing.",
+  "I work for tokens, not equity. Let's go.",
+  "This will look great in the changelog.",
+  "New feature? Great. Requirements? Optional.",
+  "Tell me the story. I'll write the code.",
+  "Let's make the compiler happy for once.",
+  "Abstraction layer incoming.",
+  "We'll write the tests after. (We won't)",
+  "Let's see if this idea survives contact with reality.",
+  "I'm powered by context. Give me some.",
+  "The refactor starts now.",
+  "Zero warnings policy starts today.",
+  "Let's make this thing feel alive.",
+  "I am your rubber duck, your pair programmer, your scapegoat.",
+  "The 10x developer was a lie. I am the 10x tool.",
+  "Let's finally tackle the thing in the backlog.",
+  "What does 'done' look like today?",
+  "My favorite bug is one I haven't seen yet.",
+  "Let's not break the build this time. Attempt #4.",
+  "Async all the things?",
+  "Permission to over-engineer: requested.",
+  "Let's add one more layer of indirection.",
+  "What would the simplest version look like?",
+  "Hot reload is on. Start breaking things.",
+  "I'll write the boilerplate. You bring the vision.",
+  "Let's make this the last time we touch this file.",
+  "First, we build. Then, we document. Maybe.",
+  "The gap between MVP and MVC is just vibes.",
+  "Let's make it obvious what this code does.",
+  "Console.log is the thinking man's debugger.",
+  "Ready for another episode of 'Why Is This Broken'?",
+  "We ball.",
+  "Let's make the product manager cry happy tears.",
+  "There's no such thing as too many components.",
+  "The design is final. The design is never final.",
+  "What we build today will outlast us both.",
+  "I'll handle the how. You handle the why.",
+  "The best codebases are built one small thing at a time.",
+  "I have access to your files. Let's use that power for good.",
+  "Idle hands write messy code. Let's get moving.",
+  "One more useEffect won't hurt.",
+  "Remember when we thought this would be simple?",
+  "Let's make it work, then make it pretty.",
+  "What's the skeleton? We'll flesh it out from there.",
+];
+
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, initialMessages, onMessagesChange, onTurnComplete, activeFilePath, onFileOpen }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessageType[]>(initialMessages || []);
+  const emptyPrompt = useMemo(() => EMPTY_PROMPTS[Math.floor(Math.random() * EMPTY_PROMPTS.length)], []);
   const [isStreaming, setIsStreaming] = useState(false);
   const [ready, setReady] = useState(false);
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
@@ -487,13 +639,13 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           <div className="chat-empty">
             <div className="chat-empty-title">SAI</div>
             <div className="chat-empty-subtitle">
-              {projectPath ? 'Describe what to build' : 'Select a project to get started'}
+              {projectPath ? emptyPrompt : 'Select a project to get started'}
             </div>
           </div>
         ) : (
           messages.map(msg => msg.id === lastUserMessage?.id
-            ? <div key={msg.id} ref={lastUserMsgRef}><ChatMessage message={msg} /></div>
-            : <ChatMessage key={msg.id} message={msg} />
+            ? <div key={msg.id} ref={lastUserMsgRef}><ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} /></div>
+            : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} />
           )
         )}
         {isStreaming && <ThinkingAnimation hasContent={messages[messages.length - 1]?.role === 'assistant'} />}
@@ -603,6 +755,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         .chat-empty-subtitle {
           font-size: 14px;
           color: var(--text-secondary);
+          font-style: italic;
         }
         .thinking-animation {
           display: flex;

@@ -646,6 +646,7 @@ export default function App() {
                   onModelChange={handleModelChange}
                   initialMessages={ws.activeSession.messages}
                   activeFilePath={ws.activeFilePath}
+                  onFileOpen={handleFileOpen}
                   onMessagesChange={(messages: ChatMessage[]) => {
                     wsMessagesRef.current.set(wsPath, messages);
                   }}

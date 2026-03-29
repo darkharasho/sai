@@ -1,10 +1,57 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
+import remarkGfm from 'remark-gfm';
 import 'highlight.js/styles/monokai.css';
 import { Circle, ChevronRight, X } from 'lucide-react';
 import ToolCallCard from './ToolCallCard';
 import type { ChatMessage as ChatMessageType } from '../../types';
+
+const FILE_PATH_RE = /(?<![:/])\b((?:\.{1,2}\/)?(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte)|(?:\/[\w.-]+)+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte))\b/g;
+
+function rehypeFilePaths() {
+  return (tree: any) => {
+    function walk(node: any): void {
+      if (node.tagName === 'code' || node.tagName === 'pre' || node.tagName === 'a') return;
+      if (node.type === 'text' && node.value) {
+        return; // handled at parent level
+      }
+      if (!node.children) return;
+      const newChildren: any[] = [];
+      for (const child of node.children) {
+        if (child.type === 'text' && child.value) {
+          FILE_PATH_RE.lastIndex = 0;
+          const text: string = child.value;
+          const parts: any[] = [];
+          let lastIndex = 0;
+          let match: RegExpExecArray | null;
+          while ((match = FILE_PATH_RE.exec(text)) !== null) {
+            if (match.index > lastIndex) {
+              parts.push({ type: 'text', value: text.slice(lastIndex, match.index) });
+            }
+            parts.push({
+              type: 'element', tagName: 'a',
+              properties: { href: `sai-file://${match[1]}`, className: ['file-link'] },
+              children: [{ type: 'text', value: match[1] }],
+            });
+            lastIndex = match.index + match[0].length;
+          }
+          if (parts.length > 0) {
+            if (lastIndex < text.length) parts.push({ type: 'text', value: text.slice(lastIndex) });
+            newChildren.push(...parts);
+          } else {
+            newChildren.push(child);
+          }
+        } else {
+          walk(child);
+          newChildren.push(child);
+        }
+      }
+      node.children = newChildren;
+    }
+    walk(tree);
+  };
+}
 
 function getDotColor(role: string): string {
   if (role === 'assistant') return 'var(--accent)';
@@ -27,7 +74,7 @@ function ImageModal({ src, onClose }: { src: string; onClose: () => void }) {
   );
 }
 
-export default function ChatMessage({ message }: { message: ChatMessageType }) {
+export default function ChatMessage({ message, projectPath, onFileOpen }: { message: ChatMessageType; projectPath?: string; onFileOpen?: (path: string) => void }) {
   const dotColor = getDotColor(message.role);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
@@ -42,14 +89,21 @@ export default function ChatMessage({ message }: { message: ChatMessageType }) {
             : <Circle size={8} fill={dotColor} stroke={dotColor} className="chat-msg-dot" />}
           <div className="chat-msg-body">
             <ReactMarkdown
-              rehypePlugins={[rehypeHighlight]}
+              remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeHighlight, rehypeFilePaths]}
               components={{
                 a: ({ href, children }) => (
                   <a
                     href={href}
                     onClick={(e) => {
                       e.preventDefault();
-                      if (href) window.sai.openExternal(href);
+                      if (href?.startsWith('sai-file://') && onFileOpen) {
+                        const rel = href.slice('sai-file://'.length);
+                        const abs = rel.startsWith('/') ? rel : `${projectPath}/${rel}`;
+                        onFileOpen(abs);
+                      } else if (href) {
+                        window.sai.openExternal(href);
+                      }
                     }}
                   >
                     {children}
@@ -107,6 +161,8 @@ export default function ChatMessage({ message }: { message: ChatMessageType }) {
         }
         .chat-msg-body a { color: var(--accent); text-decoration: underline; cursor: pointer; }
         .chat-msg-body a:hover { opacity: 0.8; }
+        .chat-msg-body a.file-link { color: var(--green); text-decoration: none; font-family: monospace; font-size: 12px; background: var(--bg-secondary); padding: 1px 5px; border-radius: 3px; }
+        .chat-msg-body a.file-link:hover { opacity: 0.8; }
         .chat-msg-body pre code { background: none; padding: 0; }
         .chat-msg-body pre {
           background: var(--bg-secondary);
