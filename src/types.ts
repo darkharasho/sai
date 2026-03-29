@@ -41,6 +41,12 @@ export interface GitCommit {
   isClaude: boolean;
 }
 
+export interface DirEntry {
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+}
+
 declare global {
   interface Window {
     sai: Record<string, any>;

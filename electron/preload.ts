@@ -27,6 +27,13 @@ contextBridge.exposeInMainWorld('sai', {
   gitLog: (cwd: string, count: number) => ipcRenderer.invoke('git:log', cwd, count),
   gitDiff: (cwd: string, filepath: string, staged: boolean) =>
     ipcRenderer.invoke('git:diff', cwd, filepath, staged),
+  fsReadDir: (dirPath: string) => ipcRenderer.invoke('fs:readDir', dirPath),
+  fsReadFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath),
+  fsWriteFile: (filePath: string, content: string) => ipcRenderer.invoke('fs:writeFile', filePath, content),
+  fsRename: (oldPath: string, newPath: string) => ipcRenderer.invoke('fs:rename', oldPath, newPath),
+  fsDelete: (targetPath: string) => ipcRenderer.invoke('fs:delete', targetPath),
+  fsCreateFile: (filePath: string) => ipcRenderer.invoke('fs:createFile', filePath),
+  fsCreateDir: (dirPath: string) => ipcRenderer.invoke('fs:createDir', dirPath),
   saveImage: (base64Data: string) => ipcRenderer.invoke('project:saveImage', base64Data),
   selectFolder: () => ipcRenderer.invoke('project:selectFolder'),
   getRecentProjects: () => ipcRenderer.invoke('project:getRecent'),

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { registerTerminalHandlers, destroyAllTerminals } from './services/pty';
 import { registerClaudeHandlers, destroyClaude } from './services/claude';
 import { registerGitHandlers } from './services/git';
+import { registerFsHandlers } from './services/fs';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -41,6 +42,7 @@ function createWindow() {
   registerTerminalHandlers(mainWindow);
   registerClaudeHandlers(mainWindow);
   registerGitHandlers();
+  registerFsHandlers(mainWindow!);
 
   // Recent projects persistence
   const recentProjectsFile = path.join(app.getPath('userData'), 'recent-projects.json');
