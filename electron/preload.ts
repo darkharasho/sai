@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.invoke('git:diff', cwd, filepath, staged),
   fsReadDir: (dirPath: string) => ipcRenderer.invoke('fs:readDir', dirPath),
   fsReadFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath),
+  fsMtime: (filePath: string) => ipcRenderer.invoke('fs:mtime', filePath),
   fsWriteFile: (filePath: string, content: string) => ipcRenderer.invoke('fs:writeFile', filePath, content),
   fsRename: (oldPath: string, newPath: string) => ipcRenderer.invoke('fs:rename', oldPath, newPath),
   fsDelete: (targetPath: string) => ipcRenderer.invoke('fs:delete', targetPath),

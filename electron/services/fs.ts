@@ -22,6 +22,11 @@ export function registerFsHandlers(mainWindow: BrowserWindow) {
     return fs.readFileSync(filePath, 'utf-8');
   });
 
+  ipcMain.handle('fs:mtime', async (_event, filePath: string) => {
+    const stat = await fs.promises.stat(filePath);
+    return { mtime: stat.mtimeMs };
+  });
+
   ipcMain.handle('fs:writeFile', async (_event, filePath: string, content: string) => {
     fs.writeFileSync(filePath, content, 'utf-8');
   });
