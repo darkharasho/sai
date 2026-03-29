@@ -3,6 +3,7 @@ import { BrowserWindow, ipcMain } from 'electron';
 
 let currentCwd: string = '';
 let activeProcess: ChildProcess | null = null;
+let activeProbe: ChildProcess | null = null;
 let sessionId: string | undefined;
 
 function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
@@ -17,42 +18,71 @@ function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
 
 export function registerClaudeHandlers(win: BrowserWindow) {
 	ipcMain.handle('claude:start', (_event, cwd: string) => {
+		// Kill any in-flight probe or active process from previous project
+		if (activeProbe) {
+			activeProbe.kill();
+			activeProbe = null;
+		}
+		if (activeProcess) {
+			activeProcess.kill();
+			activeProcess = null;
+		}
+
 		currentCwd = cwd || process.env.HOME || '/';
 		sessionId = undefined;
 
 		// Probe Claude to get slash commands from init message
-		const probe = spawn('claude', [
-			'-p', 'hi',
-			'--output-format', 'stream-json',
-			'--verbose',
-			'--max-turns', '1',
-		], {
-			cwd: currentCwd,
-			env: { ...process.env },
-			stdio: ['ignore', 'pipe', 'pipe'],
-		});
+		return new Promise<void>((resolve) => {
+			const probe = spawn('claude', [
+				'-p', 'hi',
+				'--output-format', 'stream-json',
+				'--verbose',
+				'--max-turns', '1',
+			], {
+				cwd: currentCwd,
+				env: { ...process.env },
+				stdio: ['ignore', 'pipe', 'pipe'],
+			});
 
-		let probeBuffer = '';
-		probe.stdout?.on('data', (data: Buffer) => {
-			probeBuffer += data.toString();
-			const lines = probeBuffer.split('\n');
-			probeBuffer = lines.pop() || '';
-			for (const line of lines) {
-				if (!line.trim()) continue;
-				try {
-					const msg = JSON.parse(line);
-					if (msg.type === 'system' && msg.subtype === 'init') {
-						safeSend(win, 'claude:message', msg);
-					}
-					if (msg.session_id && !sessionId) {
-						sessionId = msg.session_id;
-					}
-				} catch { /* ignore */ }
-			}
-		});
+			activeProbe = probe;
 
-		probe.on('exit', () => {
-			safeSend(win, 'claude:message', { type: 'ready' });
+			let probeBuffer = '';
+			probe.stdout?.on('data', (data: Buffer) => {
+				// Ignore output from a stale probe
+				if (activeProbe !== probe) return;
+
+				probeBuffer += data.toString();
+				const lines = probeBuffer.split('\n');
+				probeBuffer = lines.pop() || '';
+				for (const line of lines) {
+					if (!line.trim()) continue;
+					try {
+						const msg = JSON.parse(line);
+						if (msg.type === 'system' && msg.subtype === 'init') {
+							safeSend(win, 'claude:message', msg);
+						}
+						if (msg.session_id && !sessionId) {
+							sessionId = msg.session_id;
+						}
+					} catch { /* ignore */ }
+				}
+			});
+
+			probe.on('exit', () => {
+				if (activeProbe === probe) {
+					activeProbe = null;
+					safeSend(win, 'claude:message', { type: 'ready' });
+				}
+				resolve();
+			});
+
+			probe.on('error', () => {
+				if (activeProbe === probe) {
+					activeProbe = null;
+					safeSend(win, 'claude:message', { type: 'ready' });
+				}
+				resolve();
+			});
 		});
 	});
 
@@ -163,6 +193,10 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 }
 
 export function destroyClaude() {
+	if (activeProbe) {
+		activeProbe.kill();
+		activeProbe = null;
+	}
 	if (activeProcess) {
 		activeProcess.kill();
 		activeProcess = null;

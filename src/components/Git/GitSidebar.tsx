@@ -110,6 +110,12 @@ export default function GitSidebar({ projectPath, onFileClick }: GitSidebarProps
   };
 
   const handleCommit = async (message: string) => {
+    // Auto-stage all changes before committing (like VS Code)
+    if (unstagedFiles.length > 0) {
+      for (const file of unstagedFiles) {
+        await window.sai.gitStage(projectPath, file.path);
+      }
+    }
     await window.sai.gitCommit(projectPath, message);
     await refresh();
   };

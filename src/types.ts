@@ -4,6 +4,7 @@ export interface ChatMessage {
   content: string;
   timestamp: number;
   toolCalls?: ToolCall[];
+  images?: string[];
 }
 
 export interface ChatSession {

@@ -33,8 +33,7 @@
     "publish": {
       "provider": "github",
       "owner": "darkharasho",
-      "repo": "sai",
-      "releaseType": "draft"
+      "repo": "sai"
     },
     "asarUnpack": [
       "node_modules/node-pty/**/*"

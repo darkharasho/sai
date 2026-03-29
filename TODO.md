@@ -12,3 +12,4 @@
 - [x] the branch on the git pane should be a clickable dropdown (dropup) that allows for users to swap branches or make new ones
 - [ ] add drag and drop for the file viewer pane
 - [x] the fullscreen for embedded code blocks needs to look like a proper editor with lines and syntax highlighting
+- [x] switching contexts causes claude to not respond

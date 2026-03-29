@@ -116,6 +116,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    setReady(false);
     window.sai.claudeStart(projectPath || '').then(() => setReady(true));
 
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
@@ -268,8 +269,9 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     setMessages(prev => [...prev, {
       id: Date.now().toString(),
       role: 'user',
-      content: text + (images?.length ? ` [${images.length} image(s)]` : ''),
+      content: text,
       timestamp: Date.now(),
+      images: images?.length ? images : undefined,
     }]);
 
     // Save images to temp files and get paths

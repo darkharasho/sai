@@ -242,7 +242,11 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
         <div className="context-row">
           {contextItems.map((ctx, i) => (
             <span key={i} className="context-chip">
-              {ctx.type === 'image' ? <Image size={12} /> : <FileText size={12} />}
+              {ctx.type === 'image' && ctx.data ? (
+                <img src={ctx.data} alt={ctx.label} className="context-thumb" />
+              ) : (
+                <FileText size={12} />
+              )}
               {ctx.label}
               <button className="context-remove" onClick={() => removeContext(i)}>&times;</button>
             </span>
@@ -371,6 +375,13 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           padding: 2px 8px;
           font-size: 11px;
           color: var(--text-secondary);
+        }
+        .context-thumb {
+          width: 20px;
+          height: 20px;
+          object-fit: cover;
+          border-radius: 3px;
+          flex-shrink: 0;
         }
         .context-remove {
           background: none;

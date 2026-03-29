@@ -63,7 +63,7 @@ export default function ChangedFiles({ title, files, onAction, actionLabel, onFi
             onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.background = 'var(--bg-hover)'; }}
             onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'none'; }}
           >
-            <Plus size={10} /> Commit All
+            <Plus size={10} /> Stage All
           </button>
         )}
       </div>

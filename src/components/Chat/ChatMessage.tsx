@@ -20,10 +20,17 @@ export default function ChatMessage({ message }: { message: ChatMessageType }) {
       {message.content && (
         <div className="chat-msg-content">
           {message.role === 'user'
-            ? <ChevronRight size={14} color="var(--green)" className="chat-msg-dot" />
+            ? <ChevronRight size={14} color="var(--green)" className="chat-msg-dot chat-msg-chevron" />
             : <Circle size={8} fill={dotColor} stroke={dotColor} className="chat-msg-dot" />}
           <div className="chat-msg-body">
             <ReactMarkdown rehypePlugins={[rehypeHighlight]}>{message.content}</ReactMarkdown>
+            {message.images && message.images.length > 0 && (
+              <div className="chat-msg-images">
+                {message.images.map((src, i) => (
+                  <img key={i} src={src} alt={`Attached image ${i + 1}`} className="chat-msg-thumb" />
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -40,6 +47,9 @@ export default function ChatMessage({ message }: { message: ChatMessageType }) {
         .chat-msg-dot {
           margin-top: 7px;
           flex-shrink: 0;
+        }
+        .chat-msg-chevron {
+          margin-top: 4px;
         }
         .chat-msg-body { color: var(--text); line-height: 1.6; flex: 1; min-width: 0; }
         .chat-msg-body p { margin-bottom: 8px; }
@@ -74,6 +84,24 @@ export default function ChatMessage({ message }: { message: ChatMessageType }) {
         }
         .chat-msg-body pre code.hljs.language-diff .hljs-meta {
           color: #66d9ef;
+        }
+        .chat-msg-images {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+          margin-top: 6px;
+        }
+        .chat-msg-thumb {
+          max-width: 120px;
+          max-height: 80px;
+          object-fit: cover;
+          border-radius: 6px;
+          border: 1px solid var(--border);
+          cursor: pointer;
+          transition: opacity 0.15s;
+        }
+        .chat-msg-thumb:hover {
+          opacity: 0.8;
         }
       `}</style>
     </div>
