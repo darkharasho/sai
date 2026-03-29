@@ -121,6 +121,14 @@ export default function App() {
     return () => clearInterval(id);
   }, [projectPath]);
 
+  useEffect(() => {
+    if (!projectPath) return;
+    const id = setInterval(() => {
+      (window.sai.gitFetch(projectPath) as Promise<void>).catch(() => {});
+    }, 60000);
+    return () => clearInterval(id);
+  }, [projectPath]);
+
   const [historyOpen, setHistoryOpen] = useState(false);
   const historyRef = useRef<HTMLDivElement>(null);
 
