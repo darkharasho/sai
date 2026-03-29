@@ -4,3 +4,4 @@ dist-electron
 release
 electron-dist
 *.AppImage
+.superpowers/
