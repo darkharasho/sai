@@ -8,9 +8,10 @@ import TitleBar from './components/TitleBar';
 import CodePanel from './components/CodePanel/CodePanel';
 import { loadSessions, saveSessions, createSession, upsertSession } from './sessions';
 import type { ChatSession, ChatMessage, GitFile, OpenFile } from './types';
-import { MessageSquare, TerminalSquare } from 'lucide-react';
+import { MessageSquare, TerminalSquare, Code2 } from 'lucide-react';
 
 type PermissionMode = 'default' | 'bypass';
+type PanelId = 'chat' | 'editor' | 'terminal';
 
 function getStoredPermission(): PermissionMode {
   try {
@@ -39,8 +40,25 @@ export default function App() {
 
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
-  const [chatExpanded, setChatExpanded] = useState(false);
-  const [terminalExpanded, setTerminalExpanded] = useState(false);
+
+  // Accordion state: ordered list of expanded panels (max 2)
+  const [expanded, setExpanded] = useState<PanelId[]>(['chat', 'terminal']);
+
+  const togglePanel = useCallback((panel: PanelId) => {
+    setExpanded(prev => {
+      if (prev.includes(panel)) {
+        // Collapse — but don't allow 0 expanded panels
+        const next = prev.filter(p => p !== panel);
+        return next.length > 0 ? next : prev;
+      } else {
+        // Expand — if already 2 open, collapse the oldest
+        const next = [...prev, panel];
+        return next.length > 2 ? next.slice(1) : next;
+      }
+    });
+  }, []);
+
+  const hasFiles = openFiles.length > 0;
 
   // Open a git diff file in tabs
   const handleFileClick = useCallback((file: GitFile) => {
@@ -50,6 +68,12 @@ export default function App() {
       return [...prev, { path: file.path, viewMode: 'diff', file, diffMode: 'unified' }];
     });
     setActiveFilePath(file.path);
+    // Auto-expand editor when opening a file
+    setExpanded(prev => {
+      if (prev.includes('editor')) return prev;
+      const next = [...prev, 'editor' as PanelId];
+      return next.length > 2 ? next.slice(1) : next;
+    });
   }, []);
 
   // Open a file from the explorer in tabs with Monaco editor
@@ -62,6 +86,12 @@ export default function App() {
         return [...prev, { path: filePath, viewMode: 'editor', content }];
       });
       setActiveFilePath(filePath);
+      // Auto-expand editor
+      setExpanded(prev => {
+        if (prev.includes('editor')) return prev;
+        const next = [...prev, 'editor' as PanelId];
+        return next.length > 2 ? next.slice(1) : next;
+      });
     } catch {
       // File couldn't be read (binary, permissions, etc.)
     }
@@ -72,8 +102,8 @@ export default function App() {
       const next = prev.filter(f => f.path !== path);
       if (next.length === 0) {
         setActiveFilePath(null);
-        setChatExpanded(false);
-        setTerminalExpanded(false);
+        // No more files — go back to chat + terminal
+        setExpanded(['chat', 'terminal']);
       } else if (path === activeFilePath) {
         const idx = prev.findIndex(f => f.path === path);
         const newActive = next[Math.min(idx, next.length - 1)];
@@ -86,8 +116,7 @@ export default function App() {
   const handleCloseAllFiles = useCallback(() => {
     setOpenFiles([]);
     setActiveFilePath(null);
-    setChatExpanded(false);
-    setTerminalExpanded(false);
+    setExpanded(['chat', 'terminal']);
   }, []);
 
   const handleDiffModeChange = useCallback((path: string, mode: 'unified' | 'split') => {
@@ -152,7 +181,9 @@ export default function App() {
     localStorage.setItem('sai-permission-mode', mode);
   };
 
-  const hasFiles = !!activeFilePath;
+  const chatOpen = expanded.includes('chat');
+  const editorOpen = expanded.includes('editor');
+  const terminalOpen = expanded.includes('terminal');
 
   return (
     <div className="app">
@@ -169,123 +200,89 @@ export default function App() {
         {sidebarOpen === 'files' && <FileExplorerSidebar projectPath={projectPath} onFileOpen={handleFileOpen} />}
         {sidebarOpen === 'git' && <GitSidebar projectPath={projectPath} onFileClick={handleFileClick} />}
         <div className="main-content">
-          {hasFiles ? (
-            <>
-              {/* Collapsible Chat — top */}
-              <div
-                className={`collapsible-panel collapsible-chat ${chatExpanded ? 'expanded' : 'collapsed'}`}
-              >
-                {chatExpanded ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-                    <div
-                      className="collapsible-bar"
-                      onClick={() => setChatExpanded(false)}
-                    >
-                      <MessageSquare size={12} />
-                      <span>Chat</span>
-                      <span className="collapse-hint">click to collapse</span>
-                    </div>
-                    <div style={{ flex: 1, overflow: 'hidden' }}>
-                      <ChatPanel
-                        key={activeSession.id}
-                        projectPath={projectPath}
-                        permissionMode={permissionMode}
-                        onPermissionChange={handlePermissionChange}
-                        initialMessages={activeSession.messages}
-                        onMessagesChange={handleMessagesChange}
-                        onTurnComplete={handleSessionSave}
-                      />
-                    </div>
-                  </div>
-                ) : (
-                  <div
-                    className="collapsible-bar"
-                    onClick={() => setChatExpanded(true)}
-                  >
-                    <MessageSquare size={12} />
-                    <span>Chat</span>
-                  </div>
+
+          {/* Chat accordion */}
+          <div className={`accordion-panel ${chatOpen ? 'accordion-expanded' : 'accordion-collapsed'}`}>
+            <div className="accordion-bar" onClick={() => togglePanel('chat')}>
+              <MessageSquare size={12} />
+              <span>Chat</span>
+            </div>
+            {chatOpen && (
+              <div className="accordion-body">
+                <ChatPanel
+                  key={activeSession.id}
+                  projectPath={projectPath}
+                  permissionMode={permissionMode}
+                  onPermissionChange={handlePermissionChange}
+                  initialMessages={activeSession.messages}
+                  onMessagesChange={handleMessagesChange}
+                  onTurnComplete={handleSessionSave}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Editor accordion — only visible when files are open */}
+          {hasFiles && (
+            <div className={`accordion-panel ${editorOpen ? 'accordion-expanded' : 'accordion-collapsed'}`}>
+              <div className="accordion-bar" onClick={() => togglePanel('editor')}>
+                <Code2 size={12} />
+                <span>Editor</span>
+                {activeFilePath && (
+                  <span className="accordion-bar-detail">
+                    {activeFilePath.split('/').pop()}
+                  </span>
                 )}
               </div>
-
-              {/* Editor — middle */}
-              <CodePanel
-                openFiles={openFiles}
-                activeFilePath={activeFilePath}
-                projectPath={projectPath}
-                onActivate={setActiveFilePath}
-                onClose={handleFileClose}
-                onCloseAll={handleCloseAllFiles}
-                onDiffModeChange={handleDiffModeChange}
-                onEditorSave={handleEditorSave}
-              />
-
-              {/* Collapsible Terminal — bottom */}
-              <div
-                className={`collapsible-panel collapsible-terminal ${terminalExpanded ? 'expanded' : 'collapsed'}`}
-              >
-                {terminalExpanded ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-                    <div
-                      className="collapsible-bar"
-                      onClick={() => setTerminalExpanded(false)}
-                    >
-                      <TerminalSquare size={12} />
-                      <span>Terminal</span>
-                      <span className="collapse-hint">click to collapse</span>
-                    </div>
-                    <div style={{ flex: 1, overflow: 'hidden' }}>
-                      <TerminalPanel projectPath={projectPath} />
-                    </div>
-                  </div>
-                ) : (
-                  <div
-                    className="collapsible-bar"
-                    onClick={() => setTerminalExpanded(true)}
-                  >
-                    <TerminalSquare size={12} />
-                    <span>Terminal</span>
-                  </div>
-                )}
-              </div>
-            </>
-          ) : (
-            <>
-              <ChatPanel
-                key={activeSession.id}
-                projectPath={projectPath}
-                permissionMode={permissionMode}
-                onPermissionChange={handlePermissionChange}
-                initialMessages={activeSession.messages}
-                onMessagesChange={handleMessagesChange}
-                onTurnComplete={handleSessionSave}
-              />
-              <TerminalPanel projectPath={projectPath} />
-            </>
+              {editorOpen && (
+                <div className="accordion-body">
+                  <CodePanel
+                    openFiles={openFiles}
+                    activeFilePath={activeFilePath!}
+                    projectPath={projectPath}
+                    onActivate={setActiveFilePath}
+                    onClose={handleFileClose}
+                    onCloseAll={handleCloseAllFiles}
+                    onDiffModeChange={handleDiffModeChange}
+                    onEditorSave={handleEditorSave}
+                  />
+                </div>
+              )}
+            </div>
           )}
+
+          {/* Terminal accordion */}
+          <div className={`accordion-panel ${terminalOpen ? 'accordion-expanded' : 'accordion-collapsed'}`}>
+            <div className="accordion-bar" onClick={() => togglePanel('terminal')}>
+              <TerminalSquare size={12} />
+              <span>Terminal</span>
+            </div>
+            {terminalOpen && (
+              <div className="accordion-body">
+                <TerminalPanel projectPath={projectPath} />
+              </div>
+            )}
+          </div>
+
         </div>
       </div>
 
       <style>{`
-        .collapsible-panel {
-          border-top: 1px solid var(--border);
+        .accordion-panel {
+          display: flex;
+          flex-direction: column;
           overflow: hidden;
-          transition: height 0.2s ease, flex 0.2s ease;
           flex-shrink: 0;
         }
-        .collapsible-panel.collapsed {
-          height: 32px;
-        }
-        .collapsible-chat.expanded {
+        .accordion-panel.accordion-expanded {
           flex: 1;
-          height: auto;
-          min-height: 150px;
-          max-height: 50%;
+          flex-shrink: 1;
+          min-height: 0;
         }
-        .collapsible-terminal.expanded {
-          height: 280px;
+        .accordion-panel.accordion-collapsed {
+          flex: 0 0 auto;
         }
-        .collapsible-bar {
+        .accordion-bar {
           display: flex;
           align-items: center;
           gap: 8px;
@@ -300,22 +297,37 @@ export default function App() {
           user-select: none;
           flex-shrink: 0;
           background: var(--bg-secondary);
+          border-top: 1px solid var(--border);
         }
-        .collapsible-bar:hover {
+        .accordion-panel:first-child .accordion-bar {
+          border-top: none;
+        }
+        .accordion-bar:hover {
           color: var(--text-secondary);
           background: var(--bg-hover);
         }
-        .collapse-hint {
-          margin-left: auto;
-          font-size: 10px;
+        .accordion-bar-detail {
           font-weight: 400;
           text-transform: none;
           letter-spacing: 0;
-          opacity: 0;
-          transition: opacity 0.15s;
+          color: var(--text-muted);
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 11px;
+          opacity: 0.6;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
-        .collapsible-bar:hover .collapse-hint {
-          opacity: 0.5;
+        .accordion-body {
+          flex: 1;
+          overflow: hidden;
+          display: flex;
+          flex-direction: column;
+          min-height: 0;
+        }
+        .accordion-body .terminal-panel {
+          height: 100%;
+          border-top: none;
         }
       `}</style>
     </div>
