@@ -13,6 +13,7 @@ import { formatSessionDate, formatSessionTime } from './sessions';
 
 type PermissionMode = 'default' | 'bypass';
 type EffortLevel = 'low' | 'medium' | 'high' | 'max';
+type ModelChoice = 'sonnet' | 'opus' | 'haiku';
 type PanelId = 'chat' | 'editor' | 'terminal';
 
 export default function App() {
@@ -20,6 +21,7 @@ export default function App() {
   const [activeProjectPath, setActiveProjectPath] = useState<string>('');
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
   const [effortLevel, setEffortLevel] = useState<EffortLevel>('high');
+  const [modelChoice, setModelChoice] = useState<ModelChoice>('sonnet');
   const [workspaces, setWorkspaces] = useState<Map<string, WorkspaceContext>>(new Map());
   // Ref to hold latest messages per workspace without triggering re-renders during streaming
   const wsMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
@@ -73,6 +75,9 @@ export default function App() {
     });
     window.sai.settingsGet('effortLevel', 'high').then((v: string) => {
       if (v === 'low' || v === 'medium' || v === 'high' || v === 'max') setEffortLevel(v as EffortLevel);
+    });
+    window.sai.settingsGet('modelChoice', 'sonnet').then((v: string) => {
+      if (v === 'sonnet' || v === 'opus' || v === 'haiku') setModelChoice(v as ModelChoice);
     });
   }, []);
 
@@ -395,6 +400,11 @@ export default function App() {
     window.sai.settingsSet('effortLevel', level);
   };
 
+  const handleModelChange = (model: ModelChoice) => {
+    setModelChoice(model);
+    window.sai.settingsSet('modelChoice', model);
+  };
+
   const chatOpen = expanded.includes('chat');
   const editorOpen = expanded.includes('editor');
   const terminalOpen = expanded.includes('terminal');
@@ -505,6 +515,8 @@ export default function App() {
                   onPermissionChange={handlePermissionChange}
                   effortLevel={effortLevel}
                   onEffortChange={handleEffortChange}
+                  modelChoice={modelChoice}
+                  onModelChange={handleModelChange}
                   initialMessages={ws.activeSession.messages}
                   onMessagesChange={(messages: ChatMessage[]) => {
                     wsMessagesRef.current.set(wsPath, messages);

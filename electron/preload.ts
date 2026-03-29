@@ -10,7 +10,7 @@ contextBridge.exposeInMainWorld('sai', {
     return () => ipcRenderer.removeListener('terminal:data', listener);
   },
   claudeStart: (cwd: string) => ipcRenderer.invoke('claude:start', cwd),
-  claudeSend: (projectPath: string, message: string, imagePaths?: string[], permMode?: string, effort?: string) => ipcRenderer.send('claude:send', projectPath, message, imagePaths, permMode, effort),
+  claudeSend: (projectPath: string, message: string, imagePaths?: string[], permMode?: string, effort?: string, model?: string) => ipcRenderer.send('claude:send', projectPath, message, imagePaths, permMode, effort, model),
   claudeGenerateCommitMessage: (cwd: string) => ipcRenderer.invoke('claude:generateCommitMessage', cwd),
   claudeStop: (projectPath: string) => ipcRenderer.send('claude:stop', projectPath),
   claudeApprove: (approved: boolean) => ipcRenderer.send('claude:approve', approved),

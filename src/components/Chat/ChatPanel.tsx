@@ -103,12 +103,14 @@ interface ChatPanelProps {
   onPermissionChange: (mode: 'default' | 'bypass') => void;
   effortLevel: 'low' | 'medium' | 'high' | 'max';
   onEffortChange: (level: 'low' | 'medium' | 'high' | 'max') => void;
+  modelChoice: 'sonnet' | 'opus' | 'haiku';
+  onModelChange: (model: 'sonnet' | 'opus' | 'haiku') => void;
   initialMessages?: ChatMessageType[];
   onMessagesChange?: (messages: ChatMessageType[]) => void;
   onTurnComplete?: () => void;
 }
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, initialMessages, onMessagesChange, onTurnComplete }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, initialMessages, onMessagesChange, onTurnComplete }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessageType[]>(initialMessages || []);
   const [isStreaming, setIsStreaming] = useState(false);
   const [ready, setReady] = useState(false);
@@ -313,7 +315,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       );
     }
 
-    window.sai.claudeSend(projectPath, text, imagePaths, permissionMode, effortLevel);
+    window.sai.claudeSend(projectPath, text, imagePaths, permissionMode, effortLevel, modelChoice);
   };
 
   return (
@@ -342,6 +344,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         onPermissionChange={onPermissionChange}
         effortLevel={effortLevel}
         onEffortChange={onEffortChange}
+        modelChoice={modelChoice}
+        onModelChange={onModelChange}
         contextUsage={contextUsage}
         sessionUsage={sessionUsage}
         rateLimits={rateLimits}

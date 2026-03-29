@@ -2,10 +2,11 @@ import { useState, useRef, KeyboardEvent, useEffect } from 'react';
 import {
   SquarePlus, Slash, SquareSlash, AtSign, FileText, GitBranch, Terminal, Settings,
   MessageSquare, Zap, Send, Square, ShieldCheck, ShieldOff,
-  Paperclip, Image, ChevronDown, Minus, ChevronUp, ChevronsUp, Clock,
+  Paperclip, Image, ChevronDown, Minus, ChevronUp, ChevronsUp, Clock, Check,
 } from 'lucide-react';
 
 type EffortLevel = 'low' | 'medium' | 'high' | 'max';
+type ModelChoice = 'sonnet' | 'opus' | 'haiku';
 
 interface ChatInputProps {
   onSend: (message: string, images?: string[]) => void;
@@ -17,6 +18,8 @@ interface ChatInputProps {
   onPermissionChange: (mode: 'default' | 'bypass') => void;
   effortLevel: EffortLevel;
   onEffortChange: (level: EffortLevel) => void;
+  modelChoice: ModelChoice;
+  onModelChange: (model: ModelChoice) => void;
   contextUsage?: { used: number; total: number };
   sessionUsage?: { inputTokens: number; outputTokens: number };
   rateLimits?: Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number }>;
@@ -60,6 +63,12 @@ const EFFORT_CONFIG: Record<EffortLevel, { icon: typeof ChevronDown; label: stri
   high:   { icon: ChevronUp,   label: 'Hi', color: 'var(--accent)', next: 'max' },
   max:    { icon: ChevronsUp,  label: 'Max', color: 'var(--orange)', next: 'low' },
 };
+
+const MODEL_OPTIONS: { id: ModelChoice; label: string; description: string; color: string; recommended?: boolean }[] = [
+  { id: 'sonnet',  label: 'Sonnet',  description: 'Claude Sonnet 4.5 · Best for everyday tasks', color: 'var(--accent)', recommended: true },
+  { id: 'opus',    label: 'Opus',    description: 'Claude Opus 4 · Most capable for complex work', color: 'var(--orange)' },
+  { id: 'haiku',   label: 'Haiku',   description: 'Claude Haiku 3.5 · Fastest for quick answers', color: 'var(--green)' },
+];
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -154,7 +163,7 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, permissionMode, onPermissionChange, effortLevel, onEffortChange, contextUsage, sessionUsage, rateLimits }: ChatInputProps) {
+export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, rateLimits }: ChatInputProps) {
   const [value, setValue] = useState('');
   const [suggestions, setSuggestions] = useState<AutocompleteItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -163,9 +172,11 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [tickerDir, setTickerDir] = useState<'up' | 'down' | null>(null);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const draftRef = useRef('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const modelMenuRef = useRef<HTMLDivElement>(null);
 
   // Close menus on outside click
   useEffect(() => {
@@ -173,6 +184,9 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
       if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
         setSuggestions([]);
         setShowAddMenu(false);
+      }
+      if (modelMenuRef.current && !modelMenuRef.current.contains(e.target as Node)) {
+        setModelMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handler);
@@ -516,6 +530,39 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
               </button>
             );
           })()}
+
+          {/* Model selector */}
+          <div className="model-selector" ref={modelMenuRef}>
+            <button
+              className="toolbar-btn model-btn"
+              onClick={() => setModelMenuOpen(!modelMenuOpen)}
+              style={{ color: MODEL_OPTIONS.find(m => m.id === modelChoice)?.color }}
+            >
+              <span className="model-label">{MODEL_OPTIONS.find(m => m.id === modelChoice)?.label}</span>
+              <ChevronDown size={11} style={{ opacity: 0.5 }} />
+            </button>
+            {modelMenuOpen && (
+              <div className="model-dropdown">
+                <div className="model-dropdown-header">Select a model</div>
+                {MODEL_OPTIONS.map(opt => (
+                  <button
+                    key={opt.id}
+                    className={`model-dropdown-item ${opt.id === modelChoice ? 'active' : ''}`}
+                    onClick={() => { onModelChange(opt.id); setModelMenuOpen(false); }}
+                  >
+                    <div className="model-dropdown-item-info">
+                      <span className="model-dropdown-item-name" style={{ color: opt.id === modelChoice ? opt.color : undefined }}>
+                        {opt.label}
+                        {opt.recommended && <span className="model-recommended">(recommended)</span>}
+                      </span>
+                      <span className="model-dropdown-item-desc">{opt.description}</span>
+                    </div>
+                    {opt.id === modelChoice && <Check size={14} style={{ color: opt.color, flexShrink: 0 }} />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           <button
             className={`toolbar-btn permission-btn ${permissionMode === 'bypass' ? 'bypass-active' : ''}`}
@@ -872,6 +919,82 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
         .effort-label {
           font-size: 11px;
           font-family: 'JetBrains Mono', monospace;
+        }
+        .model-selector {
+          position: relative;
+        }
+        .model-btn {
+          font-size: 11px;
+          padding: 3px 8px;
+          border: 1px solid transparent;
+          transition: all 0.15s;
+        }
+        .model-btn:hover {
+          border-color: var(--border);
+        }
+        .model-label {
+          font-size: 11px;
+          font-family: 'JetBrains Mono', monospace;
+          font-weight: 600;
+        }
+        .model-dropdown {
+          position: absolute;
+          bottom: calc(100% + 8px);
+          right: 0;
+          min-width: 320px;
+          background: var(--bg-elevated);
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          box-shadow: 0 -4px 16px rgba(0,0,0,0.3);
+          z-index: 60;
+          overflow: hidden;
+        }
+        .model-dropdown-header {
+          padding: 10px 14px 6px;
+          font-size: 11px;
+          color: var(--text-muted);
+        }
+        .model-dropdown-item {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          width: 100%;
+          padding: 10px 14px;
+          background: none;
+          border: none;
+          cursor: pointer;
+          text-align: left;
+        }
+        .model-dropdown-item:hover {
+          background: var(--bg-hover);
+        }
+        .model-dropdown-item.active {
+          background: rgba(255,255,255,0.03);
+        }
+        .model-dropdown-item-info {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          flex: 1;
+          min-width: 0;
+        }
+        .model-dropdown-item-name {
+          font-size: 13px;
+          font-weight: 600;
+          color: var(--text);
+        }
+        .model-recommended {
+          font-weight: 400;
+          color: var(--text-muted);
+          margin-left: 6px;
+          font-size: 12px;
+        }
+        .model-dropdown-item-desc {
+          font-size: 11px;
+          color: var(--text-muted);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
         .permission-btn {
           font-size: 11px;
