@@ -30,16 +30,17 @@ function formatRelative(ts: number): string {
   return `${Math.floor(mins / 60)}h ago`;
 }
 
-const PROVIDER_OPTIONS: { id: 'claude' | 'codex'; label: string; svg: string; color: string }[] = [
+const PROVIDER_OPTIONS: { id: 'claude' | 'codex' | 'gemini'; label: string; svg: string; color: string }[] = [
   { id: 'claude', label: 'Claude', svg: 'svg/claude.svg', color: '#e27b4a' },
   { id: 'codex', label: 'Codex CLI', svg: 'svg/openai.svg', color: '#fff' },
+  { id: 'gemini', label: 'Gemini CLI', svg: 'svg/Google-gemini-icon.svg', color: '#4285f4' },
 ];
 
 export default function SettingsModal({ onClose, onSettingChange }: Props) {
   const [suspendTimeout, setSuspendTimeout] = useState<number>(DEFAULT_TIMEOUT);
   const [editorFontSize, setEditorFontSize] = useState(13);
   const [editorMinimap, setEditorMinimap] = useState(true);
-  const [aiProvider, setAiProvider] = useState<'claude' | 'codex'>('claude');
+  const [aiProvider, setAiProvider] = useState<'claude' | 'codex' | 'gemini'>('claude');
   const [providerOpen, setProviderOpen] = useState(false);
   const providerRef = useRef<HTMLDivElement>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
@@ -51,7 +52,7 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
     window.sai.settingsGet('editorFontSize', 13).then((v: number) => setEditorFontSize(v));
     window.sai.settingsGet('editorMinimap', true).then((v: boolean) => setEditorMinimap(v));
     window.sai.settingsGet('aiProvider', 'claude').then((v: string) => {
-      if (v === 'claude' || v === 'codex') setAiProvider(v);
+      if (v === 'claude' || v === 'codex' || v === 'gemini') setAiProvider(v as 'claude' | 'codex' | 'gemini');
     });
     window.sai.githubGetUser().then((u: any) => setIsAuthed(!!u));
 
@@ -65,7 +66,7 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
       if ('suspendTimeout' in remote) setSuspendTimeout(remote.suspendTimeout);
       if ('editorFontSize' in remote) setEditorFontSize(remote.editorFontSize);
       if ('editorMinimap' in remote) setEditorMinimap(remote.editorMinimap);
-      if ('aiProvider' in remote && (remote.aiProvider === 'claude' || remote.aiProvider === 'codex')) setAiProvider(remote.aiProvider);
+      if ('aiProvider' in remote && (remote.aiProvider === 'claude' || remote.aiProvider === 'codex' || remote.aiProvider === 'gemini')) setAiProvider(remote.aiProvider);
     });
 
     return () => { unsubSync(); unsubApplied(); };
@@ -98,7 +99,7 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
     onSettingChange?.('editorMinimap', value);
   };
 
-  const handleProviderChange = (value: 'claude' | 'codex') => {
+  const handleProviderChange = (value: 'claude' | 'codex' | 'gemini') => {
     setAiProvider(value);
     window.sai.settingsSet('aiProvider', value);
     onSettingChange?.('aiProvider', value);
