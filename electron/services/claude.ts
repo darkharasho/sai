@@ -96,15 +96,35 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 	});
 
 	ipcMain.handle('claude:generateCommitMessage', async (_event, cwd: string) => {
+		const effectiveCwd = cwd || currentCwd;
+
+		// Get the diff upfront so Claude doesn't need tool calls
+		const diff = await new Promise<string>((resolve) => {
+			const diffProc = spawn('git', ['diff', '--staged'], {
+				cwd: effectiveCwd,
+				stdio: ['ignore', 'pipe', 'pipe'],
+			});
+			let out = '';
+			diffProc.stdout?.on('data', (d: Buffer) => { out += d.toString(); });
+			diffProc.on('exit', () => resolve(out.trim()));
+			diffProc.on('error', () => resolve(''));
+		});
+
+		if (!diff) return '';
+
+		// Truncate very large diffs to keep the request fast
+		const maxLen = 8000;
+		const truncatedDiff = diff.length > maxLen
+			? diff.slice(0, maxLen) + '\n... (diff truncated)'
+			: diff;
+
 		return new Promise<string>((resolve) => {
 			const proc = spawn('claude', [
-				'-p', 'Run `git diff HEAD` to see all changes, then generate a concise commit message. Output ONLY the commit message text, nothing else. Use conventional commit format (e.g. feat:, fix:, refactor:). Keep it under 72 characters for the subject line.',
+				'-p', `Generate a concise commit message for this diff. Output ONLY the commit message text, nothing else. Use conventional commit format (e.g. feat:, fix:, refactor:). Keep it under 72 characters for the subject line.\n\n${truncatedDiff}`,
 				'--output-format', 'text',
-				'--max-turns', '10',
-				'--permission-mode', 'acceptEdits',
-				'--allowedTools', 'Bash(git diff:*) Bash(git status:*) Bash(git log:*)',
+				'--max-turns', '1',
 			], {
-				cwd: cwd || currentCwd,
+				cwd: effectiveCwd,
 				env: { ...process.env },
 				stdio: ['ignore', 'pipe', 'pipe'],
 			});

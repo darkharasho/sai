@@ -89,7 +89,7 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
       {version && (
         version === 'DEV'
           ? <span className="titlebar-dev-pill">DEV</span>
-          : <span className="titlebar-version">v{version}</span>
+          : <span className="titlebar-version" onClick={() => window.sai.updateCheck()} title="Check for updates">v{version}</span>
       )}
       <style>{`
         .titlebar {
@@ -117,6 +117,11 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
           font-size: 10px;
           margin-right: 140px;
           font-family: 'JetBrains Mono', monospace;
+          cursor: pointer;
+          -webkit-app-region: no-drag;
+        }
+        .titlebar-version:hover {
+          color: var(--accent);
         }
         .titlebar-dev-pill {
           font-size: 9px;
