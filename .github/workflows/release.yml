@@ -32,6 +32,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Rebuild native modules for Electron
+        run: npx electron-rebuild
+
       - name: Build app
         run: npm run build
 
@@ -44,8 +47,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tag="${GITHUB_REF#refs/tags/}"
+          shopt -s nullglob
           for file in release/*.AppImage release/*.exe; do
-            [ -f "$file" ] && gh release upload "$tag" "$file" --clobber
+            gh release upload "$tag" "$file" --clobber
           done
 
   publish:
