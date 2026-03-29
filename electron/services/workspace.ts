@@ -25,10 +25,18 @@ export interface WorkspaceCodex {
   busy: boolean;
 }
 
+export interface WorkspaceGemini {
+  process: ChildProcess | null;
+  buffer: string;
+  cwd: string;
+  busy: boolean;
+}
+
 export interface Workspace {
   projectPath: string;
   claude: WorkspaceClaude;
   codex: WorkspaceCodex;
+  gemini: WorkspaceGemini;
   terminals: Map<number, pty.IPty>;
   lastActivity: number;
   status: 'active' | 'suspended';
@@ -55,6 +63,12 @@ export function getOrCreate(projectPath: string): Workspace {
       suppressForward: false,
     },
     codex: {
+      process: null,
+      buffer: '',
+      cwd: projectPath,
+      busy: false,
+    },
+    gemini: {
       process: null,
       buffer: '',
       cwd: projectPath,
@@ -96,6 +110,13 @@ export function suspend(projectPath: string, win: BrowserWindow): void {
     ws.codex.process = null;
   }
   ws.codex.busy = false;
+
+  // Kill Gemini process
+  if (ws.gemini.process) {
+    ws.gemini.process.kill();
+    ws.gemini.process = null;
+  }
+  ws.gemini.busy = false;
 
   // Kill all terminals
   for (const term of ws.terminals.values()) {
