@@ -1,22 +1,41 @@
 import type { ChatSession } from './types';
 
-const STORAGE_KEY = 'sai-chat-sessions';
+const LEGACY_KEY = 'sai-chat-sessions';
 const MAX_SESSIONS = 10;
 
-export function loadSessions(): ChatSession[] {
+function storageKey(projectPath: string): string {
+  return `sai-chat-sessions-${projectPath}`;
+}
+
+export function loadSessions(projectPath: string): ChatSession[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(storageKey(projectPath));
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
   }
 }
 
-export function saveSessions(sessions: ChatSession[]): void {
+export function saveSessions(projectPath: string, sessions: ChatSession[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+    localStorage.setItem(storageKey(projectPath), JSON.stringify(sessions));
   } catch {
-    // localStorage quota exceeded — silently fail
+    // localStorage quota exceeded - silently fail
+  }
+}
+
+export function migrateLegacySessions(projectPath: string): void {
+  try {
+    const legacy = localStorage.getItem(LEGACY_KEY);
+    if (!legacy) return;
+    const existing = loadSessions(projectPath);
+    if (existing.length === 0) {
+      // Move legacy sessions to this project
+      localStorage.setItem(storageKey(projectPath), legacy);
+    }
+    localStorage.removeItem(LEGACY_KEY);
+  } catch {
+    // Migration failed - not critical
   }
 }
 

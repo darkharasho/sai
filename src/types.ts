@@ -53,6 +53,19 @@ export interface DirEntry {
   type: 'file' | 'directory';
 }
 
+export type WorkspaceStatus = 'active' | 'suspended' | 'recent';
+
+export interface WorkspaceContext {
+  projectPath: string;
+  sessions: ChatSession[];
+  activeSession: ChatSession;
+  openFiles: OpenFile[];
+  activeFilePath: string | null;
+  terminalIds: number[];
+  status: WorkspaceStatus;
+  lastActivity: number;
+}
+
 declare global {
   interface Window {
     sai: Record<string, any>;
