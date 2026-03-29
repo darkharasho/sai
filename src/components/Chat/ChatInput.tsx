@@ -1,6 +1,6 @@
 import { useState, useRef, KeyboardEvent, useEffect } from 'react';
 import {
-  Plus, Slash, AtSign, FileText, GitBranch, Terminal, Settings,
+  SquarePlus, Slash, SquareSlash, AtSign, FileText, GitBranch, Terminal, Settings,
   MessageSquare, Zap, Send, Square, ShieldCheck, ShieldOff,
   Paperclip, Image,
 } from 'lucide-react';
@@ -316,10 +316,10 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
       <div className="input-toolbar">
         <div className="toolbar-left">
           <button className="toolbar-btn" onClick={() => { setShowAddMenu(!showAddMenu); setSelectedIndex(0); }} title="Add context">
-            <Plus size={16} />
+            <SquarePlus size={18} />
           </button>
           <button className="toolbar-btn" onClick={() => { setValue(value + '/'); textareaRef.current?.focus(); }} title="Slash commands">
-            <Slash size={16} />
+            <SquareSlash size={18} />
           </button>
           {contextUsage && <ContextRing used={contextUsage.used} total={contextUsage.total} onClick={() => onSend('/compact')} />}
         </div>
