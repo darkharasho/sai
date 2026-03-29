@@ -21,6 +21,8 @@ export default function ChatMessage({ message }: { message: ChatMessageType }) {
         <div className="chat-msg-content">
           {message.role === 'user'
             ? <ChevronRight size={14} color="var(--green)" strokeWidth={3} className="chat-msg-dot chat-msg-chevron" />
+            : message.role === 'assistant'
+            ? <span className="chat-msg-dot chat-msg-claude" />
             : <Circle size={8} fill={dotColor} stroke={dotColor} className="chat-msg-dot" />}
           <div className="chat-msg-body">
             <ReactMarkdown rehypePlugins={[rehypeHighlight]}>{message.content}</ReactMarkdown>
@@ -50,6 +52,18 @@ export default function ChatMessage({ message }: { message: ChatMessageType }) {
         }
         .chat-msg-chevron {
           margin-top: 4px;
+        }
+        .chat-msg-claude {
+          width: 14px;
+          height: 14px;
+          margin-top: 2px;
+          background-color: var(--accent);
+          -webkit-mask-image: url('svg/claude.svg');
+          mask-image: url('svg/claude.svg');
+          -webkit-mask-size: contain;
+          mask-size: contain;
+          -webkit-mask-repeat: no-repeat;
+          mask-repeat: no-repeat;
         }
         .chat-msg-body { color: var(--text); line-height: 1.6; flex: 1; min-width: 0; }
         .chat-msg-body p { margin-bottom: 8px; }
