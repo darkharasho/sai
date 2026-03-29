@@ -24,12 +24,19 @@ interface ChatInputProps {
   sessionUsage?: { inputTokens: number; outputTokens: number };
   rateLimits?: Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number; utilization?: number }>;
   activeFilePath?: string | null;
-  aiProvider?: 'claude' | 'codex';
+  aiProvider?: 'claude' | 'codex' | 'gemini';
   codexModel?: string;
   codexModels?: { id: string; name: string }[];
   onCodexModelChange?: (model: string) => void;
   codexPermission?: 'auto' | 'read-only' | 'full-access';
   onCodexPermissionChange?: (perm: 'auto' | 'read-only' | 'full-access') => void;
+  geminiModel?: string;
+  geminiModels?: { id: string; name: string }[];
+  onGeminiModelChange?: (model: string) => void;
+  geminiApprovalMode?: 'default' | 'auto_edit' | 'yolo' | 'plan';
+  onGeminiApprovalModeChange?: (mode: 'default' | 'auto_edit' | 'yolo' | 'plan') => void;
+  geminiConversationMode?: 'planning' | 'fast';
+  onGeminiConversationModeChange?: (mode: 'planning' | 'fast') => void;
 }
 
 interface AutocompleteItem {
@@ -186,7 +193,7 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, rateLimits, activeFilePath, aiProvider = 'claude', codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange }: ChatInputProps) {
+export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, rateLimits, activeFilePath, aiProvider = 'claude', codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange }: ChatInputProps) {
   const [value, setValue] = useState('');
   const [suggestions, setSuggestions] = useState<AutocompleteItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -681,6 +688,57 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           </div>
           )}
 
+          {/* Model selector — Gemini */}
+          {aiProvider === 'gemini' && (
+          <div className="model-selector" ref={modelMenuRef}>
+            <button
+              className="toolbar-btn model-btn"
+              onClick={() => setModelMenuOpen(!modelMenuOpen)}
+              style={{ color: '#4285f4' }}
+            >
+              <span className="model-label">{geminiModels.find(m => m.id === geminiModel)?.name || geminiModel}</span>
+              <ChevronDown size={11} style={{ opacity: 0.5 }} />
+            </button>
+            {modelMenuOpen && (
+              <div className="model-dropdown">
+                <div className="model-dropdown-header">Select a model</div>
+                {geminiModels.map(m => (
+                  <button
+                    key={m.id}
+                    className={`model-dropdown-item ${m.id === geminiModel ? 'active' : ''}`}
+                    onClick={() => { onGeminiModelChange?.(m.id); setModelMenuOpen(false); }}
+                  >
+                    <div className="model-dropdown-item-info">
+                      <span className="model-dropdown-item-name" style={{ color: m.id === geminiModel ? '#4285f4' : undefined }}>
+                        {m.name}
+                      </span>
+                    </div>
+                    {m.id === geminiModel && <Check size={14} style={{ color: '#4285f4', flexShrink: 0 }} />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          )}
+
+          {/* Conversation mode — Gemini */}
+          {aiProvider === 'gemini' && (
+          <button
+            className="toolbar-btn"
+            onClick={() => {
+              const next = geminiConversationMode === 'planning' ? 'fast' : 'planning';
+              onGeminiConversationModeChange?.(next);
+            }}
+            title={`Conversation mode: ${geminiConversationMode}`}
+            style={{ color: '#4285f4' }}
+          >
+            {geminiConversationMode === 'planning'
+              ? <><Settings size={14} /> <span className="permission-label">Planning</span></>
+              : <><Zap size={14} /> <span className="permission-label">Fast</span></>
+            }
+          </button>
+          )}
+
           {aiProvider === 'claude' ? (
           <button
             className={`toolbar-btn permission-btn ${permissionMode === 'bypass' ? 'bypass-active' : ''}`}
@@ -690,6 +748,25 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
             {permissionMode === 'default'
               ? <><ShieldCheck size={14} /> <span className="permission-label">Default Approvals</span></>
               : <><ShieldOff size={14} /> <span className="permission-label">Bypass</span></>
+            }
+          </button>
+          ) : aiProvider === 'gemini' ? (
+          <button
+            className={`toolbar-btn permission-btn ${geminiApprovalMode === 'yolo' ? 'bypass-active' : ''}`}
+            onClick={() => {
+              const modes: Array<'default' | 'auto_edit' | 'yolo' | 'plan'> = ['default', 'auto_edit', 'yolo', 'plan'];
+              const idx = modes.indexOf(geminiApprovalMode);
+              onGeminiApprovalModeChange?.(modes[(idx + 1) % modes.length]);
+            }}
+            title={`Approval: ${geminiApprovalMode}`}
+          >
+            {geminiApprovalMode === 'default'
+              ? <><ShieldCheck size={14} /> <span className="permission-label">Default</span></>
+              : geminiApprovalMode === 'auto_edit'
+              ? <><ShieldCheck size={14} /> <span className="permission-label">Auto Edit</span></>
+              : geminiApprovalMode === 'yolo'
+              ? <><ShieldOff size={14} /> <span className="permission-label">Yolo</span></>
+              : <><ShieldCheck size={14} /> <span className="permission-label">Plan</span></>
             }
           </button>
           ) : (
