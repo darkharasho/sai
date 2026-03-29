@@ -201,8 +201,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           content: `Context auto-compacted.${summary}`,
           timestamp: Date.now(),
         }]);
-        // Reset context meter — the next result message will have accurate numbers
-        setContextUsage(prev => ({ ...prev, used: Math.round(prev.used * 0.3) }));
+        // Don't guess post-compaction size — the next result message will have accurate numbers
         return;
       }
 
