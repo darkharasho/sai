@@ -1,7 +1,8 @@
+import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/monokai.css';
-import { Circle, ChevronRight } from 'lucide-react';
+import { Circle, ChevronRight, X } from 'lucide-react';
 import ToolCallCard from './ToolCallCard';
 import type { ChatMessage as ChatMessageType } from '../../types';
 
@@ -12,8 +13,23 @@ function getDotColor(role: string): string {
   return 'var(--text-muted)';
 }
 
+function ImageModal({ src, onClose }: { src: string; onClose: () => void }) {
+  return (
+    <div className="img-modal-overlay" onClick={onClose}>
+      <button className="img-modal-close" onClick={onClose}><X size={18} /></button>
+      <img
+        src={src}
+        alt="Full size"
+        className="img-modal-img"
+        onClick={e => e.stopPropagation()}
+      />
+    </div>
+  );
+}
+
 export default function ChatMessage({ message }: { message: ChatMessageType }) {
   const dotColor = getDotColor(message.role);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   return (
     <div className={`chat-msg chat-msg-${message.role}`}>
@@ -44,7 +60,7 @@ export default function ChatMessage({ message }: { message: ChatMessageType }) {
             {message.images && message.images.length > 0 && (
               <div className="chat-msg-images">
                 {message.images.map((src, i) => (
-                  <img key={i} src={src} alt={`Attached image ${i + 1}`} className="chat-msg-thumb" />
+                  <img key={i} src={src} alt={`Attached image ${i + 1}`} className="chat-msg-thumb" onClick={() => setLightboxSrc(src)} />
                 ))}
               </div>
             )}
@@ -54,6 +70,7 @@ export default function ChatMessage({ message }: { message: ChatMessageType }) {
       {message.toolCalls?.map((tc, i) => (
         <ToolCallCard key={i} toolCall={tc} />
       ))}
+      {lightboxSrc && <ImageModal src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
       <style>{`
         .chat-msg { margin-bottom: 12px; }
         .chat-msg-content {
@@ -133,6 +150,42 @@ export default function ChatMessage({ message }: { message: ChatMessageType }) {
         }
         .chat-msg-thumb:hover {
           opacity: 0.8;
+        }
+        .img-modal-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(0, 0, 0, 0.8);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 2000;
+          backdrop-filter: blur(4px);
+          cursor: zoom-out;
+        }
+        .img-modal-img {
+          max-width: 90vw;
+          max-height: 90vh;
+          object-fit: contain;
+          border-radius: 6px;
+          box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+          cursor: default;
+        }
+        .img-modal-close {
+          position: fixed;
+          top: 16px;
+          right: 16px;
+          background: rgba(0, 0, 0, 0.5);
+          border: 1px solid rgba(255, 255, 255, 0.15);
+          border-radius: 6px;
+          color: #fff;
+          cursor: pointer;
+          padding: 6px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .img-modal-close:hover {
+          background: rgba(255, 255, 255, 0.15);
         }
       `}</style>
     </div>

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Dot, Minus, Plus, Asterisk, SunDim, SunMedium, Sun } from 'lucide-react';
+import { Dot, Minus, Plus, Asterisk, SunDim, SunMedium, Sun, ChevronDown } from 'lucide-react';
 
 const THINKING_WORDS = [
   'Thinking', 'Pondering', 'Ruminating', 'Cogitating', 'Deliberating',
@@ -108,9 +108,10 @@ interface ChatPanelProps {
   initialMessages?: ChatMessageType[];
   onMessagesChange?: (messages: ChatMessageType[]) => void;
   onTurnComplete?: () => void;
+  activeFilePath?: string | null;
 }
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, initialMessages, onMessagesChange, onTurnComplete }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, initialMessages, onMessagesChange, onTurnComplete, activeFilePath }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessageType[]>(initialMessages || []);
   const [isStreaming, setIsStreaming] = useState(false);
   const [ready, setReady] = useState(false);
@@ -119,6 +120,11 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const [sessionUsage, setSessionUsage] = useState<{ inputTokens: number; outputTokens: number }>({ inputTokens: 0, outputTokens: 0 });
   const [rateLimits, setRateLimits] = useState<Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number }>>(new Map());
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const lastUserMsgRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
+  const [showPinnedPrompt, setShowPinnedPrompt] = useState(false);
+  const [showNewMessages, setShowNewMessages] = useState(false);
 
   useEffect(() => {
     setReady(false);
@@ -182,6 +188,20 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           });
           return next;
         });
+        return;
+      }
+
+      // Surface context compaction notifications and update context meter
+      if (msg.type === 'system' && (msg.subtype === 'context_compacted' || msg.subtype === 'auto_compact' || msg.subtype === 'compact')) {
+        const summary = msg.summary ? ` Summary: ${msg.summary.slice(0, 100)}` : '';
+        setMessages(prev => [...prev, {
+          id: `compact-${Date.now()}`,
+          role: 'system',
+          content: `Context auto-compacted.${summary}`,
+          timestamp: Date.now(),
+        }]);
+        // Reset context meter — the next result message will have accurate numbers
+        setContextUsage(prev => ({ used: Math.round(prev.used * 0.3), total: prev.total }));
         return;
       }
 
@@ -307,9 +327,56 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     return cleanup;
   }, [projectPath]);
 
+  // Wheel events are never fired by programmatic scrolls — use them to detect user scrolling up
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = chatContainerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) isAtBottomRef.current = false;
+    };
+    el.addEventListener('wheel', onWheel, { passive: true });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  useEffect(() => {
+    if (isAtBottomRef.current) {
+      setShowNewMessages(false);
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    } else if (messages[messages.length - 1]?.role === 'assistant') {
+      setShowNewMessages(true);
+    }
   }, [messages, isStreaming]);
+
+  const scrollToBottom = () => {
+    isAtBottomRef.current = true;
+    setShowNewMessages(false);
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const handleScroll = () => {
+    const el = chatContainerRef.current;
+    if (!el) return;
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 60;
+    if (atBottom) {
+      isAtBottomRef.current = true;
+      setShowNewMessages(false);
+    }
+  };
+
+  const lastUserMessage = [...messages].reverse().find(m => m.role === 'user');
+
+  useEffect(() => {
+    const el = lastUserMsgRef.current;
+    const container = chatContainerRef.current;
+    if (!el || !container) return;
+    setShowPinnedPrompt(false);
+    const observer = new IntersectionObserver(
+      ([entry]) => setShowPinnedPrompt(!entry.isIntersecting),
+      { root: container, threshold: 0 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [lastUserMessage?.id]);
 
   useEffect(() => {
     onMessagesChange?.(messages);
@@ -334,6 +401,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       return;
     }
 
+    isAtBottomRef.current = true;
     setMessages(prev => [...prev, {
       id: Date.now().toString(),
       role: 'user',
@@ -350,12 +418,18 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       );
     }
 
-    window.sai.claudeSend(projectPath, text, imagePaths, permissionMode, effortLevel, modelChoice);
+    const prompt = activeFilePath ? `[File: ${activeFilePath}]\n\n${text}` : text;
+    window.sai.claudeSend(projectPath, prompt, imagePaths, permissionMode, effortLevel, modelChoice);
   };
 
   return (
     <div className="chat-panel">
-      <div className="chat-messages">
+      {showPinnedPrompt && lastUserMessage && (
+        <div className="pinned-prompt-bar">
+          <span className="pinned-prompt-text">{lastUserMessage.content}</span>
+        </div>
+      )}
+      <div className="chat-messages" ref={chatContainerRef} onScroll={handleScroll}>
         {messages.length === 0 ? (
           <div className="chat-empty">
             <div className="chat-empty-title">SAI</div>
@@ -364,11 +438,20 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             </div>
           </div>
         ) : (
-          messages.map(msg => <ChatMessage key={msg.id} message={msg} />)
+          messages.map(msg => msg.id === lastUserMessage?.id
+            ? <div key={msg.id} ref={lastUserMsgRef}><ChatMessage message={msg} /></div>
+            : <ChatMessage key={msg.id} message={msg} />
+          )
         )}
         {isStreaming && <ThinkingAnimation hasContent={messages[messages.length - 1]?.role === 'assistant'} />}
         <div ref={messagesEndRef} />
       </div>
+      {showNewMessages && (
+        <button className="new-messages-btn" onClick={scrollToBottom}>
+          <ChevronDown size={12} />
+          new messages
+        </button>
+      )}
       <ChatInput
         onSend={handleSend}
         disabled={!ready}
@@ -384,6 +467,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         contextUsage={contextUsage}
         sessionUsage={sessionUsage}
         rateLimits={rateLimits}
+        activeFilePath={activeFilePath}
       />
       <style>{`
         .chat-panel {
@@ -392,6 +476,48 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           flex-direction: column;
           min-height: 0;
           overflow: hidden;
+        }
+        .new-messages-btn {
+          position: absolute;
+          bottom: 72px;
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 10;
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          background: var(--bg-secondary);
+          border: 1px solid var(--accent);
+          border-radius: 12px;
+          color: var(--text-muted);
+          font-size: 11px;
+          font-family: 'JetBrains Mono', monospace;
+          padding: 4px 12px;
+          cursor: pointer;
+          box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+          white-space: nowrap;
+          transition: color 0.15s;
+        }
+        .new-messages-btn:hover {
+          color: var(--text);
+        }
+        .pinned-prompt-bar {
+          flex-shrink: 0;
+          padding: 5px 16px;
+          border-bottom: 1px solid var(--border);
+          background: var(--bg-primary);
+          display: flex;
+          align-items: center;
+          min-width: 0;
+        }
+        .pinned-prompt-text {
+          font-size: 12px;
+          color: var(--text-muted);
+          opacity: 0.6;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          font-family: 'JetBrains Mono', monospace;
         }
         .chat-messages {
           flex: 1;

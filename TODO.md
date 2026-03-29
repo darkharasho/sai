@@ -17,10 +17,10 @@
 - [x] links in chat need to actually be links. links in chat and term need to open in the user's default browser not a separate electron window
 - [ ] add support for gemini / codex
 - [x] we need a way to view usage and effort (and set effort)
-- [ ] if possible instead of outputting json format it like claude cli does
-- [ ] gitignored files/folders should have a dimmer gray text
-- [ ] if the editor is open with a file, add it to the context of the chat
-- [ ] clicking on the image in the chat should show it bigger via like a modal view
+- [x] if possible instead of outputting json format it like claude cli does
+- [x] gitignored files/folders should have a dimmer gray text
+- [x] if the editor is open with a file, add it to the context of the chat
+- [x] clicking on the image in the chat should show it bigger via like a modal view
 - [ ] tabs with pending changes need to show an icon in the tab name
 - [ ] closing a file with unsaved changes should have a custom modal popup themed like this app to prompt to save or cancel or close anyway
 - [ ] wont let you hit generate commit message unless the changes are staged

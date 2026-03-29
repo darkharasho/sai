@@ -23,6 +23,7 @@ interface ChatInputProps {
   contextUsage?: { used: number; total: number };
   sessionUsage?: { inputTokens: number; outputTokens: number };
   rateLimits?: Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number }>;
+  activeFilePath?: string | null;
 }
 
 interface AutocompleteItem {
@@ -165,7 +166,7 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, rateLimits }: ChatInputProps) {
+export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, rateLimits, activeFilePath }: ChatInputProps) {
   const [value, setValue] = useState('');
   const [suggestions, setSuggestions] = useState<AutocompleteItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -414,6 +415,12 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
             <SquareSlash size={18} />
           </button>
           {contextUsage && <ContextRing used={contextUsage.used} total={contextUsage.total} onClick={() => onSend('/compact')} />}
+          {activeFilePath && (
+            <span className="active-file-chip" title={activeFilePath}>
+              <FileText size={11} />
+              {activeFilePath.split('/').pop()}
+            </span>
+          )}
         </div>
 
         <div className="toolbar-center">
@@ -721,6 +728,23 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           padding: 2px 6px;
           border-radius: 3px;
           white-space: nowrap;
+        }
+        .active-file-chip {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          margin-left: 4px;
+          padding: 2px 7px;
+          background: var(--bg-hover);
+          border: 1px solid var(--border);
+          border-radius: 4px;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 11px;
+          color: var(--text-muted);
+          white-space: nowrap;
+          max-width: 180px;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
         .context-ring {
           display: flex;

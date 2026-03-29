@@ -1,6 +1,7 @@
 import { ipcMain, dialog, BrowserWindow } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 export function registerFsHandlers(mainWindow: BrowserWindow) {
   ipcMain.handle('fs:readDir', async (_event, dirPath: string) => {
@@ -52,5 +53,19 @@ export function registerFsHandlers(mainWindow: BrowserWindow) {
 
   ipcMain.handle('fs:createDir', async (_event, dirPath: string) => {
     fs.mkdirSync(dirPath, { recursive: true });
+  });
+
+  ipcMain.handle('fs:checkIgnored', async (_event, rootPath: string, paths: string[]) => {
+    if (!paths.length) return [];
+    try {
+      const result = spawnSync('git', ['check-ignore', '--stdin', '-z'], {
+        cwd: rootPath,
+        input: paths.join('\0') + '\0',
+        encoding: 'utf-8',
+      });
+      return result.stdout.split('\0').filter(Boolean);
+    } catch {
+      return [];
+    }
   });
 }

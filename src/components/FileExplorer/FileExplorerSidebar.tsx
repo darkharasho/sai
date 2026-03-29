@@ -36,6 +36,7 @@ interface InlineInput {
 
 export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExplorerSidebarProps) {
   const [tree, setTree] = useState<Map<string, TreeState>>(new Map());
+  const [ignoredPaths, setIgnoredPaths] = useState<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; entry: DirEntry | null; parentPath: string } | null>(null);
   const [inlineInput, setInlineInput] = useState<InlineInput | null>(null);
   const [dragOverPath, setDragOverPath] = useState<string | null>(null);
@@ -55,6 +56,16 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
         next.set(dirPath, { entries, expanded: true, loading: false, error: null });
         return next;
       });
+      // Check which entries are gitignored
+      const paths = entries.map((e: DirEntry) => e.path);
+      const ignored = await window.sai.fsCheckIgnored(projectPath, paths) as string[];
+      if (ignored.length > 0) {
+        setIgnoredPaths(prev => {
+          const next = new Set(prev);
+          ignored.forEach(p => next.add(p));
+          return next;
+        });
+      }
     } catch (err: any) {
       setTree(prev => {
         const next = new Map(prev);
@@ -62,11 +73,12 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
         return next;
       });
     }
-  }, []);
+  }, [projectPath]);
 
   useEffect(() => {
     if (projectPath) {
       setTree(new Map());
+      setIgnoredPaths(new Set());
       loadDir(projectPath);
     }
   }, [projectPath, loadDir]);
@@ -228,12 +240,13 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
     const state = tree.get(entry.path);
     const isExpanded = state?.expanded ?? false;
     const isRenaming = inlineInput?.renamePath === entry.path;
+    const isIgnored = ignoredPaths.has(entry.path);
 
     if (isDir) {
       return (
         <div key={entry.path}>
           <div
-            className={`tree-row ${dragOverPath === entry.path ? 'drag-over' : ''}`}
+            className={`tree-row ${dragOverPath === entry.path ? 'drag-over' : ''} ${isIgnored ? 'tree-row-ignored' : ''}`}
             style={{ paddingLeft: depth * 16 + 8 }}
             draggable
             onDragStart={e => handleDragStart(e, entry, parentPath)}
@@ -267,7 +280,7 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
     return (
       <div
         key={entry.path}
-        className="tree-row"
+        className={`tree-row ${isIgnored ? 'tree-row-ignored' : ''}`}
         style={{ paddingLeft: depth * 16 + 8 }}
         draggable
         onDragStart={e => handleDragStart(e, entry, parentPath)}
@@ -423,6 +436,12 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
         .tree-error {
           color: var(--red);
           font-size: 11px;
+        }
+        .tree-row-ignored {
+          opacity: 0.45;
+        }
+        .tree-row-ignored:hover {
+          opacity: 0.65;
         }
         .tree-row.drag-over {
           background: rgba(199, 145, 12, 0.12);

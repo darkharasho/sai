@@ -518,6 +518,7 @@ export default function App() {
                   modelChoice={modelChoice}
                   onModelChange={handleModelChange}
                   initialMessages={ws.activeSession.messages}
+                  activeFilePath={ws.activeFilePath}
                   onMessagesChange={(messages: ChatMessage[]) => {
                     wsMessagesRef.current.set(wsPath, messages);
                   }}

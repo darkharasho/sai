@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld('sai', {
   fsDelete: (targetPath: string) => ipcRenderer.invoke('fs:delete', targetPath),
   fsCreateFile: (filePath: string) => ipcRenderer.invoke('fs:createFile', filePath),
   fsCreateDir: (dirPath: string) => ipcRenderer.invoke('fs:createDir', dirPath),
+  fsCheckIgnored: (rootPath: string, paths: string[]) => ipcRenderer.invoke('fs:checkIgnored', rootPath, paths),
   // Auto-updater
   updateCheck: () => ipcRenderer.send('update:check'),
   updateInstall: () => ipcRenderer.send('update:install'),
