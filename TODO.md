@@ -1,0 +1,14 @@
+- [x] User input should be a chevron not a dot
+- [x] shrink the main input field for user inputs
+- [x] add version number to the app
+- [x] show a badge on the git page when there is changes
+- [x] context should be the project always.
+- [x] in chat syntax highlighting should be like monokai
+- [x] diff messages from claude should use the diff syntax highlighting
+- [x] move the new chat and history to the titlebar of the chat not the titlebar of the app
+- [ ] have a github login and oauth flow
+- [x] changes in the git pane needs a "commit all" button on the same line as the "CHANGES"
+- [x] add a sparkle lucide icon to the right of the branch on the git pane so it auto creates a commit message
+- [x] the branch on the git pane should be a clickable dropdown (dropup) that allows for users to swap branches or make new ones
+- [ ] add drag and drop for the file viewer pane
+- [x] the fullscreen for embedded code blocks needs to look like a proper editor with lines and syntax highlighting
