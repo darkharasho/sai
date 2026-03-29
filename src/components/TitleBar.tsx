@@ -59,6 +59,8 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
   const handleSuspend = async (path: string) => {
     setOverflowOpen(null);
     await window.sai.workspaceSuspend?.(path);
+    const list = await window.sai.workspaceGetAll?.();
+    if (list) setWorkspaceList(list);
   };
 
   const handleCloseConfirm = async () => {
@@ -89,7 +91,7 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
         {open && (
           <div className="project-dropdown" onMouseDown={(e) => {
             const target = e.target as HTMLElement;
-            if (!target.closest('.workspace-row-wrapper') || !target.closest(`[data-path="${overflowOpen}"]`)) {
+            if (!target.closest(`[data-path="${overflowOpen}"]`)) {
               setOverflowOpen(null);
             }
           }}>
