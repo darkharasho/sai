@@ -26,6 +26,10 @@
       "category": "Development",
       "icon": "public/img/sai.png"
     },
+    "win": {
+      "target": "nsis",
+      "icon": "public/img/sai.png"
+    },
     "asarUnpack": [
       "node_modules/node-pty/**/*"
     ]
