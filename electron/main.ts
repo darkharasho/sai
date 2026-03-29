@@ -6,6 +6,7 @@ import { registerClaudeHandlers, destroyClaude } from './services/claude';
 import { registerGitHandlers } from './services/git';
 import { registerFsHandlers } from './services/fs';
 import { registerUpdater } from './services/updater';
+import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove } from './services/workspace';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -30,8 +31,9 @@ function createWindow() {
   });
 
   mainWindow.on('close', () => {
+    stopSuspendTimer();
     destroyAllTerminals();
-    destroyClaude();
+    destroyAll(mainWindow!);
   });
 
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -45,6 +47,22 @@ function createWindow() {
   registerGitHandlers();
   registerFsHandlers(mainWindow!);
   registerUpdater(mainWindow!);
+  startSuspendTimer(mainWindow);
+
+  ipcMain.handle('workspace:getAll', () => {
+    const active = getAll();
+    const recent = getRecentProjects();
+    // Merge: active/suspended workspaces + recent projects not already in workspaces
+    const activeSet = new Set(active.map(w => w.projectPath));
+    const recentOnly = recent
+      .filter(p => !activeSet.has(p))
+      .map(p => ({ projectPath: p, status: 'recent', lastActivity: 0 }));
+    return [...active, ...recentOnly];
+  });
+
+  ipcMain.handle('workspace:close', (_event, projectPath: string) => {
+    remove(projectPath, mainWindow!);
+  });
 
   // Recent projects persistence
   const recentProjectsFile = path.join(app.getPath('userData'), 'recent-projects.json');
@@ -109,7 +127,8 @@ process.on('uncaughtException', (err) => {
 
 app.whenReady().then(createWindow);
 app.on('window-all-closed', () => {
+  stopSuspendTimer();
   destroyAllTerminals();
-  destroyClaude();
+  if (mainWindow) destroyAll(mainWindow);
   app.quit();
 });
