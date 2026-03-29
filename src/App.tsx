@@ -6,8 +6,8 @@ import GitSidebar from './components/Git/GitSidebar';
 import FileExplorerSidebar from './components/FileExplorer/FileExplorerSidebar';
 import TitleBar from './components/TitleBar';
 import CodePanel from './components/CodePanel/CodePanel';
-import { loadSessions, saveSessions, createSession, upsertSession } from './sessions';
-import type { ChatSession, ChatMessage, GitFile, OpenFile } from './types';
+import { loadSessions, saveSessions, createSession, upsertSession, migrateLegacySessions } from './sessions';
+import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext } from './types';
 import { MessageSquare, TerminalSquare, Code2, ChevronRight, MessageCirclePlus, Clock } from 'lucide-react';
 import { formatSessionDate, formatSessionTime } from './sessions';
 
@@ -25,15 +25,69 @@ function getStoredPermission(): PermissionMode {
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState<string | null>(null);
-  const [projectPath, setProjectPath] = useState<string>('');
+  const [activeProjectPath, setActiveProjectPath] = useState<string>('');
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(getStoredPermission);
+  const [workspaces, setWorkspaces] = useState<Map<string, WorkspaceContext>>(new Map());
 
-  const [sessions, setSessions] = useState<ChatSession[]>(loadSessions);
-  const [activeSession, setActiveSession] = useState<ChatSession>(createSession);
+  const getWorkspace = useCallback((path: string): WorkspaceContext => {
+    const existing = workspaces.get(path);
+    if (existing) return existing;
+    return {
+      projectPath: path,
+      sessions: [],
+      activeSession: createSession(),
+      openFiles: [],
+      activeFilePath: null,
+      terminalIds: [],
+      status: 'recent',
+      lastActivity: Date.now(),
+    };
+  }, [workspaces]);
+
+  const activeWorkspace = activeProjectPath ? getWorkspace(activeProjectPath) : null;
+
+  const updateWorkspace = useCallback((path: string, updater: (ws: WorkspaceContext) => WorkspaceContext) => {
+    setWorkspaces(prev => {
+      const next = new Map(prev);
+      const current = next.get(path) || {
+        projectPath: path,
+        sessions: [],
+        activeSession: createSession(),
+        openFiles: [],
+        activeFilePath: null,
+        terminalIds: [],
+        status: 'active' as const,
+        lastActivity: Date.now(),
+      };
+      next.set(path, updater(current));
+      return next;
+    });
+  }, []);
+
+  // Derived state for the active workspace
+  const projectPath = activeProjectPath;
+  const sessions = activeWorkspace?.sessions ?? [];
+  const activeSession = activeWorkspace?.activeSession ?? createSession();
+  const openFiles = activeWorkspace?.openFiles ?? [];
+  const activeFilePath = activeWorkspace?.activeFilePath ?? null;
 
   useEffect(() => {
     window.sai.getCwd().then((cwd: string) => {
-      if (cwd) setProjectPath(cwd);
+      if (cwd) {
+        migrateLegacySessions(cwd);
+        const sessions = loadSessions(cwd);
+        setActiveProjectPath(cwd);
+        setWorkspaces(new Map([[cwd, {
+          projectPath: cwd,
+          sessions,
+          activeSession: createSession(),
+          openFiles: [],
+          activeFilePath: null,
+          terminalIds: [],
+          status: 'active',
+          lastActivity: Date.now(),
+        }]]));
+      }
     });
   }, []);
 
@@ -55,9 +109,6 @@ export default function App() {
     return () => clearInterval(id);
   }, [projectPath]);
 
-  const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
-  const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
-
   const [historyOpen, setHistoryOpen] = useState(false);
   const historyRef = useRef<HTMLDivElement>(null);
 
@@ -70,6 +121,13 @@ export default function App() {
     if (historyOpen) document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, [historyOpen]);
+
+  useEffect(() => {
+    const cleanup = window.sai.onWorkspaceSuspended?.((suspendedPath: string) => {
+      updateWorkspace(suspendedPath, ws => ({ ...ws, status: 'suspended' }));
+    });
+    return cleanup;
+  }, [updateWorkspace]);
 
   const groupedSessions = sessions.reduce<{ label: string; sessions: ChatSession[] }[]>((groups, session) => {
     const label = formatSessionDate(session.updatedAt);
@@ -155,29 +213,35 @@ export default function App() {
   const twoExpanded = expandedPanels.length === 2;
 
   const handleFileClick = useCallback((file: GitFile) => {
-    setOpenFiles(prev => {
-      const exists = prev.some(f => f.path === file.path);
-      if (exists) return prev;
-      return [...prev, { path: file.path, viewMode: 'diff', file, diffMode: 'unified' }];
+    if (!activeProjectPath) return;
+    updateWorkspace(activeProjectPath, ws => {
+      const exists = ws.openFiles.some(f => f.path === file.path);
+      return {
+        ...ws,
+        openFiles: exists ? ws.openFiles : [...ws.openFiles, { path: file.path, viewMode: 'diff', file, diffMode: 'unified' }],
+        activeFilePath: file.path,
+      };
     });
-    setActiveFilePath(file.path);
     setExpanded(prev => {
       if (prev.includes('editor')) return prev;
       const next = [...prev, 'editor' as PanelId];
       setSplitRatio(0.66);
       return next.length > 2 ? next.slice(1) : next;
     });
-  }, []);
+  }, [activeProjectPath, updateWorkspace]);
 
   const handleFileOpen = useCallback(async (filePath: string) => {
+    if (!activeProjectPath) return;
     try {
       const content = await window.sai.fsReadFile(filePath) as string;
-      setOpenFiles(prev => {
-        const exists = prev.some(f => f.path === filePath);
-        if (exists) return prev;
-        return [...prev, { path: filePath, viewMode: 'editor', content }];
+      updateWorkspace(activeProjectPath, ws => {
+        const exists = ws.openFiles.some(f => f.path === filePath);
+        return {
+          ...ws,
+          openFiles: exists ? ws.openFiles : [...ws.openFiles, { path: filePath, viewMode: 'editor', content }],
+          activeFilePath: filePath,
+        };
       });
-      setActiveFilePath(filePath);
       setExpanded(prev => {
         if (prev.includes('editor')) return prev;
         const next = [...prev, 'editor' as PanelId];
@@ -187,87 +251,128 @@ export default function App() {
     } catch {
       // File couldn't be read
     }
-  }, []);
+  }, [activeProjectPath, updateWorkspace]);
 
   const handleFileClose = useCallback((path: string) => {
-    setOpenFiles(prev => {
-      const next = prev.filter(f => f.path !== path);
+    if (!activeProjectPath) return;
+    updateWorkspace(activeProjectPath, ws => {
+      const next = ws.openFiles.filter(f => f.path !== path);
+      let newActive = ws.activeFilePath;
       if (next.length === 0) {
-        setActiveFilePath(null);
+        newActive = null;
         setExpanded(['chat', 'terminal']);
         setSplitRatio(0.66);
-      } else if (path === activeFilePath) {
-        const idx = prev.findIndex(f => f.path === path);
-        const newActive = next[Math.min(idx, next.length - 1)];
-        setActiveFilePath(newActive.path);
+      } else if (path === ws.activeFilePath) {
+        const idx = ws.openFiles.findIndex(f => f.path === path);
+        newActive = next[Math.min(idx, next.length - 1)].path;
+      }
+      return { ...ws, openFiles: next, activeFilePath: newActive };
+    });
+  }, [activeProjectPath, updateWorkspace]);
+
+  const handleCloseAllFiles = useCallback(() => {
+    if (!activeProjectPath) return;
+    updateWorkspace(activeProjectPath, ws => ({
+      ...ws,
+      openFiles: [],
+      activeFilePath: null,
+    }));
+    setExpanded(['chat', 'terminal']);
+    setSplitRatio(0.66);
+  }, [activeProjectPath, updateWorkspace]);
+
+  const handleDiffModeChange = useCallback((path: string, mode: 'unified' | 'split') => {
+    if (!activeProjectPath) return;
+    updateWorkspace(activeProjectPath, ws => ({
+      ...ws,
+      openFiles: ws.openFiles.map(f => f.path === path ? { ...f, diffMode: mode } : f),
+    }));
+  }, [activeProjectPath, updateWorkspace]);
+
+  const handleProjectSwitch = useCallback((newPath: string) => {
+    if (newPath === activeProjectPath) return;
+    const sessions = loadSessions(newPath);
+    setWorkspaces(prev => {
+      const next = new Map(prev);
+      if (!next.has(newPath)) {
+        next.set(newPath, {
+          projectPath: newPath,
+          sessions,
+          activeSession: createSession(),
+          openFiles: [],
+          activeFilePath: null,
+          terminalIds: [],
+          status: 'active',
+          lastActivity: Date.now(),
+        });
+      } else {
+        const ws = next.get(newPath)!;
+        next.set(newPath, { ...ws, status: 'active', lastActivity: Date.now() });
       }
       return next;
     });
-  }, [activeFilePath]);
-
-  const handleCloseAllFiles = useCallback(() => {
-    setOpenFiles([]);
-    setActiveFilePath(null);
-    setExpanded(['chat', 'terminal']);
-    setSplitRatio(0.66);
-  }, []);
-
-  const handleDiffModeChange = useCallback((path: string, mode: 'unified' | 'split') => {
-    setOpenFiles(prev =>
-      prev.map(f => f.path === path ? { ...f, diffMode: mode } : f)
-    );
-  }, []);
+    setActiveProjectPath(newPath);
+  }, [activeProjectPath]);
 
   const handleEditorSave = useCallback(async (filePath: string, content: string) => {
     await window.sai.fsWriteFile(filePath, content);
   }, []);
 
   const persistSession = useCallback((session: ChatSession) => {
-    setSessions(prev => {
-      const updated = upsertSession(prev, session);
-      saveSessions(updated);
-      return updated;
+    if (!activeProjectPath) return;
+    updateWorkspace(activeProjectPath, ws => {
+      const updated = upsertSession(ws.sessions, session);
+      saveSessions(activeProjectPath, updated);
+      return { ...ws, sessions: updated };
     });
-  }, []);
+  }, [activeProjectPath, updateWorkspace]);
 
   const toggleSidebar = (id: string) => {
     setSidebarOpen(prev => prev === id ? null : id);
   };
 
   const handleNewChat = () => {
+    if (!activeProjectPath) return;
     persistSession(activeSession);
-    setActiveSession(createSession());
+    updateWorkspace(activeProjectPath, ws => ({
+      ...ws,
+      activeSession: createSession(),
+    }));
   };
 
   const handleSelectSession = (id: string) => {
+    if (!activeProjectPath) return;
     persistSession(activeSession);
     const selected = sessions.find(s => s.id === id);
     if (selected) {
-      setActiveSession({ ...selected });
+      updateWorkspace(activeProjectPath, ws => ({
+        ...ws,
+        activeSession: { ...selected },
+      }));
     }
   };
 
   const handleMessagesChange = useCallback((messages: ChatMessage[]) => {
-    setActiveSession(prev => {
-      const updated = { ...prev, messages, updatedAt: Date.now() };
+    if (!activeProjectPath) return;
+    updateWorkspace(activeProjectPath, ws => {
+      const updated = { ...ws.activeSession, messages, updatedAt: Date.now() };
       if (!updated.title) {
         const firstUserMsg = messages.find(m => m.role === 'user');
         if (firstUserMsg) {
           updated.title = firstUserMsg.content.slice(0, 40);
         }
       }
-      return updated;
+      return { ...ws, activeSession: updated };
     });
-  }, []);
+  }, [activeProjectPath, updateWorkspace]);
 
   const handleSessionSave = useCallback(() => {
-    setActiveSession(prev => {
-      if (prev.messages.length > 0) {
-        persistSession(prev);
-      }
-      return prev;
-    });
-  }, [persistSession]);
+    if (!activeProjectPath) return;
+    const ws = workspaces.get(activeProjectPath);
+    if (ws && ws.activeSession.messages.length > 0) {
+      persistSession(ws.activeSession);
+    }
+  }, [activeProjectPath, workspaces, persistSession]);
 
   const handlePermissionChange = (mode: PermissionMode) => {
     setPermissionMode(mode);
@@ -382,7 +487,11 @@ export default function App() {
                 openFiles={openFiles}
                 activeFilePath={activeFilePath}
                 projectPath={projectPath}
-                onActivate={setActiveFilePath}
+                onActivate={(path: string) => {
+                  if (activeProjectPath) {
+                    updateWorkspace(activeProjectPath, ws => ({ ...ws, activeFilePath: path }));
+                  }
+                }}
                 onClose={handleFileClose}
                 onCloseAll={handleCloseAllFiles}
                 onDiffModeChange={handleDiffModeChange}
@@ -402,7 +511,7 @@ export default function App() {
     <div className="app">
       <TitleBar
         projectPath={projectPath}
-        onProjectChange={setProjectPath}
+        onProjectChange={handleProjectSwitch}
       />
       <div className="app-body">
         <NavBar activeSidebar={sidebarOpen} onToggle={toggleSidebar} gitChangeCount={gitChangeCount} />
@@ -544,6 +653,9 @@ export default function App() {
         .chat-history-dropdown .history-item.active {
           border-left: 2px solid var(--accent);
           background: rgba(126,184,247,0.05);
+        }
+        .chat-history-dropdown .history-item.active .dropdown-item-path {
+          color: #fff;
         }
         .accordion-bar-detail {
           font-weight: 400;
