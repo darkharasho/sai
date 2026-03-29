@@ -1,10 +1,6 @@
 import { spawn, ChildProcess } from 'node:child_process';
 import { BrowserWindow, ipcMain } from 'electron';
-
-let currentCwd: string = '';
-let activeProcess: ChildProcess | null = null;
-let activeProbe: ChildProcess | null = null;
-let sessionId: string | undefined;
+import { getOrCreate, get, touchActivity } from './workspace';
 
 function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
 	try {
@@ -18,18 +14,20 @@ function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
 
 export function registerClaudeHandlers(win: BrowserWindow) {
 	ipcMain.handle('claude:start', (_event, cwd: string) => {
-		// Kill any in-flight probe or active process from previous project
-		if (activeProbe) {
-			activeProbe.kill();
-			activeProbe = null;
+		const ws = getOrCreate(cwd);
+
+		// Kill any in-flight probe or active process for this workspace
+		if (ws.claude.probe) {
+			ws.claude.probe.kill();
+			ws.claude.probe = null;
 		}
-		if (activeProcess) {
-			activeProcess.kill();
-			activeProcess = null;
+		if (ws.claude.process) {
+			ws.claude.process.kill();
+			ws.claude.process = null;
 		}
 
-		currentCwd = cwd || process.env.HOME || '/';
-		sessionId = undefined;
+		ws.claude.cwd = cwd || process.env.HOME || '/';
+		ws.claude.sessionId = undefined;
 
 		// Probe Claude to get slash commands from init message
 		return new Promise<void>((resolve) => {
@@ -39,17 +37,17 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 				'--verbose',
 				'--max-turns', '1',
 			], {
-				cwd: currentCwd,
+				cwd: ws.claude.cwd,
 				env: { ...process.env },
 				stdio: ['ignore', 'pipe', 'pipe'],
 			});
 
-			activeProbe = probe;
+			ws.claude.probe = probe;
 
 			let probeBuffer = '';
 			probe.stdout?.on('data', (data: Buffer) => {
 				// Ignore output from a stale probe
-				if (activeProbe !== probe) return;
+				if (ws.claude.probe !== probe) return;
 
 				probeBuffer += data.toString();
 				const lines = probeBuffer.split('\n');
@@ -59,44 +57,47 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 					try {
 						const msg = JSON.parse(line);
 						if (msg.type === 'system' && msg.subtype === 'init') {
-							safeSend(win, 'claude:message', msg);
+							safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath });
 						}
-						if (msg.session_id && !sessionId) {
-							sessionId = msg.session_id;
+						if (msg.session_id && !ws.claude.sessionId) {
+							ws.claude.sessionId = msg.session_id;
 						}
 					} catch { /* ignore */ }
 				}
 			});
 
 			probe.on('exit', () => {
-				if (activeProbe === probe) {
-					activeProbe = null;
-					safeSend(win, 'claude:message', { type: 'ready' });
+				if (ws.claude.probe === probe) {
+					ws.claude.probe = null;
+					safeSend(win, 'claude:message', { type: 'ready', projectPath: ws.projectPath });
 				}
 				resolve();
 			});
 
 			probe.on('error', () => {
-				if (activeProbe === probe) {
-					activeProbe = null;
-					safeSend(win, 'claude:message', { type: 'ready' });
+				if (ws.claude.probe === probe) {
+					ws.claude.probe = null;
+					safeSend(win, 'claude:message', { type: 'ready', projectPath: ws.projectPath });
 				}
 				resolve();
 			});
 		});
 	});
 
-	ipcMain.on('claude:stop', () => {
-		if (activeProcess) {
-			const proc = activeProcess;
-			activeProcess = null;
+	ipcMain.on('claude:stop', (_event, projectPath: string) => {
+		const ws = get(projectPath);
+		if (!ws) return;
+		if (ws.claude.process) {
+			const proc = ws.claude.process;
+			ws.claude.process = null;
 			proc.kill();
-			safeSend(win, 'claude:message', { type: 'done' });
+			safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
 		}
 	});
 
 	ipcMain.handle('claude:generateCommitMessage', async (_event, cwd: string) => {
-		const effectiveCwd = cwd || currentCwd;
+		const ws = get(cwd);
+		const effectiveCwd = cwd || ws?.claude.cwd || process.env.HOME || '/';
 
 		// Get the diff upfront so Claude doesn't need tool calls
 		const diff = await new Promise<string>((resolve) => {
@@ -136,10 +137,15 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 		});
 	});
 
-	ipcMain.on('claude:send', (_event, message: string, imagePaths?: string[], permMode?: string) => {
-		if (activeProcess) {
-			activeProcess.kill();
-			activeProcess = null;
+	ipcMain.on('claude:send', (_event, projectPath: string, message: string, imagePaths?: string[], permMode?: string) => {
+		const ws = get(projectPath);
+		if (!ws) return;
+
+		touchActivity(projectPath);
+
+		if (ws.claude.process) {
+			ws.claude.process.kill();
+			ws.claude.process = null;
 		}
 
 		// Prepend image file paths to the prompt so Claude reads them via its Read tool
@@ -156,8 +162,8 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 			'--include-partial-messages',
 		];
 
-		if (sessionId) {
-			args.push('--resume', sessionId);
+		if (ws.claude.sessionId) {
+			args.push('--resume', ws.claude.sessionId);
 		}
 
 		// Map permission modes to Claude CLI flags
@@ -167,61 +173,55 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 			args.push('--permission-mode', 'acceptEdits');
 		}
 
-		safeSend(win, 'claude:message', { type: 'streaming_start' });
+		safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath });
 
-		activeProcess = spawn('claude', args, {
-			cwd: currentCwd,
+		ws.claude.process = spawn('claude', args, {
+			cwd: ws.claude.cwd,
 			env: { ...process.env },
 			stdio: ['ignore', 'pipe', 'pipe'],
 		});
 
-		let buffer = '';
+		ws.claude.buffer = '';
 
-		activeProcess.stdout?.on('data', (data: Buffer) => {
-			buffer += data.toString();
-			const lines = buffer.split('\n');
-			buffer = lines.pop() || '';
+		ws.claude.process.stdout?.on('data', (data: Buffer) => {
+			ws.claude.buffer += data.toString();
+			const lines = ws.claude.buffer.split('\n');
+			ws.claude.buffer = lines.pop() || '';
 
 			for (const line of lines) {
 				if (!line.trim()) continue;
 				try {
 					const msg = JSON.parse(line);
-					if (msg.session_id && !sessionId) {
-						sessionId = msg.session_id;
+					if (msg.session_id && !ws.claude.sessionId) {
+						ws.claude.sessionId = msg.session_id;
 					}
-					safeSend(win, 'claude:message', msg);
+					safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath });
 				} catch { /* ignore */ }
 			}
 		});
 
-		activeProcess.stderr?.on('data', (data: Buffer) => {
+		ws.claude.process.stderr?.on('data', (data: Buffer) => {
 			const text = data.toString().trim();
 			if (text) {
-				// Always forward stderr so we can debug
-				safeSend(win, 'claude:message', { type: 'error', text });
+				safeSend(win, 'claude:message', { type: 'error', text, projectPath: ws.projectPath });
 			}
 		});
 
-		const proc = activeProcess;
+		const proc = ws.claude.process;
 		proc.on('exit', () => {
-			if (activeProcess !== proc) return; // killed by stop or new send
-			if (buffer.trim()) {
-				try { safeSend(win, 'claude:message', JSON.parse(buffer)); } catch { /* ignore */ }
+			if (ws.claude.process !== proc) return; // killed by stop or new send
+			if (ws.claude.buffer.trim()) {
+				try {
+					safeSend(win, 'claude:message', { ...JSON.parse(ws.claude.buffer), projectPath: ws.projectPath });
+				} catch { /* ignore */ }
 			}
-			buffer = '';
-			safeSend(win, 'claude:message', { type: 'done' });
-			activeProcess = null;
+			ws.claude.buffer = '';
+			safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+			ws.claude.process = null;
 		});
 	});
 }
 
 export function destroyClaude() {
-	if (activeProbe) {
-		activeProbe.kill();
-		activeProbe = null;
-	}
-	if (activeProcess) {
-		activeProcess.kill();
-		activeProcess = null;
-	}
+	// Now handled by workspace.destroyAll — this is kept for backwards compat during migration
 }
