@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import UpdateNotification from './UpdateNotification';
 
+interface WorkspaceInfo {
+  projectPath: string;
+  status: string;
+  lastActivity: number;
+}
+
 interface TitleBarProps {
   projectPath: string;
   onProjectChange: (path: string) => void;
@@ -8,7 +14,7 @@ interface TitleBarProps {
 
 export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps) {
   const [open, setOpen] = useState(false);
-  const [recentProjects, setRecentProjects] = useState<string[]>([]);
+  const [workspaceList, setWorkspaceList] = useState<WorkspaceInfo[]>([]);
   const [version, setVersion] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -22,7 +28,13 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
 
   useEffect(() => {
     if (open) {
-      window.sai.getRecentProjects().then(setRecentProjects);
+      window.sai.workspaceGetAll?.().then((list: WorkspaceInfo[]) => {
+        setWorkspaceList(list || []);
+      }).catch(() => {
+        window.sai.getRecentProjects().then((recent: string[]) => {
+          setWorkspaceList(recent.map(p => ({ projectPath: p, status: 'recent', lastActivity: 0 })));
+        });
+      });
     }
   }, [open]);
 
@@ -36,12 +48,6 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
     if (open) document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, [open]);
-
-  const handleSelectRecent = async (path: string) => {
-    await window.sai.openRecentProject(path);
-    onProjectChange(path);
-    setOpen(false);
-  };
 
   const handleOpenNew = async () => {
     const folder = await window.sai.selectFolder();
@@ -63,25 +69,69 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
         </button>
         {open && (
           <div className="project-dropdown">
-            {recentProjects.length > 0 && (
-              <>
-                <div className="dropdown-label">Recent Projects</div>
-                {recentProjects.map(p => (
-                  <button
-                    key={p}
-                    className={`dropdown-item ${p === projectPath ? 'active' : ''}`}
-                    onClick={() => handleSelectRecent(p)}
-                  >
-                    <span className="dropdown-item-name">{p.split('/').pop()}</span>
-                    <span className="dropdown-item-path">{p}</span>
+            {(() => {
+              const active = workspaceList.filter(w => w.status === 'active');
+              const suspended = workspaceList.filter(w => w.status === 'suspended');
+              const recent = workspaceList.filter(w => w.status === 'recent');
+
+              return (
+                <>
+                  {active.length > 0 && (
+                    <>
+                      <div className="dropdown-label">Active</div>
+                      {active.map(w => (
+                        <button
+                          key={w.projectPath}
+                          className={`dropdown-item workspace-item ${w.projectPath === projectPath ? 'active' : ''}`}
+                          onClick={() => { onProjectChange(w.projectPath); setOpen(false); }}
+                        >
+                          <span className="workspace-status-dot workspace-dot-active" />
+                          <span className="dropdown-item-name">{w.projectPath.split('/').pop()}</span>
+                          <span className="dropdown-item-path">{w.projectPath}</span>
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  {suspended.length > 0 && (
+                    <>
+                      {active.length > 0 && <div className="dropdown-divider" />}
+                      <div className="dropdown-label">Suspended</div>
+                      {suspended.map(w => (
+                        <button
+                          key={w.projectPath}
+                          className={`dropdown-item workspace-item ${w.projectPath === projectPath ? 'active' : ''}`}
+                          onClick={() => { onProjectChange(w.projectPath); setOpen(false); }}
+                        >
+                          <span className="workspace-status-dot workspace-dot-suspended" />
+                          <span className="dropdown-item-name">{w.projectPath.split('/').pop()}</span>
+                          <span className="dropdown-item-path">{w.projectPath}</span>
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  {recent.length > 0 && (
+                    <>
+                      {(active.length > 0 || suspended.length > 0) && <div className="dropdown-divider" />}
+                      <div className="dropdown-label">Recent</div>
+                      {recent.map(w => (
+                        <button
+                          key={w.projectPath}
+                          className={`dropdown-item workspace-item ${w.projectPath === projectPath ? 'active' : ''}`}
+                          onClick={() => { onProjectChange(w.projectPath); setOpen(false); }}
+                        >
+                          <span className="dropdown-item-name">{w.projectPath.split('/').pop()}</span>
+                          <span className="dropdown-item-path">{w.projectPath}</span>
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  <div className="dropdown-divider" />
+                  <button className="dropdown-item open-new" onClick={handleOpenNew}>
+                    + Open New Project...
                   </button>
-                ))}
-                <div className="dropdown-divider" />
-              </>
-            )}
-            <button className="dropdown-item open-new" onClick={handleOpenNew}>
-              + Open New Project...
-            </button>
+                </>
+              );
+            })()}
           </div>
         )}
       </div>
@@ -217,6 +267,27 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
           color: var(--accent);
           font-weight: 500;
           padding: 8px 12px;
+        }
+        .workspace-item {
+          flex-direction: row !important;
+          align-items: center;
+          gap: 8px;
+        }
+        .workspace-item .dropdown-item-path {
+          margin-left: auto;
+          flex-shrink: 1;
+        }
+        .workspace-status-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          flex-shrink: 0;
+        }
+        .workspace-dot-active {
+          background: #4ade80;
+        }
+        .workspace-dot-suspended {
+          background: #d4a72c;
         }
       `}</style>
     </div>
