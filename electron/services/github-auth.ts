@@ -64,6 +64,7 @@ export function registerGithubAuthHandlers(
   mainWindow: BrowserWindow,
   readSettings: () => Record<string, any>,
   writeSetting: (key: string, value: any) => void,
+  onAuthComplete?: () => void,
 ) {
   ipcMain.handle('github:getUser', () => {
     return readSettings().github_auth?.user ?? null;
@@ -74,7 +75,7 @@ export function registerGithubAuthHandlers(
 
     const deviceResult = await post(
       'https://github.com/login/device/code',
-      `client_id=${CLIENT_ID}&scope=read:user`,
+      `client_id=${CLIENT_ID}&scope=repo,read:user`,
     );
 
     if (!deviceResult.device_code) throw new Error('GitHub device flow failed');
@@ -101,6 +102,7 @@ export function registerGithubAuthHandlers(
           const user = { login: ghUser.login, avatar_url: ghUser.avatar_url, name: ghUser.name || ghUser.login };
           writeSetting('github_auth', { token: token.access_token, user });
           mainWindow.webContents.send('github:authComplete', user);
+          onAuthComplete?.();
           return;
         } else if (token.error === 'slow_down') {
           pollMs += 5000;

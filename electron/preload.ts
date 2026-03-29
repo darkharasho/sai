@@ -108,4 +108,15 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.on('github:authError', listener);
     return () => ipcRenderer.removeListener('github:authError', listener);
   },
+  githubSyncNow: () => ipcRenderer.invoke('github:syncNow'),
+  githubOnSyncStatus: (callback: (status: { status: string; lastSynced?: number }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, data: any) => callback(data);
+    ipcRenderer.on('github:syncStatus', listener);
+    return () => ipcRenderer.removeListener('github:syncStatus', listener);
+  },
+  githubOnSettingsApplied: (callback: (settings: Record<string, any>) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, settings: any) => callback(settings);
+    ipcRenderer.on('github:settingsApplied', listener);
+    return () => ipcRenderer.removeListener('github:settingsApplied', listener);
+  },
 });

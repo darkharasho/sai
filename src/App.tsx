@@ -93,6 +93,16 @@ export default function App() {
     });
     window.sai.settingsGet('editorFontSize', 13).then((v: number) => setEditorFontSize(v));
     window.sai.settingsGet('editorMinimap', true).then((v: boolean) => setEditorMinimap(v));
+
+    // Apply settings synced down from GitHub (fires on startup and after manual sync)
+    const unsubApplied = window.sai.githubOnSettingsApplied((remote: Record<string, any>) => {
+      if ('editorFontSize' in remote) setEditorFontSize(remote.editorFontSize);
+      if ('editorMinimap' in remote) setEditorMinimap(remote.editorMinimap);
+      if ('effortLevel' in remote) setEffortLevel(remote.effortLevel);
+      if ('modelChoice' in remote) setModelChoice(remote.modelChoice);
+      if ('permissionMode' in remote) setPermissionMode(remote.permissionMode);
+    });
+    return unsubApplied;
   }, []);
 
   useEffect(() => {

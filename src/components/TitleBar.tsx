@@ -34,11 +34,16 @@ export default function TitleBar({ projectPath, onProjectChange, onSettingChange
   const [ghDropOpen, setGhDropOpen] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
   const ghDropRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     window.sai.updateGetVersion().then((v: string) => setVersion(v));
     window.sai.githubGetUser().then((u: GitHubUser | null) => setGhUser(u));
+    const unsubSync = window.sai.githubOnSyncStatus((data: { status: string }) => {
+      setSyncStatus(data.status as any);
+    });
+    return () => unsubSync();
   }, []);
 
   const projectName = projectPath
@@ -229,7 +234,11 @@ export default function TitleBar({ projectPath, onProjectChange, onSettingChange
         {ghUser ? (
           <div className="gh-user-wrapper" ref={ghDropRef}>
             <button className="gh-user-btn" onClick={() => setGhDropOpen(v => !v)}>
-              <img src={ghUser.avatar_url} className="gh-avatar" alt={ghUser.login} />
+              <div className="gh-avatar-wrap">
+                <img src={ghUser.avatar_url} className="gh-avatar" alt={ghUser.login} />
+                {syncStatus === 'syncing' && <span className="gh-sync-dot syncing" />}
+                {syncStatus === 'error' && <span className="gh-sync-dot error" />}
+              </div>
               <span className="gh-username">{ghUser.login}</span>
               <ChevronDown size={11} className={`gh-chevron${ghDropOpen ? ' open' : ''}`} />
             </button>
@@ -346,12 +355,26 @@ export default function TitleBar({ projectPath, onProjectChange, onSettingChange
           color: var(--text-secondary);
         }
         .gh-user-btn:hover { background: var(--bg-hover); border-color: var(--border); color: var(--text); }
+        .gh-avatar-wrap { position: relative; flex-shrink: 0; }
         .gh-avatar {
           width: 18px;
           height: 18px;
           border-radius: 50%;
           object-fit: cover;
+          display: block;
         }
+        .gh-sync-dot {
+          position: absolute;
+          bottom: -1px;
+          right: -1px;
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          border: 1px solid var(--bg-secondary);
+        }
+        .gh-sync-dot.syncing { background: var(--accent); animation: sync-pulse 1s ease-in-out infinite; }
+        .gh-sync-dot.error { background: #f87171; }
+        @keyframes sync-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
         .gh-username {
           font-size: 11px;
           max-width: 80px;

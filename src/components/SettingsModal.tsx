@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
+import { X, RefreshCw, Check, AlertCircle } from 'lucide-react';
 
 interface Props {
   onClose: () => void;
@@ -19,15 +19,44 @@ const TIMEOUT_OPTIONS = [
 const DEFAULT_TIMEOUT = 60 * 60 * 1000;
 const FONT_SIZES = [11, 12, 13, 14, 15, 16, 18, 20];
 
+type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error';
+
+function formatRelative(ts: number): string {
+  const secs = Math.floor((Date.now() - ts) / 1000);
+  if (secs < 10) return 'just now';
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  return `${Math.floor(mins / 60)}h ago`;
+}
+
 export default function SettingsModal({ onClose, onSettingChange }: Props) {
   const [suspendTimeout, setSuspendTimeout] = useState<number>(DEFAULT_TIMEOUT);
   const [editorFontSize, setEditorFontSize] = useState(13);
   const [editorMinimap, setEditorMinimap] = useState(true);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
+  const [lastSynced, setLastSynced] = useState<number | null>(null);
+  const [isAuthed, setIsAuthed] = useState(false);
 
   useEffect(() => {
     window.sai.settingsGet('suspendTimeout', DEFAULT_TIMEOUT).then((v: number) => setSuspendTimeout(v));
     window.sai.settingsGet('editorFontSize', 13).then((v: number) => setEditorFontSize(v));
     window.sai.settingsGet('editorMinimap', true).then((v: boolean) => setEditorMinimap(v));
+    window.sai.githubGetUser().then((u: any) => setIsAuthed(!!u));
+
+    const unsubSync = window.sai.githubOnSyncStatus((data: { status: string; lastSynced?: number }) => {
+      setSyncStatus(data.status as SyncStatus);
+      if (data.lastSynced) setLastSynced(data.lastSynced);
+    });
+
+    // Re-read settings if remote sync updated them while modal was open
+    const unsubApplied = window.sai.githubOnSettingsApplied((remote: Record<string, any>) => {
+      if ('suspendTimeout' in remote) setSuspendTimeout(remote.suspendTimeout);
+      if ('editorFontSize' in remote) setEditorFontSize(remote.editorFontSize);
+      if ('editorMinimap' in remote) setEditorMinimap(remote.editorMinimap);
+    });
+
+    return () => { unsubSync(); unsubApplied(); };
   }, []);
 
   const handleTimeoutChange = (value: number) => {
@@ -47,12 +76,31 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
     onSettingChange?.('editorMinimap', value);
   };
 
+  const handleSyncNow = () => {
+    setSyncStatus('syncing');
+    window.sai.githubSyncNow();
+  };
+
   return (
     <div className="settings-overlay" onClick={onClose}>
       <div className="settings-modal" onClick={e => e.stopPropagation()}>
         <div className="settings-header">
           <span className="settings-title">Settings</span>
-          <button className="settings-close" onClick={onClose}><X size={16} /></button>
+          <div className="settings-header-right">
+            {isAuthed && (
+              <div className="sync-status">
+                {syncStatus === 'syncing' && <><RefreshCw size={12} className="sync-spin" /><span>Syncing…</span></>}
+                {syncStatus === 'synced' && <><Check size={12} className="sync-ok" /><span>Synced {lastSynced ? formatRelative(lastSynced) : ''}</span></>}
+                {syncStatus === 'error' && <><AlertCircle size={12} className="sync-err" /><span>Sync failed</span></>}
+                {(syncStatus === 'idle' || syncStatus === 'error') && (
+                  <button className="sync-btn" onClick={handleSyncNow} title="Sync now">
+                    <RefreshCw size={12} />
+                  </button>
+                )}
+              </div>
+            )}
+            <button className="settings-close" onClick={onClose}><X size={16} /></button>
+          </div>
         </div>
 
         <div className="settings-body">
@@ -77,7 +125,7 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
             <div className="settings-row settings-row-spaced">
               <div className="settings-row-info">
                 <div className="settings-row-name">Minimap</div>
-                <div className="settings-row-desc">Show the code overview scrollbar on the right</div>
+                <div className="settings-row-desc">Code overview on the right edge of the editor</div>
               </div>
               <button
                 className={`settings-toggle${editorMinimap ? ' on' : ''}`}
@@ -111,6 +159,15 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
               </select>
             </div>
           </section>
+
+          {isAuthed && (
+            <>
+              <div className="settings-divider" />
+              <div className="settings-sync-note">
+                Settings are synced to your private <code>sai-config</code> GitHub repo and shared across devices.
+              </div>
+            </>
+          )}
         </div>
 
         <style>{`
@@ -139,11 +196,12 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
             padding: 16px 20px;
             border-bottom: 1px solid var(--border);
           }
-          .settings-title {
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--text);
+          .settings-header-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
           }
+          .settings-title { font-size: 14px; font-weight: 600; color: var(--text); }
           .settings-close {
             background: none;
             border: none;
@@ -154,9 +212,28 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
             display: flex;
           }
           .settings-close:hover { color: var(--text); background: var(--bg-hover); }
-          .settings-body {
-            padding: 20px;
+          .sync-status {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 11px;
+            color: var(--text-muted);
           }
+          .sync-spin { animation: spin 1s linear infinite; }
+          @keyframes spin { to { transform: rotate(360deg); } }
+          .sync-ok { color: var(--green); }
+          .sync-err { color: #f87171; }
+          .sync-btn {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 3px;
+            border-radius: 3px;
+            display: flex;
+          }
+          .sync-btn:hover { color: var(--text); background: var(--bg-hover); }
+          .settings-body { padding: 20px; }
           .settings-section-label {
             font-size: 10px;
             font-weight: 600;
@@ -171,35 +248,22 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
             justify-content: space-between;
             gap: 10px;
           }
-          .settings-row-name {
-            font-size: 13px;
-            font-weight: 500;
-            color: var(--text);
-          }
-          .settings-row-desc {
-            font-size: 11px;
-            color: var(--text-muted);
-            margin-top: 2px;
-          }
-          .settings-divider { height: 1px; background: var(--border); margin: 16px 0; }
           .settings-row-spaced { margin-top: 12px; }
-          .settings-row { display: flex; align-items: center; justify-content: space-between; }
+          .settings-row-name { font-size: 13px; font-weight: 500; color: var(--text); }
+          .settings-row-desc { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+          .settings-divider { height: 1px; background: var(--border); margin: 16px 0; }
           .settings-toggle {
             width: 36px;
             height: 20px;
             border-radius: 10px;
-            border: none;
-            background: var(--bg-secondary);
             border: 1px solid var(--border);
+            background: var(--bg-secondary);
             cursor: pointer;
             position: relative;
             flex-shrink: 0;
             transition: background 0.15s, border-color 0.15s;
           }
-          .settings-toggle.on {
-            background: var(--accent);
-            border-color: var(--accent);
-          }
+          .settings-toggle.on { background: var(--accent); border-color: var(--accent); }
           .settings-toggle-thumb {
             position: absolute;
             top: 2px;
@@ -210,10 +274,7 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
             background: var(--text-muted);
             transition: transform 0.15s, background 0.15s;
           }
-          .settings-toggle.on .settings-toggle-thumb {
-            transform: translateX(16px);
-            background: #000;
-          }
+          .settings-toggle.on .settings-toggle-thumb { transform: translateX(16px); background: #000; }
           .settings-select {
             background: var(--bg-secondary);
             border: 1px solid var(--border);
@@ -226,6 +287,18 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
             width: 140px;
           }
           .settings-select:focus { border-color: var(--accent); }
+          .settings-sync-note {
+            font-size: 11px;
+            color: var(--text-muted);
+            line-height: 1.5;
+          }
+          .settings-sync-note code {
+            font-family: 'JetBrains Mono', monospace;
+            background: var(--bg-secondary);
+            padding: 1px 4px;
+            border-radius: 3px;
+            color: var(--accent);
+          }
         `}</style>
       </div>
     </div>

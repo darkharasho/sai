@@ -9,6 +9,7 @@ import { registerUpdater } from './services/updater';
 import { registerUsageHandlers, destroyUsagePolling } from './services/usage';
 import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove, suspend, DEFAULT_SUSPEND_TIMEOUT } from './services/workspace';
 import { registerGithubAuthHandlers } from './services/github-auth';
+import { initialSync, schedulePush } from './services/github-sync';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -84,10 +85,21 @@ function createWindow() {
     }
   }
 
+  function getAuthInfo(): { token: string; login: string } | null {
+    const auth = readSettings().github_auth;
+    if (!auth?.token || !auth?.user?.login) return null;
+    return { token: auth.token, login: auth.user.login };
+  }
+
   function writeSetting(key: string, value: any) {
     const settings = readSettings();
     settings[key] = value;
     fs.writeFileSync(settingsFile, JSON.stringify(settings));
+    // Schedule a push to GitHub if authed (skip for auth key itself)
+    if (key !== 'github_auth') {
+      const auth = getAuthInfo();
+      if (auth) schedulePush(auth.token, auth.login, readSettings, mainWindow!);
+    }
   }
 
   ipcMain.handle('settings:get', (_event, key: string, defaultValue?: any) => {
@@ -99,7 +111,26 @@ function createWindow() {
     writeSetting(key, value);
   });
 
-  registerGithubAuthHandlers(mainWindow, readSettings, writeSetting);
+  ipcMain.handle('github:syncNow', async () => {
+    const auth = getAuthInfo();
+    if (!auth) return;
+    await initialSync(auth.token, auth.login, readSettings, writeSetting, mainWindow!);
+  });
+
+  registerGithubAuthHandlers(mainWindow, readSettings, writeSetting, () => {
+    // Called after successful auth — run initial sync
+    const auth = getAuthInfo();
+    if (auth) initialSync(auth.token, auth.login, readSettings, writeSetting, mainWindow!);
+  });
+
+  // Run sync on startup if already authenticated.
+  // Delay briefly so the renderer has time to mount and subscribe to IPC events.
+  mainWindow.webContents.once('did-finish-load', () => {
+    setTimeout(() => {
+      const auth = getAuthInfo();
+      if (auth) initialSync(auth.token, auth.login, readSettings, writeSetting, mainWindow!);
+    }, 1500);
+  });
 
   // Recent projects persistence
   const recentProjectsFile = path.join(app.getPath('userData'), 'recent-projects.json');
