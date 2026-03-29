@@ -9,6 +9,9 @@ export default defineConfig({
     electron([
       {
         entry: 'electron/main.ts',
+        onstart(args) {
+          args.startup();
+        },
         vite: {
           build: {
             rollupOptions: {
@@ -26,4 +29,7 @@ export default defineConfig({
     ]),
     renderer(),
   ],
+  optimizeDeps: {
+    include: ['monaco-editor'],
+  },
 });
