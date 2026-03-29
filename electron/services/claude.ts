@@ -152,6 +152,18 @@ function ensureProcess(
     safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
   });
 
+  proc.on('error', (err) => {
+    if (ws.claude.process !== proc) return;
+    ws.claude.process = null;
+    ws.claude.processConfig = null;
+    ws.claude.busy = false;
+    ws.claude.suppressForward = false;
+    safeSend(win, 'claude:message', {
+      type: 'error', text: `Claude process error: ${err.message}`, projectPath: ws.projectPath
+    });
+    safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+  });
+
   return proc;
 }
 
@@ -204,7 +216,12 @@ export function registerClaudeHandlers(win: BrowserWindow) {
       type: 'user',
       message: { role: 'user', content: prompt },
     });
-    proc.stdin?.write(msg + '\n');
+    if (!proc.stdin || proc.stdin.destroyed) {
+      ws.claude.busy = false;
+      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+      return;
+    }
+    proc.stdin.write(msg + '\n');
   });
 
   // claude:generateCommitMessage — route through persistent process or one-shot fallback
@@ -247,10 +264,12 @@ export function registerClaudeHandlers(win: BrowserWindow) {
         ws.claude.busy = true;
         ws.claude.suppressForward = true;
 
+        let commitBuffer = '';
         const commitHandler = (data: Buffer) => {
           if (resolved) return;
-          const text = data.toString();
-          const lines = text.split('\n');
+          commitBuffer += data.toString();
+          const lines = commitBuffer.split('\n');
+          commitBuffer = lines.pop() || '';
           for (const line of lines) {
             if (!line.trim()) continue;
             try {
@@ -274,7 +293,14 @@ export function registerClaudeHandlers(win: BrowserWindow) {
           type: 'user',
           message: { role: 'user', content: commitPrompt },
         });
-        proc.stdin?.write(msg + '\n');
+        if (!proc.stdin || proc.stdin.destroyed) {
+          ws.claude.busy = false;
+          ws.claude.suppressForward = false;
+          resolved = true;
+          resolve('');
+          return;
+        }
+        proc.stdin.write(msg + '\n');
 
         // Timeout fallback — if no result in 30s, resolve empty
         setTimeout(() => {
