@@ -102,6 +102,18 @@ function CodexThinkingAnimation() {
   );
 }
 
+function GeminiThinkingAnimation() {
+  return (
+    <div className="gemini-thinking">
+      <div className="gemini-dots">
+        {[0, 1, 2, 3, 4, 5].map(i => (
+          <span key={i} className="gemini-dot" style={{ animationDelay: `${i * 0.33}s` }} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import type { ChatMessage as ChatMessageType, ToolCall } from '../../types';
@@ -116,12 +128,19 @@ interface ChatPanelProps {
   onEffortChange: (level: 'low' | 'medium' | 'high' | 'max') => void;
   modelChoice: 'sonnet' | 'opus' | 'haiku';
   onModelChange: (model: 'sonnet' | 'opus' | 'haiku') => void;
-  aiProvider: 'claude' | 'codex';
+  aiProvider: 'claude' | 'codex' | 'gemini';
   codexModel: string;
   onCodexModelChange: (model: string) => void;
   codexModels: { id: string; name: string }[];
   codexPermission: CodexPermission;
   onCodexPermissionChange: (perm: CodexPermission) => void;
+  geminiModel: string;
+  onGeminiModelChange: (model: string) => void;
+  geminiModels: { id: string; name: string }[];
+  geminiApprovalMode: 'default' | 'auto_edit' | 'yolo' | 'plan';
+  onGeminiApprovalModeChange: (mode: 'default' | 'auto_edit' | 'yolo' | 'plan') => void;
+  geminiConversationMode: 'planning' | 'fast';
+  onGeminiConversationModeChange: (mode: 'planning' | 'fast') => void;
   initialMessages?: ChatMessageType[];
   onMessagesChange?: (messages: ChatMessageType[]) => void;
   onTurnComplete?: () => void;
@@ -282,7 +301,7 @@ const EMPTY_PROMPTS = [
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, initialMessages, onMessagesChange, onTurnComplete, activeFilePath, onFileOpen }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, initialMessages, onMessagesChange, onTurnComplete, activeFilePath, onFileOpen }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessageType[]>(initialMessages || []);
   const emptyPrompt = useMemo(() => EMPTY_PROMPTS[Math.floor(Math.random() * EMPTY_PROMPTS.length)], []);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -336,7 +355,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
   useEffect(() => {
     setReady(false);
-    const startFn = aiProvider === 'codex' ? window.sai.codexStart : window.sai.claudeStart;
+    const startFn = aiProvider === 'gemini' ? (window.sai as any).geminiStart : aiProvider === 'codex' ? window.sai.codexStart : window.sai.claudeStart;
     startFn(projectPath || '').then(() => setReady(true));
 
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
@@ -688,7 +707,9 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     }
 
     const prompt = activeFilePath ? `[File: ${activeFilePath}]\n\n${text}` : text;
-    if (aiProvider === 'codex') {
+    if (aiProvider === 'gemini') {
+      (window.sai as any).geminiSend(projectPath, prompt, imagePaths, geminiApprovalMode, geminiConversationMode, geminiModel);
+    } else if (aiProvider === 'codex') {
       window.sai.codexSend(projectPath, prompt, imagePaths, codexPermission, codexModel);
     } else {
       window.sai.claudeSend(projectPath, prompt, imagePaths, permissionMode, effortLevel, modelChoice);
@@ -723,7 +744,9 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             )}
           </>
         )}
-        {isStreaming && (aiProvider === 'codex'
+        {isStreaming && (aiProvider === 'gemini'
+          ? <GeminiThinkingAnimation />
+          : aiProvider === 'codex'
           ? <CodexThinkingAnimation />
           : <ThinkingAnimation hasContent={messages[messages.length - 1]?.role === 'assistant'} />
         )}
@@ -742,7 +765,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         disabled={!ready}
         slashCommands={slashCommands}
         isStreaming={isStreaming}
-        onStop={() => aiProvider === 'codex' ? window.sai.codexStop(projectPath) : window.sai.claudeStop?.(projectPath)}
+        onStop={() => aiProvider === 'gemini' ? (window.sai as any).geminiStop(projectPath) : aiProvider === 'codex' ? window.sai.codexStop(projectPath) : window.sai.claudeStop?.(projectPath)}
         permissionMode={permissionMode}
         onPermissionChange={onPermissionChange}
         effortLevel={effortLevel}
@@ -759,6 +782,13 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         onCodexModelChange={onCodexModelChange}
         codexPermission={codexPermission}
         onCodexPermissionChange={onCodexPermissionChange}
+        geminiModel={geminiModel}
+        geminiModels={geminiModels}
+        onGeminiModelChange={onGeminiModelChange}
+        geminiApprovalMode={geminiApprovalMode}
+        onGeminiApprovalModeChange={onGeminiApprovalModeChange}
+        geminiConversationMode={geminiConversationMode}
+        onGeminiConversationModeChange={onGeminiConversationModeChange}
       />
       <style>{`
         .chat-panel {
@@ -910,6 +940,52 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         @keyframes codex-working-shimmer {
           from { background-position: 200% 0; }
           to { background-position: -200% 0; }
+        }
+        .gemini-thinking {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin-left: 24px;
+          padding: 8px 0;
+        }
+        .gemini-dots {
+          display: grid;
+          grid-template-columns: repeat(3, 6px);
+          grid-template-rows: repeat(2, 6px);
+          gap: 3px;
+        }
+        .gemini-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: rgba(66, 133, 244, 0.25);
+          animation: gemini-dot-pulse 2s ease-in-out infinite;
+        }
+        @keyframes gemini-dot-pulse {
+          0%, 100% {
+            background: rgba(66, 133, 244, 0.25);
+            transform: scale(1);
+          }
+          16.6% {
+            background: #4285f4;
+            transform: scale(1.3);
+          }
+          33.3% {
+            background: rgba(168, 85, 247, 0.25);
+            transform: scale(1);
+          }
+          50% {
+            background: #a855f7;
+            transform: scale(1.3);
+          }
+          66.6% {
+            background: rgba(234, 67, 53, 0.25);
+            transform: scale(1);
+          }
+          83.3% {
+            background: #ea4335;
+            transform: scale(1.3);
+          }
         }
       `}</style>
     </div>
