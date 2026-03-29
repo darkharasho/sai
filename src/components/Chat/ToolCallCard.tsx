@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { FileEdit, Terminal, FileText, Wrench, ChevronRight, ChevronDown, Maximize2, X } from 'lucide-react';
+import { FileEdit, Terminal, FileText, Wrench, ChevronRight, ChevronDown, Maximize2, X, Circle } from 'lucide-react';
 import type { ToolCall } from '../../types';
 
 // Lazy-load shiki for syntax highlighting
@@ -184,6 +184,7 @@ export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
     <>
       <div className="tool-call-card">
         <div className="tool-call-header" onClick={() => setExpanded(!expanded)}>
+          <Circle size={8} fill="var(--text-muted)" stroke="var(--text-muted)" className="tool-call-dot" />
           <Icon size={14} className="tool-call-icon" />
           <span className="tool-call-name">{toolCall.name}</span>
           {label && <span className="tool-call-label">{label}</span>}
@@ -241,6 +242,9 @@ export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
             border: 1px solid var(--border);
             border-radius: 6px;
             overflow: hidden;
+          }
+          .tool-call-dot {
+            flex-shrink: 0;
           }
           .tool-call-header {
             padding: 8px 12px;
