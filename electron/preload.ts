@@ -10,9 +10,9 @@ contextBridge.exposeInMainWorld('sai', {
     return () => ipcRenderer.removeListener('terminal:data', listener);
   },
   claudeStart: (cwd: string) => ipcRenderer.invoke('claude:start', cwd),
-  claudeSend: (message: string, imagePaths?: string[], permMode?: string) => ipcRenderer.send('claude:send', message, imagePaths, permMode),
+  claudeSend: (projectPath: string, message: string, imagePaths?: string[], permMode?: string) => ipcRenderer.send('claude:send', projectPath, message, imagePaths, permMode),
   claudeGenerateCommitMessage: (cwd: string) => ipcRenderer.invoke('claude:generateCommitMessage', cwd),
-  claudeStop: () => ipcRenderer.send('claude:stop'),
+  claudeStop: (projectPath: string) => ipcRenderer.send('claude:stop', projectPath),
   claudeApprove: (approved: boolean) => ipcRenderer.send('claude:approve', approved),
   claudeOnMessage: (callback: (msg: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, msg: unknown) => callback(msg);
@@ -66,6 +66,13 @@ contextBridge.exposeInMainWorld('sai', {
     const listener = (_event: Electron.IpcRendererEvent, err: any) => callback(err);
     ipcRenderer.on('update:error', listener);
     return () => ipcRenderer.removeListener('update:error', listener);
+  },
+  workspaceGetAll: () => ipcRenderer.invoke('workspace:getAll'),
+  workspaceClose: (projectPath: string) => ipcRenderer.invoke('workspace:close', projectPath),
+  onWorkspaceSuspended: (callback: (projectPath: string) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, projectPath: string) => callback(projectPath);
+    ipcRenderer.on('workspace:suspended', listener);
+    return () => ipcRenderer.removeListener('workspace:suspended', listener);
   },
   saveImage: (base64Data: string) => ipcRenderer.invoke('project:saveImage', base64Data),
   getCwd: () => ipcRenderer.invoke('project:getCwd'),
