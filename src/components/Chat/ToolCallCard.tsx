@@ -390,7 +390,7 @@ export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
   return (
     <>
       <div className="tool-call-card">
-        <div className="tool-call-header" onClick={() => setExpanded(!expanded)}>
+        <div className={`tool-call-header${hasBody ? ' tool-call-header-expandable' : ''}`} onClick={() => hasBody && setExpanded(!expanded)}>
           <Circle size={8} fill="var(--text-muted)" stroke="var(--text-muted)" className="tool-call-dot" />
           <Icon size={14} className="tool-call-icon" />
           <span className="tool-call-name">{toolCall.name}</span>
@@ -405,7 +405,7 @@ export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
               <Maximize2 size={12} />
             </button>
           )}
-          {expanded ? <ChevronDown size={14} className="tool-call-chevron" /> : <ChevronRight size={14} className="tool-call-chevron" />}
+          {hasBody && (expanded ? <ChevronDown size={14} className="tool-call-chevron" /> : <ChevronRight size={14} className="tool-call-chevron" />)}
         </div>
         {expanded && hasBody && (
           <>
@@ -472,9 +472,11 @@ export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
             gap: 8px;
             font-size: 12px;
             color: var(--text-secondary);
+          }
+          .tool-call-header-expandable {
             cursor: pointer;
           }
-          .tool-call-header:hover {
+          .tool-call-header-expandable:hover {
             background: var(--bg-hover);
           }
           .tool-call-icon {

@@ -22,7 +22,7 @@ interface ChatInputProps {
   onModelChange: (model: ModelChoice) => void;
   contextUsage?: { used: number; total: number };
   sessionUsage?: { inputTokens: number; outputTokens: number };
-  rateLimits?: Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number }>;
+  rateLimits?: Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number; utilization?: number }>;
   activeFilePath?: string | null;
 }
 
@@ -107,33 +107,34 @@ function ContextRing({ used, total, onClick }: { used: number; total: number; on
   );
 }
 
-function formatResetTime(resetsAt: number): string {
+function formatResetTime(resetsAt: number, style: 'relative' | 'absolute' = 'relative'): string {
+  const resetDate = new Date(resetsAt * 1000);
+  if (style === 'absolute') {
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const day = days[resetDate.getDay()];
+    const h = resetDate.getHours();
+    const m = resetDate.getMinutes();
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const h12 = h % 12 || 12;
+    return `${day} ${h12}:${m.toString().padStart(2, '0')} ${ampm}`;
+  }
   const diffMs = resetsAt * 1000 - Date.now();
   const diffH = Math.max(0, Math.floor(diffMs / 3600000));
-  const diffD = Math.floor(diffH / 24);
-  if (diffD > 0) return `${diffD}d ${diffH % 24}h`;
-  if (diffH > 0) return `${diffH}h`;
-  const diffM = Math.max(0, Math.floor(diffMs / 60000));
-  return `${diffM}m`;
+  const diffM = Math.max(0, Math.floor((diffMs % 3600000) / 60000));
+  if (diffH > 0) return `${diffH} hr ${diffM} min`;
+  return `${diffM} min`;
 }
 
-const WINDOW_DURATIONS: Record<string, number> = {
-  daily: 24 * 3600,
-  five_hour: 5 * 3600,
-  seven_day: 7 * 24 * 3600,
-  weekly: 7 * 24 * 3600,
-  monthly: 30 * 24 * 3600,
-};
-
-function getRateLimitProgress(rl: { rateLimitType: string; resetsAt: number }): number {
-  const windowSec = WINDOW_DURATIONS[rl.rateLimitType] || 7 * 24 * 3600;
-  const windowStartSec = rl.resetsAt - windowSec;
-  const nowSec = Date.now() / 1000;
-  const elapsed = nowSec - windowStartSec;
-  return Math.min(Math.max(elapsed / windowSec, 0), 1);
+// Use the CLI's utilization field (0.0–1.0) when available for accurate usage %.
+// Falls back to -1 (unknown) if not provided, unless the limit was hit.
+function getRateLimitProgress(rl: { rateLimitType: string; resetsAt: number; status: string; utilization?: number }): number {
+  if (rl.status === 'rejected') return 1;
+  if (rl.utilization !== undefined) return Math.min(Math.max(rl.utilization, 0), 1);
+  return -1;
 }
 
 function UsageBar({ pct, color, label, sublabel, tag }: { pct: number; color: string; label: string; sublabel: string; tag?: string }) {
+  const isUnknown = pct < 0;
   return (
     <div className="usage-bar-row">
       <div className="usage-bar-info">
@@ -141,22 +142,34 @@ function UsageBar({ pct, color, label, sublabel, tag }: { pct: number; color: st
         <span className="usage-bar-sublabel">{sublabel}</span>
       </div>
       <div className="usage-bar-track">
-        <div
-          className="usage-bar-fill"
-          style={{ width: `${Math.min(pct, 100)}%`, background: color }}
-        />
+        {!isUnknown && (
+          <div
+            className="usage-bar-fill"
+            style={{ width: `${Math.min(pct, 100)}%`, background: color }}
+          />
+        )}
       </div>
-      <span className="usage-bar-pct">{Math.round(pct)}% used</span>
+      {!isUnknown && <span className="usage-bar-pct">{Math.round(pct)}% used</span>}
     </div>
   );
 }
 
 function getRateLimitLabel(type: string): string {
-  if (type === 'five_hour') return '5-Hour';
-  if (type === 'seven_day' || type === 'weekly') return 'Weekly';
+  if (type === 'five_hour') return 'Current session';
+  if (type === 'seven_day' || type === 'weekly') return 'All models';
   if (type === 'daily') return 'Daily';
   if (type === 'monthly') return 'Monthly';
+  // e.g. "weekly_sonnet" → "Sonnet only"
+  if (type.startsWith('weekly_') || type.startsWith('seven_day_')) {
+    const model = type.replace(/^(weekly_|seven_day_)/, '');
+    return `${model.charAt(0).toUpperCase() + model.slice(1)} only`;
+  }
   return type.replace(/_/g, ' ');
+}
+
+function isWeeklyLimit(type: string): boolean {
+  return type === 'weekly' || type === 'seven_day' || type === 'monthly' ||
+    type.startsWith('weekly_') || type.startsWith('seven_day_');
 }
 
 function getBarColor(pct: number, isOverage: boolean): string {
@@ -459,12 +472,13 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
             const limits = rateLimits ? Array.from(rateLimits.values()) : [];
             const anyOverage = limits.some(rl => rl.isUsingOverage);
 
-            // Separate rate limits into usage limits and overage
-            const usageLimits = limits.filter(rl => rl.overageResetsAt === 0 || !rl.isUsingOverage);
+            // Split limits into session-level (5-hour, daily) and weekly-level
+            const sessionLimits = limits.filter(rl => !isWeeklyLimit(rl.rateLimitType));
+            const weeklyLimits = limits.filter(rl => isWeeklyLimit(rl.rateLimitType));
             const overageSource = limits.find(rl => rl.overageResetsAt > 0);
 
             // Inline text
-            const primary = usageLimits[0] || limits[0];
+            const primary = sessionLimits[0] || limits[0];
             let inlineText = '';
             if (anyOverage) {
               inlineText = 'Overage';
@@ -482,38 +496,56 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
                   {anyOverage && <span className="overage-dot" />}
                 </span>
                 <div className="usage-tooltip">
-                  {usageLimits.length > 0 && (
+                  {/* Plan usage limits — session-level (Current session, Overage) */}
+                  {(sessionLimits.length > 0 || overageSource) && (
                     <div className="usage-tooltip-section">
                       <div className="usage-tooltip-heading">Plan usage limits</div>
-                      {usageLimits.map(rl => {
-                        const pct = rl.status === 'rejected' ? 100 : getRateLimitProgress(rl) * 100;
+                      {sessionLimits.map(rl => {
+                        const pct = getRateLimitProgress(rl) * 100;
                         return (
                           <UsageBar
                             key={rl.rateLimitType}
                             pct={pct}
-                            color={getBarColor(pct, false)}
+                            color={pct >= 0 ? getBarColor(pct, false) : 'var(--text-muted)'}
                             label={getRateLimitLabel(rl.rateLimitType)}
                             sublabel={`Resets in ${formatResetTime(rl.resetsAt)}`}
                           />
                         );
                       })}
+                      {overageSource && (() => {
+                        const active = overageSource.isUsingOverage;
+                        const pct = active ? getRateLimitProgress({ rateLimitType: overageSource.rateLimitType, resetsAt: overageSource.overageResetsAt, status: overageSource.status }) * 100 : 0;
+                        return (
+                          <UsageBar
+                            pct={active ? pct : 0}
+                            color={active ? 'var(--orange)' : 'var(--text-muted)'}
+                            label="Overage"
+                            sublabel={active ? `Resets in ${formatResetTime(overageSource.overageResetsAt)}` : 'Not active'}
+                            tag={active ? 'ACTIVE' : undefined}
+                          />
+                        );
+                      })()}
                     </div>
                   )}
-                  {overageSource && (() => {
-                    const active = overageSource.isUsingOverage;
-                    const pct = active ? getRateLimitProgress({ rateLimitType: overageSource.rateLimitType, resetsAt: overageSource.overageResetsAt }) * 100 : 0;
-                    return (
-                      <div className="usage-tooltip-section">
-                        <UsageBar
-                          pct={active ? pct : 0}
-                          color={active ? 'var(--orange)' : 'var(--text-muted)'}
-                          label="Overage"
-                          sublabel={active ? `Resets in ${formatResetTime(overageSource.overageResetsAt)}` : 'Not active'}
-                          tag={active ? 'ACTIVE' : undefined}
-                        />
-                      </div>
-                    );
-                  })()}
+                  {/* Weekly limits */}
+                  {weeklyLimits.length > 0 && (
+                    <div className="usage-tooltip-section">
+                      <div className="usage-tooltip-heading">Weekly limits</div>
+                      {weeklyLimits.map(rl => {
+                        const pct = getRateLimitProgress(rl) * 100;
+                        return (
+                          <UsageBar
+                            key={rl.rateLimitType}
+                            pct={pct}
+                            color={pct >= 0 ? getBarColor(pct, false) : 'var(--text-muted)'}
+                            label={getRateLimitLabel(rl.rateLimitType)}
+                            sublabel={`Resets ${formatResetTime(rl.resetsAt, 'absolute')}`}
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
+                  {/* Context */}
                   {contextUsage && (
                     <div className="usage-tooltip-section">
                       <UsageBar

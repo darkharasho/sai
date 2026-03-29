@@ -118,7 +118,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
   const [contextUsage, setContextUsage] = useState<{ used: number; total: number }>({ used: 0, total: 1000000 });
   const [sessionUsage, setSessionUsage] = useState<{ inputTokens: number; outputTokens: number }>({ inputTokens: 0, outputTokens: 0 });
-  const [rateLimits, setRateLimits] = useState<Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number }>>(new Map());
+  const [rateLimits, setRateLimits] = useState<Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number; utilization?: number }>>(new Map());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const lastUserMsgRef = useRef<HTMLDivElement>(null);
@@ -185,6 +185,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             status: info.status || 'unknown',
             isUsingOverage: !!info.isUsingOverage,
             overageResetsAt: info.overageResetsAt || 0,
+            utilization: info.utilization,
           });
           return next;
         });
@@ -291,9 +292,15 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             (msg.usage.cache_read_input_tokens || 0) +
             (msg.usage.cache_creation_input_tokens || 0) +
             (msg.usage.output_tokens || 0);
+          // Use the CLI-reported context window, but fall back to known model sizes
+          // since the CLI may report incorrect values (e.g., 200K for 1M-context models)
           const modelUsage = msg.modelUsage || {};
           const modelKey = Object.keys(modelUsage)[0];
-          const total = modelKey ? modelUsage[modelKey].contextWindow || 1000000 : 1000000;
+          let total = modelKey ? modelUsage[modelKey].contextWindow || 0 : 0;
+          // If reported total seems wrong (used exceeds it), use a sensible default
+          if (!total || used > total) {
+            total = 1000000; // Default to 1M for extended context models
+          }
           setContextUsage({ used, total });
         }
         // Accumulate session usage
