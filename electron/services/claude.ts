@@ -3,235 +3,312 @@ import { BrowserWindow, ipcMain } from 'electron';
 import { getOrCreate, get, touchActivity } from './workspace';
 
 function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
-	try {
-		if (!win.isDestroyed()) {
-			win.webContents.send(channel, ...args);
-		}
-	} catch {
-		// Window already destroyed
-	}
+  try {
+    if (!win.isDestroyed()) {
+      win.webContents.send(channel, ...args);
+    }
+  } catch {
+    // Window already destroyed
+  }
+}
+
+/**
+ * Build CLI args for the persistent process based on current config.
+ */
+function buildArgs(permMode?: string, effort?: string, model?: string): string[] {
+  const args = [
+    '-p',
+    '--input-format', 'stream-json',
+    '--output-format', 'stream-json',
+    '--verbose',
+    '--include-partial-messages',
+  ];
+
+  if (permMode === 'bypass') {
+    args.push('--permission-mode', 'bypassPermissions');
+  } else {
+    args.push('--permission-mode', 'acceptEdits');
+  }
+
+  if (effort && ['low', 'medium', 'high', 'max'].includes(effort)) {
+    args.push('--effort', effort);
+  }
+
+  if (model) {
+    args.push('--model', model);
+  }
+
+  return args;
+}
+
+/**
+ * Spawn (or respawn) the persistent Claude process for a workspace.
+ * Attaches stdout/stderr handlers that route messages to the renderer.
+ */
+function ensureProcess(
+  win: BrowserWindow,
+  projectPath: string,
+  permMode?: string,
+  effort?: string,
+  model?: string,
+): ChildProcess {
+  const ws = getOrCreate(projectPath);
+  const currentConfig = { permMode: permMode || 'default', effort: effort || '', model: model || '' };
+
+  // If process exists and config hasn't changed, reuse it
+  if (ws.claude.process && ws.claude.processConfig &&
+      ws.claude.processConfig.permMode === currentConfig.permMode &&
+      ws.claude.processConfig.effort === currentConfig.effort &&
+      ws.claude.processConfig.model === currentConfig.model) {
+    return ws.claude.process;
+  }
+
+  // Config changed or no process — kill old one and spawn fresh
+  if (ws.claude.process) {
+    ws.claude.process.kill();
+    ws.claude.process = null;
+  }
+
+  const args = buildArgs(permMode, effort, model);
+
+  // Resume existing session if we have one
+  if (ws.claude.sessionId) {
+    args.push('--resume', ws.claude.sessionId);
+  }
+
+  const proc = spawn('claude', args, {
+    cwd: ws.claude.cwd || projectPath,
+    env: { ...process.env },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  ws.claude.process = proc;
+  ws.claude.processConfig = currentConfig;
+  ws.claude.buffer = '';
+
+  proc.stdout?.on('data', (data: Buffer) => {
+    // Ignore if this process has been replaced
+    if (ws.claude.process !== proc) return;
+
+    ws.claude.buffer += data.toString();
+    const lines = ws.claude.buffer.split('\n');
+    ws.claude.buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const msg = JSON.parse(line);
+
+        // Capture session ID
+        if (msg.session_id && !ws.claude.sessionId) {
+          ws.claude.sessionId = msg.session_id;
+        }
+
+        // Capture slash commands from init (replaces the probe)
+        if (msg.type === 'system' && msg.subtype === 'init') {
+          safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath });
+        }
+
+        // When suppressForward is true (commit msg generation), skip IPC
+        if (ws.claude.suppressForward) continue;
+
+        // Result signals end of a turn
+        if (msg.type === 'result') {
+          ws.claude.busy = false;
+          safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath });
+          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+          continue;
+        }
+
+        safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath });
+      } catch { /* ignore malformed JSON */ }
+    }
+  });
+
+  proc.stderr?.on('data', (data: Buffer) => {
+    if (ws.claude.process !== proc) return;
+    const text = data.toString().trim();
+    if (text) {
+      safeSend(win, 'claude:message', { type: 'error', text, projectPath: ws.projectPath });
+    }
+  });
+
+  proc.on('exit', () => {
+    if (ws.claude.process !== proc) return;
+
+    // Flush remaining buffer
+    if (ws.claude.buffer.trim()) {
+      try {
+        const msg = JSON.parse(ws.claude.buffer);
+        safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath });
+      } catch { /* ignore */ }
+    }
+    ws.claude.buffer = '';
+    ws.claude.process = null;
+    ws.claude.processConfig = null;
+    ws.claude.busy = false;
+    ws.claude.suppressForward = false;
+    // Signal unexpected exit so the UI can recover
+    safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+  });
+
+  return proc;
 }
 
 export function registerClaudeHandlers(win: BrowserWindow) {
-	ipcMain.handle('claude:start', (_event, cwd: string) => {
-		if (!cwd) return;
-		const ws = getOrCreate(cwd);
+  // claude:start — no longer spawns a probe. Just signals ready.
+  ipcMain.handle('claude:start', (_event, cwd: string) => {
+    if (!cwd) return;
+    const ws = getOrCreate(cwd);
+    ws.claude.cwd = cwd;
+    safeSend(win, 'claude:message', { type: 'ready', projectPath: ws.projectPath });
+  });
 
-		// If workspace already has a session, just signal ready (don't re-probe)
-		if (ws.claude.sessionId) {
-			safeSend(win, 'claude:message', { type: 'ready', projectPath: ws.projectPath });
-			return;
-		}
+  // claude:stop — kill the persistent process
+  ipcMain.on('claude:stop', (_event, projectPath: string) => {
+    const ws = get(projectPath);
+    if (!ws) return;
+    if (ws.claude.process) {
+      const proc = ws.claude.process;
+      ws.claude.process = null;
+      ws.claude.processConfig = null;
+      ws.claude.busy = false;
+      ws.claude.suppressForward = false;
+      proc.kill();
+      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+    }
+  });
 
-		// Kill any in-flight probe from a previous start attempt
-		if (ws.claude.probe) {
-			ws.claude.probe.kill();
-			ws.claude.probe = null;
-		}
+  // claude:send — write message to persistent process stdin
+  ipcMain.on('claude:send', (_event, projectPath: string, message: string, imagePaths?: string[], permMode?: string, effort?: string, model?: string) => {
+    const ws = get(projectPath);
+    if (!ws) return;
 
-		ws.claude.cwd = cwd;
+    touchActivity(projectPath);
 
-		// Probe Claude to get slash commands from init message
-		return new Promise<void>((resolve) => {
-			const probe = spawn('claude', [
-				'-p', 'hi',
-				'--output-format', 'stream-json',
-				'--verbose',
-				'--max-turns', '1',
-			], {
-				cwd: ws.claude.cwd,
-				env: { ...process.env },
-				stdio: ['ignore', 'pipe', 'pipe'],
-			});
+    // Build the prompt (same image handling as before)
+    let prompt = message;
+    if (imagePaths && imagePaths.length > 0) {
+      const imageRefs = imagePaths.map(p => `[Attached image: ${p}]`).join('\n');
+      prompt = `${imageRefs}\n\n${message}`;
+    }
 
-			ws.claude.probe = probe;
+    // Ensure persistent process is running with current config
+    const proc = ensureProcess(win, projectPath, permMode, effort, model);
 
-			let probeBuffer = '';
-			probe.stdout?.on('data', (data: Buffer) => {
-				// Ignore output from a stale probe
-				if (ws.claude.probe !== probe) return;
+    ws.claude.busy = true;
+    safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath });
 
-				probeBuffer += data.toString();
-				const lines = probeBuffer.split('\n');
-				probeBuffer = lines.pop() || '';
-				for (const line of lines) {
-					if (!line.trim()) continue;
-					try {
-						const msg = JSON.parse(line);
-						if (msg.type === 'system' && msg.subtype === 'init') {
-							safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath });
-						}
-						if (msg.session_id && !ws.claude.sessionId) {
-							ws.claude.sessionId = msg.session_id;
-						}
-					} catch { /* ignore */ }
-				}
-			});
+    // Write the user message as NDJSON to stdin
+    const msg = JSON.stringify({
+      type: 'user',
+      message: { role: 'user', content: prompt },
+    });
+    proc.stdin?.write(msg + '\n');
+  });
 
-			probe.on('exit', () => {
-				if (ws.claude.probe === probe) {
-					ws.claude.probe = null;
-					safeSend(win, 'claude:message', { type: 'ready', projectPath: ws.projectPath });
-				}
-				resolve();
-			});
+  // claude:generateCommitMessage — route through persistent process or one-shot fallback
+  ipcMain.handle('claude:generateCommitMessage', async (_event, cwd: string) => {
+    const ws = get(cwd);
+    const effectiveCwd = cwd || ws?.claude.cwd || process.env.HOME || '/';
 
-			probe.on('error', () => {
-				if (ws.claude.probe === probe) {
-					ws.claude.probe = null;
-					safeSend(win, 'claude:message', { type: 'ready', projectPath: ws.projectPath });
-				}
-				resolve();
-			});
-		});
-	});
+    // Get the diff
+    const getDiff = (args: string[]) => new Promise<string>((resolve) => {
+      const diffProc = spawn('git', ['diff', ...args], {
+        cwd: effectiveCwd,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let out = '';
+      diffProc.stdout?.on('data', (d: Buffer) => { out += d.toString(); });
+      diffProc.on('exit', () => resolve(out.trim()));
+      diffProc.on('error', () => resolve(''));
+    });
 
-	ipcMain.on('claude:stop', (_event, projectPath: string) => {
-		const ws = get(projectPath);
-		if (!ws) return;
-		if (ws.claude.process) {
-			const proc = ws.claude.process;
-			ws.claude.process = null;
-			proc.kill();
-			safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
-		}
-	});
+    let diff = await getDiff(['--staged']);
+    if (!diff) diff = await getDiff([]);
+    if (!diff) return '';
 
-	ipcMain.handle('claude:generateCommitMessage', async (_event, cwd: string) => {
-		const ws = get(cwd);
-		const effectiveCwd = cwd || ws?.claude.cwd || process.env.HOME || '/';
+    const maxLen = 8000;
+    const truncatedDiff = diff.length > maxLen
+      ? diff.slice(0, maxLen) + '\n... (diff truncated)'
+      : diff;
 
-		// Get the diff upfront so Claude doesn't need tool calls
-		const getDiff = (args: string[]) => new Promise<string>((resolve) => {
-			const diffProc = spawn('git', ['diff', ...args], {
-				cwd: effectiveCwd,
-				stdio: ['ignore', 'pipe', 'pipe'],
-			});
-			let out = '';
-			diffProc.stdout?.on('data', (d: Buffer) => { out += d.toString(); });
-			diffProc.on('exit', () => resolve(out.trim()));
-			diffProc.on('error', () => resolve(''));
-		});
+    const commitPrompt = `Generate a concise commit message for this diff. Output ONLY the commit message text, nothing else. Use conventional commit format (e.g. feat:, fix:, refactor:). Keep it under 72 characters for the subject line.\n\n${truncatedDiff}`;
 
-		// Check staged first, fall back to unstaged (commit auto-stages)
-		let diff = await getDiff(['--staged']);
-		if (!diff) diff = await getDiff([]);
-		if (!diff) return '';
+    // If persistent process exists and is idle, use it for caching benefits.
+    // suppressForward prevents the main stdout handler from sending commit
+    // message results to the renderer (which would pollute the chat UI).
+    // Instead, the result is captured here via a temporary listener.
+    if (ws?.claude.process && !ws.claude.busy) {
+      return new Promise<string>((resolve) => {
+        const proc = ws.claude.process!;
+        let resolved = false;
 
-		// Truncate very large diffs to keep the request fast
-		const maxLen = 8000;
-		const truncatedDiff = diff.length > maxLen
-			? diff.slice(0, maxLen) + '\n... (diff truncated)'
-			: diff;
+        ws.claude.busy = true;
+        ws.claude.suppressForward = true;
 
-		return new Promise<string>((resolve) => {
-			const proc = spawn('claude', [
-				'-p', `Generate a concise commit message for this diff. Output ONLY the commit message text, nothing else. Use conventional commit format (e.g. feat:, fix:, refactor:). Keep it under 72 characters for the subject line.\n\n${truncatedDiff}`,
-				'--output-format', 'text',
-				'--max-turns', '1',
-			], {
-				cwd: effectiveCwd,
-				env: { ...process.env },
-				stdio: ['ignore', 'pipe', 'pipe'],
-			});
+        const commitHandler = (data: Buffer) => {
+          if (resolved) return;
+          const text = data.toString();
+          const lines = text.split('\n');
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const msg = JSON.parse(line);
+              if (msg.type === 'result') {
+                const commitResult = typeof msg.result === 'string' ? msg.result : '';
+                ws.claude.busy = false;
+                ws.claude.suppressForward = false;
+                resolved = true;
+                proc.stdout?.removeListener('data', commitHandler);
+                resolve(commitResult.trim());
+                return;
+              }
+            } catch { /* ignore */ }
+          }
+        };
 
-			let output = '';
-			proc.stdout?.on('data', (data: Buffer) => { output += data.toString(); });
-			proc.on('exit', () => resolve(output.trim()));
-			proc.on('error', () => resolve(''));
-		});
-	});
+        proc.stdout?.on('data', commitHandler);
 
-	ipcMain.on('claude:send', (_event, projectPath: string, message: string, imagePaths?: string[], permMode?: string, effort?: string) => {
-		const ws = get(projectPath);
-		if (!ws) return;
+        const msg = JSON.stringify({
+          type: 'user',
+          message: { role: 'user', content: commitPrompt },
+        });
+        proc.stdin?.write(msg + '\n');
 
-		touchActivity(projectPath);
+        // Timeout fallback — if no result in 30s, resolve empty
+        setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            proc.stdout?.removeListener('data', commitHandler);
+            ws.claude.busy = false;
+            ws.claude.suppressForward = false;
+            resolve('');
+          }
+        }, 30000);
+      });
+    }
 
-		if (ws.claude.process) {
-			ws.claude.process.kill();
-			ws.claude.process = null;
-		}
+    // Fallback: one-shot process (no persistent process available or it's busy)
+    return new Promise<string>((resolve) => {
+      const proc = spawn('claude', [
+        '-p', commitPrompt,
+        '--output-format', 'text',
+        '--max-turns', '1',
+      ], {
+        cwd: effectiveCwd,
+        env: { ...process.env },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
 
-		// Prepend image file paths to the prompt so Claude reads them via its Read tool
-		let prompt = message;
-		if (imagePaths && imagePaths.length > 0) {
-			const imageRefs = imagePaths.map(p => `[Attached image: ${p}]`).join('\n');
-			prompt = `${imageRefs}\n\n${message}`;
-		}
-
-		const args = [
-			'-p', prompt,
-			'--output-format', 'stream-json',
-			'--verbose',
-			'--include-partial-messages',
-		];
-
-		if (ws.claude.sessionId) {
-			args.push('--resume', ws.claude.sessionId);
-		}
-
-		// Map permission modes to Claude CLI flags
-		if (permMode === 'bypass') {
-			args.push('--permission-mode', 'bypassPermissions');
-		} else {
-			args.push('--permission-mode', 'acceptEdits');
-		}
-
-		// Effort level
-		if (effort && ['low', 'medium', 'high', 'max'].includes(effort)) {
-			args.push('--effort', effort);
-		}
-
-		safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath });
-
-		ws.claude.process = spawn('claude', args, {
-			cwd: ws.claude.cwd,
-			env: { ...process.env },
-			stdio: ['ignore', 'pipe', 'pipe'],
-		});
-
-		ws.claude.buffer = '';
-
-		ws.claude.process.stdout?.on('data', (data: Buffer) => {
-			ws.claude.buffer += data.toString();
-			const lines = ws.claude.buffer.split('\n');
-			ws.claude.buffer = lines.pop() || '';
-
-			for (const line of lines) {
-				if (!line.trim()) continue;
-				try {
-					const msg = JSON.parse(line);
-					if (msg.session_id && !ws.claude.sessionId) {
-						ws.claude.sessionId = msg.session_id;
-					}
-					safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath });
-				} catch { /* ignore */ }
-			}
-		});
-
-		ws.claude.process.stderr?.on('data', (data: Buffer) => {
-			const text = data.toString().trim();
-			if (text) {
-				safeSend(win, 'claude:message', { type: 'error', text, projectPath: ws.projectPath });
-			}
-		});
-
-		const proc = ws.claude.process;
-		proc.on('exit', () => {
-			if (ws.claude.process !== proc) return; // killed by stop or new send
-			if (ws.claude.buffer.trim()) {
-				try {
-					safeSend(win, 'claude:message', { ...JSON.parse(ws.claude.buffer), projectPath: ws.projectPath });
-				} catch { /* ignore */ }
-			}
-			ws.claude.buffer = '';
-			safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
-			ws.claude.process = null;
-		});
-	});
+      let output = '';
+      proc.stdout?.on('data', (data: Buffer) => { output += data.toString(); });
+      proc.on('exit', () => resolve(output.trim()));
+      proc.on('error', () => resolve(''));
+    });
+  });
 }
 
 export function destroyClaude() {
-	// Now handled by workspace.destroyAll — this is kept for backwards compat during migration
+  // Handled by workspace.destroyAll
 }
