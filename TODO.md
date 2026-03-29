@@ -10,6 +10,13 @@
 - [x] changes in the git pane needs a "commit all" button on the same line as the "CHANGES"
 - [x] add a sparkle lucide icon to the right of the branch on the git pane so it auto creates a commit message
 - [x] the branch on the git pane should be a clickable dropdown (dropup) that allows for users to swap branches or make new ones
-- [ ] add drag and drop for the file viewer pane
+- [x] add drag and drop for the file viewer pane
 - [x] the fullscreen for embedded code blocks needs to look like a proper editor with lines and syntax highlighting
 - [x] switching contexts causes claude to not respond
+- [ ] swapping tabs in the editor without saving deletes the unsaved changes
+- [ ] add support for gemini / codex
+- [ ] we need a way to view usage and effort (and set effort)
+- [ ] if possible instead of outputting json format it like claude cli does
+- [ ] gitignored files/folders should have a dimmer gray text
+- [ ] if the editor is open with a file, add it to the context of the chat
+- [ ] clicking on the image in the chat should show it bigger via like a modal view

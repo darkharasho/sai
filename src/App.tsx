@@ -28,6 +28,8 @@ export default function App() {
   const [activeProjectPath, setActiveProjectPath] = useState<string>('');
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(getStoredPermission);
   const [workspaces, setWorkspaces] = useState<Map<string, WorkspaceContext>>(new Map());
+  // Ref to hold latest messages per workspace without triggering re-renders during streaming
+  const wsMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
 
   const getWorkspace = useCallback((path: string): WorkspaceContext => {
     const existing = workspaces.get(path);
@@ -335,8 +337,23 @@ export default function App() {
     setSidebarOpen(prev => prev === id ? null : id);
   };
 
+  // Flush latest messages from ref into workspace state
+  const flushMessages = useCallback((wsPath: string) => {
+    const latestMessages = wsMessagesRef.current.get(wsPath);
+    if (!latestMessages || latestMessages.length === 0) return;
+    updateWorkspace(wsPath, ws => {
+      const updated = { ...ws.activeSession, messages: latestMessages, updatedAt: Date.now() };
+      if (!updated.title) {
+        const firstUserMsg = latestMessages.find(m => m.role === 'user');
+        if (firstUserMsg) updated.title = firstUserMsg.content.slice(0, 40);
+      }
+      return { ...ws, activeSession: updated };
+    });
+  }, [updateWorkspace]);
+
   const handleNewChat = () => {
     if (!activeProjectPath) return;
+    flushMessages(activeProjectPath);
     persistSession(activeSession);
     updateWorkspace(activeProjectPath, ws => ({
       ...ws,
@@ -346,6 +363,7 @@ export default function App() {
 
   const handleSelectSession = (id: string) => {
     if (!activeProjectPath) return;
+    flushMessages(activeProjectPath);
     persistSession(activeSession);
     const selected = sessions.find(s => s.id === id);
     if (selected) {
@@ -355,28 +373,6 @@ export default function App() {
       }));
     }
   };
-
-  const handleMessagesChange = useCallback((messages: ChatMessage[]) => {
-    if (!activeProjectPath) return;
-    updateWorkspace(activeProjectPath, ws => {
-      const updated = { ...ws.activeSession, messages, updatedAt: Date.now() };
-      if (!updated.title) {
-        const firstUserMsg = messages.find(m => m.role === 'user');
-        if (firstUserMsg) {
-          updated.title = firstUserMsg.content.slice(0, 40);
-        }
-      }
-      return { ...ws, activeSession: updated };
-    });
-  }, [activeProjectPath, updateWorkspace]);
-
-  const handleSessionSave = useCallback(() => {
-    if (!activeProjectPath) return;
-    const ws = workspaces.get(activeProjectPath);
-    if (ws && ws.activeSession.messages.length > 0) {
-      persistSession(ws.activeSession);
-    }
-  }, [activeProjectPath, workspaces, persistSession]);
 
   const handlePermissionChange = (mode: PermissionMode) => {
     setPermissionMode(mode);
@@ -493,20 +489,21 @@ export default function App() {
                   onPermissionChange={handlePermissionChange}
                   initialMessages={ws.activeSession.messages}
                   onMessagesChange={(messages: ChatMessage[]) => {
-                    updateWorkspace(wsPath, w => {
-                      const updated = { ...w.activeSession, messages, updatedAt: Date.now() };
-                      if (!updated.title) {
-                        const firstUserMsg = messages.find(m => m.role === 'user');
-                        if (firstUserMsg) updated.title = firstUserMsg.content.slice(0, 40);
-                      }
-                      return { ...w, activeSession: updated };
-                    });
+                    wsMessagesRef.current.set(wsPath, messages);
                   }}
                   onTurnComplete={() => {
-                    const w = workspaces.get(wsPath);
-                    if (w && w.activeSession.messages.length > 0) {
-                      persistSessionForWorkspace(wsPath, w.activeSession);
-                    }
+                    const latestMessages = wsMessagesRef.current.get(wsPath) || [];
+                    if (latestMessages.length === 0) return;
+                    updateWorkspace(wsPath, w => {
+                      const updated = { ...w.activeSession, messages: latestMessages, updatedAt: Date.now() };
+                      if (!updated.title) {
+                        const firstUserMsg = latestMessages.find(m => m.role === 'user');
+                        if (firstUserMsg) updated.title = firstUserMsg.content.slice(0, 40);
+                      }
+                      const updatedSessions = upsertSession(w.sessions, updated);
+                      saveSessions(wsPath, updatedSessions);
+                      return { ...w, activeSession: updated, sessions: updatedSessions };
+                    });
                   }}
                 />
               </div>
