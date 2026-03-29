@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import UpdateNotification from './UpdateNotification';
+import CloseWorkspaceModal from './CloseWorkspaceModal';
 
 interface WorkspaceInfo {
   projectPath: string;
@@ -17,6 +18,8 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
   const [workspaceList, setWorkspaceList] = useState<WorkspaceInfo[]>([]);
   const [version, setVersion] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [overflowOpen, setOverflowOpen] = useState<string | null>(null);
+  const [closeTarget, setCloseTarget] = useState<string | null>(null);
 
   useEffect(() => {
     window.sai.updateGetVersion().then((v: string) => setVersion(v));
@@ -38,6 +41,10 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
     }
   }, [open]);
 
+  useEffect(() => {
+    if (!open) setOverflowOpen(null);
+  }, [open]);
+
   // Close dropdown on outside click
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -48,6 +55,18 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
     if (open) document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, [open]);
+
+  const handleSuspend = async (path: string) => {
+    setOverflowOpen(null);
+    await window.sai.workspaceSuspend?.(path);
+  };
+
+  const handleCloseConfirm = async () => {
+    if (!closeTarget) return;
+    await window.sai.workspaceClose?.(closeTarget);
+    setCloseTarget(null);
+    setOpen(false);
+  };
 
   const handleOpenNew = async () => {
     const folder = await window.sai.selectFolder();
@@ -80,15 +99,36 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
                     <>
                       <div className="dropdown-label">Active</div>
                       {active.map(w => (
-                        <button
-                          key={w.projectPath}
-                          className={`dropdown-item workspace-item ${w.projectPath === projectPath ? 'active' : ''}`}
-                          onClick={() => { onProjectChange(w.projectPath); setOpen(false); }}
-                        >
-                          <span className="workspace-status-dot workspace-dot-active" />
-                          <span className="dropdown-item-name">{w.projectPath.split('/').pop()}</span>
-                          <span className="dropdown-item-path">{w.projectPath}</span>
-                        </button>
+                        <div key={w.projectPath} className="workspace-row-wrapper">
+                          <button
+                            className={`dropdown-item workspace-item ${w.projectPath === projectPath ? 'active' : ''}`}
+                            onClick={() => { onProjectChange(w.projectPath); setOpen(false); }}
+                          >
+                            <span className="workspace-status-dot workspace-dot-active" />
+                            <span className="dropdown-item-name">{w.projectPath.split('/').pop()}</span>
+                            <span className="dropdown-item-path">{w.projectPath}</span>
+                          </button>
+                          <button
+                            className={`workspace-overflow-btn${overflowOpen === w.projectPath ? ' open' : ''}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOverflowOpen(overflowOpen === w.projectPath ? null : w.projectPath);
+                            }}
+                          >···</button>
+                          {overflowOpen === w.projectPath && (
+                            <div className="workspace-submenu">
+                              <button className="workspace-submenu-item" onClick={() => handleSuspend(w.projectPath)}>
+                                ⏸ Suspend
+                              </button>
+                              <button
+                                className="workspace-submenu-item danger"
+                                onClick={() => { setOverflowOpen(null); setCloseTarget(w.projectPath); }}
+                              >
+                                ✕ Close
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       ))}
                     </>
                   )}
@@ -140,6 +180,13 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
         version === 'DEV'
           ? <span className="titlebar-dev-pill">DEV</span>
           : <span className="titlebar-version" onClick={() => window.sai.updateCheck()} title="Check for updates">v{version}</span>
+      )}
+      {closeTarget && (
+        <CloseWorkspaceModal
+          projectPath={closeTarget}
+          onConfirm={handleCloseConfirm}
+          onCancel={() => setCloseTarget(null)}
+        />
       )}
       <style>{`
         .titlebar {
@@ -288,6 +335,71 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
         }
         .workspace-dot-suspended {
           background: #d4a72c;
+        }
+        .workspace-row-wrapper {
+          position: relative;
+        }
+        .workspace-row-wrapper .dropdown-item {
+          padding-right: 36px;
+        }
+        .workspace-overflow-btn {
+          position: absolute;
+          right: 8px;
+          top: 50%;
+          transform: translateY(-50%);
+          background: none;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          font-size: 14px;
+          letter-spacing: 1px;
+          padding: 2px 4px;
+          border-radius: 3px;
+          opacity: 0;
+          -webkit-app-region: no-drag;
+        }
+        .workspace-row-wrapper:hover .workspace-overflow-btn,
+        .workspace-overflow-btn.open {
+          opacity: 1;
+        }
+        .workspace-overflow-btn:hover {
+          background: var(--bg-secondary);
+          color: var(--text);
+        }
+        .workspace-submenu {
+          position: absolute;
+          right: 8px;
+          top: calc(100% - 4px);
+          z-index: 200;
+          background: var(--bg-elevated);
+          border: 1px solid var(--border);
+          border-radius: 6px;
+          padding: 4px 0;
+          min-width: 120px;
+          box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+        }
+        .workspace-submenu-item {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          width: 100%;
+          padding: 7px 12px;
+          background: none;
+          border: none;
+          color: var(--text);
+          cursor: pointer;
+          font-size: 12px;
+          text-align: left;
+          -webkit-app-region: no-drag;
+        }
+        .workspace-submenu-item:hover {
+          background: var(--bg-hover);
+        }
+        .workspace-submenu-item.danger {
+          color: #f87171;
+        }
+        .workspace-submenu-item.danger:hover {
+          background: rgba(248,113,113,0.08);
         }
       `}</style>
     </div>
