@@ -6,3 +6,4 @@ electron-dist
 *.AppImage
 .superpowers/
 .env
+.worktrees/
