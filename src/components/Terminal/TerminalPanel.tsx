@@ -94,6 +94,10 @@ export default function TerminalPanel({ projectPath }: { projectPath: string }) 
           background: var(--bg-mid);
           overflow: hidden;
         }
+        .collapsible-terminal .terminal-panel {
+          height: 100%;
+          border-top: none;
+        }
         .terminal-header {
           padding: 6px 12px;
           font-size: 11px;

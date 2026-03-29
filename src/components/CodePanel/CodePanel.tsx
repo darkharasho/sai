@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { X } from 'lucide-react';
 import type { OpenFile } from '../../types';
 import DiffViewer from './DiffViewer';
+import MonacoEditor from '../FileExplorer/MonacoEditor';
 
 interface CodePanelProps {
   openFiles: OpenFile[];
@@ -11,6 +12,7 @@ interface CodePanelProps {
   onClose: (path: string) => void;
   onCloseAll: () => void;
   onDiffModeChange: (path: string, mode: 'unified' | 'split') => void;
+  onEditorSave: (filePath: string, content: string) => Promise<void>;
 }
 
 export default function CodePanel({
@@ -21,8 +23,9 @@ export default function CodePanel({
   onClose,
   onCloseAll,
   onDiffModeChange,
+  onEditorSave,
 }: CodePanelProps) {
-  const activeFile = openFiles.find(f => f.file.path === activeFilePath);
+  const activeFile = openFiles.find(f => f.path === activeFilePath);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -35,6 +38,8 @@ export default function CodePanel({
   }, [activeFilePath, onClose]);
 
   if (!activeFile) return null;
+
+  const isDiff = activeFile.viewMode === 'diff';
 
   return (
     <div style={{
@@ -58,17 +63,17 @@ export default function CodePanel({
           flex: 1,
           overflow: 'hidden',
         }}>
-          {openFiles.map(({ file }) => {
-            const isActive = file.path === activeFilePath;
-            const fileName = file.path.split('/').pop() ?? file.path;
+          {openFiles.map((f) => {
+            const isActive = f.path === activeFilePath;
+            const fileName = f.path.split('/').pop() ?? f.path;
             return (
               <div
-                key={file.path}
-                onClick={() => onActivate(file.path)}
+                key={f.path}
+                onClick={() => onActivate(f.path)}
                 onMouseDown={(e) => {
                   if (e.button === 1) {
                     e.preventDefault();
-                    onClose(file.path);
+                    onClose(f.path);
                   }
                 }}
                 style={{
@@ -95,7 +100,7 @@ export default function CodePanel({
                   {fileName}
                 </span>
                 <button
-                  onClick={(e) => { e.stopPropagation(); onClose(file.path); }}
+                  onClick={(e) => { e.stopPropagation(); onClose(f.path); }}
                   style={{
                     background: 'none',
                     border: 'none',
@@ -159,43 +164,65 @@ export default function CodePanel({
           fontSize: 11,
           color: 'var(--text-muted)',
         }}>
-          {activeFile.file.path}
+          {activeFile.path}
         </span>
 
-        {/* Unified / Split toggle */}
-        <div style={{
-          display: 'flex',
-          borderRadius: 4,
-          overflow: 'hidden',
-          border: '1px solid var(--border)',
-        }}>
-          {(['unified', 'split'] as const).map((m) => (
-            <button
-              key={m}
-              onClick={() => onDiffModeChange(activeFilePath, m)}
-              style={{
-                background: activeFile.diffMode === m ? 'var(--bg-hover)' : 'transparent',
-                color: activeFile.diffMode === m ? 'var(--text)' : 'var(--text-muted)',
-                border: 'none',
-                padding: '3px 10px',
-                fontSize: 11,
-                cursor: 'pointer',
-                textTransform: 'capitalize' as const,
-              }}
-            >
-              {m}
-            </button>
-          ))}
-        </div>
+        {isDiff && (
+          <div style={{
+            display: 'flex',
+            borderRadius: 4,
+            overflow: 'hidden',
+            border: '1px solid var(--border)',
+          }}>
+            {(['unified', 'split'] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => onDiffModeChange(activeFilePath, m)}
+                style={{
+                  background: activeFile.diffMode === m ? 'var(--bg-hover)' : 'transparent',
+                  color: activeFile.diffMode === m ? 'var(--text)' : 'var(--text-muted)',
+                  border: 'none',
+                  padding: '3px 10px',
+                  fontSize: 11,
+                  cursor: 'pointer',
+                  textTransform: 'capitalize' as const,
+                }}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {!isDiff && (
+          <span style={{
+            color: 'var(--text-muted)',
+            fontSize: 11,
+            padding: '3px 8px',
+            border: '1px solid var(--border)',
+            borderRadius: 4,
+          }}>
+            Ctrl+S to save
+          </span>
+        )}
       </div>
 
-      {/* Diff content */}
-      <DiffViewer
-        projectPath={projectPath}
-        filePath={activeFile.file.path}
-        staged={activeFile.file.staged}
-        mode={activeFile.diffMode}
-      />
+      {/* Content */}
+      {isDiff && activeFile.file ? (
+        <DiffViewer
+          projectPath={projectPath}
+          filePath={activeFile.file.path}
+          staged={activeFile.file.staged}
+          mode={activeFile.diffMode ?? 'unified'}
+        />
+      ) : activeFile.viewMode === 'editor' && activeFile.content !== undefined ? (
+        <MonacoEditor
+          key={activeFile.path}
+          filePath={activeFile.path}
+          content={activeFile.content}
+          onSave={onEditorSave}
+        />
+      ) : null}
     </div>
   );
 }

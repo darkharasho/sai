@@ -3,12 +3,12 @@ import NavBar from './components/NavBar';
 import ChatPanel from './components/Chat/ChatPanel';
 import TerminalPanel from './components/Terminal/TerminalPanel';
 import GitSidebar from './components/Git/GitSidebar';
+import FileExplorerSidebar from './components/FileExplorer/FileExplorerSidebar';
 import TitleBar from './components/TitleBar';
 import CodePanel from './components/CodePanel/CodePanel';
 import { loadSessions, saveSessions, createSession, upsertSession } from './sessions';
 import type { ChatSession, ChatMessage, GitFile, OpenFile } from './types';
-import FileExplorerSidebar from './components/FileExplorer/FileExplorerSidebar';
-import EditorModal from './components/FileExplorer/EditorModal';
+import { MessageSquare, TerminalSquare } from 'lucide-react';
 
 type PermissionMode = 'default' | 'bypass';
 
@@ -39,26 +39,45 @@ export default function App() {
 
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
-  const [editorModal, setEditorModal] = useState<{ path: string; content: string } | null>(null);
+  const [chatExpanded, setChatExpanded] = useState(false);
+  const [terminalExpanded, setTerminalExpanded] = useState(false);
 
+  // Open a git diff file in tabs
   const handleFileClick = useCallback((file: GitFile) => {
     setOpenFiles(prev => {
-      const exists = prev.some(f => f.file.path === file.path);
+      const exists = prev.some(f => f.path === file.path);
       if (exists) return prev;
-      return [...prev, { file, diffMode: 'unified' }];
+      return [...prev, { path: file.path, viewMode: 'diff', file, diffMode: 'unified' }];
     });
     setActiveFilePath(file.path);
   }, []);
 
+  // Open a file from the explorer in tabs with Monaco editor
+  const handleFileOpen = useCallback(async (filePath: string) => {
+    try {
+      const content = await window.sai.fsReadFile(filePath) as string;
+      setOpenFiles(prev => {
+        const exists = prev.some(f => f.path === filePath);
+        if (exists) return prev;
+        return [...prev, { path: filePath, viewMode: 'editor', content }];
+      });
+      setActiveFilePath(filePath);
+    } catch {
+      // File couldn't be read (binary, permissions, etc.)
+    }
+  }, []);
+
   const handleFileClose = useCallback((path: string) => {
     setOpenFiles(prev => {
-      const next = prev.filter(f => f.file.path !== path);
+      const next = prev.filter(f => f.path !== path);
       if (next.length === 0) {
         setActiveFilePath(null);
+        setChatExpanded(false);
+        setTerminalExpanded(false);
       } else if (path === activeFilePath) {
-        const idx = prev.findIndex(f => f.file.path === path);
+        const idx = prev.findIndex(f => f.path === path);
         const newActive = next[Math.min(idx, next.length - 1)];
-        setActiveFilePath(newActive.file.path);
+        setActiveFilePath(newActive.path);
       }
       return next;
     });
@@ -67,21 +86,14 @@ export default function App() {
   const handleCloseAllFiles = useCallback(() => {
     setOpenFiles([]);
     setActiveFilePath(null);
+    setChatExpanded(false);
+    setTerminalExpanded(false);
   }, []);
 
   const handleDiffModeChange = useCallback((path: string, mode: 'unified' | 'split') => {
     setOpenFiles(prev =>
-      prev.map(f => f.file.path === path ? { ...f, diffMode: mode } : f)
+      prev.map(f => f.path === path ? { ...f, diffMode: mode } : f)
     );
-  }, []);
-
-  const handleFileOpen = useCallback(async (filePath: string) => {
-    try {
-      const content = await window.sai.fsReadFile(filePath) as string;
-      setEditorModal({ path: filePath, content });
-    } catch {
-      // File couldn't be read (binary, permissions, etc.)
-    }
   }, []);
 
   const handleEditorSave = useCallback(async (filePath: string, content: string) => {
@@ -101,13 +113,11 @@ export default function App() {
   };
 
   const handleNewChat = () => {
-    // Save current session before creating new one
     persistSession(activeSession);
     setActiveSession(createSession());
   };
 
   const handleSelectSession = (id: string) => {
-    // Save current session first
     persistSession(activeSession);
     const selected = sessions.find(s => s.id === id);
     if (selected) {
@@ -118,7 +128,6 @@ export default function App() {
   const handleMessagesChange = useCallback((messages: ChatMessage[]) => {
     setActiveSession(prev => {
       const updated = { ...prev, messages, updatedAt: Date.now() };
-      // Set title from first user message
       if (!updated.title) {
         const firstUserMsg = messages.find(m => m.role === 'user');
         if (firstUserMsg) {
@@ -129,7 +138,6 @@ export default function App() {
     });
   }, []);
 
-  // Persist active session whenever it changes and has messages
   const handleSessionSave = useCallback(() => {
     setActiveSession(prev => {
       if (prev.messages.length > 0) {
@@ -143,6 +151,8 @@ export default function App() {
     setPermissionMode(mode);
     localStorage.setItem('sai-permission-mode', mode);
   };
+
+  const hasFiles = !!activeFilePath;
 
   return (
     <div className="app">
@@ -159,16 +169,86 @@ export default function App() {
         {sidebarOpen === 'files' && <FileExplorerSidebar projectPath={projectPath} onFileOpen={handleFileOpen} />}
         {sidebarOpen === 'git' && <GitSidebar projectPath={projectPath} onFileClick={handleFileClick} />}
         <div className="main-content">
-          {activeFilePath ? (
-            <CodePanel
-              openFiles={openFiles}
-              activeFilePath={activeFilePath}
-              projectPath={projectPath}
-              onActivate={setActiveFilePath}
-              onClose={handleFileClose}
-              onCloseAll={handleCloseAllFiles}
-              onDiffModeChange={handleDiffModeChange}
-            />
+          {hasFiles ? (
+            <>
+              {/* Collapsible Chat — top */}
+              <div
+                className={`collapsible-panel collapsible-chat ${chatExpanded ? 'expanded' : 'collapsed'}`}
+              >
+                {chatExpanded ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+                    <div
+                      className="collapsible-bar"
+                      onClick={() => setChatExpanded(false)}
+                    >
+                      <MessageSquare size={12} />
+                      <span>Chat</span>
+                      <span className="collapse-hint">click to collapse</span>
+                    </div>
+                    <div style={{ flex: 1, overflow: 'hidden' }}>
+                      <ChatPanel
+                        key={activeSession.id}
+                        projectPath={projectPath}
+                        permissionMode={permissionMode}
+                        onPermissionChange={handlePermissionChange}
+                        initialMessages={activeSession.messages}
+                        onMessagesChange={handleMessagesChange}
+                        onTurnComplete={handleSessionSave}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    className="collapsible-bar"
+                    onClick={() => setChatExpanded(true)}
+                  >
+                    <MessageSquare size={12} />
+                    <span>Chat</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Editor — middle */}
+              <CodePanel
+                openFiles={openFiles}
+                activeFilePath={activeFilePath}
+                projectPath={projectPath}
+                onActivate={setActiveFilePath}
+                onClose={handleFileClose}
+                onCloseAll={handleCloseAllFiles}
+                onDiffModeChange={handleDiffModeChange}
+                onEditorSave={handleEditorSave}
+              />
+
+              {/* Collapsible Terminal — bottom */}
+              <div
+                className={`collapsible-panel collapsible-terminal ${terminalExpanded ? 'expanded' : 'collapsed'}`}
+              >
+                {terminalExpanded ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+                    <div
+                      className="collapsible-bar"
+                      onClick={() => setTerminalExpanded(false)}
+                    >
+                      <TerminalSquare size={12} />
+                      <span>Terminal</span>
+                      <span className="collapse-hint">click to collapse</span>
+                    </div>
+                    <div style={{ flex: 1, overflow: 'hidden' }}>
+                      <TerminalPanel projectPath={projectPath} />
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    className="collapsible-bar"
+                    onClick={() => setTerminalExpanded(true)}
+                  >
+                    <TerminalSquare size={12} />
+                    <span>Terminal</span>
+                  </div>
+                )}
+              </div>
+            </>
           ) : (
             <>
               <ChatPanel
@@ -185,14 +265,59 @@ export default function App() {
           )}
         </div>
       </div>
-      {editorModal && (
-        <EditorModal
-          filePath={editorModal.path}
-          content={editorModal.content}
-          onSave={handleEditorSave}
-          onClose={() => setEditorModal(null)}
-        />
-      )}
+
+      <style>{`
+        .collapsible-panel {
+          border-top: 1px solid var(--border);
+          overflow: hidden;
+          transition: height 0.2s ease, flex 0.2s ease;
+          flex-shrink: 0;
+        }
+        .collapsible-panel.collapsed {
+          height: 32px;
+        }
+        .collapsible-chat.expanded {
+          flex: 1;
+          height: auto;
+          min-height: 150px;
+          max-height: 50%;
+        }
+        .collapsible-terminal.expanded {
+          height: 280px;
+        }
+        .collapsible-bar {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 0 12px;
+          height: 32px;
+          font-size: 11px;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          color: var(--text-muted);
+          cursor: pointer;
+          user-select: none;
+          flex-shrink: 0;
+          background: var(--bg-secondary);
+        }
+        .collapsible-bar:hover {
+          color: var(--text-secondary);
+          background: var(--bg-hover);
+        }
+        .collapse-hint {
+          margin-left: auto;
+          font-size: 10px;
+          font-weight: 400;
+          text-transform: none;
+          letter-spacing: 0;
+          opacity: 0;
+          transition: opacity 0.15s;
+        }
+        .collapsible-bar:hover .collapse-hint {
+          opacity: 0.5;
+        }
+      `}</style>
     </div>
   );
 }

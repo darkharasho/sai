@@ -28,8 +28,13 @@ export interface GitFile {
 }
 
 export interface OpenFile {
-  file: GitFile;
-  diffMode: 'unified' | 'split';
+  path: string;
+  viewMode: 'diff' | 'editor';
+  // diff mode fields
+  file?: GitFile;
+  diffMode?: 'unified' | 'split';
+  // editor mode fields
+  content?: string;
 }
 
 export interface GitCommit {

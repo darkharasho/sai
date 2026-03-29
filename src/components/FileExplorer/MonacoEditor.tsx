@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { X } from 'lucide-react';
 import * as monaco from 'monaco-editor';
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
@@ -63,19 +62,19 @@ const EXT_TO_LANG: Record<string, string> = {
   '.vue': 'html', '.svelte': 'html', '.graphql': 'graphql', '.gql': 'graphql',
 };
 
-function detectLanguage(filePath: string): string {
+export function detectLanguage(filePath: string): string {
   const ext = '.' + filePath.split('.').pop()?.toLowerCase();
   return EXT_TO_LANG[ext] ?? 'plaintext';
 }
 
-interface EditorModalProps {
+interface MonacoEditorProps {
   filePath: string;
   content: string;
   onSave: (filePath: string, content: string) => Promise<void>;
-  onClose: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
-export default function EditorModal({ filePath, content, onSave, onClose }: EditorModalProps) {
+export default function MonacoEditor({ filePath, content, onSave, onDirtyChange }: MonacoEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -89,19 +88,13 @@ export default function EditorModal({ filePath, content, onSave, onClose }: Edit
     try {
       await onSave(filePath, currentContent);
       setDirty(false);
+      onDirtyChange?.(false);
       setSaveError(false);
     } catch {
       setSaveError(true);
       setTimeout(() => setSaveError(false), 3000);
     }
-  }, [filePath, onSave]);
-
-  const handleClose = useCallback(() => {
-    if (dirty) {
-      if (!confirm('You have unsaved changes. Close anyway?')) return;
-    }
-    onClose();
-  }, [dirty, onClose]);
+  }, [filePath, onSave, onDirtyChange]);
 
   // Create editor on mount
   useEffect(() => {
@@ -126,128 +119,43 @@ export default function EditorModal({ filePath, content, onSave, onClose }: Edit
 
     editorRef.current = editor;
 
-    // Track dirty state
     editor.onDidChangeModelContent(() => {
       setDirty(true);
+      onDirtyChange?.(true);
     });
 
-    // Track cursor position
     editor.onDidChangeCursorPosition(e => {
       setCursorPosition({ line: e.position.lineNumber, column: e.position.column });
     });
 
-    // Ctrl+S to save
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
       handleSave();
     });
 
-    // Focus editor
     editor.focus();
 
     return () => {
       editor.dispose();
     };
-  }, []);  // Only run on mount
-
-  // Escape to close (outside Monaco so it doesn't interfere with editor keybindings)
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      // Only handle Escape if focus is NOT inside the Monaco editor
-      if (e.key === 'Escape' && !containerRef.current?.contains(document.activeElement)) {
-        handleClose();
-      }
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [handleClose]);
-
-  const fileName = filePath.split('/').pop() ?? filePath;
+  }, []);
 
   return (
-    <div className="editor-modal-overlay" onClick={handleClose}>
-      <div className="editor-modal-content" onClick={e => e.stopPropagation()}>
-        {/* Header */}
-        <div className="editor-modal-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {dirty && <span className="editor-dirty-dot" />}
-            <span className="editor-modal-title">{filePath}</span>
-            {saveError && <span style={{ color: 'var(--red)', fontSize: 11 }}>Save failed</span>}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ color: 'var(--text-muted)', fontSize: 11, padding: '3px 8px', border: '1px solid var(--border)', borderRadius: 4 }}>
-              Ctrl+S to save
-            </span>
-            <button className="editor-modal-close" onClick={handleClose}><X size={18} /></button>
-          </div>
-        </div>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div ref={containerRef} style={{ flex: 1, overflow: 'hidden' }} />
 
-        {/* Monaco Editor Container */}
-        <div ref={containerRef} style={{ flex: 1, overflow: 'hidden' }} />
-
-        {/* Status Bar */}
-        <div className="editor-modal-statusbar">
+      {/* Status Bar */}
+      <div className="monaco-statusbar">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {dirty && <span className="monaco-dirty-dot" />}
           <span>{language}</span>
-          <span>Ln {cursorPosition.line}, Col {cursorPosition.column}</span>
-          <span>UTF-8</span>
+          {saveError && <span style={{ color: 'var(--red)' }}>Save failed</span>}
         </div>
+        <span>Ln {cursorPosition.line}, Col {cursorPosition.column}</span>
+        <span>UTF-8</span>
       </div>
 
       <style>{`
-        .editor-modal-overlay {
-          position: fixed;
-          inset: 0;
-          background: rgba(0,0,0,0.7);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          z-index: 1000;
-          backdrop-filter: blur(2px);
-        }
-        .editor-modal-content {
-          background: var(--bg-primary);
-          border: 1px solid var(--border);
-          border-radius: 10px;
-          width: 90vw;
-          height: 85vh;
-          display: flex;
-          flex-direction: column;
-          overflow: hidden;
-          box-shadow: 0 16px 48px rgba(0,0,0,0.5);
-        }
-        .editor-modal-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 8px 16px;
-          border-bottom: 1px solid var(--border);
-          flex-shrink: 0;
-        }
-        .editor-modal-title {
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 13px;
-          color: var(--text);
-        }
-        .editor-dirty-dot {
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
-          background: var(--accent);
-          flex-shrink: 0;
-        }
-        .editor-modal-close {
-          background: none;
-          border: none;
-          color: var(--text-muted);
-          cursor: pointer;
-          padding: 4px;
-          border-radius: 4px;
-          display: flex;
-        }
-        .editor-modal-close:hover {
-          color: var(--text);
-          background: var(--bg-hover);
-        }
-        .editor-modal-statusbar {
+        .monaco-statusbar {
           display: flex;
           align-items: center;
           justify-content: space-between;
@@ -256,6 +164,14 @@ export default function EditorModal({ filePath, content, onSave, onClose }: Edit
           font-family: 'JetBrains Mono', monospace;
           font-size: 11px;
           color: var(--text-muted);
+          flex-shrink: 0;
+          background: var(--bg-secondary);
+        }
+        .monaco-dirty-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: var(--accent);
           flex-shrink: 0;
         }
       `}</style>
