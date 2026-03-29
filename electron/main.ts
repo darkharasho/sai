@@ -6,7 +6,7 @@ import { registerClaudeHandlers } from './services/claude';
 import { registerGitHandlers } from './services/git';
 import { registerFsHandlers } from './services/fs';
 import { registerUpdater } from './services/updater';
-import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove } from './services/workspace';
+import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove, suspend } from './services/workspace';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -61,6 +61,10 @@ function createWindow() {
 
   ipcMain.handle('workspace:close', (_event, projectPath: string) => {
     remove(projectPath, mainWindow!);
+  });
+
+  ipcMain.handle('workspace:suspend', (_event, projectPath: string) => {
+    suspend(projectPath, mainWindow!);
   });
 
   // Settings persistence (works across dev/prod)
