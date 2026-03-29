@@ -102,8 +102,8 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 		const effectiveCwd = cwd || ws?.claude.cwd || process.env.HOME || '/';
 
 		// Get the diff upfront so Claude doesn't need tool calls
-		const diff = await new Promise<string>((resolve) => {
-			const diffProc = spawn('git', ['diff', '--staged'], {
+		const getDiff = (args: string[]) => new Promise<string>((resolve) => {
+			const diffProc = spawn('git', ['diff', ...args], {
 				cwd: effectiveCwd,
 				stdio: ['ignore', 'pipe', 'pipe'],
 			});
@@ -113,6 +113,9 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 			diffProc.on('error', () => resolve(''));
 		});
 
+		// Check staged first, fall back to unstaged (commit auto-stages)
+		let diff = await getDiff(['--staged']);
+		if (!diff) diff = await getDiff([]);
 		if (!diff) return '';
 
 		// Truncate very large diffs to keep the request fast

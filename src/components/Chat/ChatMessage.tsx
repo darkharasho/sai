@@ -25,7 +25,22 @@ export default function ChatMessage({ message }: { message: ChatMessageType }) {
             ? <span className="chat-msg-dot chat-msg-claude" />
             : <Circle size={8} fill={dotColor} stroke={dotColor} className="chat-msg-dot" />}
           <div className="chat-msg-body">
-            <ReactMarkdown rehypePlugins={[rehypeHighlight]}>{message.content}</ReactMarkdown>
+            <ReactMarkdown
+              rehypePlugins={[rehypeHighlight]}
+              components={{
+                a: ({ href, children }) => (
+                  <a
+                    href={href}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      if (href) window.sai.openExternal(href);
+                    }}
+                  >
+                    {children}
+                  </a>
+                ),
+              }}
+            >{message.content}</ReactMarkdown>
             {message.images && message.images.length > 0 && (
               <div className="chat-msg-images">
                 {message.images.map((src, i) => (
@@ -73,6 +88,8 @@ export default function ChatMessage({ message }: { message: ChatMessageType }) {
           border-radius: 3px;
           font-size: 12px;
         }
+        .chat-msg-body a { color: var(--accent); text-decoration: underline; cursor: pointer; }
+        .chat-msg-body a:hover { opacity: 0.8; }
         .chat-msg-body pre code { background: none; padding: 0; }
         .chat-msg-body pre {
           background: var(--bg-secondary);

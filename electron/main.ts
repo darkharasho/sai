@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { registerTerminalHandlers, destroyAllTerminals } from './services/pty';
@@ -141,6 +141,12 @@ function createWindow() {
   ipcMain.handle('project:openRecent', (_event, projectPath: string) => {
     addRecentProject(projectPath);
     return projectPath;
+  });
+
+  ipcMain.handle('shell:openExternal', (_event, url: string) => {
+    if (/^https?:\/\//i.test(url)) {
+      return shell.openExternal(url);
+    }
   });
 }
 

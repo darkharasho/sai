@@ -14,7 +14,7 @@
 - [x] the fullscreen for embedded code blocks needs to look like a proper editor with lines and syntax highlighting
 - [x] switching contexts causes claude to not respond
 - [x] swapping tabs in the editor without saving deletes the unsaved changes
-- [ ] links in chat need to actually be links. links in chat and term need to open in the user's default browser not a separate electron window
+- [x] links in chat need to actually be links. links in chat and term need to open in the user's default browser not a separate electron window
 - [ ] add support for gemini / codex
 - [x] we need a way to view usage and effort (and set effort)
 - [ ] if possible instead of outputting json format it like claude cli does

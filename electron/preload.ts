@@ -81,4 +81,5 @@ contextBridge.exposeInMainWorld('sai', {
   selectFolder: () => ipcRenderer.invoke('project:selectFolder'),
   getRecentProjects: () => ipcRenderer.invoke('project:getRecent'),
   openRecentProject: (path: string) => ipcRenderer.invoke('project:openRecent', path),
+  openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
 });

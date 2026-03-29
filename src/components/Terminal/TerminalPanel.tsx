@@ -38,7 +38,9 @@ export default function TerminalPanel({ projectPath }: { projectPath: string }) 
 
     const fit = new FitAddon();
     xterm.loadAddon(fit);
-    xterm.loadAddon(new WebLinksAddon());
+    xterm.loadAddon(new WebLinksAddon((_event, url) => {
+      window.sai.openExternal(url);
+    }));
     xterm.open(termRef.current);
     fit.fit();
 
