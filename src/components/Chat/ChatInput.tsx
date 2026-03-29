@@ -20,7 +20,7 @@ interface ChatInputProps {
   onEffortChange: (level: EffortLevel) => void;
   modelChoice: ModelChoice;
   onModelChange: (model: ModelChoice) => void;
-  contextUsage?: { used: number; total: number };
+  contextUsage?: { used: number; total: number; inputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; outputTokens: number };
   sessionUsage?: { inputTokens: number; outputTokens: number };
   rateLimits?: Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number; utilization?: number }>;
   activeFilePath?: string | null;

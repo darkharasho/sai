@@ -116,7 +116,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const [isStreaming, setIsStreaming] = useState(false);
   const [ready, setReady] = useState(false);
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
-  const [contextUsage, setContextUsage] = useState<{ used: number; total: number }>({ used: 0, total: 1000000 });
+  const [contextUsage, setContextUsage] = useState<{ used: number; total: number; inputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; outputTokens: number }>({ used: 0, total: 1000000, inputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, outputTokens: 0 });
   const [sessionUsage, setSessionUsage] = useState<{ inputTokens: number; outputTokens: number }>({ inputTokens: 0, outputTokens: 0 });
   const [rateLimits, setRateLimits] = useState<Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number; utilization?: number }>>(new Map());
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -202,7 +202,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           timestamp: Date.now(),
         }]);
         // Reset context meter — the next result message will have accurate numbers
-        setContextUsage(prev => ({ used: Math.round(prev.used * 0.3), total: prev.total }));
+        setContextUsage(prev => ({ ...prev, used: Math.round(prev.used * 0.3) }));
         return;
       }
 
@@ -288,10 +288,11 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       if (msg.type === 'result') {
         // Update context usage
         if (msg.usage) {
-          const used = (msg.usage.input_tokens || 0) +
-            (msg.usage.cache_read_input_tokens || 0) +
-            (msg.usage.cache_creation_input_tokens || 0) +
-            (msg.usage.output_tokens || 0);
+          const inputTokens = msg.usage.input_tokens || 0;
+          const cacheReadTokens = msg.usage.cache_read_input_tokens || 0;
+          const cacheCreationTokens = msg.usage.cache_creation_input_tokens || 0;
+          const outputTokens = msg.usage.output_tokens || 0;
+          const used = inputTokens + cacheReadTokens + cacheCreationTokens + outputTokens;
           // Use the CLI-reported context window, but fall back to known model sizes
           // since the CLI may report incorrect values (e.g., 200K for 1M-context models)
           const modelUsage = msg.modelUsage || {};
@@ -301,7 +302,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           if (!total || used > total) {
             total = 1000000; // Default to 1M for extended context models
           }
-          setContextUsage({ used, total });
+          setContextUsage({ used, total, inputTokens, cacheReadTokens, cacheCreationTokens, outputTokens });
         }
         // Accumulate session usage
         if (msg.usage) {
