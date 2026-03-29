@@ -1,5 +1,6 @@
 import * as pty from 'node-pty';
 import { BrowserWindow, ipcMain } from 'electron';
+import { get, touchActivity } from './workspace';
 
 function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
 	try {
@@ -11,7 +12,10 @@ function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
 	}
 }
 
-const terminals = new Map<number, pty.IPty>();
+// Global map for ID→terminal lookup (IDs are globally unique)
+const allTerminals = new Map<number, pty.IPty>();
+// Reverse lookup: terminal ID → project path
+const terminalOwner = new Map<number, string>();
 let nextId = 1;
 
 export function registerTerminalHandlers(win: BrowserWindow) {
@@ -23,22 +27,43 @@ export function registerTerminalHandlers(win: BrowserWindow) {
       cwd: cwd || process.env.HOME || '/',
       env: process.env as Record<string, string>,
     });
-    terminals.set(id, term);
+
+    allTerminals.set(id, term);
+
+    // Register with workspace if one exists for this cwd
+    const ws = get(cwd);
+    if (ws) {
+      ws.terminals.set(id, term);
+      terminalOwner.set(id, cwd);
+    }
+
     term.onData((data) => { safeSend(win, 'terminal:data', id, data); });
-    term.onExit(() => { terminals.delete(id); });
+    term.onExit(() => {
+      allTerminals.delete(id);
+      const owner = terminalOwner.get(id);
+      if (owner) {
+        const ownerWs = get(owner);
+        ownerWs?.terminals.delete(id);
+        terminalOwner.delete(id);
+      }
+    });
     return id;
   });
 
   ipcMain.on('terminal:write', (_event, id: number, data: string) => {
-    terminals.get(id)?.write(data);
+    allTerminals.get(id)?.write(data);
+    // Update activity for owning workspace
+    const owner = terminalOwner.get(id);
+    if (owner) touchActivity(owner);
   });
 
   ipcMain.on('terminal:resize', (_event, id: number, cols: number, rows: number) => {
-    terminals.get(id)?.resize(cols, rows);
+    allTerminals.get(id)?.resize(cols, rows);
   });
 }
 
 export function destroyAllTerminals() {
-  for (const term of terminals.values()) { term.kill(); }
-  terminals.clear();
+  for (const term of allTerminals.values()) { term.kill(); }
+  allTerminals.clear();
+  terminalOwner.clear();
 }
