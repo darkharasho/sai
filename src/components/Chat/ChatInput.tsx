@@ -554,6 +554,27 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
                         label="Context"
                         sublabel={`${formatTokens(contextUsage.used)} / ${formatTokens(contextUsage.total)}`}
                       />
+                      {contextUsage.used > 0 && (() => {
+                        const totalInput = contextUsage.inputTokens + contextUsage.cacheReadTokens + contextUsage.cacheCreationTokens;
+                        const cacheHitPct = totalInput > 0 ? Math.round((contextUsage.cacheReadTokens / totalInput) * 100) : 0;
+                        return (
+                          <div className="context-breakdown">
+                            <div className="context-breakdown-row">
+                              <span className="context-breakdown-label">Cache hit</span>
+                              <span className="context-breakdown-value">{formatTokens(contextUsage.cacheReadTokens)}</span>
+                              <span className="context-breakdown-pct">({cacheHitPct}%)</span>
+                            </div>
+                            <div className="context-breakdown-row">
+                              <span className="context-breakdown-label">New input</span>
+                              <span className="context-breakdown-value">{formatTokens(contextUsage.inputTokens + contextUsage.cacheCreationTokens)}</span>
+                            </div>
+                            <div className="context-breakdown-row">
+                              <span className="context-breakdown-label">Output</span>
+                              <span className="context-breakdown-value">{formatTokens(contextUsage.outputTokens)}</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
@@ -970,6 +991,34 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           font-family: 'JetBrains Mono', monospace;
           color: var(--text-muted);
           white-space: nowrap;
+        }
+        .context-breakdown {
+          margin-top: 8px;
+          padding-top: 6px;
+          border-top: 1px solid var(--border);
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
+        }
+        .context-breakdown-row {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 11px;
+          color: var(--text-muted);
+        }
+        .context-breakdown-label {
+          width: 70px;
+          flex-shrink: 0;
+        }
+        .context-breakdown-value {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 10px;
+        }
+        .context-breakdown-pct {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 10px;
+          color: var(--text-muted);
         }
         .effort-btn {
           font-size: 11px;
