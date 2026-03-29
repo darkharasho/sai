@@ -5,7 +5,6 @@ import { BrowserWindow } from 'electron';
 
 export interface WorkspaceClaude {
   process: ChildProcess | null;
-  probe: ChildProcess | null;       // kept temporarily — removed in Task 3
   sessionId: string | undefined;
   buffer: string;
   cwd: string;
@@ -40,7 +39,6 @@ export function getOrCreate(projectPath: string): Workspace {
     projectPath,
     claude: {
       process: null,
-      probe: null,
       sessionId: undefined,
       buffer: '',
       cwd: projectPath,
@@ -69,15 +67,14 @@ export function suspend(projectPath: string, win: BrowserWindow): void {
   const ws = workspaces.get(projectPath);
   if (!ws || ws.status === 'suspended') return;
 
-  // Kill Claude processes
-  if (ws.claude.probe) {
-    ws.claude.probe.kill();
-    ws.claude.probe = null;
-  }
+  // Kill Claude process
   if (ws.claude.process) {
     ws.claude.process.kill();
     ws.claude.process = null;
   }
+  ws.claude.processConfig = null;
+  ws.claude.busy = false;
+  ws.claude.suppressForward = false;
 
   // Kill all terminals
   for (const term of ws.terminals.values()) {
