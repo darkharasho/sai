@@ -2,7 +2,7 @@
   <img src="public/img/sai.png" alt="SAI Logo" width="180" />
 </p>
 
-<h1 align="center">SAI — Simple AI</h1>
+<h1 align="center">SAI — Simply AI</h1>
 
 <p align="center">
   <strong>The AI-first code editor that puts Claude right where you work.</strong>
@@ -21,6 +21,8 @@
 SAI is a desktop code editor built from the ground up around AI. No plugins. No bolt-on copilots. Just a seamless environment where you chat with Claude, edit code, run commands, and manage Git — all without ever leaving the window.
 
 Open a project, ask Claude to build a feature, and watch it happen in real time. Review diffs, stage changes, commit — done. That's SAI.
+
+<img width="1400" height="900" alt="image" src="https://github.com/user-attachments/assets/f493ea77-d87c-499a-93b0-40cb2ad1cf81" />
 
 ---
 
