@@ -5,10 +5,18 @@ import { BrowserWindow } from 'electron';
 
 export interface WorkspaceClaude {
   process: ChildProcess | null;
-  probe: ChildProcess | null;
+  probe: ChildProcess | null;       // kept temporarily — removed in Task 3
   sessionId: string | undefined;
   buffer: string;
   cwd: string;
+  // Track config the process was spawned with, to detect changes
+  processConfig: {
+    permMode: string;
+    effort: string;
+    model: string;
+  } | null;
+  busy: boolean;           // true while a turn is in progress
+  suppressForward: boolean; // true during commit msg generation — suppresses IPC forwarding
 }
 
 export interface Workspace {
@@ -36,6 +44,9 @@ export function getOrCreate(projectPath: string): Workspace {
       sessionId: undefined,
       buffer: '',
       cwd: projectPath,
+      processConfig: null,
+      busy: false,
+      suppressForward: false,
     },
     terminals: new Map(),
     lastActivity: Date.now(),
