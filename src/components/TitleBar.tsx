@@ -87,7 +87,12 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
           {projectName} ▾
         </button>
         {open && (
-          <div className="project-dropdown">
+          <div className="project-dropdown" onMouseDown={(e) => {
+            const target = e.target as HTMLElement;
+            if (!target.closest('.workspace-row-wrapper') || !target.closest(`[data-path="${overflowOpen}"]`)) {
+              setOverflowOpen(null);
+            }
+          }}>
             {(() => {
               const active = workspaceList.filter(w => w.status === 'active');
               const suspended = workspaceList.filter(w => w.status === 'suspended');
@@ -99,7 +104,7 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
                     <>
                       <div className="dropdown-label">Active</div>
                       {active.map(w => (
-                        <div key={w.projectPath} className="workspace-row-wrapper">
+                        <div key={w.projectPath} className="workspace-row-wrapper" data-path={w.projectPath}>
                           <button
                             className={`dropdown-item workspace-item ${w.projectPath === projectPath ? 'active' : ''}`}
                             onClick={() => { onProjectChange(w.projectPath); setOpen(false); }}
@@ -263,7 +268,6 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
           min-width: 300px;
           max-width: 450px;
           box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-          overflow: hidden;
         }
         .dropdown-label {
           padding: 8px 12px 4px;
