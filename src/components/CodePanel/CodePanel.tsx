@@ -8,6 +8,7 @@ interface CodePanelProps {
   openFiles: OpenFile[];
   activeFilePath: string;
   projectPath: string;
+  externallyModified: Set<string>;
   onActivate: (path: string) => void;
   onClose: (path: string) => void;
   onCloseAll: () => void;
@@ -15,12 +16,15 @@ interface CodePanelProps {
   onEditorSave: (filePath: string, content: string) => Promise<void>;
   onEditorContentChange?: (filePath: string, content: string) => void;
   onEditorDirtyChange?: (filePath: string, dirty: boolean) => void;
+  onReloadFile: (path: string) => void;
+  onKeepMyEdits: (path: string) => void;
 }
 
 export default function CodePanel({
   openFiles,
   activeFilePath,
   projectPath,
+  externallyModified,
   onActivate,
   onClose,
   onCloseAll,
@@ -28,6 +32,8 @@ export default function CodePanel({
   onEditorSave,
   onEditorContentChange,
   onEditorDirtyChange,
+  onReloadFile,
+  onKeepMyEdits,
 }: CodePanelProps) {
   const activeFile = openFiles.find(f => f.path === activeFilePath);
 
@@ -245,6 +251,54 @@ export default function CodePanel({
           </span>
         )}
       </div>
+
+      {/* External change banner */}
+      {externallyModified.has(activeFilePath) && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '6px 12px',
+          background: 'var(--bg-secondary)',
+          borderBottom: '1px solid var(--border)',
+          flexShrink: 0,
+          fontSize: 12,
+          color: 'var(--text-muted)',
+        }}>
+          <span style={{ color: 'var(--text-warning, #e8a838)' }}>⚠</span>
+          <span>File changed on disk</span>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+            <button
+              onClick={() => onReloadFile(activeFilePath)}
+              style={{
+                background: 'var(--accent)',
+                border: 'none',
+                borderRadius: 4,
+                color: '#fff',
+                cursor: 'pointer',
+                fontSize: 11,
+                padding: '3px 10px',
+              }}
+            >
+              Reload
+            </button>
+            <button
+              onClick={() => onKeepMyEdits(activeFilePath)}
+              style={{
+                background: 'none',
+                border: '1px solid var(--border)',
+                borderRadius: 4,
+                color: 'var(--text-muted)',
+                cursor: 'pointer',
+                fontSize: 11,
+                padding: '3px 10px',
+              }}
+            >
+              Keep My Edits
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Content */}
       {isDiff && activeFile.file ? (
