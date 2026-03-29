@@ -118,7 +118,7 @@ function ImageModal({ src, onClose }: { src: string; onClose: () => void }) {
   );
 }
 
-export default function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude' }: { message: ChatMessageType; projectPath?: string; onFileOpen?: (path: string) => void; aiProvider?: 'claude' | 'codex' }) {
+export default function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude' }: { message: ChatMessageType; projectPath?: string; onFileOpen?: (path: string) => void; aiProvider?: 'claude' | 'codex' | 'gemini' }) {
   const dotColor = getDotColor(message.role);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
@@ -129,7 +129,7 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
           {message.role === 'user'
             ? <ChevronRight size={14} color="var(--green)" strokeWidth={3} className="chat-msg-dot chat-msg-chevron" />
             : message.role === 'assistant'
-            ? <span className={`chat-msg-dot ${aiProvider === 'codex' ? 'chat-msg-openai' : 'chat-msg-claude'}`} />
+            ? <span className={`chat-msg-dot ${aiProvider === 'gemini' ? 'chat-msg-gemini' : aiProvider === 'codex' ? 'chat-msg-openai' : 'chat-msg-claude'}`} />
             : <Circle size={8} fill={dotColor} stroke={dotColor} className="chat-msg-dot" />}
           <div className="chat-msg-body">
             <ReactMarkdown
@@ -203,6 +203,18 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
           background-color: var(--accent);
           -webkit-mask-image: url('svg/openai.svg');
           mask-image: url('svg/openai.svg');
+          -webkit-mask-size: contain;
+          mask-size: contain;
+          -webkit-mask-repeat: no-repeat;
+          mask-repeat: no-repeat;
+        }
+        .chat-msg-gemini {
+          width: 14px;
+          height: 14px;
+          margin-top: 2px;
+          background-color: #4285f4;
+          -webkit-mask-image: url('svg/Google-gemini-icon.svg');
+          mask-image: url('svg/Google-gemini-icon.svg');
           -webkit-mask-size: contain;
           mask-size: contain;
           -webkit-mask-repeat: no-repeat;
