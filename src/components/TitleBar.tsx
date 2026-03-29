@@ -1,6 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
 import UpdateNotification from './UpdateNotification';
 import CloseWorkspaceModal from './CloseWorkspaceModal';
+import GitHubAuthModal from './GitHubAuthModal';
+import SettingsModal from './SettingsModal';
+import { LogOut, Settings, ChevronDown } from 'lucide-react';
+
+interface GitHubUser {
+  login: string;
+  avatar_url: string;
+  name: string;
+}
 
 interface WorkspaceInfo {
   projectPath: string;
@@ -11,18 +20,25 @@ interface WorkspaceInfo {
 interface TitleBarProps {
   projectPath: string;
   onProjectChange: (path: string) => void;
+  onSettingChange?: (key: string, value: any) => void;
 }
 
-export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps) {
+export default function TitleBar({ projectPath, onProjectChange, onSettingChange }: TitleBarProps) {
   const [open, setOpen] = useState(false);
   const [workspaceList, setWorkspaceList] = useState<WorkspaceInfo[]>([]);
   const [version, setVersion] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [overflowOpen, setOverflowOpen] = useState<string | null>(null);
   const [closeTarget, setCloseTarget] = useState<string | null>(null);
+  const [ghUser, setGhUser] = useState<GitHubUser | null>(null);
+  const [ghDropOpen, setGhDropOpen] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const ghDropRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     window.sai.updateGetVersion().then((v: string) => setVersion(v));
+    window.sai.githubGetUser().then((u: GitHubUser | null) => setGhUser(u));
   }, []);
 
   const projectName = projectPath
@@ -76,6 +92,27 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
       onProjectChange(folder);
     }
     setOpen(false);
+  };
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ghDropRef.current && !ghDropRef.current.contains(e.target as Node)) {
+        setGhDropOpen(false);
+      }
+    };
+    if (ghDropOpen) document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [ghDropOpen]);
+
+  const handleGhLogout = async () => {
+    await window.sai.githubLogout();
+    setGhUser(null);
+    setGhDropOpen(false);
+  };
+
+  const handleAuthSuccess = (user: GitHubUser) => {
+    setGhUser(user);
+    setShowAuthModal(false);
   };
 
   return (
@@ -183,11 +220,49 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
         )}
       </div>
       <UpdateNotification />
-      {version && (
-        version === 'DEV'
-          ? <span className="titlebar-dev-pill">DEV</span>
-          : <span className="titlebar-version" onClick={() => window.sai.updateCheck()} title="Check for updates">v{version}</span>
-      )}
+      <div className="titlebar-right">
+        {version && (
+          version === 'DEV'
+            ? <span className="titlebar-dev-pill">DEV</span>
+            : <span className="titlebar-version" onClick={() => window.sai.updateCheck()} title="Check for updates">v{version}</span>
+        )}
+        {ghUser ? (
+          <div className="gh-user-wrapper" ref={ghDropRef}>
+            <button className="gh-user-btn" onClick={() => setGhDropOpen(v => !v)}>
+              <img src={ghUser.avatar_url} className="gh-avatar" alt={ghUser.login} />
+              <span className="gh-username">{ghUser.login}</span>
+              <ChevronDown size={11} className={`gh-chevron${ghDropOpen ? ' open' : ''}`} />
+            </button>
+            {ghDropOpen && (
+              <div className="gh-dropdown">
+                <div className="gh-dropdown-header">
+                  <img src={ghUser.avatar_url} className="gh-dropdown-avatar" alt={ghUser.login} />
+                  <div>
+                    <div className="gh-dropdown-name">{ghUser.name}</div>
+                    <div className="gh-dropdown-login">@{ghUser.login}</div>
+                  </div>
+                </div>
+                <div className="gh-dropdown-divider" />
+                <button className="gh-dropdown-item" onClick={() => { setGhDropOpen(false); setShowSettings(true); }}>
+                  <Settings size={13} /> Settings
+                </button>
+                <button className="gh-dropdown-item danger" onClick={handleGhLogout}>
+                  <LogOut size={13} /> Sign out
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <button className="gh-login-btn" onClick={() => setShowAuthModal(true)}>
+            <svg viewBox="0 0 24 24" fill="currentColor" width="13" height="13">
+              <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/>
+            </svg>
+            Login
+          </button>
+        )}
+      </div>
+      {showAuthModal && <GitHubAuthModal onSuccess={handleAuthSuccess} onClose={() => setShowAuthModal(false)} />}
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} onSettingChange={onSettingChange} />}
       {closeTarget && (
         <CloseWorkspaceModal
           projectPath={closeTarget}
@@ -216,17 +291,22 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
           flex-shrink: 0;
         }
         .titlebar-drag { flex: 1; }
+        .titlebar-right {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-right: 104px;
+          -webkit-app-region: no-drag;
+          flex-shrink: 0;
+        }
         .titlebar-version {
           color: var(--text-secondary);
           font-size: 10px;
-          margin-right: 140px;
           font-family: 'JetBrains Mono', monospace;
           cursor: pointer;
           -webkit-app-region: no-drag;
         }
-        .titlebar-version:hover {
-          color: var(--accent);
-        }
+        .titlebar-version:hover { color: var(--accent); }
         .titlebar-dev-pill {
           font-size: 9px;
           font-weight: 700;
@@ -237,8 +317,105 @@ export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps
           border: 1px solid rgba(199, 145, 12, 0.35);
           border-radius: 8px;
           padding: 1px 8px;
-          margin-right: 140px;
         }
+        .gh-login-btn {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          background: var(--bg-secondary);
+          border: 1px solid var(--border);
+          border-radius: 5px;
+          color: var(--text-secondary);
+          font-size: 11px;
+          padding: 3px 8px;
+          cursor: pointer;
+        }
+        .gh-login-btn:hover { color: var(--text); border-color: var(--accent); }
+        .gh-user-wrapper {
+          position: relative;
+        }
+        .gh-user-btn {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          background: none;
+          border: 1px solid transparent;
+          border-radius: 5px;
+          cursor: pointer;
+          padding: 2px 6px;
+          color: var(--text-secondary);
+        }
+        .gh-user-btn:hover { background: var(--bg-hover); border-color: var(--border); color: var(--text); }
+        .gh-avatar {
+          width: 18px;
+          height: 18px;
+          border-radius: 50%;
+          object-fit: cover;
+        }
+        .gh-username {
+          font-size: 11px;
+          max-width: 80px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .gh-chevron {
+          transition: transform 0.15s;
+        }
+        .gh-chevron.open { transform: rotate(180deg); }
+        .gh-dropdown {
+          position: absolute;
+          top: calc(100% + 6px);
+          right: 0;
+          background: var(--bg-elevated);
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          min-width: 200px;
+          box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+          overflow: hidden;
+          z-index: 500;
+        }
+        .gh-dropdown-header {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 12px;
+        }
+        .gh-dropdown-avatar {
+          width: 36px;
+          height: 36px;
+          border-radius: 50%;
+        }
+        .gh-dropdown-name {
+          font-size: 13px;
+          font-weight: 500;
+          color: var(--text);
+        }
+        .gh-dropdown-login {
+          font-size: 11px;
+          color: var(--text-muted);
+          margin-top: 1px;
+        }
+        .gh-dropdown-divider {
+          height: 1px;
+          background: var(--border);
+        }
+        .gh-dropdown-item {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          width: 100%;
+          padding: 8px 12px;
+          background: none;
+          border: none;
+          color: var(--text);
+          font-size: 12px;
+          cursor: pointer;
+          text-align: left;
+        }
+        .gh-dropdown-item:hover { background: var(--bg-hover); }
+        .gh-dropdown-item.danger { color: #f87171; }
+        .gh-dropdown-item.danger:hover { background: rgba(248,113,113,0.08); }
         .project-dropdown-wrapper {
           -webkit-app-region: no-drag;
           position: absolute;

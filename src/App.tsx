@@ -23,6 +23,8 @@ export default function App() {
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
   const [effortLevel, setEffortLevel] = useState<EffortLevel>('high');
   const [modelChoice, setModelChoice] = useState<ModelChoice>('sonnet');
+  const [editorFontSize, setEditorFontSize] = useState(13);
+  const [editorMinimap, setEditorMinimap] = useState(true);
   const [workspaces, setWorkspaces] = useState<Map<string, WorkspaceContext>>(new Map());
   const [pendingClose, setPendingClose] = useState<string | null>(null);
   // Ref to hold latest messages per workspace without triggering re-renders during streaming
@@ -89,6 +91,8 @@ export default function App() {
     window.sai.settingsGet('modelChoice', 'sonnet').then((v: string) => {
       if (v === 'sonnet' || v === 'opus' || v === 'haiku') setModelChoice(v as ModelChoice);
     });
+    window.sai.settingsGet('editorFontSize', 13).then((v: number) => setEditorFontSize(v));
+    window.sai.settingsGet('editorMinimap', true).then((v: boolean) => setEditorMinimap(v));
   }, []);
 
   useEffect(() => {
@@ -672,6 +676,8 @@ export default function App() {
                 openFiles={openFiles}
                 activeFilePath={activeFilePath}
                 projectPath={projectPath}
+                editorFontSize={editorFontSize}
+                editorMinimap={editorMinimap}
                 onActivate={(path: string) => {
                   if (activeProjectPath) {
                     updateWorkspace(activeProjectPath, ws => ({ ...ws, activeFilePath: path }));
@@ -702,6 +708,10 @@ export default function App() {
       <TitleBar
         projectPath={projectPath}
         onProjectChange={handleProjectSwitch}
+        onSettingChange={(key, value) => {
+          if (key === 'editorFontSize') setEditorFontSize(value);
+          if (key === 'editorMinimap') setEditorMinimap(value);
+        }}
       />
       <div className="app-body">
         <NavBar activeSidebar={sidebarOpen} onToggle={toggleSidebar} gitChangeCount={gitChangeCount} />

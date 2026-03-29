@@ -7,7 +7,8 @@ import { registerGitHandlers } from './services/git';
 import { registerFsHandlers } from './services/fs';
 import { registerUpdater } from './services/updater';
 import { registerUsageHandlers, destroyUsagePolling } from './services/usage';
-import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove, suspend } from './services/workspace';
+import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove, suspend, DEFAULT_SUSPEND_TIMEOUT } from './services/workspace';
+import { registerGithubAuthHandlers } from './services/github-auth';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -49,7 +50,10 @@ function createWindow() {
   registerFsHandlers(mainWindow!);
   registerUpdater(mainWindow!);
   registerUsageHandlers(mainWindow!);
-  startSuspendTimer(mainWindow);
+  startSuspendTimer(mainWindow, () => {
+    const s = readSettings();
+    return typeof s.suspendTimeout === 'number' ? s.suspendTimeout : DEFAULT_SUSPEND_TIMEOUT;
+  });
 
   ipcMain.handle('workspace:getAll', () => {
     const active = getAll().filter(w => w.projectPath);
@@ -94,6 +98,8 @@ function createWindow() {
   ipcMain.handle('settings:set', (_event, key: string, value: any) => {
     writeSetting(key, value);
   });
+
+  registerGithubAuthHandlers(mainWindow, readSettings, writeSetting);
 
   // Recent projects persistence
   const recentProjectsFile = path.join(app.getPath('userData'), 'recent-projects.json');

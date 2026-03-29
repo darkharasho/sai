@@ -115,16 +115,18 @@ export function destroyAll(win: BrowserWindow): void {
 }
 
 const SUSPEND_CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutes
-const SUSPEND_TIMEOUT = 60 * 60 * 1000; // 1 hour
+export const DEFAULT_SUSPEND_TIMEOUT = 60 * 60 * 1000; // 1 hour
 
 let suspendTimer: ReturnType<typeof setInterval> | null = null;
 
-export function startSuspendTimer(win: BrowserWindow): void {
+export function startSuspendTimer(win: BrowserWindow, getTimeout: () => number = () => DEFAULT_SUSPEND_TIMEOUT): void {
   if (suspendTimer) return;
   suspendTimer = setInterval(() => {
+    const timeout = getTimeout();
+    if (timeout === 0) return; // "Never"
     const now = Date.now();
     for (const [projectPath, ws] of workspaces) {
-      if (ws.status === 'active' && now - ws.lastActivity > SUSPEND_TIMEOUT) {
+      if (ws.status === 'active' && now - ws.lastActivity > timeout) {
         suspend(projectPath, win);
       }
     }

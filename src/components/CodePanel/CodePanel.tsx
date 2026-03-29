@@ -8,6 +8,8 @@ interface CodePanelProps {
   openFiles: OpenFile[];
   activeFilePath: string;
   projectPath: string;
+  editorFontSize?: number;
+  editorMinimap?: boolean;
   externallyModified: Set<string>;
   onActivate: (path: string) => void;
   onClose: (path: string) => void;
@@ -24,6 +26,8 @@ export default function CodePanel({
   openFiles,
   activeFilePath,
   projectPath,
+  editorFontSize = 13,
+  editorMinimap = true,
   externallyModified,
   onActivate,
   onClose,
@@ -313,6 +317,8 @@ export default function CodePanel({
           key={activeFile.path}
           filePath={activeFile.path}
           content={activeFile.content}
+          fontSize={editorFontSize}
+          minimap={editorMinimap}
           onSave={onEditorSave}
           onContentChange={onEditorContentChange}
           onDirtyChange={onEditorDirtyChange ? (dirty) => onEditorDirtyChange(activeFile.path, dirty) : undefined}

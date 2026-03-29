@@ -70,12 +70,14 @@ export function detectLanguage(filePath: string): string {
 interface MonacoEditorProps {
   filePath: string;
   content: string;
+  fontSize?: number;
+  minimap?: boolean;
   onSave: (filePath: string, content: string) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
   onContentChange?: (filePath: string, content: string) => void;
 }
 
-export default function MonacoEditor({ filePath, content, onSave, onDirtyChange, onContentChange }: MonacoEditorProps) {
+export default function MonacoEditor({ filePath, content, fontSize = 13, minimap = true, onSave, onDirtyChange, onContentChange }: MonacoEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const onContentChangeRef = useRef(onContentChange);
@@ -108,9 +110,9 @@ export default function MonacoEditor({ filePath, content, onSave, onDirtyChange,
       language,
       theme: 'sai-dark',
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-      fontSize: 13,
+      fontSize,
       lineHeight: 20,
-      minimap: { enabled: true },
+      minimap: { enabled: minimap },
       scrollBeyondLastLine: false,
       automaticLayout: true,
       padding: { top: 8 },
@@ -144,6 +146,11 @@ export default function MonacoEditor({ filePath, content, onSave, onDirtyChange,
       editor.dispose();
     };
   }, []);
+
+  // Apply font/minimap changes live without remounting
+  useEffect(() => {
+    editorRef.current?.updateOptions({ fontSize, minimap: { enabled: minimap } });
+  }, [fontSize, minimap]);
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
