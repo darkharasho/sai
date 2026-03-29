@@ -88,8 +88,9 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 
 	ipcMain.on('claude:stop', () => {
 		if (activeProcess) {
-			activeProcess.kill();
+			const proc = activeProcess;
 			activeProcess = null;
+			proc.kill();
 			safeSend(win, 'claude:message', { type: 'done' });
 		}
 	});
@@ -181,7 +182,9 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 			}
 		});
 
-		activeProcess.on('exit', () => {
+		const proc = activeProcess;
+		proc.on('exit', () => {
+			if (activeProcess !== proc) return; // killed by stop or new send
 			if (buffer.trim()) {
 				try { safeSend(win, 'claude:message', JSON.parse(buffer)); } catch { /* ignore */ }
 			}

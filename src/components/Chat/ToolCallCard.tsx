@@ -174,7 +174,7 @@ function FullscreenModal({ code, lang, label, onClose }: { code: string; lang: s
           backdrop-filter: blur(2px);
         }
         .modal-content {
-          background: #272822;
+          background: var(--bg-primary);
           border: 1px solid var(--border);
           border-radius: 10px;
           width: 90vw;
@@ -189,9 +189,9 @@ function FullscreenModal({ code, lang, label, onClose }: { code: string; lang: s
           align-items: center;
           justify-content: space-between;
           padding: 8px 16px;
-          border-bottom: 1px solid rgba(255,255,255,0.08);
+          border-bottom: 1px solid var(--border);
           flex-shrink: 0;
-          background: #1e1f1c;
+          background: var(--bg-secondary);
         }
         .modal-header-left, .modal-header-right {
           display: flex;
@@ -201,31 +201,37 @@ function FullscreenModal({ code, lang, label, onClose }: { code: string; lang: s
         .modal-title {
           font-family: 'JetBrains Mono', monospace;
           font-size: 13px;
-          color: #f8f8f2;
+          color: var(--text);
         }
         .modal-meta {
           font-family: 'JetBrains Mono', monospace;
           font-size: 11px;
-          color: #75715e;
+          color: var(--text-muted);
         }
         .modal-close {
           background: none;
           border: none;
-          color: #75715e;
+          color: var(--text-muted);
           cursor: pointer;
           padding: 4px;
           border-radius: 4px;
           display: flex;
         }
         .modal-close:hover {
-          color: #f8f8f2;
-          background: rgba(255,255,255,0.06);
+          color: var(--text);
+          background: var(--bg-hover);
         }
         .modal-body {
           flex: 1;
           overflow: auto;
           font-size: 13px;
-          background: #272822;
+          background: var(--bg-primary);
+        }
+        .modal-body .highlighted-code pre,
+        .modal-body .highlighted-code pre code,
+        .modal-body .shiki {
+          background: transparent !important;
+          background-color: transparent !important;
         }
         .editor-code {
           display: flex;
@@ -236,8 +242,8 @@ function FullscreenModal({ code, lang, label, onClose }: { code: string; lang: s
         }
         .editor-gutter {
           padding: 16px 0;
-          background: #1e1f1c;
-          border-right: 1px solid rgba(255,255,255,0.06);
+          background: var(--bg-secondary);
+          border-right: 1px solid var(--border);
           text-align: right;
           user-select: none;
           flex-shrink: 0;
@@ -246,7 +252,7 @@ function FullscreenModal({ code, lang, label, onClose }: { code: string; lang: s
         }
         .editor-line-number {
           padding: 0 12px 0 16px;
-          color: #75715e;
+          color: var(--text-muted);
           font-size: 12px;
           height: 20px;
         }
@@ -259,7 +265,7 @@ function FullscreenModal({ code, lang, label, onClose }: { code: string; lang: s
           overflow: visible;
           font-size: 13px;
           line-height: 20px;
-          color: #f8f8f2;
+          color: var(--text);
         }
         .editor-lines code {
           font-size: inherit;
@@ -271,7 +277,7 @@ function FullscreenModal({ code, lang, label, onClose }: { code: string; lang: s
           white-space: pre;
         }
         .editor-line:hover {
-          background: rgba(255,255,255,0.03);
+          background: var(--bg-hover);
         }
       `}</style>
     </div>
