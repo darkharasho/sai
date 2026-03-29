@@ -1,4 +1,4 @@
-import { GitBranch } from 'lucide-react';
+import { FolderClosed, GitBranch } from 'lucide-react';
 
 interface NavBarProps {
   activeSidebar: string | null;
@@ -8,6 +8,13 @@ interface NavBarProps {
 export default function NavBar({ activeSidebar, onToggle }: NavBarProps) {
   return (
     <div className="navbar">
+      <button
+        className={`nav-btn ${activeSidebar === 'files' ? 'active' : ''}`}
+        onClick={() => onToggle('files')}
+        title="Explorer"
+      >
+        <FolderClosed size={20} />
+      </button>
       <button
         className={`nav-btn ${activeSidebar === 'git' ? 'active' : ''}`}
         onClick={() => onToggle('git')}
