@@ -12,21 +12,14 @@ import { MessageSquare, TerminalSquare, Code2, ChevronRight, MessageCirclePlus, 
 import { formatSessionDate, formatSessionTime } from './sessions';
 
 type PermissionMode = 'default' | 'bypass';
+type EffortLevel = 'low' | 'medium' | 'high' | 'max';
 type PanelId = 'chat' | 'editor' | 'terminal';
-
-function getStoredPermission(): PermissionMode {
-  try {
-    const v = localStorage.getItem('sai-permission-mode');
-    return v === 'bypass' ? 'bypass' : 'default';
-  } catch {
-    return 'default';
-  }
-}
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState<string | null>(null);
   const [activeProjectPath, setActiveProjectPath] = useState<string>('');
-  const [permissionMode, setPermissionMode] = useState<PermissionMode>(getStoredPermission);
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
+  const [effortLevel, setEffortLevel] = useState<EffortLevel>('high');
   const [workspaces, setWorkspaces] = useState<Map<string, WorkspaceContext>>(new Map());
   // Ref to hold latest messages per workspace without triggering re-renders during streaming
   const wsMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
@@ -72,6 +65,16 @@ export default function App() {
   const activeSession = activeWorkspace?.activeSession ?? createSession();
   const openFiles = activeWorkspace?.openFiles ?? [];
   const activeFilePath = activeWorkspace?.activeFilePath ?? null;
+
+  // Load persisted settings from main process (file-based, works in dev+prod)
+  useEffect(() => {
+    window.sai.settingsGet('permissionMode', 'default').then((v: string) => {
+      if (v === 'bypass') setPermissionMode('bypass');
+    });
+    window.sai.settingsGet('effortLevel', 'high').then((v: string) => {
+      if (v === 'low' || v === 'medium' || v === 'high' || v === 'max') setEffortLevel(v as EffortLevel);
+    });
+  }, []);
 
   useEffect(() => {
     window.sai.getCwd().then((cwd: string) => {
@@ -320,6 +323,14 @@ export default function App() {
     await window.sai.fsWriteFile(filePath, content);
   }, []);
 
+  const handleEditorContentChange = useCallback((filePath: string, content: string) => {
+    if (!activeProjectPath) return;
+    updateWorkspace(activeProjectPath, ws => ({
+      ...ws,
+      openFiles: ws.openFiles.map(f => f.path === filePath ? { ...f, content } : f),
+    }));
+  }, [activeProjectPath, updateWorkspace]);
+
   const persistSessionForWorkspace = useCallback((wsPath: string, session: ChatSession) => {
     updateWorkspace(wsPath, ws => {
       const updated = upsertSession(ws.sessions, session);
@@ -376,7 +387,12 @@ export default function App() {
 
   const handlePermissionChange = (mode: PermissionMode) => {
     setPermissionMode(mode);
-    localStorage.setItem('sai-permission-mode', mode);
+    window.sai.settingsSet('permissionMode', mode);
+  };
+
+  const handleEffortChange = (level: EffortLevel) => {
+    setEffortLevel(level);
+    window.sai.settingsSet('effortLevel', level);
   };
 
   const chatOpen = expanded.includes('chat');
@@ -487,6 +503,8 @@ export default function App() {
                   projectPath={wsPath}
                   permissionMode={permissionMode}
                   onPermissionChange={handlePermissionChange}
+                  effortLevel={effortLevel}
+                  onEffortChange={handleEffortChange}
                   initialMessages={ws.activeSession.messages}
                   onMessagesChange={(messages: ChatMessage[]) => {
                     wsMessagesRef.current.set(wsPath, messages);
@@ -522,6 +540,7 @@ export default function App() {
                 onCloseAll={handleCloseAllFiles}
                 onDiffModeChange={handleDiffModeChange}
                 onEditorSave={handleEditorSave}
+                onEditorContentChange={handleEditorContentChange}
               />
             )}
             {panel === 'terminal' && (

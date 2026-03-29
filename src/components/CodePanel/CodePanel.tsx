@@ -13,6 +13,7 @@ interface CodePanelProps {
   onCloseAll: () => void;
   onDiffModeChange: (path: string, mode: 'unified' | 'split') => void;
   onEditorSave: (filePath: string, content: string) => Promise<void>;
+  onEditorContentChange?: (filePath: string, content: string) => void;
 }
 
 export default function CodePanel({
@@ -24,6 +25,7 @@ export default function CodePanel({
   onCloseAll,
   onDiffModeChange,
   onEditorSave,
+  onEditorContentChange,
 }: CodePanelProps) {
   const activeFile = openFiles.find(f => f.path === activeFilePath);
 
@@ -221,6 +223,7 @@ export default function CodePanel({
           filePath={activeFile.path}
           content={activeFile.content}
           onSave={onEditorSave}
+          onContentChange={onEditorContentChange}
         />
       ) : null}
     </div>

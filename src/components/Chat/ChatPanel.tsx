@@ -101,18 +101,21 @@ interface ChatPanelProps {
   projectPath: string;
   permissionMode: 'default' | 'bypass';
   onPermissionChange: (mode: 'default' | 'bypass') => void;
+  effortLevel: 'low' | 'medium' | 'high' | 'max';
+  onEffortChange: (level: 'low' | 'medium' | 'high' | 'max') => void;
   initialMessages?: ChatMessageType[];
   onMessagesChange?: (messages: ChatMessageType[]) => void;
   onTurnComplete?: () => void;
 }
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, initialMessages, onMessagesChange, onTurnComplete }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, initialMessages, onMessagesChange, onTurnComplete }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessageType[]>(initialMessages || []);
   const [isStreaming, setIsStreaming] = useState(false);
   const [ready, setReady] = useState(false);
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
-  // permissionMode is now a prop from App
   const [contextUsage, setContextUsage] = useState<{ used: number; total: number }>({ used: 0, total: 1000000 });
+  const [sessionUsage, setSessionUsage] = useState<{ inputTokens: number; outputTokens: number }>({ inputTokens: 0, outputTokens: 0 });
+  const [rateLimits, setRateLimits] = useState<Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number }>>(new Map());
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -162,7 +165,25 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         return;
       }
 
-      // Skip system/rate_limit noise
+      // Capture rate limit info (may receive multiple: daily, weekly, etc.)
+      if (msg.type === 'rate_limit_event' && msg.rate_limit_info) {
+        const info = msg.rate_limit_info;
+        const key = info.rateLimitType || 'unknown';
+        setRateLimits(prev => {
+          const next = new Map(prev);
+          next.set(key, {
+            rateLimitType: key,
+            resetsAt: info.resetsAt || 0,
+            status: info.status || 'unknown',
+            isUsingOverage: !!info.isUsingOverage,
+            overageResetsAt: info.overageResetsAt || 0,
+          });
+          return next;
+        });
+        return;
+      }
+
+      // Skip system noise
       if (msg.type === 'system' || msg.type === 'rate_limit_event' || msg.type === 'user') {
         return;
       }
@@ -217,6 +238,13 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           const modelKey = Object.keys(modelUsage)[0];
           const total = modelKey ? modelUsage[modelKey].contextWindow || 1000000 : 1000000;
           setContextUsage({ used, total });
+        }
+        // Accumulate session usage
+        if (msg.usage) {
+          setSessionUsage(prev => ({
+            inputTokens: prev.inputTokens + (msg.usage.input_tokens || 0) + (msg.usage.cache_read_input_tokens || 0) + (msg.usage.cache_creation_input_tokens || 0),
+            outputTokens: prev.outputTokens + (msg.usage.output_tokens || 0),
+          }));
         }
       }
       if (msg.type === 'result' && msg.result) {
@@ -285,7 +313,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       );
     }
 
-    window.sai.claudeSend(projectPath, text, imagePaths, permissionMode);
+    window.sai.claudeSend(projectPath, text, imagePaths, permissionMode, effortLevel);
   };
 
   return (
@@ -312,7 +340,11 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         onStop={() => window.sai.claudeStop?.(projectPath)}
         permissionMode={permissionMode}
         onPermissionChange={onPermissionChange}
+        effortLevel={effortLevel}
+        onEffortChange={onEffortChange}
         contextUsage={contextUsage}
+        sessionUsage={sessionUsage}
+        rateLimits={rateLimits}
       />
       <style>{`
         .chat-panel {

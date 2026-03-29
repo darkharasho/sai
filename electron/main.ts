@@ -63,6 +63,32 @@ function createWindow() {
     remove(projectPath, mainWindow!);
   });
 
+  // Settings persistence (works across dev/prod)
+  const settingsFile = path.join(app.getPath('userData'), 'settings.json');
+
+  function readSettings(): Record<string, any> {
+    try {
+      return JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
+    } catch {
+      return {};
+    }
+  }
+
+  function writeSetting(key: string, value: any) {
+    const settings = readSettings();
+    settings[key] = value;
+    fs.writeFileSync(settingsFile, JSON.stringify(settings));
+  }
+
+  ipcMain.handle('settings:get', (_event, key: string, defaultValue?: any) => {
+    const settings = readSettings();
+    return key in settings ? settings[key] : defaultValue;
+  });
+
+  ipcMain.handle('settings:set', (_event, key: string, value: any) => {
+    writeSetting(key, value);
+  });
+
   // Recent projects persistence
   const recentProjectsFile = path.join(app.getPath('userData'), 'recent-projects.json');
 

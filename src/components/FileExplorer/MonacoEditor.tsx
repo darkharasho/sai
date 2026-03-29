@@ -72,11 +72,14 @@ interface MonacoEditorProps {
   content: string;
   onSave: (filePath: string, content: string) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
+  onContentChange?: (filePath: string, content: string) => void;
 }
 
-export default function MonacoEditor({ filePath, content, onSave, onDirtyChange }: MonacoEditorProps) {
+export default function MonacoEditor({ filePath, content, onSave, onDirtyChange, onContentChange }: MonacoEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const onContentChangeRef = useRef(onContentChange);
+  onContentChangeRef.current = onContentChange;
   const [dirty, setDirty] = useState(false);
   const [saveError, setSaveError] = useState(false);
   const [cursorPosition, setCursorPosition] = useState({ line: 1, column: 1 });
@@ -135,6 +138,9 @@ export default function MonacoEditor({ filePath, content, onSave, onDirtyChange 
     editor.focus();
 
     return () => {
+      if (onContentChangeRef.current) {
+        onContentChangeRef.current(filePath, editor.getValue());
+      }
       editor.dispose();
     };
   }, []);

@@ -13,10 +13,13 @@
 - [x] add drag and drop for the file viewer pane
 - [x] the fullscreen for embedded code blocks needs to look like a proper editor with lines and syntax highlighting
 - [x] switching contexts causes claude to not respond
-- [ ] swapping tabs in the editor without saving deletes the unsaved changes
+- [x] swapping tabs in the editor without saving deletes the unsaved changes
+- [ ] links in chat need to actually be links. links in chat and term need to open in the user's default browser not a separate electron window
 - [ ] add support for gemini / codex
-- [ ] we need a way to view usage and effort (and set effort)
+- [x] we need a way to view usage and effort (and set effort)
 - [ ] if possible instead of outputting json format it like claude cli does
 - [ ] gitignored files/folders should have a dimmer gray text
 - [ ] if the editor is open with a file, add it to the context of the chat
 - [ ] clicking on the image in the chat should show it bigger via like a modal view
+- [ ] tabs with pending changes need to show an icon in the tab name
+- [ ] closing a file with unsaved changes should have a custom modal popup themed like this app to prompt to save or cancel or close anyway

@@ -10,7 +10,7 @@ contextBridge.exposeInMainWorld('sai', {
     return () => ipcRenderer.removeListener('terminal:data', listener);
   },
   claudeStart: (cwd: string) => ipcRenderer.invoke('claude:start', cwd),
-  claudeSend: (projectPath: string, message: string, imagePaths?: string[], permMode?: string) => ipcRenderer.send('claude:send', projectPath, message, imagePaths, permMode),
+  claudeSend: (projectPath: string, message: string, imagePaths?: string[], permMode?: string, effort?: string) => ipcRenderer.send('claude:send', projectPath, message, imagePaths, permMode, effort),
   claudeGenerateCommitMessage: (cwd: string) => ipcRenderer.invoke('claude:generateCommitMessage', cwd),
   claudeStop: (projectPath: string) => ipcRenderer.send('claude:stop', projectPath),
   claudeApprove: (approved: boolean) => ipcRenderer.send('claude:approve', approved),
@@ -75,6 +75,8 @@ contextBridge.exposeInMainWorld('sai', {
     return () => ipcRenderer.removeListener('workspace:suspended', listener);
   },
   saveImage: (base64Data: string) => ipcRenderer.invoke('project:saveImage', base64Data),
+  settingsGet: (key: string, defaultValue?: any) => ipcRenderer.invoke('settings:get', key, defaultValue),
+  settingsSet: (key: string, value: any) => ipcRenderer.invoke('settings:set', key, value),
   getCwd: () => ipcRenderer.invoke('project:getCwd'),
   selectFolder: () => ipcRenderer.invoke('project:selectFolder'),
   getRecentProjects: () => ipcRenderer.invoke('project:getRecent'),

@@ -2,8 +2,10 @@ import { useState, useRef, KeyboardEvent, useEffect } from 'react';
 import {
   SquarePlus, Slash, SquareSlash, AtSign, FileText, GitBranch, Terminal, Settings,
   MessageSquare, Zap, Send, Square, ShieldCheck, ShieldOff,
-  Paperclip, Image,
+  Paperclip, Image, ChevronDown, Minus, ChevronUp, ChevronsUp, Clock,
 } from 'lucide-react';
+
+type EffortLevel = 'low' | 'medium' | 'high' | 'max';
 
 interface ChatInputProps {
   onSend: (message: string, images?: string[]) => void;
@@ -13,7 +15,11 @@ interface ChatInputProps {
   onStop?: () => void;
   permissionMode: 'default' | 'bypass';
   onPermissionChange: (mode: 'default' | 'bypass') => void;
+  effortLevel: EffortLevel;
+  onEffortChange: (level: EffortLevel) => void;
   contextUsage?: { used: number; total: number };
+  sessionUsage?: { inputTokens: number; outputTokens: number };
+  rateLimits?: Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number }>;
 }
 
 interface AutocompleteItem {
@@ -48,6 +54,19 @@ const ADD_MENU_ITEMS: AutocompleteItem[] = [
   { label: 'Add URL', value: '@url ', description: 'Reference a URL', icon: <AtSign size={14} /> },
 ];
 
+const EFFORT_CONFIG: Record<EffortLevel, { icon: typeof ChevronDown; label: string; color: string; next: EffortLevel }> = {
+  low:    { icon: ChevronDown, label: 'Lo', color: 'var(--text-muted)', next: 'medium' },
+  medium: { icon: Minus,       label: 'Med', color: 'var(--text-secondary)', next: 'high' },
+  high:   { icon: ChevronUp,   label: 'Hi', color: 'var(--accent)', next: 'max' },
+  max:    { icon: ChevronsUp,  label: 'Max', color: 'var(--orange)', next: 'low' },
+};
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return `${n}`;
+}
+
 function ContextRing({ used, total, onClick }: { used: number; total: number; onClick?: () => void }) {
   const pct = Math.min((used / total) * 100, 100);
   const radius = 9;
@@ -78,7 +97,64 @@ function ContextRing({ used, total, onClick }: { used: number; total: number; on
   );
 }
 
-export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, permissionMode, onPermissionChange, contextUsage }: ChatInputProps) {
+function formatResetTime(resetsAt: number): string {
+  const diffMs = resetsAt * 1000 - Date.now();
+  const diffH = Math.max(0, Math.floor(diffMs / 3600000));
+  const diffD = Math.floor(diffH / 24);
+  if (diffD > 0) return `${diffD}d ${diffH % 24}h`;
+  if (diffH > 0) return `${diffH}h`;
+  const diffM = Math.max(0, Math.floor(diffMs / 60000));
+  return `${diffM}m`;
+}
+
+const WINDOW_DURATIONS: Record<string, number> = {
+  daily: 24 * 3600,
+  seven_day: 7 * 24 * 3600,
+  weekly: 7 * 24 * 3600,
+  monthly: 30 * 24 * 3600,
+};
+
+function getRateLimitProgress(rl: { rateLimitType: string; resetsAt: number }): number {
+  const windowSec = WINDOW_DURATIONS[rl.rateLimitType] || 7 * 24 * 3600;
+  const windowStartSec = rl.resetsAt - windowSec;
+  const nowSec = Date.now() / 1000;
+  const elapsed = nowSec - windowStartSec;
+  return Math.min(Math.max(elapsed / windowSec, 0), 1);
+}
+
+function UsageBar({ pct, color, label, sublabel, tag }: { pct: number; color: string; label: string; sublabel: string; tag?: string }) {
+  return (
+    <div className="usage-bar-row">
+      <div className="usage-bar-info">
+        <span className="usage-bar-label">{label}{tag && <span className="usage-bar-tag" style={{ color }}>{tag}</span>}</span>
+        <span className="usage-bar-sublabel">{sublabel}</span>
+      </div>
+      <div className="usage-bar-track">
+        <div
+          className="usage-bar-fill"
+          style={{ width: `${Math.min(pct, 100)}%`, background: color }}
+        />
+      </div>
+      <span className="usage-bar-pct">{Math.round(pct)}% used</span>
+    </div>
+  );
+}
+
+function getRateLimitLabel(type: string): string {
+  if (type === 'seven_day' || type === 'weekly') return 'Weekly';
+  if (type === 'daily') return 'Daily';
+  if (type === 'monthly') return 'Monthly';
+  return type.replace(/_/g, ' ');
+}
+
+function getBarColor(pct: number, isOverage: boolean): string {
+  if (isOverage) return 'var(--orange)';
+  if (pct > 80) return 'var(--red)';
+  if (pct > 50) return 'var(--orange)';
+  return 'var(--accent)';
+}
+
+export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, permissionMode, onPermissionChange, effortLevel, onEffortChange, contextUsage, sessionUsage, rateLimits }: ChatInputProps) {
   const [value, setValue] = useState('');
   const [suggestions, setSuggestions] = useState<AutocompleteItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -334,6 +410,113 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
         </div>
 
         <div className="toolbar-right">
+          {/* Usage & rate limit */}
+          {(sessionUsage || (rateLimits && rateLimits.size > 0)) && (() => {
+            const limits = rateLimits ? Array.from(rateLimits.values()) : [];
+            const anyOverage = limits.some(rl => rl.isUsingOverage);
+
+            // Build the 3 bars: daily, weekly, overage
+            // Find daily and weekly from the rate limit events
+            const weekly = limits.find(rl => rl.rateLimitType === 'seven_day' || rl.rateLimitType === 'weekly');
+            const daily = limits.find(rl => rl.rateLimitType === 'daily');
+            // Derive overage bar from whichever limit has overage info
+            const overageSource = limits.find(rl => rl.overageResetsAt > 0);
+
+            // Inline text
+            const primary = weekly || daily || limits[0];
+            let inlineText = '';
+            if (anyOverage) {
+              inlineText = 'Overage';
+            } else if (primary) {
+              inlineText = `Resets ${formatResetTime(primary.resetsAt)}`;
+            } else if (sessionUsage) {
+              inlineText = formatTokens(sessionUsage.inputTokens + sessionUsage.outputTokens);
+            }
+
+            return (
+              <div className="usage-wrapper">
+                <span className={`toolbar-usage${anyOverage ? ' usage-overage' : ''}`}>
+                  <Clock size={13} />
+                  <span>{inlineText}</span>
+                  {anyOverage && <span className="overage-dot" />}
+                </span>
+                <div className="usage-tooltip">
+                  {weekly && (() => {
+                    // status "rejected" = 100%, otherwise estimate from time elapsed
+                    const pct = weekly.status === 'rejected' ? 100 : getRateLimitProgress(weekly) * 100;
+                    return (
+                      <div className="usage-tooltip-section">
+                        <div className="usage-tooltip-heading">Plan usage limits</div>
+                        <UsageBar
+                          pct={pct}
+                          color={getBarColor(pct, false)}
+                          label="Current session"
+                          sublabel={`Resets in ${formatResetTime(weekly.resetsAt)}`}
+                        />
+                      </div>
+                    );
+                  })()}
+                  {weekly && (() => {
+                    const pct = weekly.status === 'rejected' ? 100 : getRateLimitProgress(weekly) * 100;
+                    return (
+                      <div className="usage-tooltip-section">
+                        <div className="usage-tooltip-heading">Weekly limits</div>
+                        <UsageBar
+                          pct={pct}
+                          color={getBarColor(pct, false)}
+                          label="All models"
+                          sublabel={`Resets in ${formatResetTime(weekly.resetsAt)}`}
+                        />
+                      </div>
+                    );
+                  })()}
+                  {overageSource && (() => {
+                    const active = overageSource.isUsingOverage;
+                    const pct = active ? getRateLimitProgress({ rateLimitType: overageSource.rateLimitType, resetsAt: overageSource.overageResetsAt }) * 100 : 0;
+                    return (
+                      <div className="usage-tooltip-section">
+                        <UsageBar
+                          pct={active ? pct : 0}
+                          color={active ? 'var(--orange)' : 'var(--text-muted)'}
+                          label="Overage"
+                          sublabel={active ? `Resets in ${formatResetTime(overageSource.overageResetsAt)}` : 'Not active'}
+                          tag={active ? 'ACTIVE' : undefined}
+                        />
+                      </div>
+                    );
+                  })()}
+                  {contextUsage && (
+                    <div className="usage-tooltip-section">
+                      <UsageBar
+                        pct={Math.min((contextUsage.used / contextUsage.total) * 100, 100)}
+                        color={getBarColor(Math.min((contextUsage.used / contextUsage.total) * 100, 100), false)}
+                        label="Context"
+                        sublabel={`${formatTokens(contextUsage.used)} / ${formatTokens(contextUsage.total)}`}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Effort level */}
+          {(() => {
+            const cfg = EFFORT_CONFIG[effortLevel];
+            const Icon = cfg.icon;
+            return (
+              <button
+                className="toolbar-btn effort-btn"
+                onClick={() => onEffortChange(cfg.next)}
+                title={`Effort: ${effortLevel} — Click to cycle`}
+                style={{ color: cfg.color }}
+              >
+                <Icon size={15} />
+                <span className="effort-label">{cfg.label}</span>
+              </button>
+            );
+          })()}
+
           <button
             className={`toolbar-btn permission-btn ${permissionMode === 'bypass' ? 'bypass-active' : ''}`}
             onClick={() => onPermissionChange(permissionMode === 'default' ? 'bypass' : 'default')}
@@ -539,6 +722,156 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
         .toolbar-btn:hover {
           color: var(--text);
           background: var(--bg-hover);
+        }
+        .usage-wrapper {
+          position: relative;
+        }
+        .usage-wrapper:hover .usage-tooltip {
+          display: flex;
+        }
+        .toolbar-usage {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          font-size: 11px;
+          font-family: 'JetBrains Mono', monospace;
+          color: var(--text-muted);
+          padding: 3px 8px;
+          border-radius: 4px;
+          user-select: none;
+          cursor: default;
+        }
+        .toolbar-usage:hover {
+          background: var(--bg-hover);
+        }
+        .toolbar-usage.usage-overage {
+          color: var(--orange);
+        }
+        .overage-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: var(--orange);
+          flex-shrink: 0;
+        }
+        .usage-tooltip {
+          display: none;
+          flex-direction: column;
+          gap: 0;
+          position: absolute;
+          bottom: calc(100% + 8px);
+          right: 0;
+          min-width: 380px;
+          background: var(--bg-elevated);
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          box-shadow: 0 -4px 16px rgba(0,0,0,0.3);
+          z-index: 60;
+          overflow: hidden;
+        }
+        .usage-tooltip-section {
+          padding: 8px 12px;
+        }
+        .usage-tooltip-section + .usage-tooltip-section {
+          border-top: 1px solid var(--border);
+        }
+        .usage-tooltip-title {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          font-size: 10px;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          color: var(--text-muted);
+          margin-bottom: 6px;
+        }
+        .usage-tooltip-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 2px 0;
+          font-size: 12px;
+        }
+        .usage-tooltip-label {
+          color: var(--text-muted);
+        }
+        .usage-tooltip-value {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 11px;
+          color: var(--text);
+        }
+        .usage-tooltip-warn .usage-tooltip-value {
+          color: var(--orange);
+        }
+        .usage-tooltip-heading {
+          font-size: 13px;
+          font-weight: 600;
+          color: var(--text);
+          margin-bottom: 10px;
+        }
+        .usage-bar-row {
+          display: grid;
+          grid-template-columns: 120px 1fr auto;
+          align-items: center;
+          gap: 12px;
+        }
+        .usage-bar-info {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          min-width: 0;
+        }
+        .usage-bar-label {
+          font-size: 12px;
+          color: var(--text);
+          font-weight: 500;
+          white-space: nowrap;
+        }
+        .usage-bar-tag {
+          font-size: 9px;
+          font-weight: 700;
+          letter-spacing: 0.5px;
+          margin-left: 6px;
+          padding: 1px 5px;
+          border-radius: 3px;
+          background: rgba(255,255,255,0.06);
+        }
+        .usage-bar-sublabel {
+          font-size: 10px;
+          color: var(--text-muted);
+          white-space: nowrap;
+        }
+        .usage-bar-track {
+          height: 6px;
+          border-radius: 3px;
+          background: var(--bg-hover);
+          overflow: hidden;
+          min-width: 100px;
+        }
+        .usage-bar-fill {
+          height: 100%;
+          border-radius: 3px;
+          transition: width 0.4s ease;
+        }
+        .usage-bar-pct {
+          font-size: 11px;
+          font-family: 'JetBrains Mono', monospace;
+          color: var(--text-muted);
+          white-space: nowrap;
+        }
+        .effort-btn {
+          font-size: 11px;
+          padding: 3px 8px;
+          border: 1px solid transparent;
+          transition: all 0.15s;
+        }
+        .effort-btn:hover {
+          border-color: var(--border);
+        }
+        .effort-label {
+          font-size: 11px;
+          font-family: 'JetBrains Mono', monospace;
         }
         .permission-btn {
           font-size: 11px;

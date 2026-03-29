@@ -139,7 +139,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 		});
 	});
 
-	ipcMain.on('claude:send', (_event, projectPath: string, message: string, imagePaths?: string[], permMode?: string) => {
+	ipcMain.on('claude:send', (_event, projectPath: string, message: string, imagePaths?: string[], permMode?: string, effort?: string) => {
 		const ws = get(projectPath);
 		if (!ws) return;
 
@@ -173,6 +173,11 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 			args.push('--permission-mode', 'bypassPermissions');
 		} else {
 			args.push('--permission-mode', 'acceptEdits');
+		}
+
+		// Effort level
+		if (effort && ['low', 'medium', 'high', 'max'].includes(effort)) {
+			args.push('--effort', effort);
 		}
 
 		safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath });
