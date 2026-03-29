@@ -20,7 +20,7 @@ export default function ChatMessage({ message }: { message: ChatMessageType }) {
       {message.content && (
         <div className="chat-msg-content">
           {message.role === 'user'
-            ? <ChevronRight size={14} color="var(--green)" className="chat-msg-dot chat-msg-chevron" />
+            ? <ChevronRight size={14} color="var(--green)" strokeWidth={3} className="chat-msg-dot chat-msg-chevron" />
             : <Circle size={8} fill={dotColor} stroke={dotColor} className="chat-msg-dot" />}
           <div className="chat-msg-body">
             <ReactMarkdown rehypePlugins={[rehypeHighlight]}>{message.content}</ReactMarkdown>

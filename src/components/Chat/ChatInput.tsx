@@ -84,7 +84,10 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [contextItems, setContextItems] = useState<ContextItem[]>([]);
-  // permissionMode is now a prop
+  const [history, setHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [tickerDir, setTickerDir] = useState<'up' | 'down' | null>(null);
+  const draftRef = useRef('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
@@ -155,9 +158,49 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
       }
       if (e.key === 'Escape') { setSuggestions([]); setShowAddMenu(false); return; }
     }
+    // History navigation (only when no dropdown is open)
+    if (e.key === 'ArrowUp' && items.length === 0) {
+      const ta = textareaRef.current;
+      const atFirstLine = !ta || ta.selectionStart === 0 || !value.slice(0, ta.selectionStart).includes('\n');
+      if (atFirstLine && history.length > 0) {
+        e.preventDefault();
+        if (historyIndex === -1) draftRef.current = value;
+        const next = historyIndex === -1 ? history.length - 1 : Math.max(historyIndex - 1, 0);
+        setHistoryIndex(next);
+        setValue(history[next]);
+        setTickerDir('up');
+        setTimeout(() => setTickerDir(null), 200);
+        return;
+      }
+    }
+    if (e.key === 'ArrowDown' && items.length === 0) {
+      const ta = textareaRef.current;
+      const atLastLine = !ta || ta.selectionEnd === value.length || !value.slice(ta.selectionEnd).includes('\n');
+      if (atLastLine && historyIndex !== -1) {
+        e.preventDefault();
+        const next = historyIndex + 1;
+        if (next >= history.length) {
+          setHistoryIndex(-1);
+          setValue(draftRef.current);
+        } else {
+          setHistoryIndex(next);
+          setValue(history[next]);
+        }
+        setTickerDir('down');
+        setTimeout(() => setTickerDir(null), 200);
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       if (value.trim()) {
+        setHistory(prev => {
+          const trimmed = value.trim();
+          if (prev[prev.length - 1] === trimmed) return prev;
+          return [...prev, trimmed];
+        });
+        setHistoryIndex(-1);
+        draftRef.current = '';
         const images = contextItems.filter(c => c.type === 'image' && c.data).map(c => c.data!);
         onSend(value.trim(), images.length > 0 ? images : undefined);
         setValue('');
@@ -255,7 +298,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
       )}
 
       {/* Main input area */}
-      <div className="input-box">
+      <div className={`input-box ${tickerDir ? `ticker-${tickerDir}` : ''}`}>
         <textarea
           ref={textareaRef}
           className="chat-textarea"
@@ -311,6 +354,13 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
               className="send-btn"
               onClick={() => {
                 if (value.trim()) {
+                  setHistory(prev => {
+                    const trimmed = value.trim();
+                    if (prev[prev.length - 1] === trimmed) return prev;
+                    return [...prev, trimmed];
+                  });
+                  setHistoryIndex(-1);
+                  draftRef.current = '';
                   const images = contextItems.filter(c => c.type === 'image' && c.data).map(c => c.data!);
                   onSend(value.trim(), images.length > 0 ? images : undefined);
                   setValue('');
@@ -397,6 +447,20 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           border: 1px solid var(--accent);
           border-radius: 10px;
           overflow: hidden;
+        }
+        .input-box.ticker-up .chat-textarea {
+          animation: ticker-slide-up 0.2s ease-out;
+        }
+        .input-box.ticker-down .chat-textarea {
+          animation: ticker-slide-down 0.2s ease-out;
+        }
+        @keyframes ticker-slide-up {
+          0% { transform: translateY(8px); opacity: 0.3; }
+          100% { transform: translateY(0); opacity: 1; }
+        }
+        @keyframes ticker-slide-down {
+          0% { transform: translateY(-8px); opacity: 0.3; }
+          100% { transform: translateY(0); opacity: 1; }
         }
         .chat-textarea {
           width: 100%;
