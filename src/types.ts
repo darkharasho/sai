@@ -39,6 +39,7 @@ export interface OpenFile {
   content?: string;
   savedContent?: string;
   isDirty?: boolean;
+  diskMtime?: number;
 }
 
 export interface GitCommit {

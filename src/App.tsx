@@ -245,12 +245,15 @@ export default function App() {
   const handleFileOpen = useCallback(async (filePath: string) => {
     if (!activeProjectPath) return;
     try {
-      const content = await window.sai.fsReadFile(filePath) as string;
+      const [content, { mtime }] = await Promise.all([
+        window.sai.fsReadFile(filePath) as Promise<string>,
+        window.sai.fsMtime(filePath) as Promise<{ mtime: number }>,
+      ]);
       updateWorkspace(activeProjectPath, ws => {
         const exists = ws.openFiles.some(f => f.path === filePath);
         return {
           ...ws,
-          openFiles: exists ? ws.openFiles : [...ws.openFiles, { path: filePath, viewMode: 'editor', content, savedContent: content }],
+          openFiles: exists ? ws.openFiles : [...ws.openFiles, { path: filePath, viewMode: 'editor', content, savedContent: content, diskMtime: mtime }],
           activeFilePath: filePath,
         };
       });
@@ -341,10 +344,11 @@ export default function App() {
 
   const handleEditorSave = useCallback(async (filePath: string, content: string) => {
     await window.sai.fsWriteFile(filePath, content);
+    const { mtime } = await window.sai.fsMtime(filePath) as { mtime: number };
     if (activeProjectPath) {
       updateWorkspace(activeProjectPath, ws => ({
         ...ws,
-        openFiles: ws.openFiles.map(f => f.path === filePath ? { ...f, savedContent: content, isDirty: false } : f),
+        openFiles: ws.openFiles.map(f => f.path === filePath ? { ...f, savedContent: content, isDirty: false, diskMtime: mtime } : f),
       }));
     }
   }, [activeProjectPath, updateWorkspace]);
