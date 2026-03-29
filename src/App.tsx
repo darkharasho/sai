@@ -318,14 +318,18 @@ export default function App() {
     await window.sai.fsWriteFile(filePath, content);
   }, []);
 
-  const persistSession = useCallback((session: ChatSession) => {
-    if (!activeProjectPath) return;
-    updateWorkspace(activeProjectPath, ws => {
+  const persistSessionForWorkspace = useCallback((wsPath: string, session: ChatSession) => {
+    updateWorkspace(wsPath, ws => {
       const updated = upsertSession(ws.sessions, session);
-      saveSessions(activeProjectPath, updated);
+      saveSessions(wsPath, updated);
       return { ...ws, sessions: updated };
     });
-  }, [activeProjectPath, updateWorkspace]);
+  }, [updateWorkspace]);
+
+  const persistSession = useCallback((session: ChatSession) => {
+    if (!activeProjectPath) return;
+    persistSessionForWorkspace(activeProjectPath, session);
+  }, [activeProjectPath, persistSessionForWorkspace]);
 
   const toggleSidebar = (id: string) => {
     setSidebarOpen(prev => prev === id ? null : id);
@@ -471,17 +475,42 @@ export default function App() {
         </div>
         <div className="accordion-body-wrapper">
           <div className="accordion-body">
-            {panel === 'chat' && (
-              <ChatPanel
-                key={activeSession.id}
-                projectPath={projectPath}
-                permissionMode={permissionMode}
-                onPermissionChange={handlePermissionChange}
-                initialMessages={activeSession.messages}
-                onMessagesChange={handleMessagesChange}
-                onTurnComplete={handleSessionSave}
-              />
-            )}
+            {panel === 'chat' && Array.from(workspaces.entries()).map(([wsPath, ws]) => (
+              <div
+                key={`chat-${wsPath}`}
+                style={{
+                  display: wsPath === activeProjectPath ? 'flex' : 'none',
+                  flexDirection: 'column',
+                  flex: 1,
+                  minHeight: 0,
+                  overflow: 'hidden',
+                }}
+              >
+                <ChatPanel
+                  key={ws.activeSession.id}
+                  projectPath={wsPath}
+                  permissionMode={permissionMode}
+                  onPermissionChange={handlePermissionChange}
+                  initialMessages={ws.activeSession.messages}
+                  onMessagesChange={(messages: ChatMessage[]) => {
+                    updateWorkspace(wsPath, w => {
+                      const updated = { ...w.activeSession, messages, updatedAt: Date.now() };
+                      if (!updated.title) {
+                        const firstUserMsg = messages.find(m => m.role === 'user');
+                        if (firstUserMsg) updated.title = firstUserMsg.content.slice(0, 40);
+                      }
+                      return { ...w, activeSession: updated };
+                    });
+                  }}
+                  onTurnComplete={() => {
+                    const w = workspaces.get(wsPath);
+                    if (w && w.activeSession.messages.length > 0) {
+                      persistSessionForWorkspace(wsPath, w.activeSession);
+                    }
+                  }}
+                />
+              </div>
+            ))}
             {panel === 'editor' && activeFilePath && (
               <CodePanel
                 openFiles={openFiles}

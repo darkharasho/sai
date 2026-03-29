@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { registerTerminalHandlers, destroyAllTerminals } from './services/pty';
-import { registerClaudeHandlers, destroyClaude } from './services/claude';
+import { registerClaudeHandlers } from './services/claude';
 import { registerGitHandlers } from './services/git';
 import { registerFsHandlers } from './services/fs';
 import { registerUpdater } from './services/updater';
@@ -50,12 +50,11 @@ function createWindow() {
   startSuspendTimer(mainWindow);
 
   ipcMain.handle('workspace:getAll', () => {
-    const active = getAll();
+    const active = getAll().filter(w => w.projectPath);
     const recent = getRecentProjects();
-    // Merge: active/suspended workspaces + recent projects not already in workspaces
     const activeSet = new Set(active.map(w => w.projectPath));
     const recentOnly = recent
-      .filter(p => !activeSet.has(p))
+      .filter(p => p && !activeSet.has(p))
       .map(p => ({ projectPath: p, status: 'recent', lastActivity: 0 }));
     return [...active, ...recentOnly];
   });

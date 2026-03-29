@@ -14,20 +14,22 @@ function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
 
 export function registerClaudeHandlers(win: BrowserWindow) {
 	ipcMain.handle('claude:start', (_event, cwd: string) => {
+		if (!cwd) return;
 		const ws = getOrCreate(cwd);
 
-		// Kill any in-flight probe or active process for this workspace
+		// If workspace already has a session, just signal ready (don't re-probe)
+		if (ws.claude.sessionId) {
+			safeSend(win, 'claude:message', { type: 'ready', projectPath: ws.projectPath });
+			return;
+		}
+
+		// Kill any in-flight probe from a previous start attempt
 		if (ws.claude.probe) {
 			ws.claude.probe.kill();
 			ws.claude.probe = null;
 		}
-		if (ws.claude.process) {
-			ws.claude.process.kill();
-			ws.claude.process = null;
-		}
 
-		ws.claude.cwd = cwd || process.env.HOME || '/';
-		ws.claude.sessionId = undefined;
+		ws.claude.cwd = cwd;
 
 		// Probe Claude to get slash commands from init message
 		return new Promise<void>((resolve) => {
