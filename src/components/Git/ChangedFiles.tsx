@@ -1,11 +1,12 @@
 import { useState } from 'react';
+import { Plus, Minus, FileText, FilePlus, FileX, FileSymlink } from 'lucide-react';
 import { GitFile } from '../../types';
 
-const STATUS_CONFIG: Record<GitFile['status'], { label: string; color: string }> = {
-  modified: { label: 'M', color: 'var(--orange)' },
-  added:    { label: 'A', color: 'var(--green)' },
-  deleted:  { label: 'D', color: 'var(--red)' },
-  renamed:  { label: 'R', color: 'var(--blue)' },
+const STATUS_CONFIG: Record<GitFile['status'], { icon: typeof FileText; color: string }> = {
+  modified: { icon: FileText,     color: 'var(--orange)' },
+  added:    { icon: FilePlus,     color: 'var(--green)' },
+  deleted:  { icon: FileX,        color: 'var(--red)' },
+  renamed:  { icon: FileSymlink,  color: 'var(--blue)' },
 };
 
 interface ChangedFilesProps {
@@ -61,19 +62,8 @@ export default function ChangedFiles({ title, files, onAction, actionLabel, onFi
               minWidth: 0,
             }}
           >
-            {/* Status badge */}
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 700,
-                color: cfg.color,
-                width: 12,
-                flexShrink: 0,
-                textAlign: 'center' as const,
-              }}
-            >
-              {cfg.label}
-            </span>
+            {/* Status icon */}
+            <cfg.icon size={14} color={cfg.color} style={{ flexShrink: 0 }} />
 
             {/* File name + directory */}
             <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
@@ -129,7 +119,7 @@ export default function ChangedFiles({ title, files, onAction, actionLabel, onFi
                 justifyContent: 'center',
               }}
             >
-              {actionLabel}
+              {actionLabel === '+' ? <Plus size={14} /> : <Minus size={14} />}
             </button>
           </div>
         );

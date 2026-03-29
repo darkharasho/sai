@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { GitBranch, Check, ArrowUp, ArrowDown } from 'lucide-react';
 
 interface CommitBoxProps {
   branch: string;
@@ -50,7 +51,7 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
           color: 'var(--text-secondary)',
         }}
       >
-        <span style={{ color: 'var(--accent)' }}>⎇</span>
+        <GitBranch size={13} color="var(--accent)" />
         <span
           style={{
             flex: 1,
@@ -106,6 +107,9 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
           fontWeight: 600,
           cursor: message.trim() && !busy ? 'pointer' : 'not-allowed',
           transition: 'background 0.15s',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
         }}
         onMouseEnter={(e) => {
           if (message.trim() && !busy)
@@ -116,6 +120,7 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
             (e.currentTarget as HTMLButtonElement).style.background = 'var(--accent)';
         }}
       >
+        <Check size={14} style={{ marginRight: 4 }} />
         {busy ? 'Working…' : 'Commit'}
       </button>
 
@@ -134,6 +139,9 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
             color: busy ? 'var(--text-muted)' : 'var(--text-secondary)',
             fontSize: 12,
             cursor: busy ? 'not-allowed' : 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
           }}
           onMouseEnter={(e) => {
             if (!busy) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-hover)';
@@ -142,8 +150,8 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
             (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-input)';
           }}
         >
-          ↑{ahead > 0 ? ahead : ''}
-          {' '}Push
+          <ArrowUp size={13} style={{ marginRight: 3 }} />
+          Push{ahead > 0 ? ` ${ahead}` : ''}
         </button>
 
         <button
@@ -159,6 +167,9 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
             color: busy ? 'var(--text-muted)' : 'var(--text-secondary)',
             fontSize: 12,
             cursor: busy ? 'not-allowed' : 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
           }}
           onMouseEnter={(e) => {
             if (!busy) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-hover)';
@@ -167,8 +178,8 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
             (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-input)';
           }}
         >
-          ↓{behind > 0 ? behind : ''}
-          {' '}Pull
+          <ArrowDown size={13} style={{ marginRight: 3 }} />
+          Pull{behind > 0 ? ` ${behind}` : ''}
         </button>
       </div>
     </div>

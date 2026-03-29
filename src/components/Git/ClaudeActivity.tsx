@@ -1,3 +1,4 @@
+import { GitCommit as GitCommitIcon } from 'lucide-react';
 import { GitCommit } from '../../types';
 
 interface ClaudeActivityProps {
@@ -49,7 +50,7 @@ export default function ClaudeActivity({ commits }: ClaudeActivityProps) {
             }}
           >
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-              <span style={{ fontSize: 12, flexShrink: 0, lineHeight: '16px' }}>🤖</span>
+              <GitCommitIcon size={14} color="var(--accent)" style={{ flexShrink: 0 }} />
               <span
                 style={{
                   fontSize: 12,
