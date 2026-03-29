@@ -22,7 +22,7 @@ export function registerTerminalHandlers(win: BrowserWindow) {
   ipcMain.handle('terminal:create', (_event, cwd: string) => {
     const shell = process.env.SHELL || '/bin/bash';
     const id = nextId++;
-    const term = pty.spawn(shell, [], {
+    const term = pty.spawn(shell, ['--login'], {
       name: 'xterm-256color',
       cwd: cwd || process.env.HOME || '/',
       env: process.env as Record<string, string>,

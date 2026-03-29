@@ -86,4 +86,11 @@ contextBridge.exposeInMainWorld('sai', {
   getRecentProjects: () => ipcRenderer.invoke('project:getRecent'),
   openRecentProject: (path: string) => ipcRenderer.invoke('project:openRecent', path),
   openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
+  // Usage API polling
+  usageFetch: () => ipcRenderer.invoke('usage:fetch'),
+  onUsageUpdate: (callback: (data: any) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, data: any) => callback(data);
+    ipcRenderer.on('usage:update', listener);
+    return () => ipcRenderer.removeListener('usage:update', listener);
+  },
 });

@@ -126,11 +126,11 @@ function formatResetTime(resetsAt: number, style: 'relative' | 'absolute' = 'rel
 }
 
 // Use the CLI's utilization field (0.0–1.0) when available for accurate usage %.
-// Falls back to -1 (unknown) if not provided, unless the limit was hit.
+// Falls back to 0 if not provided (better than hiding the bar entirely).
 function getRateLimitProgress(rl: { rateLimitType: string; resetsAt: number; status: string; utilization?: number }): number {
   if (rl.status === 'rejected') return 1;
   if (rl.utilization !== undefined) return Math.min(Math.max(rl.utilization, 0), 1);
-  return -1;
+  return 0;
 }
 
 function UsageBar({ pct, color, label, sublabel, tag }: { pct: number; color: string; label: string; sublabel: string; tag?: string }) {

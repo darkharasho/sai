@@ -334,6 +334,52 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     return cleanup;
   }, [projectPath]);
 
+  // Poll the Anthropic usage API for real utilization percentages
+  useEffect(() => {
+    const handleUsage = (data: any) => {
+      if (!data) return;
+      setRateLimits(prev => {
+        const next = new Map(prev);
+        // five_hour → Current session
+        if (data.five_hour) {
+          const existing = next.get('five_hour') || {
+            rateLimitType: 'five_hour',
+            resetsAt: 0,
+            status: 'unknown',
+            isUsingOverage: false,
+            overageResetsAt: 0,
+          };
+          next.set('five_hour', {
+            ...existing,
+            utilization: (data.five_hour.utilization ?? 0) / 100, // API returns 0-100, we use 0-1
+            ...(data.five_hour.resets_at ? { resetsAt: Math.floor(new Date(data.five_hour.resets_at).getTime() / 1000) } : {}),
+          });
+        }
+        // seven_day → Weekly (All models)
+        if (data.seven_day) {
+          const existing = next.get('seven_day') || {
+            rateLimitType: 'seven_day',
+            resetsAt: 0,
+            status: 'unknown',
+            isUsingOverage: false,
+            overageResetsAt: 0,
+          };
+          next.set('seven_day', {
+            ...existing,
+            utilization: (data.seven_day.utilization ?? 0) / 100,
+            ...(data.seven_day.resets_at ? { resetsAt: Math.floor(new Date(data.seven_day.resets_at).getTime() / 1000) } : {}),
+          });
+        }
+        return next;
+      });
+    };
+
+    const cleanup = (window.sai as any).onUsageUpdate?.(handleUsage);
+    // Also do an initial fetch
+    (window.sai as any).usageFetch?.().then(handleUsage);
+    return () => cleanup?.();
+  }, []);
+
   // Wheel events are never fired by programmatic scrolls — use them to detect user scrolling up
   useEffect(() => {
     const el = chatContainerRef.current;

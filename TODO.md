@@ -27,5 +27,7 @@
 - [x] closing a file with unsaved changes should have a custom modal popup themed like this app to prompt to save or cancel or close anyway
 - [x] wont let you hit generate commit message unless the changes are staged
 - [x] periodically check for git pulls and whether unstaged/staged changes are still valid
-- [ ] manual suspend button on workspaces
+- [x] manual suspend button on workspaces
+- [ ] localhost links need to be actual links too
+- [ ] files in the current project should have a link to open them in the editor
 - [ ] more flavortext besides "describe what to build" that rotates each time its a fresh session

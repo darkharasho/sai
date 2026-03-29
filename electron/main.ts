@@ -6,6 +6,7 @@ import { registerClaudeHandlers } from './services/claude';
 import { registerGitHandlers } from './services/git';
 import { registerFsHandlers } from './services/fs';
 import { registerUpdater } from './services/updater';
+import { registerUsageHandlers, destroyUsagePolling } from './services/usage';
 import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove, suspend } from './services/workspace';
 
 let mainWindow: BrowserWindow | null = null;
@@ -47,6 +48,7 @@ function createWindow() {
   registerGitHandlers();
   registerFsHandlers(mainWindow!);
   registerUpdater(mainWindow!);
+  registerUsageHandlers(mainWindow!);
   startSuspendTimer(mainWindow);
 
   ipcMain.handle('workspace:getAll', () => {
@@ -163,6 +165,7 @@ process.on('uncaughtException', (err) => {
 app.whenReady().then(createWindow);
 app.on('window-all-closed', () => {
   stopSuspendTimer();
+  destroyUsagePolling();
   destroyAllTerminals();
   if (mainWindow) destroyAll(mainWindow);
   app.quit();
