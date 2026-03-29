@@ -224,7 +224,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
     proc.stdin.write(msg + '\n');
   });
 
-  // claude:generateCommitMessage — route through persistent process or one-shot fallback
+  // claude:generateCommitMessage — always one-shot to avoid context token costs
   ipcMain.handle('claude:generateCommitMessage', async (_event, cwd: string) => {
     const ws = get(cwd);
     const effectiveCwd = cwd || ws?.claude.cwd || process.env.HOME || '/';
@@ -252,75 +252,14 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 
     const commitPrompt = `Generate a concise commit message for this diff. Output ONLY the commit message text, nothing else. Use conventional commit format (e.g. feat:, fix:, refactor:). Keep it under 72 characters for the subject line.\n\n${truncatedDiff}`;
 
-    // If persistent process exists and is idle, use it for caching benefits.
-    // suppressForward prevents the main stdout handler from sending commit
-    // message results to the renderer (which would pollute the chat UI).
-    // Instead, the result is captured here via a temporary listener.
-    if (ws?.claude.process && !ws.claude.busy) {
-      return new Promise<string>((resolve) => {
-        const proc = ws.claude.process!;
-        let resolved = false;
-
-        ws.claude.busy = true;
-        ws.claude.suppressForward = true;
-
-        let commitBuffer = '';
-        const commitHandler = (data: Buffer) => {
-          if (resolved) return;
-          commitBuffer += data.toString();
-          const lines = commitBuffer.split('\n');
-          commitBuffer = lines.pop() || '';
-          for (const line of lines) {
-            if (!line.trim()) continue;
-            try {
-              const msg = JSON.parse(line);
-              if (msg.type === 'result') {
-                const commitResult = typeof msg.result === 'string' ? msg.result : '';
-                ws.claude.busy = false;
-                ws.claude.suppressForward = false;
-                resolved = true;
-                proc.stdout?.removeListener('data', commitHandler);
-                resolve(commitResult.trim());
-                return;
-              }
-            } catch { /* ignore */ }
-          }
-        };
-
-        proc.stdout?.on('data', commitHandler);
-
-        const msg = JSON.stringify({
-          type: 'user',
-          message: { role: 'user', content: commitPrompt },
-        });
-        if (!proc.stdin || proc.stdin.destroyed) {
-          ws.claude.busy = false;
-          ws.claude.suppressForward = false;
-          resolved = true;
-          resolve('');
-          return;
-        }
-        proc.stdin.write(msg + '\n');
-
-        // Timeout fallback — if no result in 30s, resolve empty
-        setTimeout(() => {
-          if (!resolved) {
-            resolved = true;
-            proc.stdout?.removeListener('data', commitHandler);
-            ws.claude.busy = false;
-            ws.claude.suppressForward = false;
-            resolve('');
-          }
-        }, 30000);
-      });
-    }
-
-    // Fallback: one-shot process (no persistent process available or it's busy)
+    // Always use a one-shot process for commit messages to avoid paying
+    // for the full conversation context as input tokens.
     return new Promise<string>((resolve) => {
       const proc = spawn('claude', [
         '-p', commitPrompt,
         '--output-format', 'text',
         '--max-turns', '1',
+        '--model', 'haiku',
       ], {
         cwd: effectiveCwd,
         env: { ...process.env },

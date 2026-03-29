@@ -446,12 +446,14 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         {isStreaming && <ThinkingAnimation hasContent={messages[messages.length - 1]?.role === 'assistant'} />}
         <div ref={messagesEndRef} />
       </div>
-      {showNewMessages && (
-        <button className="new-messages-btn" onClick={scrollToBottom}>
-          <ChevronDown size={12} />
-          new messages
-        </button>
-      )}
+      <div className="new-messages-anchor">
+        {showNewMessages && (
+          <button className="new-messages-btn" onClick={scrollToBottom}>
+            <ChevronDown size={12} />
+            new messages
+          </button>
+        )}
+      </div>
       <ChatInput
         onSend={handleSend}
         disabled={!ready}
@@ -477,9 +479,15 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           min-height: 0;
           overflow: hidden;
         }
+        .new-messages-anchor {
+          position: relative;
+          flex-shrink: 0;
+          height: 0;
+          z-index: 10;
+        }
         .new-messages-btn {
           position: absolute;
-          bottom: 72px;
+          bottom: 8px;
           left: 50%;
           transform: translateX(-50%);
           z-index: 10;

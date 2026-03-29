@@ -6,6 +6,7 @@ import GitSidebar from './components/Git/GitSidebar';
 import FileExplorerSidebar from './components/FileExplorer/FileExplorerSidebar';
 import TitleBar from './components/TitleBar';
 import CodePanel from './components/CodePanel/CodePanel';
+import UnsavedChangesModal from './components/UnsavedChangesModal';
 import { loadSessions, saveSessions, createSession, upsertSession, migrateLegacySessions } from './sessions';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext } from './types';
 import { MessageSquare, TerminalSquare, Code2, ChevronRight, MessageCirclePlus, Clock } from 'lucide-react';
@@ -23,6 +24,7 @@ export default function App() {
   const [effortLevel, setEffortLevel] = useState<EffortLevel>('high');
   const [modelChoice, setModelChoice] = useState<ModelChoice>('sonnet');
   const [workspaces, setWorkspaces] = useState<Map<string, WorkspaceContext>>(new Map());
+  const [pendingClose, setPendingClose] = useState<string | null>(null);
   // Ref to hold latest messages per workspace without triggering re-renders during streaming
   const wsMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
 
@@ -248,7 +250,7 @@ export default function App() {
         const exists = ws.openFiles.some(f => f.path === filePath);
         return {
           ...ws,
-          openFiles: exists ? ws.openFiles : [...ws.openFiles, { path: filePath, viewMode: 'editor', content }],
+          openFiles: exists ? ws.openFiles : [...ws.openFiles, { path: filePath, viewMode: 'editor', content, savedContent: content }],
           activeFilePath: filePath,
         };
       });
@@ -263,7 +265,7 @@ export default function App() {
     }
   }, [activeProjectPath, updateWorkspace]);
 
-  const handleFileClose = useCallback((path: string) => {
+  const doFileClose = useCallback((path: string) => {
     if (!activeProjectPath) return;
     updateWorkspace(activeProjectPath, ws => {
       const next = ws.openFiles.filter(f => f.path !== path);
@@ -279,6 +281,18 @@ export default function App() {
       return { ...ws, openFiles: next, activeFilePath: newActive };
     });
   }, [activeProjectPath, updateWorkspace]);
+
+  const handleFileClose = useCallback((path: string) => {
+    if (!activeProjectPath) return;
+    const ws = workspaces.get(activeProjectPath);
+    const file = ws?.openFiles.find(f => f.path === path);
+    const isDirty = file?.viewMode === 'editor' && !!file.isDirty;
+    if (isDirty) {
+      setPendingClose(path);
+    } else {
+      doFileClose(path);
+    }
+  }, [activeProjectPath, workspaces, doFileClose]);
 
   const handleCloseAllFiles = useCallback(() => {
     if (!activeProjectPath) return;
@@ -301,6 +315,7 @@ export default function App() {
 
   const handleProjectSwitch = useCallback((newPath: string) => {
     if (newPath === activeProjectPath) return;
+    window.sai.openRecentProject(newPath);
     const sessions = loadSessions(newPath);
     setWorkspaces(prev => {
       const next = new Map(prev);
@@ -326,13 +341,27 @@ export default function App() {
 
   const handleEditorSave = useCallback(async (filePath: string, content: string) => {
     await window.sai.fsWriteFile(filePath, content);
-  }, []);
+    if (activeProjectPath) {
+      updateWorkspace(activeProjectPath, ws => ({
+        ...ws,
+        openFiles: ws.openFiles.map(f => f.path === filePath ? { ...f, savedContent: content, isDirty: false } : f),
+      }));
+    }
+  }, [activeProjectPath, updateWorkspace]);
 
   const handleEditorContentChange = useCallback((filePath: string, content: string) => {
     if (!activeProjectPath) return;
     updateWorkspace(activeProjectPath, ws => ({
       ...ws,
       openFiles: ws.openFiles.map(f => f.path === filePath ? { ...f, content } : f),
+    }));
+  }, [activeProjectPath, updateWorkspace]);
+
+  const handleEditorDirtyChange = useCallback((filePath: string, dirty: boolean) => {
+    if (!activeProjectPath) return;
+    updateWorkspace(activeProjectPath, ws => ({
+      ...ws,
+      openFiles: ws.openFiles.map(f => f.path === filePath ? { ...f, isDirty: dirty } : f),
     }));
   }, [activeProjectPath, updateWorkspace]);
 
@@ -554,6 +583,7 @@ export default function App() {
                 onDiffModeChange={handleDiffModeChange}
                 onEditorSave={handleEditorSave}
                 onEditorContentChange={handleEditorContentChange}
+                onEditorDirtyChange={handleEditorDirtyChange}
               />
             )}
             {panel === 'terminal' && (
@@ -591,6 +621,29 @@ export default function App() {
       </div>
 
       {isDragging && <div className="drag-overlay" />}
+
+      {pendingClose && (() => {
+        const ws = activeProjectPath ? workspaces.get(activeProjectPath) : null;
+        const file = ws?.openFiles.find(f => f.path === pendingClose);
+        const fileName = pendingClose.split('/').pop() ?? pendingClose;
+        return (
+          <UnsavedChangesModal
+            fileName={fileName}
+            onSave={async () => {
+              if (file?.content !== undefined) {
+                await handleEditorSave(pendingClose, file.content);
+              }
+              doFileClose(pendingClose);
+              setPendingClose(null);
+            }}
+            onDiscard={() => {
+              doFileClose(pendingClose);
+              setPendingClose(null);
+            }}
+            onCancel={() => setPendingClose(null)}
+          />
+        );
+      })()}
 
       <style>{`
         .accordion-panel {

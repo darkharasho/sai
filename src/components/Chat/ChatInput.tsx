@@ -176,6 +176,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [tickerDir, setTickerDir] = useState<'up' | 'down' | null>(null);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const draftRef = useRef('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -187,6 +188,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
       if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
         setSuggestions([]);
         setShowAddMenu(false);
+        setSlashMenuOpen(false);
       }
       if (modelMenuRef.current && !modelMenuRef.current.contains(e.target as Node)) {
         setModelMenuOpen(false);
@@ -199,6 +201,24 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
   // Autocomplete
   useEffect(() => {
     if (showAddMenu) { setSuggestions([]); return; }
+
+    const dynamicCommands: AutocompleteItem[] = slashCommands.map(name => ({
+      label: `/${name}`,
+      value: `/${name}`,
+      description: name.includes(':') ? name.split(':')[0] : '',
+      icon: getCommandIcon(name),
+    }));
+    const all = [...BUILTIN_COMMANDS, ...dynamicCommands];
+    const seen = new Set<string>();
+    const unique = all.filter(c => { if (seen.has(c.label)) return false; seen.add(c.label); return true; });
+
+    // Slash menu button was clicked — show all commands
+    if (slashMenuOpen) {
+      setSuggestions(unique);
+      setSelectedIndex(0);
+      return;
+    }
+
     const cursorPos = textareaRef.current?.selectionStart ?? value.length;
     const textBeforeCursor = value.slice(0, cursorPos);
     const lastSpace = textBeforeCursor.lastIndexOf(' ');
@@ -207,25 +227,26 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
     const currentWord = textBeforeCursor.slice(wordStart).toLowerCase();
 
     if (currentWord.startsWith('/')) {
-      const dynamicCommands: AutocompleteItem[] = slashCommands.map(name => ({
-        label: `/${name}`,
-        value: `/${name}`,
-        description: name.includes(':') ? name.split(':')[0] : '',
-        icon: getCommandIcon(name),
-      }));
-      const all = [...BUILTIN_COMMANDS, ...dynamicCommands];
-      const seen = new Set<string>();
-      const unique = all.filter(c => { if (seen.has(c.label)) return false; seen.add(c.label); return true; });
       setSuggestions(unique.filter(c => c.label.toLowerCase().startsWith(currentWord)));
       setSelectedIndex(0);
     } else {
       setSuggestions([]);
     }
-  }, [value, slashCommands, showAddMenu]);
+  }, [value, slashCommands, showAddMenu, slashMenuOpen]);
 
   const applySuggestion = (item: AutocompleteItem) => {
-    if (item.value === '__IMAGE__') { handleAddImage(); setSuggestions([]); setShowAddMenu(false); return; }
-    if (!item.value) { setSuggestions([]); setShowAddMenu(false); return; }
+    if (item.value === '__IMAGE__') { handleAddImage(); setSuggestions([]); setShowAddMenu(false); setSlashMenuOpen(false); return; }
+    if (!item.value) { setSuggestions([]); setShowAddMenu(false); setSlashMenuOpen(false); return; }
+
+    // If opened via slash menu button (no `/` typed), insert the full command
+    if (slashMenuOpen) {
+      setValue(item.value + ' ');
+      setSuggestions([]);
+      setSlashMenuOpen(false);
+      textareaRef.current?.focus();
+      return;
+    }
+
     const cursorPos = textareaRef.current?.selectionStart ?? value.length;
     const textBeforeCursor = value.slice(0, cursorPos);
     const lastSpace = textBeforeCursor.lastIndexOf(' ');
@@ -249,7 +270,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
         applySuggestion(items[selectedIndex]);
         return;
       }
-      if (e.key === 'Escape') { setSuggestions([]); setShowAddMenu(false); return; }
+      if (e.key === 'Escape') { setSuggestions([]); setShowAddMenu(false); setSlashMenuOpen(false); return; }
     }
     // History navigation (only when no dropdown is open)
     if (e.key === 'ArrowUp' && items.length === 0) {
@@ -396,7 +417,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           ref={textareaRef}
           className="chat-textarea"
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => { setValue(e.target.value); setSlashMenuOpen(false); }}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           placeholder={isStreaming ? 'Queue another message...' : 'Message Claude...'}
@@ -411,7 +432,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           <button className="toolbar-btn" onClick={() => { setShowAddMenu(!showAddMenu); setSelectedIndex(0); }} title="Add context">
             <SquarePlus size={18} />
           </button>
-          <button className="toolbar-btn" onClick={() => { setValue(value + '/'); textareaRef.current?.focus(); }} title="Slash commands">
+          <button className="toolbar-btn" onClick={() => { setSlashMenuOpen(prev => !prev); setShowAddMenu(false); }} title="Slash commands">
             <SquareSlash size={18} />
           </button>
           {contextUsage && <ContextRing used={contextUsage.used} total={contextUsage.total} onClick={() => onSend('/compact')} />}

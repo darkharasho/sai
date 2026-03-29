@@ -14,6 +14,7 @@ interface CodePanelProps {
   onDiffModeChange: (path: string, mode: 'unified' | 'split') => void;
   onEditorSave: (filePath: string, content: string) => Promise<void>;
   onEditorContentChange?: (filePath: string, content: string) => void;
+  onEditorDirtyChange?: (filePath: string, dirty: boolean) => void;
 }
 
 export default function CodePanel({
@@ -26,6 +27,7 @@ export default function CodePanel({
   onDiffModeChange,
   onEditorSave,
   onEditorContentChange,
+  onEditorDirtyChange,
 }: CodePanelProps) {
   const activeFile = openFiles.find(f => f.path === activeFilePath);
 
@@ -68,6 +70,7 @@ export default function CodePanel({
           {openFiles.map((f) => {
             const isActive = f.path === activeFilePath;
             const fileName = f.path.split('/').pop() ?? f.path;
+            const isDirty = f.viewMode === 'editor' && !!f.isDirty;
             return (
               <div
                 key={f.path}
@@ -78,6 +81,7 @@ export default function CodePanel({
                     onClose(f.path);
                   }
                 }}
+                className="tab-item"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -101,30 +105,63 @@ export default function CodePanel({
                 }}>
                   {fileName}
                 </span>
-                <button
-                  onClick={(e) => { e.stopPropagation(); onClose(f.path); }}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: isActive ? 'var(--text-muted)' : 'transparent',
-                    cursor: 'pointer',
-                    padding: 2,
-                    borderRadius: 3,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                  onMouseEnter={(e) => {
-                    (e.target as HTMLElement).style.color = 'var(--text)';
-                    (e.target as HTMLElement).style.background = 'var(--bg-hover)';
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.target as HTMLElement).style.color = isActive ? 'var(--text-muted)' : 'transparent';
-                    (e.target as HTMLElement).style.background = 'none';
-                  }}
-                >
-                  <X size={14} />
-                </button>
+                <div style={{ position: 'relative', width: 18, height: 18, flexShrink: 0 }}>
+                  {isDirty && (
+                    <div
+                      className="tab-dirty-dot"
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <div style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: '50%',
+                        background: 'var(--text-muted)',
+                      }} />
+                    </div>
+                  )}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onClose(f.path); }}
+                    className={isDirty ? 'tab-close-hidden' : ''}
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      background: 'none',
+                      border: 'none',
+                      color: isActive ? 'var(--text-muted)' : 'transparent',
+                      cursor: 'pointer',
+                      padding: 2,
+                      borderRadius: 3,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      opacity: isDirty ? 0 : 1,
+                    }}
+                    onMouseEnter={(e) => {
+                      const btn = e.currentTarget;
+                      btn.style.opacity = '1';
+                      btn.style.color = 'var(--text)';
+                      btn.style.background = 'var(--bg-hover)';
+                      const dot = btn.parentElement?.querySelector('.tab-dirty-dot') as HTMLElement | null;
+                      if (dot) dot.style.opacity = '0';
+                    }}
+                    onMouseLeave={(e) => {
+                      const btn = e.currentTarget;
+                      btn.style.color = isActive ? 'var(--text-muted)' : 'transparent';
+                      btn.style.background = 'none';
+                      btn.style.opacity = isDirty ? '0' : '1';
+                      const dot = btn.parentElement?.querySelector('.tab-dirty-dot') as HTMLElement | null;
+                      if (dot) dot.style.opacity = '1';
+                    }}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
               </div>
             );
           })}
@@ -224,6 +261,7 @@ export default function CodePanel({
           content={activeFile.content}
           onSave={onEditorSave}
           onContentChange={onEditorContentChange}
+          onDirtyChange={onEditorDirtyChange ? (dirty) => onEditorDirtyChange(activeFile.path, dirty) : undefined}
         />
       ) : null}
     </div>

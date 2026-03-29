@@ -37,6 +37,8 @@ export interface OpenFile {
   diffMode?: 'unified' | 'split';
   // editor mode fields
   content?: string;
+  savedContent?: string;
+  isDirty?: boolean;
 }
 
 export interface GitCommit {
