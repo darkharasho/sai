@@ -246,6 +246,32 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
         .chat-msg-body pre code.hljs.language-diff .hljs-meta {
           color: #66d9ef;
         }
+        .chat-msg-body table {
+          border-collapse: collapse;
+          width: 100%;
+          margin: 8px 0;
+          font-size: 13px;
+          overflow-x: auto;
+          display: block;
+        }
+        .chat-msg-body th,
+        .chat-msg-body td {
+          border: 1px solid var(--border);
+          padding: 6px 12px;
+          text-align: left;
+          white-space: nowrap;
+        }
+        .chat-msg-body th {
+          background: var(--bg-secondary);
+          font-weight: 600;
+          color: var(--text);
+        }
+        .chat-msg-body td {
+          color: var(--text-secondary);
+        }
+        .chat-msg-body tr:hover td {
+          background: var(--bg-secondary);
+        }
         .chat-msg-images {
           display: flex;
           flex-wrap: wrap;

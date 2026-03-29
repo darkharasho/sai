@@ -279,6 +279,9 @@ const EMPTY_PROMPTS = [
   "What's the skeleton? We'll flesh it out from there.",
 ];
 
+const RENDER_CHUNK = 50; // messages to show per window
+const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
+
 export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, initialMessages, onMessagesChange, onTurnComplete, activeFilePath, onFileOpen }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessageType[]>(initialMessages || []);
   const emptyPrompt = useMemo(() => EMPTY_PROMPTS[Math.floor(Math.random() * EMPTY_PROMPTS.length)], []);
@@ -294,6 +297,42 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const isAtBottomRef = useRef(true);
   const [showPinnedPrompt, setShowPinnedPrompt] = useState(false);
   const [showNewMessages, setShowNewMessages] = useState(false);
+
+  // Windowed rendering: only render messages from renderStart onward
+  const [renderStart, setRenderStart] = useState(0);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  // Keep render window pinned to the tail when user is at bottom
+  useEffect(() => {
+    if (isAtBottomRef.current && messages.length > RENDER_CHUNK) {
+      setRenderStart(messages.length - RENDER_CHUNK);
+    } else if (messages.length <= RENDER_CHUNK) {
+      setRenderStart(0);
+    }
+  }, [messages.length]);
+
+  // Auto-load older messages when sentinel scrolls into view
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    const container = chatContainerRef.current;
+    if (!sentinel || !container) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && renderStart > 0) {
+          const prevScrollHeight = container.scrollHeight;
+          setRenderStart(prev => Math.max(0, prev - LOAD_MORE_CHUNK));
+          // Preserve scroll position after loading older messages
+          requestAnimationFrame(() => {
+            const newScrollHeight = container.scrollHeight;
+            container.scrollTop += newScrollHeight - prevScrollHeight;
+          });
+        }
+      },
+      { root: container, threshold: 0 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [renderStart]);
 
   useEffect(() => {
     setReady(false);
@@ -586,6 +625,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     }
   };
 
+  const visibleMessages = useMemo(
+    () => messages.slice(renderStart),
+    [messages, renderStart]
+  );
+  const hasHiddenMessages = renderStart > 0;
+
   const lastUserMessage = [...messages].reverse().find(m => m.role === 'user');
 
   useEffect(() => {
@@ -609,6 +654,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     // Handle built-in commands locally
     if (text === '/clear') {
       setMessages([]);
+      setRenderStart(0);
       return;
     }
     if (text === '/help') {
@@ -665,10 +711,17 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             </div>
           </div>
         ) : (
-          messages.map(msg => msg.id === lastUserMessage?.id
-            ? <div key={msg.id} ref={lastUserMsgRef}><ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} /></div>
-            : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} />
-          )
+          <>
+            {hasHiddenMessages && (
+              <div ref={sentinelRef} className="chat-load-sentinel">
+                <span className="chat-load-sentinel-text">Loading earlier messages...</span>
+              </div>
+            )}
+            {visibleMessages.map(msg => msg.id === lastUserMessage?.id
+              ? <div key={msg.id} ref={lastUserMsgRef}><ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} /></div>
+              : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} />
+            )}
+          </>
         )}
         {isStreaming && (aiProvider === 'codex'
           ? <CodexThinkingAnimation />
@@ -768,6 +821,17 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           overflow-y: auto;
           padding: 16px;
           min-height: 0;
+        }
+        .chat-load-sentinel {
+          display: flex;
+          justify-content: center;
+          padding: 12px 0;
+        }
+        .chat-load-sentinel-text {
+          font-size: 11px;
+          color: var(--text-muted);
+          opacity: 0.5;
+          font-family: 'JetBrains Mono', monospace;
         }
         .chat-empty {
           display: flex;
