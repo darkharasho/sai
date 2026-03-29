@@ -18,9 +18,17 @@ export interface WorkspaceClaude {
   suppressForward: boolean; // true during commit msg generation — suppresses IPC forwarding
 }
 
+export interface WorkspaceCodex {
+  process: ChildProcess | null;
+  buffer: string;
+  cwd: string;
+  busy: boolean;
+}
+
 export interface Workspace {
   projectPath: string;
   claude: WorkspaceClaude;
+  codex: WorkspaceCodex;
   terminals: Map<number, pty.IPty>;
   lastActivity: number;
   status: 'active' | 'suspended';
@@ -45,6 +53,12 @@ export function getOrCreate(projectPath: string): Workspace {
       processConfig: null,
       busy: false,
       suppressForward: false,
+    },
+    codex: {
+      process: null,
+      buffer: '',
+      cwd: projectPath,
+      busy: false,
     },
     terminals: new Map(),
     lastActivity: Date.now(),
@@ -75,6 +89,13 @@ export function suspend(projectPath: string, win: BrowserWindow): void {
   ws.claude.processConfig = null;
   ws.claude.busy = false;
   ws.claude.suppressForward = false;
+
+  // Kill Codex process
+  if (ws.codex.process) {
+    ws.codex.process.kill();
+    ws.codex.process = null;
+  }
+  ws.codex.busy = false;
 
   // Kill all terminals
   for (const term of ws.terminals.values()) {

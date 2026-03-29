@@ -7,8 +7,8 @@
 - [x] diff messages from claude should use the diff syntax highlighting
 - [x] move the new chat and history to the titlebar of the chat not the titlebar of the app
 - [x] have a github login and oauth flow
-  - [ ] have settings pane, initially should set suspended session time (give some options like 5 min, 15, 30, 1 hour, etc)
-  - [ ] config syncing across devices through a private sai-config repo managed by the app
+  - [x] have settings pane, initially should set suspended session time (give some options like 5 min, 15, 30, 1 hour, etc)
+  - [x] config syncing across devices through a private sai-config repo managed by the app
 - [x] changes in the git pane needs a "commit all" button on the same line as the "CHANGES"
 - [x] add a sparkle lucide icon to the right of the branch on the git pane so it auto creates a commit message
 - [x] the branch on the git pane should be a clickable dropdown (dropup) that allows for users to swap branches or make new ones

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 import 'highlight.js/styles/monokai.css';
@@ -8,6 +8,66 @@ import ToolCallCard from './ToolCallCard';
 import type { ChatMessage as ChatMessageType } from '../../types';
 
 const FILE_PATH_RE = /(?<![:/])\b((?:\.{1,2}\/)?(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte)|(?:\/[\w.-]+)+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte))\b/g;
+
+const URL_RE = /https?:\/\/[^\s<>)\]]+/g;
+
+function linkifyText(text: string): any[] {
+  // First pass: find all URLs
+  URL_RE.lastIndex = 0;
+  const urlMatches: { index: number; length: number; value: string; type: 'url' }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = URL_RE.exec(text)) !== null) {
+    // Strip trailing punctuation that's likely not part of the URL
+    let url = m[0].replace(/[.,;:!?)]+$/, '');
+    urlMatches.push({ index: m.index, length: url.length, value: url, type: 'url' });
+  }
+
+  // Second pass: find file paths in non-URL segments
+  const allMatches: { index: number; length: number; value: string; type: 'url' | 'file' }[] = [...urlMatches];
+
+  // Build ranges covered by URLs to skip
+  const urlRanges = urlMatches.map(u => [u.index, u.index + u.length]);
+  FILE_PATH_RE.lastIndex = 0;
+  while ((m = FILE_PATH_RE.exec(text)) !== null) {
+    const start = m.index;
+    const end = start + m[0].length;
+    const inUrl = urlRanges.some(([us, ue]) => start >= us && end <= ue);
+    if (!inUrl) {
+      allMatches.push({ index: m.index, length: m[0].length, value: m[1], type: 'file' });
+    }
+  }
+
+  if (allMatches.length === 0) return [];
+
+  // Sort by position
+  allMatches.sort((a, b) => a.index - b.index);
+
+  const parts: any[] = [];
+  let lastIndex = 0;
+  for (const match of allMatches) {
+    if (match.index > lastIndex) {
+      parts.push({ type: 'text', value: text.slice(lastIndex, match.index) });
+    }
+    if (match.type === 'url') {
+      parts.push({
+        type: 'element', tagName: 'a',
+        properties: { href: match.value },
+        children: [{ type: 'text', value: match.value }],
+      });
+    } else {
+      parts.push({
+        type: 'element', tagName: 'a',
+        properties: { href: `sai-file://${match.value}`, className: ['file-link'] },
+        children: [{ type: 'text', value: match.value }],
+      });
+    }
+    lastIndex = match.index + match.length;
+  }
+  if (lastIndex < text.length) {
+    parts.push({ type: 'text', value: text.slice(lastIndex) });
+  }
+  return parts;
+}
 
 function rehypeFilePaths() {
   return (tree: any) => {
@@ -20,24 +80,8 @@ function rehypeFilePaths() {
       const newChildren: any[] = [];
       for (const child of node.children) {
         if (child.type === 'text' && child.value) {
-          FILE_PATH_RE.lastIndex = 0;
-          const text: string = child.value;
-          const parts: any[] = [];
-          let lastIndex = 0;
-          let match: RegExpExecArray | null;
-          while ((match = FILE_PATH_RE.exec(text)) !== null) {
-            if (match.index > lastIndex) {
-              parts.push({ type: 'text', value: text.slice(lastIndex, match.index) });
-            }
-            parts.push({
-              type: 'element', tagName: 'a',
-              properties: { href: `sai-file://${match[1]}`, className: ['file-link'] },
-              children: [{ type: 'text', value: match[1] }],
-            });
-            lastIndex = match.index + match[0].length;
-          }
+          const parts = linkifyText(child.value);
           if (parts.length > 0) {
-            if (lastIndex < text.length) parts.push({ type: 'text', value: text.slice(lastIndex) });
             newChildren.push(...parts);
           } else {
             newChildren.push(child);
@@ -74,7 +118,7 @@ function ImageModal({ src, onClose }: { src: string; onClose: () => void }) {
   );
 }
 
-export default function ChatMessage({ message, projectPath, onFileOpen }: { message: ChatMessageType; projectPath?: string; onFileOpen?: (path: string) => void }) {
+export default function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude' }: { message: ChatMessageType; projectPath?: string; onFileOpen?: (path: string) => void; aiProvider?: 'claude' | 'codex' }) {
   const dotColor = getDotColor(message.role);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
@@ -85,12 +129,13 @@ export default function ChatMessage({ message, projectPath, onFileOpen }: { mess
           {message.role === 'user'
             ? <ChevronRight size={14} color="var(--green)" strokeWidth={3} className="chat-msg-dot chat-msg-chevron" />
             : message.role === 'assistant'
-            ? <span className="chat-msg-dot chat-msg-claude" />
+            ? <span className={`chat-msg-dot ${aiProvider === 'codex' ? 'chat-msg-openai' : 'chat-msg-claude'}`} />
             : <Circle size={8} fill={dotColor} stroke={dotColor} className="chat-msg-dot" />}
           <div className="chat-msg-body">
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               rehypePlugins={[rehypeHighlight, rehypeFilePaths]}
+              urlTransform={(url) => url.startsWith('sai-file://') ? url : defaultUrlTransform(url)}
               components={{
                 a: ({ href, children }) => (
                   <a
@@ -146,6 +191,18 @@ export default function ChatMessage({ message, projectPath, onFileOpen }: { mess
           background-color: var(--accent);
           -webkit-mask-image: url('svg/claude.svg');
           mask-image: url('svg/claude.svg');
+          -webkit-mask-size: contain;
+          mask-size: contain;
+          -webkit-mask-repeat: no-repeat;
+          mask-repeat: no-repeat;
+        }
+        .chat-msg-openai {
+          width: 14px;
+          height: 14px;
+          margin-top: 2px;
+          background-color: var(--accent);
+          -webkit-mask-image: url('svg/openai.svg');
+          mask-image: url('svg/openai.svg');
           -webkit-mask-size: contain;
           mask-size: contain;
           -webkit-mask-repeat: no-repeat;

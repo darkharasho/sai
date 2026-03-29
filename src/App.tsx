@@ -15,6 +15,8 @@ import { formatSessionDate, formatSessionTime } from './sessions';
 type PermissionMode = 'default' | 'bypass';
 type EffortLevel = 'low' | 'medium' | 'high' | 'max';
 type ModelChoice = 'sonnet' | 'opus' | 'haiku';
+type AIProvider = 'claude' | 'codex';
+type CodexPermission = 'auto' | 'read-only' | 'full-access';
 type PanelId = 'chat' | 'editor' | 'terminal';
 
 export default function App() {
@@ -25,6 +27,10 @@ export default function App() {
   const [modelChoice, setModelChoice] = useState<ModelChoice>('sonnet');
   const [editorFontSize, setEditorFontSize] = useState(13);
   const [editorMinimap, setEditorMinimap] = useState(true);
+  const [aiProvider, setAiProvider] = useState<AIProvider>('claude');
+  const [codexModel, setCodexModel] = useState('');
+  const [codexModels, setCodexModels] = useState<{ id: string; name: string }[]>([]);
+  const [codexPermission, setCodexPermission] = useState<CodexPermission>('auto');
   const [workspaces, setWorkspaces] = useState<Map<string, WorkspaceContext>>(new Map());
   const [pendingClose, setPendingClose] = useState<string | null>(null);
   // Ref to hold latest messages per workspace without triggering re-renders during streaming
@@ -82,27 +88,74 @@ export default function App() {
 
   // Load persisted settings from main process (file-based, works in dev+prod)
   useEffect(() => {
-    window.sai.settingsGet('permissionMode', 'default').then((v: string) => {
-      if (v === 'bypass') setPermissionMode('bypass');
-    });
-    window.sai.settingsGet('effortLevel', 'high').then((v: string) => {
-      if (v === 'low' || v === 'medium' || v === 'high' || v === 'max') setEffortLevel(v as EffortLevel);
-    });
-    window.sai.settingsGet('modelChoice', 'sonnet').then((v: string) => {
-      if (v === 'sonnet' || v === 'opus' || v === 'haiku') setModelChoice(v as ModelChoice);
-    });
     window.sai.settingsGet('editorFontSize', 13).then((v: number) => setEditorFontSize(v));
     window.sai.settingsGet('editorMinimap', true).then((v: boolean) => setEditorMinimap(v));
+    window.sai.settingsGet('aiProvider', 'claude').then((v: string) => {
+      if (v === 'claude' || v === 'codex') setAiProvider(v as AIProvider);
+    });
+    // Load nested provider settings
+    window.sai.settingsGet('claude', {}).then((c: any) => {
+      if (c.model === 'sonnet' || c.model === 'opus' || c.model === 'haiku') setModelChoice(c.model);
+      if (c.effort === 'low' || c.effort === 'medium' || c.effort === 'high' || c.effort === 'max') setEffortLevel(c.effort);
+      if (c.permission === 'default' || c.permission === 'bypass') setPermissionMode(c.permission);
+    });
+    window.sai.settingsGet('codex', {}).then((c: any) => {
+      if (c.model) setCodexModel(c.model);
+      if (c.permission === 'auto' || c.permission === 'read-only' || c.permission === 'full-access') setCodexPermission(c.permission);
+    });
+    // Migrate flat keys to nested (one-time)
+    Promise.all([
+      window.sai.settingsGet('modelChoice', null),
+      window.sai.settingsGet('effortLevel', null),
+      window.sai.settingsGet('permissionMode', null),
+      window.sai.settingsGet('codexModel', null),
+      window.sai.settingsGet('codexPermission', null),
+    ]).then(([mc, el, pm, cm, cp]) => {
+      if (mc || el || pm) {
+        window.sai.settingsGet('claude', {}).then((existing: any) => {
+          const claude = { ...existing };
+          if (mc && !claude.model) claude.model = mc;
+          if (el && !claude.effort) claude.effort = el;
+          if (pm && !claude.permission) claude.permission = pm;
+          window.sai.settingsSet('claude', claude);
+        });
+      }
+      if (cm || cp) {
+        window.sai.settingsGet('codex', {}).then((existing: any) => {
+          const codex = { ...existing };
+          if (cm && !codex.model) codex.model = cm;
+          if (cp && !codex.permission) codex.permission = cp;
+          window.sai.settingsSet('codex', codex);
+        });
+      }
+    });
 
     // Apply settings synced down from GitHub (fires on startup and after manual sync)
     const unsubApplied = window.sai.githubOnSettingsApplied((remote: Record<string, any>) => {
       if ('editorFontSize' in remote) setEditorFontSize(remote.editorFontSize);
       if ('editorMinimap' in remote) setEditorMinimap(remote.editorMinimap);
-      if ('effortLevel' in remote) setEffortLevel(remote.effortLevel);
-      if ('modelChoice' in remote) setModelChoice(remote.modelChoice);
-      if ('permissionMode' in remote) setPermissionMode(remote.permissionMode);
+      if ('aiProvider' in remote && (remote.aiProvider === 'claude' || remote.aiProvider === 'codex')) setAiProvider(remote.aiProvider);
+      if ('claude' in remote && typeof remote.claude === 'object') {
+        const c = remote.claude;
+        if (c.model === 'sonnet' || c.model === 'opus' || c.model === 'haiku') setModelChoice(c.model);
+        if (c.effort === 'low' || c.effort === 'medium' || c.effort === 'high' || c.effort === 'max') setEffortLevel(c.effort);
+        if (c.permission === 'default' || c.permission === 'bypass') setPermissionMode(c.permission);
+      }
+      if ('codex' in remote && typeof remote.codex === 'object') {
+        const c = remote.codex;
+        if (c.model) setCodexModel(c.model);
+        if (c.permission === 'auto' || c.permission === 'read-only' || c.permission === 'full-access') setCodexPermission(c.permission);
+      }
     });
     return unsubApplied;
+  }, []);
+
+  // Prefetch Codex models once at startup so they're ready when user switches
+  useEffect(() => {
+    (window.sai as any).codexModels?.().then((result: { models: { id: string; name: string }[]; defaultModel: string }) => {
+      if (result?.models?.length) setCodexModels(result.models);
+      if (result?.defaultModel) setCodexModel(prev => prev || result.defaultModel);
+    });
   }, []);
 
   useEffect(() => {
@@ -531,19 +584,41 @@ export default function App() {
     }
   };
 
+  const saveClaudeSetting = (key: string, value: any) => {
+    window.sai.settingsGet('claude', {}).then((existing: any) => {
+      window.sai.settingsSet('claude', { ...existing, [key]: value });
+    });
+  };
+
+  const saveCodexSetting = (key: string, value: any) => {
+    window.sai.settingsGet('codex', {}).then((existing: any) => {
+      window.sai.settingsSet('codex', { ...existing, [key]: value });
+    });
+  };
+
   const handlePermissionChange = (mode: PermissionMode) => {
     setPermissionMode(mode);
-    window.sai.settingsSet('permissionMode', mode);
+    saveClaudeSetting('permission', mode);
   };
 
   const handleEffortChange = (level: EffortLevel) => {
     setEffortLevel(level);
-    window.sai.settingsSet('effortLevel', level);
+    saveClaudeSetting('effort', level);
   };
 
   const handleModelChange = (model: ModelChoice) => {
     setModelChoice(model);
-    window.sai.settingsSet('modelChoice', model);
+    saveClaudeSetting('model', model);
+  };
+
+  const handleCodexModelChange = (model: string) => {
+    setCodexModel(model);
+    saveCodexSetting('model', model);
+  };
+
+  const handleCodexPermissionChange = (perm: CodexPermission) => {
+    setCodexPermission(perm);
+    saveCodexSetting('permission', perm);
   };
 
   const chatOpen = expanded.includes('chat');
@@ -567,7 +642,13 @@ export default function App() {
 
   const renderPanel = (panel: PanelId) => {
     const isOpen = expanded.includes(panel);
-    const icon = panel === 'chat' ? <MessageSquare size={12} />
+    const icon = panel === 'chat'
+      ? <span className="accordion-provider-icon" style={{
+          maskImage: `url('${aiProvider === 'codex' ? 'svg/openai.svg' : 'svg/claude.svg'}')`,
+          WebkitMaskImage: `url('${aiProvider === 'codex' ? 'svg/openai.svg' : 'svg/claude.svg'}')`,
+          backgroundColor: aiProvider === 'codex' ? 'var(--text)' : '#e27b4a',
+          opacity: 1,
+        }} />
       : panel === 'editor' ? <Code2 size={12} />
       : <TerminalSquare size={12} />;
     const label = panel === 'chat' ? 'Chat' : panel === 'editor' ? 'Editor' : 'Terminal';
@@ -658,6 +739,12 @@ export default function App() {
                   onEffortChange={handleEffortChange}
                   modelChoice={modelChoice}
                   onModelChange={handleModelChange}
+                  aiProvider={aiProvider}
+                  codexModel={codexModel}
+                  onCodexModelChange={handleCodexModelChange}
+                  codexModels={codexModels}
+                  codexPermission={codexPermission}
+                  onCodexPermissionChange={handleCodexPermissionChange}
                   initialMessages={ws.activeSession.messages}
                   activeFilePath={ws.activeFilePath}
                   onFileOpen={handleFileOpen}
@@ -721,6 +808,7 @@ export default function App() {
         onSettingChange={(key, value) => {
           if (key === 'editorFontSize') setEditorFontSize(value);
           if (key === 'editorMinimap') setEditorMinimap(value);
+          if (key === 'aiProvider') setAiProvider(value);
         }}
       />
       <div className="app-body">
@@ -830,6 +918,16 @@ export default function App() {
         .accordion-bar-btn:hover {
           color: var(--accent);
           background: var(--bg-hover);
+        }
+        .accordion-provider-icon {
+          display: inline-block;
+          width: 12px;
+          height: 12px;
+          mask-size: contain;
+          -webkit-mask-size: contain;
+          mask-repeat: no-repeat;
+          -webkit-mask-repeat: no-repeat;
+          flex-shrink: 0;
         }
         .chat-history-dropdown {
           position: absolute;

@@ -93,9 +93,20 @@ function ThinkingAnimation({ hasContent }: { hasContent: boolean }) {
     </div>
   );
 }
+function CodexThinkingAnimation() {
+  return (
+    <div className="codex-thinking">
+      <span className="codex-thinking-dot">•</span>
+      <span className="codex-working">Working</span>
+    </div>
+  );
+}
+
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import type { ChatMessage as ChatMessageType, ToolCall } from '../../types';
+
+type CodexPermission = 'auto' | 'read-only' | 'full-access';
 
 interface ChatPanelProps {
   projectPath: string;
@@ -105,6 +116,12 @@ interface ChatPanelProps {
   onEffortChange: (level: 'low' | 'medium' | 'high' | 'max') => void;
   modelChoice: 'sonnet' | 'opus' | 'haiku';
   onModelChange: (model: 'sonnet' | 'opus' | 'haiku') => void;
+  aiProvider: 'claude' | 'codex';
+  codexModel: string;
+  onCodexModelChange: (model: string) => void;
+  codexModels: { id: string; name: string }[];
+  codexPermission: CodexPermission;
+  onCodexPermissionChange: (perm: CodexPermission) => void;
   initialMessages?: ChatMessageType[];
   onMessagesChange?: (messages: ChatMessageType[]) => void;
   onTurnComplete?: () => void;
@@ -262,7 +279,7 @@ const EMPTY_PROMPTS = [
   "What's the skeleton? We'll flesh it out from there.",
 ];
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, initialMessages, onMessagesChange, onTurnComplete, activeFilePath, onFileOpen }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, initialMessages, onMessagesChange, onTurnComplete, activeFilePath, onFileOpen }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessageType[]>(initialMessages || []);
   const emptyPrompt = useMemo(() => EMPTY_PROMPTS[Math.floor(Math.random() * EMPTY_PROMPTS.length)], []);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -280,7 +297,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
   useEffect(() => {
     setReady(false);
-    window.sai.claudeStart(projectPath || '').then(() => setReady(true));
+    const startFn = aiProvider === 'codex' ? window.sai.codexStart : window.sai.claudeStart;
+    startFn(projectPath || '').then(() => setReady(true));
 
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
       // Only process messages for this workspace
@@ -484,7 +502,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     });
 
     return cleanup;
-  }, [projectPath]);
+  }, [projectPath, aiProvider]);
 
   // Poll the Anthropic usage API for real utilization percentages
   useEffect(() => {
@@ -624,7 +642,11 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     }
 
     const prompt = activeFilePath ? `[File: ${activeFilePath}]\n\n${text}` : text;
-    window.sai.claudeSend(projectPath, prompt, imagePaths, permissionMode, effortLevel, modelChoice);
+    if (aiProvider === 'codex') {
+      window.sai.codexSend(projectPath, prompt, imagePaths, codexPermission, codexModel);
+    } else {
+      window.sai.claudeSend(projectPath, prompt, imagePaths, permissionMode, effortLevel, modelChoice);
+    }
   };
 
   return (
@@ -644,11 +666,14 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           </div>
         ) : (
           messages.map(msg => msg.id === lastUserMessage?.id
-            ? <div key={msg.id} ref={lastUserMsgRef}><ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} /></div>
-            : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} />
+            ? <div key={msg.id} ref={lastUserMsgRef}><ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} /></div>
+            : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} />
           )
         )}
-        {isStreaming && <ThinkingAnimation hasContent={messages[messages.length - 1]?.role === 'assistant'} />}
+        {isStreaming && (aiProvider === 'codex'
+          ? <CodexThinkingAnimation />
+          : <ThinkingAnimation hasContent={messages[messages.length - 1]?.role === 'assistant'} />
+        )}
         <div ref={messagesEndRef} />
       </div>
       <div className="new-messages-anchor">
@@ -664,7 +689,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         disabled={!ready}
         slashCommands={slashCommands}
         isStreaming={isStreaming}
-        onStop={() => window.sai.claudeStop?.(projectPath)}
+        onStop={() => aiProvider === 'codex' ? window.sai.codexStop(projectPath) : window.sai.claudeStop?.(projectPath)}
         permissionMode={permissionMode}
         onPermissionChange={onPermissionChange}
         effortLevel={effortLevel}
@@ -675,6 +700,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         sessionUsage={sessionUsage}
         rateLimits={rateLimits}
         activeFilePath={activeFilePath}
+        aiProvider={aiProvider}
+        codexModel={codexModel}
+        codexModels={codexModels}
+        onCodexModelChange={onCodexModelChange}
+        codexPermission={codexPermission}
+        onCodexPermissionChange={onCodexPermissionChange}
       />
       <style>{`
         .chat-panel {
@@ -782,6 +813,39 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         @keyframes blink-cursor {
           0%, 100% { opacity: 1; }
           50% { opacity: 0; }
+        }
+        .codex-thinking {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 12px 0;
+        }
+        .codex-thinking-dot {
+          color: var(--text-muted);
+          font-size: 16px;
+          line-height: 1;
+        }
+        .codex-working {
+          font-size: 14px;
+          font-weight: 700;
+          background-image: linear-gradient(
+            90deg,
+            rgba(220,220,220,0.95) 0%,
+            rgba(220,220,220,0.95) 42%,
+            rgba(100,100,100,0.7) 50%,
+            rgba(220,220,220,0.95) 58%,
+            rgba(220,220,220,0.95) 100%
+          );
+          background-size: 400% 100%;
+          background-position: 200% 0;
+          -webkit-background-clip: text;
+          background-clip: text;
+          color: transparent;
+          animation: codex-working-shimmer 8s linear infinite;
+        }
+        @keyframes codex-working-shimmer {
+          from { background-position: 200% 0; }
+          to { background-position: -200% 0; }
         }
       `}</style>
     </div>

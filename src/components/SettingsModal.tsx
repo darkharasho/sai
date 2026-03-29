@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { X, RefreshCw, Check, AlertCircle } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { X, RefreshCw, Check, AlertCircle, ChevronDown } from 'lucide-react';
 
 interface Props {
   onClose: () => void;
@@ -30,10 +30,18 @@ function formatRelative(ts: number): string {
   return `${Math.floor(mins / 60)}h ago`;
 }
 
+const PROVIDER_OPTIONS: { id: 'claude' | 'codex'; label: string; svg: string; color: string }[] = [
+  { id: 'claude', label: 'Claude', svg: 'svg/claude.svg', color: '#e27b4a' },
+  { id: 'codex', label: 'Codex CLI', svg: 'svg/openai.svg', color: '#fff' },
+];
+
 export default function SettingsModal({ onClose, onSettingChange }: Props) {
   const [suspendTimeout, setSuspendTimeout] = useState<number>(DEFAULT_TIMEOUT);
   const [editorFontSize, setEditorFontSize] = useState(13);
   const [editorMinimap, setEditorMinimap] = useState(true);
+  const [aiProvider, setAiProvider] = useState<'claude' | 'codex'>('claude');
+  const [providerOpen, setProviderOpen] = useState(false);
+  const providerRef = useRef<HTMLDivElement>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [lastSynced, setLastSynced] = useState<number | null>(null);
   const [isAuthed, setIsAuthed] = useState(false);
@@ -42,6 +50,9 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
     window.sai.settingsGet('suspendTimeout', DEFAULT_TIMEOUT).then((v: number) => setSuspendTimeout(v));
     window.sai.settingsGet('editorFontSize', 13).then((v: number) => setEditorFontSize(v));
     window.sai.settingsGet('editorMinimap', true).then((v: boolean) => setEditorMinimap(v));
+    window.sai.settingsGet('aiProvider', 'claude').then((v: string) => {
+      if (v === 'claude' || v === 'codex') setAiProvider(v);
+    });
     window.sai.githubGetUser().then((u: any) => setIsAuthed(!!u));
 
     const unsubSync = window.sai.githubOnSyncStatus((data: { status: string; lastSynced?: number }) => {
@@ -54,10 +65,21 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
       if ('suspendTimeout' in remote) setSuspendTimeout(remote.suspendTimeout);
       if ('editorFontSize' in remote) setEditorFontSize(remote.editorFontSize);
       if ('editorMinimap' in remote) setEditorMinimap(remote.editorMinimap);
+      if ('aiProvider' in remote && (remote.aiProvider === 'claude' || remote.aiProvider === 'codex')) setAiProvider(remote.aiProvider);
     });
 
     return () => { unsubSync(); unsubApplied(); };
   }, []);
+
+  // Close provider dropdown on outside click
+  useEffect(() => {
+    if (!providerOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (providerRef.current && !providerRef.current.contains(e.target as Node)) setProviderOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [providerOpen]);
 
   const handleTimeoutChange = (value: number) => {
     setSuspendTimeout(value);
@@ -74,6 +96,12 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
     setEditorMinimap(value);
     window.sai.settingsSet('editorMinimap', value);
     onSettingChange?.('editorMinimap', value);
+  };
+
+  const handleProviderChange = (value: 'claude' | 'codex') => {
+    setAiProvider(value);
+    window.sai.settingsSet('aiProvider', value);
+    onSettingChange?.('aiProvider', value);
   };
 
   const handleSyncNow = () => {
@@ -104,6 +132,55 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
         </div>
 
         <div className="settings-body">
+          <section className="settings-section">
+            <div className="settings-section-label">AI Provider</div>
+
+            <div className="settings-row">
+              <div className="settings-row-info">
+                <div className="settings-row-name">Chat provider</div>
+                <div className="settings-row-desc">Which AI backend to use for the chat panel</div>
+              </div>
+              <div className="provider-select" ref={providerRef}>
+                <button className="provider-select-btn" onClick={() => setProviderOpen(!providerOpen)}>
+                  <span
+                    className="provider-icon"
+                    style={{
+                      maskImage: `url('${PROVIDER_OPTIONS.find(p => p.id === aiProvider)!.svg}')`,
+                      WebkitMaskImage: `url('${PROVIDER_OPTIONS.find(p => p.id === aiProvider)!.svg}')`,
+                      backgroundColor: PROVIDER_OPTIONS.find(p => p.id === aiProvider)!.color,
+                    }}
+                  />
+                  <span>{PROVIDER_OPTIONS.find(p => p.id === aiProvider)!.label}</span>
+                  <ChevronDown size={11} style={{ opacity: 0.5 }} />
+                </button>
+                {providerOpen && (
+                  <div className="provider-dropdown">
+                    {PROVIDER_OPTIONS.map(opt => (
+                      <button
+                        key={opt.id}
+                        className={`provider-dropdown-item ${opt.id === aiProvider ? 'active' : ''}`}
+                        onClick={() => { handleProviderChange(opt.id); setProviderOpen(false); }}
+                      >
+                        <span
+                          className="provider-icon"
+                          style={{
+                            maskImage: `url('${opt.svg}')`,
+                            WebkitMaskImage: `url('${opt.svg}')`,
+                            backgroundColor: opt.color,
+                          }}
+                        />
+                        <span>{opt.label}</span>
+                        {opt.id === aiProvider && <Check size={13} style={{ marginLeft: 'auto', color: 'var(--accent)' }} />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+
+          <div className="settings-divider" />
+
           <section className="settings-section">
             <div className="settings-section-label">Editor</div>
 
@@ -287,6 +364,60 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
             width: 140px;
           }
           .settings-select:focus { border-color: var(--accent); }
+          .provider-select {
+            position: relative;
+          }
+          .provider-select-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            color: var(--text);
+            font-size: 12px;
+            padding: 5px 10px;
+            cursor: pointer;
+            min-width: 140px;
+          }
+          .provider-select-btn:hover { border-color: var(--accent); }
+          .provider-icon {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            mask-size: contain;
+            -webkit-mask-size: contain;
+            mask-repeat: no-repeat;
+            -webkit-mask-repeat: no-repeat;
+            flex-shrink: 0;
+          }
+          .provider-dropdown {
+            position: absolute;
+            top: calc(100% + 4px);
+            right: 0;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+            overflow: hidden;
+            z-index: 10;
+            min-width: 160px;
+          }
+          .provider-dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            padding: 8px 12px;
+            background: none;
+            border: none;
+            color: var(--text);
+            font-size: 12px;
+            cursor: pointer;
+            text-align: left;
+          }
+          .provider-dropdown-item:hover { background: var(--bg-hover); }
+          .provider-dropdown-item.active { background: var(--bg-secondary); }
           .settings-sync-note {
             font-size: 11px;
             color: var(--text-muted);

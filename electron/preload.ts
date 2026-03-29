@@ -14,6 +14,11 @@ contextBridge.exposeInMainWorld('sai', {
   claudeGenerateCommitMessage: (cwd: string) => ipcRenderer.invoke('claude:generateCommitMessage', cwd),
   claudeStop: (projectPath: string) => ipcRenderer.send('claude:stop', projectPath),
   claudeApprove: (approved: boolean) => ipcRenderer.send('claude:approve', approved),
+  // Codex CLI
+  codexModels: () => ipcRenderer.invoke('codex:models'),
+  codexStart: (cwd: string) => ipcRenderer.invoke('codex:start', cwd),
+  codexSend: (projectPath: string, message: string, imagePaths?: string[], permMode?: string, model?: string) => ipcRenderer.send('codex:send', projectPath, message, imagePaths, permMode, model),
+  codexStop: (projectPath: string) => ipcRenderer.send('codex:stop', projectPath),
   claudeOnMessage: (callback: (msg: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, msg: unknown) => callback(msg);
     ipcRenderer.on('claude:message', listener);

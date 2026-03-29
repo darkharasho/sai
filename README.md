@@ -5,7 +5,7 @@
 <h1 align="center">SAI — Simply AI</h1>
 
 <p align="center">
-  <strong>The AI-first code editor that puts Claude right where you work.</strong>
+  <strong>The AI-first code editor that puts your preferred AI provider right where you work.</strong>
 </p>
 
 <p align="center">
@@ -18,9 +18,9 @@
 
 ## Stop context-switching. Start shipping.
 
-SAI is a desktop code editor built from the ground up around AI. No plugins. No bolt-on copilots. Just a seamless environment where you chat with Claude, edit code, run commands, and manage Git — all without ever leaving the window.
+SAI is a desktop code editor built from the ground up around AI. No plugins. No bolt-on copilots. Just a seamless environment where you chat with Claude or Codex, edit code, run commands, and manage Git — all without ever leaving the window.
 
-Open a project, ask Claude to build a feature, and watch it happen in real time. Review diffs, stage changes, commit — done. That's SAI.
+Open a project, pick your provider, ask it to build a feature, and watch it happen in real time. Review diffs, stage changes, commit — done. That's SAI.
 
 <img width="1400" height="900" alt="image" src="https://github.com/user-attachments/assets/f493ea77-d87c-499a-93b0-40cb2ad1cf81" />
 
@@ -28,17 +28,20 @@ Open a project, ask Claude to build a feature, and watch it happen in real time.
 
 ## Features
 
-### Chat with Claude, in context
-Converse with Claude directly inside your editor. SAI sends your full project context so Claude understands your codebase — not just the snippet you pasted. Stream responses in real time, attach images, and pick up where you left off with persistent sessions.
+### Swap AI providers without leaving the editor
+Use Claude or Codex CLI for the chat panel and switch between them from Settings. SAI keeps provider-specific settings separate, including model and permission preferences, so you can change backends without reconfiguring everything from scratch.
+
+### Chat in context
+Converse with your selected provider directly inside your editor. SAI sends your full project context so it understands your codebase — not just the snippet you pasted. Stream responses in real time, attach images, and pick up where you left off with persistent sessions.
 
 ### Built-in code editor
-A full Monaco-powered editor with syntax highlighting, tabs, and split diff views. See exactly what Claude changed with inline diffs — unified or side-by-side. Expand any code block to a fullscreen view when you need to focus.
+A full Monaco-powered editor with syntax highlighting, tabs, and split diff views. See exactly what your AI changed with inline diffs — unified or side-by-side. Expand any code block to a fullscreen view when you need to focus.
 
 ### Integrated terminal
 A real terminal, not a toy. Full PTY support, interactive shell, clickable links, and proper color rendering — powered by XTerm.js. Runs in your project directory, ready when you need it.
 
 ### First-class Git integration
-Stage files, switch branches, commit, push, and pull — all from the sidebar. See your change status at a glance, review diffs before committing, and let Claude generate commit messages for you. Real-time polling keeps everything in sync.
+Stage files, switch branches, commit, push, and pull — all from the sidebar. See your change status at a glance, review diffs before committing, and let the active provider generate commit messages for you. Real-time polling keeps everything in sync.
 
 ### File explorer with drag-and-drop
 Browse, create, rename, and delete files without touching the terminal. Drag and drop to reorganize. Right-click for quick actions. Everything stays anchored to your project root.
@@ -59,7 +62,12 @@ Grab the latest release for your platform:
 
 ### Prerequisites
 
-SAI uses the [Claude CLI](https://docs.anthropic.com/en/docs/claude-code) under the hood. Make sure you have it installed and authenticated before launching.
+SAI supports multiple chat backends. Install and authenticate the CLI for whichever provider you want to use:
+
+- **Claude** — [Claude CLI](https://docs.anthropic.com/en/docs/claude-code)
+- **Codex** — `codex` CLI
+
+You can switch providers any time from `Settings → AI Provider → Chat provider`.
 
 ### Build from source
 

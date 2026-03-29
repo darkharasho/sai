@@ -10,6 +10,7 @@ import { registerUsageHandlers, destroyUsagePolling } from './services/usage';
 import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove, suspend, DEFAULT_SUSPEND_TIMEOUT } from './services/workspace';
 import { registerGithubAuthHandlers } from './services/github-auth';
 import { initialSync, schedulePush } from './services/github-sync';
+import { registerCodexHandlers } from './services/codex';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -47,6 +48,7 @@ function createWindow() {
 
   registerTerminalHandlers(mainWindow);
   registerClaudeHandlers(mainWindow);
+  registerCodexHandlers(mainWindow);
   registerGitHandlers();
   registerFsHandlers(mainWindow!);
   registerUpdater(mainWindow!);

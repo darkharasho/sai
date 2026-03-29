@@ -24,6 +24,12 @@ interface ChatInputProps {
   sessionUsage?: { inputTokens: number; outputTokens: number };
   rateLimits?: Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number; utilization?: number }>;
   activeFilePath?: string | null;
+  aiProvider?: 'claude' | 'codex';
+  codexModel?: string;
+  codexModels?: { id: string; name: string }[];
+  onCodexModelChange?: (model: string) => void;
+  codexPermission?: 'auto' | 'read-only' | 'full-access';
+  onCodexPermissionChange?: (perm: 'auto' | 'read-only' | 'full-access') => void;
 }
 
 interface AutocompleteItem {
@@ -70,6 +76,7 @@ const MODEL_OPTIONS: { id: ModelChoice; label: string; description: string; colo
   { id: 'opus',    label: 'Opus',    description: 'Claude Opus 4 · Most capable for complex work', color: 'var(--orange)' },
   { id: 'haiku',   label: 'Haiku',   description: 'Claude Haiku 3.5 · Fastest for quick answers', color: 'var(--green)' },
 ];
+
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -179,7 +186,7 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, rateLimits, activeFilePath }: ChatInputProps) {
+export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, rateLimits, activeFilePath, aiProvider = 'claude', codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange }: ChatInputProps) {
   const [value, setValue] = useState('');
   const [suggestions, setSuggestions] = useState<AutocompleteItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -448,7 +455,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           <button className="toolbar-btn" onClick={() => { setSlashMenuOpen(prev => !prev); setShowAddMenu(false); }} title="Slash commands">
             <SquareSlash size={18} />
           </button>
-          {contextUsage && <ContextRing used={contextUsage.used} total={contextUsage.total} onClick={() => onSend('/compact')} />}
+          {aiProvider === 'claude' && contextUsage && <ContextRing used={contextUsage.used} total={contextUsage.total} onClick={() => onSend('/compact')} />}
           {activeFilePath && (
             <span className="active-file-chip" title={activeFilePath}>
               <FileText size={11} />
@@ -468,7 +475,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
 
         <div className="toolbar-right">
           {/* Usage & rate limit */}
-          {(sessionUsage || (rateLimits && rateLimits.size > 0)) && (() => {
+          {aiProvider === 'claude' && (sessionUsage || (rateLimits && rateLimits.size > 0)) && (() => {
             const limits = rateLimits ? Array.from(rateLimits.values()) : [];
             const anyOverage = limits.some(rl => rl.isUsingOverage);
 
@@ -582,8 +589,8 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
             );
           })()}
 
-          {/* Effort level */}
-          {(() => {
+          {/* Effort level — Claude only */}
+          {aiProvider === 'claude' && (() => {
             const cfg = EFFORT_CONFIG[effortLevel];
             const Icon = cfg.icon;
             return (
@@ -599,7 +606,8 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
             );
           })()}
 
-          {/* Model selector */}
+          {/* Model selector — Claude only */}
+          {aiProvider === 'claude' && (
           <div className="model-selector" ref={modelMenuRef}>
             <button
               className="toolbar-btn model-btn"
@@ -631,7 +639,49 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
               </div>
             )}
           </div>
+          )}
 
+          {/* Model selector — Codex */}
+          {aiProvider === 'codex' && (
+          <div className="model-selector" ref={modelMenuRef}>
+            <button
+              className="toolbar-btn model-btn"
+              onClick={() => setModelMenuOpen(!modelMenuOpen)}
+              style={{ color: 'var(--accent)' }}
+            >
+              <span className="model-label">{codexModel || 'Model'}</span>
+              <ChevronDown size={11} style={{ opacity: 0.5 }} />
+            </button>
+            {modelMenuOpen && (
+              <div className="model-dropdown">
+                <div className="model-dropdown-header">Select a model</div>
+                {codexModels.map(m => (
+                  <button
+                    key={m.id}
+                    className={`model-dropdown-item ${m.id === codexModel ? 'active' : ''}`}
+                    onClick={() => { onCodexModelChange?.(m.id); setModelMenuOpen(false); }}
+                  >
+                    <div className="model-dropdown-item-info">
+                      <span className="model-dropdown-item-name" style={{ color: m.id === codexModel ? 'var(--accent)' : undefined }}>
+                        {m.name}
+                      </span>
+                    </div>
+                    {m.id === codexModel && <Check size={14} style={{ color: 'var(--accent)', flexShrink: 0 }} />}
+                  </button>
+                ))}
+                {codexModels.length === 0 && (
+                  <div className="model-dropdown-item" style={{ opacity: 0.5, cursor: 'default' }}>
+                    <div className="model-dropdown-item-info">
+                      <span className="model-dropdown-item-name">Loading models...</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          )}
+
+          {aiProvider === 'claude' ? (
           <button
             className={`toolbar-btn permission-btn ${permissionMode === 'bypass' ? 'bypass-active' : ''}`}
             onClick={() => onPermissionChange(permissionMode === 'default' ? 'bypass' : 'default')}
@@ -642,6 +692,23 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
               : <><ShieldOff size={14} /> <span className="permission-label">Bypass</span></>
             }
           </button>
+          ) : (
+          <button
+            className={`toolbar-btn permission-btn ${codexPermission === 'full-access' ? 'bypass-active' : ''}`}
+            onClick={() => {
+              const next = codexPermission === 'auto' ? 'read-only' : codexPermission === 'read-only' ? 'full-access' : 'auto';
+              onCodexPermissionChange?.(next);
+            }}
+            title={`Permissions: ${codexPermission}`}
+          >
+            {codexPermission === 'auto'
+              ? <><ShieldCheck size={14} /> <span className="permission-label">Auto</span></>
+              : codexPermission === 'read-only'
+              ? <><ShieldCheck size={14} /> <span className="permission-label">Read-only</span></>
+              : <><ShieldOff size={14} /> <span className="permission-label">Full Access</span></>
+            }
+          </button>
+          )}
 
           {isStreaming ? (
             <button className="send-btn stop-btn" onClick={onStop} title="Stop">
