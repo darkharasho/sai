@@ -27,6 +27,14 @@ export default function App() {
   const [pendingClose, setPendingClose] = useState<string | null>(null);
   // Ref to hold latest messages per workspace without triggering re-renders during streaming
   const wsMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
+  const [externallyModified, setExternallyModified] = useState<Set<string>>(new Set());
+  const workspacesRef = useRef(workspaces);
+
+  useEffect(() => { workspacesRef.current = workspaces; }, [workspaces]);
+
+  useEffect(() => {
+    setExternallyModified(new Set());
+  }, [activeProjectPath]);
 
   const getWorkspace = useCallback((path: string): WorkspaceContext => {
     const existing = workspaces.get(path);
@@ -128,6 +136,42 @@ export default function App() {
     }, 60000);
     return () => clearInterval(id);
   }, [projectPath]);
+
+  useEffect(() => {
+    if (!projectPath) return;
+    const id = setInterval(async () => {
+      const ws = workspacesRef.current.get(projectPath);
+      if (!ws) return;
+      const editorFiles = ws.openFiles.filter(
+        f => f.viewMode === 'editor' && f.diskMtime !== undefined
+      );
+      for (const file of editorFiles) {
+        try {
+          const { mtime } = await (window.sai.fsMtime(file.path) as Promise<{ mtime: number }>);
+          if (mtime <= file.diskMtime!) continue;
+          if (!file.isDirty) {
+            const content = await (window.sai.fsReadFile(file.path) as Promise<string>);
+            updateWorkspace(projectPath, w => ({
+              ...w,
+              openFiles: w.openFiles.map(f =>
+                f.path === file.path
+                  ? { ...f, content, savedContent: content, isDirty: false, diskMtime: mtime }
+                  : f
+              ),
+            }));
+          } else {
+            setExternallyModified(prev => {
+              if (prev.has(file.path)) return prev;
+              return new Set([...prev, file.path]);
+            });
+          }
+        } catch {
+          // File may have been deleted or moved; ignore
+        }
+      }
+    }, 5000);
+    return () => clearInterval(id);
+  }, [projectPath, updateWorkspace]);
 
   const [historyOpen, setHistoryOpen] = useState(false);
   const historyRef = useRef<HTMLDivElement>(null);
@@ -377,6 +421,48 @@ export default function App() {
     }));
   }, [activeProjectPath, updateWorkspace]);
 
+  const handleReloadFile = useCallback(async (filePath: string) => {
+    if (!activeProjectPath) return;
+    try {
+      const [content, { mtime }] = await Promise.all([
+        window.sai.fsReadFile(filePath) as Promise<string>,
+        window.sai.fsMtime(filePath) as Promise<{ mtime: number }>,
+      ]);
+      updateWorkspace(activeProjectPath, ws => ({
+        ...ws,
+        openFiles: ws.openFiles.map(f =>
+          f.path === filePath
+            ? { ...f, content, savedContent: content, isDirty: false, diskMtime: mtime }
+            : f
+        ),
+      }));
+    } catch { }
+    setExternallyModified(prev => {
+      const next = new Set(prev);
+      next.delete(filePath);
+      return next;
+    });
+  }, [activeProjectPath, updateWorkspace]);
+
+  const handleKeepMyEdits = useCallback(async (filePath: string) => {
+    try {
+      const { mtime } = await (window.sai.fsMtime(filePath) as Promise<{ mtime: number }>);
+      if (activeProjectPath) {
+        updateWorkspace(activeProjectPath, ws => ({
+          ...ws,
+          openFiles: ws.openFiles.map(f =>
+            f.path === filePath ? { ...f, diskMtime: mtime } : f
+          ),
+        }));
+      }
+    } catch { }
+    setExternallyModified(prev => {
+      const next = new Set(prev);
+      next.delete(filePath);
+      return next;
+    });
+  }, [activeProjectPath, updateWorkspace]);
+
   const persistSessionForWorkspace = useCallback((wsPath: string, session: ChatSession) => {
     updateWorkspace(wsPath, ws => {
       const updated = upsertSession(ws.sessions, session);
@@ -596,6 +682,9 @@ export default function App() {
                 onEditorSave={handleEditorSave}
                 onEditorContentChange={handleEditorContentChange}
                 onEditorDirtyChange={handleEditorDirtyChange}
+                externallyModified={externallyModified}
+                onReloadFile={handleReloadFile}
+                onKeepMyEdits={handleKeepMyEdits}
               />
             )}
             {panel === 'terminal' && (
