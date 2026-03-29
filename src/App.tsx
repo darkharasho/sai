@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import NavBar from './components/NavBar';
 import ChatPanel from './components/Chat/ChatPanel';
 import TerminalPanel from './components/Terminal/TerminalPanel';
@@ -41,22 +41,80 @@ export default function App() {
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
 
-  // Accordion state: ordered list of expanded panels (max 2)
+  // Accordion state
   const [expanded, setExpanded] = useState<PanelId[]>(['chat', 'terminal']);
+  // Split ratio: fraction of available space given to the first expanded panel (0.0–1.0)
+  const [splitRatio, setSplitRatio] = useState(0.66);
+  const [isDragging, setIsDragging] = useState(false);
+  const mainContentRef = useRef<HTMLDivElement>(null);
 
   const togglePanel = useCallback((panel: PanelId) => {
     setExpanded(prev => {
       if (prev.includes(panel)) {
         const next = prev.filter(p => p !== panel);
-        return next.length > 0 ? next : prev;
+        if (next.length === 0) return prev;
+        // When going from 2 to 1, reset split ratio for next time
+        setSplitRatio(0.66);
+        return next;
       } else {
         const next = [...prev, panel];
+        setSplitRatio(0.66);
         return next.length > 2 ? next.slice(1) : next;
       }
     });
   }, []);
 
+  // Drag handling
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+
   const hasFiles = openFiles.length > 0;
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!mainContentRef.current) return;
+      const rect = mainContentRef.current.getBoundingClientRect();
+      // Total height minus the accordion bars (32px each * number of panels)
+      const panels: PanelId[] = hasFiles ? ['chat', 'editor', 'terminal'] : ['chat', 'terminal'];
+      const barHeight = panels.length * 32;
+      const handleHeight = 6;
+      const availableHeight = rect.height - barHeight - handleHeight;
+      const mouseY = e.clientY - rect.top;
+
+      // Find the position of the first expanded panel's bar
+      let firstBarOffset = 0;
+      for (const p of panels) {
+        if (p === expandedPanels[0]) break;
+        firstBarOffset += expanded.includes(p) ? 32 : 32; // collapsed panels are just bars
+      }
+      // Actually, let's compute based on panels above the divider
+      // The divider sits between the two expanded panels. We need to figure out
+      // how much vertical space is above the divider vs below.
+      const relativeY = mouseY - firstBarOffset - 32; // subtract the first expanded panel's bar
+      const ratio = Math.max(0.15, Math.min(0.85, relativeY / availableHeight));
+      setSplitRatio(ratio);
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging, expanded, hasFiles]);
+
+  // Determine which panels are visible and which are expanded
+  const allPanels: PanelId[] = hasFiles ? ['chat', 'editor', 'terminal'] : ['chat', 'terminal'];
+  const expandedPanels = allPanels.filter(p => expanded.includes(p));
+  const twoExpanded = expandedPanels.length === 2;
 
   const handleFileClick = useCallback((file: GitFile) => {
     setOpenFiles(prev => {
@@ -68,6 +126,7 @@ export default function App() {
     setExpanded(prev => {
       if (prev.includes('editor')) return prev;
       const next = [...prev, 'editor' as PanelId];
+      setSplitRatio(0.66);
       return next.length > 2 ? next.slice(1) : next;
     });
   }, []);
@@ -84,6 +143,7 @@ export default function App() {
       setExpanded(prev => {
         if (prev.includes('editor')) return prev;
         const next = [...prev, 'editor' as PanelId];
+        setSplitRatio(0.66);
         return next.length > 2 ? next.slice(1) : next;
       });
     } catch {
@@ -97,6 +157,7 @@ export default function App() {
       if (next.length === 0) {
         setActiveFilePath(null);
         setExpanded(['chat', 'terminal']);
+        setSplitRatio(0.66);
       } else if (path === activeFilePath) {
         const idx = prev.findIndex(f => f.path === path);
         const newActive = next[Math.min(idx, next.length - 1)];
@@ -110,6 +171,7 @@ export default function App() {
     setOpenFiles([]);
     setActiveFilePath(null);
     setExpanded(['chat', 'terminal']);
+    setSplitRatio(0.66);
   }, []);
 
   const handleDiffModeChange = useCallback((path: string, mode: 'unified' | 'split') => {
@@ -178,6 +240,78 @@ export default function App() {
   const editorOpen = expanded.includes('editor');
   const terminalOpen = expanded.includes('terminal');
 
+  // Compute flex values: first expanded panel gets splitRatio, second gets the rest
+  const getPanelFlex = (panel: PanelId): string => {
+    if (!expanded.includes(panel)) return '0 0 32px';
+    if (expandedPanels.length === 1) return '1 1 0%';
+    const isFirst = expandedPanels[0] === panel;
+    const ratio = isFirst ? splitRatio : 1 - splitRatio;
+    return `${ratio} ${ratio} 0%`;
+  };
+
+  // Should we show a drag handle after this panel?
+  const showHandleAfter = (panel: PanelId): boolean => {
+    if (!twoExpanded) return false;
+    return panel === expandedPanels[0];
+  };
+
+  const renderPanel = (panel: PanelId) => {
+    const isOpen = expanded.includes(panel);
+    const icon = panel === 'chat' ? <MessageSquare size={12} />
+      : panel === 'editor' ? <Code2 size={12} />
+      : <TerminalSquare size={12} />;
+    const label = panel === 'chat' ? 'Chat' : panel === 'editor' ? 'Editor' : 'Terminal';
+
+    return (
+      <div
+        key={panel}
+        className={`accordion-panel ${isOpen ? 'accordion-expanded' : 'accordion-collapsed'}`}
+        style={{ flex: getPanelFlex(panel), transition: isDragging ? 'none' : undefined }}
+      >
+        <div className="accordion-bar" onClick={() => togglePanel(panel)}>
+          <ChevronRight size={12} className={`accordion-chevron ${isOpen ? 'open' : ''}`} />
+          {icon}
+          <span>{label}</span>
+          {panel === 'editor' && !isOpen && activeFilePath && (
+            <span className="accordion-bar-detail">
+              {activeFilePath.split('/').pop()}
+            </span>
+          )}
+        </div>
+        <div className="accordion-body-wrapper">
+          <div className="accordion-body">
+            {panel === 'chat' && (
+              <ChatPanel
+                key={activeSession.id}
+                projectPath={projectPath}
+                permissionMode={permissionMode}
+                onPermissionChange={handlePermissionChange}
+                initialMessages={activeSession.messages}
+                onMessagesChange={handleMessagesChange}
+                onTurnComplete={handleSessionSave}
+              />
+            )}
+            {panel === 'editor' && activeFilePath && (
+              <CodePanel
+                openFiles={openFiles}
+                activeFilePath={activeFilePath}
+                projectPath={projectPath}
+                onActivate={setActiveFilePath}
+                onClose={handleFileClose}
+                onCloseAll={handleCloseAllFiles}
+                onDiffModeChange={handleDiffModeChange}
+                onEditorSave={handleEditorSave}
+              />
+            )}
+            {panel === 'terminal' && (
+              <TerminalPanel projectPath={projectPath} />
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="app">
       <TitleBar
@@ -192,76 +326,22 @@ export default function App() {
         <NavBar activeSidebar={sidebarOpen} onToggle={toggleSidebar} />
         {sidebarOpen === 'files' && <FileExplorerSidebar projectPath={projectPath} onFileOpen={handleFileOpen} />}
         {sidebarOpen === 'git' && <GitSidebar projectPath={projectPath} onFileClick={handleFileClick} />}
-        <div className="main-content">
-
-          {/* Chat accordion */}
-          <div className={`accordion-panel ${chatOpen ? 'accordion-expanded' : 'accordion-collapsed'}`}>
-            <div className="accordion-bar" onClick={() => togglePanel('chat')}>
-              <ChevronRight size={12} className={`accordion-chevron ${chatOpen ? 'open' : ''}`} />
-              <MessageSquare size={12} />
-              <span>Chat</span>
-            </div>
-            <div className="accordion-body-wrapper">
-              <div className="accordion-body">
-                <ChatPanel
-                  key={activeSession.id}
-                  projectPath={projectPath}
-                  permissionMode={permissionMode}
-                  onPermissionChange={handlePermissionChange}
-                  initialMessages={activeSession.messages}
-                  onMessagesChange={handleMessagesChange}
-                  onTurnComplete={handleSessionSave}
+        <div className="main-content" ref={mainContentRef}>
+          {allPanels.map((panel, i) => (
+            <div key={panel} style={{ display: 'contents' }}>
+              {renderPanel(panel)}
+              {showHandleAfter(panel) && (
+                <div
+                  className={`drag-handle ${isDragging ? 'dragging' : ''}`}
+                  onMouseDown={handleDragStart}
                 />
-              </div>
+              )}
             </div>
-          </div>
-
-          {/* Editor accordion */}
-          {hasFiles && (
-            <div className={`accordion-panel ${editorOpen ? 'accordion-expanded' : 'accordion-collapsed'}`}>
-              <div className="accordion-bar" onClick={() => togglePanel('editor')}>
-                <ChevronRight size={12} className={`accordion-chevron ${editorOpen ? 'open' : ''}`} />
-                <Code2 size={12} />
-                <span>Editor</span>
-                {activeFilePath && (
-                  <span className="accordion-bar-detail">
-                    {activeFilePath.split('/').pop()}
-                  </span>
-                )}
-              </div>
-              <div className="accordion-body-wrapper">
-                <div className="accordion-body">
-                  <CodePanel
-                    openFiles={openFiles}
-                    activeFilePath={activeFilePath!}
-                    projectPath={projectPath}
-                    onActivate={setActiveFilePath}
-                    onClose={handleFileClose}
-                    onCloseAll={handleCloseAllFiles}
-                    onDiffModeChange={handleDiffModeChange}
-                    onEditorSave={handleEditorSave}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Terminal accordion */}
-          <div className={`accordion-panel ${terminalOpen ? 'accordion-expanded' : 'accordion-collapsed'}`}>
-            <div className="accordion-bar" onClick={() => togglePanel('terminal')}>
-              <ChevronRight size={12} className={`accordion-chevron ${terminalOpen ? 'open' : ''}`} />
-              <TerminalSquare size={12} />
-              <span>Terminal</span>
-            </div>
-            <div className="accordion-body-wrapper">
-              <div className="accordion-body">
-                <TerminalPanel projectPath={projectPath} />
-              </div>
-            </div>
-          </div>
-
+          ))}
         </div>
       </div>
+
+      {isDragging && <div className="drag-overlay" />}
 
       <style>{`
         .accordion-panel {
@@ -269,13 +349,10 @@ export default function App() {
           flex-direction: column;
           overflow: hidden;
           transition: flex 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        .accordion-panel.accordion-expanded {
-          flex: 1 1 0%;
           min-height: 0;
         }
         .accordion-panel.accordion-collapsed {
-          flex: 0 0 32px;
+          flex: 0 0 32px !important;
         }
         .accordion-bar {
           display: flex;
@@ -339,6 +416,41 @@ export default function App() {
         .accordion-body .terminal-panel {
           height: 100%;
           border-top: none;
+        }
+        .drag-handle {
+          height: 6px;
+          flex-shrink: 0;
+          cursor: row-resize;
+          background: transparent;
+          position: relative;
+          z-index: 10;
+        }
+        .drag-handle::after {
+          content: '';
+          position: absolute;
+          left: 50%;
+          top: 50%;
+          transform: translate(-50%, -50%);
+          width: 32px;
+          height: 3px;
+          border-radius: 2px;
+          background: var(--text-muted);
+          opacity: 0;
+          transition: opacity 0.15s;
+        }
+        .drag-handle:hover::after,
+        .drag-handle.dragging::after {
+          opacity: 0.5;
+        }
+        .drag-handle:hover,
+        .drag-handle.dragging {
+          background: var(--bg-hover);
+        }
+        .drag-overlay {
+          position: fixed;
+          inset: 0;
+          z-index: 9999;
+          cursor: row-resize;
         }
       `}</style>
     </div>
