@@ -4,11 +4,19 @@ import path from 'node:path';
 import fs from 'node:fs';
 
 export function registerUpdater(mainWindow: BrowserWindow) {
+  // Always register getVersion — it works regardless of update capability
+  ipcMain.handle('update:getVersion', () => {
+    return app.getVersion();
+  });
+
   const updateConfigPath = path.join(process.resourcesPath, 'app-update.yml');
   const isPortable = Boolean(process.env.PORTABLE_EXECUTABLE);
   const canAutoUpdate = app.isPackaged && !isPortable && fs.existsSync(updateConfigPath);
 
   if (!canAutoUpdate) {
+    // Register no-op handlers so the renderer doesn't hang
+    ipcMain.on('update:check', () => {});
+    ipcMain.on('update:install', () => {});
     return;
   }
 
@@ -55,17 +63,12 @@ export function registerUpdater(mainWindow: BrowserWindow) {
     });
   });
 
-  // IPC handlers
   ipcMain.on('update:check', () => {
     autoUpdater.checkForUpdates().catch(() => {});
   });
 
   ipcMain.on('update:install', () => {
     autoUpdater.quitAndInstall();
-  });
-
-  ipcMain.handle('update:getVersion', () => {
-    return app.getVersion();
   });
 
   // Check after 3 second delay

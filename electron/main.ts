@@ -95,6 +95,12 @@ function createWindow() {
   });
 }
 
+// Suppress EPIPE errors from writing to closed streams (e.g. killed child processes)
+process.on('uncaughtException', (err) => {
+  if ((err as NodeJS.ErrnoException).code === 'EPIPE') return;
+  console.error('Uncaught exception:', err);
+});
+
 app.whenReady().then(createWindow);
 app.on('window-all-closed', () => {
   destroyAllTerminals();

@@ -48,7 +48,7 @@ jobs:
         run: |
           tag="${GITHUB_REF#refs/tags/}"
           shopt -s nullglob
-          for file in release/*.AppImage release/*.exe; do
+          for file in release/*.AppImage release/*.exe release/latest-linux.yml release/latest.yml; do
             gh release upload "$tag" "$file" --clobber
           done
 
