@@ -15,7 +15,9 @@ import { formatSessionDate, formatSessionTime } from './sessions';
 type PermissionMode = 'default' | 'bypass';
 type EffortLevel = 'low' | 'medium' | 'high' | 'max';
 type ModelChoice = 'sonnet' | 'opus' | 'haiku';
-type AIProvider = 'claude' | 'codex';
+type AIProvider = 'claude' | 'codex' | 'gemini';
+type GeminiApprovalMode = 'default' | 'auto_edit' | 'yolo' | 'plan';
+type GeminiConversationMode = 'planning' | 'fast';
 type CodexPermission = 'auto' | 'read-only' | 'full-access';
 type PanelId = 'chat' | 'editor' | 'terminal';
 
@@ -31,6 +33,10 @@ export default function App() {
   const [codexModel, setCodexModel] = useState('');
   const [codexModels, setCodexModels] = useState<{ id: string; name: string }[]>([]);
   const [codexPermission, setCodexPermission] = useState<CodexPermission>('auto');
+  const [geminiModel, setGeminiModel] = useState('auto-gemini-3');
+  const [geminiModels, setGeminiModels] = useState<{ id: string; name: string }[]>([]);
+  const [geminiApprovalMode, setGeminiApprovalMode] = useState<GeminiApprovalMode>('default');
+  const [geminiConversationMode, setGeminiConversationMode] = useState<GeminiConversationMode>('planning');
   const [workspaces, setWorkspaces] = useState<Map<string, WorkspaceContext>>(new Map());
   const [pendingClose, setPendingClose] = useState<string | null>(null);
   // Ref to hold latest messages per workspace without triggering re-renders during streaming
@@ -91,7 +97,7 @@ export default function App() {
     window.sai.settingsGet('editorFontSize', 13).then((v: number) => setEditorFontSize(v));
     window.sai.settingsGet('editorMinimap', true).then((v: boolean) => setEditorMinimap(v));
     window.sai.settingsGet('aiProvider', 'claude').then((v: string) => {
-      if (v === 'claude' || v === 'codex') setAiProvider(v as AIProvider);
+      if (v === 'claude' || v === 'codex' || v === 'gemini') setAiProvider(v as AIProvider);
     });
     // Load nested provider settings
     window.sai.settingsGet('claude', {}).then((c: any) => {
@@ -102,6 +108,11 @@ export default function App() {
     window.sai.settingsGet('codex', {}).then((c: any) => {
       if (c.model) setCodexModel(c.model);
       if (c.permission === 'auto' || c.permission === 'read-only' || c.permission === 'full-access') setCodexPermission(c.permission);
+    });
+    window.sai.settingsGet('gemini', {}).then((g: any) => {
+      if (g.model) setGeminiModel(g.model);
+      if (g.approvalMode === 'default' || g.approvalMode === 'auto_edit' || g.approvalMode === 'yolo' || g.approvalMode === 'plan') setGeminiApprovalMode(g.approvalMode);
+      if (g.conversationMode === 'planning' || g.conversationMode === 'fast') setGeminiConversationMode(g.conversationMode);
     });
     // Migrate flat keys to nested (one-time)
     Promise.all([
@@ -134,7 +145,7 @@ export default function App() {
     const unsubApplied = window.sai.githubOnSettingsApplied((remote: Record<string, any>) => {
       if ('editorFontSize' in remote) setEditorFontSize(remote.editorFontSize);
       if ('editorMinimap' in remote) setEditorMinimap(remote.editorMinimap);
-      if ('aiProvider' in remote && (remote.aiProvider === 'claude' || remote.aiProvider === 'codex')) setAiProvider(remote.aiProvider);
+      if ('aiProvider' in remote && (remote.aiProvider === 'claude' || remote.aiProvider === 'codex' || remote.aiProvider === 'gemini')) setAiProvider(remote.aiProvider);
       if ('claude' in remote && typeof remote.claude === 'object') {
         const c = remote.claude;
         if (c.model === 'sonnet' || c.model === 'opus' || c.model === 'haiku') setModelChoice(c.model);
@@ -146,6 +157,12 @@ export default function App() {
         if (c.model) setCodexModel(c.model);
         if (c.permission === 'auto' || c.permission === 'read-only' || c.permission === 'full-access') setCodexPermission(c.permission);
       }
+      if ('gemini' in remote && typeof remote.gemini === 'object') {
+        const g = remote.gemini;
+        if (g.model) setGeminiModel(g.model);
+        if (g.approvalMode === 'default' || g.approvalMode === 'auto_edit' || g.approvalMode === 'yolo' || g.approvalMode === 'plan') setGeminiApprovalMode(g.approvalMode);
+        if (g.conversationMode === 'planning' || g.conversationMode === 'fast') setGeminiConversationMode(g.conversationMode);
+      }
     });
     return unsubApplied;
   }, []);
@@ -155,6 +172,14 @@ export default function App() {
     (window.sai as any).codexModels?.().then((result: { models: { id: string; name: string }[]; defaultModel: string }) => {
       if (result?.models?.length) setCodexModels(result.models);
       if (result?.defaultModel) setCodexModel(prev => prev || result.defaultModel);
+    });
+  }, []);
+
+  // Prefetch Gemini models (hardcoded) at startup
+  useEffect(() => {
+    (window.sai as any).geminiModels?.().then((result: { models: { id: string; name: string }[]; defaultModel: string }) => {
+      if (result?.models?.length) setGeminiModels(result.models);
+      if (result?.defaultModel) setGeminiModel(prev => prev || result.defaultModel);
     });
   }, []);
 
@@ -621,6 +646,27 @@ export default function App() {
     saveCodexSetting('permission', perm);
   };
 
+  const saveGeminiSetting = (key: string, value: any) => {
+    window.sai.settingsGet('gemini', {}).then((existing: any) => {
+      window.sai.settingsSet('gemini', { ...existing, [key]: value });
+    });
+  };
+
+  const handleGeminiModelChange = (model: string) => {
+    setGeminiModel(model);
+    saveGeminiSetting('model', model);
+  };
+
+  const handleGeminiApprovalModeChange = (mode: GeminiApprovalMode) => {
+    setGeminiApprovalMode(mode);
+    saveGeminiSetting('approvalMode', mode);
+  };
+
+  const handleGeminiConversationModeChange = (mode: GeminiConversationMode) => {
+    setGeminiConversationMode(mode);
+    saveGeminiSetting('conversationMode', mode);
+  };
+
   const chatOpen = expanded.includes('chat');
   const editorOpen = expanded.includes('editor');
   const terminalOpen = expanded.includes('terminal');
@@ -642,11 +688,13 @@ export default function App() {
 
   const renderPanel = (panel: PanelId) => {
     const isOpen = expanded.includes(panel);
+    const providerSvg = aiProvider === 'codex' ? 'svg/openai.svg' : aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : 'svg/claude.svg';
+    const providerColor = aiProvider === 'codex' ? 'var(--text)' : aiProvider === 'gemini' ? '#4285f4' : '#e27b4a';
     const icon = panel === 'chat'
       ? <span className="accordion-provider-icon" style={{
-          maskImage: `url('${aiProvider === 'codex' ? 'svg/openai.svg' : 'svg/claude.svg'}')`,
-          WebkitMaskImage: `url('${aiProvider === 'codex' ? 'svg/openai.svg' : 'svg/claude.svg'}')`,
-          backgroundColor: aiProvider === 'codex' ? 'var(--text)' : '#e27b4a',
+          maskImage: `url('${providerSvg}')`,
+          WebkitMaskImage: `url('${providerSvg}')`,
+          backgroundColor: providerColor,
           opacity: 1,
         }} />
       : panel === 'editor' ? <Code2 size={12} />
@@ -745,6 +793,13 @@ export default function App() {
                   codexModels={codexModels}
                   codexPermission={codexPermission}
                   onCodexPermissionChange={handleCodexPermissionChange}
+                  geminiModel={geminiModel}
+                  onGeminiModelChange={handleGeminiModelChange}
+                  geminiModels={geminiModels}
+                  geminiApprovalMode={geminiApprovalMode}
+                  onGeminiApprovalModeChange={handleGeminiApprovalModeChange}
+                  geminiConversationMode={geminiConversationMode}
+                  onGeminiConversationModeChange={handleGeminiConversationModeChange}
                   initialMessages={ws.activeSession.messages}
                   activeFilePath={ws.activeFilePath}
                   onFileOpen={handleFileOpen}
