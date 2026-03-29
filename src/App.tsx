@@ -8,7 +8,7 @@ import TitleBar from './components/TitleBar';
 import CodePanel from './components/CodePanel/CodePanel';
 import { loadSessions, saveSessions, createSession, upsertSession } from './sessions';
 import type { ChatSession, ChatMessage, GitFile, OpenFile } from './types';
-import { MessageSquare, TerminalSquare, Code2 } from 'lucide-react';
+import { MessageSquare, TerminalSquare, Code2, ChevronRight } from 'lucide-react';
 
 type PermissionMode = 'default' | 'bypass';
 type PanelId = 'chat' | 'editor' | 'terminal';
@@ -47,11 +47,9 @@ export default function App() {
   const togglePanel = useCallback((panel: PanelId) => {
     setExpanded(prev => {
       if (prev.includes(panel)) {
-        // Collapse — but don't allow 0 expanded panels
         const next = prev.filter(p => p !== panel);
         return next.length > 0 ? next : prev;
       } else {
-        // Expand — if already 2 open, collapse the oldest
         const next = [...prev, panel];
         return next.length > 2 ? next.slice(1) : next;
       }
@@ -60,7 +58,6 @@ export default function App() {
 
   const hasFiles = openFiles.length > 0;
 
-  // Open a git diff file in tabs
   const handleFileClick = useCallback((file: GitFile) => {
     setOpenFiles(prev => {
       const exists = prev.some(f => f.path === file.path);
@@ -68,7 +65,6 @@ export default function App() {
       return [...prev, { path: file.path, viewMode: 'diff', file, diffMode: 'unified' }];
     });
     setActiveFilePath(file.path);
-    // Auto-expand editor when opening a file
     setExpanded(prev => {
       if (prev.includes('editor')) return prev;
       const next = [...prev, 'editor' as PanelId];
@@ -76,7 +72,6 @@ export default function App() {
     });
   }, []);
 
-  // Open a file from the explorer in tabs with Monaco editor
   const handleFileOpen = useCallback(async (filePath: string) => {
     try {
       const content = await window.sai.fsReadFile(filePath) as string;
@@ -86,14 +81,13 @@ export default function App() {
         return [...prev, { path: filePath, viewMode: 'editor', content }];
       });
       setActiveFilePath(filePath);
-      // Auto-expand editor
       setExpanded(prev => {
         if (prev.includes('editor')) return prev;
         const next = [...prev, 'editor' as PanelId];
         return next.length > 2 ? next.slice(1) : next;
       });
     } catch {
-      // File couldn't be read (binary, permissions, etc.)
+      // File couldn't be read
     }
   }, []);
 
@@ -102,7 +96,6 @@ export default function App() {
       const next = prev.filter(f => f.path !== path);
       if (next.length === 0) {
         setActiveFilePath(null);
-        // No more files — go back to chat + terminal
         setExpanded(['chat', 'terminal']);
       } else if (path === activeFilePath) {
         const idx = prev.findIndex(f => f.path === path);
@@ -204,10 +197,11 @@ export default function App() {
           {/* Chat accordion */}
           <div className={`accordion-panel ${chatOpen ? 'accordion-expanded' : 'accordion-collapsed'}`}>
             <div className="accordion-bar" onClick={() => togglePanel('chat')}>
+              <ChevronRight size={12} className={`accordion-chevron ${chatOpen ? 'open' : ''}`} />
               <MessageSquare size={12} />
               <span>Chat</span>
             </div>
-            {chatOpen && (
+            <div className="accordion-body-wrapper">
               <div className="accordion-body">
                 <ChatPanel
                   key={activeSession.id}
@@ -219,13 +213,14 @@ export default function App() {
                   onTurnComplete={handleSessionSave}
                 />
               </div>
-            )}
+            </div>
           </div>
 
-          {/* Editor accordion — only visible when files are open */}
+          {/* Editor accordion */}
           {hasFiles && (
             <div className={`accordion-panel ${editorOpen ? 'accordion-expanded' : 'accordion-collapsed'}`}>
               <div className="accordion-bar" onClick={() => togglePanel('editor')}>
+                <ChevronRight size={12} className={`accordion-chevron ${editorOpen ? 'open' : ''}`} />
                 <Code2 size={12} />
                 <span>Editor</span>
                 {activeFilePath && (
@@ -234,7 +229,7 @@ export default function App() {
                   </span>
                 )}
               </div>
-              {editorOpen && (
+              <div className="accordion-body-wrapper">
                 <div className="accordion-body">
                   <CodePanel
                     openFiles={openFiles}
@@ -247,21 +242,22 @@ export default function App() {
                     onEditorSave={handleEditorSave}
                   />
                 </div>
-              )}
+              </div>
             </div>
           )}
 
           {/* Terminal accordion */}
           <div className={`accordion-panel ${terminalOpen ? 'accordion-expanded' : 'accordion-collapsed'}`}>
             <div className="accordion-bar" onClick={() => togglePanel('terminal')}>
+              <ChevronRight size={12} className={`accordion-chevron ${terminalOpen ? 'open' : ''}`} />
               <TerminalSquare size={12} />
               <span>Terminal</span>
             </div>
-            {terminalOpen && (
+            <div className="accordion-body-wrapper">
               <div className="accordion-body">
                 <TerminalPanel projectPath={projectPath} />
               </div>
-            )}
+            </div>
           </div>
 
         </div>
@@ -272,15 +268,14 @@ export default function App() {
           display: flex;
           flex-direction: column;
           overflow: hidden;
-          flex-shrink: 0;
+          transition: flex 0.25s cubic-bezier(0.4, 0, 0.2, 1);
         }
         .accordion-panel.accordion-expanded {
-          flex: 1;
-          flex-shrink: 1;
+          flex: 1 1 0%;
           min-height: 0;
         }
         .accordion-panel.accordion-collapsed {
-          flex: 0 0 auto;
+          flex: 0 0 32px;
         }
         .accordion-bar {
           display: flex;
@@ -306,6 +301,14 @@ export default function App() {
           color: var(--text-secondary);
           background: var(--bg-hover);
         }
+        .accordion-chevron {
+          transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+          flex-shrink: 0;
+          color: var(--text-muted);
+        }
+        .accordion-chevron.open {
+          transform: rotate(90deg);
+        }
         .accordion-bar-detail {
           font-weight: 400;
           text-transform: none;
@@ -318,12 +321,20 @@ export default function App() {
           text-overflow: ellipsis;
           white-space: nowrap;
         }
-        .accordion-body {
+        .accordion-body-wrapper {
           flex: 1;
           overflow: hidden;
+          min-height: 0;
+        }
+        .accordion-collapsed .accordion-body-wrapper {
+          flex: 0;
+          height: 0;
+        }
+        .accordion-body {
+          height: 100%;
           display: flex;
           flex-direction: column;
-          min-height: 0;
+          overflow: hidden;
         }
         .accordion-body .terminal-panel {
           height: 100%;
