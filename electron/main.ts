@@ -87,6 +87,7 @@ function createWindow() {
   });
 
   ipcMain.handle('project:getRecent', () => getRecentProjects());
+  ipcMain.handle('project:getCwd', () => process.cwd());
 
   ipcMain.handle('project:openRecent', (_event, projectPath: string) => {
     addRecentProject(projectPath);

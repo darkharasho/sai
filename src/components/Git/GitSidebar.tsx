@@ -97,6 +97,13 @@ export default function GitSidebar({ projectPath, onFileClick }: GitSidebarProps
     await refresh();
   };
 
+  const handleStageAll = async () => {
+    for (const file of unstagedFiles) {
+      await window.sai.gitStage(projectPath, file.path);
+    }
+    await refresh();
+  };
+
   const handleUnstage = async (file: GitFile) => {
     await window.sai.gitUnstage(projectPath, file.path);
     await refresh();
@@ -211,6 +218,7 @@ export default function GitSidebar({ projectPath, onFileClick }: GitSidebarProps
           onAction={handleStage}
           actionLabel="+"
           onFileClick={onFileClick}
+          onStageAll={handleStageAll}
         />
 
         <ClaudeActivity commits={commits} />
@@ -224,6 +232,10 @@ export default function GitSidebar({ projectPath, onFileClick }: GitSidebarProps
         onCommit={handleCommit}
         onPush={handlePush}
         onPull={handlePull}
+        onGenerateMessage={() => window.sai.claudeGenerateCommitMessage(projectPath)}
+        onListBranches={() => window.sai.gitBranches(projectPath)}
+        onCheckout={async (b: string) => { await window.sai.gitCheckout(projectPath, b); await refresh(); }}
+        onCreateBranch={async (name: string) => { await window.sai.gitCreateBranch(projectPath, name); await refresh(); }}
       />
     </div>
   );

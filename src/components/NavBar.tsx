@@ -3,9 +3,12 @@ import { FolderClosed, GitBranch } from 'lucide-react';
 interface NavBarProps {
   activeSidebar: string | null;
   onToggle: (id: string) => void;
+  gitChangeCount?: number;
 }
 
-export default function NavBar({ activeSidebar, onToggle }: NavBarProps) {
+export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0 }: NavBarProps) {
+  const badgeLabel = gitChangeCount > 100 ? '99+' : `${gitChangeCount}`;
+
   return (
     <div className="navbar">
       <button
@@ -21,6 +24,7 @@ export default function NavBar({ activeSidebar, onToggle }: NavBarProps) {
         title="Source Control"
       >
         <GitBranch size={20} />
+        {gitChangeCount > 0 && <span className="git-badge">{badgeLabel}</span>}
       </button>
       <style>{`
         .navbar {
@@ -45,6 +49,23 @@ export default function NavBar({ activeSidebar, onToggle }: NavBarProps) {
           color: var(--text-secondary);
           cursor: pointer;
           border-radius: 6px;
+          position: relative;
+        }
+        .git-badge {
+          position: absolute;
+          top: 4px;
+          right: 2px;
+          background: var(--accent);
+          color: #000;
+          font-size: 9px;
+          font-weight: 700;
+          font-family: 'JetBrains Mono', monospace;
+          min-width: 16px;
+          height: 16px;
+          line-height: 16px;
+          text-align: center;
+          border-radius: 8px;
+          padding: 0 3px;
         }
         .nav-btn:hover {
           color: var(--text);

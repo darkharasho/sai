@@ -8,8 +8,8 @@ function getHighlighter() {
   if (!highlighterPromise) {
     highlighterPromise = import('shiki').then(({ createHighlighter }) =>
       createHighlighter({
-        themes: ['github-dark'],
-        langs: ['json', 'typescript', 'javascript', 'bash', 'python', 'html', 'css', 'markdown', 'yaml', 'toml', 'rust', 'go'],
+        themes: ['monokai'],
+        langs: ['json', 'typescript', 'javascript', 'bash', 'python', 'html', 'css', 'markdown', 'yaml', 'toml', 'rust', 'go', 'diff'],
       })
     );
   }
@@ -35,7 +35,7 @@ function detectLang(toolCall: ToolCall): string {
   return 'text';
 }
 
-function HighlightedCode({ code, lang }: { code: string; lang: string }) {
+function HighlightedCode({ code, lang, showLineNumbers }: { code: string; lang: string; showLineNumbers?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const [html, setHtml] = useState<string>('');
 
@@ -43,7 +43,7 @@ function HighlightedCode({ code, lang }: { code: string; lang: string }) {
     if (!code || lang === 'text') return;
     getHighlighter().then(highlighter => {
       try {
-        const result = highlighter.codeToHtml(code, { lang, theme: 'github-dark' });
+        const result = highlighter.codeToHtml(code, { lang, theme: 'monokai' });
         setHtml(result);
       } catch {
         // Language not loaded
@@ -51,19 +51,67 @@ function HighlightedCode({ code, lang }: { code: string; lang: string }) {
     });
   }, [code, lang]);
 
+  if (showLineNumbers) {
+    const lines = code.split('\n');
+    const gutterWidth = String(lines.length).length;
+    if (html) {
+      // Extract inner content from shiki's <pre><code>...</code></pre>
+      const codeMatch = html.match(/<code[^>]*>([\s\S]*)<\/code>/);
+      const inner = codeMatch ? codeMatch[1] : '';
+      // Shiki wraps each line in a <span class="line">
+      const lineSpans = inner.split(/<span class="line">/);
+      const lineHtmls = lineSpans.slice(1).map(s => {
+        const end = s.lastIndexOf('</span>');
+        return end >= 0 ? s.substring(0, end) : s;
+      });
+      return (
+        <div ref={ref} className="editor-code">
+          <div className="editor-gutter">
+            {lines.map((_, i) => (
+              <div key={i} className="editor-line-number" style={{ width: `${gutterWidth}ch` }}>{i + 1}</div>
+            ))}
+          </div>
+          <pre className="editor-lines">
+            <code>
+              {lineHtmls.map((lineHtml, i) => (
+                <div key={i} className="editor-line" dangerouslySetInnerHTML={{ __html: lineHtml || '&nbsp;' }} />
+              ))}
+            </code>
+          </pre>
+        </div>
+      );
+    }
+    return (
+      <div ref={ref} className="editor-code">
+        <div className="editor-gutter">
+          {lines.map((_, i) => (
+            <div key={i} className="editor-line-number" style={{ width: `${gutterWidth}ch` }}>{i + 1}</div>
+          ))}
+        </div>
+        <pre className="editor-lines"><code>{lines.map((line, i) => (
+          <div key={i} className="editor-line">{line || '\n'}</div>
+        ))}</code></pre>
+      </div>
+    );
+  }
+
   if (html) {
     return <div ref={ref} className="highlighted-code" dangerouslySetInnerHTML={{ __html: html }} />;
   }
   return <pre className="plain-code"><code>{code}</code></pre>;
 }
 
-function formatInput(toolCall: ToolCall): { label: string; code: string } {
+function formatInput(toolCall: ToolCall): { label: string; code: string; langOverride?: string } {
   const input = toolCall.input || '';
   try {
     const parsed = JSON.parse(input);
     if (parsed.command) return { label: 'Command', code: parsed.command };
     if (parsed.file_path && parsed.content) return { label: parsed.file_path, code: parsed.content };
-    if (parsed.file_path && parsed.old_string) return { label: parsed.file_path, code: `- ${parsed.old_string}\n+ ${parsed.new_string}` };
+    if (parsed.file_path && parsed.old_string != null) {
+      const oldLines = (parsed.old_string || '').split('\n').map((l: string) => `- ${l}`).join('\n');
+      const newLines = (parsed.new_string || '').split('\n').map((l: string) => `+ ${l}`).join('\n');
+      return { label: parsed.file_path, code: `${oldLines}\n${newLines}`, langOverride: 'diff' };
+    }
     if (parsed.file_path) return { label: parsed.file_path, code: input };
     if (parsed.pattern) return { label: `grep: ${parsed.pattern}`, code: input };
     return { label: '', code: JSON.stringify(parsed, null, 2) };
@@ -95,15 +143,23 @@ function FullscreenModal({ code, lang, label, onClose }: { code: string; lang: s
     return () => document.removeEventListener('keydown', handler);
   }, [onClose]);
 
+  const lineCount = code.split('\n').length;
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
-          <span className="modal-title">{label || 'Output'}</span>
-          <button className="modal-close" onClick={onClose}><X size={18} /></button>
+          <div className="modal-header-left">
+            <span className="modal-title">{label || 'Output'}</span>
+            <span className="modal-meta">{lang !== 'text' ? lang : ''}</span>
+          </div>
+          <div className="modal-header-right">
+            <span className="modal-meta">{lineCount} lines</span>
+            <button className="modal-close" onClick={onClose}><X size={18} /></button>
+          </div>
         </div>
         <div className="modal-body">
-          <HighlightedCode code={code} lang={lang} />
+          <HighlightedCode code={code} lang={lang} showLineNumbers />
         </div>
       </div>
       <style>{`
@@ -118,7 +174,7 @@ function FullscreenModal({ code, lang, label, onClose }: { code: string; lang: s
           backdrop-filter: blur(2px);
         }
         .modal-content {
-          background: var(--bg-primary);
+          background: #272822;
           border: 1px solid var(--border);
           border-radius: 10px;
           width: 90vw;
@@ -132,40 +188,90 @@ function FullscreenModal({ code, lang, label, onClose }: { code: string; lang: s
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 12px 16px;
-          border-bottom: 1px solid var(--border);
+          padding: 8px 16px;
+          border-bottom: 1px solid rgba(255,255,255,0.08);
           flex-shrink: 0;
+          background: #1e1f1c;
+        }
+        .modal-header-left, .modal-header-right {
+          display: flex;
+          align-items: center;
+          gap: 12px;
         }
         .modal-title {
           font-family: 'JetBrains Mono', monospace;
           font-size: 13px;
-          color: var(--text);
+          color: #f8f8f2;
+        }
+        .modal-meta {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 11px;
+          color: #75715e;
         }
         .modal-close {
           background: none;
           border: none;
-          color: var(--text-muted);
+          color: #75715e;
           cursor: pointer;
           padding: 4px;
           border-radius: 4px;
           display: flex;
         }
         .modal-close:hover {
-          color: var(--text);
-          background: var(--bg-hover);
+          color: #f8f8f2;
+          background: rgba(255,255,255,0.06);
         }
         .modal-body {
           flex: 1;
           overflow: auto;
           font-size: 13px;
+          background: #272822;
         }
-        .modal-body .highlighted-code pre,
-        .modal-body .plain-code {
+        .editor-code {
+          display: flex;
+          min-height: 100%;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 13px;
+          line-height: 20px;
+        }
+        .editor-gutter {
+          padding: 16px 0;
+          background: #1e1f1c;
+          border-right: 1px solid rgba(255,255,255,0.06);
+          text-align: right;
+          user-select: none;
+          flex-shrink: 0;
+          position: sticky;
+          left: 0;
+        }
+        .editor-line-number {
+          padding: 0 12px 0 16px;
+          color: #75715e;
+          font-size: 12px;
+          height: 20px;
+        }
+        .editor-lines {
+          flex: 1;
           margin: 0;
-          padding: 16px;
+          padding: 16px 16px;
           background: transparent !important;
           border-radius: 0;
+          overflow: visible;
           font-size: 13px;
+          line-height: 20px;
+          color: #f8f8f2;
+        }
+        .editor-lines code {
+          font-size: inherit;
+          background: none;
+          padding: 0;
+        }
+        .editor-line {
+          height: 20px;
+          white-space: pre;
+        }
+        .editor-line:hover {
+          background: rgba(255,255,255,0.03);
         }
       `}</style>
     </div>
@@ -176,8 +282,8 @@ export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
   const [expanded, setExpanded] = useState(true); // Start expanded
   const [fullscreenCode, setFullscreenCode] = useState<{ code: string; lang: string; label: string } | null>(null);
   const Icon = iconMap[toolCall.type] || Wrench;
-  const lang = detectLang(toolCall);
-  const { label, code } = formatInput(toolCall);
+  const { label, code, langOverride } = formatInput(toolCall);
+  const lang = langOverride || detectLang(toolCall);
   const { truncated, isTruncated } = truncateCode(code, MAX_PREVIEW_LINES);
 
   return (
@@ -312,6 +418,14 @@ export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
             font-size: 12px;
             background: transparent;
             border-radius: 0;
+          }
+          .tool-call-body .highlighted-code .line:has(.shiki-diff-add),
+          .editor-line:has(.shiki-diff-add) {
+            background: rgba(166, 226, 46, 0.1);
+          }
+          .tool-call-body .highlighted-code .line:has(.shiki-diff-delete),
+          .editor-line:has(.shiki-diff-delete) {
+            background: rgba(249, 38, 114, 0.1);
           }
           .tool-call-show-more {
             display: block;

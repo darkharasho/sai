@@ -324,7 +324,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
 
       <style>{`
         .input-wrapper {
-          padding: 0 16px 12px;
+          padding: 0 15% 12px;
           position: relative;
         }
         .autocomplete-dropdown {
@@ -383,12 +383,9 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
 
         .input-box {
           background: var(--bg-input);
-          border: 1px solid var(--border);
+          border: 1px solid var(--accent);
           border-radius: 10px;
           overflow: hidden;
-        }
-        .input-box:focus-within {
-          border-color: var(--accent);
         }
         .chat-textarea {
           width: 100%;

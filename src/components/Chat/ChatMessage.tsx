@@ -1,5 +1,7 @@
 import ReactMarkdown from 'react-markdown';
-import { Circle } from 'lucide-react';
+import rehypeHighlight from 'rehype-highlight';
+import 'highlight.js/styles/monokai.css';
+import { Circle, ChevronRight } from 'lucide-react';
 import ToolCallCard from './ToolCallCard';
 import type { ChatMessage as ChatMessageType } from '../../types';
 
@@ -17,9 +19,11 @@ export default function ChatMessage({ message }: { message: ChatMessageType }) {
     <div className={`chat-msg chat-msg-${message.role}`}>
       {message.content && (
         <div className="chat-msg-content">
-          <Circle size={8} fill={dotColor} stroke={dotColor} className="chat-msg-dot" />
+          {message.role === 'user'
+            ? <ChevronRight size={14} color="var(--green)" className="chat-msg-dot" />
+            : <Circle size={8} fill={dotColor} stroke={dotColor} className="chat-msg-dot" />}
           <div className="chat-msg-body">
-            <ReactMarkdown>{message.content}</ReactMarkdown>
+            <ReactMarkdown rehypePlugins={[rehypeHighlight]}>{message.content}</ReactMarkdown>
           </div>
         </div>
       )}
@@ -52,6 +56,24 @@ export default function ChatMessage({ message }: { message: ChatMessageType }) {
           padding: 12px;
           overflow-x: auto;
           margin: 8px 0;
+        }
+        .chat-msg-body pre code.hljs.language-diff {
+          padding: 0;
+        }
+        .chat-msg-body pre code.hljs.language-diff .hljs-addition {
+          color: #a6e22e;
+          background: rgba(166, 226, 46, 0.1);
+          display: inline-block;
+          width: 100%;
+        }
+        .chat-msg-body pre code.hljs.language-diff .hljs-deletion {
+          color: #f92672;
+          background: rgba(249, 38, 114, 0.1);
+          display: inline-block;
+          width: 100%;
+        }
+        .chat-msg-body pre code.hljs.language-diff .hljs-meta {
+          color: #66d9ef;
         }
       `}</style>
     </div>

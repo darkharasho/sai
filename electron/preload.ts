@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('sai', {
   },
   claudeStart: (cwd: string) => ipcRenderer.invoke('claude:start', cwd),
   claudeSend: (message: string, imagePaths?: string[], permMode?: string) => ipcRenderer.send('claude:send', message, imagePaths, permMode),
+  claudeGenerateCommitMessage: (cwd: string) => ipcRenderer.invoke('claude:generateCommitMessage', cwd),
   claudeStop: () => ipcRenderer.send('claude:stop'),
   claudeApprove: (approved: boolean) => ipcRenderer.send('claude:approve', approved),
   claudeOnMessage: (callback: (msg: unknown) => void) => {
@@ -25,6 +26,9 @@ contextBridge.exposeInMainWorld('sai', {
   gitPush: (cwd: string) => ipcRenderer.invoke('git:push', cwd),
   gitPull: (cwd: string) => ipcRenderer.invoke('git:pull', cwd),
   gitLog: (cwd: string, count: number) => ipcRenderer.invoke('git:log', cwd, count),
+  gitBranches: (cwd: string) => ipcRenderer.invoke('git:branches', cwd),
+  gitCheckout: (cwd: string, branchName: string) => ipcRenderer.invoke('git:checkout', cwd, branchName),
+  gitCreateBranch: (cwd: string, branchName: string) => ipcRenderer.invoke('git:createBranch', cwd, branchName),
   gitDiff: (cwd: string, filepath: string, staged: boolean) =>
     ipcRenderer.invoke('git:diff', cwd, filepath, staged),
   fsReadDir: (dirPath: string) => ipcRenderer.invoke('fs:readDir', dirPath),
@@ -64,6 +68,7 @@ contextBridge.exposeInMainWorld('sai', {
     return () => ipcRenderer.removeListener('update:error', listener);
   },
   saveImage: (base64Data: string) => ipcRenderer.invoke('project:saveImage', base64Data),
+  getCwd: () => ipcRenderer.invoke('project:getCwd'),
   selectFolder: () => ipcRenderer.invoke('project:selectFolder'),
   getRecentProjects: () => ipcRenderer.invoke('project:getRecent'),
   openRecentProject: (path: string) => ipcRenderer.invoke('project:openRecent', path),

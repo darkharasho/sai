@@ -1,47 +1,19 @@
 import { useState, useEffect, useRef } from 'react';
-import { MessageCirclePlus, Clock } from 'lucide-react';
-import type { ChatSession } from '../types';
-import { formatSessionDate, formatSessionTime } from '../sessions';
 import UpdateNotification from './UpdateNotification';
 
 interface TitleBarProps {
   projectPath: string;
   onProjectChange: (path: string) => void;
-  onNewChat: () => void;
-  sessions: ChatSession[];
-  activeSessionId: string;
-  onSelectSession: (id: string) => void;
 }
 
-export default function TitleBar({ projectPath, onProjectChange, onNewChat, sessions, activeSessionId, onSelectSession }: TitleBarProps) {
+export default function TitleBar({ projectPath, onProjectChange }: TitleBarProps) {
   const [open, setOpen] = useState(false);
   const [recentProjects, setRecentProjects] = useState<string[]>([]);
+  const [version, setVersion] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const historyRef = useRef<HTMLDivElement>(null);
-
-  // Close history dropdown on outside click
   useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (historyRef.current && !historyRef.current.contains(e.target as Node)) {
-        setHistoryOpen(false);
-      }
-    };
-    if (historyOpen) document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [historyOpen]);
-
-  // Group sessions by date
-  const groupedSessions = sessions.reduce<{ label: string; sessions: ChatSession[] }[]>((groups, session) => {
-    const label = formatSessionDate(session.updatedAt);
-    const existing = groups.find(g => g.label === label);
-    if (existing) {
-      existing.sessions.push(session);
-    } else {
-      groups.push({ label, sessions: [session] });
-    }
-    return groups;
+    window.sai.updateGetVersion().then((v: string) => setVersion(v));
   }, []);
 
   const projectName = projectPath
@@ -116,49 +88,7 @@ export default function TitleBar({ projectPath, onProjectChange, onNewChat, sess
         )}
       </div>
       <UpdateNotification />
-      <div className="titlebar-actions">
-        <div className="history-dropdown-wrapper" ref={historyRef}>
-          <button
-            className="new-chat-btn"
-            onClick={() => setHistoryOpen(!historyOpen)}
-            title="Recent conversations"
-          >
-            <Clock size={16} />
-          </button>
-          {historyOpen && (
-            <div className="history-dropdown">
-              {sessions.length === 0 ? (
-                <div className="dropdown-label" style={{ padding: '12px' }}>
-                  No recent conversations
-                </div>
-              ) : (
-                groupedSessions.map((group, gi) => (
-                  <div key={group.label}>
-                    {gi > 0 && <div className="dropdown-divider" />}
-                    <div className="dropdown-label">{group.label}</div>
-                    {group.sessions.map(session => (
-                      <button
-                        key={session.id}
-                        className={`dropdown-item history-item ${session.id === activeSessionId ? 'active' : ''}`}
-                        onClick={() => {
-                          onSelectSession(session.id);
-                          setHistoryOpen(false);
-                        }}
-                      >
-                        <span className="dropdown-item-name">{session.title || 'Untitled'}</span>
-                        <span className="dropdown-item-path">{formatSessionTime(session.updatedAt)}</span>
-                      </button>
-                    ))}
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-        </div>
-        <button className="new-chat-btn" onClick={onNewChat} title="New conversation">
-          <MessageCirclePlus size={18} />
-        </button>
-      </div>
+      {version && <span className="titlebar-version">v{version}</span>}
       <style>{`
         .titlebar {
           height: var(--titlebar-height);
@@ -180,27 +110,12 @@ export default function TitleBar({ projectPath, onProjectChange, onNewChat, sess
           flex-shrink: 0;
         }
         .titlebar-drag { flex: 1; }
-        .titlebar-actions {
-          -webkit-app-region: no-drag;
-          display: flex;
-          align-items: center;
-          gap: 2px;
-          margin-right: 140px; /* Space for window controls overlay */
-        }
-        .new-chat-btn {
-          -webkit-app-region: no-drag;
-          background: none;
-          border: none;
+        .titlebar-version {
           color: var(--text-muted);
-          cursor: pointer;
-          padding: 4px;
-          border-radius: 4px;
-          display: flex;
-          align-items: center;
-        }
-        .new-chat-btn:hover {
-          color: var(--accent);
-          background: var(--bg-hover);
+          font-size: 10px;
+          margin-right: 140px;
+          opacity: 0.6;
+          font-family: 'JetBrains Mono', monospace;
         }
         .project-dropdown-wrapper {
           -webkit-app-region: no-drag;
@@ -284,36 +199,6 @@ export default function TitleBar({ projectPath, onProjectChange, onNewChat, sess
           color: var(--accent);
           font-weight: 500;
           padding: 8px 12px;
-        }
-        .history-dropdown-wrapper {
-          -webkit-app-region: no-drag;
-          position: relative;
-        }
-        .history-dropdown {
-          position: absolute;
-          top: 100%;
-          right: 0;
-          margin-top: 4px;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
-          border-radius: 6px;
-          min-width: 280px;
-          max-width: 350px;
-          max-height: 400px;
-          overflow-y: auto;
-          box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-          z-index: 200;
-        }
-        .history-item.active {
-          border-left: 2px solid var(--accent);
-          background: rgba(126,184,247,0.05);
-          color: #fff;
-        }
-        .history-item.active .dropdown-item-name {
-          color: #fff;
-        }
-        .history-item.active .dropdown-item-path {
-          color: var(--text-muted);
         }
       `}</style>
     </div>

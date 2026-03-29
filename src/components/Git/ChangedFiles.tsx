@@ -15,9 +15,10 @@ interface ChangedFilesProps {
   onAction: (file: GitFile) => void;
   actionLabel: string;
   onFileClick: (file: GitFile) => void;
+  onStageAll?: () => void;
 }
 
-export default function ChangedFiles({ title, files, onAction, actionLabel, onFileClick }: ChangedFilesProps) {
+export default function ChangedFiles({ title, files, onAction, actionLabel, onFileClick, onStageAll }: ChangedFilesProps) {
   const [hoveredPath, setHoveredPath] = useState<string | null>(null);
 
   if (files.length === 0) return null;
@@ -33,9 +34,38 @@ export default function ChangedFiles({ title, files, onAction, actionLabel, onFi
           letterSpacing: '0.6px',
           color: 'var(--text-muted)',
           userSelect: 'none' as const,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
         }}
       >
-        {title} ({files.length})
+        <span>{title} ({files.length})</span>
+        {onStageAll && (
+          <button
+            onClick={onStageAll}
+            title="Stage all changes"
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--text-muted)',
+              cursor: 'pointer',
+              padding: '0 2px',
+              fontSize: 10,
+              fontWeight: 600,
+              fontFamily: 'inherit',
+              letterSpacing: '0.4px',
+              textTransform: 'uppercase' as const,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 3,
+              borderRadius: 3,
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.background = 'var(--bg-hover)'; }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'none'; }}
+          >
+            <Plus size={10} /> Commit All
+          </button>
+        )}
       </div>
 
       {files.map((file) => {

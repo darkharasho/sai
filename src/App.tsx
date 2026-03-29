@@ -8,7 +8,8 @@ import TitleBar from './components/TitleBar';
 import CodePanel from './components/CodePanel/CodePanel';
 import { loadSessions, saveSessions, createSession, upsertSession } from './sessions';
 import type { ChatSession, ChatMessage, GitFile, OpenFile } from './types';
-import { MessageSquare, TerminalSquare, Code2, ChevronRight } from 'lucide-react';
+import { MessageSquare, TerminalSquare, Code2, ChevronRight, MessageCirclePlus, Clock } from 'lucide-react';
+import { formatSessionDate, formatSessionTime } from './sessions';
 
 type PermissionMode = 'default' | 'bypass';
 type PanelId = 'chat' | 'editor' | 'terminal';
@@ -31,15 +32,52 @@ export default function App() {
   const [activeSession, setActiveSession] = useState<ChatSession>(createSession);
 
   useEffect(() => {
-    window.sai.getRecentProjects().then((projects: string[]) => {
-      if (projects.length > 0 && !projectPath) {
-        setProjectPath(projects[0]);
-      }
+    window.sai.getCwd().then((cwd: string) => {
+      if (cwd) setProjectPath(cwd);
     });
   }, []);
 
+  const [gitChangeCount, setGitChangeCount] = useState(0);
+
+  useEffect(() => {
+    if (!projectPath) return;
+    const poll = () => {
+      (window.sai.gitStatus(projectPath) as Promise<any>).then((status: any) => {
+        const paths = new Set<string>();
+        for (const item of [...(status.staged ?? []), ...(status.modified ?? []), ...(status.created ?? []), ...(status.deleted ?? []), ...(status.not_added ?? [])]) {
+          paths.add(typeof item === 'string' ? item : item.path);
+        }
+        setGitChangeCount(paths.size);
+      }).catch(() => {});
+    };
+    poll();
+    const id = setInterval(poll, 5000);
+    return () => clearInterval(id);
+  }, [projectPath]);
+
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
+
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const historyRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (historyRef.current && !historyRef.current.contains(e.target as Node)) {
+        setHistoryOpen(false);
+      }
+    };
+    if (historyOpen) document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [historyOpen]);
+
+  const groupedSessions = sessions.reduce<{ label: string; sessions: ChatSession[] }[]>((groups, session) => {
+    const label = formatSessionDate(session.updatedAt);
+    const existing = groups.find(g => g.label === label);
+    if (existing) existing.sessions.push(session);
+    else groups.push({ label, sessions: [session] });
+    return groups;
+  }, []);
 
   // Accordion state
   const [expanded, setExpanded] = useState<PanelId[]>(['chat', 'terminal']);
@@ -277,6 +315,54 @@ export default function App() {
               {activeFilePath.split('/').pop()}
             </span>
           )}
+          {panel === 'chat' && (
+            <div className="accordion-bar-actions" ref={historyRef}>
+              <button
+                className="accordion-bar-btn"
+                onClick={(e) => { e.stopPropagation(); setHistoryOpen(!historyOpen); }}
+                title="Recent conversations"
+              >
+                <Clock size={12} />
+              </button>
+              <button
+                className="accordion-bar-btn"
+                onClick={(e) => { e.stopPropagation(); handleNewChat(); }}
+                title="New conversation"
+              >
+                <MessageCirclePlus size={12} />
+              </button>
+              {historyOpen && (
+                <div className="chat-history-dropdown">
+                  {sessions.length === 0 ? (
+                    <div className="dropdown-label" style={{ padding: '12px' }}>
+                      No recent conversations
+                    </div>
+                  ) : (
+                    groupedSessions.map((group, gi) => (
+                      <div key={group.label}>
+                        {gi > 0 && <div className="dropdown-divider" />}
+                        <div className="dropdown-label">{group.label}</div>
+                        {group.sessions.map(session => (
+                          <button
+                            key={session.id}
+                            className={`dropdown-item history-item ${session.id === activeSession.id ? 'active' : ''}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSelectSession(session.id);
+                              setHistoryOpen(false);
+                            }}
+                          >
+                            <span className="dropdown-item-name">{session.title || 'Untitled'}</span>
+                            <span className="dropdown-item-path">{formatSessionTime(session.updatedAt)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div className="accordion-body-wrapper">
           <div className="accordion-body">
@@ -317,13 +403,9 @@ export default function App() {
       <TitleBar
         projectPath={projectPath}
         onProjectChange={setProjectPath}
-        onNewChat={handleNewChat}
-        sessions={sessions}
-        activeSessionId={activeSession.id}
-        onSelectSession={handleSelectSession}
       />
       <div className="app-body">
-        <NavBar activeSidebar={sidebarOpen} onToggle={toggleSidebar} />
+        <NavBar activeSidebar={sidebarOpen} onToggle={toggleSidebar} gitChangeCount={gitChangeCount} />
         {sidebarOpen === 'files' && <FileExplorerSidebar projectPath={projectPath} onFileOpen={handleFileOpen} />}
         {sidebarOpen === 'git' && <GitSidebar projectPath={projectPath} onFileClick={handleFileClick} />}
         <div className="main-content" ref={mainContentRef}>
@@ -385,6 +467,83 @@ export default function App() {
         }
         .accordion-chevron.open {
           transform: rotate(90deg);
+        }
+        .accordion-bar-actions {
+          display: flex;
+          align-items: center;
+          gap: 2px;
+          margin-left: auto;
+          position: relative;
+        }
+        .accordion-bar-btn {
+          background: none;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          padding: 3px;
+          border-radius: 4px;
+          display: flex;
+          align-items: center;
+        }
+        .accordion-bar-btn:hover {
+          color: var(--accent);
+          background: var(--bg-hover);
+        }
+        .chat-history-dropdown {
+          position: absolute;
+          top: 100%;
+          right: 0;
+          margin-top: 4px;
+          background: var(--bg-elevated);
+          border: 1px solid var(--border);
+          border-radius: 6px;
+          min-width: 280px;
+          max-width: 350px;
+          max-height: 400px;
+          overflow-y: auto;
+          box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+          z-index: 200;
+          text-transform: none;
+          letter-spacing: 0;
+          font-weight: 400;
+        }
+        .chat-history-dropdown .dropdown-label {
+          padding: 8px 12px 4px;
+          font-size: 10px;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          color: var(--text-muted);
+        }
+        .chat-history-dropdown .dropdown-item {
+          display: flex;
+          flex-direction: column;
+          width: 100%;
+          padding: 6px 12px;
+          background: none;
+          border: none;
+          color: var(--text);
+          cursor: pointer;
+          text-align: left;
+          font-size: 13px;
+        }
+        .chat-history-dropdown .dropdown-item:hover {
+          background: var(--bg-hover);
+        }
+        .chat-history-dropdown .dropdown-item-name {
+          font-weight: 500;
+        }
+        .chat-history-dropdown .dropdown-item-path {
+          font-size: 11px;
+          color: var(--text-muted);
+        }
+        .chat-history-dropdown .dropdown-divider {
+          height: 1px;
+          background: var(--border);
+          margin: 4px 0;
+        }
+        .chat-history-dropdown .history-item.active {
+          border-left: 2px solid var(--accent);
+          background: rgba(126,184,247,0.05);
         }
         .accordion-bar-detail {
           font-weight: 400;
