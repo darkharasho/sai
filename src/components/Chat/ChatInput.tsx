@@ -1,4 +1,6 @@
 import { useState, useRef, KeyboardEvent, useEffect } from 'react';
+import type { PendingApproval } from '../../types';
+import ApprovalPanel from './ApprovalPanel';
 import {
   SquarePlus, Slash, SquareSlash, AtSign, FileText, GitBranch, Terminal, Settings,
   MessageSquare, Zap, Send, Square, ShieldCheck, ShieldOff,
@@ -25,6 +27,10 @@ interface ChatInputProps {
   rateLimits?: Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number; utilization?: number }>;
   activeFilePath?: string | null;
   aiProvider?: 'claude' | 'codex' | 'gemini';
+  pendingApproval?: PendingApproval | null;
+  onApprove?: (modifiedCommand?: string) => void;
+  onDeny?: () => void;
+  onAlwaysAllow?: () => void;
   codexModel?: string;
   codexModels?: { id: string; name: string }[];
   onCodexModelChange?: (model: string) => void;
@@ -193,7 +199,7 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, rateLimits, activeFilePath, aiProvider = 'claude', codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange }: ChatInputProps) {
+export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, rateLimits, activeFilePath, aiProvider = 'claude', pendingApproval, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange }: ChatInputProps) {
   const [value, setValue] = useState('');
   const [suggestions, setSuggestions] = useState<AutocompleteItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -438,8 +444,17 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
         </div>
       )}
 
+      {pendingApproval && onApprove && onDeny && onAlwaysAllow && (
+        <ApprovalPanel
+          approval={pendingApproval}
+          onApprove={onApprove}
+          onDeny={onDeny}
+          onAlwaysAllow={onAlwaysAllow}
+        />
+      )}
+
       {/* Main input area */}
-      <div className={`input-box ${tickerDir ? `ticker-${tickerDir}` : ''}`}>
+      <div className={`input-box ${tickerDir ? `ticker-${tickerDir}` : ''}`} style={{ opacity: pendingApproval ? 0.4 : 1, pointerEvents: pendingApproval ? 'none' as const : 'auto' as const }}>
         <textarea
           ref={textareaRef}
           className="chat-textarea"

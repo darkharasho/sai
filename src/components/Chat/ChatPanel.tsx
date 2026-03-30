@@ -292,7 +292,7 @@ function GeminiThinkingAnimation({ loadingPhrases = 'all' }: { loadingPhrases?: 
 
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
-import type { ChatMessage as ChatMessageType, ToolCall } from '../../types';
+import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval } from '../../types';
 
 type CodexPermission = 'auto' | 'read-only' | 'full-access';
 
@@ -484,6 +484,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const [isStreaming, setIsStreaming] = useState(false);
   const [ready, setReady] = useState(false);
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
+  const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
   const [contextUsage, setContextUsage] = useState<{ used: number; total: number; inputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; outputTokens: number }>({ used: 0, total: 1000000, inputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, outputTokens: 0 });
   const [sessionUsage, setSessionUsage] = useState<{ inputTokens: number; outputTokens: number }>({ inputTokens: 0, outputTokens: 0 });
   const [rateLimits, setRateLimits] = useState<Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number; utilization?: number }>>(new Map());
@@ -610,6 +611,18 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         return;
       }
 
+      // Tool approval request from main process
+      if (msg.type === 'approval_needed') {
+        setPendingApproval({
+          toolName: msg.toolName,
+          toolUseId: msg.toolUseId,
+          command: msg.command,
+          description: msg.description,
+          input: msg.input,
+        });
+        return;
+      }
+
       // Skip system noise
       if (msg.type === 'system' || msg.type === 'rate_limit_event') {
         return;
@@ -627,6 +640,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           }
         }
         if (results.length > 0) {
+          setPendingApproval(null);
           setMessages(prev => {
             const next = [...prev];
             for (let i = next.length - 1; i >= 0; i--) {
@@ -854,6 +868,26 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     onMessagesChange?.(messages);
   }, [messages]);
 
+  const handleApprove = (modifiedCommand?: string) => {
+    if (!pendingApproval) return;
+    window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, true, modifiedCommand);
+    setPendingApproval(null);
+  };
+
+  const handleDeny = () => {
+    if (!pendingApproval) return;
+    window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, false);
+    setPendingApproval(null);
+  };
+
+  const handleAlwaysAllow = async () => {
+    if (!pendingApproval) return;
+    const pattern = `${pendingApproval.toolName}(*)`;
+    await window.sai.claudeAlwaysAllow(projectPath, pattern);
+    window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, true);
+    setPendingApproval(null);
+  };
+
   const handleSend = async (text: string, images?: string[]) => {
     // Handle built-in commands locally
     if (text === '/clear') {
@@ -956,6 +990,10 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         onSend={handleSend}
         disabled={!ready}
         slashCommands={slashCommands}
+        pendingApproval={pendingApproval}
+        onApprove={handleApprove}
+        onDeny={handleDeny}
+        onAlwaysAllow={handleAlwaysAllow}
         isStreaming={isStreaming}
         onStop={() => aiProvider === 'gemini' ? (window.sai as any).geminiStop(projectPath) : aiProvider === 'codex' ? window.sai.codexStop(projectPath) : window.sai.claudeStop?.(projectPath)}
         permissionMode={permissionMode}
