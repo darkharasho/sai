@@ -13,12 +13,12 @@ jobs:
     strategy:
       matrix:
         include:
-          # - os: ubuntu-latest
-          #   platform: linux
-          #   args: --linux AppImage
-          # - os: windows-latest
-          #   platform: win
-          #   args: --win nsis
+          - os: ubuntu-latest
+            platform: linux
+            args: --linux AppImage
+          - os: windows-latest
+            platform: win
+            args: --win nsis
           - os: macos-latest
             platform: mac
             args: --mac dmg
