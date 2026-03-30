@@ -260,7 +260,17 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
     const currentWord = textBeforeCursor.slice(wordStart).toLowerCase();
 
     if (currentWord.startsWith('/')) {
-      setSuggestions(unique.filter(c => c.label.toLowerCase().startsWith(currentWord)));
+      const query = currentWord.slice(1); // without the leading /
+      setSuggestions(unique.filter(c => {
+        const full = c.label.toLowerCase();
+        if (full.startsWith(currentWord)) return true;
+        // Match against short name after `:` (e.g., /brainstorm matches /superpowers:brainstorming)
+        const colonIdx = full.indexOf(':');
+        if (colonIdx !== -1 && full.slice(colonIdx + 1).startsWith(query)) return true;
+        // Also fuzzy: match anywhere in the label
+        if (query.length >= 2 && full.includes(query)) return true;
+        return false;
+      }));
       setSelectedIndex(0);
     } else {
       setSuggestions([]);
