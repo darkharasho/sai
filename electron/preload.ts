@@ -13,7 +13,10 @@ contextBridge.exposeInMainWorld('sai', {
   claudeSend: (projectPath: string, message: string, imagePaths?: string[], permMode?: string, effort?: string, model?: string) => ipcRenderer.send('claude:send', projectPath, message, imagePaths, permMode, effort, model),
   claudeGenerateCommitMessage: (cwd: string) => ipcRenderer.invoke('claude:generateCommitMessage', cwd),
   claudeStop: (projectPath: string) => ipcRenderer.send('claude:stop', projectPath),
-  claudeApprove: (approved: boolean) => ipcRenderer.send('claude:approve', approved),
+  claudeApprove: (projectPath: string, toolUseId: string, approved: boolean, modifiedCommand?: string) =>
+    ipcRenderer.send('claude:approve', projectPath, toolUseId, approved, modifiedCommand),
+  claudeAlwaysAllow: (projectPath: string, toolPattern: string) =>
+    ipcRenderer.invoke('claude:alwaysAllow', projectPath, toolPattern),
   // Codex CLI
   codexModels: () => ipcRenderer.invoke('codex:models'),
   codexStart: (cwd: string) => ipcRenderer.invoke('codex:start', cwd),

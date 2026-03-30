@@ -24,6 +24,14 @@ export interface ToolCall {
   output?: string;
 }
 
+export interface PendingApproval {
+  toolName: string;
+  toolUseId: string;
+  command: string;
+  description: string;
+  input: Record<string, any>;
+}
+
 export interface GitFile {
   path: string;
   status: 'modified' | 'added' | 'deleted' | 'renamed';
