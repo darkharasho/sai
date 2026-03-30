@@ -163,6 +163,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                             {completedWorkspaces?.has(w.projectPath) && <span className="workspace-completed-icon" title="Response complete">!</span>}
                             <span className="dropdown-item-path">{w.projectPath}</span>
                           </button>
+                          {w.projectPath !== projectPath && (<>
                           <button
                             className={`workspace-overflow-btn${overflowOpen === w.projectPath ? ' open' : ''}`}
                             onClick={(e) => {
@@ -183,6 +184,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                               </button>
                             </div>
                           )}
+                          </>)}
                         </div>
                       ))}
                     </>
