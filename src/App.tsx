@@ -886,14 +886,16 @@ export default function App() {
                               setHistoryOpen(false);
                             }}
                           >
-                            {session.aiProvider && (
-                              <img
-                                src={session.aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : session.aiProvider === 'codex' ? 'svg/openai.svg' : 'svg/claude.svg'}
-                                alt={session.aiProvider}
-                                className="history-provider-icon"
-                              />
-                            )}
-                            <span className="dropdown-item-name">{session.title || 'Untitled'}</span>
+                            <span className="dropdown-item-title-row">
+                              {session.aiProvider && (
+                                <img
+                                  src={session.aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : session.aiProvider === 'codex' ? 'svg/openai.svg' : 'svg/claude.svg'}
+                                  alt={session.aiProvider}
+                                  className="history-provider-icon"
+                                />
+                              )}
+                              <span className="dropdown-item-name">{session.title || 'Untitled'}</span>
+                            </span>
                             <span className="dropdown-item-path">{formatSessionTime(session.updatedAt)}</span>
                           </button>
                         ))}
@@ -1223,6 +1225,11 @@ export default function App() {
         }
         .chat-history-dropdown .history-item.active .dropdown-item-path {
           color: #fff;
+        }
+        .dropdown-item-title-row {
+          display: flex;
+          align-items: center;
+          gap: 6px;
         }
         .history-provider-icon {
           width: 12px;
