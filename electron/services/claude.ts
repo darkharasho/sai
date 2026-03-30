@@ -8,6 +8,28 @@ import { notifyCompletion } from './notify';
 
 const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
 
+/**
+ * Build an enriched PATH so CLI tools installed via nvm, volta, etc. are found
+ * even when Electron doesn't inherit the user's interactive shell PATH.
+ */
+function enrichedEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  const home = require('node:os').homedir();
+  const extraPaths: string[] = [];
+  const nvmDir = path.join(home, '.nvm', 'versions', 'node');
+  if (fs.existsSync(nvmDir)) {
+    try { for (const v of fs.readdirSync(nvmDir)) extraPaths.push(path.join(nvmDir, v, 'bin')); } catch {}
+  }
+  extraPaths.push(
+    path.join(home, '.local', 'bin'),
+    path.join(home, '.volta', 'bin'),
+    '/usr/local/bin',
+    '/opt/homebrew/bin',
+  );
+  env.PATH = [...extraPaths, env.PATH || ''].join(':');
+  return env;
+}
+
 function readCachedSlashCommands(): string[] {
   try {
     return JSON.parse(fs.readFileSync(SLASH_COMMANDS_CACHE, 'utf-8'));
@@ -101,7 +123,7 @@ function ensureProcess(
 
   const proc = spawn('claude', args, {
     cwd: ws.claude.cwd || projectPath,
-    env: { ...process.env },
+    env: enrichedEnv(),
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 
@@ -521,19 +543,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 
     const commitPrompt = `Generate a concise commit message for this diff. Output ONLY the commit message text, nothing else. Use conventional commit format (e.g. feat:, fix:, refactor:). Keep it under 72 characters for the subject line.\n\n${truncatedDiff}`;
 
-    // Build enriched PATH for codex/gemini CLIs (they may be nvm-installed)
-    const enrichedEnv = (() => {
-      const env = { ...process.env };
-      const home = require('node:os').homedir();
-      const extraPaths: string[] = [];
-      const nvmDir = path.join(home, '.nvm', 'versions', 'node');
-      if (fs.existsSync(nvmDir)) {
-        try { for (const v of fs.readdirSync(nvmDir)) extraPaths.push(path.join(nvmDir, v, 'bin')); } catch {}
-      }
-      extraPaths.push(path.join(home, '.local', 'bin'), path.join(home, '.volta', 'bin'), '/usr/local/bin');
-      env.PATH = [...extraPaths, env.PATH || ''].join(':');
-      return env;
-    })();
+    const env = enrichedEnv();
 
     // Spawn the appropriate CLI with its fast model
     let cmd: string;
@@ -552,7 +562,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
     return new Promise<string>((resolve) => {
       const proc = spawn(cmd, args, {
         cwd: effectiveCwd,
-        env: enrichedEnv,
+        env,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 

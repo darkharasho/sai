@@ -233,6 +233,15 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  // Focus textarea on mount and when input becomes enabled (e.g. workspace switch)
+  useEffect(() => {
+    if (!disabled) {
+      // Small delay so the DOM is settled after workspace switch
+      const id = setTimeout(() => textareaRef.current?.focus(), 50);
+      return () => clearTimeout(id);
+    }
+  }, [disabled]);
+
   // Autocomplete
   useEffect(() => {
     if (showAddMenu) { setSuggestions([]); return; }
