@@ -35,6 +35,10 @@ function createWindow() {
     },
   });
 
+  mainWindow.on('focus', () => {
+    mainWindow?.flashFrame(false);
+  });
+
   mainWindow.on('close', () => {
     stopSuspendTimer();
     destroyAllTerminals();

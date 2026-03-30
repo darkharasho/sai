@@ -195,6 +195,7 @@ function ensureProcess(
           ws.claude.busy = false;
           safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath });
           safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+          if (!win.isFocused()) win.flashFrame(true);
           continue;
         }
 

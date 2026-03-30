@@ -310,6 +310,7 @@ export function registerCodexHandlers(win: BrowserWindow) {
           // Mark not busy on turn completion
           if (msg.type === 'turn.completed' || msg.type === 'turn.failed') {
             ws.codex.busy = false;
+            if (!win.isFocused()) win.flashFrame(true);
           }
         } catch { /* malformed JSON */ }
       }
