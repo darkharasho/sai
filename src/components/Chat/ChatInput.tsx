@@ -315,6 +315,40 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
       }
       if (e.key === 'Escape') { setSuggestions([]); setShowAddMenu(false); setSlashMenuOpen(false); return; }
     }
+    // Tab completion for slash commands even when suggestions haven't rendered yet
+    if (e.key === 'Tab' && items.length === 0) {
+      const cursorPos = textareaRef.current?.selectionStart ?? value.length;
+      const textBeforeCursor = value.slice(0, cursorPos);
+      const lastSep = Math.max(textBeforeCursor.lastIndexOf(' '), textBeforeCursor.lastIndexOf('\n'));
+      const currentWord = textBeforeCursor.slice(lastSep + 1).toLowerCase();
+      if (currentWord.startsWith('/') && currentWord.length > 1) {
+        const query = currentWord.slice(1);
+        const dynamicCommands: AutocompleteItem[] = slashCommands.map(name => ({
+          label: `/${name}`, value: `/${name}`,
+          description: name.includes(':') ? name.split(':')[0] : '',
+          icon: getCommandIcon(name),
+        }));
+        const all = [...BUILTIN_COMMANDS, ...dynamicCommands];
+        const matches = all.filter(c => {
+          const full = c.label.toLowerCase();
+          if (full.startsWith(currentWord)) return true;
+          const colonIdx = full.indexOf(':');
+          if (colonIdx !== -1 && full.slice(colonIdx + 1).startsWith(query)) return true;
+          if (query.length >= 2 && full.includes(query)) return true;
+          return false;
+        });
+        if (matches.length > 0) {
+          e.preventDefault();
+          if (matches.length === 1) {
+            applySuggestion(matches[0]);
+          } else {
+            setSuggestions(matches);
+            setSelectedIndex(0);
+          }
+          return;
+        }
+      }
+    }
     // History navigation (only when no dropdown is open)
     if (e.key === 'ArrowUp' && items.length === 0) {
       const ta = textareaRef.current;
