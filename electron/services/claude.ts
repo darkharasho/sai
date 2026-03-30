@@ -122,9 +122,10 @@ function ensureProcess(
       try {
         const msg = JSON.parse(line);
 
-        // Capture session ID
+        // Capture session ID and forward to renderer
         if (msg.session_id && !ws.claude.sessionId) {
           ws.claude.sessionId = msg.session_id;
+          safeSend(win, 'claude:message', { type: 'session_id', sessionId: msg.session_id, projectPath: ws.projectPath });
         }
 
         // Capture slash commands from init (replaces the probe)
@@ -294,6 +295,19 @@ export function registerClaudeHandlers(win: BrowserWindow) {
       proc.kill();
       safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
     }
+  });
+
+  // claude:setSessionId — switch to a different Claude session (for history resumption)
+  ipcMain.on('claude:setSessionId', (_event, projectPath: string, sessionId: string | undefined) => {
+    const ws = get(projectPath);
+    if (!ws) return;
+    // Kill existing process so next send respawns with --resume for the new session
+    if (ws.claude.process) {
+      ws.claude.process.kill();
+      ws.claude.process = null;
+      ws.claude.processConfig = null;
+    }
+    ws.claude.sessionId = sessionId;
   });
 
   // claude:send — write message to persistent process stdin

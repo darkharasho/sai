@@ -14,6 +14,7 @@ export interface ChatSession {
   createdAt: number;
   updatedAt: number;
   aiProvider?: 'claude' | 'codex' | 'gemini';
+  claudeSessionId?: string;
 }
 
 export interface ToolCall {

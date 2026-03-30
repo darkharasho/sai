@@ -659,6 +659,8 @@ export default function App() {
     if (!activeProjectPath) return;
     flushMessages(activeProjectPath);
     persistSession(activeSession);
+    // Clear backend session so next message starts fresh
+    window.sai.claudeSetSessionId(activeProjectPath, undefined);
     updateWorkspace(activeProjectPath, ws => ({
       ...ws,
       activeSession: createSession(),
@@ -671,6 +673,8 @@ export default function App() {
     persistSession(activeSession);
     const selected = sessions.find(s => s.id === id);
     if (selected) {
+      // Tell backend to switch to the selected session's Claude session ID
+      window.sai.claudeSetSessionId(activeProjectPath, selected.claudeSessionId);
       updateWorkspace(activeProjectPath, ws => ({
         ...ws,
         activeSession: { ...selected },
@@ -887,6 +891,12 @@ export default function App() {
                   onFileOpen={handleFileOpen}
                   onMessagesChange={(messages: ChatMessage[]) => {
                     wsMessagesRef.current.set(wsPath, messages);
+                  }}
+                  onClaudeSessionId={(sessionId: string) => {
+                    updateWorkspace(wsPath, w => ({
+                      ...w,
+                      activeSession: { ...w.activeSession, claudeSessionId: sessionId },
+                    }));
                   }}
                   onTurnComplete={() => {
                     const latestMessages = wsMessagesRef.current.get(wsPath) || [];
