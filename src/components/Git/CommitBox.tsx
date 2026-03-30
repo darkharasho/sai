@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { GitBranch, Check, ArrowUp, ArrowDown, Sparkle, Sparkles, Plus, ChevronDown } from 'lucide-react';
+import { GitBranch, Check, ArrowUp, ArrowDown, Sparkle, Sparkles, Plus, ChevronDown, X } from 'lucide-react';
 
 
 interface CommitBoxProps {
@@ -24,6 +24,7 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
   const [branchFilter, setBranchFilter] = useState('');
   const [creatingBranch, setCreatingBranch] = useState(false);
   const [newBranchName, setNewBranchName] = useState('');
+  const [gitError, setGitError] = useState<string | null>(null);
   const branchMenuRef = useRef<HTMLDivElement>(null);
   const filterRef = useRef<HTMLInputElement>(null);
 
@@ -50,8 +51,11 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
 
   const handleSwitch = async (b: string) => {
     setBusy(true);
+    setGitError(null);
     try {
       await onCheckout(b);
+    } catch (err: any) {
+      setGitError(err?.message ?? 'Failed to switch branch');
     } finally {
       setBusy(false);
       setBranchMenuOpen(false);
@@ -62,8 +66,11 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
   const handleCreate = async () => {
     if (!newBranchName.trim()) return;
     setBusy(true);
+    setGitError(null);
     try {
       await onCreateBranch(newBranchName.trim());
+    } catch (err: any) {
+      setGitError(err?.message ?? 'Failed to create branch');
     } finally {
       setBusy(false);
       setBranchMenuOpen(false);
@@ -75,8 +82,11 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
 
   const handle = async (fn: () => Promise<void>) => {
     setBusy(true);
+    setGitError(null);
     try {
       await fn();
+    } catch (err: any) {
+      setGitError(err?.message ?? 'Git operation failed');
     } finally {
       setBusy(false);
     }
@@ -277,6 +287,42 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
           </div>
         )}
       </div>
+
+      {/* Git error banner */}
+      {gitError && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 6,
+            padding: '6px 8px',
+            background: 'var(--bg-input)',
+            borderLeft: '2px solid var(--red)',
+            borderRadius: 3,
+            fontSize: 11,
+            color: 'var(--red)',
+            lineHeight: 1.4,
+          }}
+        >
+          <span style={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{gitError}</span>
+          <button
+            onClick={() => setGitError(null)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--red)',
+              cursor: 'pointer',
+              padding: 0,
+              flexShrink: 0,
+              display: 'flex',
+              alignItems: 'center',
+            }}
+            title="Dismiss"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
 
       {/* Commit message textarea */}
       <textarea
