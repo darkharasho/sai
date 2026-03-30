@@ -31,3 +31,6 @@
 - [x] localhost links need to be actual links too
 - [x] files in the current project should have a link to open them in the editor
 - [x] more flavortext besides "describe what to build" that rotates each time its a fresh session
+- [ ] need a way to approve commands (have a sliding up ui like vscode)
+- [ ] in the workspace dropdown for workspaces with active chats lets put a lightly animated spinner to signify which are working
+- [ ] when swapping workspaces we should autoscroll the chat to the bottom

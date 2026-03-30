@@ -1,6 +1,24 @@
 import { spawn, ChildProcess } from 'node:child_process';
-import { BrowserWindow, ipcMain } from 'electron';
+import { BrowserWindow, ipcMain, app } from 'electron';
 import { getOrCreate, get, touchActivity } from './workspace';
+import * as path from 'node:path';
+import * as fs from 'node:fs';
+
+const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
+
+function readCachedSlashCommands(): string[] {
+  try {
+    return JSON.parse(fs.readFileSync(SLASH_COMMANDS_CACHE, 'utf-8'));
+  } catch {
+    return [];
+  }
+}
+
+function writeCachedSlashCommands(commands: string[]) {
+  try {
+    fs.writeFileSync(SLASH_COMMANDS_CACHE, JSON.stringify(commands));
+  } catch { /* ignore write errors */ }
+}
 
 function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
   try {
@@ -106,6 +124,9 @@ function ensureProcess(
 
         // Capture slash commands from init (replaces the probe)
         if (msg.type === 'system' && msg.subtype === 'init') {
+          if (msg.slash_commands) {
+            writeCachedSlashCommands(msg.slash_commands);
+          }
           safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath });
         }
 
@@ -169,10 +190,20 @@ function ensureProcess(
 
 export function registerClaudeHandlers(win: BrowserWindow) {
   // claude:start — no longer spawns a probe. Just signals ready.
+  // Sends cached slash commands immediately so they're available before the process init.
   ipcMain.handle('claude:start', (_event, cwd: string) => {
     if (!cwd) return;
     const ws = getOrCreate(cwd);
     ws.claude.cwd = cwd;
+
+    // Send cached slash commands so the UI has them instantly
+    const cached = readCachedSlashCommands();
+    if (cached.length > 0) {
+      safeSend(win, 'claude:message', {
+        type: 'system', subtype: 'init', slash_commands: cached, projectPath: ws.projectPath,
+      });
+    }
+
     safeSend(win, 'claude:message', { type: 'ready', projectPath: ws.projectPath });
   });
 
