@@ -852,6 +852,21 @@ export default function App() {
         </div>
         <div className="accordion-body-wrapper">
           <div className="accordion-body">
+            {panel === 'chat' && workspaces.size === 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 16, color: 'var(--text-muted)', padding: 32 }}>
+                <span style={{ fontSize: 18, fontWeight: 500, color: 'var(--text)' }}>Welcome to sai</span>
+                <span style={{ fontSize: 13 }}>Open a folder to get started</span>
+                <button
+                  style={{ marginTop: 8, padding: '8px 20px', background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 500 }}
+                  onClick={async () => {
+                    const folder = await window.sai.selectFolder();
+                    if (folder) handleProjectSwitch(folder);
+                  }}
+                >
+                  Open Folder
+                </button>
+              </div>
+            )}
             {panel === 'chat' && Array.from(workspaces.entries()).map(([wsPath, ws]) => (
               <div
                 key={`chat-${wsPath}`}

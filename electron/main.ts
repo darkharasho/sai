@@ -186,7 +186,7 @@ function createWindow() {
     if (recent.length > 0 && fs.existsSync(recent[0])) {
       return recent[0];
     }
-    return process.cwd();
+    return null;
   });
 
   ipcMain.handle('project:openRecent', (_event, projectPath: string) => {
