@@ -3,6 +3,7 @@ import { GitFile, GitCommit } from '../../types';
 import ChangedFiles from './ChangedFiles';
 import CommitBox from './CommitBox';
 import ClaudeActivity from './ClaudeActivity';
+import DiscardChangesModal from './DiscardChangesModal';
 
 interface GitStatusItem {
   path: string;
@@ -65,6 +66,7 @@ export default function GitSidebar({ projectPath, onFileClick }: GitSidebarProps
   const [unstagedFiles, setUnstagedFiles] = useState<GitFile[]>([]);
   const [commits, setCommits] = useState<GitCommit[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [discardTarget, setDiscardTarget] = useState<GitFile | null>(null);
 
   const refresh = useCallback(async () => {
     if (!projectPath) return;
@@ -106,6 +108,16 @@ export default function GitSidebar({ projectPath, onFileClick }: GitSidebarProps
 
   const handleUnstage = async (file: GitFile) => {
     await window.sai.gitUnstage(projectPath, file.path);
+    await refresh();
+  };
+
+  const handleDiscard = async () => {
+    if (!discardTarget) return;
+    if (discardTarget.staged) {
+      await window.sai.gitUnstage(projectPath, discardTarget.path);
+    }
+    await (window.sai as any).gitDiscard(projectPath, discardTarget.path);
+    setDiscardTarget(null);
     await refresh();
   };
 
@@ -216,6 +228,8 @@ export default function GitSidebar({ projectPath, onFileClick }: GitSidebarProps
           onAction={handleUnstage}
           actionLabel="-"
           onFileClick={onFileClick}
+          onDiscard={setDiscardTarget}
+          staged
         />
 
         <ChangedFiles
@@ -225,6 +239,7 @@ export default function GitSidebar({ projectPath, onFileClick }: GitSidebarProps
           actionLabel="+"
           onFileClick={onFileClick}
           onStageAll={handleStageAll}
+          onDiscard={setDiscardTarget}
         />
 
         <ClaudeActivity commits={commits} />
@@ -243,6 +258,14 @@ export default function GitSidebar({ projectPath, onFileClick }: GitSidebarProps
         onCheckout={async (b: string) => { await window.sai.gitCheckout(projectPath, b); await refresh(); }}
         onCreateBranch={async (name: string) => { await window.sai.gitCreateBranch(projectPath, name); await refresh(); }}
       />
+
+      {discardTarget && (
+        <DiscardChangesModal
+          filePath={discardTarget.path}
+          onConfirm={handleDiscard}
+          onCancel={() => setDiscardTarget(null)}
+        />
+      )}
     </div>
   );
 }

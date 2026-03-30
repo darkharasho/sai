@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Plus, Minus, FileText, FilePlus, FileX, FileSymlink } from 'lucide-react';
 import { GitFile } from '../../types';
 
@@ -9,6 +9,12 @@ const STATUS_CONFIG: Record<GitFile['status'], { icon: typeof FileText; color: s
   renamed:  { icon: FileSymlink,  color: 'var(--blue)' },
 };
 
+interface ContextMenuState {
+  x: number;
+  y: number;
+  file: GitFile;
+}
+
 interface ChangedFilesProps {
   title: string;
   files: GitFile[];
@@ -16,12 +22,50 @@ interface ChangedFilesProps {
   actionLabel: string;
   onFileClick: (file: GitFile) => void;
   onStageAll?: () => void;
+  onDiscard?: (file: GitFile) => void;
+  staged?: boolean;
 }
 
-export default function ChangedFiles({ title, files, onAction, actionLabel, onFileClick, onStageAll }: ChangedFilesProps) {
+export default function ChangedFiles({ title, files, onAction, actionLabel, onFileClick, onStageAll, onDiscard, staged }: ChangedFilesProps) {
   const [hoveredPath, setHoveredPath] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setContextMenu(null);
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
+    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [contextMenu]);
+
+  // Reposition if menu overflows viewport
+  useEffect(() => {
+    if (!menuRef.current) return;
+    const rect = menuRef.current.getBoundingClientRect();
+    if (rect.right > window.innerWidth) {
+      menuRef.current.style.left = `${window.innerWidth - rect.width - 8}px`;
+    }
+    if (rect.bottom > window.innerHeight) {
+      menuRef.current.style.top = `${window.innerHeight - rect.height - 8}px`;
+    }
+  }, [contextMenu]);
 
   if (files.length === 0) return null;
+
+  const handleContextMenu = (e: React.MouseEvent, file: GitFile) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY, file });
+  };
 
   return (
     <div style={{ marginBottom: 8 }}>
@@ -82,6 +126,7 @@ export default function ChangedFiles({ title, files, onAction, actionLabel, onFi
             onMouseEnter={() => setHoveredPath(file.path)}
             onMouseLeave={() => setHoveredPath(null)}
             onClick={() => onFileClick(file)}
+            onContextMenu={e => handleContextMenu(e, file)}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -154,6 +199,44 @@ export default function ChangedFiles({ title, files, onAction, actionLabel, onFi
           </div>
         );
       })}
+
+      {contextMenu && (
+        <div
+          ref={menuRef}
+          style={{
+            position: 'fixed',
+            left: contextMenu.x,
+            top: contextMenu.y,
+            background: '#1c2128',
+            border: '1px solid var(--border)',
+            borderRadius: 6,
+            padding: '4px 0',
+            minWidth: 180,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+            zIndex: 2000,
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: 13,
+          }}
+        >
+          <div
+            onClick={() => { onAction(contextMenu.file); setContextMenu(null); }}
+            style={{ padding: '6px 16px', color: 'var(--text)', cursor: 'pointer' }}
+            onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
+            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+          >
+            {staged ? 'Unstage' : 'Stage'}
+          </div>
+          <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
+          <div
+            onClick={() => { onDiscard?.(contextMenu.file); setContextMenu(null); }}
+            style={{ padding: '6px 16px', color: 'var(--red)', cursor: 'pointer' }}
+            onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
+            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+          >
+            Discard Changes
+          </div>
+        </div>
+      )}
     </div>
   );
 }

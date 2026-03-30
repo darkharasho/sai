@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('sai', {
   gitCreateBranch: (cwd: string, branchName: string) => ipcRenderer.invoke('git:createBranch', cwd, branchName),
   gitDiff: (cwd: string, filepath: string, staged: boolean) =>
     ipcRenderer.invoke('git:diff', cwd, filepath, staged),
+  gitDiscard: (cwd: string, filepath: string) => ipcRenderer.invoke('git:discard', cwd, filepath),
   fsReadDir: (dirPath: string) => ipcRenderer.invoke('fs:readDir', dirPath),
   fsReadFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath),
   fsMtime: (filePath: string) => ipcRenderer.invoke('fs:mtime', filePath),

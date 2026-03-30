@@ -75,4 +75,17 @@ export function registerGitHandlers() {
     const args = staged ? ['--cached', '--', filepath] : ['--', filepath];
     return await git.diff(args);
   });
+
+  ipcMain.handle('git:discard', async (_event, cwd: string, filepath: string) => {
+    const git = simpleGit(cwd);
+    const status = await git.status();
+    const isUntracked = status.not_added.includes(filepath);
+    if (isUntracked) {
+      const { unlink } = await import('fs/promises');
+      const { join } = await import('path');
+      await unlink(join(cwd, filepath));
+    } else {
+      await git.checkout(['--', filepath]);
+    }
+  });
 }

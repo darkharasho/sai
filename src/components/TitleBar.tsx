@@ -157,29 +157,25 @@ export default function TitleBar({ projectPath, onProjectChange, onSettingChange
                             <span className="dropdown-item-name">{w.projectPath.split('/').pop()}</span>
                             <span className="dropdown-item-path">{w.projectPath}</span>
                           </button>
-                          {w.projectPath !== projectPath && (
-                            <>
+                          <button
+                            className={`workspace-overflow-btn${overflowOpen === w.projectPath ? ' open' : ''}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOverflowOpen(overflowOpen === w.projectPath ? null : w.projectPath);
+                            }}
+                          >···</button>
+                          {overflowOpen === w.projectPath && (
+                            <div className="workspace-submenu">
+                              <button className="workspace-submenu-item" onClick={() => handleSuspend(w.projectPath)}>
+                                ⏸ Suspend
+                              </button>
                               <button
-                                className={`workspace-overflow-btn${overflowOpen === w.projectPath ? ' open' : ''}`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setOverflowOpen(overflowOpen === w.projectPath ? null : w.projectPath);
-                                }}
-                              >···</button>
-                              {overflowOpen === w.projectPath && (
-                                <div className="workspace-submenu">
-                                  <button className="workspace-submenu-item" onClick={() => handleSuspend(w.projectPath)}>
-                                    ⏸ Suspend
-                                  </button>
-                                  <button
-                                    className="workspace-submenu-item danger"
-                                    onClick={() => { setOverflowOpen(null); setCloseTarget(w.projectPath); }}
-                                  >
-                                    ✕ Close
-                                  </button>
-                                </div>
-                              )}
-                            </>
+                                className="workspace-submenu-item danger"
+                                onClick={() => { setOverflowOpen(null); setCloseTarget(w.projectPath); }}
+                              >
+                                ✕ Close
+                              </button>
+                            </div>
                           )}
                         </div>
                       ))}
