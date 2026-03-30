@@ -162,12 +162,14 @@ function ensureProcess(
         // --- Detect tool_result denial (approval needed) ---
         if (msg.type === 'user' && msg.message?.content) {
           const content = Array.isArray(msg.message.content) ? msg.message.content : [];
-          const denialBlock = content.find((block: any) =>
-            block.type === 'tool_result' &&
-            block.is_error === true &&
-            typeof block.content === 'string' &&
-            block.content.toLowerCase().includes('requires approval')
-          );
+          const denialBlock = content.find((block: any) => {
+            if (block.type !== 'tool_result' || !block.is_error || typeof block.content !== 'string') return false;
+            const lower = block.content.toLowerCase();
+            // CLI denial patterns: "requested permissions", "was blocked", "haven't granted"
+            return lower.includes('requested permissions') ||
+                   lower.includes('was blocked') ||
+                   lower.includes("haven't granted");
+          });
           if (denialBlock && ws.claude.pendingToolUse) {
             // Intercept: don't forward this denial to the renderer
             ws.claude.awaitingApproval = true;
