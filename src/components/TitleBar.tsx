@@ -21,10 +21,11 @@ interface TitleBarProps {
   projectPath: string;
   onProjectChange: (path: string) => void;
   completedWorkspaces?: Set<string>;
+  busyWorkspaces?: Set<string>;
   onSettingChange?: (key: string, value: any) => void;
 }
 
-export default function TitleBar({ projectPath, onProjectChange, completedWorkspaces, onSettingChange }: TitleBarProps) {
+export default function TitleBar({ projectPath, onProjectChange, completedWorkspaces, busyWorkspaces, onSettingChange }: TitleBarProps) {
   const [open, setOpen] = useState(false);
   const [workspaceList, setWorkspaceList] = useState<WorkspaceInfo[]>([]);
   const [version, setVersion] = useState('');
@@ -155,7 +156,9 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                             className={`dropdown-item workspace-item ${w.projectPath === projectPath ? 'active' : ''}`}
                             onClick={() => { onProjectChange(w.projectPath); setOpen(false); }}
                           >
-                            <span className="workspace-status-dot workspace-dot-active" />
+                            {busyWorkspaces?.has(w.projectPath)
+                              ? <span className="workspace-spinner" title="Working..." />
+                              : <span className="workspace-status-dot workspace-dot-active" />}
                             <span className="dropdown-item-name">{w.projectPath.split('/').pop()}</span>
                             {completedWorkspaces?.has(w.projectPath) && <span className="workspace-completed-icon" title="Response complete">!</span>}
                             <span className="dropdown-item-path">{w.projectPath}</span>
@@ -570,6 +573,18 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         }
         .workspace-dot-active {
           background: #4ade80;
+        }
+        .workspace-spinner {
+          width: 10px;
+          height: 10px;
+          border: 1.5px solid rgba(199, 145, 12, 0.3);
+          border-top-color: var(--accent);
+          border-radius: 50%;
+          flex-shrink: 0;
+          animation: workspace-spin 0.8s linear infinite;
+        }
+        @keyframes workspace-spin {
+          to { transform: rotate(360deg); }
         }
         .workspace-dot-suspended {
           background: #d4a72c;

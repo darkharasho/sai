@@ -45,6 +45,7 @@ export default function App() {
   const wsMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
   const [externallyModified, setExternallyModified] = useState<Set<string>>(new Set());
   const [completedWorkspaces, setCompletedWorkspaces] = useState<Set<string>>(new Set());
+  const [busyWorkspaces, setBusyWorkspaces] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<{ message: string; key: number } | null>(null);
   const workspacesRef = useRef(workspaces);
   const activeProjectPathRef = useRef(activeProjectPath);
@@ -299,9 +300,11 @@ export default function App() {
       if (!msg.projectPath) return;
       if (msg.type === 'streaming_start') {
         streamingWorkspacesRef.current.add(msg.projectPath);
+        setBusyWorkspaces(prev => new Set(prev).add(msg.projectPath));
       }
       if (msg.type === 'done' && streamingWorkspacesRef.current.has(msg.projectPath)) {
         streamingWorkspacesRef.current.delete(msg.projectPath);
+        setBusyWorkspaces(prev => { const next = new Set(prev); next.delete(msg.projectPath); return next; });
         if (msg.projectPath !== activeProjectPathRef.current) {
           const wsName = msg.projectPath.split('/').pop() || msg.projectPath;
           setCompletedWorkspaces(prev => new Set(prev).add(msg.projectPath));
@@ -917,6 +920,7 @@ export default function App() {
         projectPath={projectPath}
         onProjectChange={handleProjectSwitch}
         completedWorkspaces={completedWorkspaces}
+        busyWorkspaces={busyWorkspaces}
         onSettingChange={(key, value) => {
           if (key === 'editorFontSize') setEditorFontSize(value);
           if (key === 'editorMinimap') setEditorMinimap(value);
