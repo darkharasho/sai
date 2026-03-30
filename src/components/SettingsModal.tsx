@@ -45,6 +45,7 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
   const providerRef = useRef<HTMLDivElement>(null);
   const [geminiLoadingPhrases, setGeminiLoadingPhrases] = useState<'witty' | 'tips' | 'all' | 'off'>('all');
   const [systemNotifications, setSystemNotifications] = useState(false);
+  const [focusedChat, setFocusedChat] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [lastSynced, setLastSynced] = useState<number | null>(null);
   const [isAuthed, setIsAuthed] = useState(false);
@@ -57,6 +58,7 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
       if (g.loadingPhrases === 'witty' || g.loadingPhrases === 'tips' || g.loadingPhrases === 'all' || g.loadingPhrases === 'off') setGeminiLoadingPhrases(g.loadingPhrases);
     });
     window.sai.settingsGet('systemNotifications', false).then((v: boolean) => setSystemNotifications(v));
+    window.sai.settingsGet('focusedChat', false).then((v: boolean) => setFocusedChat(v));
     window.sai.settingsGet('aiProvider', 'claude').then((v: string) => {
       if (v === 'claude' || v === 'codex' || v === 'gemini') setAiProvider(v as 'claude' | 'codex' | 'gemini');
     });
@@ -74,6 +76,7 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
       if ('editorMinimap' in remote) setEditorMinimap(remote.editorMinimap);
       if ('aiProvider' in remote && (remote.aiProvider === 'claude' || remote.aiProvider === 'codex' || remote.aiProvider === 'gemini')) setAiProvider(remote.aiProvider);
       if ('systemNotifications' in remote) setSystemNotifications(remote.systemNotifications);
+      if ('focusedChat' in remote) setFocusedChat(remote.focusedChat);
     });
 
     return () => { unsubSync(); unsubApplied(); };
@@ -118,6 +121,12 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
       window.sai.settingsSet('gemini', { ...existing, loadingPhrases: value });
     });
     onSettingChange?.('geminiLoadingPhrases', value);
+  };
+
+  const handleFocusedChatChange = (value: boolean) => {
+    setFocusedChat(value);
+    window.sai.settingsSet('focusedChat', value);
+    onSettingChange?.('focusedChat', value);
   };
 
   const handleSystemNotificationsChange = (value: boolean) => {
@@ -230,6 +239,27 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
                 onClick={() => handleMinimapChange(!editorMinimap)}
                 role="switch"
                 aria-checked={editorMinimap}
+              >
+                <span className="settings-toggle-thumb" />
+              </button>
+            </div>
+          </section>
+
+          <div className="settings-divider" />
+
+          <section className="settings-section">
+            <div className="settings-section-label">Layout</div>
+
+            <div className="settings-row">
+              <div className="settings-row-info">
+                <div className="settings-row-name">Focused chat</div>
+                <div className="settings-row-desc">Chat stays at 66%, editor and terminal toggle in the remaining space</div>
+              </div>
+              <button
+                className={`settings-toggle${focusedChat ? ' on' : ''}`}
+                onClick={() => handleFocusedChatChange(!focusedChat)}
+                role="switch"
+                aria-checked={focusedChat}
               >
                 <span className="settings-toggle-thumb" />
               </button>

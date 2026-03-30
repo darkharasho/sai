@@ -46,6 +46,7 @@ export default function App() {
   const [externallyModified, setExternallyModified] = useState<Set<string>>(new Set());
   const [completedWorkspaces, setCompletedWorkspaces] = useState<Set<string>>(new Set());
   const [busyWorkspaces, setBusyWorkspaces] = useState<Set<string>>(new Set());
+  const [focusedChat, setFocusedChat] = useState(false);
   const [toast, setToast] = useState<{ message: string; key: number } | null>(null);
   const workspacesRef = useRef(workspaces);
   const activeProjectPathRef = useRef(activeProjectPath);
@@ -101,6 +102,7 @@ export default function App() {
 
   // Load persisted settings from main process (file-based, works in dev+prod)
   useEffect(() => {
+    window.sai.settingsGet('focusedChat', false).then((v: boolean) => setFocusedChat(v));
     window.sai.settingsGet('editorFontSize', 13).then((v: number) => setEditorFontSize(v));
     window.sai.settingsGet('editorMinimap', true).then((v: boolean) => setEditorMinimap(v));
     window.sai.settingsGet('aiProvider', 'claude').then((v: string) => {
@@ -334,20 +336,41 @@ export default function App() {
   const mainContentRef = useRef<HTMLDivElement>(null);
 
   const togglePanel = useCallback((panel: PanelId) => {
-    setExpanded(prev => {
+    setExpanded((prev: PanelId[]) => {
+      // Focused chat mode: chat stays at 66%, editor/terminal toggle in the 34% slot
+      if (focusedChat) {
+        if (panel === 'chat') {
+          if (prev.includes('chat')) {
+            const next = prev.filter(p => p !== 'chat') as PanelId[];
+            return next.length === 0 ? prev : next;
+          }
+          return prev.includes('chat') ? prev : (['chat' as PanelId, ...prev.filter(p => p !== 'chat')].slice(0, 2) as PanelId[]);
+        }
+        // Editor or terminal: swap into the secondary slot alongside chat
+        if (prev.includes(panel)) {
+          const next = prev.filter(p => p !== panel) as PanelId[];
+          return next.length === 0 ? prev : next;
+        }
+        if (prev.includes('chat')) {
+          setSplitRatio(0.66);
+          return ['chat', panel] as PanelId[];
+        }
+        return [...prev, panel].slice(0, 2) as PanelId[];
+      }
+
+      // Default mode
       if (prev.includes(panel)) {
-        const next = prev.filter(p => p !== panel);
+        const next = prev.filter(p => p !== panel) as PanelId[];
         if (next.length === 0) return prev;
-        // When going from 2 to 1, reset split ratio for next time
         setSplitRatio(0.66);
         return next;
       } else {
-        const next = [...prev, panel];
+        const next = [...prev, panel] as PanelId[];
         setSplitRatio(0.66);
-        return next.length > 2 ? next.slice(1) : next;
+        return next.length > 2 ? next.slice(1) as PanelId[] : next;
       }
     });
-  }, []);
+  }, [focusedChat]);
 
   // Drag handling
   const handleDragStart = useCallback((e: React.MouseEvent) => {
@@ -413,11 +436,15 @@ export default function App() {
     });
     setExpanded(prev => {
       if (prev.includes('editor')) return prev;
+      if (focusedChat && prev.includes('chat')) {
+        setSplitRatio(0.66);
+        return ['chat', 'editor'];
+      }
       const next = [...prev, 'editor' as PanelId];
       setSplitRatio(0.66);
       return next.length > 2 ? next.slice(1) : next;
     });
-  }, [activeProjectPath, updateWorkspace]);
+  }, [activeProjectPath, updateWorkspace, focusedChat]);
 
   const handleFileOpen = useCallback(async (filePath: string) => {
     if (!activeProjectPath) return;
@@ -436,6 +463,10 @@ export default function App() {
       });
       setExpanded(prev => {
         if (prev.includes('editor')) return prev;
+        if (focusedChat && prev.includes('chat')) {
+          setSplitRatio(0.66);
+          return ['chat', 'editor'];
+        }
         const next = [...prev, 'editor' as PanelId];
         setSplitRatio(0.66);
         return next.length > 2 ? next.slice(1) : next;
@@ -443,7 +474,7 @@ export default function App() {
     } catch {
       // File couldn't be read
     }
-  }, [activeProjectPath, updateWorkspace]);
+  }, [activeProjectPath, updateWorkspace, focusedChat]);
 
   const doFileClose = useCallback((path: string) => {
     if (!activeProjectPath) return;
@@ -929,6 +960,7 @@ export default function App() {
           if (key === 'editorMinimap') setEditorMinimap(value);
           if (key === 'aiProvider') setAiProvider(value);
           if (key === 'geminiLoadingPhrases') handleGeminiLoadingPhrasesChange(value);
+          if (key === 'focusedChat') { setFocusedChat(value); if (value) { setExpanded(['chat', 'terminal']); setSplitRatio(0.66); } }
         }}
       />
       <div className="app-body">
