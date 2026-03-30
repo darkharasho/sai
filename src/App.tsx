@@ -983,7 +983,7 @@ export default function App() {
         onSettingChange={(key, value) => {
           if (key === 'editorFontSize') setEditorFontSize(value);
           if (key === 'editorMinimap') setEditorMinimap(value);
-          if (key === 'aiProvider') setAiProvider(value);
+          if (key === 'aiProvider') { setAiProvider(value); handleNewChat(); }
           if (key === 'geminiLoadingPhrases') handleGeminiLoadingPhrasesChange(value);
           if (key === 'focusedChat') { setFocusedChat(value); if (value) { setExpanded(['chat', 'terminal']); setSplitRatio(0.66); } }
         }}
