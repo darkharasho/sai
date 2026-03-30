@@ -1,12 +1,12 @@
 ---
 name: mac-release
-description: Create a macOS release for SAI - bumps version, generates release notes, tags, pushes, creates a draft GitHub release, monitors CI, and publishes.
+description: Create a release for SAI - bumps version, generates release notes, tags, pushes, and creates a draft GitHub release. CI automatically builds artifacts and publishes.
 user-invocable: true
 ---
 
 # /mac-release
 
-Create a release for SAI. Bumps version, generates release notes, tags, pushes, creates a draft GitHub release, monitors the CI build, and publishes once artifacts are attached.
+Create a release for SAI. Bumps version, generates release notes, tags, pushes, and creates a draft GitHub release. The GitHub Actions workflow automatically builds artifacts for all platforms and publishes the release when done.
 
 ## Usage
 
@@ -75,39 +75,20 @@ gh release create v{NEW_VERSION} --draft --title "v{NEW_VERSION}" --notes "{RELE
 
 Use a heredoc for the notes body to preserve formatting.
 
-### Step 6: Monitor the GitHub Actions build
+### Step 6: Done
 
 1. Tell the user: "Draft release created. GitHub Actions is now building artifacts for Linux, Windows, and macOS."
-2. Wait ~30 seconds, then poll the workflow run:
-   ```bash
-   gh run list --workflow=release.yml --limit=1 --json status,conclusion,databaseId
-   ```
-3. If status is `in_progress` or `queued`, report progress and poll again every 60 seconds.
-4. If conclusion is `success`, proceed to Step 7.
-5. If conclusion is `failure`, report the failure and provide the command to view logs:
-   ```bash
-   gh run view {RUN_ID} --log-failed
-   ```
-   Then abort.
-
-### Step 7: Verify and publish
-
-1. Verify artifacts are attached:
-   ```bash
-   gh release view v{NEW_VERSION} --json assets --jq '.assets[].name'
-   ```
-   Confirm that `.dmg`, `.exe`, `.AppImage`, `latest.yml`, `latest-linux.yml`, and `latest-mac.yml` are all present.
-2. If all artifacts are present, the `publish` job in the workflow will automatically mark the release as non-draft. Confirm:
-   ```bash
-   gh release view v{NEW_VERSION} --json isDraft --jq '.isDraft'
-   ```
-3. If `isDraft` is still `true` after the workflow completes, manually publish:
-   ```bash
-   gh release edit v{NEW_VERSION} --draft=false
-   ```
-4. Report the final release URL to the user:
+2. Explain that the CI workflow will automatically:
+   - Build artifacts for all platforms (`.dmg`, `.exe`, `.AppImage`, auto-update manifests)
+   - Attach them to the draft release
+   - Publish the release (mark as non-draft) once all builds succeed
+3. Provide the release URL for the user to monitor:
    ```bash
    gh release view v{NEW_VERSION} --json url --jq '.url'
+   ```
+4. Provide the Actions run link so the user can watch build progress:
+   ```bash
+   gh run list --workflow=release.yml --limit=1 --json url --jq '.[0].url'
    ```
 
 ### Error recovery
