@@ -7,6 +7,7 @@ import FileExplorerSidebar from './components/FileExplorer/FileExplorerSidebar';
 import TitleBar from './components/TitleBar';
 import CodePanel from './components/CodePanel/CodePanel';
 import UnsavedChangesModal from './components/UnsavedChangesModal';
+import WorkspaceToast from './components/WorkspaceToast';
 import { loadSessions, saveSessions, createSession, upsertSession, migrateLegacySessions } from './sessions';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext } from './types';
 import { MessageSquare, TerminalSquare, Code2, ChevronRight, MessageCirclePlus, Clock } from 'lucide-react';
@@ -43,9 +44,13 @@ export default function App() {
   // Ref to hold latest messages per workspace without triggering re-renders during streaming
   const wsMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
   const [externallyModified, setExternallyModified] = useState<Set<string>>(new Set());
+  const [completedWorkspaces, setCompletedWorkspaces] = useState<Set<string>>(new Set());
+  const [toast, setToast] = useState<{ message: string; key: number } | null>(null);
   const workspacesRef = useRef(workspaces);
+  const activeProjectPathRef = useRef(activeProjectPath);
 
   useEffect(() => { workspacesRef.current = workspaces; }, [workspaces]);
+  useEffect(() => { activeProjectPathRef.current = activeProjectPath; }, [activeProjectPath]);
 
   useEffect(() => {
     setExternallyModified(new Set());
@@ -287,6 +292,26 @@ export default function App() {
     return cleanup;
   }, [updateWorkspace]);
 
+  // Listen for background workspace completions
+  const streamingWorkspacesRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const cleanup = window.sai.claudeOnMessage((msg: any) => {
+      if (!msg.projectPath) return;
+      if (msg.type === 'streaming_start') {
+        streamingWorkspacesRef.current.add(msg.projectPath);
+      }
+      if (msg.type === 'done' && streamingWorkspacesRef.current.has(msg.projectPath)) {
+        streamingWorkspacesRef.current.delete(msg.projectPath);
+        if (msg.projectPath !== activeProjectPathRef.current) {
+          const wsName = msg.projectPath.split('/').pop() || msg.projectPath;
+          setCompletedWorkspaces(prev => new Set(prev).add(msg.projectPath));
+          setToast({ message: `${wsName} has finished`, key: Date.now() });
+        }
+      }
+    });
+    return cleanup;
+  }, []);
+
   const groupedSessions = sessions.reduce<{ label: string; sessions: ChatSession[] }[]>((groups, session) => {
     const label = formatSessionDate(session.updatedAt);
     const existing = groups.find(g => g.label === label);
@@ -486,6 +511,11 @@ export default function App() {
       return next;
     });
     setActiveProjectPath(newPath);
+    setCompletedWorkspaces(prev => {
+      const next = new Set(prev);
+      next.delete(newPath);
+      return next;
+    });
   }, [activeProjectPath]);
 
   const handleEditorSave = useCallback(async (filePath: string, content: string) => {
@@ -875,6 +905,7 @@ export default function App() {
       <TitleBar
         projectPath={projectPath}
         onProjectChange={handleProjectSwitch}
+        completedWorkspaces={completedWorkspaces}
         onSettingChange={(key, value) => {
           if (key === 'editorFontSize') setEditorFontSize(value);
           if (key === 'editorMinimap') setEditorMinimap(value);
@@ -925,6 +956,10 @@ export default function App() {
           />
         );
       })()}
+
+      {toast && (
+        <WorkspaceToast key={toast.key} message={toast.message} onDismiss={() => setToast(null)} />
+      )}
 
       <style>{`
         .accordion-panel {

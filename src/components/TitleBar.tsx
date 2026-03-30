@@ -20,10 +20,11 @@ interface WorkspaceInfo {
 interface TitleBarProps {
   projectPath: string;
   onProjectChange: (path: string) => void;
+  completedWorkspaces?: Set<string>;
   onSettingChange?: (key: string, value: any) => void;
 }
 
-export default function TitleBar({ projectPath, onProjectChange, onSettingChange }: TitleBarProps) {
+export default function TitleBar({ projectPath, onProjectChange, completedWorkspaces, onSettingChange }: TitleBarProps) {
   const [open, setOpen] = useState(false);
   const [workspaceList, setWorkspaceList] = useState<WorkspaceInfo[]>([]);
   const [version, setVersion] = useState('');
@@ -129,6 +130,7 @@ export default function TitleBar({ projectPath, onProjectChange, onSettingChange
       <div className="project-dropdown-wrapper" ref={dropdownRef}>
         <button className="project-selector" onClick={() => setOpen(!open)}>
           {projectName} ▾
+          {completedWorkspaces && completedWorkspaces.size > 0 && <span className="workspace-done-dot" />}
         </button>
         {open && (
           <div className="project-dropdown" onMouseDown={(e) => {
@@ -155,6 +157,7 @@ export default function TitleBar({ projectPath, onProjectChange, onSettingChange
                           >
                             <span className="workspace-status-dot workspace-dot-active" />
                             <span className="dropdown-item-name">{w.projectPath.split('/').pop()}</span>
+                            {completedWorkspaces?.has(w.projectPath) && <span className="workspace-completed-icon" title="Response complete">!</span>}
                             <span className="dropdown-item-path">{w.projectPath}</span>
                           </button>
                           <button
@@ -453,6 +456,35 @@ export default function TitleBar({ projectPath, onProjectChange, onSettingChange
           cursor: pointer;
           padding: 4px 12px;
           border-radius: 4px;
+          position: relative;
+        }
+        .workspace-done-dot {
+          display: inline-block;
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          background: var(--accent);
+          margin-left: 6px;
+          vertical-align: middle;
+          animation: done-pulse 2s ease-in-out infinite;
+        }
+        .workspace-completed-icon {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 14px;
+          height: 14px;
+          border-radius: 50%;
+          background: var(--accent);
+          color: #000;
+          font-size: 10px;
+          font-weight: 800;
+          flex-shrink: 0;
+          animation: done-pulse 2s ease-in-out infinite;
+        }
+        @keyframes done-pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
         }
         .project-selector:hover {
           background: var(--bg-hover);
