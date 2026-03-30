@@ -19,6 +19,16 @@ const TIMEOUT_OPTIONS = [
 const DEFAULT_TIMEOUT = 60 * 60 * 1000;
 const FONT_SIZES = [11, 12, 13, 14, 15, 16, 18, 20];
 
+const AUTO_COMPACT_OPTIONS = [
+  { label: 'Off',  value: 0 },
+  { label: '30%',  value: 30 },
+  { label: '40%',  value: 40 },
+  { label: '50%',  value: 50 },
+  { label: '60%',  value: 60 },
+  { label: '70%',  value: 70 },
+  { label: '80%',  value: 80 },
+];
+
 type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error';
 
 function formatRelative(ts: number): string {
@@ -46,6 +56,7 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
   const [geminiLoadingPhrases, setGeminiLoadingPhrases] = useState<'witty' | 'tips' | 'all' | 'off'>('all');
   const [systemNotifications, setSystemNotifications] = useState(false);
   const [focusedChat, setFocusedChat] = useState(false);
+  const [autoCompactThreshold, setAutoCompactThreshold] = useState(0);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [lastSynced, setLastSynced] = useState<number | null>(null);
   const [isAuthed, setIsAuthed] = useState(false);
@@ -59,6 +70,7 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
     });
     window.sai.settingsGet('systemNotifications', false).then((v: boolean) => setSystemNotifications(v));
     window.sai.settingsGet('focusedChat', false).then((v: boolean) => setFocusedChat(v));
+    window.sai.settingsGet('autoCompactThreshold', 0).then((v: number) => setAutoCompactThreshold(v));
     window.sai.settingsGet('aiProvider', 'claude').then((v: string) => {
       if (v === 'claude' || v === 'codex' || v === 'gemini') setAiProvider(v as 'claude' | 'codex' | 'gemini');
     });
@@ -77,6 +89,7 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
       if ('aiProvider' in remote && (remote.aiProvider === 'claude' || remote.aiProvider === 'codex' || remote.aiProvider === 'gemini')) setAiProvider(remote.aiProvider);
       if ('systemNotifications' in remote) setSystemNotifications(remote.systemNotifications);
       if ('focusedChat' in remote) setFocusedChat(remote.focusedChat);
+      if ('autoCompactThreshold' in remote) setAutoCompactThreshold(remote.autoCompactThreshold);
     });
 
     return () => { unsubSync(); unsubApplied(); };
@@ -127,6 +140,12 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
     setFocusedChat(value);
     window.sai.settingsSet('focusedChat', value);
     onSettingChange?.('focusedChat', value);
+  };
+
+  const handleAutoCompactChange = (value: number) => {
+    setAutoCompactThreshold(value);
+    window.sai.settingsSet('autoCompactThreshold', value);
+    onSettingChange?.('autoCompactThreshold', value);
   };
 
   const handleSystemNotificationsChange = (value: boolean) => {
@@ -282,6 +301,22 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
                 onChange={e => handleTimeoutChange(Number(e.target.value))}
               >
                 {TIMEOUT_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="settings-row settings-row-spaced">
+              <div className="settings-row-info">
+                <div className="settings-row-name">Auto-compact context</div>
+                <div className="settings-row-desc">Automatically compact when context reaches this threshold to reduce token costs</div>
+              </div>
+              <select
+                className="settings-select"
+                value={autoCompactThreshold}
+                onChange={e => handleAutoCompactChange(Number(e.target.value))}
+              >
+                {AUTO_COMPACT_OPTIONS.map(opt => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
               </select>

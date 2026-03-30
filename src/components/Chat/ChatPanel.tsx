@@ -489,6 +489,9 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const [fileContextEnabled, setFileContextEnabled] = useState(true);
   const [contextUsage, setContextUsage] = useState<{ used: number; total: number; inputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; outputTokens: number }>({ used: 0, total: 1000000, inputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, outputTokens: 0 });
   const [sessionUsage, setSessionUsage] = useState<{ inputTokens: number; outputTokens: number }>({ inputTokens: 0, outputTokens: 0 });
+  const [sessionCost, setSessionCost] = useState(0);
+  const [autoCompactThreshold, setAutoCompactThreshold] = useState(0); // 0 = off
+  const autoCompactCooldownRef = useRef(0); // timestamp — don't re-compact until after this
   const [rateLimits, setRateLimits] = useState<Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number; utilization?: number }>>(new Map());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -533,6 +536,23 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     observer.observe(sentinel);
     return () => observer.disconnect();
   }, [renderStart]);
+
+  // Load auto-compact threshold setting
+  useEffect(() => {
+    window.sai.settingsGet('autoCompactThreshold', 0).then((v: number) => setAutoCompactThreshold(v));
+  }, []);
+
+  // Auto-compact when context exceeds threshold
+  useEffect(() => {
+    if (aiProvider !== 'claude' || !autoCompactThreshold || !contextUsage.used || !contextUsage.total) return;
+    if (isStreaming) return; // don't compact mid-turn
+    const pct = contextUsage.used / contextUsage.total;
+    if (pct < autoCompactThreshold / 100) return;
+    if (Date.now() < autoCompactCooldownRef.current) return;
+    // Trigger compact and set 60s cooldown
+    autoCompactCooldownRef.current = Date.now() + 60_000;
+    window.sai.claudeSend(projectPath, '/compact', undefined, permissionMode, effortLevel, modelChoice);
+  }, [contextUsage, isStreaming]);
 
   useEffect(() => {
     setReady(false);
@@ -744,6 +764,10 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             inputTokens: prev.inputTokens + (msg.usage.input_tokens || 0) + (msg.usage.cache_read_input_tokens || 0) + (msg.usage.cache_creation_input_tokens || 0),
             outputTokens: prev.outputTokens + (msg.usage.output_tokens || 0),
           }));
+        }
+        // Track session cost from CLI-reported total (cumulative per session)
+        if (msg.total_cost_usd != null) {
+          setSessionCost(msg.total_cost_usd);
         }
       }
       if (msg.type === 'result' && msg.result) {
@@ -1025,6 +1049,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         onModelChange={onModelChange}
         contextUsage={contextUsage}
         sessionUsage={sessionUsage}
+        sessionCost={sessionCost}
         rateLimits={rateLimits}
         activeFilePath={activeFilePath}
         fileContextEnabled={fileContextEnabled}

@@ -24,6 +24,7 @@ interface ChatInputProps {
   onModelChange: (model: ModelChoice) => void;
   contextUsage?: { used: number; total: number; inputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; outputTokens: number };
   sessionUsage?: { inputTokens: number; outputTokens: number };
+  sessionCost?: number;
   rateLimits?: Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number; utilization?: number }>;
   activeFilePath?: string | null;
   fileContextEnabled?: boolean;
@@ -201,7 +202,7 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, rateLimits, activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange }: ChatInputProps) {
+export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, sessionCost, rateLimits, activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange }: ChatInputProps) {
   const [value, setValue] = useState('');
   const [suggestions, setSuggestions] = useState<AutocompleteItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -568,9 +569,12 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
 
             // Inline text
             const primary = sessionLimits[0] || limits[0];
+            const costStr = (sessionCost ?? 0) > 0 ? `$${sessionCost!.toFixed(2)}` : '';
             let inlineText = '';
             if (anyOverage) {
               inlineText = 'Overage';
+            } else if (costStr) {
+              inlineText = costStr;
             } else if (primary) {
               inlineText = `Resets ${formatResetTime(primary.resetsAt)}`;
             } else if (sessionUsage) {
@@ -664,6 +668,13 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
                           </div>
                         );
                       })()}
+                    </div>
+                  )}
+                  {/* Session cost */}
+                  {(sessionCost ?? 0) > 0 && (
+                    <div className="usage-tooltip-section">
+                      <div className="usage-tooltip-heading">Session cost</div>
+                      <div className="session-cost-value">${sessionCost!.toFixed(4)}</div>
                     </div>
                   )}
                 </div>
@@ -1244,6 +1255,12 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           font-family: 'JetBrains Mono', monospace;
           font-size: 10px;
           color: var(--text-muted);
+        }
+        .session-cost-value {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 12px;
+          font-weight: 600;
+          color: var(--text);
         }
         .effort-btn {
           font-size: 11px;
