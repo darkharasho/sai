@@ -31,7 +31,7 @@
       "icon": "public/img/sai.png"
     },
     "mac": {
-      "target": "dmg",
+      "target": ["dmg", "zip"],
       "category": "public.app-category.developer-tools",
       "icon": "public/img/sai.png"
     },
