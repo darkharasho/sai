@@ -1,3 +1,9 @@
+---
+name: mac-release
+description: Create a macOS release for SAI - bumps version, generates release notes, tags, pushes, creates a draft GitHub release, monitors CI, and publishes.
+user-invocable: true
+---
+
 # /mac-release
 
 Create a release for SAI. Bumps version, generates release notes, tags, pushes, creates a draft GitHub release, monitors the CI build, and publishes once artifacts are attached.
