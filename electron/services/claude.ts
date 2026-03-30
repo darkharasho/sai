@@ -1,6 +1,7 @@
-import { spawn, ChildProcess } from 'node:child_process';
+import { spawn, ChildProcess, execFile } from 'node:child_process';
 import { BrowserWindow, ipcMain, app } from 'electron';
 import { getOrCreate, get, touchActivity } from './workspace';
+import type { PendingToolUse } from './workspace';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
@@ -46,6 +47,9 @@ function buildArgs(permMode?: string, effort?: string, model?: string): string[]
     args.push('--permission-mode', 'bypassPermissions');
   } else {
     args.push('--permission-mode', 'acceptEdits');
+    // Skip user-level settings (e.g. Bash(*) in ~/.claude/settings.json)
+    // so SAI can gate approvals instead of the CLI auto-allowing
+    args.push('--setting-sources', 'project');
   }
 
   if (effort && ['low', 'medium', 'high', 'max'].includes(effort)) {
@@ -133,6 +137,52 @@ function ensureProcess(
         // When suppressForward is true (commit msg generation), skip IPC
         if (ws.claude.suppressForward) continue;
 
+        // --- Approval flow: buffer messages while awaiting user decision ---
+        if (ws.claude.awaitingApproval) {
+          ws.claude.approvalBuffered.push(msg);
+          // If we get a result while awaiting, the CLI turn is done (model responded to the denial).
+          // We keep buffering — the approve/deny handler will flush or discard.
+          continue;
+        }
+
+        // --- Track the latest tool_use from assistant messages ---
+        if (msg.type === 'assistant' && msg.message?.content) {
+          const content = Array.isArray(msg.message.content) ? msg.message.content : [];
+          for (const block of content) {
+            if (block.type === 'tool_use') {
+              ws.claude.pendingToolUse = {
+                toolName: block.name,
+                toolUseId: block.id,
+                input: block.input || {},
+              };
+            }
+          }
+        }
+
+        // --- Detect tool_result denial (approval needed) ---
+        if (msg.type === 'user' && msg.message?.content) {
+          const content = Array.isArray(msg.message.content) ? msg.message.content : [];
+          const denialBlock = content.find((block: any) =>
+            block.type === 'tool_result' &&
+            block.is_error === true &&
+            typeof block.content === 'string' &&
+            block.content.toLowerCase().includes('requires approval')
+          );
+          if (denialBlock && ws.claude.pendingToolUse) {
+            // Intercept: don't forward this denial to the renderer
+            ws.claude.awaitingApproval = true;
+            ws.claude.approvalBuffered = [];
+            safeSend(win, 'claude:message', {
+              type: 'approval_needed',
+              projectPath: ws.projectPath,
+              toolName: ws.claude.pendingToolUse.toolName,
+              toolUseId: ws.claude.pendingToolUse.toolUseId,
+              input: ws.claude.pendingToolUse.input,
+            });
+            continue;
+          }
+        }
+
         // Result signals end of a turn
         if (msg.type === 'result') {
           ws.claude.busy = false;
@@ -169,6 +219,9 @@ function ensureProcess(
     ws.claude.processConfig = null;
     ws.claude.busy = false;
     ws.claude.suppressForward = false;
+    ws.claude.pendingToolUse = null;
+    ws.claude.approvalBuffered = [];
+    ws.claude.awaitingApproval = false;
     // Signal unexpected exit so the UI can recover
     safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
   });
@@ -179,6 +232,9 @@ function ensureProcess(
     ws.claude.processConfig = null;
     ws.claude.busy = false;
     ws.claude.suppressForward = false;
+    ws.claude.pendingToolUse = null;
+    ws.claude.approvalBuffered = [];
+    ws.claude.awaitingApproval = false;
     safeSend(win, 'claude:message', {
       type: 'error', text: `Claude process error: ${err.message}`, projectPath: ws.projectPath
     });
@@ -217,6 +273,9 @@ export function registerClaudeHandlers(win: BrowserWindow) {
       ws.claude.processConfig = null;
       ws.claude.busy = false;
       ws.claude.suppressForward = false;
+      ws.claude.pendingToolUse = null;
+      ws.claude.approvalBuffered = [];
+      ws.claude.awaitingApproval = false;
       proc.kill();
       safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
     }
@@ -253,6 +312,123 @@ export function registerClaudeHandlers(win: BrowserWindow) {
       return;
     }
     proc.stdin.write(msg + '\n');
+  });
+
+  // claude:approve — user approved a tool that was denied by the CLI
+  ipcMain.handle('claude:approve', async (_event, projectPath: string) => {
+    const ws = get(projectPath);
+    if (!ws || !ws.claude.pendingToolUse || !ws.claude.awaitingApproval) return;
+
+    const pending = ws.claude.pendingToolUse;
+    const cwd = ws.claude.cwd || projectPath;
+
+    let result = '';
+    let isError = false;
+
+    try {
+      if (pending.toolName === 'Bash' || pending.toolName === 'bash') {
+        const command = pending.input.command || '';
+        const execResult = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+          execFile('bash', ['-c', command], {
+            cwd,
+            timeout: 120_000,
+            maxBuffer: 10 * 1024 * 1024,
+            env: { ...process.env },
+          }, (err, stdout, stderr) => {
+            if (err && !stdout && !stderr) {
+              reject(err);
+            } else {
+              resolve({ stdout: stdout || '', stderr: stderr || '' });
+            }
+          });
+        });
+        result = execResult.stdout;
+        if (execResult.stderr) {
+          result += (result ? '\n' : '') + execResult.stderr;
+        }
+      } else {
+        // For non-bash tools, we can't execute them ourselves
+        result = `Tool "${pending.toolName}" was approved but SAI can only execute Bash commands directly.`;
+        isError = true;
+      }
+    } catch (err: any) {
+      result = err.message || 'Command execution failed';
+      isError = true;
+    }
+
+    // Send the real tool result to the renderer as if the CLI produced it
+    safeSend(win, 'claude:message', {
+      type: 'user',
+      projectPath: ws.projectPath,
+      message: {
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: pending.toolUseId,
+          content: result,
+          is_error: isError,
+        }],
+      },
+    });
+
+    // Discard buffered messages (model's response to the denial)
+    ws.claude.approvalBuffered = [];
+    ws.claude.awaitingApproval = false;
+    ws.claude.pendingToolUse = null;
+
+    // Send a follow-up message to the CLI so it knows the tool was actually executed
+    const proc = ws.claude.process;
+    if (proc?.stdin && !proc.stdin.destroyed) {
+      const followUp = JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: `The tool "${pending.toolName}" was approved and executed by the user. Here is the actual output:\n\n${result}\n\nPlease continue based on this result.`,
+        },
+      });
+      proc.stdin.write(followUp + '\n');
+    }
+
+    return { result, isError };
+  });
+
+  // claude:deny — user denied a tool that needed approval
+  ipcMain.handle('claude:deny', async (_event, projectPath: string) => {
+    const ws = get(projectPath);
+    if (!ws || !ws.claude.awaitingApproval) return;
+
+    // Flush buffered messages to the renderer (the denial + model's response)
+    for (const buffered of ws.claude.approvalBuffered) {
+      if (buffered.type === 'result') {
+        ws.claude.busy = false;
+        safeSend(win, 'claude:message', { ...buffered, projectPath: ws.projectPath });
+        safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+      } else {
+        safeSend(win, 'claude:message', { ...buffered, projectPath: ws.projectPath });
+      }
+    }
+
+    ws.claude.approvalBuffered = [];
+    ws.claude.awaitingApproval = false;
+    ws.claude.pendingToolUse = null;
+  });
+
+  // claude:alwaysAllow — add a tool pattern to the project's .claude/settings.local.json
+  ipcMain.handle('claude:alwaysAllow', async (_event, projectPath: string, toolPattern: string) => {
+    const claudeDir = path.join(projectPath, '.claude');
+    const settingsPath = path.join(claudeDir, 'settings.local.json');
+    let settings: Record<string, any> = {};
+    try {
+      settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+    } catch { /* file doesn't exist yet */ }
+    if (!settings.permissions) settings.permissions = {};
+    if (!Array.isArray(settings.permissions.allow)) settings.permissions.allow = [];
+    if (!settings.permissions.allow.includes(toolPattern)) {
+      settings.permissions.allow.push(toolPattern);
+    }
+    try { fs.mkdirSync(claudeDir, { recursive: true }); } catch { /* exists */ }
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+    return true;
   });
 
   // claude:generateCommitMessage — always one-shot to avoid context token costs

@@ -3,6 +3,12 @@ import { ChildProcess } from 'node:child_process';
 import type * as pty from 'node-pty';
 import { BrowserWindow } from 'electron';
 
+export interface PendingToolUse {
+  toolName: string;
+  toolUseId: string;
+  input: Record<string, any>;
+}
+
 export interface WorkspaceClaude {
   process: ChildProcess | null;
   sessionId: string | undefined;
@@ -16,6 +22,10 @@ export interface WorkspaceClaude {
   } | null;
   busy: boolean;           // true while a turn is in progress
   suppressForward: boolean; // true during commit msg generation — suppresses IPC forwarding
+  // Approval flow state
+  pendingToolUse: PendingToolUse | null;
+  approvalBuffered: any[];
+  awaitingApproval: boolean;
 }
 
 export interface WorkspaceCodex {
@@ -61,6 +71,9 @@ export function getOrCreate(projectPath: string): Workspace {
       processConfig: null,
       busy: false,
       suppressForward: false,
+      pendingToolUse: null,
+      approvalBuffered: [],
+      awaitingApproval: false,
     },
     codex: {
       process: null,
@@ -103,6 +116,9 @@ export function suspend(projectPath: string, win: BrowserWindow): void {
   ws.claude.processConfig = null;
   ws.claude.busy = false;
   ws.claude.suppressForward = false;
+  ws.claude.pendingToolUse = null;
+  ws.claude.approvalBuffered = [];
+  ws.claude.awaitingApproval = false;
 
   // Kill Codex process
   if (ws.codex.process) {
