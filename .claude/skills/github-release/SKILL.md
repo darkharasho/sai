@@ -1,19 +1,19 @@
 ---
-name: mac-release
+name: github-release
 description: Create a release for SAI - bumps version, generates release notes, tags, pushes, and creates a draft GitHub release. CI automatically builds artifacts and publishes.
 user-invocable: true
 ---
 
-# /mac-release
+# /github-release
 
 Create a release for SAI. Bumps version, generates release notes, tags, pushes, and creates a draft GitHub release. The GitHub Actions workflow automatically builds artifacts for all platforms and publishes the release when done.
 
 ## Usage
 
 ```
-/mac-release patch
-/mac-release minor
-/mac-release major
+/github-release patch
+/github-release minor
+/github-release major
 ```
 
 The argument is required and must be one of `patch`, `minor`, or `major`.
