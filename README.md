@@ -18,7 +18,7 @@
 
 ## Stop context-switching. Start shipping.
 
-SAI is a desktop code editor built from the ground up around AI. No plugins. No bolt-on copilots. Just a seamless environment where you chat with Claude or Codex, edit code, run commands, and manage Git — all without ever leaving the window.
+SAI is a desktop code editor built from the ground up around AI. No plugins. No bolt-on copilots. Just a seamless environment where you chat with Claude, Codex, or Gemini, edit code, run commands, and manage Git — all without ever leaving the window.
 
 Open a project, pick your provider, ask it to build a feature, and watch it happen in real time. Review diffs, stage changes, commit — done. That's SAI.
 
@@ -28,26 +28,32 @@ Open a project, pick your provider, ask it to build a feature, and watch it happ
 
 ## Features
 
-### Swap AI providers without leaving the editor
-Use Claude or Codex CLI for the chat panel and switch between them from Settings. SAI keeps provider-specific settings separate, including model and permission preferences, so you can change backends without reconfiguring everything from scratch.
+### Bring your preferred AI CLI
+Use Claude, Codex CLI, or Gemini CLI in the chat panel and switch providers from Settings at any time. SAI keeps provider-specific models, approval controls, and conversation preferences separate, so swapping backends does not mean rebuilding your setup.
 
-### Chat in context
-Converse with your selected provider directly inside your editor. SAI sends your full project context so it understands your codebase — not just the snippet you pasted. Stream responses in real time, attach images, and pick up where you left off with persistent sessions.
+### Multi-project workspaces
+Keep multiple projects open in one app window and jump between them from the workspace switcher. Active workspaces show live status, background completions surface as notifications, and idle projects can be suspended automatically or manually to free resources.
 
-### Built-in code editor
-A full Monaco-powered editor with syntax highlighting, tabs, and split diff views. See exactly what your AI changed with inline diffs — unified or side-by-side. Expand any code block to a fullscreen view when you need to focus.
+### Chat with real project context
+Talk to your assistant inside the editor with your repository context already attached. SAI supports streaming responses, image attachments, file-aware prompting, persistent sessions, and a built-in chat history menu so you can resume past conversations without losing your place.
+
+### Review approvals, usage, and context in real time
+Stay in control while the model works. SAI exposes provider-specific approval modes, an inline approval panel for tool calls, context and token usage indicators, effort controls, and model pickers so you can trade off speed, cost, and autonomy without leaving the composer.
+
+### Built-in editor and diff review
+A full Monaco-powered editor with tabs, syntax highlighting, unsaved-change protection, and side-by-side or unified diff views. Open file links directly from chat, inspect generated patches, and expand embedded code blocks into a focused fullscreen editor when you need room.
 
 ### Integrated terminal
-A real terminal, not a toy. Full PTY support, interactive shell, clickable links, and proper color rendering — powered by XTerm.js. Runs in your project directory, ready when you need it.
+A real terminal, not a toy. Full PTY support, interactive shell, clickable links, localhost URLs, and proper color rendering — powered by XTerm.js. It runs in your project directory and is ready whenever the task needs a command instead of a prompt.
 
 ### First-class Git integration
-Stage files, switch branches, commit, push, and pull — all from the sidebar. See your change status at a glance, review diffs before committing, and let the active provider generate commit messages for you. Real-time polling keeps everything in sync.
+Stage files, commit all, switch or create branches, push, pull, discard changes, and review diffs from the sidebar. SAI keeps Git status fresh with background refreshes and can generate commit messages for you using the active provider once your changes are staged.
 
 ### File explorer with drag-and-drop
-Browse, create, rename, and delete files without touching the terminal. Drag and drop to reorganize. Right-click for quick actions. Everything stays anchored to your project root.
+Browse, create, rename, delete, and reorganize files without touching the terminal. Drag and drop entries to move them, use context menus for quick actions, and keep everything anchored to the current project root.
 
-### Auto-updates
-SAI checks for updates automatically and installs them seamlessly. Always on the latest version, zero effort.
+### Synced settings, notifications, and updates
+Sign in with GitHub to sync settings through a private `sai-config` repo across devices. SAI can send desktop notifications when background responses finish, badges active workspaces in the UI, and checks for app updates automatically.
 
 ---
 
@@ -66,8 +72,11 @@ SAI supports multiple chat backends. Install and authenticate the CLI for whiche
 
 - **Claude** — [Claude CLI](https://docs.anthropic.com/en/docs/claude-code)
 - **Codex** — `codex` CLI
+- **Gemini** — `gemini` CLI
 
 You can switch providers any time from `Settings → AI Provider → Chat provider`.
+
+Optional: sign in with GitHub inside SAI to enable cross-device settings sync.
 
 ### Build from source
 
