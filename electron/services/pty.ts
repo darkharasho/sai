@@ -22,10 +22,15 @@ export function registerTerminalHandlers(win: BrowserWindow) {
   ipcMain.handle('terminal:create', (_event, cwd: string) => {
     const shell = process.env.SHELL || '/bin/bash';
     const id = nextId++;
+    const env = { ...process.env } as Record<string, string>;
+    // Prevent child processes from grouping under SAI in the taskbar
+    delete env.GIO_LAUNCHED_DESKTOP_FILE;
+    delete env.GIO_LAUNCHED_DESKTOP_FILE_PID;
+    delete env.BAMF_DESKTOP_FILE_HINT;
     const term = pty.spawn(shell, ['--login'], {
       name: 'xterm-256color',
       cwd: cwd || process.env.HOME || '/',
-      env: process.env as Record<string, string>,
+      env,
     });
 
     allTerminals.set(id, term);
