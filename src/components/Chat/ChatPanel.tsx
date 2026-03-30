@@ -485,6 +485,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const [ready, setReady] = useState(false);
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
+  const [fileContextEnabled, setFileContextEnabled] = useState(true);
   const [contextUsage, setContextUsage] = useState<{ used: number; total: number; inputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; outputTokens: number }>({ used: 0, total: 1000000, inputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, outputTokens: 0 });
   const [sessionUsage, setSessionUsage] = useState<{ inputTokens: number; outputTokens: number }>({ inputTokens: 0, outputTokens: 0 });
   const [rateLimits, setRateLimits] = useState<Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number; utilization?: number }>>(new Map());
@@ -934,7 +935,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       );
     }
 
-    const prompt = activeFilePath ? `[File: ${activeFilePath}]\n\n${text}` : text;
+    const prompt = activeFilePath && fileContextEnabled ? `[File: ${activeFilePath}]\n\n${text}` : text;
     if (aiProvider === 'gemini') {
       (window.sai as any).geminiSend(projectPath, prompt, imagePaths, geminiApprovalMode, geminiConversationMode, geminiModel);
     } else if (aiProvider === 'codex') {
@@ -1015,6 +1016,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         sessionUsage={sessionUsage}
         rateLimits={rateLimits}
         activeFilePath={activeFilePath}
+        fileContextEnabled={fileContextEnabled}
+        onFileContextToggle={() => setFileContextEnabled(prev => !prev)}
         aiProvider={aiProvider}
         codexModel={codexModel}
         codexModels={codexModels}

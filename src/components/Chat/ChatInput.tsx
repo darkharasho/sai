@@ -4,7 +4,7 @@ import ApprovalPanel from './ApprovalPanel';
 import {
   SquarePlus, Slash, SquareSlash, AtSign, FileText, GitBranch, Terminal, Settings,
   MessageSquare, Zap, Send, Square, ShieldCheck, ShieldOff,
-  Paperclip, Image, ChevronDown, Minus, ChevronUp, ChevronsUp, Clock, Check,
+  Paperclip, Image, ChevronDown, Minus, ChevronUp, ChevronsUp, Clock, Check, EyeOff,
 } from 'lucide-react';
 
 type EffortLevel = 'low' | 'medium' | 'high' | 'max';
@@ -26,6 +26,8 @@ interface ChatInputProps {
   sessionUsage?: { inputTokens: number; outputTokens: number };
   rateLimits?: Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number; utilization?: number }>;
   activeFilePath?: string | null;
+  fileContextEnabled?: boolean;
+  onFileContextToggle?: () => void;
   aiProvider?: 'claude' | 'codex' | 'gemini';
   pendingApproval?: PendingApproval | null;
   onApprove?: (modifiedCommand?: string) => void;
@@ -199,7 +201,7 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, rateLimits, activeFilePath, aiProvider = 'claude', pendingApproval, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange }: ChatInputProps) {
+export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, rateLimits, activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange }: ChatInputProps) {
   const [value, setValue] = useState('');
   const [suggestions, setSuggestions] = useState<AutocompleteItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -523,8 +525,13 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           </button>
           {aiProvider === 'claude' && contextUsage && <ContextRing used={contextUsage.used} total={contextUsage.total} onClick={() => onSend('/compact')} />}
           {activeFilePath && (
-            <span className="active-file-chip" title={activeFilePath}>
-              <FileText size={11} />
+            <span
+              className={`active-file-chip${!fileContextEnabled ? ' disabled' : ''}`}
+              title={fileContextEnabled ? activeFilePath : `${activeFilePath} (excluded from context)`}
+              onClick={onFileContextToggle}
+              style={{ cursor: 'pointer' }}
+            >
+              {fileContextEnabled ? <FileText size={11} /> : <EyeOff size={11} />}
               {activeFilePath.split('/').pop()}
             </span>
           )}
@@ -1022,6 +1029,12 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           max-width: 180px;
           overflow: hidden;
           text-overflow: ellipsis;
+          transition: opacity 0.15s;
+        }
+        .active-file-chip:hover { border-color: var(--text-muted); }
+        .active-file-chip.disabled {
+          opacity: 0.4;
+          text-decoration: line-through;
         }
         .context-ring {
           display: flex;
