@@ -820,6 +820,11 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
+  // Scroll to bottom on mount (session switch remounts via key change)
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+  }, []);
+
   useEffect(() => {
     // Instant scroll on workspace switch
     if (prevProjectPathRef.current !== projectPath) {
