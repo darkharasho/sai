@@ -7,7 +7,7 @@ import { registerGitHandlers } from './services/git';
 import { registerFsHandlers } from './services/fs';
 import { registerUpdater } from './services/updater';
 import { registerUsageHandlers, destroyUsagePolling } from './services/usage';
-import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove, suspend, DEFAULT_SUSPEND_TIMEOUT } from './services/workspace';
+import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, getOrCreate, remove, suspend, DEFAULT_SUSPEND_TIMEOUT } from './services/workspace';
 import { registerGithubAuthHandlers } from './services/github-auth';
 import { initialSync, schedulePush } from './services/github-sync';
 import { registerCodexHandlers } from './services/codex';
@@ -187,6 +187,7 @@ function createWindow() {
 
   ipcMain.handle('project:openRecent', (_event, projectPath: string) => {
     addRecentProject(projectPath);
+    getOrCreate(projectPath);
     return projectPath;
   });
 
