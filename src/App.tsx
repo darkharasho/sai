@@ -294,22 +294,25 @@ export default function App() {
   }, [updateWorkspace]);
 
   // Listen for background workspace completions
-  const streamingWorkspacesRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
       if (!msg.projectPath) return;
       if (msg.type === 'streaming_start') {
-        streamingWorkspacesRef.current.add(msg.projectPath);
         setBusyWorkspaces(prev => new Set(prev).add(msg.projectPath));
       }
-      if (msg.type === 'done' && streamingWorkspacesRef.current.has(msg.projectPath)) {
-        streamingWorkspacesRef.current.delete(msg.projectPath);
-        setBusyWorkspaces(prev => { const next = new Set(prev); next.delete(msg.projectPath); return next; });
-        if (msg.projectPath !== activeProjectPathRef.current) {
-          const wsName = msg.projectPath.split('/').pop() || msg.projectPath;
-          setCompletedWorkspaces(prev => new Set(prev).add(msg.projectPath));
-          setToast({ message: `${wsName} has finished`, key: Date.now() });
-        }
+      if (msg.type === 'done') {
+        setBusyWorkspaces(prev => {
+          if (!prev.has(msg.projectPath)) return prev;
+          const next = new Set(prev);
+          next.delete(msg.projectPath);
+          // Notify if this was a background workspace
+          if (msg.projectPath !== activeProjectPathRef.current) {
+            const wsName = msg.projectPath.split('/').pop() || msg.projectPath;
+            setCompletedWorkspaces(p => new Set(p).add(msg.projectPath));
+            setToast({ message: `${wsName} has finished`, key: Date.now() });
+          }
+          return next;
+        });
       }
     });
     return cleanup;
