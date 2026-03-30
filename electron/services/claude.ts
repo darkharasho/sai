@@ -373,9 +373,41 @@ export function registerClaudeHandlers(win: BrowserWindow) {
         if (execResult.stderr) {
           result += (result ? '\n' : '') + execResult.stderr;
         }
+      } else if (pending.toolName === 'Write') {
+        const filePath = pending.input.file_path;
+        const content = pending.input.content || '';
+        const dir = path.dirname(filePath);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(filePath, content, 'utf-8');
+        result = `Successfully wrote to ${filePath}`;
+      } else if (pending.toolName === 'Edit') {
+        const filePath = pending.input.file_path;
+        const oldStr = pending.input.old_string;
+        const newStr = pending.input.new_string;
+        if (!fs.existsSync(filePath)) {
+          result = `File not found: ${filePath}`;
+          isError = true;
+        } else {
+          let fileContent = fs.readFileSync(filePath, 'utf-8');
+          if (!fileContent.includes(oldStr)) {
+            result = `old_string not found in ${filePath}`;
+            isError = true;
+          } else {
+            fileContent = fileContent.replace(oldStr, newStr);
+            fs.writeFileSync(filePath, fileContent, 'utf-8');
+            result = `Successfully edited ${filePath}`;
+          }
+        }
+      } else if (pending.toolName === 'Read') {
+        const filePath = pending.input.file_path;
+        if (!fs.existsSync(filePath)) {
+          result = `File not found: ${filePath}`;
+          isError = true;
+        } else {
+          result = fs.readFileSync(filePath, 'utf-8');
+        }
       } else {
-        // For non-bash tools, we can't execute them ourselves
-        result = `Tool "${pending.toolName}" was approved but SAI can only execute Bash commands directly.`;
+        result = `Tool "${pending.toolName}" was approved but SAI cannot execute it directly.`;
         isError = true;
       }
     } catch (err: any) {
