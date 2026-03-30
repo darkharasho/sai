@@ -21,7 +21,7 @@ jobs:
             args: --win nsis
           - os: macos-latest
             platform: mac
-            args: --mac dmg
+            args: --mac dmg zip
     runs-on: ${{ matrix.os }}
 
     steps:
