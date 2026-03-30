@@ -311,7 +311,9 @@ export function registerCodexHandlers(win: BrowserWindow) {
           // Mark not busy on turn completion
           if (msg.type === 'turn.completed' || msg.type === 'turn.failed') {
             ws.codex.busy = false;
-            notifyCompletion(win, ws.projectPath);
+            notifyCompletion(win, ws.projectPath, {
+              provider: 'Codex',
+            });
           }
         } catch { /* malformed JSON */ }
       }

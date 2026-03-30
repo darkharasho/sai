@@ -246,7 +246,9 @@ export function registerGeminiHandlers(win: BrowserWindow) {
           // Mark not busy on result
           if (msg.type === 'result') {
             ws.gemini.busy = false;
-            notifyCompletion(win, ws.projectPath);
+            notifyCompletion(win, ws.projectPath, {
+              provider: 'Gemini',
+            });
           }
         } catch { /* malformed JSON */ }
       }
