@@ -155,7 +155,7 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
                   </a>
                 ),
               }}
-            >{message.content}</ReactMarkdown>
+            >{typeof message.content === 'string' ? message.content : String(message.content ?? '')}</ReactMarkdown>
             {message.images && message.images.length > 0 && (
               <div className="chat-msg-images">
                 {message.images.map((src, i) => (
@@ -172,6 +172,13 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
       {lightboxSrc && <ImageModal src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
       <style>{`
         .chat-msg { margin-bottom: 12px; }
+        .chat-msg-user {
+          background: rgba(255, 255, 255, 0.02);
+          border-radius: 8px;
+          padding: 8px 10px;
+          margin-left: -10px;
+          margin-right: -10px;
+        }
         .chat-msg-content {
           display: flex;
           gap: 10px;
@@ -212,7 +219,7 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
           width: 14px;
           height: 14px;
           margin-top: 2px;
-          background-color: #4285f4;
+          background-color: var(--accent, #c7910c);
           -webkit-mask-image: url('svg/Google-gemini-icon.svg');
           mask-image: url('svg/Google-gemini-icon.svg');
           -webkit-mask-size: contain;

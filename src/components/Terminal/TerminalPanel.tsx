@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
+import { RotateCw } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
 
 export default function TerminalPanel({ projectPath }: { projectPath: string }) {
@@ -9,6 +10,11 @@ export default function TerminalPanel({ projectPath }: { projectPath: string }) 
   const xtermRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const termIdRef = useRef<number | null>(null);
+  const [restartKey, setRestartKey] = useState(0);
+
+  const handleRestart = useCallback(() => {
+    setRestartKey(k => k + 1);
+  }, []);
 
   useEffect(() => {
     if (!termRef.current) return;
@@ -47,6 +53,24 @@ export default function TerminalPanel({ projectPath }: { projectPath: string }) 
     xtermRef.current = xterm;
     fitRef.current = fit;
 
+    // Handle Ctrl+Shift+C (copy) and Ctrl+Shift+V (paste)
+    xterm.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.type === 'keydown') {
+        if (e.key === 'C' || e.code === 'KeyC') {
+          const sel = xterm.getSelection();
+          if (sel) navigator.clipboard.writeText(sel);
+          return false;
+        }
+        if (e.key === 'V' || e.code === 'KeyV') {
+          navigator.clipboard.readText().then(text => {
+            if (text) xterm.paste(text);
+          });
+          return false;
+        }
+      }
+      return true;
+    });
+
     // Create terminal in main process
     window.sai.terminalCreate(cwd).then((id: number) => {
       termIdRef.current = id;
@@ -78,12 +102,15 @@ export default function TerminalPanel({ projectPath }: { projectPath: string }) 
       resizeObserver.disconnect();
       xterm.dispose();
     };
-  }, [projectPath]);
+  }, [projectPath, restartKey]);
 
   return (
     <div className="terminal-panel">
       <div className="terminal-header">
         <span>TERMINAL</span>
+        <button className="terminal-restart-btn" onClick={handleRestart} title="Restart terminal">
+          <RotateCw size={12} />
+        </button>
       </div>
       <div className="terminal-content" ref={termRef} />
       <style>{`
@@ -104,6 +131,23 @@ export default function TerminalPanel({ projectPath }: { projectPath: string }) 
           border-bottom: 1px solid var(--border);
           letter-spacing: 0.5px;
           flex-shrink: 0;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+        .terminal-restart-btn {
+          background: none;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          padding: 2px;
+          display: flex;
+          align-items: center;
+          border-radius: 3px;
+        }
+        .terminal-restart-btn:hover {
+          color: var(--text);
+          background: var(--bg-hover);
         }
         .terminal-content {
           flex: 1;

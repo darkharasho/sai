@@ -37,6 +37,7 @@ export default function App() {
   const [geminiModels, setGeminiModels] = useState<{ id: string; name: string }[]>([]);
   const [geminiApprovalMode, setGeminiApprovalMode] = useState<GeminiApprovalMode>('default');
   const [geminiConversationMode, setGeminiConversationMode] = useState<GeminiConversationMode>('planning');
+  const [geminiLoadingPhrases, setGeminiLoadingPhrases] = useState<'witty' | 'tips' | 'all' | 'off'>('all');
   const [workspaces, setWorkspaces] = useState<Map<string, WorkspaceContext>>(new Map());
   const [pendingClose, setPendingClose] = useState<string | null>(null);
   // Ref to hold latest messages per workspace without triggering re-renders during streaming
@@ -113,6 +114,7 @@ export default function App() {
       if (g.model) setGeminiModel(g.model);
       if (g.approvalMode === 'default' || g.approvalMode === 'auto_edit' || g.approvalMode === 'yolo' || g.approvalMode === 'plan') setGeminiApprovalMode(g.approvalMode);
       if (g.conversationMode === 'planning' || g.conversationMode === 'fast') setGeminiConversationMode(g.conversationMode);
+      if (g.loadingPhrases === 'witty' || g.loadingPhrases === 'tips' || g.loadingPhrases === 'all' || g.loadingPhrases === 'off') setGeminiLoadingPhrases(g.loadingPhrases);
     });
     // Migrate flat keys to nested (one-time)
     Promise.all([
@@ -667,6 +669,11 @@ export default function App() {
     saveGeminiSetting('conversationMode', mode);
   };
 
+  const handleGeminiLoadingPhrasesChange = (mode: 'witty' | 'tips' | 'all' | 'off') => {
+    setGeminiLoadingPhrases(mode);
+    saveGeminiSetting('loadingPhrases', mode);
+  };
+
   const chatOpen = expanded.includes('chat');
   const editorOpen = expanded.includes('editor');
   const terminalOpen = expanded.includes('terminal');
@@ -753,6 +760,13 @@ export default function App() {
                               setHistoryOpen(false);
                             }}
                           >
+                            {session.aiProvider && (
+                              <img
+                                src={session.aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : session.aiProvider === 'codex' ? 'svg/openai.svg' : 'svg/claude.svg'}
+                                alt={session.aiProvider}
+                                className="history-provider-icon"
+                              />
+                            )}
                             <span className="dropdown-item-name">{session.title || 'Untitled'}</span>
                             <span className="dropdown-item-path">{formatSessionTime(session.updatedAt)}</span>
                           </button>
@@ -800,6 +814,7 @@ export default function App() {
                   onGeminiApprovalModeChange={handleGeminiApprovalModeChange}
                   geminiConversationMode={geminiConversationMode}
                   onGeminiConversationModeChange={handleGeminiConversationModeChange}
+                  geminiLoadingPhrases={geminiLoadingPhrases}
                   initialMessages={ws.activeSession.messages}
                   activeFilePath={ws.activeFilePath}
                   onFileOpen={handleFileOpen}
@@ -810,7 +825,7 @@ export default function App() {
                     const latestMessages = wsMessagesRef.current.get(wsPath) || [];
                     if (latestMessages.length === 0) return;
                     updateWorkspace(wsPath, w => {
-                      const updated = { ...w.activeSession, messages: latestMessages, updatedAt: Date.now() };
+                      const updated = { ...w.activeSession, messages: latestMessages, updatedAt: Date.now(), aiProvider };
                       if (!updated.title) {
                         const firstUserMsg = latestMessages.find(m => m.role === 'user');
                         if (firstUserMsg) updated.title = firstUserMsg.content.slice(0, 40);
@@ -864,6 +879,7 @@ export default function App() {
           if (key === 'editorFontSize') setEditorFontSize(value);
           if (key === 'editorMinimap') setEditorMinimap(value);
           if (key === 'aiProvider') setAiProvider(value);
+          if (key === 'geminiLoadingPhrases') handleGeminiLoadingPhrasesChange(value);
         }}
       />
       <div className="app-body">
@@ -1042,6 +1058,12 @@ export default function App() {
         }
         .chat-history-dropdown .history-item.active .dropdown-item-path {
           color: #fff;
+        }
+        .history-provider-icon {
+          width: 12px;
+          height: 12px;
+          flex-shrink: 0;
+          opacity: 0.6;
         }
         .accordion-bar-detail {
           font-weight: 400;

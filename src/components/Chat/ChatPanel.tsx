@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Dot, Minus, Plus, Asterisk, SunDim, SunMedium, Sun, ChevronDown } from 'lucide-react';
+import { Dot, Minus, Plus, Asterisk, SunDim, SunMedium, Sun, ChevronDown, LocateFixed } from 'lucide-react';
 
 const THINKING_WORDS = [
   'Thinking', 'Pondering', 'Ruminating', 'Cogitating', 'Deliberating',
@@ -102,14 +102,190 @@ function CodexThinkingAnimation() {
   );
 }
 
-function GeminiThinkingAnimation() {
+const GEMINI_COLORS = ['#D7AFFF', '#87AFFF', '#87D7D7', '#D7FFD7', '#FFFFAF', '#FF87AF'];
+const COLOR_CYCLE_MS = 4000;
+const BRAILLE_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+function lerpColor(a: string, b: string, t: number): string {
+  const parse = (hex: string) => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+  const [r1, g1, b1] = parse(a);
+  const [r2, g2, b2] = parse(b);
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const bl = Math.round(b1 + (b2 - b1) * t);
+  return `rgb(${r},${g},${bl})`;
+}
+
+// Witty loading phrases (from Gemini CLI, Apache 2.0)
+const GEMINI_WITTY = [
+  "I'm Feeling Lucky", "Shipping awesomeness", "Painting the serifs back on",
+  "Navigating the slime mold", "Consulting the digital spirits", "Reticulating splines",
+  "Warming up the AI hamsters", "Asking the magic conch shell", "Generating witty retort",
+  "Polishing the algorithms", "Don't rush perfection (or my code)", "Brewing fresh bytes",
+  "Counting electrons", "Engaging cognitive processors",
+  "Checking for syntax errors in the universe", "One moment, optimizing humor",
+  "Shuffling punchlines", "Untangling neural nets", "Compiling brilliance",
+  "Loading wit.exe", "Summoning the cloud of wisdom", "Preparing a witty response",
+  "Just a sec, I'm debugging reality", "Confuzzling the options",
+  "Tuning the cosmic frequencies", "Crafting a response worthy of your patience",
+  "Compiling the 1s and 0s", "Resolving dependencies... and existential crises",
+  "Defragmenting memories... both RAM and personal", "Rebooting the humor module",
+  "Caching the essentials (mostly cat memes)", "Optimizing for ludicrous speed",
+  "Swapping bits... don't tell the bytes", "Garbage collecting... be right back",
+  "Assembling the interwebs", "Converting coffee into code",
+  "Updating the syntax for reality", "Rewiring the synapses",
+  "Looking for a misplaced semicolon", "Greasin' the cogs of the machine",
+  "Pre-heating the servers", "Calibrating the flux capacitor",
+  "Engaging the improbability drive", "Channeling the Force",
+  "Aligning the stars for optimal response", "So say we all",
+  "Loading the next great idea", "Just a moment, I'm in the zone",
+  "Preparing to dazzle you with brilliance", "Just a tick, I'm polishing my wit",
+  "Hold tight, I'm crafting a masterpiece", "Just a jiffy, I'm debugging the universe",
+  "Just a moment, I'm aligning the pixels", "Warp speed engaged",
+  "Mining for more Dilithium crystals", "Don't panic",
+  "Following the white rabbit", "The truth is in here... somewhere",
+  "Blowing on the cartridge", "Loading... Do a barrel roll!",
+  "Waiting for the respawn", "Finishing the Kessel Run in less than 12 parsecs",
+  "The cake is not a lie, it's just still loading",
+  "Fiddling with the character creation screen",
+  "Just a moment, I'm finding the right meme", "Pressing 'A' to continue",
+  "Herding digital cats", "Polishing the pixels",
+  "Finding a suitable loading screen pun", "Distracting you with this witty phrase",
+  "Almost there... probably", "Our hamsters are working as fast as they can",
+  "Giving Cloudy a pat on the head", "Petting the cat", "Slapping the bass",
+  "I'm going the distance, I'm going for speed",
+  "Is this the real life? Is this just fantasy?",
+  "I've got a good feeling about this", "Doing research on the latest memes",
+  "Hmmm... let me think",
+  "Why don't programmers like nature? It has too many bugs",
+  "Why do programmers prefer dark mode? Because light attracts bugs",
+  "Why did the developer go broke? Because they used up all their cache",
+  "Applying percussive maintenance", "Searching for the correct USB orientation",
+  "Ensuring the magic smoke stays inside the wires",
+  "Rewriting in Rust for no particular reason", "Trying to exit Vim",
+  "Spinning up the hamster wheel",
+  "That's not a bug, it's an undocumented feature",
+  "Engage.", "I'll be back... with an answer.", "My other process is a TARDIS",
+  "Communing with the machine spirit", "Letting the thoughts marinate",
+  "Just remembered where I put my keys", "Pondering the orb",
+  "I've seen things you people wouldn't believe... like a user who reads loading messages.",
+  "Initiating thoughtful gaze", "What's a computer's favorite snack? Microchips.",
+  "Why do Java developers wear glasses? Because they don't C#.",
+  "Charging the laser... pew pew!", "Dividing by zero... just kidding!",
+  "Making it go beep boop.", "Buffering... because even AIs need a moment.",
+  "Entangling quantum particles for a faster response",
+  "Are you not entertained? (Working on it!)",
+  "Just waiting for the dial-up tone to finish",
+  "Pretty sure there's a cat walking on the keyboard somewhere",
+  "Enhancing... Enhancing... Still loading.",
+  "It's not a bug, it's a feature... of this loading screen.",
+  "Have you tried turning it off and on again? (The loading screen, not me.)",
+  "Constructing additional pylons", "Releasing the HypnoDrones",
+];
+
+// Informative tips about Gemini CLI features (from Gemini CLI, Apache 2.0)
+const GEMINI_TIPS = [
+  "Restore project files to a previous state with /restore…",
+  "Clear the screen and history with /clear…",
+  "Save tokens by summarizing the context with /compress…",
+  "Copy the last response to your clipboard with /copy…",
+  "Open the full documentation in your browser with /docs…",
+  "Add directories to your workspace with /directory add <path>…",
+  "Get help on commands with /help…",
+  "Create a project-specific GEMINI.md file with /init…",
+  "List configured MCP servers and tools with /mcp list…",
+  "See the current instructional context with /memory show…",
+  "Choose your Gemini model with /model…",
+  "Check model-specific usage stats with /stats model…",
+  "Check tool-specific usage stats with /stats tools…",
+  "Change the CLI's color theme with /theme…",
+  "List all available tools with /tools…",
+  "View and edit settings with /settings…",
+  "Toggle Vim keybindings on and off with /vim…",
+  "Execute any shell command with !<command>…",
+  "Share your conversation to a file with /resume share <file>…",
+  "Save your current conversation with /resume save <tag>…",
+  "Resume a saved conversation with /resume resume <tag>…",
+  "Close dialogs and suggestions with Esc…",
+  "Cancel a request with Ctrl+C, or press twice to exit…",
+  "Clear your screen at any time with Ctrl+L…",
+  "Toggle auto-approval (YOLO mode) for all tools with Ctrl+Y…",
+  "Cycle through approval modes with Shift+Tab…",
+  "Toggle Markdown rendering with Alt+M…",
+  "Toggle shell mode by typing ! in an empty prompt…",
+  "Insert a newline with a backslash (\\) followed by Enter…",
+  "Navigate your prompt history with the Up and Down arrows…",
+  "Search through command history with Ctrl+R…",
+  "Accept an autocomplete suggestion with Tab or Enter…",
+  "Personalize your CLI with a new color theme (/settings)…",
+  "Don't like these tips? You can hide them (/settings)…",
+  "Customize loading phrases: tips, witty, all, or off (/settings)…",
+  "Show citations to see where the model gets information (/settings)…",
+  "Enable AI-powered prompt completion while typing (/settings)…",
+  "Automatically accept safe read-only tool calls (/settings)…",
+  "Enable checkpointing to recover your session after a crash (settings.json)…",
+  "Run tools in a secure sandbox environment (settings.json)…",
+  "Define and manage connections to MCP servers (settings.json)…",
+  "Set your preferred editor for opening files (/settings)…",
+  "File a bug report directly with /bug…",
+];
+
+function getGeminiHints(mode: 'witty' | 'tips' | 'all' | 'off'): string[] {
+  if (mode === 'witty') return GEMINI_WITTY;
+  if (mode === 'tips') return GEMINI_TIPS;
+  if (mode === 'all') return [...GEMINI_WITTY, ...GEMINI_TIPS];
+  return [];
+}
+
+
+function GeminiThinkingAnimation({ loadingPhrases = 'all' }: { loadingPhrases?: 'witty' | 'tips' | 'all' | 'off' }) {
+  const hints = useMemo(() => getGeminiHints(loadingPhrases), [loadingPhrases]);
+  const [frame, setFrame] = useState(0);
+  const [color, setColor] = useState(GEMINI_COLORS[0]);
+  const [hintIndex, setHintIndex] = useState(() => hints.length > 0 ? Math.floor(Math.random() * hints.length) : 0);
+
+  // Braille spinner at 80ms
+  useEffect(() => {
+    const interval = setInterval(() => setFrame(f => (f + 1) % BRAILLE_FRAMES.length), 80);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Smooth rainbow color cycle over 4s
+  useEffect(() => {
+    let raf: number;
+    const start = Date.now();
+    const tick = () => {
+      const elapsed = (Date.now() - start) % COLOR_CYCLE_MS;
+      const progress = elapsed / COLOR_CYCLE_MS;
+      const pos = progress * GEMINI_COLORS.length;
+      const idx = Math.floor(pos);
+      const t = pos - idx;
+      const c1 = GEMINI_COLORS[idx % GEMINI_COLORS.length];
+      const c2 = GEMINI_COLORS[(idx + 1) % GEMINI_COLORS.length];
+      setColor(lerpColor(c1, c2, t));
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  // Cycle hints every 5 seconds
+  useEffect(() => {
+    if (hints.length === 0) return;
+    const hintInterval = setInterval(() => {
+      setHintIndex(prev => {
+        let next;
+        do { next = Math.floor(Math.random() * hints.length); } while (next === prev && hints.length > 1);
+        return next;
+      });
+    }, 5000);
+    return () => clearInterval(hintInterval);
+  }, [hints]);
+
   return (
     <div className="gemini-thinking">
-      <div className="gemini-dots">
-        {[0, 1, 2, 3, 4, 5].map(i => (
-          <span key={i} className="gemini-dot" style={{ animationDelay: `${i * 0.33}s` }} />
-        ))}
-      </div>
+      <span className="gemini-spinner" style={{ color }}>{BRAILLE_FRAMES[frame]}</span>
+      <span className="gemini-hint">{hints.length > 0 ? hints[hintIndex] : 'Thinking...'}</span>
     </div>
   );
 }
@@ -141,6 +317,7 @@ interface ChatPanelProps {
   onGeminiApprovalModeChange: (mode: 'default' | 'auto_edit' | 'yolo' | 'plan') => void;
   geminiConversationMode: 'planning' | 'fast';
   onGeminiConversationModeChange: (mode: 'planning' | 'fast') => void;
+  geminiLoadingPhrases?: 'witty' | 'tips' | 'all' | 'off';
   initialMessages?: ChatMessageType[];
   onMessagesChange?: (messages: ChatMessageType[]) => void;
   onTurnComplete?: () => void;
@@ -301,7 +478,7 @@ const EMPTY_PROMPTS = [
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, initialMessages, onMessagesChange, onTurnComplete, activeFilePath, onFileOpen }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, activeFilePath, onFileOpen }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessageType[]>(initialMessages || []);
   const emptyPrompt = useMemo(() => EMPTY_PROMPTS[Math.floor(Math.random() * EMPTY_PROMPTS.length)], []);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -498,8 +675,16 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
         if (text || tools.length > 0) {
           setMessages(prev => {
-            // Each assistant message is a new message in the chat
-            // (Claude may send multiple during multi-turn)
+            const last = prev[prev.length - 1];
+            // Append text to the last assistant message only if it's a pure text message
+            // (no tool calls). This handles streaming deltas from Gemini.
+            // If the last message has tool calls, always create a new message so
+            // tool cards stay above the follow-up text response.
+            if (last?.role === 'assistant' && text && !tools.length && !last.toolCalls) {
+              const updated = [...prev];
+              updated[updated.length - 1] = { ...last, content: last.content + text };
+              return updated;
+            }
             return [...prev, {
               id: `${Date.now()}-${Math.random()}`,
               role: 'assistant',
@@ -721,6 +906,13 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       {showPinnedPrompt && lastUserMessage && (
         <div className="pinned-prompt-bar">
           <span className="pinned-prompt-text">{lastUserMessage.content}</span>
+          <button
+            className="pinned-prompt-jump"
+            onClick={() => lastUserMsgRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+            title="Jump to message"
+          >
+            <LocateFixed size={12} />
+          </button>
         </div>
       )}
       <div className="chat-messages" ref={chatContainerRef} onScroll={handleScroll}>
@@ -745,7 +937,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           </>
         )}
         {isStreaming && (aiProvider === 'gemini'
-          ? <GeminiThinkingAnimation />
+          ? <GeminiThinkingAnimation loadingPhrases={geminiLoadingPhrases} />
           : aiProvider === 'codex'
           ? <CodexThinkingAnimation />
           : <ThinkingAnimation hasContent={messages[messages.length - 1]?.role === 'assistant'} />
@@ -838,6 +1030,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           min-width: 0;
         }
         .pinned-prompt-text {
+          flex: 1;
           font-size: 12px;
           color: var(--text-muted);
           opacity: 0.6;
@@ -845,6 +1038,24 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           overflow: hidden;
           text-overflow: ellipsis;
           font-family: 'JetBrains Mono', monospace;
+        }
+        .pinned-prompt-jump {
+          flex-shrink: 0;
+          background: none;
+          border: none;
+          color: var(--text-muted);
+          opacity: 0.4;
+          cursor: pointer;
+          padding: 2px;
+          margin-left: 8px;
+          display: flex;
+          align-items: center;
+          border-radius: 3px;
+          transition: opacity 0.15s;
+        }
+        .pinned-prompt-jump:hover {
+          opacity: 1;
+          color: var(--accent);
         }
         .chat-messages {
           flex: 1;
@@ -944,48 +1155,27 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         .gemini-thinking {
           display: flex;
           align-items: center;
-          gap: 10px;
-          margin-left: 24px;
+          gap: 8px;
           padding: 8px 0;
+          margin-bottom: 12px;
         }
-        .gemini-dots {
-          display: grid;
-          grid-template-columns: repeat(3, 6px);
-          grid-template-rows: repeat(2, 6px);
-          gap: 3px;
+        .gemini-spinner {
+          font-size: 18px;
+          line-height: 1;
+          flex-shrink: 0;
         }
-        .gemini-dot {
-          width: 6px;
-          height: 6px;
-          border-radius: 50%;
-          background: rgba(66, 133, 244, 0.25);
-          animation: gemini-dot-pulse 2s ease-in-out infinite;
+        .gemini-hint {
+          font-size: 13px;
+          font-style: italic;
+          color: var(--text);
+          opacity: 0.85;
+          animation: gemini-hint-fade 5s ease-in-out infinite;
         }
-        @keyframes gemini-dot-pulse {
-          0%, 100% {
-            background: rgba(66, 133, 244, 0.25);
-            transform: scale(1);
-          }
-          16.6% {
-            background: #4285f4;
-            transform: scale(1.3);
-          }
-          33.3% {
-            background: rgba(168, 85, 247, 0.25);
-            transform: scale(1);
-          }
-          50% {
-            background: #a855f7;
-            transform: scale(1.3);
-          }
-          66.6% {
-            background: rgba(234, 67, 53, 0.25);
-            transform: scale(1);
-          }
-          83.3% {
-            background: #ea4335;
-            transform: scale(1.3);
-          }
+        @keyframes gemini-hint-fade {
+          0% { opacity: 0; }
+          8% { opacity: 0.85; }
+          88% { opacity: 0.85; }
+          100% { opacity: 0; }
         }
       `}</style>
     </div>

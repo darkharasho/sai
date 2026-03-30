@@ -13,6 +13,7 @@ export interface ChatSession {
   messages: ChatMessage[];
   createdAt: number;
   updatedAt: number;
+  aiProvider?: 'claude' | 'codex' | 'gemini';
 }
 
 export interface ToolCall {

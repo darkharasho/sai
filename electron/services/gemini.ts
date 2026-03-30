@@ -51,7 +51,7 @@ const GEMINI_MODELS: { id: string; name: string }[] = [
   { id: 'auto-gemini-3', name: 'Auto (Gemini 3)' },
   { id: 'auto-gemini-2.5', name: 'Auto (Gemini 2.5)' },
   { id: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro' },
-  { id: 'gemini-3-flash', name: 'Gemini 3 Flash' },
+  { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash' },
   { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
   { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
   { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite' },
@@ -75,11 +75,17 @@ function translateEvent(msg: any, projectPath: string): any[] {
       // Skip user message echoes
       if (msg.role === 'user') break;
       if (msg.role === 'assistant' && msg.content) {
+        // msg.content can be a string or an object/array — ensure we emit a string
+        const text = typeof msg.content === 'string'
+          ? msg.content
+          : typeof msg.content === 'object' && msg.content !== null
+            ? (msg.content.text || JSON.stringify(msg.content))
+            : String(msg.content);
         events.push({
           type: 'assistant',
           projectPath,
           message: {
-            content: [{ type: 'text', text: msg.content }],
+            content: [{ type: 'text', text }],
           },
         });
       }
@@ -87,8 +93,8 @@ function translateEvent(msg: any, projectPath: string): any[] {
     }
 
     case 'tool_use': {
-      const name = msg.name || msg.tool || 'unknown';
-      const input = msg.arguments || msg.input || {};
+      const name = msg.tool_name || msg.name || msg.tool || 'unknown';
+      const input = msg.parameters || msg.arguments || msg.input || {};
       events.push({
         type: 'assistant',
         projectPath,
@@ -110,10 +116,14 @@ function translateEvent(msg: any, projectPath: string): any[] {
     case 'result': {
       const stats = msg.stats;
       if (msg.status === 'error' || msg.error) {
+        const err = msg.error;
+        const errText = typeof err === 'string' ? err
+          : typeof err === 'object' && err !== null ? (err.message || JSON.stringify(err))
+          : msg.message || 'Gemini error';
         events.push({
           type: 'error',
           projectPath,
-          text: msg.error || msg.message || 'Gemini error',
+          text: errText,
         });
       } else if (stats) {
         events.push({
@@ -131,14 +141,19 @@ function translateEvent(msg: any, projectPath: string): any[] {
       break;
     }
 
-    case 'error':
+    case 'error': {
+      const errMsg = typeof msg.message === 'string' ? msg.message
+        : typeof msg.error === 'string' ? msg.error
+        : typeof msg.error === 'object' && msg.error?.message ? msg.error.message
+        : 'Gemini error';
       events.push({
         type: 'error',
         projectPath,
-        text: msg.message || msg.error || 'Gemini error',
+        text: errMsg,
       });
       events.push({ type: 'done', projectPath });
       break;
+    }
 
     default:
       break;
@@ -191,8 +206,8 @@ export function registerGeminiHandlers(win: BrowserWindow) {
 
     const args = ['-p', prompt, '--output-format', 'stream-json'];
 
-    // Conversation mode: 'fast' overrides model to gemini-3-flash
-    const effectiveModel = conversationMode === 'fast' ? 'gemini-3-flash' : (model || GEMINI_DEFAULT_MODEL);
+    // Conversation mode: 'fast' overrides model to flash
+    const effectiveModel = conversationMode === 'fast' ? 'flash' : (model || GEMINI_DEFAULT_MODEL);
     args.push('-m', effectiveModel);
 
     // Approval mode

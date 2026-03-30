@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, RefreshCw, Check, AlertCircle, ChevronDown } from 'lucide-react';
+import { X, Check, ChevronDown } from 'lucide-react';
 
 interface Props {
   onClose: () => void;
@@ -43,6 +43,7 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
   const [aiProvider, setAiProvider] = useState<'claude' | 'codex' | 'gemini'>('claude');
   const [providerOpen, setProviderOpen] = useState(false);
   const providerRef = useRef<HTMLDivElement>(null);
+  const [geminiLoadingPhrases, setGeminiLoadingPhrases] = useState<'witty' | 'tips' | 'all' | 'off'>('all');
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [lastSynced, setLastSynced] = useState<number | null>(null);
   const [isAuthed, setIsAuthed] = useState(false);
@@ -51,6 +52,9 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
     window.sai.settingsGet('suspendTimeout', DEFAULT_TIMEOUT).then((v: number) => setSuspendTimeout(v));
     window.sai.settingsGet('editorFontSize', 13).then((v: number) => setEditorFontSize(v));
     window.sai.settingsGet('editorMinimap', true).then((v: boolean) => setEditorMinimap(v));
+    window.sai.settingsGet('gemini', {}).then((g: any) => {
+      if (g.loadingPhrases === 'witty' || g.loadingPhrases === 'tips' || g.loadingPhrases === 'all' || g.loadingPhrases === 'off') setGeminiLoadingPhrases(g.loadingPhrases);
+    });
     window.sai.settingsGet('aiProvider', 'claude').then((v: string) => {
       if (v === 'claude' || v === 'codex' || v === 'gemini') setAiProvider(v as 'claude' | 'codex' | 'gemini');
     });
@@ -105,6 +109,14 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
     onSettingChange?.('aiProvider', value);
   };
 
+  const handleGeminiLoadingPhrasesChange = (value: 'witty' | 'tips' | 'all' | 'off') => {
+    setGeminiLoadingPhrases(value);
+    window.sai.settingsGet('gemini', {}).then((existing: any) => {
+      window.sai.settingsSet('gemini', { ...existing, loadingPhrases: value });
+    });
+    onSettingChange?.('geminiLoadingPhrases', value);
+  };
+
   const handleSyncNow = () => {
     setSyncStatus('syncing');
     window.sai.githubSyncNow();
@@ -117,16 +129,16 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
           <span className="settings-title">Settings</span>
           <div className="settings-header-right">
             {isAuthed && (
-              <div className="sync-status">
-                {syncStatus === 'syncing' && <><RefreshCw size={12} className="sync-spin" /><span>Syncing…</span></>}
-                {syncStatus === 'synced' && <><Check size={12} className="sync-ok" /><span>Synced {lastSynced ? formatRelative(lastSynced) : ''}</span></>}
-                {syncStatus === 'error' && <><AlertCircle size={12} className="sync-err" /><span>Sync failed</span></>}
-                {(syncStatus === 'idle' || syncStatus === 'error') && (
-                  <button className="sync-btn" onClick={handleSyncNow} title="Sync now">
-                    <RefreshCw size={12} />
-                  </button>
-                )}
-              </div>
+              <button
+                className={`sync-dot sync-dot-${syncStatus}`}
+                onClick={handleSyncNow}
+                title={
+                  syncStatus === 'syncing' ? 'Syncing to GitHub…' :
+                  syncStatus === 'synced' ? `Synced ${lastSynced ? formatRelative(lastSynced) : ''}` :
+                  syncStatus === 'error' ? 'Sync failed — click to retry' :
+                  'Click to sync settings'
+                }
+              />
             )}
             <button className="settings-close" onClick={onClose}><X size={16} /></button>
           </div>
@@ -238,6 +250,29 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
             </div>
           </section>
 
+          <div className="settings-divider" />
+
+          <section className="settings-section">
+            <div className="settings-section-label">Gemini</div>
+
+            <div className="settings-row">
+              <div className="settings-row-info">
+                <div className="settings-row-name">Loading phrases</div>
+                <div className="settings-row-desc">What to show while Gemini is thinking</div>
+              </div>
+              <select
+                className="settings-select"
+                value={geminiLoadingPhrases}
+                onChange={e => handleGeminiLoadingPhrasesChange(e.target.value as any)}
+              >
+                <option value="all">All (witty + tips)</option>
+                <option value="witty">Witty phrases</option>
+                <option value="tips">Informative tips</option>
+                <option value="off">Off</option>
+              </select>
+            </div>
+          </section>
+
           {isAuthed && (
             <>
               <div className="settings-divider" />
@@ -290,27 +325,42 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
             display: flex;
           }
           .settings-close:hover { color: var(--text); background: var(--bg-hover); }
-          .sync-status {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            font-size: 11px;
-            color: var(--text-muted);
-          }
-          .sync-spin { animation: spin 1s linear infinite; }
-          @keyframes spin { to { transform: rotate(360deg); } }
-          .sync-ok { color: var(--green); }
-          .sync-err { color: #f87171; }
-          .sync-btn {
-            background: none;
+          .sync-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
             border: none;
-            color: var(--text-muted);
+            padding: 0;
             cursor: pointer;
-            padding: 3px;
-            border-radius: 3px;
-            display: flex;
+            background: var(--text-muted);
+            opacity: 0.3;
+            transition: opacity 0.3s, background 0.3s, box-shadow 0.3s;
+            flex-shrink: 0;
           }
-          .sync-btn:hover { color: var(--text); background: var(--bg-hover); }
+          .sync-dot:hover { opacity: 0.8; }
+          .sync-dot-syncing {
+            background: var(--accent);
+            opacity: 1;
+            animation: sync-pulse 1s ease-in-out infinite;
+          }
+          .sync-dot-synced {
+            background: var(--green);
+            opacity: 1;
+            animation: sync-fade 2s ease-out forwards;
+          }
+          .sync-dot-error {
+            background: #f87171;
+            opacity: 1;
+          }
+          @keyframes sync-pulse {
+            0%, 100% { opacity: 0.4; }
+            50% { opacity: 1; }
+          }
+          @keyframes sync-fade {
+            0% { opacity: 1; }
+            60% { opacity: 1; }
+            100% { opacity: 0.3; }
+          }
           .settings-body { padding: 20px; }
           .settings-section-label {
             font-size: 10px;
