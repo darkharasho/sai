@@ -71,8 +71,8 @@ Grab the latest release for your platform:
 SAI supports multiple chat backends. Install and authenticate the CLI for whichever provider you want to use:
 
 - **Claude** — [Claude CLI](https://docs.anthropic.com/en/docs/claude-code)
-- **Codex** — `codex` CLI
-- **Gemini** — `gemini` CLI
+- **Codex** — [Codex CLI](https://developers.openai.com/codex/cli)
+- **Gemini** — [Gemini CLI](https://geminicli.com/)
 
 You can switch providers any time from `Settings → AI Provider → Chat provider`.
 
