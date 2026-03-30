@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { getOrCreate, get, touchActivity } from './workspace';
+import { notifyCompletion } from './notify';
 
 /**
  * Build an enriched PATH that includes common locations for nvm/fnm/volta-installed binaries.
@@ -310,7 +311,7 @@ export function registerCodexHandlers(win: BrowserWindow) {
           // Mark not busy on turn completion
           if (msg.type === 'turn.completed' || msg.type === 'turn.failed') {
             ws.codex.busy = false;
-            if (!win.isFocused()) win.flashFrame(true);
+            notifyCompletion(win, ws.projectPath);
           }
         } catch { /* malformed JSON */ }
       }

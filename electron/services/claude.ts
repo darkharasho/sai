@@ -4,6 +4,7 @@ import { getOrCreate, get, touchActivity } from './workspace';
 import type { PendingToolUse } from './workspace';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { notifyCompletion } from './notify';
 
 const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
 
@@ -195,7 +196,7 @@ function ensureProcess(
           ws.claude.busy = false;
           safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath });
           safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
-          if (!win.isFocused()) win.flashFrame(true);
+          notifyCompletion(win, ws.projectPath);
           continue;
         }
 

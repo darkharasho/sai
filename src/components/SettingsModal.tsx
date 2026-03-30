@@ -44,6 +44,7 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
   const [providerOpen, setProviderOpen] = useState(false);
   const providerRef = useRef<HTMLDivElement>(null);
   const [geminiLoadingPhrases, setGeminiLoadingPhrases] = useState<'witty' | 'tips' | 'all' | 'off'>('all');
+  const [systemNotifications, setSystemNotifications] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [lastSynced, setLastSynced] = useState<number | null>(null);
   const [isAuthed, setIsAuthed] = useState(false);
@@ -55,6 +56,7 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
     window.sai.settingsGet('gemini', {}).then((g: any) => {
       if (g.loadingPhrases === 'witty' || g.loadingPhrases === 'tips' || g.loadingPhrases === 'all' || g.loadingPhrases === 'off') setGeminiLoadingPhrases(g.loadingPhrases);
     });
+    window.sai.settingsGet('systemNotifications', false).then((v: boolean) => setSystemNotifications(v));
     window.sai.settingsGet('aiProvider', 'claude').then((v: string) => {
       if (v === 'claude' || v === 'codex' || v === 'gemini') setAiProvider(v as 'claude' | 'codex' | 'gemini');
     });
@@ -71,6 +73,7 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
       if ('editorFontSize' in remote) setEditorFontSize(remote.editorFontSize);
       if ('editorMinimap' in remote) setEditorMinimap(remote.editorMinimap);
       if ('aiProvider' in remote && (remote.aiProvider === 'claude' || remote.aiProvider === 'codex' || remote.aiProvider === 'gemini')) setAiProvider(remote.aiProvider);
+      if ('systemNotifications' in remote) setSystemNotifications(remote.systemNotifications);
     });
 
     return () => { unsubSync(); unsubApplied(); };
@@ -115,6 +118,11 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
       window.sai.settingsSet('gemini', { ...existing, loadingPhrases: value });
     });
     onSettingChange?.('geminiLoadingPhrases', value);
+  };
+
+  const handleSystemNotificationsChange = (value: boolean) => {
+    setSystemNotifications(value);
+    window.sai.settingsSet('systemNotifications', value);
   };
 
   const handleSyncNow = () => {
@@ -247,6 +255,27 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
               </select>
+            </div>
+          </section>
+
+          <div className="settings-divider" />
+
+          <section className="settings-section">
+            <div className="settings-section-label">Notifications</div>
+
+            <div className="settings-row">
+              <div className="settings-row-info">
+                <div className="settings-row-name">System notifications</div>
+                <div className="settings-row-desc">Send a desktop notification when a response completes and the app is not focused</div>
+              </div>
+              <button
+                className={`settings-toggle${systemNotifications ? ' on' : ''}`}
+                onClick={() => handleSystemNotificationsChange(!systemNotifications)}
+                role="switch"
+                aria-checked={systemNotifications}
+              >
+                <span className="settings-toggle-thumb" />
+              </button>
             </div>
           </section>
 
