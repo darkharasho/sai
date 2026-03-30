@@ -492,6 +492,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const lastUserMsgRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
+  const prevProjectPathRef = useRef(projectPath);
   const [showPinnedPrompt, setShowPinnedPrompt] = useState(false);
   const [showNewMessages, setShowNewMessages] = useState(false);
 
@@ -819,13 +820,21 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   }, []);
 
   useEffect(() => {
+    // Instant scroll on workspace switch
+    if (prevProjectPathRef.current !== projectPath) {
+      prevProjectPathRef.current = projectPath;
+      isAtBottomRef.current = true;
+      setShowNewMessages(false);
+      messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+      return;
+    }
     if (isAtBottomRef.current) {
       setShowNewMessages(false);
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     } else if (messages[messages.length - 1]?.role === 'assistant') {
       setShowNewMessages(true);
     }
-  }, [messages, isStreaming]);
+  }, [messages, isStreaming, projectPath]);
 
   const scrollToBottom = () => {
     isAtBottomRef.current = true;
