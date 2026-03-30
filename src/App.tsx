@@ -991,7 +991,7 @@ export default function App() {
       <div className="app-body">
         <NavBar activeSidebar={sidebarOpen} onToggle={toggleSidebar} gitChangeCount={gitChangeCount} />
         {sidebarOpen === 'files' && <FileExplorerSidebar projectPath={projectPath} onFileOpen={handleFileOpen} />}
-        {sidebarOpen === 'git' && <GitSidebar projectPath={projectPath} onFileClick={handleFileClick} />}
+        {sidebarOpen === 'git' && <GitSidebar projectPath={projectPath} onFileClick={handleFileClick} aiProvider={aiProvider} />}
         <div className="main-content" ref={mainContentRef}>
           {allPanels.map((panel, i) => (
             <div key={panel} style={{ display: 'contents' }}>

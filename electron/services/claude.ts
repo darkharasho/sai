@@ -493,7 +493,8 @@ export function registerClaudeHandlers(win: BrowserWindow) {
   });
 
   // claude:generateCommitMessage — always one-shot to avoid context token costs
-  ipcMain.handle('claude:generateCommitMessage', async (_event, cwd: string) => {
+  // Uses each AI provider's fast/cheap model for generation.
+  ipcMain.handle('claude:generateCommitMessage', async (_event, cwd: string, aiProvider?: string) => {
     const ws = get(cwd);
     const effectiveCwd = cwd || ws?.claude.cwd || process.env.HOME || '/';
 
@@ -520,23 +521,60 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 
     const commitPrompt = `Generate a concise commit message for this diff. Output ONLY the commit message text, nothing else. Use conventional commit format (e.g. feat:, fix:, refactor:). Keep it under 72 characters for the subject line.\n\n${truncatedDiff}`;
 
-    // Always use a one-shot process for commit messages to avoid paying
-    // for the full conversation context as input tokens.
+    // Build enriched PATH for codex/gemini CLIs (they may be nvm-installed)
+    const enrichedEnv = (() => {
+      const env = { ...process.env };
+      const home = require('node:os').homedir();
+      const extraPaths: string[] = [];
+      const nvmDir = path.join(home, '.nvm', 'versions', 'node');
+      if (fs.existsSync(nvmDir)) {
+        try { for (const v of fs.readdirSync(nvmDir)) extraPaths.push(path.join(nvmDir, v, 'bin')); } catch {}
+      }
+      extraPaths.push(path.join(home, '.local', 'bin'), path.join(home, '.volta', 'bin'), '/usr/local/bin');
+      env.PATH = [...extraPaths, env.PATH || ''].join(':');
+      return env;
+    })();
+
+    // Spawn the appropriate CLI with its fast model
+    let cmd: string;
+    let args: string[];
+    if (aiProvider === 'codex') {
+      cmd = 'codex';
+      args = ['exec', '-q', '--json', '-m', 'codex-mini', commitPrompt];
+    } else if (aiProvider === 'gemini') {
+      cmd = 'gemini';
+      args = ['-p', commitPrompt, '--output-format', 'text', '-m', 'flash'];
+    } else {
+      cmd = 'claude';
+      args = ['-p', commitPrompt, '--output-format', 'text', '--max-turns', '1', '--model', 'haiku'];
+    }
+
     return new Promise<string>((resolve) => {
-      const proc = spawn('claude', [
-        '-p', commitPrompt,
-        '--output-format', 'text',
-        '--max-turns', '1',
-        '--model', 'haiku',
-      ], {
+      const proc = spawn(cmd, args, {
         cwd: effectiveCwd,
-        env: { ...process.env },
+        env: enrichedEnv,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 
       let output = '';
       proc.stdout?.on('data', (data: Buffer) => { output += data.toString(); });
-      proc.on('exit', () => resolve(output.trim()));
+      proc.on('exit', () => {
+        let result = output.trim();
+        // Codex returns JSON — extract the message text
+        if (aiProvider === 'codex') {
+          try {
+            const lines = result.split('\n').filter(l => l.trim());
+            for (const line of lines) {
+              const parsed = JSON.parse(line);
+              if (parsed.type === 'message' && parsed.content) {
+                result = parsed.content;
+                break;
+              }
+            }
+          } catch { /* use raw output */ }
+        }
+        resolve(result);
+      });
       proc.on('error', () => resolve(''));
     });
   });
