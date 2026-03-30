@@ -14,7 +14,7 @@ contextBridge.exposeInMainWorld('sai', {
   claudeGenerateCommitMessage: (cwd: string) => ipcRenderer.invoke('claude:generateCommitMessage', cwd),
   claudeStop: (projectPath: string) => ipcRenderer.send('claude:stop', projectPath),
   claudeApprove: (projectPath: string, toolUseId: string, approved: boolean, modifiedCommand?: string) =>
-    ipcRenderer.send('claude:approve', projectPath, toolUseId, approved, modifiedCommand),
+    ipcRenderer.invoke('claude:approve', projectPath, toolUseId, approved, modifiedCommand),
   claudeAlwaysAllow: (projectPath: string, toolPattern: string) =>
     ipcRenderer.invoke('claude:alwaysAllow', projectPath, toolPattern),
   // Codex CLI

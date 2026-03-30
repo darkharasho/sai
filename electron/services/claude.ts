@@ -172,12 +172,17 @@ function ensureProcess(
             // Intercept: don't forward this denial to the renderer
             ws.claude.awaitingApproval = true;
             ws.claude.approvalBuffered = [];
+            const tu = ws.claude.pendingToolUse;
+            const command = tu.input.command || tu.input.file_path || JSON.stringify(tu.input);
+            const description = tu.input.description || '';
             safeSend(win, 'claude:message', {
               type: 'approval_needed',
               projectPath: ws.projectPath,
-              toolName: ws.claude.pendingToolUse.toolName,
-              toolUseId: ws.claude.pendingToolUse.toolUseId,
-              input: ws.claude.pendingToolUse.input,
+              toolName: tu.toolName,
+              toolUseId: tu.toolUseId,
+              command,
+              description,
+              input: tu.input,
             });
             continue;
           }
@@ -314,11 +319,30 @@ export function registerClaudeHandlers(win: BrowserWindow) {
     proc.stdin.write(msg + '\n');
   });
 
-  // claude:approve — user approved a tool that was denied by the CLI
-  ipcMain.handle('claude:approve', async (_event, projectPath: string) => {
+  // claude:approve — user approved or denied a tool that was denied by the CLI
+  ipcMain.handle('claude:approve', async (_event, projectPath: string, toolUseId: string, approved: boolean, modifiedCommand?: string) => {
     const ws = get(projectPath);
     if (!ws || !ws.claude.pendingToolUse || !ws.claude.awaitingApproval) return;
 
+    // --- Deny path ---
+    if (!approved) {
+      // Flush buffered messages to the renderer (the denial + model's response)
+      for (const buffered of ws.claude.approvalBuffered) {
+        if (buffered.type === 'result') {
+          ws.claude.busy = false;
+          safeSend(win, 'claude:message', { ...buffered, projectPath: ws.projectPath });
+          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+        } else {
+          safeSend(win, 'claude:message', { ...buffered, projectPath: ws.projectPath });
+        }
+      }
+      ws.claude.approvalBuffered = [];
+      ws.claude.awaitingApproval = false;
+      ws.claude.pendingToolUse = null;
+      return;
+    }
+
+    // --- Approve path ---
     const pending = ws.claude.pendingToolUse;
     const cwd = ws.claude.cwd || projectPath;
 
@@ -327,7 +351,8 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 
     try {
       if (pending.toolName === 'Bash' || pending.toolName === 'bash') {
-        const command = pending.input.command || '';
+        // Use modified command if user edited it, otherwise use original
+        const command = modifiedCommand || pending.input.command || '';
         const execResult = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
           execFile('bash', ['-c', command], {
             cwd,
@@ -374,6 +399,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
     // Discard buffered messages (model's response to the denial)
     ws.claude.approvalBuffered = [];
     ws.claude.awaitingApproval = false;
+    ws.claude.busy = false;
     ws.claude.pendingToolUse = null;
 
     // Send a follow-up message to the CLI so it knows the tool was actually executed
@@ -390,27 +416,6 @@ export function registerClaudeHandlers(win: BrowserWindow) {
     }
 
     return { result, isError };
-  });
-
-  // claude:deny — user denied a tool that needed approval
-  ipcMain.handle('claude:deny', async (_event, projectPath: string) => {
-    const ws = get(projectPath);
-    if (!ws || !ws.claude.awaitingApproval) return;
-
-    // Flush buffered messages to the renderer (the denial + model's response)
-    for (const buffered of ws.claude.approvalBuffered) {
-      if (buffered.type === 'result') {
-        ws.claude.busy = false;
-        safeSend(win, 'claude:message', { ...buffered, projectPath: ws.projectPath });
-        safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
-      } else {
-        safeSend(win, 'claude:message', { ...buffered, projectPath: ws.projectPath });
-      }
-    }
-
-    ws.claude.approvalBuffered = [];
-    ws.claude.awaitingApproval = false;
-    ws.claude.pendingToolUse = null;
   });
 
   // claude:alwaysAllow — add a tool pattern to the project's .claude/settings.local.json
