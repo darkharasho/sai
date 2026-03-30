@@ -34,3 +34,6 @@
 - [ ] need a way to approve commands (have a sliding up ui like vscode)
 - [ ] in the workspace dropdown for workspaces with active chats lets put a lightly animated spinner to signify which are working
 - [ ] when swapping workspaces we should autoscroll the chat to the bottom
+- [ ] notifications dont seem to work on mcp responses like superpower 
+- [ ] also put a notification in the app icon (if possible) in the taskbar
+- [ ] add an option to send a system notification when an assistant completes its response (like the workspace notification)

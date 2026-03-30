@@ -230,10 +230,11 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
         .chat-msg-body { color: var(--text); line-height: 1.6; flex: 1; min-width: 0; }
         .chat-msg-body p { margin-bottom: 8px; }
         .chat-msg-body code {
-          background: var(--bg-secondary);
+          background: var(--bg-hover);
           padding: 2px 6px;
           border-radius: 3px;
           font-size: 12px;
+          border: 1px solid var(--border);
         }
         .chat-msg-body a { color: var(--accent); text-decoration: underline; cursor: pointer; }
         .chat-msg-body a:hover { opacity: 0.8; }
