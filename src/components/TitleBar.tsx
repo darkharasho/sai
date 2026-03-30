@@ -583,6 +583,10 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           flex-shrink: 0;
           animation: workspace-spin 0.8s linear infinite;
         }
+        .dropdown-item.active .workspace-spinner {
+          border-color: rgba(0, 0, 0, 0.2);
+          border-top-color: #000;
+        }
         @keyframes workspace-spin {
           to { transform: rotate(360deg); }
         }
