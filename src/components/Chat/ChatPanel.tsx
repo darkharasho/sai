@@ -957,7 +957,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           <span className="pinned-prompt-text">{lastUserMessage.content}</span>
           <button
             className="pinned-prompt-jump"
-            onClick={() => lastUserMsgRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+            onClick={() => { isAtBottomRef.current = false; lastUserMsgRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }}
             title="Jump to message"
           >
             <LocateFixed size={12} />
