@@ -8,7 +8,7 @@ import TitleBar from './components/TitleBar';
 import CodePanel from './components/CodePanel/CodePanel';
 import UnsavedChangesModal from './components/UnsavedChangesModal';
 import WorkspaceToast from './components/WorkspaceToast';
-import { loadSessions, saveSessions, createSession, upsertSession, migrateLegacySessions } from './sessions';
+import { loadSessions, saveSessions, createSession, upsertSession, migrateLegacySessions, loadSessionMessages } from './sessions';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext } from './types';
 import { MessageSquare, TerminalSquare, Code2, ChevronRight, MessageCirclePlus, Clock } from 'lucide-react';
 import { formatSessionDate, formatSessionTime } from './sessions';

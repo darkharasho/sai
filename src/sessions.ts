@@ -1,39 +1,94 @@
-import type { ChatSession } from './types';
+import type { ChatSession, ChatMessage } from './types';
 
 const LEGACY_KEY = 'sai-chat-sessions';
-const MAX_SESSIONS = 10;
+const MAX_SESSIONS = 200;
 
-function storageKey(projectPath: string): string {
-  return `sai-chat-sessions-${projectPath}`;
+function indexKey(projectPath: string): string {
+  return `sai-sessions-index-${projectPath}`;
+}
+
+function messagesKey(sessionId: string): string {
+  return `sai-session-msgs-${sessionId}`;
+}
+
+// Strip messages for index storage
+function toIndexEntry(session: ChatSession): ChatSession {
+  return { ...session, messages: [] };
 }
 
 export function loadSessions(projectPath: string): ChatSession[] {
   try {
-    const raw = localStorage.getItem(storageKey(projectPath));
+    const raw = localStorage.getItem(indexKey(projectPath));
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
   }
 }
 
-export function saveSessions(projectPath: string, sessions: ChatSession[]): void {
+export function loadSessionMessages(sessionId: string): ChatMessage[] {
   try {
-    localStorage.setItem(storageKey(projectPath), JSON.stringify(sessions));
+    const raw = localStorage.getItem(messagesKey(sessionId));
+    return raw ? JSON.parse(raw) : [];
   } catch {
-    // localStorage quota exceeded - silently fail
+    return [];
   }
+}
+
+export function saveSessionMessages(sessionId: string, messages: ChatMessage[]): void {
+  try {
+    localStorage.setItem(messagesKey(sessionId), JSON.stringify(messages));
+  } catch {
+    // localStorage quota exceeded
+  }
+}
+
+function saveIndex(projectPath: string, sessions: ChatSession[]): void {
+  try {
+    localStorage.setItem(indexKey(projectPath), JSON.stringify(sessions.map(toIndexEntry)));
+  } catch {
+    // localStorage quota exceeded
+  }
+}
+
+export function saveSessions(projectPath: string, sessions: ChatSession[]): void {
+  saveIndex(projectPath, sessions);
 }
 
 export function migrateLegacySessions(projectPath: string): void {
   try {
+    // Migrate from legacy single-key format
     const legacy = localStorage.getItem(LEGACY_KEY);
-    if (!legacy) return;
-    const existing = loadSessions(projectPath);
-    if (existing.length === 0) {
-      // Move legacy sessions to this project
-      localStorage.setItem(storageKey(projectPath), legacy);
+    if (legacy) {
+      const existing = loadSessions(projectPath);
+      if (existing.length === 0) {
+        const parsed: ChatSession[] = JSON.parse(legacy);
+        // Save messages separately, then store index
+        for (const s of parsed) {
+          if (s.messages.length > 0) {
+            saveSessionMessages(s.id, s.messages);
+          }
+        }
+        saveIndex(projectPath, parsed);
+      }
+      localStorage.removeItem(LEGACY_KEY);
     }
-    localStorage.removeItem(LEGACY_KEY);
+
+    // Migrate from old combined format (sai-chat-sessions-<path>)
+    const oldKey = `sai-chat-sessions-${projectPath}`;
+    const oldData = localStorage.getItem(oldKey);
+    if (oldData) {
+      const existing = loadSessions(projectPath);
+      if (existing.length === 0) {
+        const parsed: ChatSession[] = JSON.parse(oldData);
+        for (const s of parsed) {
+          if (s.messages.length > 0) {
+            saveSessionMessages(s.id, s.messages);
+          }
+        }
+        saveIndex(projectPath, parsed);
+      }
+      localStorage.removeItem(oldKey);
+    }
   } catch {
     // Migration failed - not critical
   }
@@ -65,13 +120,17 @@ export function upsertSession(sessions: ChatSession[], session: ChatSession): Ch
 
   session.updatedAt = Date.now();
 
+  // Save messages separately
+  saveSessionMessages(session.id, session.messages);
+
+  const entry = toIndexEntry(session);
   const existing = sessions.findIndex(s => s.id === session.id);
   let updated: ChatSession[];
   if (existing >= 0) {
     updated = [...sessions];
-    updated[existing] = session;
+    updated[existing] = entry;
   } else {
-    updated = [session, ...sessions];
+    updated = [entry, ...sessions];
   }
 
   // Sort by updatedAt descending, keep max
