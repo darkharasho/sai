@@ -22,6 +22,61 @@ type GeminiConversationMode = 'planning' | 'fast';
 type CodexPermission = 'auto' | 'read-only' | 'full-access';
 type PanelId = 'chat' | 'editor' | 'terminal';
 
+function WelcomeTypewriter() {
+  const full = 'Welcome to Simply AI';
+  const final = 'Welcome to SAI';
+  const [text, setText] = useState('');
+  const shared = 'Welcome to S';
+  const [phase, setPhase] = useState<'typing' | 'deleting' | 'retyping' | 'done' | 'hidden'>('typing');
+
+  useEffect(() => {
+    let timeout: ReturnType<typeof setTimeout>;
+    if (phase === 'typing') {
+      if (text.length < full.length) {
+        timeout = setTimeout(() => setText(full.slice(0, text.length + 1)), 60);
+      } else {
+        timeout = setTimeout(() => setPhase('deleting'), 1500);
+      }
+    } else if (phase === 'deleting') {
+      if (text.length > shared.length) {
+        timeout = setTimeout(() => setText(text.slice(0, -1)), 40);
+      } else {
+        setPhase('retyping');
+      }
+    } else if (phase === 'retyping') {
+      if (text.length < final.length) {
+        timeout = setTimeout(() => setText(final.slice(0, text.length + 1)), 60);
+      } else {
+        timeout = setTimeout(() => setPhase('done'), 0);
+      }
+    } else if (phase === 'done') {
+      timeout = setTimeout(() => setPhase('hidden'), 2000);
+    }
+    return () => clearTimeout(timeout);
+  }, [text, phase]);
+
+  return (
+    <span style={{ fontSize: 24, fontWeight: 600, color: 'var(--accent)' }}>
+      {text}
+      {phase !== 'hidden' && <span style={{
+        display: 'inline-block',
+        width: 2,
+        height: '1em',
+        background: 'var(--accent)',
+        marginLeft: 2,
+        verticalAlign: 'text-bottom',
+        animation: 'cursor-blink 1s step-start infinite',
+      }} />}
+      <style>{`
+        @keyframes cursor-blink {
+          0% { opacity: 1; }
+          50% { opacity: 0; }
+        }
+      `}</style>
+    </span>
+  );
+}
+
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState<string | null>(null);
   const [activeProjectPath, setActiveProjectPath] = useState<string>('');
@@ -854,7 +909,7 @@ export default function App() {
           <div className="accordion-body">
             {panel === 'chat' && workspaces.size === 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 16, color: 'var(--text-muted)', padding: 32 }}>
-                <span style={{ fontSize: 18, fontWeight: 500, color: 'var(--text)' }}>Welcome to sai</span>
+                <WelcomeTypewriter />
                 <span style={{ fontSize: 13 }}>Open a folder to get started</span>
                 <button
                   style={{ marginTop: 8, padding: '8px 20px', background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 500 }}

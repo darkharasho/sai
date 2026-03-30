@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('sai', {
+  platform: process.platform,
   terminalCreate: (cwd: string) => ipcRenderer.invoke('terminal:create', cwd),
   terminalWrite: (id: number, data: string) => ipcRenderer.send('terminal:write', id, data),
   terminalResize: (id: number, cols: number, rows: number) => ipcRenderer.send('terminal:resize', id, cols, rows),

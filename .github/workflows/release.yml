@@ -13,12 +13,15 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
-            platform: linux
-            args: --linux AppImage
-          - os: windows-latest
-            platform: win
-            args: --win nsis
+          # - os: ubuntu-latest
+          #   platform: linux
+          #   args: --linux AppImage
+          # - os: windows-latest
+          #   platform: win
+          #   args: --win nsis
+          - os: macos-latest
+            platform: mac
+            args: --mac dmg
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -48,7 +51,7 @@ jobs:
         run: |
           tag="${GITHUB_REF#refs/tags/}"
           shopt -s nullglob
-          for file in release/*.AppImage release/*.exe release/latest-linux.yml release/latest.yml; do
+          for file in release/*.AppImage release/*.exe release/*.dmg release/latest-linux.yml release/latest.yml release/latest-mac.yml; do
             gh release upload "$tag" "$file" --clobber
           done
 

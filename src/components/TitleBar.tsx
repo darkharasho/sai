@@ -123,10 +123,12 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
   };
 
   return (
-    <div className="titlebar">
-      <div className="titlebar-brand">
-        <img src="svg/sai.svg" alt="SAI" width="18" height="18" />
-      </div>
+    <div className={`titlebar${window.sai.platform === 'darwin' ? ' titlebar-mac' : ''}`}>
+      {window.sai.platform !== 'darwin' && (
+        <div className="titlebar-brand">
+          <img src="svg/sai.svg" alt="SAI" width="18" height="18" />
+        </div>
+      )}
       <div className="titlebar-drag" />
       <div className="project-dropdown-wrapper" ref={dropdownRef}>
         <button className="project-selector" onClick={() => setOpen(!open)}>
@@ -277,6 +279,11 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
             Login
           </button>
         )}
+        {window.sai.platform === 'darwin' && (
+          <div className="titlebar-brand">
+            <img src="svg/sai.svg" alt="SAI" width="18" height="18" />
+          </div>
+        )}
       </div>
       {showAuthModal && <GitHubAuthModal onSuccess={handleAuthSuccess} onClose={() => setShowAuthModal(false)} />}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} onSettingChange={onSettingChange} />}
@@ -315,6 +322,12 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           margin-right: 104px;
           -webkit-app-region: no-drag;
           flex-shrink: 0;
+        }
+        .titlebar-mac {
+          padding-left: 78px;
+        }
+        .titlebar-mac .titlebar-right {
+          margin-right: 12px;
         }
         .titlebar-version {
           color: var(--text-secondary);
