@@ -730,9 +730,11 @@ export default function App() {
     if (selected) {
       // Tell backend to switch to the selected session's Claude session ID
       window.sai.claudeSetSessionId(activeProjectPath, selected.claudeSessionId);
+      // Load messages on demand from separate storage
+      const messages = loadSessionMessages(selected.id);
       updateWorkspace(activeProjectPath, ws => ({
         ...ws,
-        activeSession: { ...selected },
+        activeSession: { ...selected, messages },
       }));
     }
   };
