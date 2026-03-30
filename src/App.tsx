@@ -891,9 +891,20 @@ export default function App() {
                 onKeepMyEdits={handleKeepMyEdits}
               />
             )}
-            {panel === 'terminal' && (
-              <TerminalPanel projectPath={projectPath} />
-            )}
+            {panel === 'terminal' && Array.from(workspaces.entries()).map(([wsPath]) => (
+              <div
+                key={`term-${wsPath}`}
+                style={{
+                  display: wsPath === activeProjectPath ? 'flex' : 'none',
+                  flexDirection: 'column',
+                  flex: 1,
+                  minHeight: 0,
+                  overflow: 'hidden',
+                }}
+              >
+                <TerminalPanel projectPath={wsPath} />
+              </div>
+            ))}
           </div>
         </div>
       </div>
