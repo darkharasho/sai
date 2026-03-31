@@ -61,11 +61,13 @@ export default function TerminalPanel({ projectPath }: { projectPath: string }) 
     xterm.attachCustomKeyEventHandler((e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && e.type === 'keydown') {
         if (e.key === 'C' || e.code === 'KeyC') {
+          e.preventDefault();
           const sel = xterm.getSelection();
           if (sel) navigator.clipboard.writeText(sel);
           return false;
         }
         if (e.key === 'V' || e.code === 'KeyV') {
+          e.preventDefault();
           navigator.clipboard.readText().then(text => {
             if (text) xterm.paste(text);
           });
@@ -87,6 +89,10 @@ export default function TerminalPanel({ projectPath }: { projectPath: string }) 
       xterm.onResize(({ cols, rows }) => {
         window.sai.terminalResize(id, cols, rows);
       });
+
+      // Sync initial dimensions — fit.fit() may have already fired before
+      // the PTY was created, so the PTY could still be at default 80x24.
+      window.sai.terminalResize(id, xterm.cols, xterm.rows);
     });
 
     // Receive pty output
