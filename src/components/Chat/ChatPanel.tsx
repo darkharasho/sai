@@ -493,6 +493,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const [autoCompactThreshold, setAutoCompactThreshold] = useState(0); // 0 = off
   const autoCompactCooldownRef = useRef(0); // timestamp — don't re-compact until after this
   const [rateLimits, setRateLimits] = useState<Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number; utilization?: number }>>(new Map());
+  const [billingMode, setBillingMode] = useState<'subscription' | 'api'>('subscription');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const lastUserMsgRef = useRef<HTMLDivElement>(null);
@@ -839,6 +840,14 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     return () => cleanup?.();
   }, []);
 
+  useEffect(() => {
+    (window.sai as any).usageMode?.().then((mode: string) => {
+      if (mode === 'subscription' || mode === 'api') {
+        setBillingMode(mode);
+      }
+    });
+  }, []);
+
   // Wheel events are never fired by programmatic scrolls — use them to detect user scrolling up
   useEffect(() => {
     const el = chatContainerRef.current;
@@ -1051,6 +1060,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         sessionUsage={sessionUsage}
         sessionCost={sessionCost}
         rateLimits={rateLimits}
+        billingMode={billingMode}
         activeFilePath={activeFilePath}
         fileContextEnabled={fileContextEnabled}
         onFileContextToggle={() => setFileContextEnabled(prev => !prev)}

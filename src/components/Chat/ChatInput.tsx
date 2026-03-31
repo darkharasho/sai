@@ -26,6 +26,7 @@ interface ChatInputProps {
   sessionUsage?: { inputTokens: number; outputTokens: number };
   sessionCost?: number;
   rateLimits?: Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number; utilization?: number }>;
+  billingMode?: 'subscription' | 'api';
   activeFilePath?: string | null;
   fileContextEnabled?: boolean;
   onFileContextToggle?: () => void;
@@ -202,7 +203,7 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, sessionCost, rateLimits, activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange }: ChatInputProps) {
+export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, sessionCost, rateLimits, billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange }: ChatInputProps) {
   const [value, setValue] = useState('');
   const [suggestions, setSuggestions] = useState<AutocompleteItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -569,16 +570,25 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
 
             // Inline text
             const primary = sessionLimits[0] || limits[0];
-            const costStr = (sessionCost ?? 0) > 0 ? `$${sessionCost!.toFixed(2)}` : '';
             let inlineText = '';
             if (anyOverage) {
               inlineText = 'Overage';
-            } else if (costStr) {
-              inlineText = costStr;
-            } else if (primary) {
-              inlineText = `Resets ${formatResetTime(primary.resetsAt)}`;
-            } else if (sessionUsage) {
-              inlineText = formatTokens(sessionUsage.inputTokens + sessionUsage.outputTokens);
+            } else if (billingMode === 'subscription') {
+              // Show session utilization % for subscription users
+              const sessionUtil = primary?.utilization;
+              if (sessionUtil !== undefined) {
+                inlineText = `${Math.round(sessionUtil * 100)}% used`;
+              } else {
+                inlineText = 'Usage';
+              }
+            } else {
+              // API mode: show cost or token count
+              const costStr = (sessionCost ?? 0) > 0 ? `$${sessionCost!.toFixed(2)}` : '';
+              if (costStr) {
+                inlineText = costStr;
+              } else if (sessionUsage) {
+                inlineText = formatTokens(sessionUsage.inputTokens + sessionUsage.outputTokens);
+              }
             }
 
             return (
@@ -590,7 +600,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
                 </span>
                 <div className="usage-tooltip">
                   {/* Plan usage limits — session-level (Current session, Overage) */}
-                  {(sessionLimits.length > 0 || overageSource) && (
+                  {billingMode === 'subscription' && (sessionLimits.length > 0 || overageSource) && (
                     <div className="usage-tooltip-section">
                       <div className="usage-tooltip-heading">Plan usage limits</div>
                       {sessionLimits.map(rl => {
@@ -621,7 +631,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
                     </div>
                   )}
                   {/* Weekly limits */}
-                  {weeklyLimits.length > 0 && (
+                  {billingMode === 'subscription' && weeklyLimits.length > 0 && (
                     <div className="usage-tooltip-section">
                       <div className="usage-tooltip-heading">Weekly limits</div>
                       {weeklyLimits.map(rl => {
@@ -671,7 +681,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
                     </div>
                   )}
                   {/* Session cost */}
-                  {(sessionCost ?? 0) > 0 && (
+                  {billingMode === 'api' && (sessionCost ?? 0) > 0 && (
                     <div className="usage-tooltip-section">
                       <div className="usage-tooltip-heading">Session cost</div>
                       <div className="session-cost-value">${sessionCost!.toFixed(4)}</div>
