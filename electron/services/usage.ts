@@ -82,7 +82,15 @@ export function registerUsageHandlers(win: BrowserWindow) {
   });
 
   ipcMain.handle('usage:mode', () => {
-    return readOAuthToken() ? 'subscription' : 'api';
+    // Don't use the cached readOAuthToken() — check the file directly
+    // so that mode is correct even if credentials arrive after app start
+    try {
+      const raw = fs.readFileSync(CREDENTIALS_PATH, 'utf-8');
+      const creds = JSON.parse(raw);
+      return creds?.claudeAiOauth?.accessToken ? 'subscription' : 'api';
+    } catch {
+      return 'api';
+    }
   });
 
   // Start polling — sends usage:update events to renderer

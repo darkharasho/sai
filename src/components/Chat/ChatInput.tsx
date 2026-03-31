@@ -568,8 +568,8 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
             const weeklyLimits = limits.filter(rl => isWeeklyLimit(rl.rateLimitType));
             const overageSource = limits.find(rl => rl.overageResetsAt > 0);
 
-            // Inline text
-            const primary = sessionLimits[0] || limits[0];
+            // Inline text — pick the limit with the highest utilization
+            const primary = [...sessionLimits].sort((a, b) => (b.utilization ?? 0) - (a.utilization ?? 0))[0] || limits[0];
             let inlineText = '';
             if (anyOverage) {
               inlineText = 'Overage';
