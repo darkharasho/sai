@@ -48,7 +48,10 @@ export default function TerminalPanel({ projectPath }: { projectPath: string }) 
       window.sai.openExternal(url);
     }));
     xterm.open(termRef.current);
-    fit.fit();
+    // Delay initial fit so xterm's renderer has time to initialize dimensions
+    requestAnimationFrame(() => {
+      try { fit.fit(); } catch { /* terminal not ready yet */ }
+    });
 
     xtermRef.current = xterm;
     fitRef.current = fit;
@@ -91,15 +94,27 @@ export default function TerminalPanel({ projectPath }: { projectPath: string }) 
       }
     });
 
-    // Handle container resize
+    // Handle container resize — skip fitting when hidden (zero dimensions)
+    const container = termRef.current;
     const resizeObserver = new ResizeObserver(() => {
-      fit.fit();
+      if (container.offsetWidth === 0 || container.offsetHeight === 0) return;
+      try { fit.fit(); } catch { /* terminal may not be fully initialized */ }
     });
-    resizeObserver.observe(termRef.current);
+    resizeObserver.observe(container);
+
+    // Re-fit when the terminal becomes visible again (e.g. workspace swap)
+    const intersectionObserver = new IntersectionObserver((entries) => {
+      if (entries[0]?.isIntersecting) {
+        try { fit.fit(); } catch { /* ignore */ }
+        xterm.refresh(0, xterm.rows - 1);
+      }
+    });
+    intersectionObserver.observe(container);
 
     return () => {
       cleanup();
       resizeObserver.disconnect();
+      intersectionObserver.disconnect();
       xterm.dispose();
     };
   }, [projectPath, restartKey]);
