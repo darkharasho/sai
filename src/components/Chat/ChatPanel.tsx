@@ -483,6 +483,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const [messages, setMessages] = useState<ChatMessageType[]>(initialMessages || []);
   const emptyPrompt = useMemo(() => EMPTY_PROMPTS[Math.floor(Math.random() * EMPTY_PROMPTS.length)], []);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [hasStreamingContent, setHasStreamingContent] = useState(false);
   const [ready, setReady] = useState(false);
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
@@ -576,6 +577,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
       if (msg.type === 'streaming_start') {
         setIsStreaming(true);
+        setHasStreamingContent(false);
         return;
       }
 
@@ -718,6 +720,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         const text = textParts.join('');
 
         if (text || tools.length > 0) {
+          setHasStreamingContent(true);
           setMessages(prev => {
             const last = prev[prev.length - 1];
             // Append text to the last assistant message only if it's a pure text message
@@ -1030,7 +1033,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             )}
           </>
         )}
-        {isStreaming && messages[messages.length - 1]?.role !== 'assistant' && (aiProvider === 'gemini'
+        {isStreaming && !hasStreamingContent && (aiProvider === 'gemini'
           ? <GeminiThinkingAnimation loadingPhrases={geminiLoadingPhrases} />
           : aiProvider === 'codex'
           ? <CodexThinkingAnimation />

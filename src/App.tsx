@@ -367,8 +367,8 @@ export default function App() {
           if (!prev.has(msg.projectPath)) return prev;
           const next = new Set(prev);
           next.delete(msg.projectPath);
-          // Notify if this was a background workspace
-          if (msg.projectPath !== activeProjectPathRef.current) {
+          // Notify if this was a background workspace (and app isn't focused)
+          if (msg.projectPath !== activeProjectPathRef.current && !document.hasFocus()) {
             const wsName = msg.projectPath.split('/').pop() || msg.projectPath;
             setCompletedWorkspaces(p => new Set(p).add(msg.projectPath));
             setToast({ message: `${wsName} has finished`, key: Date.now() });

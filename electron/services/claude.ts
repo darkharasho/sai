@@ -214,10 +214,11 @@ function ensureProcess(
 
         // Result signals end of a turn
         if (msg.type === 'result') {
+          const wasBusy = ws.claude.busy;
           ws.claude.busy = false;
           safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath });
           safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
-          notifyCompletion(win, ws.projectPath, {
+          if (wasBusy) notifyCompletion(win, ws.projectPath, {
             provider: 'Claude',
             duration: msg.duration_ms,
             turns: msg.num_turns,
@@ -475,7 +476,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
     // Discard buffered messages (model's response to the denial)
     ws.claude.approvalBuffered = [];
     ws.claude.awaitingApproval = false;
-    ws.claude.busy = false;
+    // Keep busy = true — Claude will continue processing the follow-up
     ws.claude.pendingToolUse = null;
 
     // Send a compact follow-up to the CLI with the actual tool result

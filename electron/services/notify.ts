@@ -13,6 +13,18 @@ function isEnabled(): boolean {
   }
 }
 
+/**
+ * Track focus state via window events — more reliable than isFocused() on Wayland.
+ * Call initFocusTracking(win) once after window creation.
+ */
+let windowFocused = true;
+
+export function initFocusTracking(win: BrowserWindow) {
+  win.on('focus', () => { windowFocused = true; });
+  win.on('blur', () => { windowFocused = false; });
+  windowFocused = win.isFocused();
+}
+
 export interface CompletionInfo {
   provider?: string;
   duration?: number;   // ms
@@ -34,11 +46,15 @@ function formatDuration(ms: number): string {
  * when a response completes while the window is unfocused.
  */
 export function notifyCompletion(win: BrowserWindow, projectPath: string, info?: CompletionInfo) {
-  if (win.isFocused()) return;
+  if (win.isDestroyed()) return;
+  // Use event-tracked focus state — isFocused() is unreliable on Wayland
+  if (windowFocused) return;
+
+  if (!isEnabled()) return;
 
   win.flashFrame(true);
 
-  if (isEnabled() && Notification.isSupported()) {
+  if (Notification.isSupported()) {
     const wsName = projectPath.split('/').pop() || projectPath;
 
     const parts: string[] = [];

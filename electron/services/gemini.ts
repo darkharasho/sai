@@ -245,8 +245,9 @@ export function registerGeminiHandlers(win: BrowserWindow) {
           }
           // Mark not busy on result
           if (msg.type === 'result') {
+            const wasBusy = ws.gemini.busy;
             ws.gemini.busy = false;
-            notifyCompletion(win, ws.projectPath, {
+            if (wasBusy) notifyCompletion(win, ws.projectPath, {
               provider: 'Gemini',
             });
           }
