@@ -599,6 +599,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           content: msg.text || 'Unknown error',
           timestamp: Date.now(),
         }]);
+        setIsStreaming(false);
         return;
       }
 
@@ -1024,11 +1025,11 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             )}
           </>
         )}
-        {isStreaming && (aiProvider === 'gemini'
+        {isStreaming && messages[messages.length - 1]?.role !== 'assistant' && (aiProvider === 'gemini'
           ? <GeminiThinkingAnimation loadingPhrases={geminiLoadingPhrases} />
           : aiProvider === 'codex'
           ? <CodexThinkingAnimation />
-          : <ThinkingAnimation hasContent={messages[messages.length - 1]?.role === 'assistant'} />
+          : <ThinkingAnimation hasContent={false} />
         )}
         <div ref={messagesEndRef} />
       </div>

@@ -4,7 +4,7 @@ import { BrowserWindow } from 'electron';
 const REPO_NAME = 'sai-config';
 const SETTINGS_FILE = 'settings.json';
 // Keys that are device-specific and should never be synced
-const EXCLUDE_KEYS = new Set(['github_auth']);
+const EXCLUDE_KEYS = new Set(['github_auth', 'aiProvider']);
 
 function apiRequest(method: string, path: string, token: string, body?: any): Promise<{ status: number; data: any }> {
   return new Promise((resolve, reject) => {
