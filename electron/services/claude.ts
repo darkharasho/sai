@@ -218,13 +218,14 @@ function ensureProcess(
           ws.claude.busy = false;
           safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath });
           safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
-          if (wasBusy) notifyCompletion(win, ws.projectPath, {
+          // Delay notification so renderer has time to process the result/done IPC
+          if (wasBusy) setTimeout(() => notifyCompletion(win, ws.projectPath, {
             provider: 'Claude',
             duration: msg.duration_ms,
             turns: msg.num_turns,
             cost: msg.total_cost_usd,
             summary: msg.result,
-          });
+          }), 500);
           continue;
         }
 

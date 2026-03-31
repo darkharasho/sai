@@ -324,6 +324,7 @@ interface ChatPanelProps {
   onClaudeSessionId?: (sessionId: string) => void;
   activeFilePath?: string | null;
   onFileOpen?: (path: string) => void;
+  isActive?: boolean;
 }
 
 const EMPTY_PROMPTS = [
@@ -479,7 +480,7 @@ const EMPTY_PROMPTS = [
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, activeFilePath, onFileOpen }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, activeFilePath, onFileOpen, isActive }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessageType[]>(initialMessages || []);
   const emptyPrompt = useMemo(() => EMPTY_PROMPTS[Math.floor(Math.random() * EMPTY_PROMPTS.length)], []);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -498,9 +499,9 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const lastUserMsgRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
-  const prevProjectPathRef = useRef(projectPath);
   const [showPinnedPrompt, setShowPinnedPrompt] = useState(false);
   const [showNewMessages, setShowNewMessages] = useState(false);
+  const streamingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Windowed rendering: only render messages from renderStart onward
   const [renderStart, setRenderStart] = useState(0);
@@ -555,6 +556,14 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     window.sai.claudeSend(projectPath, '/compact', undefined, permissionMode, effortLevel, modelChoice);
   }, [contextUsage, isStreaming]);
 
+  // Safety: clear orphaned streaming state when effect re-runs (e.g. provider switch)
+  useEffect(() => {
+    setIsStreaming(false);
+    return () => {
+      if (streamingTimeoutRef.current) clearTimeout(streamingTimeoutRef.current);
+    };
+  }, [projectPath, aiProvider]);
+
   useEffect(() => {
     setReady(false);
     const startFn = aiProvider === 'gemini' ? (window.sai as any).geminiStart : aiProvider === 'codex' ? window.sai.codexStart : window.sai.claudeStart;
@@ -564,6 +573,13 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         setSlashCommands(result.slashCommands);
       }
     });
+
+    const resetStreamingTimeout = () => {
+      if (streamingTimeoutRef.current) clearTimeout(streamingTimeoutRef.current);
+      streamingTimeoutRef.current = setTimeout(() => {
+        setIsStreaming(false);
+      }, 5000);
+    };
 
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
       // Only process messages for this workspace
@@ -581,23 +597,27 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
       if (msg.type === 'streaming_start') {
         setIsStreaming(true);
+        resetStreamingTimeout();
         return;
       }
 
       // Process exited — turn is fully complete
       if (msg.type === 'done') {
+        if (streamingTimeoutRef.current) clearTimeout(streamingTimeoutRef.current);
         setIsStreaming(false);
         onTurnComplete?.();
         return;
       }
 
       if (msg.type === 'process_exit') {
+        if (streamingTimeoutRef.current) clearTimeout(streamingTimeoutRef.current);
         setReady(false);
         setIsStreaming(false);
         return;
       }
 
       if (msg.type === 'error') {
+        if (streamingTimeoutRef.current) clearTimeout(streamingTimeoutRef.current);
         setMessages(prev => [...prev, {
           id: Date.now().toString(),
           role: 'system',
@@ -697,6 +717,9 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       }
 
       if (msg.type === 'user') return;
+
+      // Reset streaming safety timer on any substantive message
+      resetStreamingTimeout();
 
       // Assistant message — streaming content + tool calls
       if (msg.type === 'assistant' && msg.message?.content) {
@@ -873,17 +896,18 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     });
   }, []);
 
+  // Scroll to bottom when this workspace becomes the active/visible one
   useEffect(() => {
-    // Instant scroll on workspace switch — use rAF so DOM is settled
-    if (prevProjectPathRef.current !== projectPath) {
-      prevProjectPathRef.current = projectPath;
+    if (isActive) {
       isAtBottomRef.current = true;
       setShowNewMessages(false);
       requestAnimationFrame(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
       });
-      return;
     }
+  }, [isActive]);
+
+  useEffect(() => {
     if (isAtBottomRef.current) {
       setShowNewMessages(false);
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });

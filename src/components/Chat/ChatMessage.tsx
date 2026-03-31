@@ -189,7 +189,7 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
           flex-shrink: 0;
         }
         .chat-msg-chevron {
-          margin-top: 4px;
+          margin-top: 3px;
         }
         .chat-msg-claude {
           width: 14px;
@@ -228,7 +228,8 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
           mask-repeat: no-repeat;
         }
         .chat-msg-body { color: var(--text); line-height: 1.6; flex: 1; min-width: 0; }
-        .chat-msg-body p { margin-bottom: 8px; }
+        .chat-msg-body p { margin: 0 0 8px 0; }
+        .chat-msg-body p:last-child { margin-bottom: 0; }
         .chat-msg-body code {
           background: var(--bg-hover);
           padding: 2px 6px;

@@ -247,9 +247,10 @@ export function registerGeminiHandlers(win: BrowserWindow) {
           if (msg.type === 'result') {
             const wasBusy = ws.gemini.busy;
             ws.gemini.busy = false;
-            if (wasBusy) notifyCompletion(win, ws.projectPath, {
+            // Delay notification so renderer has time to process the result/done IPC
+            if (wasBusy) setTimeout(() => notifyCompletion(win, ws.projectPath, {
               provider: 'Gemini',
-            });
+            }), 500);
           }
         } catch { /* malformed JSON */ }
       }

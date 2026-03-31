@@ -368,10 +368,13 @@ export default function App() {
           const next = new Set(prev);
           next.delete(msg.projectPath);
           // Notify if this was a background workspace (and app isn't focused)
+          // Delay slightly so the ChatPanel has time to render the final content
           if (msg.projectPath !== activeProjectPathRef.current && !document.hasFocus()) {
             const wsName = msg.projectPath.split('/').pop() || msg.projectPath;
-            setCompletedWorkspaces(p => new Set(p).add(msg.projectPath));
-            setToast({ message: `${wsName} has finished`, key: Date.now() });
+            setTimeout(() => {
+              setCompletedWorkspaces(p => new Set(p).add(msg.projectPath));
+              setToast({ message: `${wsName} has finished`, key: Date.now() });
+            }, 300);
           }
           return next;
         });
@@ -968,6 +971,7 @@ export default function App() {
                   initialMessages={ws.activeSession.messages}
                   activeFilePath={ws.activeFilePath}
                   onFileOpen={handleFileOpen}
+                  isActive={wsPath === activeProjectPath}
                   onMessagesChange={(messages: ChatMessage[]) => {
                     wsMessagesRef.current.set(wsPath, messages);
                   }}

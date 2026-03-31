@@ -312,9 +312,10 @@ export function registerCodexHandlers(win: BrowserWindow) {
           if (msg.type === 'turn.completed' || msg.type === 'turn.failed') {
             const wasBusy = ws.codex.busy;
             ws.codex.busy = false;
-            if (wasBusy) notifyCompletion(win, ws.projectPath, {
+            // Delay notification so renderer has time to process the result/done IPC
+            if (wasBusy) setTimeout(() => notifyCompletion(win, ws.projectPath, {
               provider: 'Codex',
-            });
+            }), 500);
           }
         } catch { /* malformed JSON */ }
       }
