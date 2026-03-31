@@ -71,9 +71,6 @@ function buildArgs(permMode?: string, effort?: string, model?: string): string[]
     args.push('--permission-mode', 'bypassPermissions');
   } else {
     args.push('--permission-mode', 'acceptEdits');
-    // Skip user-level settings (e.g. Bash(*) in ~/.claude/settings.json)
-    // so SAI can gate approvals instead of the CLI auto-allowing
-    args.push('--setting-sources', 'project');
   }
 
   if (effort && ['low', 'medium', 'high', 'max'].includes(effort)) {
@@ -481,14 +478,19 @@ export function registerClaudeHandlers(win: BrowserWindow) {
     ws.claude.busy = false;
     ws.claude.pendingToolUse = null;
 
-    // Send a follow-up message to the CLI so it knows the tool was actually executed
+    // Send a compact follow-up to the CLI with the actual tool result
     const proc = ws.claude.process;
     if (proc?.stdin && !proc.stdin.destroyed) {
+      // Truncate large results to avoid inflating context
+      const maxLen = 8000;
+      const truncated = result.length > maxLen
+        ? result.slice(0, maxLen) + `\n... (truncated ${result.length - maxLen} chars)`
+        : result;
       const followUp = JSON.stringify({
         type: 'user',
         message: {
           role: 'user',
-          content: `The tool "${pending.toolName}" was approved and executed by the user. Here is the actual output:\n\n${result}\n\nPlease continue based on this result.`,
+          content: `[${pending.toolName} output]\n${truncated}`,
         },
       });
       proc.stdin.write(followUp + '\n');
