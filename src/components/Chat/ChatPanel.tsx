@@ -558,7 +558,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   useEffect(() => {
     setReady(false);
     const startFn = aiProvider === 'gemini' ? (window.sai as any).geminiStart : aiProvider === 'codex' ? window.sai.codexStart : window.sai.claudeStart;
-    startFn(projectPath || '').then(() => setReady(true));
+    startFn(projectPath || '').then((result: any) => {
+      setReady(true);
+      if (result?.slashCommands?.length) {
+        setSlashCommands(result.slashCommands);
+      }
+    });
 
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
       // Only process messages for this workspace

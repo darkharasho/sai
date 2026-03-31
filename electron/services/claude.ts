@@ -289,15 +289,11 @@ export function registerClaudeHandlers(win: BrowserWindow) {
     const ws = getOrCreate(cwd);
     ws.claude.cwd = cwd;
 
-    // Send cached slash commands so the UI has them instantly
-    const cached = readCachedSlashCommands();
-    if (cached.length > 0) {
-      safeSend(win, 'claude:message', {
-        type: 'system', subtype: 'init', slash_commands: cached, projectPath: ws.projectPath,
-      });
-    }
-
     safeSend(win, 'claude:message', { type: 'ready', projectPath: ws.projectPath });
+
+    // Return cached slash commands directly so the renderer can use them
+    // without relying on a separate IPC message that may arrive before the listener is ready
+    return { slashCommands: readCachedSlashCommands() };
   });
 
   // claude:stop — kill the persistent process
