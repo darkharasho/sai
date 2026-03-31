@@ -86,6 +86,7 @@ export default function App() {
   const [editorFontSize, setEditorFontSize] = useState(13);
   const [editorMinimap, setEditorMinimap] = useState(true);
   const [aiProvider, setAiProvider] = useState<AIProvider>('claude');
+  const [commitMessageProvider, setCommitMessageProvider] = useState<AIProvider>('claude');
   const [codexModel, setCodexModel] = useState('');
   const [codexModels, setCodexModels] = useState<{ id: string; name: string }[]>([]);
   const [codexPermission, setCodexPermission] = useState<CodexPermission>('auto');
@@ -163,6 +164,9 @@ export default function App() {
     window.sai.settingsGet('aiProvider', 'claude').then((v: string) => {
       if (v === 'claude' || v === 'codex' || v === 'gemini') setAiProvider(v as AIProvider);
     });
+    window.sai.settingsGet('commitMessageProvider', 'claude').then((v: string) => {
+      if (v === 'claude' || v === 'codex' || v === 'gemini') setCommitMessageProvider(v as AIProvider);
+    });
     // Load nested provider settings
     window.sai.settingsGet('claude', {}).then((c: any) => {
       if (c.model === 'sonnet' || c.model === 'opus' || c.model === 'haiku') setModelChoice(c.model);
@@ -211,6 +215,7 @@ export default function App() {
       if ('editorFontSize' in remote) setEditorFontSize(remote.editorFontSize);
       if ('editorMinimap' in remote) setEditorMinimap(remote.editorMinimap);
       if ('aiProvider' in remote && (remote.aiProvider === 'claude' || remote.aiProvider === 'codex' || remote.aiProvider === 'gemini')) setAiProvider(remote.aiProvider);
+      if ('commitMessageProvider' in remote && (remote.commitMessageProvider === 'claude' || remote.commitMessageProvider === 'codex' || remote.commitMessageProvider === 'gemini')) setCommitMessageProvider(remote.commitMessageProvider);
       if ('claude' in remote && typeof remote.claude === 'object') {
         const c = remote.claude;
         if (c.model === 'sonnet' || c.model === 'opus' || c.model === 'haiku') setModelChoice(c.model);
@@ -1043,6 +1048,7 @@ export default function App() {
           if (key === 'editorFontSize') setEditorFontSize(value);
           if (key === 'editorMinimap') setEditorMinimap(value);
           if (key === 'aiProvider') { setAiProvider(value); handleNewChat(); }
+          if (key === 'commitMessageProvider') setCommitMessageProvider(value);
           if (key === 'geminiLoadingPhrases') handleGeminiLoadingPhrasesChange(value);
           if (key === 'focusedChat') { setFocusedChat(value); if (value) { setExpanded(['chat', 'terminal']); setSplitRatio(0.66); } }
         }}
@@ -1050,7 +1056,7 @@ export default function App() {
       <div className="app-body">
         <NavBar activeSidebar={sidebarOpen} onToggle={toggleSidebar} gitChangeCount={gitChangeCount} />
         {sidebarOpen === 'files' && <FileExplorerSidebar projectPath={projectPath} onFileOpen={handleFileOpen} />}
-        {sidebarOpen === 'git' && <GitSidebar projectPath={projectPath} onFileClick={handleFileClick} aiProvider={aiProvider} />}
+        {sidebarOpen === 'git' && <GitSidebar projectPath={projectPath} onFileClick={handleFileClick} commitMessageProvider={commitMessageProvider} />}
         <div className="main-content" ref={mainContentRef}>
           {allPanels.map((panel, i) => (
             <div key={panel} style={{ display: 'contents' }}>
