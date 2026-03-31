@@ -25,6 +25,7 @@ interface GitSidebarProps {
   projectPath: string;
   onFileClick: (file: GitFile) => void;
   aiProvider?: 'claude' | 'codex' | 'gemini';
+  commitMessageProvider?: 'claude' | 'codex' | 'gemini';
 }
 
 function getPath(item: GitStatusItem | string): string {
@@ -59,7 +60,7 @@ function parseStatus(status: GitStatus): { staged: GitFile[]; unstaged: GitFile[
   return { staged, unstaged };
 }
 
-export default function GitSidebar({ projectPath, onFileClick, aiProvider }: GitSidebarProps) {
+export default function GitSidebar({ projectPath, onFileClick, aiProvider, commitMessageProvider }: GitSidebarProps) {
   const [branch, setBranch] = useState('');
   const [ahead, setAhead] = useState(0);
   const [behind, setBehind] = useState(0);
@@ -254,7 +255,7 @@ export default function GitSidebar({ projectPath, onFileClick, aiProvider }: Git
         onCommit={handleCommit}
         onPush={handlePush}
         onPull={handlePull}
-        onGenerateMessage={() => window.sai.claudeGenerateCommitMessage(projectPath, aiProvider)}
+        onGenerateMessage={() => window.sai.claudeGenerateCommitMessage(projectPath, commitMessageProvider ?? aiProvider)}
         onListBranches={() => window.sai.gitBranches(projectPath)}
         onCheckout={async (b: string) => { await window.sai.gitCheckout(projectPath, b); await refresh(); }}
         onCreateBranch={async (name: string) => { await window.sai.gitCreateBranch(projectPath, name); await refresh(); }}
