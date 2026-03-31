@@ -4,6 +4,7 @@
   "description": "AI-First Code Editor",
   "main": "dist-electron/main.js",
   "scripts": {
+    "postinstall": "electron-rebuild -w node-pty",
     "dev": "vite",
     "build": "tsc && vite build",
     "electron:dev": "vite --no-sandbox",
@@ -31,7 +32,10 @@
       "icon": "public/img/sai.png"
     },
     "mac": {
-      "target": ["dmg", "zip"],
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "category": "public.app-category.developer-tools",
       "icon": "public/img/sai.png"
     },
@@ -62,6 +66,7 @@
     "simple-git": "^3.27.0"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.0.3",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",

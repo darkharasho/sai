@@ -2,10 +2,11 @@ import { useState, useRef, KeyboardEvent, useEffect } from 'react';
 import type { PendingApproval } from '../../types';
 import ApprovalPanel from './ApprovalPanel';
 import {
-  SquarePlus, Slash, SquareSlash, AtSign, FileText, GitBranch, Terminal, Settings,
+  SquarePlus, Slash, SquareSlash, AtSign, FileText, GitBranch, Terminal as TerminalIcon, Settings,
   MessageSquare, Zap, Send, Square, ShieldCheck, ShieldOff,
   Paperclip, Image, ChevronDown, Minus, ChevronUp, ChevronsUp, Clock, Check, EyeOff,
 } from 'lucide-react';
+import { getTerminalContent } from '../../terminalBuffer';
 
 type EffortLevel = 'low' | 'medium' | 'high' | 'max';
 type ModelChoice = 'sonnet' | 'opus' | 'haiku';
@@ -58,13 +59,13 @@ interface AutocompleteItem {
 
 interface ContextItem {
   label: string;
-  type: 'file' | 'url' | 'image';
-  data?: string; // base64 data for images, path for files
+  type: 'file' | 'url' | 'image' | 'terminal';
+  data?: string; // base64 data for images, path for files, content for terminal
 }
 
 function getCommandIcon(name: string): React.ReactNode {
   if (name.includes('commit') || name.includes('git') || name.includes('pr') || name.includes('review') || name.includes('clean_gone')) return <GitBranch size={14} />;
-  if (name.includes('terminal') || name.includes('debug') || name.includes('bash')) return <Terminal size={14} />;
+  if (name.includes('terminal') || name.includes('debug') || name.includes('bash')) return <TerminalIcon size={14} />;
   if (name.includes('file') || name.includes('init') || name.includes('claude-md') || name.includes('revise')) return <FileText size={14} />;
   if (name.includes('config') || name.includes('setting') || name.includes('cost')) return <Settings size={14} />;
   return <Slash size={14} />;
@@ -76,6 +77,7 @@ const BUILTIN_COMMANDS: AutocompleteItem[] = [
 ];
 
 const ADD_MENU_ITEMS: AutocompleteItem[] = [
+  { label: 'Add Terminal', value: '__TERMINAL__', description: 'Attach terminal output', icon: <TerminalIcon size={14} /> },
   { label: 'Add File', value: '__FILE__', description: 'Attach a file', icon: <FileText size={14} /> },
   { label: 'Add Image', value: '__IMAGE__', description: 'Attach an image', icon: <Image size={14} /> },
   { label: 'Add URL', value: '@url ', description: 'Reference a URL', icon: <AtSign size={14} /> },
@@ -276,7 +278,16 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
     const wordStart = Math.max(lastSpace, lastNewline) + 1;
     const currentWord = textBeforeCursor.slice(wordStart).toLowerCase();
 
-    if (currentWord.startsWith('/')) {
+    if (currentWord.startsWith('@') && currentWord.length > 1) {
+      // Show @terminal suggestion when user types @t, @te, @terminal, etc.
+      const query = currentWord.slice(1);
+      const atItems: AutocompleteItem[] = [];
+      if ('terminal'.startsWith(query)) {
+        atItems.push({ label: '@terminal', value: '__TERMINAL__', description: 'Attach terminal output', icon: <TerminalIcon size={14} /> });
+      }
+      setSuggestions(atItems);
+      setSelectedIndex(0);
+    } else if (currentWord.startsWith('/')) {
       const query = currentWord.slice(1); // without the leading /
       setSuggestions(unique.filter(c => {
         const full = c.label.toLowerCase();
@@ -294,7 +305,41 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
     }
   }, [value, slashCommands, showAddMenu, slashMenuOpen]);
 
+  const handleAddTerminal = () => {
+    const content = getTerminalContent();
+    if (content) {
+      setContextItems(prev => {
+        // Replace existing terminal context if any
+        const filtered = prev.filter(c => c.type !== 'terminal');
+        const lines = content.split('\n').length;
+        return [...filtered, {
+          label: `Terminal (${lines} lines)`,
+          type: 'terminal',
+          data: content,
+        }];
+      });
+    }
+  };
+
   const applySuggestion = (item: AutocompleteItem) => {
+    if (item.value === '__TERMINAL__') {
+      // Remove the @terminal text the user typed
+      if (!showAddMenu) {
+        const cursorPos = textareaRef.current?.selectionStart ?? value.length;
+        const textBeforeCursor = value.slice(0, cursorPos);
+        const lastSpace = textBeforeCursor.lastIndexOf(' ');
+        const lastNewline = textBeforeCursor.lastIndexOf('\n');
+        const wordStart = Math.max(lastSpace, lastNewline) + 1;
+        const before = value.slice(0, wordStart);
+        const after = value.slice(cursorPos);
+        setValue((before + after).trim() ? before + after : '');
+      }
+      handleAddTerminal();
+      setSuggestions([]);
+      setShowAddMenu(false);
+      setSlashMenuOpen(false);
+      return;
+    }
     if (item.value === '__FILE__') { handleAddFile(); setSuggestions([]); setShowAddMenu(false); setSlashMenuOpen(false); return; }
     if (item.value === '__IMAGE__') { handleAddImage(); setSuggestions([]); setShowAddMenu(false); setSlashMenuOpen(false); return; }
     if (!item.value) { setSuggestions([]); setShowAddMenu(false); setSlashMenuOpen(false); return; }
@@ -442,10 +487,17 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
   };
 
   const buildMessage = (text: string): string => {
+    const parts: string[] = [];
+    const termCtx = contextItems.find(c => c.type === 'terminal' && c.data);
+    if (termCtx) {
+      parts.push(`[Terminal output]\n\`\`\`\n${termCtx.data}\n\`\`\``);
+    }
     const filePaths = contextItems.filter(c => c.type === 'file' && c.data).map(c => c.data!);
-    if (filePaths.length === 0) return text;
-    const fileRefs = filePaths.map(p => `@${p}`).join(' ');
-    return `${fileRefs} ${text}`;
+    if (filePaths.length > 0) {
+      parts.push(filePaths.map(p => `@${p}`).join(' '));
+    }
+    parts.push(text);
+    return parts.join('\n\n');
   };
 
   const handleAddFile = async () => {
@@ -514,6 +566,8 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
             <span key={i} className="context-chip">
               {ctx.type === 'image' && ctx.data ? (
                 <img src={ctx.data} alt={ctx.label} className="context-thumb" />
+              ) : ctx.type === 'terminal' ? (
+                <TerminalIcon size={12} />
               ) : (
                 <FileText size={12} />
               )}

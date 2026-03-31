@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { RotateCw } from 'lucide-react';
+import { registerTerminal, unregisterTerminal } from '../../terminalBuffer';
 import '@xterm/xterm/css/xterm.css';
 
 export default function TerminalPanel({ projectPath }: { projectPath: string }) {
@@ -77,6 +78,7 @@ export default function TerminalPanel({ projectPath }: { projectPath: string }) 
     // Create terminal in main process
     window.sai.terminalCreate(cwd).then((id: number) => {
       termIdRef.current = id;
+      registerTerminal(id, xterm);
 
       xterm.onData((data) => {
         window.sai.terminalWrite(id, data);
@@ -112,6 +114,7 @@ export default function TerminalPanel({ projectPath }: { projectPath: string }) 
     intersectionObserver.observe(container);
 
     return () => {
+      if (termIdRef.current !== null) unregisterTerminal(termIdRef.current);
       cleanup();
       resizeObserver.disconnect();
       intersectionObserver.disconnect();
