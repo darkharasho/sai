@@ -44,7 +44,11 @@ function fetchUsage(token: string): Promise<Record<string, unknown> | null> {
       res.on('data', (chunk: Buffer) => { body += chunk.toString(); });
       res.on('end', () => {
         if (res.statusCode === 200) {
-          try { resolve(JSON.parse(body)); } catch { resolve(null); }
+          try {
+            const parsed = JSON.parse(body);
+            console.log('[usage] API response:', JSON.stringify(parsed, null, 2));
+            resolve(parsed);
+          } catch { resolve(null); }
         } else if (res.statusCode === 429) {
           // Back off using retry-after header, or default to 5 minutes
           const retryAfter = parseInt(res.headers['retry-after'] as string, 10);
@@ -75,6 +79,10 @@ export function registerUsageHandlers(win: BrowserWindow) {
     const token = readOAuthToken();
     if (!token) return null;
     return fetchUsage(token);
+  });
+
+  ipcMain.handle('usage:mode', () => {
+    return readOAuthToken() ? 'subscription' : 'api';
   });
 
   // Start polling — sends usage:update events to renderer
