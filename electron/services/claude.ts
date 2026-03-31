@@ -564,8 +564,9 @@ export function registerClaudeHandlers(win: BrowserWindow) {
       const proc = spawn(cmd, args, {
         cwd: effectiveCwd,
         env,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe'],
       });
+      proc.stdin?.end();
 
       let output = '';
       proc.stdout?.on('data', (data: Buffer) => { output += data.toString(); });
