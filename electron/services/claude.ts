@@ -5,6 +5,7 @@ import type { PendingToolUse } from './workspace';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { notifyCompletion } from './notify';
+import { extractCodexCommitMessage } from './commit-message-parser';
 
 const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
 
@@ -570,19 +571,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
       proc.stdout?.on('data', (data: Buffer) => { output += data.toString(); });
       proc.on('exit', () => {
         let result = output.trim();
-        // Codex returns JSON — extract the message text
-        if (aiProvider === 'codex') {
-          try {
-            const lines = result.split('\n').filter(l => l.trim());
-            for (const line of lines) {
-              const parsed = JSON.parse(line);
-              if (parsed.type === 'message' && parsed.content) {
-                result = parsed.content;
-                break;
-              }
-            }
-          } catch { /* use raw output */ }
-        }
+        if (aiProvider === 'codex') result = extractCodexCommitMessage(result);
         resolve(result);
       });
       proc.on('error', () => resolve(''));
