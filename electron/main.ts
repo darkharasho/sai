@@ -180,6 +180,14 @@ function createWindow() {
     return folder;
   });
 
+  ipcMain.handle('project:selectFile', async () => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      properties: ['openFile'],
+      title: 'Select File',
+    });
+    return result.filePaths[0] || null;
+  });
+
   ipcMain.handle('project:getRecent', () => getRecentProjects());
   ipcMain.handle('project:getCwd', () => {
     const recent = getRecentProjects();

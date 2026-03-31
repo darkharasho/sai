@@ -99,6 +99,7 @@ contextBridge.exposeInMainWorld('sai', {
   settingsSet: (key: string, value: any) => ipcRenderer.invoke('settings:set', key, value),
   getCwd: () => ipcRenderer.invoke('project:getCwd'),
   selectFolder: () => ipcRenderer.invoke('project:selectFolder'),
+  selectFile: () => ipcRenderer.invoke('project:selectFile'),
   getRecentProjects: () => ipcRenderer.invoke('project:getRecent'),
   openRecentProject: (path: string) => ipcRenderer.invoke('project:openRecent', path),
   openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),

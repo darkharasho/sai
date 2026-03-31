@@ -76,7 +76,7 @@ const BUILTIN_COMMANDS: AutocompleteItem[] = [
 ];
 
 const ADD_MENU_ITEMS: AutocompleteItem[] = [
-  { label: 'Add File', value: '@file ', description: 'Reference a file', icon: <FileText size={14} /> },
+  { label: 'Add File', value: '__FILE__', description: 'Attach a file', icon: <FileText size={14} /> },
   { label: 'Add Image', value: '__IMAGE__', description: 'Attach an image', icon: <Image size={14} /> },
   { label: 'Add URL', value: '@url ', description: 'Reference a URL', icon: <AtSign size={14} /> },
 ];
@@ -291,6 +291,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
   }, [value, slashCommands, showAddMenu, slashMenuOpen]);
 
   const applySuggestion = (item: AutocompleteItem) => {
+    if (item.value === '__FILE__') { handleAddFile(); setSuggestions([]); setShowAddMenu(false); setSlashMenuOpen(false); return; }
     if (item.value === '__IMAGE__') { handleAddImage(); setSuggestions([]); setShowAddMenu(false); setSlashMenuOpen(false); return; }
     if (!item.value) { setSuggestions([]); setShowAddMenu(false); setSlashMenuOpen(false); return; }
 
@@ -406,7 +407,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
         setHistoryIndex(-1);
         draftRef.current = '';
         const images = contextItems.filter(c => c.type === 'image' && c.data).map(c => c.data!);
-        onSend(value.trim(), images.length > 0 ? images : undefined);
+        onSend(buildMessage(value.trim()), images.length > 0 ? images : undefined);
         setValue('');
         setContextItems([]);
         setSuggestions([]);
@@ -433,6 +434,24 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
         }
         return;
       }
+    }
+  };
+
+  const buildMessage = (text: string): string => {
+    const filePaths = contextItems.filter(c => c.type === 'file' && c.data).map(c => c.data!);
+    if (filePaths.length === 0) return text;
+    const fileRefs = filePaths.map(p => `@${p}`).join(' ');
+    return `${fileRefs} ${text}`;
+  };
+
+  const handleAddFile = async () => {
+    const filePath = await (window.sai as any).selectFile();
+    if (filePath) {
+      setContextItems(prev => [...prev, {
+        label: filePath.split('/').pop() || filePath,
+        type: 'file',
+        data: filePath,
+      }]);
     }
   };
 
@@ -900,7 +919,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
                   setHistoryIndex(-1);
                   draftRef.current = '';
                   const images = contextItems.filter(c => c.type === 'image' && c.data).map(c => c.data!);
-                  onSend(value.trim(), images.length > 0 ? images : undefined);
+                  onSend(buildMessage(value.trim()), images.length > 0 ? images : undefined);
                   setValue('');
                   setContextItems([]);
                 }
@@ -1008,6 +1027,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           padding: 10px 14px;
           font-family: inherit;
           font-size: 13px;
+          line-height: 24px;
           resize: none;
           outline: none;
           min-height: 44px;
