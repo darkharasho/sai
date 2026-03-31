@@ -235,10 +235,14 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // Focus textarea on mount and when input becomes enabled (e.g. workspace switch)
+  // Always focus textarea on mount (workspace switch remounts via key change)
+  useEffect(() => {
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, []);
+
+  // Re-focus when input becomes enabled (e.g. after streaming ends)
   useEffect(() => {
     if (!disabled) {
-      // Small delay so the DOM is settled after workspace switch
       const id = setTimeout(() => textareaRef.current?.focus(), 50);
       return () => clearTimeout(id);
     }
@@ -531,6 +535,18 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
 
       {/* Main input area */}
       <div className={`input-box ${tickerDir ? `ticker-${tickerDir}` : ''}`} style={{ opacity: pendingApproval ? 0.4 : 1, pointerEvents: pendingApproval ? 'none' as const : 'auto' as const }}>
+        {!value && (
+          <div className="chat-placeholder" onClick={() => textareaRef.current?.focus()}>
+            {!isStreaming && (
+              <span className="chat-placeholder-icon" style={{
+                maskImage: `url('${aiProvider === 'codex' ? 'svg/openai.svg' : aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : 'svg/claude.svg'}')`,
+                WebkitMaskImage: `url('${aiProvider === 'codex' ? 'svg/openai.svg' : aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : 'svg/claude.svg'}')`,
+                backgroundColor: 'var(--text-muted)',
+              }} />
+            )}
+            <span>{isStreaming ? 'Queue another message...' : `Message ${aiProvider === 'codex' ? 'Codex' : aiProvider === 'gemini' ? 'Gemini' : 'Claude'}...`}</span>
+          </div>
+        )}
         <textarea
           ref={textareaRef}
           className="chat-textarea"
@@ -538,7 +554,6 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           onChange={(e) => { setValue(e.target.value); setSlashMenuOpen(false); }}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
-          placeholder={isStreaming ? 'Queue another message...' : 'Message Claude...'}
           rows={2}
           disabled={disabled}
         />
@@ -1004,6 +1019,39 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           border: 1px solid var(--accent);
           border-radius: 10px;
           overflow: hidden;
+          position: relative;
+        }
+        .chat-placeholder {
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          display: flex;
+          align-items: flex-start;
+          padding: 10px 14px;
+          gap: 6px;
+          pointer-events: none;
+          color: var(--text-muted);
+          font-family: inherit;
+          font-size: 13px;
+          line-height: 17px;
+          z-index: 1;
+          cursor: text;
+          pointer-events: auto;
+        }
+        .chat-placeholder-icon {
+          display: inline-block;
+          width: 16px;
+          height: 16px;
+          flex-shrink: 0;
+          margin-top: 1px;
+          mask-size: contain;
+          -webkit-mask-size: contain;
+          mask-repeat: no-repeat;
+          -webkit-mask-repeat: no-repeat;
+          mask-position: center;
+          -webkit-mask-position: center;
         }
         .input-box.ticker-up .chat-textarea {
           animation: ticker-slide-up 0.2s ease-out;
@@ -1027,7 +1075,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           padding: 10px 14px;
           font-family: inherit;
           font-size: 13px;
-          line-height: 24px;
+          line-height: 17px;
           resize: none;
           outline: none;
           min-height: 44px;

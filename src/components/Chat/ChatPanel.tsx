@@ -861,17 +861,22 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   }, []);
 
   // Scroll to bottom on mount (session switch remounts via key change)
+  // Use rAF to ensure DOM has laid out messages before scrolling
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+    requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+    });
   }, []);
 
   useEffect(() => {
-    // Instant scroll on workspace switch
+    // Instant scroll on workspace switch — use rAF so DOM is settled
     if (prevProjectPathRef.current !== projectPath) {
       prevProjectPathRef.current = projectPath;
       isAtBottomRef.current = true;
       setShowNewMessages(false);
-      messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+      });
       return;
     }
     if (isAtBottomRef.current) {
