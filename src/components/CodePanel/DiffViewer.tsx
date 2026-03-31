@@ -121,26 +121,26 @@ export default function DiffViewer({ projectPath, filePath, staged, mode }: Diff
           color: var(--text);
         }
         .d2h-del {
-          background: rgba(227, 85, 53, 0.15);
+          background: rgba(180, 60, 40, 0.25);
           border-color: transparent;
         }
         .d2h-ins {
-          background: rgba(0, 168, 132, 0.15);
+          background: rgba(72, 100, 40, 0.35);
           border-color: transparent;
         }
         .d2h-del .d2h-code-line-ctn {
-          color: var(--red);
+          color: var(--text);
           background: transparent;
         }
         .d2h-ins .d2h-code-line-ctn {
-          color: var(--green);
+          color: var(--text);
           background: transparent;
         }
         .d2h-del .d2h-code-side-line {
-          background: rgba(227, 85, 53, 0.15);
+          background: rgba(180, 60, 40, 0.25);
         }
         .d2h-ins .d2h-code-side-line {
-          background: rgba(0, 168, 132, 0.15);
+          background: rgba(72, 100, 40, 0.35);
         }
         .d2h-info {
           background: var(--bg-secondary);

@@ -253,19 +253,19 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
           padding: 0;
         }
         .chat-msg-body pre code.hljs.language-diff .hljs-addition {
-          color: #a6e22e;
-          background: rgba(166, 226, 46, 0.1);
+          color: var(--text);
+          background: rgba(72, 100, 40, 0.35);
           display: inline-block;
           width: 100%;
         }
         .chat-msg-body pre code.hljs.language-diff .hljs-deletion {
-          color: #f92672;
-          background: rgba(249, 38, 114, 0.1);
+          color: var(--text);
+          background: rgba(180, 60, 40, 0.25);
           display: inline-block;
           width: 100%;
         }
         .chat-msg-body pre code.hljs.language-diff .hljs-meta {
-          color: #66d9ef;
+          color: var(--text-muted);
         }
         .chat-msg-body table {
           border-collapse: collapse;

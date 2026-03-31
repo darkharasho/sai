@@ -36,6 +36,7 @@ function detectLang(toolCall: ToolCall): string {
 }
 
 function HighlightedCode({ code, lang, showLineNumbers }: { code: string; lang: string; showLineNumbers?: boolean }) {
+  const isDiff = lang === 'diff';
   const ref = useRef<HTMLDivElement>(null);
   const [html, setHtml] = useState<string>('');
 
@@ -96,12 +97,93 @@ function HighlightedCode({ code, lang, showLineNumbers }: { code: string; lang: 
   }
 
   if (html) {
-    return <div ref={ref} className="highlighted-code" dangerouslySetInnerHTML={{ __html: html }} />;
+    return <div ref={ref} className={`highlighted-code${isDiff ? ' lang-diff' : ''}`} dangerouslySetInnerHTML={{ __html: html }} />;
   }
   return <pre className="plain-code"><code>{code}</code></pre>;
 }
 
-function formatInput(toolCall: ToolCall): { label: string; code: string; langOverride?: string } {
+function extractLineHtmls(shikiHtml: string): string[] {
+  const codeMatch = shikiHtml.match(/<code[^>]*>([\s\S]*)<\/code>/);
+  const inner = codeMatch ? codeMatch[1] : '';
+  const lineSpans = inner.split(/<span class="line">/);
+  return lineSpans.slice(1).map(s => {
+    const end = s.lastIndexOf('</span>');
+    return end >= 0 ? s.substring(0, end) : s;
+  });
+}
+
+function DiffHighlightedCode({ oldString, newString, lang }: { oldString: string; newString: string; lang: string }) {
+  const [lines, setLines] = useState<{ html: string; type: 'del' | 'add' }[]>([]);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    if (lang === 'text') {
+      const result: { html: string; type: 'del' | 'add' }[] = [];
+      for (const l of oldString.split('\n')) result.push({ html: escapeHtml(l), type: 'del' });
+      for (const l of newString.split('\n')) result.push({ html: escapeHtml(l), type: 'add' });
+      setLines(result);
+      setReady(true);
+      return;
+    }
+    getHighlighter().then(highlighter => {
+      try {
+        const oldHtml = highlighter.codeToHtml(oldString, { lang, theme: 'monokai' });
+        const newHtml = highlighter.codeToHtml(newString, { lang, theme: 'monokai' });
+        const oldLines = extractLineHtmls(oldHtml);
+        const newLines = extractLineHtmls(newHtml);
+        const result: { html: string; type: 'del' | 'add' }[] = [];
+        for (const l of oldLines) result.push({ html: l, type: 'del' });
+        for (const l of newLines) result.push({ html: l, type: 'add' });
+        setLines(result);
+      } catch {
+        // fallback
+        const result: { html: string; type: 'del' | 'add' }[] = [];
+        for (const l of oldString.split('\n')) result.push({ html: escapeHtml(l), type: 'del' });
+        for (const l of newString.split('\n')) result.push({ html: escapeHtml(l), type: 'add' });
+        setLines(result);
+      }
+      setReady(true);
+    });
+  }, [oldString, newString, lang]);
+
+  if (!ready && lines.length === 0) return null;
+
+  return (
+    <pre className="diff-highlighted">
+      <code>
+        {lines.map((line, i) => (
+          <div key={i} className={`diff-line diff-${line.type}`}>
+            <span className="diff-marker">{line.type === 'add' ? '+' : '-'}</span>
+            <span dangerouslySetInnerHTML={{ __html: line.html || '&nbsp;' }} />
+          </div>
+        ))}
+      </code>
+    </pre>
+  );
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function langFromPath(filePath: string): string {
+  const ext = filePath.split('.').pop()?.toLowerCase();
+  const map: Record<string, string> = {
+    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
+    py: 'python', json: 'json', css: 'css', html: 'html', md: 'markdown',
+    yaml: 'yaml', yml: 'yaml', toml: 'toml', rs: 'rust', go: 'go', sh: 'bash', bash: 'bash',
+  };
+  return (ext && map[ext]) || 'text';
+}
+
+interface FormatResult {
+  label: string;
+  code: string;
+  langOverride?: string;
+  diff?: { oldString: string; newString: string; fileLang: string };
+}
+
+function formatInput(toolCall: ToolCall): FormatResult {
   const input = toolCall.input || '';
   try {
     const parsed = JSON.parse(input);
@@ -112,11 +194,20 @@ function formatInput(toolCall: ToolCall): { label: string; code: string; langOve
     // Write — show file path + content
     if (parsed.file_path && parsed.content) return { label: parsed.file_path, code: parsed.content };
 
-    // Edit — show diff
+    // Edit — show diff with structured data for syntax-highlighted rendering
     if (parsed.file_path && parsed.old_string != null) {
       const oldLines = (parsed.old_string || '').split('\n').map((l: string) => `- ${l}`).join('\n');
       const newLines = (parsed.new_string || '').split('\n').map((l: string) => `+ ${l}`).join('\n');
-      return { label: parsed.file_path, code: `${oldLines}\n${newLines}`, langOverride: 'diff' };
+      return {
+        label: parsed.file_path,
+        code: `${oldLines}\n${newLines}`,
+        langOverride: 'diff',
+        diff: {
+          oldString: parsed.old_string || '',
+          newString: parsed.new_string || '',
+          fileLang: langFromPath(parsed.file_path),
+        },
+      };
     }
 
     // Read / Glob with file_path — label only, no body needed
@@ -378,7 +469,7 @@ export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
   const [expanded, setExpanded] = useState(true); // Start expanded
   const [fullscreenCode, setFullscreenCode] = useState<{ code: string; lang: string; label: string } | null>(null);
   const Icon = iconMap[toolCall.type] || Wrench;
-  const { label, code, langOverride } = formatInput(toolCall);
+  const { label, code, langOverride, diff } = formatInput(toolCall);
   const lang = langOverride || detectLang(toolCall);
   const { truncated, isTruncated } = truncateCode(code, MAX_PREVIEW_LINES);
 
@@ -418,7 +509,11 @@ export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
             {isTodo && <TodoListView input={toolCall.input || ''} />}
             {!isBash && !isTodo && code && (
               <div className="tool-call-body">
-                <HighlightedCode code={truncated} lang={lang} />
+                {diff ? (
+                  <DiffHighlightedCode oldString={diff.oldString} newString={diff.newString} lang={diff.fileLang} />
+                ) : (
+                  <HighlightedCode code={truncated} lang={lang} />
+                )}
                 {isTruncated && (
                   <button
                     className="tool-call-show-more"
@@ -534,13 +629,35 @@ export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
             background: transparent;
             border-radius: 0;
           }
-          .tool-call-body .highlighted-code .line:has(.shiki-diff-add),
-          .editor-line:has(.shiki-diff-add) {
-            background: rgba(166, 226, 46, 0.1);
+          .diff-highlighted {
+            margin: 0;
+            padding: 10px 0;
+            background: transparent !important;
+            border-radius: 0;
+            font-size: 12px;
+            line-height: 20px;
           }
-          .tool-call-body .highlighted-code .line:has(.shiki-diff-delete),
-          .editor-line:has(.shiki-diff-delete) {
-            background: rgba(249, 38, 114, 0.1);
+          .diff-highlighted code {
+            font-size: inherit;
+            background: none;
+            padding: 0;
+          }
+          .diff-line {
+            display: flex;
+            padding: 0 12px;
+            white-space: pre;
+          }
+          .diff-line.diff-add {
+            background: rgba(72, 100, 40, 0.35);
+          }
+          .diff-line.diff-del {
+            background: rgba(180, 60, 40, 0.25);
+          }
+          .diff-marker {
+            flex-shrink: 0;
+            width: 1.5ch;
+            color: var(--text-muted);
+            user-select: none;
           }
           .tool-call-show-more {
             display: block;
