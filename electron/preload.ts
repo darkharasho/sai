@@ -104,6 +104,7 @@ contextBridge.exposeInMainWorld('sai', {
   openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
   // Usage API polling
   usageFetch: () => ipcRenderer.invoke('usage:fetch'),
+  usageMode: () => ipcRenderer.invoke('usage:mode'),
   onUsageUpdate: (callback: (data: any) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, data: any) => callback(data);
     ipcRenderer.on('usage:update', listener);
