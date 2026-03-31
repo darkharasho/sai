@@ -53,6 +53,9 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
   const [aiProvider, setAiProvider] = useState<'claude' | 'codex' | 'gemini'>('claude');
   const [providerOpen, setProviderOpen] = useState(false);
   const providerRef = useRef<HTMLDivElement>(null);
+  const [commitMessageProvider, setCommitMessageProvider] = useState<'claude' | 'codex' | 'gemini'>('claude');
+  const [commitProviderOpen, setCommitProviderOpen] = useState(false);
+  const commitProviderRef = useRef<HTMLDivElement>(null);
   const [geminiLoadingPhrases, setGeminiLoadingPhrases] = useState<'witty' | 'tips' | 'all' | 'off'>('all');
   const [systemNotifications, setSystemNotifications] = useState(false);
   const [focusedChat, setFocusedChat] = useState(false);
@@ -74,6 +77,9 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
     window.sai.settingsGet('aiProvider', 'claude').then((v: string) => {
       if (v === 'claude' || v === 'codex' || v === 'gemini') setAiProvider(v as 'claude' | 'codex' | 'gemini');
     });
+    window.sai.settingsGet('commitMessageProvider', 'claude').then((v: string) => {
+      if (v === 'claude' || v === 'codex' || v === 'gemini') setCommitMessageProvider(v as 'claude' | 'codex' | 'gemini');
+    });
     window.sai.githubGetUser().then((u: any) => setIsAuthed(!!u));
 
     const unsubSync = window.sai.githubOnSyncStatus((data: { status: string; lastSynced?: number }) => {
@@ -87,6 +93,7 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
       if ('editorFontSize' in remote) setEditorFontSize(remote.editorFontSize);
       if ('editorMinimap' in remote) setEditorMinimap(remote.editorMinimap);
       if ('aiProvider' in remote && (remote.aiProvider === 'claude' || remote.aiProvider === 'codex' || remote.aiProvider === 'gemini')) setAiProvider(remote.aiProvider);
+      if ('commitMessageProvider' in remote && (remote.commitMessageProvider === 'claude' || remote.commitMessageProvider === 'codex' || remote.commitMessageProvider === 'gemini')) setCommitMessageProvider(remote.commitMessageProvider);
       if ('systemNotifications' in remote) setSystemNotifications(remote.systemNotifications);
       if ('focusedChat' in remote) setFocusedChat(remote.focusedChat);
       if ('autoCompactThreshold' in remote) setAutoCompactThreshold(remote.autoCompactThreshold);
@@ -104,6 +111,15 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [providerOpen]);
+
+  useEffect(() => {
+    if (!commitProviderOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (commitProviderRef.current && !commitProviderRef.current.contains(e.target as Node)) setCommitProviderOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [commitProviderOpen]);
 
   const handleTimeoutChange = (value: number) => {
     setSuspendTimeout(value);
@@ -126,6 +142,12 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
     setAiProvider(value);
     window.sai.settingsSet('aiProvider', value);
     onSettingChange?.('aiProvider', value);
+  };
+
+  const handleCommitProviderChange = (value: 'claude' | 'codex' | 'gemini') => {
+    setCommitMessageProvider(value);
+    window.sai.settingsSet('commitMessageProvider', value);
+    onSettingChange?.('commitMessageProvider', value);
   };
 
   const handleGeminiLoadingPhrasesChange = (value: 'witty' | 'tips' | 'all' | 'off') => {
@@ -220,6 +242,49 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
                         />
                         <span>{opt.label}</span>
                         {opt.id === aiProvider && <Check size={13} style={{ marginLeft: 'auto', color: 'var(--accent)' }} />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="settings-row">
+              <div className="settings-row-info">
+                <div className="settings-row-name">Commit message provider</div>
+                <div className="settings-row-desc">Which AI backend generates commit messages</div>
+              </div>
+              <div className="provider-select" ref={commitProviderRef}>
+                <button className="provider-select-btn" onClick={() => setCommitProviderOpen(!commitProviderOpen)}>
+                  <span
+                    className="provider-icon"
+                    style={{
+                      maskImage: `url('${PROVIDER_OPTIONS.find(p => p.id === commitMessageProvider)!.svg}')`,
+                      WebkitMaskImage: `url('${PROVIDER_OPTIONS.find(p => p.id === commitMessageProvider)!.svg}')`,
+                      backgroundColor: PROVIDER_OPTIONS.find(p => p.id === commitMessageProvider)!.color,
+                    }}
+                  />
+                  <span>{PROVIDER_OPTIONS.find(p => p.id === commitMessageProvider)!.label}</span>
+                  <ChevronDown size={11} style={{ opacity: 0.5 }} />
+                </button>
+                {commitProviderOpen && (
+                  <div className="provider-dropdown">
+                    {PROVIDER_OPTIONS.map(opt => (
+                      <button
+                        key={opt.id}
+                        className={`provider-dropdown-item ${opt.id === commitMessageProvider ? 'active' : ''}`}
+                        onClick={() => { handleCommitProviderChange(opt.id); setCommitProviderOpen(false); }}
+                      >
+                        <span
+                          className="provider-icon"
+                          style={{
+                            maskImage: `url('${opt.svg}')`,
+                            WebkitMaskImage: `url('${opt.svg}')`,
+                            backgroundColor: opt.color,
+                          }}
+                        />
+                        <span>{opt.label}</span>
+                        {opt.id === commitMessageProvider && <Check size={13} style={{ marginLeft: 'auto', color: 'var(--accent)' }} />}
                       </button>
                     ))}
                   </div>
