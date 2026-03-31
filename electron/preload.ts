@@ -86,6 +86,7 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.on('update:error', listener);
     return () => ipcRenderer.removeListener('update:error', listener);
   },
+  workspaceSetActive: (projectPath: string) => ipcRenderer.send('workspace:setActive', projectPath),
   workspaceGetAll: () => ipcRenderer.invoke('workspace:getAll'),
   workspaceClose: (projectPath: string) => ipcRenderer.invoke('workspace:close', projectPath),
   workspaceSuspend: (projectPath: string) => ipcRenderer.invoke('workspace:suspend', projectPath),

@@ -8,7 +8,7 @@ import { registerFsHandlers } from './services/fs';
 import { registerUpdater } from './services/updater';
 import { registerUsageHandlers, destroyUsagePolling } from './services/usage';
 import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove, suspend, DEFAULT_SUSPEND_TIMEOUT } from './services/workspace';
-import { initFocusTracking } from './services/notify';
+import { initFocusTracking, setActiveWorkspace } from './services/notify';
 import { registerGithubAuthHandlers } from './services/github-auth';
 import { initialSync, schedulePush } from './services/github-sync';
 import { registerCodexHandlers } from './services/codex';
@@ -64,6 +64,10 @@ function createWindow() {
   startSuspendTimer(mainWindow, () => {
     const s = readSettings();
     return typeof s.suspendTimeout === 'number' ? s.suspendTimeout : DEFAULT_SUSPEND_TIMEOUT;
+  });
+
+  ipcMain.on('workspace:setActive', (_event, projectPath: string) => {
+    setActiveWorkspace(projectPath || '');
   });
 
   ipcMain.handle('workspace:getAll', () => {

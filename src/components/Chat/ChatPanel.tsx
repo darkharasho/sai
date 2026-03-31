@@ -501,7 +501,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const isAtBottomRef = useRef(true);
   const [showPinnedPrompt, setShowPinnedPrompt] = useState(false);
   const [showNewMessages, setShowNewMessages] = useState(false);
-  const streamingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Windowed rendering: only render messages from renderStart onward
   const [renderStart, setRenderStart] = useState(0);
@@ -559,9 +558,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   // Safety: clear orphaned streaming state when effect re-runs (e.g. provider switch)
   useEffect(() => {
     setIsStreaming(false);
-    return () => {
-      if (streamingTimeoutRef.current) clearTimeout(streamingTimeoutRef.current);
-    };
   }, [projectPath, aiProvider]);
 
   useEffect(() => {
@@ -573,13 +569,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         setSlashCommands(result.slashCommands);
       }
     });
-
-    const resetStreamingTimeout = () => {
-      if (streamingTimeoutRef.current) clearTimeout(streamingTimeoutRef.current);
-      streamingTimeoutRef.current = setTimeout(() => {
-        setIsStreaming(false);
-      }, 5000);
-    };
 
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
       // Only process messages for this workspace
@@ -597,27 +586,23 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
       if (msg.type === 'streaming_start') {
         setIsStreaming(true);
-        resetStreamingTimeout();
         return;
       }
 
       // Process exited — turn is fully complete
       if (msg.type === 'done') {
-        if (streamingTimeoutRef.current) clearTimeout(streamingTimeoutRef.current);
         setIsStreaming(false);
         onTurnComplete?.();
         return;
       }
 
       if (msg.type === 'process_exit') {
-        if (streamingTimeoutRef.current) clearTimeout(streamingTimeoutRef.current);
         setReady(false);
         setIsStreaming(false);
         return;
       }
 
       if (msg.type === 'error') {
-        if (streamingTimeoutRef.current) clearTimeout(streamingTimeoutRef.current);
         setMessages(prev => [...prev, {
           id: Date.now().toString(),
           role: 'system',
@@ -717,9 +702,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       }
 
       if (msg.type === 'user') return;
-
-      // Reset streaming safety timer on any substantive message
-      resetStreamingTimeout();
 
       // Assistant message — streaming content + tool calls
       if (msg.type === 'assistant' && msg.message?.content) {

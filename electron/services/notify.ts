@@ -18,11 +18,16 @@ function isEnabled(): boolean {
  * Call initFocusTracking(win) once after window creation.
  */
 let windowFocused = true;
+let activeWorkspacePath = '';
 
 export function initFocusTracking(win: BrowserWindow) {
   win.on('focus', () => { windowFocused = true; });
   win.on('blur', () => { windowFocused = false; });
   windowFocused = win.isFocused();
+}
+
+export function setActiveWorkspace(projectPath: string) {
+  activeWorkspacePath = projectPath;
 }
 
 export interface CompletionInfo {
@@ -48,7 +53,8 @@ function formatDuration(ms: number): string {
 export function notifyCompletion(win: BrowserWindow, projectPath: string, info?: CompletionInfo) {
   if (win.isDestroyed()) return;
   // Use event-tracked focus state — isFocused() is unreliable on Wayland
-  if (windowFocused) return;
+  // Only suppress if the window is focused AND this is the active workspace
+  if (windowFocused && projectPath === activeWorkspacePath) return;
 
   if (!isEnabled()) return;
 

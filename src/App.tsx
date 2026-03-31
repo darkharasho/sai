@@ -108,7 +108,10 @@ export default function App() {
   const activeProjectPathRef = useRef(activeProjectPath);
 
   useEffect(() => { workspacesRef.current = workspaces; }, [workspaces]);
-  useEffect(() => { activeProjectPathRef.current = activeProjectPath; }, [activeProjectPath]);
+  useEffect(() => {
+    activeProjectPathRef.current = activeProjectPath;
+    window.sai.workspaceSetActive(activeProjectPath);
+  }, [activeProjectPath]);
 
   useEffect(() => {
     setExternallyModified(new Set());
