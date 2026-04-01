@@ -220,6 +220,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
+  const [cursorPos, setCursorPos] = useState(0);
 
   // Close menus on outside click
   useEffect(() => {
@@ -447,16 +448,17 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (value.trim()) {
+      const sendValue = value;
+      if (sendValue.trim()) {
         setHistory(prev => {
-          const trimmed = value.trim();
+          const trimmed = sendValue.trim();
           if (prev[prev.length - 1] === trimmed) return prev;
           return [...prev, trimmed];
         });
         setHistoryIndex(-1);
         draftRef.current = '';
         const images = contextItems.filter(c => c.type === 'image' && c.data).map(c => c.data!);
-        onSend(buildMessage(value.trim()), images.length > 0 ? images : undefined);
+        onSend(buildMessage(sendValue.trim()), images.length > 0 ? images : undefined);
         setValue('');
         setContextItems([]);
         setSuggestions([]);
@@ -605,7 +607,8 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           ref={textareaRef}
           className="chat-textarea"
           value={value}
-          onChange={(e) => { setValue(e.target.value); setSlashMenuOpen(false); }}
+          onChange={(e) => { setValue(e.target.value); setCursorPos(e.target.selectionStart ?? e.target.value.length); setSlashMenuOpen(false); }}
+          onSelect={(e) => { setCursorPos((e.target as HTMLTextAreaElement).selectionStart ?? 0); }}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           rows={2}
@@ -1072,7 +1075,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           background: var(--bg-input);
           border: 1px solid var(--accent);
           border-radius: 10px;
-          overflow: hidden;
+          overflow: visible;
           position: relative;
         }
         .chat-placeholder {
@@ -1134,9 +1137,10 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           outline: none;
           min-height: 44px;
           max-height: 200px;
+          position: relative;
+          z-index: 1;
         }
         .chat-textarea:disabled { opacity: 0.5; }
-
         .input-toolbar {
           display: flex;
           align-items: center;
@@ -1520,6 +1524,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           color: #fff;
         }
         .stop-btn:hover { background: #ff6b4f; }
+
       `}</style>
     </div>
   );
