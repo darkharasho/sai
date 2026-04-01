@@ -22,13 +22,15 @@ export const test = base.extend<{ window: Page }>({
     await page.addInitScript((fixturePath: string) => {
       const noop = () => () => {};
       (window as any).sai = {
+        // Platform property (not a function) — used by TitleBar for layout
+        platform: 'linux',
         // Core navigation — return fixture project as CWD
         getCwd: () => Promise.resolve(fixturePath),
         getRecentProjects: () => Promise.resolve([fixturePath]),
         selectFolder: () => Promise.resolve(null),
         selectFile: () => Promise.resolve(null),
         openRecentProject: () => {},
-        // Settings
+        // Settings — return sensible defaults so the app initializes properly
         settingsGet: (_key: string, defaultVal?: any) => Promise.resolve(defaultVal ?? null),
         settingsSet: () => Promise.resolve(),
         // Claude
@@ -39,24 +41,24 @@ export const test = base.extend<{ window: Page }>({
         claudeApprove: () => Promise.resolve(),
         claudeAlwaysAllow: () => Promise.resolve(),
         claudeGenerateCommitMessage: () => Promise.resolve('fix: test'),
-        claudeOnMessage: () => noop,
+        claudeOnMessage: (_cb: any) => noop(),
         // Codex
-        codexModels: () => Promise.resolve([]),
+        codexModels: () => Promise.resolve({ models: [], defaultModel: '' }),
         codexStart: () => Promise.resolve({ message: 'ready' }),
         codexSend: () => {},
         codexStop: () => {},
-        codexOnMessage: () => noop,
+        codexOnMessage: (_cb: any) => noop(),
         // Gemini
         geminiModels: () => Promise.resolve({ models: [], defaultModel: 'auto-gemini-3' }),
         geminiStart: () => Promise.resolve({ message: 'ready' }),
         geminiSend: () => {},
         geminiStop: () => {},
-        geminiOnMessage: () => noop,
+        geminiOnMessage: (_cb: any) => noop(),
         // Terminal
         terminalCreate: () => Promise.resolve(1),
         terminalWrite: () => {},
         terminalResize: () => {},
-        terminalOnData: () => noop,
+        terminalOnData: (_cb: any) => noop(),
         // Git
         gitStatus: () => Promise.resolve({ branch: 'main', staged: [], modified: [], created: [], deleted: [], not_added: [], ahead: 0, behind: 0 }),
         gitStage: () => Promise.resolve(),
@@ -90,30 +92,30 @@ export const test = base.extend<{ window: Page }>({
         workspaceGetAll: () => Promise.resolve([{ projectPath: fixturePath, status: 'active', lastActivity: Date.now() }]),
         workspaceClose: () => Promise.resolve(),
         workspaceSuspend: () => Promise.resolve(),
-        onWorkspaceSuspended: () => noop,
+        onWorkspaceSuspended: (_cb: any) => noop(),
         // Usage
         usageFetch: () => Promise.resolve(null),
         usageMode: () => Promise.resolve('api'),
-        onUsageUpdate: () => noop,
+        onUsageUpdate: (_cb: any) => noop(),
         // Updater
         updateCheck: () => Promise.resolve(),
         updateInstall: () => {},
         updateGetVersion: () => Promise.resolve('0.3.17'),
-        onUpdateStatus: () => noop,
-        onUpdateAvailable: () => noop,
-        onUpdateProgress: () => noop,
-        onUpdateDownloaded: () => noop,
-        onUpdateError: () => noop,
-        // GitHub
-        githubGetUser: () => Promise.resolve(null),
+        onUpdateStatus: (_cb: any) => noop(),
+        onUpdateAvailable: (_cb: any) => noop(),
+        onUpdateProgress: (_cb: any) => noop(),
+        onUpdateDownloaded: (_cb: any) => noop(),
+        onUpdateError: (_cb: any) => noop(),
+        // GitHub — provide a mock user so Settings is accessible via the user dropdown
+        githubGetUser: () => Promise.resolve({ login: 'test-user', avatar_url: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>', name: 'Test User' }),
         githubStartAuth: () => {},
         githubCancelAuth: () => {},
         githubLogout: () => Promise.resolve(),
-        githubOnAuthComplete: () => noop,
-        githubOnAuthError: () => noop,
+        githubOnAuthComplete: (_cb: any) => noop(),
+        githubOnAuthError: (_cb: any) => noop(),
         githubSyncNow: () => Promise.resolve(),
-        githubOnSyncStatus: () => noop,
-        githubOnSettingsApplied: () => noop,
+        githubOnSyncStatus: (_cb: any) => noop(),
+        githubOnSettingsApplied: (_cb: any) => noop(),
         // Project
         saveImage: () => Promise.resolve('/tmp/test.png'),
       };
@@ -121,8 +123,11 @@ export const test = base.extend<{ window: Page }>({
 
     await page.goto('http://localhost:5173');
     await page.waitForLoadState('domcontentloaded');
-    // Wait for React to hydrate and initial data loading
-    await page.waitForTimeout(3000);
+    // Wait for the app to fully render — project selector appears once getCwd resolves
+    // and the workspace is initialized
+    await page.waitForSelector('.project-selector', { timeout: 15000 });
+    // Small extra wait for any remaining async initialization
+    await page.waitForTimeout(1000);
     await use(page);
   },
 });
