@@ -1,6 +1,8 @@
 import { test as base, _electron, ElectronApplication, Page } from '@playwright/test';
 import path from 'path';
 
+const DEV_SERVER_URL = 'http://localhost:5173';
+
 export const test = base.extend<{
   electronApp: ElectronApplication;
   window: Page;
@@ -11,6 +13,7 @@ export const test = base.extend<{
       env: {
         ...process.env,
         NODE_ENV: 'test',
+        VITE_DEV_SERVER_URL: DEV_SERVER_URL,
       },
     });
     await use(app);

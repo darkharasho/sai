@@ -11,4 +11,10 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
+  webServer: {
+    command: 'PLAYWRIGHT=1 npx vite',
+    port: 5173,
+    reuseExistingServer: !process.env.CI,
+    timeout: 30000,
+  },
 });

@@ -45,7 +45,6 @@ Check if the user included `e2e` as an additional argument (e.g., `/github-relea
 If `e2e` was specified:
 
 ```bash
-npm run build
 npm run test:e2e
 ```
 
