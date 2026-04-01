@@ -230,7 +230,14 @@ function ensureProcess(
         }
 
         safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath });
-      } catch { /* ignore malformed JSON */ }
+      } catch {
+        // If a malformed line looks like it contains a result, force-send done
+        // so the UI doesn't get stuck in streaming state
+        if (line.includes('"type":"result"') || line.includes('"type": "result"')) {
+          ws.claude.busy = false;
+          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+        }
+      }
     }
   });
 
@@ -344,6 +351,11 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 
     // Ensure persistent process is running with current config
     const proc = ensureProcess(win, projectPath, permMode, effort, model);
+
+    // If previous turn's done was lost (malformed JSON, CLI hiccup), clear stale state
+    if (ws.claude.busy) {
+      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+    }
 
     ws.claude.busy = true;
     safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath });
