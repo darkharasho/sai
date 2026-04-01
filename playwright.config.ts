@@ -1,15 +1,17 @@
-import { defineConfig } from '@playwright/test';
+import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: 'tests/e2e',
   testMatch: '**/*.spec.ts',
   timeout: 60000,
   retries: 1,
-  workers: 1, // Electron tests must run serially
+  workers: 1,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
+    baseURL: 'http://localhost:5173',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
+    ...devices['Desktop Chrome'],
   },
   webServer: {
     command: 'PLAYWRIGHT=1 npx vite',

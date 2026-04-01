@@ -14,6 +14,11 @@ import { initialSync, schedulePush } from './services/github-sync';
 import { registerCodexHandlers } from './services/codex';
 import { registerGeminiHandlers } from './services/gemini';
 
+// Allow E2E tests to isolate userData
+if (process.env.SAI_USER_DATA_DIR) {
+  app.setPath('userData', process.env.SAI_USER_DATA_DIR);
+}
+
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow() {
