@@ -8,6 +8,8 @@ import TitleBar from './components/TitleBar';
 import CodePanel from './components/CodePanel/CodePanel';
 import UnsavedChangesModal from './components/UnsavedChangesModal';
 import WorkspaceToast from './components/WorkspaceToast';
+import { useWhatsNew } from './hooks/useWhatsNew';
+import WhatsNewModal from './components/WhatsNewModal';
 import { loadSessions, saveSessions, createSession, upsertSession, migrateLegacySessions, loadSessionMessages } from './sessions';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext } from './types';
 import { MessageSquare, TerminalSquare, Code2, ChevronRight, MessageCirclePlus, Clock } from 'lucide-react';
@@ -104,6 +106,7 @@ export default function App() {
   const [busyWorkspaces, setBusyWorkspaces] = useState<Set<string>>(new Set());
   const [focusedChat, setFocusedChat] = useState(false);
   const [toast, setToast] = useState<{ message: string; key: number } | null>(null);
+  const { isOpen: whatsNewOpen, version: whatsNewVersion, releaseNotes, fetchStatus, openWhatsNew, closeWhatsNew } = useWhatsNew();
   const workspacesRef = useRef(workspaces);
   const activeProjectPathRef = useRef(activeProjectPath);
 
@@ -1059,6 +1062,7 @@ export default function App() {
           if (key === 'geminiLoadingPhrases') handleGeminiLoadingPhrasesChange(value);
           if (key === 'focusedChat') { setFocusedChat(value); if (value) { setExpanded(['chat', 'terminal']); setSplitRatio(0.66); } }
         }}
+        onOpenWhatsNew={openWhatsNew}
       />
       <div className="app-body">
         <NavBar activeSidebar={sidebarOpen} onToggle={toggleSidebar} gitChangeCount={gitChangeCount} />
@@ -1103,6 +1107,16 @@ export default function App() {
           />
         );
       })()}
+
+      {whatsNewOpen && (
+        <WhatsNewModal
+          isOpen={whatsNewOpen}
+          version={whatsNewVersion}
+          releaseNotes={releaseNotes}
+          fetchStatus={fetchStatus}
+          onClose={closeWhatsNew}
+        />
+      )}
 
       {toast && (
         <WorkspaceToast key={toast.key} message={toast.message} onDismiss={() => setToast(null)} />

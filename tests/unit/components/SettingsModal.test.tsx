@@ -165,4 +165,34 @@ describe('SettingsModal', () => {
       expect(mock.githubGetUser).toHaveBeenCalled();
     });
   });
+
+  it('renders "What\'s New" button when onOpenWhatsNew is provided', async () => {
+    const mock = createMockSai();
+    mock.settingsGet = makeSettingsGetMock();
+    installMockSai(mock);
+
+    render(<SettingsModal onClose={vi.fn()} onOpenWhatsNew={vi.fn()} />);
+
+    await waitFor(() =>
+      expect(screen.getByText("See what changed in this version")).toBeTruthy()
+    );
+  });
+
+  it('calls onOpenWhatsNew and onClose when "What\'s New" is clicked', async () => {
+    const mock = createMockSai();
+    mock.settingsGet = makeSettingsGetMock();
+    installMockSai(mock);
+
+    const onOpenWhatsNew = vi.fn();
+    const onClose = vi.fn();
+    render(<SettingsModal onClose={onClose} onOpenWhatsNew={onOpenWhatsNew} />);
+
+    await waitFor(() => expect(screen.getByText("See what changed in this version")).toBeTruthy());
+    const buttons = screen.getAllByText("What's New");
+    const button = buttons.find(el => el.tagName === 'BUTTON')!;
+    fireEvent.click(button);
+
+    expect(onOpenWhatsNew).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });

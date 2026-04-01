@@ -4,6 +4,7 @@ import { X, Check, ChevronDown } from 'lucide-react';
 interface Props {
   onClose: () => void;
   onSettingChange?: (key: string, value: any) => void;
+  onOpenWhatsNew?: () => void;
 }
 
 const TIMEOUT_OPTIONS = [
@@ -46,7 +47,7 @@ const PROVIDER_OPTIONS: { id: 'claude' | 'codex' | 'gemini'; label: string; svg:
   { id: 'gemini', label: 'Gemini CLI', svg: 'svg/Google-gemini-icon.svg', color: '#4285f4' },
 ];
 
-export default function SettingsModal({ onClose, onSettingChange }: Props) {
+export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew }: Props) {
   const [suspendTimeout, setSuspendTimeout] = useState<number>(DEFAULT_TIMEOUT);
   const [editorFontSize, setEditorFontSize] = useState(13);
   const [editorMinimap, setEditorMinimap] = useState(true);
@@ -437,6 +438,25 @@ export default function SettingsModal({ onClose, onSettingChange }: Props) {
               <div className="settings-divider" />
               <div className="settings-sync-note">
                 Settings are synced to your private <code>sai-config</code> GitHub repo and shared across devices.
+              </div>
+            </>
+          )}
+
+          {onOpenWhatsNew && (
+            <>
+              <div className="settings-divider" />
+              <div className="settings-row">
+                <div className="settings-row-info">
+                  <div className="settings-row-name">What's New</div>
+                  <div className="settings-row-desc">See what changed in this version</div>
+                </div>
+                <button
+                  className="settings-close"
+                  style={{ padding: '5px 10px', fontSize: 12, color: 'var(--accent)' }}
+                  onClick={() => { onOpenWhatsNew(); onClose(); }}
+                >
+                  What's New
+                </button>
               </div>
             </>
           )}
