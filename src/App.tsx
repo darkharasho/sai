@@ -375,7 +375,7 @@ export default function App() {
           next.delete(msg.projectPath);
           // Notify if this was a background workspace (and app isn't focused)
           // Delay slightly so the ChatPanel has time to render the final content
-          if (msg.projectPath !== activeProjectPathRef.current && !document.hasFocus()) {
+          if (msg.projectPath !== activeProjectPathRef.current) {
             const wsName = msg.projectPath.split('/').pop() || msg.projectPath;
             setTimeout(() => {
               setCompletedWorkspaces(p => new Set(p).add(msg.projectPath));
