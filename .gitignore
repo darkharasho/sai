@@ -7,3 +7,4 @@ electron-dist
 .superpowers/
 .env
 .worktrees/
+coverage/
