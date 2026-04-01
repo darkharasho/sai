@@ -28,7 +28,31 @@ When the user invokes `/release <bump>`, follow these steps exactly:
 2. Run `git branch --show-current` — if not `main`, abort: "Must be on the main branch to release."
 3. Check that the argument is one of `patch`, `minor`, or `major`. If missing or invalid, abort with usage hint.
 
-### Step 2: Bump version
+### Step 2: Run Tests
+
+Run the test suite before proceeding:
+
+```bash
+npm test
+```
+
+If any tests fail, STOP immediately. Show the failing test output to the user and do NOT proceed with the release. Tell them to fix the failing tests first.
+
+#### Optional: E2E Tests
+
+Check if the user included `e2e` as an additional argument (e.g., `/github-release patch e2e`).
+
+If `e2e` was specified:
+
+```bash
+npm run test:e2e
+```
+
+If E2E tests fail, STOP and show the output. Do NOT proceed with the release.
+
+If `e2e` was NOT specified, skip this step.
+
+### Step 3: Bump version
 
 1. Read `package.json`.
 2. Parse the current `version` field (semver: `MAJOR.MINOR.PATCH`).
@@ -36,7 +60,7 @@ When the user invokes `/release <bump>`, follow these steps exactly:
 4. Write the updated version back to `package.json` (change only the version field, preserve everything else).
 5. Tell the user the old and new version.
 
-### Step 3: Generate release notes
+### Step 4: Generate release notes
 
 1. Run `git describe --tags --abbrev=0` to find the previous tag. If no tags exist, use the root commit.
 2. Run `git log <prev-tag>..HEAD --pretty=format:"%h %s"` to get commits since the last release.
@@ -46,9 +70,9 @@ When the user invokes `/release <bump>`, follow these steps exactly:
    - Everything else           -> **Other Changes**
 4. Format each entry as `- {message} ({short hash})`.
 5. Omit empty sections.
-6. Store the formatted notes for use in Step 5.
+6. Store the formatted notes for use in Step 6.
 
-### Step 4: Commit and tag
+### Step 5: Commit and tag
 
 Run these commands sequentially:
 
@@ -58,7 +82,7 @@ git commit -m "release: v{NEW_VERSION}"
 git tag v{NEW_VERSION}
 ```
 
-### Step 5: Push and create draft release
+### Step 6: Push and create draft release
 
 Run these commands sequentially:
 
@@ -75,7 +99,7 @@ gh release create v{NEW_VERSION} --draft --title "v{NEW_VERSION}" --notes "{RELE
 
 Use a heredoc for the notes body to preserve formatting.
 
-### Step 6: Done
+### Step 7: Done
 
 1. Tell the user: "Draft release created. GitHub Actions is now building artifacts for Linux, Windows, and macOS."
 2. Explain that the CI workflow will automatically:

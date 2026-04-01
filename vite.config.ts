@@ -10,7 +10,9 @@ export default defineConfig({
       {
         entry: 'electron/main.ts',
         onstart(args) {
-          args.startup();
+          if (!process.env.PLAYWRIGHT) {
+            args.startup();
+          }
         },
         vite: {
           build: {

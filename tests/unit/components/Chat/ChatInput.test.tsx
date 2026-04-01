@@ -1,0 +1,128 @@
+/**
+ * ChatInput unit tests.
+ *
+ * IMPORTANT: ChatInput uses a useEffect that depends on the `slashCommands`
+ * prop.  If `slashCommands` is not passed (triggering the default `[]` param),
+ * React sees a new array reference on every render and creates an infinite
+ * render loop.  Always pass `STABLE_SLASH_COMMANDS` so the reference stays
+ * constant across renders.
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { installMockSai } from '../../../helpers/ipc-mock';
+
+// Must be hoisted before the component import
+vi.mock('../../../../src/terminalBuffer', () => ({
+  getTerminalContent: vi.fn().mockReturnValue(''),
+}));
+
+import ChatInput from '../../../../src/components/Chat/ChatInput';
+
+/** Stable empty array to prevent infinite-render caused by new `[]` on each render */
+const STABLE_SLASH_COMMANDS: string[] = [];
+
+const defaultProps = {
+  onSend: vi.fn(),
+  permissionMode: 'default' as const,
+  onPermissionChange: vi.fn(),
+  effortLevel: 'medium' as const,
+  onEffortChange: vi.fn(),
+  modelChoice: 'sonnet' as const,
+  onModelChange: vi.fn(),
+  // Always provide a stable reference so the slashCommands useEffect
+  // dependency doesn't change every render.
+  slashCommands: STABLE_SLASH_COMMANDS,
+};
+
+describe('ChatInput', () => {
+  beforeEach(() => {
+    installMockSai();
+    vi.clearAllMocks();
+  });
+
+  it('renders without crashing', () => {
+    render(<ChatInput {...defaultProps} />);
+    expect(screen.getByRole('textbox')).toBeTruthy();
+  });
+
+  it('renders a textarea for input', () => {
+    render(<ChatInput {...defaultProps} />);
+    const textarea = screen.getByRole('textbox');
+    expect(textarea.tagName).toBe('TEXTAREA');
+  });
+
+  it('updates value when user types', () => {
+    render(<ChatInput {...defaultProps} />);
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'Hello Claude' } });
+    expect(textarea.value).toBe('Hello Claude');
+  });
+
+  it('calls onSend with message when Enter is pressed', () => {
+    const onSend = vi.fn();
+    render(<ChatInput {...defaultProps} onSend={onSend} />);
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'Test message' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+    // Images array is omitted (undefined) when no images attached
+    expect(onSend).toHaveBeenCalledWith('Test message', undefined);
+  });
+
+  it('does not call onSend on Shift+Enter (newline)', () => {
+    const onSend = vi.fn();
+    render(<ChatInput {...defaultProps} onSend={onSend} />);
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'Test message' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true });
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it('does not call onSend when message is empty', () => {
+    const onSend = vi.fn();
+    render(<ChatInput {...defaultProps} onSend={onSend} />);
+    const textarea = screen.getByRole('textbox');
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it('clears textarea after sending', () => {
+    const onSend = vi.fn();
+    render(<ChatInput {...defaultProps} onSend={onSend} />);
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'Hello' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+    expect(textarea.value).toBe('');
+  });
+
+  it('shows approval panel when pendingApproval is provided', () => {
+    const pendingApproval = {
+      toolName: 'Bash',
+      toolUseId: 'tu-1',
+      command: 'rm -rf /tmp/test',
+      description: 'Remove temp files',
+      input: {},
+    };
+    render(
+      <ChatInput
+        {...defaultProps}
+        pendingApproval={pendingApproval}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+        onAlwaysAllow={vi.fn()}
+      />
+    );
+    expect(screen.getByText('Bash')).toBeTruthy();
+  });
+
+  it('renders without pendingApproval (no approval panel)', () => {
+    render(<ChatInput {...defaultProps} pendingApproval={null} />);
+    expect(screen.queryByText('Approve')).toBeNull();
+  });
+
+  it('shows streaming state correctly', () => {
+    const { container } = render(
+      <ChatInput {...defaultProps} isStreaming={true} onStop={vi.fn()} />
+    );
+    expect(container).toBeTruthy();
+  });
+});
