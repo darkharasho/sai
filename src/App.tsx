@@ -104,6 +104,7 @@ export default function App() {
   const [externallyModified, setExternallyModified] = useState<Set<string>>(new Set());
   const [completedWorkspaces, setCompletedWorkspaces] = useState<Set<string>>(new Set());
   const [busyWorkspaces, setBusyWorkspaces] = useState<Set<string>>(new Set());
+  const wsTurnSeqRef = useRef<Map<string, number>>(new Map());
   const [focusedChat, setFocusedChat] = useState(false);
   const [toast, setToast] = useState<{ message: string; key: number } | null>(null);
   const { isOpen: whatsNewOpen, version: whatsNewVersion, releaseNotes, fetchStatus, openWhatsNew, closeWhatsNew } = useWhatsNew();
@@ -366,9 +367,17 @@ export default function App() {
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
       if (!msg.projectPath) return;
       if (msg.type === 'streaming_start') {
+        if (msg.turnSeq != null) wsTurnSeqRef.current.set(msg.projectPath, msg.turnSeq);
         setBusyWorkspaces(prev => new Set(prev).add(msg.projectPath));
       }
       if (msg.type === 'done') {
+        // Ignore stale 'done' from a previous turn
+        if (msg.turnSeq != null) {
+          const expected = wsTurnSeqRef.current.get(msg.projectPath);
+          if (expected != null && msg.turnSeq !== expected) return;
+          // Consume the turnSeq so a duplicate done is rejected
+          wsTurnSeqRef.current.set(msg.projectPath, -1);
+        }
         setBusyWorkspaces(prev => {
           if (!prev.has(msg.projectPath)) return prev;
           const next = new Set(prev);

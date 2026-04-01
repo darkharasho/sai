@@ -217,7 +217,7 @@ function ensureProcess(
           const wasBusy = ws.claude.busy;
           ws.claude.busy = false;
           safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath });
-          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.claude.turnSeq });
           // Delay notification so renderer has time to process the result/done IPC
           if (wasBusy) setTimeout(() => notifyCompletion(win, ws.projectPath, {
             provider: 'Claude',
@@ -235,7 +235,7 @@ function ensureProcess(
         // so the UI doesn't get stuck in streaming state
         if (line.includes('"type":"result"') || line.includes('"type": "result"')) {
           ws.claude.busy = false;
-          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.claude.turnSeq });
         }
       }
     }
@@ -259,6 +259,7 @@ function ensureProcess(
         safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath });
       } catch { /* ignore */ }
     }
+    const wasBusy = ws.claude.busy;
     ws.claude.buffer = '';
     ws.claude.process = null;
     ws.claude.processConfig = null;
@@ -267,8 +268,10 @@ function ensureProcess(
     ws.claude.pendingToolUse = null;
     ws.claude.approvalBuffered = [];
     ws.claude.awaitingApproval = false;
-    // Signal unexpected exit so the UI can recover
-    safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+    // Only signal done if we were mid-turn — avoids spurious done when idle process crashes
+    if (wasBusy) {
+      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.claude.turnSeq });
+    }
   });
 
   proc.on('error', (err) => {
@@ -283,7 +286,7 @@ function ensureProcess(
     safeSend(win, 'claude:message', {
       type: 'error', text: `Claude process error: ${err.message}`, projectPath: ws.projectPath
     });
-    safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+    safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.claude.turnSeq });
   });
 
   return proc;
@@ -318,7 +321,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
       ws.claude.approvalBuffered = [];
       ws.claude.awaitingApproval = false;
       proc.kill();
-      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.claude.turnSeq });
     }
   });
 
@@ -352,13 +355,29 @@ export function registerClaudeHandlers(win: BrowserWindow) {
     // Ensure persistent process is running with current config
     const proc = ensureProcess(win, projectPath, permMode, effort, model);
 
-    // If previous turn's done was lost (malformed JSON, CLI hiccup), clear stale state
-    if (ws.claude.busy) {
-      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+    // Flush any partial buffer from the previous turn so stale results
+    // don't leak into the new turn and send a spurious 'done'.
+    if (ws.claude.buffer.trim()) {
+      try {
+        const stale = JSON.parse(ws.claude.buffer);
+        if (stale.type === 'result') {
+          ws.claude.busy = false;
+          safeSend(win, 'claude:message', { ...stale, projectPath: ws.projectPath });
+          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.claude.turnSeq });
+        }
+      } catch { /* partial/malformed — discard */ }
+      ws.claude.buffer = '';
     }
 
+    // If previous turn's done was lost (malformed JSON, CLI hiccup), clear stale state
+    if (ws.claude.busy) {
+      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.claude.turnSeq });
+    }
+
+    // New turn — increment sequence so renderer can ignore stale 'done' messages
+    ws.claude.turnSeq++;
     ws.claude.busy = true;
-    safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath });
+    safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath, turnSeq: ws.claude.turnSeq });
 
     // Write the user message as NDJSON to stdin
     const msg = JSON.stringify({
@@ -367,7 +386,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
     });
     if (!proc.stdin || proc.stdin.destroyed) {
       ws.claude.busy = false;
-      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.claude.turnSeq });
       return;
     }
     proc.stdin.write(msg + '\n');
@@ -385,7 +404,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
         if (buffered.type === 'result') {
           ws.claude.busy = false;
           safeSend(win, 'claude:message', { ...buffered, projectPath: ws.projectPath });
-          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.claude.turnSeq });
         } else {
           safeSend(win, 'claude:message', { ...buffered, projectPath: ws.projectPath });
         }

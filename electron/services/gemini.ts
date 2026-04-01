@@ -184,7 +184,7 @@ export function registerGeminiHandlers(win: BrowserWindow) {
       ws.gemini.process = null;
       ws.gemini.busy = false;
       proc.kill();
-      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.gemini.turnSeq });
     }
   });
 
@@ -223,10 +223,11 @@ export function registerGeminiHandlers(win: BrowserWindow) {
     });
 
     ws.gemini.process = proc;
+    ws.gemini.turnSeq++;
     ws.gemini.busy = true;
     ws.gemini.buffer = '';
 
-    safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath });
+    safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath, turnSeq: ws.gemini.turnSeq });
 
     proc.stdout?.on('data', (data: Buffer) => {
       if (ws.gemini.process !== proc) return;
@@ -241,6 +242,7 @@ export function registerGeminiHandlers(win: BrowserWindow) {
           const msg = JSON.parse(line);
           const events = translateEvent(msg, ws.projectPath);
           for (const ev of events) {
+            if (ev.type === 'streaming_start' || ev.type === 'done') ev.turnSeq = ws.gemini.turnSeq;
             safeSend(win, 'claude:message', ev);
           }
           // Mark not busy on result
@@ -273,14 +275,19 @@ export function registerGeminiHandlers(win: BrowserWindow) {
           const msg = JSON.parse(ws.gemini.buffer);
           const events = translateEvent(msg, ws.projectPath);
           for (const ev of events) {
+            if (ev.type === 'streaming_start' || ev.type === 'done') ev.turnSeq = ws.gemini.turnSeq;
             safeSend(win, 'claude:message', ev);
           }
         } catch { /* ignore */ }
       }
+      const wasBusy = ws.gemini.busy;
       ws.gemini.buffer = '';
       ws.gemini.process = null;
       ws.gemini.busy = false;
-      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+      // Only send done if the turn didn't already complete normally via result event
+      if (wasBusy) {
+        safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.gemini.turnSeq });
+      }
     });
 
     proc.on('error', (err) => {
@@ -290,7 +297,7 @@ export function registerGeminiHandlers(win: BrowserWindow) {
       safeSend(win, 'claude:message', {
         type: 'error', text: `Gemini process error: ${err.message}`, projectPath: ws.projectPath,
       });
-      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.gemini.turnSeq });
     });
   });
 }

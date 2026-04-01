@@ -242,7 +242,7 @@ export function registerCodexHandlers(win: BrowserWindow) {
       ws.codex.process = null;
       ws.codex.busy = false;
       proc.kill();
-      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.codex.turnSeq });
     }
   });
 
@@ -288,10 +288,11 @@ export function registerCodexHandlers(win: BrowserWindow) {
     });
 
     ws.codex.process = proc;
+    ws.codex.turnSeq++;
     ws.codex.busy = true;
     ws.codex.buffer = '';
 
-    safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath });
+    safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath, turnSeq: ws.codex.turnSeq });
 
     proc.stdout?.on('data', (data: Buffer) => {
       if (ws.codex.process !== proc) return;
@@ -306,6 +307,7 @@ export function registerCodexHandlers(win: BrowserWindow) {
           const msg = JSON.parse(line);
           const events = translateEvent(msg, ws.projectPath);
           for (const ev of events) {
+            if (ev.type === 'streaming_start' || ev.type === 'done') ev.turnSeq = ws.codex.turnSeq;
             safeSend(win, 'claude:message', ev);
           }
           // Mark not busy on turn completion
@@ -337,15 +339,19 @@ export function registerCodexHandlers(win: BrowserWindow) {
           const msg = JSON.parse(ws.codex.buffer);
           const events = translateEvent(msg, ws.projectPath);
           for (const ev of events) {
+            if (ev.type === 'streaming_start' || ev.type === 'done') ev.turnSeq = ws.codex.turnSeq;
             safeSend(win, 'claude:message', ev);
           }
         } catch { /* ignore */ }
       }
+      const wasBusy = ws.codex.busy;
       ws.codex.buffer = '';
       ws.codex.process = null;
       ws.codex.busy = false;
-      // Ensure the UI gets a done signal
-      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+      // Only send done if the turn didn't already complete normally via turn.completed
+      if (wasBusy) {
+        safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.codex.turnSeq });
+      }
     });
 
     proc.on('error', (err) => {
@@ -355,7 +361,7 @@ export function registerCodexHandlers(win: BrowserWindow) {
       safeSend(win, 'claude:message', {
         type: 'error', text: `Codex process error: ${err.message}`, projectPath: ws.projectPath,
       });
-      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath });
+      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.codex.turnSeq });
     });
   });
 }

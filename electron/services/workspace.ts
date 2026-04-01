@@ -21,6 +21,7 @@ export interface WorkspaceClaude {
     model: string;
   } | null;
   busy: boolean;           // true while a turn is in progress
+  turnSeq: number;         // monotonic counter — incremented each turn, tags streaming_start/done
   suppressForward: boolean; // true during commit msg generation — suppresses IPC forwarding
   // Approval flow state
   pendingToolUse: PendingToolUse | null;
@@ -33,6 +34,7 @@ export interface WorkspaceCodex {
   buffer: string;
   cwd: string;
   busy: boolean;
+  turnSeq: number;
 }
 
 export interface WorkspaceGemini {
@@ -40,6 +42,7 @@ export interface WorkspaceGemini {
   buffer: string;
   cwd: string;
   busy: boolean;
+  turnSeq: number;
 }
 
 export interface Workspace {
@@ -70,6 +73,7 @@ export function getOrCreate(projectPath: string): Workspace {
       cwd: projectPath,
       processConfig: null,
       busy: false,
+      turnSeq: 0,
       suppressForward: false,
       pendingToolUse: null,
       approvalBuffered: [],
@@ -80,12 +84,14 @@ export function getOrCreate(projectPath: string): Workspace {
       buffer: '',
       cwd: projectPath,
       busy: false,
+      turnSeq: 0,
     },
     gemini: {
       process: null,
       buffer: '',
       cwd: projectPath,
       busy: false,
+      turnSeq: 0,
     },
     terminals: new Map(),
     lastActivity: Date.now(),

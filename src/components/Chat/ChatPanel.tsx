@@ -484,6 +484,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const [messages, setMessages] = useState<ChatMessageType[]>(initialMessages || []);
   const emptyPrompt = useMemo(() => EMPTY_PROMPTS[Math.floor(Math.random() * EMPTY_PROMPTS.length)], []);
   const [isStreaming, setIsStreaming] = useState(false);
+  const turnSeqRef = useRef(0); // tracks the active turn's sequence number
   const [ready, setReady] = useState(false);
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
@@ -585,12 +586,17 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       }
 
       if (msg.type === 'streaming_start') {
+        if (msg.turnSeq != null) turnSeqRef.current = msg.turnSeq;
         setIsStreaming(true);
         return;
       }
 
       // Process exited — turn is fully complete
       if (msg.type === 'done') {
+        // Ignore stale 'done' from a previous turn (e.g. buffered result flushed late)
+        if (msg.turnSeq != null && msg.turnSeq !== turnSeqRef.current) return;
+        // Consume the turnSeq so a duplicate done (e.g. from exit handler) is rejected
+        turnSeqRef.current = -1;
         setIsStreaming(false);
         onTurnComplete?.();
         return;
