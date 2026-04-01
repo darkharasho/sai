@@ -115,6 +115,7 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
       minimap: { enabled: minimap },
       scrollBeyondLastLine: false,
       automaticLayout: true,
+      fixedOverflowWidgets: true,
       padding: { top: 8 },
       renderLineHighlight: 'line',
       cursorBlinking: 'smooth',
