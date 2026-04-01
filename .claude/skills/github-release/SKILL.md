@@ -65,12 +65,22 @@ If `e2e` was NOT specified, skip this step.
 1. Run `git describe --tags --abbrev=0` to find the previous tag. If no tags exist, use the root commit.
 2. Run `git log <prev-tag>..HEAD --pretty=format:"%h %s"` to get commits since the last release.
 3. Group commits into sections by conventional commit prefix:
-   - `feat:` or `feat(...):`  -> **Features**
+   - `feat:` or `feat(...):`  -> **What's New**
    - `fix:` or `fix(...):`    -> **Bug Fixes**
-   - Everything else           -> **Other Changes**
-4. Format each entry as `- {message} ({short hash})`.
+   - Skip internal-only changes (`chore`, `ci`, `docs`, `style`, `refactor`, `test`, `build`, `release` commits) — users don't need to see these.
+4. **Rewrite each entry in plain, user-facing language.** Strip the conventional commit prefix and scope. Describe the change from the user's perspective — what they can now do or what got fixed. Keep it concise but clear. Do not include commit hashes.
 5. Omit empty sections.
 6. Store the formatted notes for use in Step 6.
+
+   Example output:
+   ```markdown
+   ## What's New
+   - Browse files with the new file explorer sidebar
+   - Edit files in a full-featured code editor modal
+
+   ## Bug Fixes
+   - Fixed line numbers being cut off in narrow windows
+   ```
 
 ### Step 5: Commit and tag
 
