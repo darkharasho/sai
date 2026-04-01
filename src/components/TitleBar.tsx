@@ -134,7 +134,17 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
       <div className="project-dropdown-wrapper" ref={dropdownRef}>
         <button className="project-selector" onClick={() => setOpen(!open)}>
           {projectName} ▾
-          {completedWorkspaces && completedWorkspaces.size > 0 && <span className="workspace-done-dot" />}
+          {(() => {
+            const bgBusyCount = busyWorkspaces ? [...busyWorkspaces].filter(p => p !== projectPath).length : 0;
+            if (completedWorkspaces && completedWorkspaces.size > 0) return <span className="workspace-done-dot" />;
+            if (bgBusyCount > 0) return (
+              <span className="titlebar-busy-indicator">
+                <span className="titlebar-busy-spinner" />
+                {bgBusyCount > 1 && <span className="titlebar-busy-count">{bgBusyCount}</span>}
+              </span>
+            );
+            return null;
+          })()}
         </button>
         {open && (
           <div className="project-dropdown" onMouseDown={(e) => {
@@ -486,6 +496,29 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           margin-left: 6px;
           vertical-align: middle;
           animation: done-pulse 2s ease-in-out infinite;
+        }
+        .titlebar-busy-indicator {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          margin-left: 6px;
+          vertical-align: middle;
+        }
+        .titlebar-busy-spinner {
+          display: inline-block;
+          width: 9px;
+          height: 9px;
+          border: 1.5px solid rgba(199, 145, 12, 0.25);
+          border-top-color: var(--accent);
+          border-radius: 50%;
+          animation: workspace-spin 0.8s linear infinite;
+        }
+        .titlebar-busy-count {
+          font-size: 10px;
+          font-family: 'JetBrains Mono', monospace;
+          color: var(--text-muted);
+          opacity: 0.6;
+          font-weight: 500;
         }
         .workspace-completed-icon {
           display: inline-flex;
