@@ -64,7 +64,7 @@ function ThinkingAnimation({ hasContent }: { hasContent: boolean }) {
       if (charIndex < word.length) {
         timeout = setTimeout(() => setCharIndex(c => c + 1), 40 + Math.random() * 30);
       } else {
-        timeout = setTimeout(() => setPhase('pause'), 800 + Math.random() * 400);
+        timeout = setTimeout(() => setPhase('pause'), 1200 + Math.random() * 600);
       }
     } else if (phase === 'pause') {
       timeout = setTimeout(() => setPhase('erasing'), 100);
@@ -609,7 +609,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           content: msg.text || 'Unknown error',
           timestamp: Date.now(),
         }]);
-        setIsStreaming(false);
+        // Don't set isStreaming=false here — errors can be non-fatal stderr warnings.
+        // The authoritative end-of-turn signal is 'done' or 'process_exit'.
         return;
       }
 
@@ -802,7 +803,9 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       }
     });
 
-    return cleanup;
+    return () => {
+      cleanup();
+    };
   }, [projectPath, aiProvider]);
 
   // Poll the Anthropic usage API for real utilization percentages
