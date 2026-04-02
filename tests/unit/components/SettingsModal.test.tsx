@@ -178,6 +178,22 @@ describe('SettingsModal', () => {
     );
   });
 
+  it('renders sidebar with General and Provider nav items', () => {
+    render(<SettingsModal {...defaultProps} />);
+    const sidebar = document.querySelector('.settings-sidebar');
+    expect(sidebar).toBeTruthy();
+    expect(screen.getByText('General')).toBeTruthy();
+    expect(screen.getByText('Provider')).toBeTruthy();
+  });
+
+  it('renders provider sub-items in sidebar', () => {
+    render(<SettingsModal {...defaultProps} />);
+    const sidebar = document.querySelector('.settings-sidebar')!;
+    expect(sidebar.textContent).toContain('Claude');
+    expect(sidebar.textContent).toContain('Codex');
+    expect(sidebar.textContent).toContain('Gemini');
+  });
+
   it('calls onOpenWhatsNew and onClose when "What\'s New" is clicked', async () => {
     const mock = createMockSai();
     mock.settingsGet = makeSettingsGetMock();
