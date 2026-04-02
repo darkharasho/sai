@@ -199,283 +199,308 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.githubSyncNow();
   };
 
+  const renderGeneralPage = () => (
+    <>
+      <section className="settings-section">
+        <div className="settings-section-label">Editor</div>
+
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <div className="settings-row-name">Font size</div>
+          </div>
+          <select
+            className="settings-select"
+            value={editorFontSize}
+            onChange={e => handleFontSizeChange(Number(e.target.value))}
+          >
+            {FONT_SIZES.map(s => (
+              <option key={s} value={s}>{s}px</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="settings-row settings-row-spaced">
+          <div className="settings-row-info">
+            <div className="settings-row-name">Minimap</div>
+            <div className="settings-row-desc">Code overview on the right edge of the editor</div>
+          </div>
+          <button
+            className={`settings-toggle${editorMinimap ? ' on' : ''}`}
+            onClick={() => handleMinimapChange(!editorMinimap)}
+            role="switch"
+            aria-checked={editorMinimap}
+          >
+            <span className="settings-toggle-thumb" />
+          </button>
+        </div>
+      </section>
+
+      <div className="settings-divider" />
+
+      <section className="settings-section">
+        <div className="settings-section-label">Layout</div>
+
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <div className="settings-row-name">Focused chat</div>
+            <div className="settings-row-desc">Chat stays at 66%, editor and terminal toggle in the remaining space</div>
+          </div>
+          <button
+            className={`settings-toggle${focusedChat ? ' on' : ''}`}
+            onClick={() => handleFocusedChatChange(!focusedChat)}
+            role="switch"
+            aria-checked={focusedChat}
+          >
+            <span className="settings-toggle-thumb" />
+          </button>
+        </div>
+
+        <div className="settings-row settings-row-spaced">
+          <div className="settings-row-info">
+            <div className="settings-row-name">Sidebar width</div>
+            <div className="settings-row-desc">Width of the file explorer and git sidebars</div>
+          </div>
+          <select
+            className="settings-select"
+            value={sidebarWidth}
+            onChange={e => handleSidebarWidthChange(Number(e.target.value))}
+          >
+            {SIDEBAR_WIDTH_OPTIONS.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
+      </section>
+
+      <div className="settings-divider" />
+
+      <section className="settings-section">
+        <div className="settings-section-label">Workspaces</div>
+
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <div className="settings-row-name">Auto-suspend after</div>
+            <div className="settings-row-desc">Idle workspaces are suspended to free up resources</div>
+          </div>
+          <select
+            className="settings-select"
+            value={suspendTimeout}
+            onChange={e => handleTimeoutChange(Number(e.target.value))}
+          >
+            {TIMEOUT_OPTIONS.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
+      </section>
+
+      <div className="settings-divider" />
+
+      <section className="settings-section">
+        <div className="settings-section-label">Notifications</div>
+
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <div className="settings-row-name">System notifications</div>
+            <div className="settings-row-desc">Send a desktop notification when a response completes and the app is not focused</div>
+          </div>
+          <button
+            className={`settings-toggle${systemNotifications ? ' on' : ''}`}
+            onClick={() => handleSystemNotificationsChange(!systemNotifications)}
+            role="switch"
+            aria-checked={systemNotifications}
+          >
+            <span className="settings-toggle-thumb" />
+          </button>
+        </div>
+      </section>
+
+      {isAuthed && (
+        <>
+          <div className="settings-divider" />
+          <div className="settings-sync-note">
+            Settings are synced to your private <code>sai-config</code> GitHub repo and shared across devices.
+          </div>
+        </>
+      )}
+
+      {onOpenWhatsNew && (
+        <>
+          <div className="settings-divider" />
+          <div className="settings-row">
+            <div className="settings-row-info">
+              <div className="settings-row-name">What's New</div>
+              <div className="settings-row-desc">See what changed in this version</div>
+            </div>
+            <button
+              className="settings-close"
+              style={{ padding: '5px 10px', fontSize: 12, color: 'var(--accent)' }}
+              onClick={() => { onOpenWhatsNew(); onClose(); }}
+            >
+              What's New
+            </button>
+          </div>
+        </>
+      )}
+    </>
+  );
+
+  const renderProviderPage = () => (
+    <>
+      <section className="settings-section">
+        <div className="settings-section-label">AI Provider</div>
+
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <div className="settings-row-name">Chat provider</div>
+            <div className="settings-row-desc">Which AI backend to use for the chat panel</div>
+          </div>
+          <div className="provider-select" ref={providerRef}>
+            <button className="provider-select-btn" onClick={() => setProviderOpen(!providerOpen)}>
+              <span
+                className="provider-icon"
+                style={{
+                  maskImage: `url('${PROVIDER_OPTIONS.find(p => p.id === aiProvider)!.svg}')`,
+                  WebkitMaskImage: `url('${PROVIDER_OPTIONS.find(p => p.id === aiProvider)!.svg}')`,
+                  backgroundColor: PROVIDER_OPTIONS.find(p => p.id === aiProvider)!.color,
+                }}
+              />
+              <span>{PROVIDER_OPTIONS.find(p => p.id === aiProvider)!.label}</span>
+              <ChevronDown size={11} style={{ opacity: 0.5 }} />
+            </button>
+            {providerOpen && (
+              <div className="provider-dropdown">
+                {PROVIDER_OPTIONS.map(opt => (
+                  <button
+                    key={opt.id}
+                    className={`provider-dropdown-item ${opt.id === aiProvider ? 'active' : ''}`}
+                    onClick={() => { handleProviderChange(opt.id); setProviderOpen(false); }}
+                  >
+                    <span
+                      className="provider-icon"
+                      style={{
+                        maskImage: `url('${opt.svg}')`,
+                        WebkitMaskImage: `url('${opt.svg}')`,
+                        backgroundColor: opt.color,
+                      }}
+                    />
+                    <span>{opt.label}</span>
+                    {opt.id === aiProvider && <Check size={13} style={{ marginLeft: 'auto', color: 'var(--accent)' }} />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <div className="settings-row-name">Commit message provider</div>
+            <div className="settings-row-desc">Which AI backend generates commit messages</div>
+          </div>
+          <div className="provider-select" ref={commitProviderRef}>
+            <button className="provider-select-btn" onClick={() => setCommitProviderOpen(!commitProviderOpen)}>
+              <span
+                className="provider-icon"
+                style={{
+                  maskImage: `url('${PROVIDER_OPTIONS.find(p => p.id === commitMessageProvider)!.svg}')`,
+                  WebkitMaskImage: `url('${PROVIDER_OPTIONS.find(p => p.id === commitMessageProvider)!.svg}')`,
+                  backgroundColor: PROVIDER_OPTIONS.find(p => p.id === commitMessageProvider)!.color,
+                }}
+              />
+              <span>{PROVIDER_OPTIONS.find(p => p.id === commitMessageProvider)!.label}</span>
+              <ChevronDown size={11} style={{ opacity: 0.5 }} />
+            </button>
+            {commitProviderOpen && (
+              <div className="provider-dropdown">
+                {PROVIDER_OPTIONS.map(opt => (
+                  <button
+                    key={opt.id}
+                    className={`provider-dropdown-item ${opt.id === commitMessageProvider ? 'active' : ''}`}
+                    onClick={() => { handleCommitProviderChange(opt.id); setCommitProviderOpen(false); }}
+                  >
+                    <span
+                      className="provider-icon"
+                      style={{
+                        maskImage: `url('${opt.svg}')`,
+                        WebkitMaskImage: `url('${opt.svg}')`,
+                        backgroundColor: opt.color,
+                      }}
+                    />
+                    <span>{opt.label}</span>
+                    {opt.id === commitMessageProvider && <Check size={13} style={{ marginLeft: 'auto', color: 'var(--accent)' }} />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+    </>
+  );
+
+  const renderClaudePage = () => (
+    <section className="settings-section">
+      <div className="settings-section-label">Claude</div>
+      <div className="settings-row">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Auto-compact context</div>
+          <div className="settings-row-desc">Automatically compact when context reaches this threshold to reduce token costs</div>
+        </div>
+        <select
+          className="settings-select"
+          value={autoCompactThreshold}
+          onChange={e => handleAutoCompactChange(Number(e.target.value))}
+        >
+          {AUTO_COMPACT_OPTIONS.map(opt => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
+      </div>
+    </section>
+  );
+
+  const renderCodexPage = () => (
+    <section className="settings-section">
+      <div className="settings-section-label">Codex</div>
+      <div className="settings-row">
+        <div className="settings-row-info">
+          <div className="settings-row-name" style={{ color: 'var(--text-muted)' }}>No Codex-specific settings yet</div>
+        </div>
+      </div>
+    </section>
+  );
+
+  const renderGeminiPage = () => (
+    <section className="settings-section">
+      <div className="settings-section-label">Gemini</div>
+      <div className="settings-row">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Loading phrases</div>
+          <div className="settings-row-desc">What to show while Gemini is thinking</div>
+        </div>
+        <select
+          className="settings-select"
+          value={geminiLoadingPhrases}
+          onChange={e => handleGeminiLoadingPhrasesChange(e.target.value as any)}
+        >
+          <option value="all">All (witty + tips)</option>
+          <option value="witty">Witty phrases</option>
+          <option value="tips">Informative tips</option>
+          <option value="off">Off</option>
+        </select>
+      </div>
+    </section>
+  );
+
   const renderActivePage = () => {
-    return (
-      <>
-        <section className="settings-section">
-            <div className="settings-section-label">AI Provider</div>
-
-            <div className="settings-row">
-              <div className="settings-row-info">
-                <div className="settings-row-name">Chat provider</div>
-                <div className="settings-row-desc">Which AI backend to use for the chat panel</div>
-              </div>
-              <div className="provider-select" ref={providerRef}>
-                <button className="provider-select-btn" onClick={() => setProviderOpen(!providerOpen)}>
-                  <span
-                    className="provider-icon"
-                    style={{
-                      maskImage: `url('${PROVIDER_OPTIONS.find(p => p.id === aiProvider)!.svg}')`,
-                      WebkitMaskImage: `url('${PROVIDER_OPTIONS.find(p => p.id === aiProvider)!.svg}')`,
-                      backgroundColor: PROVIDER_OPTIONS.find(p => p.id === aiProvider)!.color,
-                    }}
-                  />
-                  <span>{PROVIDER_OPTIONS.find(p => p.id === aiProvider)!.label}</span>
-                  <ChevronDown size={11} style={{ opacity: 0.5 }} />
-                </button>
-                {providerOpen && (
-                  <div className="provider-dropdown">
-                    {PROVIDER_OPTIONS.map(opt => (
-                      <button
-                        key={opt.id}
-                        className={`provider-dropdown-item ${opt.id === aiProvider ? 'active' : ''}`}
-                        onClick={() => { handleProviderChange(opt.id); setProviderOpen(false); }}
-                      >
-                        <span
-                          className="provider-icon"
-                          style={{
-                            maskImage: `url('${opt.svg}')`,
-                            WebkitMaskImage: `url('${opt.svg}')`,
-                            backgroundColor: opt.color,
-                          }}
-                        />
-                        <span>{opt.label}</span>
-                        {opt.id === aiProvider && <Check size={13} style={{ marginLeft: 'auto', color: 'var(--accent)' }} />}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="settings-row">
-              <div className="settings-row-info">
-                <div className="settings-row-name">Commit message provider</div>
-                <div className="settings-row-desc">Which AI backend generates commit messages</div>
-              </div>
-              <div className="provider-select" ref={commitProviderRef}>
-                <button className="provider-select-btn" onClick={() => setCommitProviderOpen(!commitProviderOpen)}>
-                  <span
-                    className="provider-icon"
-                    style={{
-                      maskImage: `url('${PROVIDER_OPTIONS.find(p => p.id === commitMessageProvider)!.svg}')`,
-                      WebkitMaskImage: `url('${PROVIDER_OPTIONS.find(p => p.id === commitMessageProvider)!.svg}')`,
-                      backgroundColor: PROVIDER_OPTIONS.find(p => p.id === commitMessageProvider)!.color,
-                    }}
-                  />
-                  <span>{PROVIDER_OPTIONS.find(p => p.id === commitMessageProvider)!.label}</span>
-                  <ChevronDown size={11} style={{ opacity: 0.5 }} />
-                </button>
-                {commitProviderOpen && (
-                  <div className="provider-dropdown">
-                    {PROVIDER_OPTIONS.map(opt => (
-                      <button
-                        key={opt.id}
-                        className={`provider-dropdown-item ${opt.id === commitMessageProvider ? 'active' : ''}`}
-                        onClick={() => { handleCommitProviderChange(opt.id); setCommitProviderOpen(false); }}
-                      >
-                        <span
-                          className="provider-icon"
-                          style={{
-                            maskImage: `url('${opt.svg}')`,
-                            WebkitMaskImage: `url('${opt.svg}')`,
-                            backgroundColor: opt.color,
-                          }}
-                        />
-                        <span>{opt.label}</span>
-                        {opt.id === commitMessageProvider && <Check size={13} style={{ marginLeft: 'auto', color: 'var(--accent)' }} />}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </section>
-
-          <div className="settings-divider" />
-
-          <section className="settings-section">
-            <div className="settings-section-label">Editor</div>
-
-            <div className="settings-row">
-              <div className="settings-row-info">
-                <div className="settings-row-name">Font size</div>
-              </div>
-              <select
-                className="settings-select"
-                value={editorFontSize}
-                onChange={e => handleFontSizeChange(Number(e.target.value))}
-              >
-                {FONT_SIZES.map(s => (
-                  <option key={s} value={s}>{s}px</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="settings-row settings-row-spaced">
-              <div className="settings-row-info">
-                <div className="settings-row-name">Minimap</div>
-                <div className="settings-row-desc">Code overview on the right edge of the editor</div>
-              </div>
-              <button
-                className={`settings-toggle${editorMinimap ? ' on' : ''}`}
-                onClick={() => handleMinimapChange(!editorMinimap)}
-                role="switch"
-                aria-checked={editorMinimap}
-              >
-                <span className="settings-toggle-thumb" />
-              </button>
-            </div>
-          </section>
-
-          <div className="settings-divider" />
-
-          <section className="settings-section">
-            <div className="settings-section-label">Layout</div>
-
-            <div className="settings-row">
-              <div className="settings-row-info">
-                <div className="settings-row-name">Focused chat</div>
-                <div className="settings-row-desc">Chat stays at 66%, editor and terminal toggle in the remaining space</div>
-              </div>
-              <button
-                className={`settings-toggle${focusedChat ? ' on' : ''}`}
-                onClick={() => handleFocusedChatChange(!focusedChat)}
-                role="switch"
-                aria-checked={focusedChat}
-              >
-                <span className="settings-toggle-thumb" />
-              </button>
-            </div>
-
-            <div className="settings-row settings-row-spaced">
-              <div className="settings-row-info">
-                <div className="settings-row-name">Sidebar width</div>
-                <div className="settings-row-desc">Width of the file explorer and git sidebars</div>
-              </div>
-              <select
-                className="settings-select"
-                value={sidebarWidth}
-                onChange={e => handleSidebarWidthChange(Number(e.target.value))}
-              >
-                {SIDEBAR_WIDTH_OPTIONS.map(opt => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-            </div>
-          </section>
-
-          <div className="settings-divider" />
-
-          <section className="settings-section">
-            <div className="settings-section-label">Workspaces</div>
-
-            <div className="settings-row">
-              <div className="settings-row-info">
-                <div className="settings-row-name">Auto-suspend after</div>
-                <div className="settings-row-desc">Idle workspaces are suspended to free up resources</div>
-              </div>
-              <select
-                className="settings-select"
-                value={suspendTimeout}
-                onChange={e => handleTimeoutChange(Number(e.target.value))}
-              >
-                {TIMEOUT_OPTIONS.map(opt => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="settings-row settings-row-spaced">
-              <div className="settings-row-info">
-                <div className="settings-row-name">Auto-compact context</div>
-                <div className="settings-row-desc">Automatically compact when context reaches this threshold to reduce token costs</div>
-              </div>
-              <select
-                className="settings-select"
-                value={autoCompactThreshold}
-                onChange={e => handleAutoCompactChange(Number(e.target.value))}
-              >
-                {AUTO_COMPACT_OPTIONS.map(opt => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-            </div>
-          </section>
-
-          <div className="settings-divider" />
-
-          <section className="settings-section">
-            <div className="settings-section-label">Notifications</div>
-
-            <div className="settings-row">
-              <div className="settings-row-info">
-                <div className="settings-row-name">System notifications</div>
-                <div className="settings-row-desc">Send a desktop notification when a response completes and the app is not focused</div>
-              </div>
-              <button
-                className={`settings-toggle${systemNotifications ? ' on' : ''}`}
-                onClick={() => handleSystemNotificationsChange(!systemNotifications)}
-                role="switch"
-                aria-checked={systemNotifications}
-              >
-                <span className="settings-toggle-thumb" />
-              </button>
-            </div>
-          </section>
-
-          <div className="settings-divider" />
-
-          <section className="settings-section">
-            <div className="settings-section-label">Gemini</div>
-
-            <div className="settings-row">
-              <div className="settings-row-info">
-                <div className="settings-row-name">Loading phrases</div>
-                <div className="settings-row-desc">What to show while Gemini is thinking</div>
-              </div>
-              <select
-                className="settings-select"
-                value={geminiLoadingPhrases}
-                onChange={e => handleGeminiLoadingPhrasesChange(e.target.value as any)}
-              >
-                <option value="all">All (witty + tips)</option>
-                <option value="witty">Witty phrases</option>
-                <option value="tips">Informative tips</option>
-                <option value="off">Off</option>
-              </select>
-            </div>
-          </section>
-
-          {isAuthed && (
-            <>
-              <div className="settings-divider" />
-              <div className="settings-sync-note">
-                Settings are synced to your private <code>sai-config</code> GitHub repo and shared across devices.
-              </div>
-            </>
-          )}
-
-          {onOpenWhatsNew && (
-            <>
-              <div className="settings-divider" />
-              <div className="settings-row">
-                <div className="settings-row-info">
-                  <div className="settings-row-name">What's New</div>
-                  <div className="settings-row-desc">See what changed in this version</div>
-                </div>
-                <button
-                  className="settings-close"
-                  style={{ padding: '5px 10px', fontSize: 12, color: 'var(--accent)' }}
-                  onClick={() => { onOpenWhatsNew(); onClose(); }}
-                >
-                  What's New
-                </button>
-              </div>
-            </>
-          )}
-      </>
-    );
+    switch (activePage) {
+      case 'general': return renderGeneralPage();
+      case 'provider': return renderProviderPage();
+      case 'claude': return renderClaudePage();
+      case 'codex': return renderCodexPage();
+      case 'gemini': return renderGeminiPage();
+    }
   };
 
   return (

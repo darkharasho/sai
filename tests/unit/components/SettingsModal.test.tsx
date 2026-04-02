@@ -75,25 +75,38 @@ describe('SettingsModal', () => {
     });
   });
 
-  it('renders AI Provider section', () => {
+  it('renders AI Provider section on Provider page', async () => {
     render(<SettingsModal {...defaultProps} />);
-    expect(screen.getByText('AI Provider')).toBeTruthy();
+    fireEvent.click(screen.getByText('Provider'));
+    await waitFor(() => {
+      expect(screen.getByText('AI Provider')).toBeTruthy();
+    });
   });
 
-  it('renders Chat provider row', () => {
+  it('renders Chat provider row on Provider page', async () => {
     render(<SettingsModal {...defaultProps} />);
-    expect(screen.getByText('Chat provider')).toBeTruthy();
+    fireEvent.click(screen.getByText('Provider'));
+    await waitFor(() => {
+      expect(screen.getByText('Chat provider')).toBeTruthy();
+    });
   });
 
-  it('renders Commit message provider row', () => {
+  it('renders Commit message provider row on Provider page', async () => {
     render(<SettingsModal {...defaultProps} />);
-    expect(screen.getByText('Commit message provider')).toBeTruthy();
+    fireEvent.click(screen.getByText('Provider'));
+    await waitFor(() => {
+      expect(screen.getByText('Commit message provider')).toBeTruthy();
+    });
   });
 
   it('opens provider dropdown when provider button is clicked', async () => {
     render(<SettingsModal {...defaultProps} />);
+    fireEvent.click(screen.getByText('Provider'));
+    await waitFor(() => {
+      const providerBtns = document.querySelectorAll('.provider-select-btn');
+      expect(providerBtns.length).toBeGreaterThan(0);
+    });
     const providerBtns = document.querySelectorAll('.provider-select-btn');
-    expect(providerBtns.length).toBeGreaterThan(0);
     fireEvent.click(providerBtns[0]);
     await waitFor(() => {
       expect(document.querySelector('.provider-dropdown')).toBeTruthy();
@@ -107,6 +120,13 @@ describe('SettingsModal', () => {
     installMockSai(mock);
 
     render(<SettingsModal {...defaultProps} />);
+    fireEvent.click(screen.getByText('Provider'));
+
+    await waitFor(() => {
+      const providerBtns = document.querySelectorAll('.provider-select-btn');
+      expect(providerBtns.length).toBeGreaterThan(0);
+    });
+
     // Open the provider dropdown
     const providerBtns = document.querySelectorAll('.provider-select-btn');
     fireEvent.click(providerBtns[0]);
@@ -192,6 +212,57 @@ describe('SettingsModal', () => {
     expect(sidebar.textContent).toContain('Claude');
     expect(sidebar.textContent).toContain('Codex');
     expect(sidebar.textContent).toContain('Gemini');
+  });
+
+  it('shows General page by default with Editor section', () => {
+    render(<SettingsModal {...defaultProps} />);
+    expect(screen.getByText('Editor')).toBeTruthy();
+    expect(screen.getByText('Font size')).toBeTruthy();
+  });
+
+  it('shows Provider page when Provider nav is clicked', async () => {
+    render(<SettingsModal {...defaultProps} />);
+    const providerNav = screen.getByText('Provider');
+    fireEvent.click(providerNav);
+    await waitFor(() => {
+      expect(screen.getByText('Chat provider')).toBeTruthy();
+      expect(screen.getByText('Commit message provider')).toBeTruthy();
+    });
+  });
+
+  it('shows Claude page when Claude nav is clicked', async () => {
+    render(<SettingsModal {...defaultProps} />);
+    const claudeNav = screen.getByText('Claude');
+    fireEvent.click(claudeNav);
+    await waitFor(() => {
+      expect(screen.getByText('Auto-compact context')).toBeTruthy();
+    });
+  });
+
+  it('shows Gemini page when Gemini nav is clicked', async () => {
+    render(<SettingsModal {...defaultProps} />);
+    const geminiNav = screen.getByText('Gemini');
+    fireEvent.click(geminiNav);
+    await waitFor(() => {
+      expect(screen.getByText('Loading phrases')).toBeTruthy();
+    });
+  });
+
+  it('shows Codex placeholder page when Codex nav is clicked', async () => {
+    render(<SettingsModal {...defaultProps} />);
+    const codexNav = screen.getByText('Codex');
+    fireEvent.click(codexNav);
+    await waitFor(() => {
+      expect(screen.getByText(/no codex-specific settings/i)).toBeTruthy();
+    });
+  });
+
+  it('hides General content when on Provider page', async () => {
+    render(<SettingsModal {...defaultProps} />);
+    fireEvent.click(screen.getByText('Provider'));
+    await waitFor(() => {
+      expect(screen.queryByText('Font size')).toBeNull();
+    });
   });
 
   it('calls onOpenWhatsNew and onClose when "What\'s New" is clicked', async () => {
