@@ -19,7 +19,7 @@ export interface ChatSession {
 
 export interface ToolCall {
   id?: string;
-  type: 'file_edit' | 'terminal_command' | 'file_read' | 'other';
+  type: 'file_edit' | 'terminal_command' | 'file_read' | 'web_fetch' | 'other';
   name: string;
   input: string;
   output?: string;

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { FileEdit, Terminal, FileText, Wrench, ChevronRight, ChevronDown, Maximize2, X, Circle } from 'lucide-react';
+import { FileEdit, Terminal, FileText, Wrench, ChevronRight, ChevronDown, Maximize2, X, Circle, Globe } from 'lucide-react';
 import type { ToolCall } from '../../types';
 
 // Lazy-load shiki for syntax highlighting
@@ -249,6 +249,7 @@ const iconMap = {
   file_edit: FileEdit,
   terminal_command: Terminal,
   file_read: FileText,
+  web_fetch: Globe,
   other: Wrench,
 } as const;
 

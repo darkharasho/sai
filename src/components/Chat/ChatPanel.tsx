@@ -724,7 +724,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
               id: block.id,
               type: block.name?.includes('Edit') || block.name?.includes('Write') ? 'file_edit' :
                     block.name?.includes('Bash') ? 'terminal_command' :
-                    block.name?.includes('Read') || block.name?.includes('Glob') || block.name?.includes('Grep') ? 'file_read' : 'other',
+                    block.name?.includes('Read') || block.name?.includes('Glob') || block.name?.includes('Grep') ? 'file_read' :
+                    block.name?.includes('WebFetch') || block.name?.includes('WebSearch') ? 'web_fetch' : 'other',
               name: block.name || 'tool',
               input: typeof block.input === 'string' ? block.input :
                      typeof block.input === 'object' ? JSON.stringify(block.input, null, 2) : '',
