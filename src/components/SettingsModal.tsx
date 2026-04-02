@@ -20,6 +20,12 @@ const TIMEOUT_OPTIONS = [
 const DEFAULT_TIMEOUT = 60 * 60 * 1000;
 const FONT_SIZES = [11, 12, 13, 14, 15, 16, 18, 20];
 
+const SIDEBAR_WIDTH_OPTIONS = [
+  { label: 'Narrow',  value: 200 },
+  { label: 'Medium',  value: 250 },
+  { label: 'Wide',    value: 300 },
+];
+
 const AUTO_COMPACT_OPTIONS = [
   { label: 'Off',  value: 0 },
   { label: '30%',  value: 30 },
@@ -60,6 +66,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [geminiLoadingPhrases, setGeminiLoadingPhrases] = useState<'witty' | 'tips' | 'all' | 'off'>('all');
   const [systemNotifications, setSystemNotifications] = useState(false);
   const [focusedChat, setFocusedChat] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(300);
   const [autoCompactThreshold, setAutoCompactThreshold] = useState(0);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [lastSynced, setLastSynced] = useState<number | null>(null);
@@ -74,6 +81,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     });
     window.sai.settingsGet('systemNotifications', false).then((v: boolean) => setSystemNotifications(v));
     window.sai.settingsGet('focusedChat', false).then((v: boolean) => setFocusedChat(v));
+    window.sai.settingsGet('sidebarWidth', 300).then((v: number) => setSidebarWidth(v));
     window.sai.settingsGet('autoCompactThreshold', 0).then((v: number) => setAutoCompactThreshold(v));
     window.sai.settingsGet('aiProvider', 'claude').then((v: string) => {
       if (v === 'claude' || v === 'codex' || v === 'gemini') setAiProvider(v as 'claude' | 'codex' | 'gemini');
@@ -97,6 +105,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if ('commitMessageProvider' in remote && (remote.commitMessageProvider === 'claude' || remote.commitMessageProvider === 'codex' || remote.commitMessageProvider === 'gemini')) setCommitMessageProvider(remote.commitMessageProvider);
       if ('systemNotifications' in remote) setSystemNotifications(remote.systemNotifications);
       if ('focusedChat' in remote) setFocusedChat(remote.focusedChat);
+      if ('sidebarWidth' in remote) setSidebarWidth(remote.sidebarWidth);
       if ('autoCompactThreshold' in remote) setAutoCompactThreshold(remote.autoCompactThreshold);
     });
 
@@ -163,6 +172,12 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     setFocusedChat(value);
     window.sai.settingsSet('focusedChat', value);
     onSettingChange?.('focusedChat', value);
+  };
+
+  const handleSidebarWidthChange = (value: number) => {
+    setSidebarWidth(value);
+    window.sai.settingsSet('sidebarWidth', value);
+    onSettingChange?.('sidebarWidth', value);
   };
 
   const handleAutoCompactChange = (value: number) => {
@@ -348,6 +363,22 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
               >
                 <span className="settings-toggle-thumb" />
               </button>
+            </div>
+
+            <div className="settings-row settings-row-spaced">
+              <div className="settings-row-info">
+                <div className="settings-row-name">Sidebar width</div>
+                <div className="settings-row-desc">Width of the file explorer and git sidebars</div>
+              </div>
+              <select
+                className="settings-select"
+                value={sidebarWidth}
+                onChange={e => handleSidebarWidthChange(Number(e.target.value))}
+              >
+                {SIDEBAR_WIDTH_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
             </div>
           </section>
 

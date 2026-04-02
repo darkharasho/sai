@@ -166,6 +166,9 @@ export default function App() {
   // Load persisted settings from main process (file-based, works in dev+prod)
   useEffect(() => {
     window.sai.settingsGet('focusedChat', false).then((v: boolean) => setFocusedChat(v));
+    window.sai.settingsGet('sidebarWidth', 300).then((v: number) => {
+      document.documentElement.style.setProperty('--sidebar-width', `${v}px`);
+    });
     window.sai.settingsGet('editorFontSize', 13).then((v: number) => setEditorFontSize(v));
     window.sai.settingsGet('editorMinimap', true).then((v: boolean) => setEditorMinimap(v));
     window.sai.settingsGet('aiProvider', 'claude').then((v: string) => {
@@ -221,6 +224,7 @@ export default function App() {
     const unsubApplied = window.sai.githubOnSettingsApplied((remote: Record<string, any>) => {
       if ('editorFontSize' in remote) setEditorFontSize(remote.editorFontSize);
       if ('editorMinimap' in remote) setEditorMinimap(remote.editorMinimap);
+      if ('sidebarWidth' in remote) document.documentElement.style.setProperty('--sidebar-width', `${remote.sidebarWidth}px`);
       if ('aiProvider' in remote && (remote.aiProvider === 'claude' || remote.aiProvider === 'codex' || remote.aiProvider === 'gemini')) setAiProvider(remote.aiProvider);
       if ('commitMessageProvider' in remote && (remote.commitMessageProvider === 'claude' || remote.commitMessageProvider === 'codex' || remote.commitMessageProvider === 'gemini')) setCommitMessageProvider(remote.commitMessageProvider);
       if ('claude' in remote && typeof remote.claude === 'object') {
@@ -1075,7 +1079,7 @@ export default function App() {
                 }}
               />
             )}
-            {panel === 'terminal' && Array.from(workspaces.entries()).map(([wsPath]) => (
+            {panel === 'terminal' && Array.from(workspaces.entries()).map(([wsPath, ws]) => (
               <div
                 key={`term-${wsPath}`}
                 style={{
@@ -1086,7 +1090,7 @@ export default function App() {
                   overflow: 'hidden',
                 }}
               >
-                <TerminalPanel projectPath={wsPath} />
+                <TerminalPanel projectPath={wsPath} isActive={wsPath === activeProjectPath && ws.status === 'active'} />
               </div>
             ))}
           </div>
@@ -1109,6 +1113,7 @@ export default function App() {
           if (key === 'commitMessageProvider') setCommitMessageProvider(value);
           if (key === 'geminiLoadingPhrases') handleGeminiLoadingPhrasesChange(value);
           if (key === 'focusedChat') { setFocusedChat(value); if (value) { setExpanded(['chat', 'terminal']); setSplitRatio(0.66); } }
+          if (key === 'sidebarWidth') document.documentElement.style.setProperty('--sidebar-width', `${value}px`);
         }}
         onOpenWhatsNew={openWhatsNew}
       />
