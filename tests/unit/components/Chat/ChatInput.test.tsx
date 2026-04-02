@@ -15,6 +15,7 @@ import { installMockSai } from '../../../helpers/ipc-mock';
 vi.mock('../../../../src/terminalBuffer', () => ({
   getTerminalContent: vi.fn().mockReturnValue(''),
   getTerminalLastCommand: vi.fn().mockReturnValue(''),
+  getActiveTerminalId: vi.fn().mockReturnValue(null),
 }));
 
 import ChatInput from '../../../../src/components/Chat/ChatInput';

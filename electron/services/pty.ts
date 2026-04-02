@@ -93,6 +93,11 @@ export function registerTerminalHandlers(win: BrowserWindow) {
     return id;
   });
 
+  ipcMain.handle('terminal:getProcess', (_event, id: number) => {
+    const term = allTerminals.get(id);
+    return term ? term.process : null;
+  });
+
   ipcMain.on('terminal:write', (_event, id: number, data: string) => {
     allTerminals.get(id)?.write(data);
     // Update activity for owning workspace

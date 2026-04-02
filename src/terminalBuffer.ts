@@ -21,6 +21,23 @@ export function setActiveWorkspace(path: string | null) {
   activeWorkspacePath = path;
 }
 
+/** Get the ID of the active workspace's terminal (for IPC calls). */
+export function getActiveTerminalId(): number | null {
+  if (activeWorkspacePath) {
+    for (const [id] of terminals) {
+      if (terminalWorkspace.get(id) === activeWorkspacePath) {
+        return id;
+      }
+    }
+  }
+  // Fallback: last registered
+  let lastId: number | null = null;
+  for (const [id] of terminals) {
+    lastId = id;
+  }
+  return lastId;
+}
+
 /** Find the terminal for the active workspace, or fall back to the last registered one. */
 function getActiveTerminal(): Terminal | null {
   let target: Terminal | null = null;
