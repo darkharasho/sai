@@ -53,6 +53,7 @@ vi.mock('diff2html', () => ({
   html: vi.fn().mockReturnValue('<div class="d2h-file-wrapper">mocked diff</div>'),
 }));
 vi.mock('diff2html/bundles/css/diff2html.min.css', () => ({}));
+vi.mock('highlight.js/styles/monokai.css', () => ({}));
 
 import CodePanel from '../../../../src/components/CodePanel/CodePanel';
 import type { OpenFile } from '../../../../src/types';
@@ -194,5 +195,45 @@ describe('CodePanel', () => {
     );
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledWith('/home/user/project/src/App.tsx');
+  });
+
+  it('renders MarkdownPreview when mdPreview is true for a .md file', () => {
+    const mdFile = makeOpenFile({
+      path: '/project/README.md',
+      content: '# Hello\n\nWorld',
+      mdPreview: true,
+    });
+    const { container } = render(
+      <CodePanel
+        {...defaultProps}
+        openFiles={[mdFile]}
+        activeFilePath="/project/README.md"
+        onToggleMdPreview={vi.fn()}
+      />
+    );
+    // MarkdownPreview renders the content as HTML, not raw markdown
+    expect(container.textContent).toContain('Hello');
+    // Should have the preview status bar with "Editor" button
+    const editorBtn = container.querySelector('[aria-label="Editor"]');
+    expect(editorBtn).toBeTruthy();
+  });
+
+  it('renders MonacoEditor when mdPreview is false for a .md file', () => {
+    const mdFile = makeOpenFile({
+      path: '/project/README.md',
+      content: '# Hello\n\nWorld',
+      mdPreview: false,
+    });
+    const { container } = render(
+      <CodePanel
+        {...defaultProps}
+        openFiles={[mdFile]}
+        activeFilePath="/project/README.md"
+        onToggleMdPreview={vi.fn()}
+      />
+    );
+    // Should NOT have the preview Editor button
+    const editorBtn = container.querySelector('[aria-label="Editor"]');
+    expect(editorBtn).toBeNull();
   });
 });

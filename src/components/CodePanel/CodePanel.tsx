@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { X } from 'lucide-react';
 import type { OpenFile } from '../../types';
 import DiffViewer from './DiffViewer';
+import MarkdownPreview from './MarkdownPreview';
 import MonacoEditor from '../FileExplorer/MonacoEditor';
 
 interface CodePanelProps {
@@ -21,6 +22,7 @@ interface CodePanelProps {
   onReloadFile: (path: string) => void;
   onKeepMyEdits: (path: string) => void;
   onLineRevealed?: (path: string) => void;
+  onToggleMdPreview?: (path: string) => void;
 }
 
 export default function CodePanel({
@@ -40,6 +42,7 @@ export default function CodePanel({
   onReloadFile,
   onKeepMyEdits,
   onLineRevealed,
+  onToggleMdPreview,
 }: CodePanelProps) {
   const activeFile = openFiles.find(f => f.path === activeFilePath);
 
@@ -314,6 +317,11 @@ export default function CodePanel({
           staged={activeFile.file.staged}
           mode={activeFile.diffMode ?? 'unified'}
         />
+      ) : activeFile.viewMode === 'editor' && activeFile.mdPreview && activeFile.content !== undefined ? (
+        <MarkdownPreview
+          content={activeFile.content}
+          onTogglePreview={() => onToggleMdPreview?.(activeFile.path)}
+        />
       ) : activeFile.viewMode === 'editor' && activeFile.content !== undefined ? (
         <MonacoEditor
           key={activeFile.path}
@@ -326,6 +334,7 @@ export default function CodePanel({
           onContentChange={onEditorContentChange}
           onDirtyChange={onEditorDirtyChange ? (dirty) => onEditorDirtyChange(activeFile.path, dirty) : undefined}
           onLineRevealed={onLineRevealed ? () => onLineRevealed(activeFile.path) : undefined}
+          onTogglePreview={onToggleMdPreview ? () => onToggleMdPreview(activeFile.path) : undefined}
         />
       ) : null}
     </div>
