@@ -51,6 +51,7 @@ export interface OpenFile {
   isDirty?: boolean;
   diskMtime?: number;
   pendingLine?: number;
+  mdPreview?: boolean;
 }
 
 export interface GitCommit {
