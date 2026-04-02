@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Check, ChevronDown } from 'lucide-react';
+import { X, Check, ChevronDown, Settings as SettingsIcon, Monitor } from 'lucide-react';
 
 interface Props {
   onClose: () => void;
@@ -37,6 +37,7 @@ const AUTO_COMPACT_OPTIONS = [
 ];
 
 type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error';
+type SettingsPage = 'general' | 'provider' | 'claude' | 'codex' | 'gemini';
 
 function formatRelative(ts: number): string {
   const secs = Math.floor((Date.now() - ts) / 1000);
@@ -71,6 +72,8 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [lastSynced, setLastSynced] = useState<number | null>(null);
   const [isAuthed, setIsAuthed] = useState(false);
+
+  const [activePage, setActivePage] = useState<SettingsPage>('general');
 
   useEffect(() => {
     window.sai.settingsGet('suspendTimeout', DEFAULT_TIMEOUT).then((v: number) => setSuspendTimeout(v));
@@ -196,30 +199,10 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.githubSyncNow();
   };
 
-  return (
-    <div className="settings-overlay" onClick={onClose}>
-      <div className="settings-modal" onClick={e => e.stopPropagation()}>
-        <div className="settings-header">
-          <span className="settings-title">Settings</span>
-          <div className="settings-header-right">
-            {isAuthed && (
-              <button
-                className={`sync-dot sync-dot-${syncStatus}`}
-                onClick={handleSyncNow}
-                title={
-                  syncStatus === 'syncing' ? 'Syncing to GitHub…' :
-                  syncStatus === 'synced' ? `Synced ${lastSynced ? formatRelative(lastSynced) : ''}` :
-                  syncStatus === 'error' ? 'Sync failed — click to retry' :
-                  'Click to sync settings'
-                }
-              />
-            )}
-            <button className="settings-close" onClick={onClose}><X size={16} /></button>
-          </div>
-        </div>
-
-        <div className="settings-body">
-          <section className="settings-section">
+  const renderActivePage = () => {
+    return (
+      <>
+        <section className="settings-section">
             <div className="settings-section-label">AI Provider</div>
 
             <div className="settings-row">
@@ -491,6 +474,73 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
               </div>
             </>
           )}
+      </>
+    );
+  };
+
+  return (
+    <div className="settings-overlay" onClick={onClose}>
+      <div className="settings-modal" onClick={e => e.stopPropagation()}>
+        <div className="settings-header">
+          <span className="settings-title">Settings</span>
+          <div className="settings-header-right">
+            {isAuthed && (
+              <button
+                className={`sync-dot sync-dot-${syncStatus}`}
+                onClick={handleSyncNow}
+                title={
+                  syncStatus === 'syncing' ? 'Syncing to GitHub…' :
+                  syncStatus === 'synced' ? `Synced ${lastSynced ? formatRelative(lastSynced) : ''}` :
+                  syncStatus === 'error' ? 'Sync failed — click to retry' :
+                  'Click to sync settings'
+                }
+              />
+            )}
+            <button className="settings-close" onClick={onClose}><X size={16} /></button>
+          </div>
+        </div>
+
+        <div className="settings-layout">
+          <nav className="settings-sidebar">
+            <button
+              className={`settings-nav-item${activePage === 'general' ? ' active' : ''}`}
+              onClick={() => setActivePage('general')}
+            >
+              <SettingsIcon size={14} />
+              <span>General</span>
+            </button>
+            <button
+              className={`settings-nav-item${activePage === 'provider' ? ' active' : ''}`}
+              onClick={() => setActivePage('provider')}
+            >
+              <Monitor size={14} />
+              <span>Provider</span>
+            </button>
+            {PROVIDER_OPTIONS.map(p => (
+              <button
+                key={p.id}
+                className={`settings-nav-sub${activePage === p.id ? ' active' : ''}`}
+                onClick={() => setActivePage(p.id)}
+                style={activePage === p.id ? { borderLeftColor: p.color } as React.CSSProperties : undefined}
+              >
+                <span
+                  className="provider-icon"
+                  style={{
+                    maskImage: `url('${p.svg}')`,
+                    WebkitMaskImage: `url('${p.svg}')`,
+                    backgroundColor: activePage === p.id ? p.color : 'var(--text-muted)',
+                    width: 14,
+                    height: 14,
+                  }}
+                />
+                <span>{p.id.charAt(0).toUpperCase() + p.id.slice(1)}</span>
+              </button>
+            ))}
+          </nav>
+
+          <div className="settings-content">
+            {renderActivePage()}
+          </div>
         </div>
 
         <style>{`
@@ -508,7 +558,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             background: var(--bg-elevated);
             border: 1px solid var(--border);
             border-radius: 10px;
-            width: 480px;
+            width: 720px;
             box-shadow: 0 24px 64px rgba(0,0,0,0.5);
             overflow: hidden;
           }
@@ -571,7 +621,64 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             60% { opacity: 1; }
             100% { opacity: 0.3; }
           }
-          .settings-body { padding: 20px; }
+          .settings-layout {
+            display: flex;
+            min-height: 400px;
+            max-height: calc(100vh - 120px);
+          }
+          .settings-sidebar {
+            width: 185px;
+            min-width: 185px;
+            background: var(--bg-primary);
+            border-right: 1px solid var(--border);
+            padding: 12px 0;
+            display: flex;
+            flex-direction: column;
+          }
+          .settings-nav-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 9px 16px;
+            font-size: 12px;
+            color: var(--text-muted);
+            background: none;
+            border: none;
+            border-left: 2px solid transparent;
+            cursor: pointer;
+            text-align: left;
+            width: 100%;
+          }
+          .settings-nav-item:hover { color: var(--text); background: var(--bg-hover); }
+          .settings-nav-item.active {
+            color: var(--text);
+            background: rgba(255,255,255,0.05);
+            border-left-color: var(--accent);
+          }
+          .settings-nav-sub {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 16px 7px 36px;
+            font-size: 11px;
+            color: var(--text-muted);
+            background: none;
+            border: none;
+            border-left: 2px solid transparent;
+            cursor: pointer;
+            text-align: left;
+            width: 100%;
+          }
+          .settings-nav-sub:hover { color: var(--text); background: var(--bg-hover); }
+          .settings-nav-sub.active {
+            color: var(--text);
+            background: rgba(255,255,255,0.05);
+          }
+          .settings-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+          }
           .settings-section-label {
             font-size: 10px;
             font-weight: 600;
