@@ -757,8 +757,13 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         }
       }
 
-      // Result — final answer for this turn, also has usage data
+      // Result — final answer for this turn, also has usage data.
+      // Treat result as the authoritative end-of-turn: clear streaming immediately
+      // so the UI doesn't stay stuck if the subsequent 'done' message is lost.
       if (msg.type === 'result') {
+        setIsStreaming(false);
+        onTurnComplete?.();
+        turnSeqRef.current = -1;
         // Update context usage
         if (msg.usage) {
           const inputTokens = msg.usage.input_tokens || 0;

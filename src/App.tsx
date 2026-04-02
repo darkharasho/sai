@@ -370,14 +370,16 @@ export default function App() {
         if (msg.turnSeq != null) wsTurnSeqRef.current.set(msg.projectPath, msg.turnSeq);
         setBusyWorkspaces(prev => new Set(prev).add(msg.projectPath));
       }
-      if (msg.type === 'done') {
-        // Ignore stale 'done' from a previous turn
-        if (msg.turnSeq != null) {
+      // Treat 'result' as authoritative end-of-turn — clear busy immediately
+      // so the titlebar spinner doesn't stay stuck if the 'done' message is lost.
+      if (msg.type === 'result' || msg.type === 'done') {
+        // For 'done', ignore stale messages from a previous turn
+        if (msg.type === 'done' && msg.turnSeq != null) {
           const expected = wsTurnSeqRef.current.get(msg.projectPath);
           if (expected != null && msg.turnSeq !== expected) return;
-          // Consume the turnSeq so a duplicate done is rejected
-          wsTurnSeqRef.current.set(msg.projectPath, -1);
         }
+        // Consume the turnSeq so duplicates are rejected
+        wsTurnSeqRef.current.set(msg.projectPath, -1);
         setBusyWorkspaces(prev => {
           if (!prev.has(msg.projectPath)) return prev;
           const next = new Set(prev);
