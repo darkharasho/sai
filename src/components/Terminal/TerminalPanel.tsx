@@ -89,7 +89,7 @@ export default function TerminalPanel({ projectPath, isActive }: { projectPath: 
     // Create terminal in main process
     window.sai.terminalCreate(cwd).then((id: number) => {
       termIdRef.current = id;
-      registerTerminal(id, xterm);
+      registerTerminal(id, xterm, projectPath);
 
       xterm.onData((data) => {
         window.sai.terminalWrite(id, data);

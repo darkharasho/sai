@@ -4,30 +4,50 @@ import type { Terminal } from '@xterm/xterm';
 // without prop-drilling through the component tree.
 
 const terminals = new Map<number, Terminal>();
+const terminalWorkspace = new Map<number, string>();
+let activeWorkspacePath: string | null = null;
 
-export function registerTerminal(id: number, term: Terminal) {
+export function registerTerminal(id: number, term: Terminal, workspacePath?: string) {
   terminals.set(id, term);
+  if (workspacePath) terminalWorkspace.set(id, workspacePath);
 }
 
 export function unregisterTerminal(id: number) {
   terminals.delete(id);
+  terminalWorkspace.delete(id);
+}
+
+export function setActiveWorkspace(path: string | null) {
+  activeWorkspacePath = path;
 }
 
 /**
- * Read the visible content of the most recently registered terminal.
+ * Read the visible content of the active workspace's terminal.
+ * Falls back to the most recently registered terminal if no workspace match.
  * Returns the last `maxLines` lines of scrollback + viewport.
  */
 export function getTerminalContent(maxLines = 200): string | null {
-  // Get the last registered terminal (most recent)
-  let lastId = -1;
-  let lastTerm: Terminal | null = null;
-  for (const [id, term] of terminals) {
-    lastId = id;
-    lastTerm = term;
-  }
-  if (!lastTerm) return null;
+  let target: Terminal | null = null;
 
-  const buf = lastTerm.buffer.active;
+  // Prefer the terminal belonging to the active workspace
+  if (activeWorkspacePath) {
+    for (const [id, term] of terminals) {
+      if (terminalWorkspace.get(id) === activeWorkspacePath) {
+        target = term;
+      }
+    }
+  }
+
+  // Fallback: last registered terminal
+  if (!target) {
+    for (const [, term] of terminals) {
+      target = term;
+    }
+  }
+
+  if (!target) return null;
+
+  const buf = target.buffer.active;
   const totalLines = buf.length;
   const start = Math.max(0, totalLines - maxLines);
   const lines: string[] = [];

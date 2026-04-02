@@ -10,6 +10,7 @@ import UnsavedChangesModal from './components/UnsavedChangesModal';
 import WorkspaceToast from './components/WorkspaceToast';
 import { useWhatsNew } from './hooks/useWhatsNew';
 import WhatsNewModal from './components/WhatsNewModal';
+import { setActiveWorkspace } from './terminalBuffer';
 import { loadSessions, saveSessions, createSession, upsertSession, migrateLegacySessions, loadSessionMessages } from './sessions';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext } from './types';
 import { MessageSquare, TerminalSquare, Code2, ChevronRight, MessageCirclePlus, Clock } from 'lucide-react';
@@ -114,6 +115,7 @@ export default function App() {
   useEffect(() => { workspacesRef.current = workspaces; }, [workspaces]);
   useEffect(() => {
     activeProjectPathRef.current = activeProjectPath;
+    setActiveWorkspace(activeProjectPath);
     window.sai.workspaceSetActive(activeProjectPath);
   }, [activeProjectPath]);
 
