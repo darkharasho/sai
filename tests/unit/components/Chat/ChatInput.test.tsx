@@ -14,6 +14,7 @@ import { installMockSai } from '../../../helpers/ipc-mock';
 // Must be hoisted before the component import
 vi.mock('../../../../src/terminalBuffer', () => ({
   getTerminalContent: vi.fn().mockReturnValue(''),
+  getTerminalLastCommand: vi.fn().mockReturnValue(''),
 }));
 
 import ChatInput from '../../../../src/components/Chat/ChatInput';
@@ -204,6 +205,24 @@ describe('ChatInput', () => {
       const textarea = screen.getByRole('textbox');
       fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
       expect(onQueue).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('@terminal:last autocomplete', () => {
+    it('shows @terminal:last suggestion when typing @t', async () => {
+      render(<ChatInput {...defaultProps} slashCommands={STABLE_SLASH_COMMANDS} />);
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: '@t' } });
+      expect(await screen.findByText('@terminal')).toBeTruthy();
+      expect(await screen.findByText('@terminal:last')).toBeTruthy();
+    });
+
+    it('shows only @terminal:last when typing @terminal:', async () => {
+      render(<ChatInput {...defaultProps} slashCommands={STABLE_SLASH_COMMANDS} />);
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: '@terminal:' } });
+      expect(await screen.findByText('@terminal:last')).toBeTruthy();
+      expect(screen.queryByText('@terminal')).toBeNull();
     });
   });
 });
