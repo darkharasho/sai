@@ -29,7 +29,7 @@ export default function MessageQueue({ queue, onRemove }: MessageQueueProps) {
           display: flex;
           flex-direction: column;
           gap: 2px;
-          padding: 0 8px 4px;
+          padding: 0 15% 4px;
           flex-shrink: 0;
         }
         .message-queue-card {

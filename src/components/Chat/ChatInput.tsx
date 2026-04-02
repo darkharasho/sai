@@ -1014,9 +1014,6 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
             </button>
           )}
         </div>
-        {(queueCount ?? 0) > 0 && (
-          <span className="queue-counter">{queueCount}/5 queued</span>
-        )}
       </div>
 
       <style>{`
@@ -1171,13 +1168,6 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           display: flex;
           gap: 4px;
           overflow-x: auto;
-        }
-        .queue-counter {
-          font-size: 10px;
-          opacity: 0.3;
-          white-space: nowrap;
-          margin-left: auto;
-          padding-left: 8px;
         }
         .toolbar-context-chip {
           display: flex;
