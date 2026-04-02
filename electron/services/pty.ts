@@ -95,7 +95,27 @@ export function registerTerminalHandlers(win: BrowserWindow) {
 
   ipcMain.handle('terminal:getProcess', (_event, id: number) => {
     const term = allTerminals.get(id);
-    return term ? term.process : null;
+    if (!term) return null;
+    // On Linux, pty.process returns the original shell, not the foreground process.
+    // Read /proc/<pid>/stat to get the foreground process group, then its name.
+    if (process.platform === 'linux') {
+      try {
+        const fs = require('fs') as typeof import('fs');
+        const stat = fs.readFileSync(`/proc/${term.pid}/stat`, 'utf8');
+        // Field 8 (0-indexed 7) is tpgid — the foreground process group ID
+        // Fields are space-separated, but field 2 (comm) is in parens and may contain spaces
+        const closeParenIdx = stat.lastIndexOf(')');
+        const fields = stat.slice(closeParenIdx + 2).split(' ');
+        const tpgid = parseInt(fields[5], 10); // tpgid is field 8, but after extracting past ")", it's index 5
+        if (tpgid > 0) {
+          const comm = fs.readFileSync(`/proc/${tpgid}/comm`, 'utf8').trim();
+          return comm || term.process;
+        }
+      } catch {
+        // Fall through to default
+      }
+    }
+    return term.process;
   });
 
   ipcMain.on('terminal:write', (_event, id: number, data: string) => {
