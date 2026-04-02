@@ -114,7 +114,14 @@ export function suspend(projectPath: string, win: BrowserWindow): void {
   const ws = workspaces.get(projectPath);
   if (!ws || ws.status === 'suspended') return;
 
-  // Kill Claude process
+  const safeSend = (channel: string, ...args: any[]) => {
+    try { if (!win.isDestroyed() && win.webContents) win.webContents.send(channel, ...args); } catch { /* destroyed */ }
+  };
+
+  // Kill Claude process — send done first so the frontend clears streaming state
+  if (ws.claude.busy) {
+    safeSend('claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.claude.turnSeq });
+  }
   if (ws.claude.process) {
     ws.claude.process.kill();
     ws.claude.process = null;
@@ -127,6 +134,9 @@ export function suspend(projectPath: string, win: BrowserWindow): void {
   ws.claude.awaitingApproval = false;
 
   // Kill Codex process
+  if (ws.codex.busy) {
+    safeSend('claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.codex.turnSeq });
+  }
   if (ws.codex.process) {
     ws.codex.process.kill();
     ws.codex.process = null;
@@ -134,6 +144,9 @@ export function suspend(projectPath: string, win: BrowserWindow): void {
   ws.codex.busy = false;
 
   // Kill Gemini process
+  if (ws.gemini.busy) {
+    safeSend('claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.gemini.turnSeq });
+  }
   if (ws.gemini.process) {
     ws.gemini.process.kill();
     ws.gemini.process = null;

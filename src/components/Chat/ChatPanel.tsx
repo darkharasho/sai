@@ -553,7 +553,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     if (Date.now() < autoCompactCooldownRef.current) return;
     // Trigger compact and set 60s cooldown
     autoCompactCooldownRef.current = Date.now() + 60_000;
-    window.sai.claudeSend(projectPath, '/compact', undefined, permissionMode, effortLevel, modelChoice);
+    window.sai.claudeCompact(projectPath, permissionMode, effortLevel, modelChoice);
   }, [contextUsage, isStreaming]);
 
   // Safety: clear orphaned streaming state when effect re-runs (e.g. provider switch)
@@ -978,6 +978,10 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     if (text === '/clear') {
       setMessages([]);
       setRenderStart(0);
+      return;
+    }
+    if (text === '/compact' && aiProvider === 'claude') {
+      window.sai.claudeCompact(projectPath, permissionMode, effortLevel, modelChoice);
       return;
     }
     if (text === '/help') {

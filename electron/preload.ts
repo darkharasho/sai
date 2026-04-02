@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('sai', {
   claudeStart: (cwd: string) => ipcRenderer.invoke('claude:start', cwd),
   claudeSend: (projectPath: string, message: string, imagePaths?: string[], permMode?: string, effort?: string, model?: string) => ipcRenderer.send('claude:send', projectPath, message, imagePaths, permMode, effort, model),
   claudeGenerateCommitMessage: (cwd: string, aiProvider?: string) => ipcRenderer.invoke('claude:generateCommitMessage', cwd, aiProvider),
+  claudeCompact: (projectPath: string, permMode?: string, effort?: string, model?: string) => ipcRenderer.send('claude:compact', projectPath, permMode, effort, model),
   claudeStop: (projectPath: string) => ipcRenderer.send('claude:stop', projectPath),
   claudeSetSessionId: (projectPath: string, sessionId: string | undefined) => ipcRenderer.send('claude:setSessionId', projectPath, sessionId),
   claudeApprove: (projectPath: string, toolUseId: string, approved: boolean, modifiedCommand?: string) =>

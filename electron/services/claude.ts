@@ -156,8 +156,16 @@ function ensureProcess(
           safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath });
         }
 
-        // When suppressForward is true (commit msg generation), skip IPC
-        if (ws.claude.suppressForward) continue;
+        // When suppressForward is true (silent compact), skip IPC forwarding.
+        // Allow system messages through (compact notification) but suppress everything else.
+        // When a result arrives, the silent turn is done — clear the flag.
+        if (ws.claude.suppressForward) {
+          if (msg.type === 'result') {
+            ws.claude.suppressForward = false;
+          }
+          if (msg.type !== 'system') continue;
+          // Fall through to forward system messages (e.g. context_compacted)
+        }
 
         // --- Approval flow: buffer messages while awaiting user decision ---
         if (ws.claude.awaitingApproval) {
@@ -355,6 +363,19 @@ export function registerClaudeHandlers(win: BrowserWindow) {
     // Ensure persistent process is running with current config
     const proc = ensureProcess(win, projectPath, permMode, effort, model);
 
+    // Clear suppressForward in case a silent compact is in progress — user-initiated
+    // turns always take priority and need full message forwarding.
+    ws.claude.suppressForward = false;
+
+    // Clear stale approval state — if the frontend lost the approval dialog
+    // (e.g. workspace switch unmounted ChatPanel), awaitingApproval would stay
+    // true and silently buffer ALL subsequent messages, freezing the UI.
+    if (ws.claude.awaitingApproval) {
+      ws.claude.awaitingApproval = false;
+      ws.claude.approvalBuffered = [];
+      ws.claude.pendingToolUse = null;
+    }
+
     // Flush any partial buffer from the previous turn so stale results
     // don't leak into the new turn and send a spurious 'done'.
     if (ws.claude.buffer.trim()) {
@@ -390,6 +411,22 @@ export function registerClaudeHandlers(win: BrowserWindow) {
       return;
     }
     proc.stdin.write(msg + '\n');
+  });
+
+  // claude:compact — silently write /compact to stdin without starting a turn.
+  // This prevents the UI from entering streaming state for background compaction.
+  ipcMain.on('claude:compact', (_event, projectPath: string, permMode?: string, effort?: string, model?: string) => {
+    const ws = get(projectPath);
+    if (!ws) return;
+    touchActivity(projectPath);
+    const proc = ensureProcess(win, projectPath, permMode, effort, model);
+    ws.claude.suppressForward = true;
+    const msg = JSON.stringify({ type: 'user', message: { role: 'user', content: '/compact' } });
+    if (proc.stdin && !proc.stdin.destroyed) {
+      proc.stdin.write(msg + '\n');
+    } else {
+      ws.claude.suppressForward = false;
+    }
   });
 
   // claude:approve — user approved or denied a tool that was denied by the CLI
