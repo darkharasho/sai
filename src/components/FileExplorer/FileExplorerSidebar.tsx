@@ -83,6 +83,21 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
     }
   }, [projectPath, loadDir]);
 
+  // Poll expanded directories for external filesystem changes
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTree(current => {
+        current.forEach((state, dirPath) => {
+          if (state.expanded && !state.loading) {
+            loadDir(dirPath);
+          }
+        });
+        return current;
+      });
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [loadDir]);
+
   const toggleDir = (dirPath: string) => {
     const state = tree.get(dirPath);
     if (state?.expanded) {
