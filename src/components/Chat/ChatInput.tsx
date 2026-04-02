@@ -6,7 +6,7 @@ import {
   MessageSquare, Zap, Send, Square, ShieldCheck, ShieldOff,
   Paperclip, Image, ChevronDown, Minus, ChevronUp, ChevronsUp, Clock, Check, EyeOff,
 } from 'lucide-react';
-import { getTerminalContent } from '../../terminalBuffer';
+import { getTerminalContent, getTerminalLastCommand } from '../../terminalBuffer';
 
 type EffortLevel = 'low' | 'medium' | 'high' | 'max';
 type ModelChoice = 'sonnet' | 'opus' | 'haiku';
@@ -80,6 +80,7 @@ const BUILTIN_COMMANDS: AutocompleteItem[] = [
 
 const ADD_MENU_ITEMS: AutocompleteItem[] = [
   { label: 'Add Terminal', value: '__TERMINAL__', description: 'Attach terminal output', icon: <TerminalIcon size={14} /> },
+  { label: 'Add Last Command', value: '__TERMINAL_LAST__', description: 'Attach output from last terminal command', icon: <Clock size={14} /> },
   { label: 'Add File', value: '__FILE__', description: 'Attach a file', icon: <FileText size={14} /> },
   { label: 'Add Image', value: '__IMAGE__', description: 'Attach an image', icon: <Image size={14} /> },
   { label: 'Add URL', value: '@url ', description: 'Reference a URL', icon: <AtSign size={14} /> },
@@ -288,6 +289,9 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
       if ('terminal'.startsWith(query)) {
         atItems.push({ label: '@terminal', value: '__TERMINAL__', description: 'Attach terminal output', icon: <TerminalIcon size={14} /> });
       }
+      if ('terminal:last'.startsWith(query)) {
+        atItems.push({ label: '@terminal:last', value: '__TERMINAL_LAST__', description: 'Attach output from last terminal command', icon: <Clock size={14} /> });
+      }
       setSuggestions(atItems);
       setSelectedIndex(0);
     } else if (currentWord.startsWith('/')) {
@@ -324,6 +328,21 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
     }
   };
 
+  const handleAddTerminalLast = () => {
+    const content = getTerminalLastCommand();
+    if (content) {
+      setContextItems(prev => {
+        const filtered = prev.filter(c => c.type !== 'terminal');
+        const lines = content.split('\n').length;
+        return [...filtered, {
+          label: `Terminal: last cmd (${lines} lines)`,
+          type: 'terminal',
+          data: content,
+        }];
+      });
+    }
+  };
+
   const applySuggestion = (item: AutocompleteItem) => {
     if (item.value === '__TERMINAL__') {
       // Remove the @terminal text the user typed
@@ -338,6 +357,23 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
         setValue((before + after).trim() ? before + after : '');
       }
       handleAddTerminal();
+      setSuggestions([]);
+      setShowAddMenu(false);
+      setSlashMenuOpen(false);
+      return;
+    }
+    if (item.value === '__TERMINAL_LAST__') {
+      if (!showAddMenu) {
+        const cursorPos = textareaRef.current?.selectionStart ?? value.length;
+        const textBeforeCursor = value.slice(0, cursorPos);
+        const lastSpace = textBeforeCursor.lastIndexOf(' ');
+        const lastNewline = textBeforeCursor.lastIndexOf('\n');
+        const wordStart = Math.max(lastSpace, lastNewline) + 1;
+        const before = value.slice(0, wordStart);
+        const after = value.slice(cursorPos);
+        setValue((before + after).trim() ? before + after : '');
+      }
+      handleAddTerminalLast();
       setSuggestions([]);
       setShowAddMenu(false);
       setSlashMenuOpen(false);
