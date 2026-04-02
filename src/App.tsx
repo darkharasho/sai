@@ -606,6 +606,32 @@ export default function App() {
     }));
   }, [activeProjectPath, updateWorkspace]);
 
+  const handleToggleMdPreview = useCallback((path: string) => {
+    if (!activeProjectPath) return;
+    updateWorkspace(activeProjectPath, ws => ({
+      ...ws,
+      openFiles: ws.openFiles.map(f =>
+        f.path === path ? { ...f, mdPreview: !f.mdPreview } : f
+      ),
+    }));
+  }, [activeProjectPath, updateWorkspace]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'M') {
+        e.preventDefault();
+        if (!activeProjectPath) return;
+        const ws = workspaces.get(activeProjectPath);
+        const activePath = ws?.activeFilePath;
+        if (activePath && activePath.endsWith('.md')) {
+          handleToggleMdPreview(activePath);
+        }
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [activeProjectPath, workspaces, handleToggleMdPreview]);
+
   const handleProjectSwitch = useCallback((newPath: string) => {
     if (newPath === activeProjectPath) return;
     window.sai.openRecentProject(newPath);
@@ -1038,6 +1064,7 @@ export default function App() {
                 externallyModified={externallyModified}
                 onReloadFile={handleReloadFile}
                 onKeepMyEdits={handleKeepMyEdits}
+                onToggleMdPreview={handleToggleMdPreview}
                 onLineRevealed={(path: string) => {
                   if (activeProjectPath) {
                     updateWorkspace(activeProjectPath, ws => ({
