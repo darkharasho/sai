@@ -2,6 +2,36 @@ import * as pty from 'node-pty';
 import { BrowserWindow, ipcMain } from 'electron';
 import { get, touchActivity } from './workspace';
 
+/** Check whether systemd-run --user --scope is available (Linux only). Cached after first call. */
+let hasSystemdRun: boolean | undefined;
+function detectSystemdScope(): boolean {
+  if (process.platform !== 'linux') return false;
+  if (hasSystemdRun !== undefined) return hasSystemdRun;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { execFileSync } = require('child_process') as typeof import('child_process');
+    execFileSync('systemd-run', ['--user', '--scope', '--', '/bin/true'], {
+      stdio: 'ignore', timeout: 3000,
+    });
+    hasSystemdRun = true;
+  } catch {
+    hasSystemdRun = false;
+  }
+  return hasSystemdRun;
+}
+
+// Indirection so tests can override detection without mocking child_process
+export let canUseSystemdScope = detectSystemdScope;
+
+/** Override the scope detection function (for testing). */
+export function _setSystemdScopeDetector(fn: () => boolean) { canUseSystemdScope = fn; }
+
+/** Reset to real detection (for testing). */
+export function _resetSystemdDetection() {
+  hasSystemdRun = undefined;
+  canUseSystemdScope = detectSystemdScope;
+}
+
 function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
 	try {
 		if (!win.isDestroyed()) {
@@ -27,7 +57,15 @@ export function registerTerminalHandlers(win: BrowserWindow) {
     delete env.GIO_LAUNCHED_DESKTOP_FILE;
     delete env.GIO_LAUNCHED_DESKTOP_FILE_PID;
     delete env.BAMF_DESKTOP_FILE_HINT;
-    const term = pty.spawn(shell, ['--login'], {
+    // On Linux with systemd, spawn via systemd-run --user --scope so the shell
+    // lives in its own cgroup. This prevents desktop environments (GNOME, KDE)
+    // from grouping GUI apps launched from the terminal under SAI's taskbar icon.
+    const useScope = canUseSystemdScope();
+    const spawnCmd = useScope ? 'systemd-run' : shell;
+    const spawnArgs = useScope
+      ? ['--user', '--scope', '--quiet', '--', shell, '--login']
+      : ['--login'];
+    const term = pty.spawn(spawnCmd, spawnArgs, {
       name: 'xterm-256color',
       cwd: cwd || process.env.HOME || '/',
       env,
