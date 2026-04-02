@@ -101,10 +101,12 @@ export default function DiffViewer({ projectPath, filePath, staged, mode }: Diff
           font-size: 12px;
           width: 100%;
         }
+
+        /* Line numbers – base */
         .d2h-code-linenumber,
         .d2h-code-side-linenumber {
           background: var(--bg-secondary) !important;
-          color: var(--text-secondary) !important;
+          color: var(--text-muted) !important;
           border-right: 1px solid var(--border);
           min-width: 50px;
           width: 50px;
@@ -112,6 +114,8 @@ export default function DiffViewer({ projectPath, filePath, staged, mode }: Diff
           text-align: right;
           position: static;
         }
+
+        /* Context (unchanged) lines */
         .d2h-code-line {
           background: var(--bg-primary);
           color: var(--text);
@@ -120,36 +124,71 @@ export default function DiffViewer({ projectPath, filePath, staged, mode }: Diff
           background: var(--bg-primary);
           color: var(--text);
         }
+
+        /* Deletion rows */
         .d2h-del {
-          background: rgba(180, 60, 40, 0.25);
+          background: rgba(227, 85, 53, 0.12);
           border-color: transparent;
         }
-        .d2h-ins {
-          background: rgba(72, 100, 40, 0.35);
-          border-color: transparent;
+        .d2h-del .d2h-code-linenumber,
+        .d2h-del .d2h-code-side-linenumber {
+          background: rgba(227, 85, 53, 0.18) !important;
+          color: #e07060 !important;
         }
         .d2h-del .d2h-code-line-ctn {
-          color: var(--text);
-          background: transparent;
-        }
-        .d2h-ins .d2h-code-line-ctn {
-          color: var(--text);
+          color: #f0a8a0;
           background: transparent;
         }
         .d2h-del .d2h-code-side-line {
-          background: rgba(180, 60, 40, 0.25);
+          background: rgba(227, 85, 53, 0.12);
+        }
+        .d2h-del .d2h-code-line-prefix {
+          color: #e07060;
+        }
+
+        /* Insertion rows */
+        .d2h-ins {
+          background: rgba(0, 168, 132, 0.12);
+          border-color: transparent;
+        }
+        .d2h-ins .d2h-code-linenumber,
+        .d2h-ins .d2h-code-side-linenumber {
+          background: rgba(0, 168, 132, 0.18) !important;
+          color: #60c0a0 !important;
+        }
+        .d2h-ins .d2h-code-line-ctn {
+          color: #a0e0c8;
+          background: transparent;
         }
         .d2h-ins .d2h-code-side-line {
-          background: rgba(72, 100, 40, 0.35);
+          background: rgba(0, 168, 132, 0.12);
         }
+        .d2h-ins .d2h-code-line-prefix {
+          color: #60c0a0;
+        }
+
+        /* Word-level inline changes */
+        .d2h-del .d2h-change {
+          background: rgba(227, 85, 53, 0.30);
+          border-radius: 2px;
+        }
+        .d2h-ins .d2h-change {
+          background: rgba(0, 168, 132, 0.30);
+          border-radius: 2px;
+        }
+
+        /* Hunk headers */
         .d2h-info {
-          background: var(--bg-secondary);
-          color: var(--text-muted);
+          background: rgba(17, 183, 212, 0.08);
+          color: var(--blue);
           border-bottom: 1px solid var(--border);
         }
+
+        /* Context line prefix (+, -, space) */
         .d2h-code-line-prefix {
           color: var(--text-muted);
         }
+
         .diff-mode-unified .d2h-code-line-ctn {
           white-space: pre-wrap;
           word-break: break-all;
