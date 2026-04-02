@@ -303,7 +303,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
       setSelectedIndex(0);
       // Async: query running process for next render
       const termId = getActiveTerminalId();
-      if (termId !== null) {
+      if (termId !== null && typeof window.sai.terminalGetProcess === 'function') {
         const SHELLS = ['bash', 'zsh', 'fish', 'sh', 'dash', 'tcsh', 'csh', 'login'];
         window.sai.terminalGetProcess(termId).then((proc: string | null) => {
           if (proc) {
@@ -312,7 +312,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           } else {
             setRunningProcess(null);
           }
-        });
+        }).catch(() => setRunningProcess(null));
       }
     } else if (currentWord.startsWith('/')) {
       const query = currentWord.slice(1); // without the leading /
