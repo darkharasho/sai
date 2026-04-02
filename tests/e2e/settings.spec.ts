@@ -87,9 +87,15 @@ test.describe('Settings Modal', () => {
     const modal = window.locator('.settings-modal');
     await modal.waitFor({ state: 'visible', timeout: 5000 });
 
-    // Provider options: Claude, Codex CLI, Gemini CLI
-    const claudeOption = window.locator('.settings-modal').locator('text=Claude').first();
-    const providerExists = await claudeOption.isVisible().catch(() => false);
+    // Navigate to the Provider page via sidebar
+    const sidebar = modal.locator('.settings-sidebar');
+    const providerNav = sidebar.locator('.settings-nav-item', { hasText: 'Provider' });
+    await providerNav.click();
+    await window.waitForTimeout(300);
+
+    // Provider page should show the provider select button
+    const providerSelectBtn = modal.locator('.provider-select-btn');
+    const providerExists = await providerSelectBtn.isVisible().catch(() => false);
     expect(providerExists).toBe(true);
 
     await window.keyboard.press('Escape');
@@ -105,6 +111,38 @@ test.describe('Settings Modal', () => {
     const fontSizeControls = modal.locator('text=Font Size');
     const exists = await fontSizeControls.count() > 0;
     expect(exists).toBe(true);
+
+    await window.keyboard.press('Escape');
+  });
+
+  test('settings modal sidebar navigation works', async ({ window }) => {
+    const opened = await openSettings(window);
+    if (!opened) { test.skip(); return; }
+
+    const modal = window.locator('.settings-modal');
+    await modal.waitFor({ state: 'visible', timeout: 5000 });
+
+    // Sidebar should be visible
+    const sidebar = modal.locator('.settings-sidebar');
+    await expect(sidebar).toBeVisible();
+
+    // Click Provider nav
+    const providerNav = sidebar.locator('.settings-nav-item', { hasText: 'Provider' });
+    await providerNav.click();
+    await window.waitForTimeout(300);
+
+    // Provider page should show chat provider
+    const chatProvider = modal.locator('text=Chat provider');
+    await expect(chatProvider).toBeVisible({ timeout: 3000 });
+
+    // Click back to General
+    const generalNav = sidebar.locator('.settings-nav-item', { hasText: 'General' });
+    await generalNav.click();
+    await window.waitForTimeout(300);
+
+    // Font size should be visible again
+    const fontSize = modal.locator('text=Font size');
+    await expect(fontSize).toBeVisible({ timeout: 3000 });
 
     await window.keyboard.press('Escape');
   });
