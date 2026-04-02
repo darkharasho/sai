@@ -50,6 +50,7 @@ export interface OpenFile {
   savedContent?: string;
   isDirty?: boolean;
   diskMtime?: number;
+  pendingLine?: number;
 }
 
 export interface GitCommit {

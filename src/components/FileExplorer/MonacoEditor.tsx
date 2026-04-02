@@ -72,12 +72,14 @@ interface MonacoEditorProps {
   content: string;
   fontSize?: number;
   minimap?: boolean;
+  initialLine?: number;
   onSave: (filePath: string, content: string) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
   onContentChange?: (filePath: string, content: string) => void;
+  onLineRevealed?: () => void;
 }
 
-export default function MonacoEditor({ filePath, content, fontSize = 13, minimap = true, onSave, onDirtyChange, onContentChange }: MonacoEditorProps) {
+export default function MonacoEditor({ filePath, content, fontSize = 13, minimap = true, initialLine, onSave, onDirtyChange, onContentChange, onLineRevealed }: MonacoEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const onContentChangeRef = useRef(onContentChange);
@@ -138,6 +140,12 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
       handleSave();
     });
 
+    if (initialLine) {
+      editor.revealLineInCenter(initialLine);
+      editor.setPosition({ lineNumber: initialLine, column: 1 });
+      onLineRevealed?.();
+    }
+
     editor.focus();
 
     return () => {
@@ -147,6 +155,16 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
       editor.dispose();
     };
   }, []);
+
+  // Jump to line when initialLine changes (e.g. clicking a second file reference)
+  useEffect(() => {
+    if (initialLine && editorRef.current) {
+      editorRef.current.revealLineInCenter(initialLine);
+      editorRef.current.setPosition({ lineNumber: initialLine, column: 1 });
+      editorRef.current.focus();
+      onLineRevealed?.();
+    }
+  }, [initialLine]);
 
   // Apply font/minimap changes live without remounting
   useEffect(() => {

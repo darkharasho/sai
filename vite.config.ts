@@ -11,7 +11,7 @@ export default defineConfig({
         entry: 'electron/main.ts',
         onstart(args) {
           if (!process.env.PLAYWRIGHT) {
-            args.startup();
+            args.startup(['.', '--no-sandbox', '--in-process-gpu']);
           }
         },
         vite: {

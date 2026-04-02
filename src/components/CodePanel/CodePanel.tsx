@@ -20,6 +20,7 @@ interface CodePanelProps {
   onEditorDirtyChange?: (filePath: string, dirty: boolean) => void;
   onReloadFile: (path: string) => void;
   onKeepMyEdits: (path: string) => void;
+  onLineRevealed?: (path: string) => void;
 }
 
 export default function CodePanel({
@@ -38,6 +39,7 @@ export default function CodePanel({
   onEditorDirtyChange,
   onReloadFile,
   onKeepMyEdits,
+  onLineRevealed,
 }: CodePanelProps) {
   const activeFile = openFiles.find(f => f.path === activeFilePath);
 
@@ -319,9 +321,11 @@ export default function CodePanel({
           content={activeFile.content}
           fontSize={editorFontSize}
           minimap={editorMinimap}
+          initialLine={activeFile.pendingLine}
           onSave={onEditorSave}
           onContentChange={onEditorContentChange}
           onDirtyChange={onEditorDirtyChange ? (dirty) => onEditorDirtyChange(activeFile.path, dirty) : undefined}
+          onLineRevealed={onLineRevealed ? () => onLineRevealed(activeFile.path) : undefined}
         />
       ) : null}
     </div>

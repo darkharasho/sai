@@ -323,7 +323,7 @@ interface ChatPanelProps {
   onTurnComplete?: () => void;
   onClaudeSessionId?: (sessionId: string) => void;
   activeFilePath?: string | null;
-  onFileOpen?: (path: string) => void;
+  onFileOpen?: (path: string, line?: number) => void;
   isActive?: boolean;
 }
 

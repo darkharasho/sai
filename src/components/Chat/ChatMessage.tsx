@@ -7,7 +7,7 @@ import { Circle, ChevronRight, X } from 'lucide-react';
 import ToolCallCard from './ToolCallCard';
 import type { ChatMessage as ChatMessageType } from '../../types';
 
-const FILE_PATH_RE = /(?<![:/])\b((?:\.{1,2}\/)?(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte)|(?:\/[\w.-]+)+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte))\b/g;
+const FILE_PATH_RE = /(?<![:/])\b((?:\.{1,2}\/)?(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte)|(?:\/[\w.-]+)+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte))(?::(\d+))?\b/g;
 
 const URL_RE = /https?:\/\/[^\s<>)\]]+/g;
 
@@ -23,7 +23,7 @@ function linkifyText(text: string): any[] {
   }
 
   // Second pass: find file paths in non-URL segments
-  const allMatches: { index: number; length: number; value: string; type: 'url' | 'file' }[] = [...urlMatches];
+  const allMatches: { index: number; length: number; value: string; line?: string; type: 'url' | 'file' }[] = [...urlMatches];
 
   // Build ranges covered by URLs to skip
   const urlRanges = urlMatches.map(u => [u.index, u.index + u.length]);
@@ -33,7 +33,8 @@ function linkifyText(text: string): any[] {
     const end = start + m[0].length;
     const inUrl = urlRanges.some(([us, ue]) => start >= us && end <= ue);
     if (!inUrl) {
-      allMatches.push({ index: m.index, length: m[0].length, value: m[1], type: 'file' });
+      const lineNum = m[2] ? `:${m[2]}` : '';
+      allMatches.push({ index: m.index, length: m[0].length, value: m[1], line: lineNum, type: 'file' });
     }
   }
 
@@ -55,10 +56,11 @@ function linkifyText(text: string): any[] {
         children: [{ type: 'text', value: match.value }],
       });
     } else {
+      const href = `sai-file://${match.value}${match.line || ''}`;
       parts.push({
         type: 'element', tagName: 'a',
-        properties: { href: `sai-file://${match.value}`, className: ['file-link'] },
-        children: [{ type: 'text', value: match.value }],
+        properties: { href, className: ['file-link'] },
+        children: [{ type: 'text', value: match.value + (match.line || '') }],
       });
     }
     lastIndex = match.index + match.length;
@@ -71,8 +73,11 @@ function linkifyText(text: string): any[] {
 
 function rehypeFilePaths() {
   return (tree: any) => {
-    function walk(node: any): void {
-      if (node.tagName === 'code' || node.tagName === 'pre' || node.tagName === 'a') return;
+    function walk(node: any, insidePre = false): void {
+      if (node.tagName === 'a') return;
+      // Skip code blocks (pre > code) but allow inline code
+      if (node.tagName === 'pre') { insidePre = true; }
+      if (node.tagName === 'code' && insidePre) return;
       if (node.type === 'text' && node.value) {
         return; // handled at parent level
       }
@@ -87,7 +92,7 @@ function rehypeFilePaths() {
             newChildren.push(child);
           }
         } else {
-          walk(child);
+          walk(child, insidePre);
           newChildren.push(child);
         }
       }
@@ -118,7 +123,7 @@ function ImageModal({ src, onClose }: { src: string; onClose: () => void }) {
   );
 }
 
-export default function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude' }: { message: ChatMessageType; projectPath?: string; onFileOpen?: (path: string) => void; aiProvider?: 'claude' | 'codex' | 'gemini' }) {
+export default function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude' }: { message: ChatMessageType; projectPath?: string; onFileOpen?: (path: string, line?: number) => void; aiProvider?: 'claude' | 'codex' | 'gemini' }) {
   const dotColor = getDotColor(message.role);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
@@ -143,9 +148,12 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
                     onClick={(e) => {
                       e.preventDefault();
                       if (href?.startsWith('sai-file://') && onFileOpen) {
-                        const rel = href.slice('sai-file://'.length);
+                        const raw = href.slice('sai-file://'.length);
+                        const lineMatch = raw.match(/:(\d+)$/);
+                        const line = lineMatch ? parseInt(lineMatch[1], 10) : undefined;
+                        const rel = lineMatch ? raw.slice(0, -lineMatch[0].length) : raw;
                         const abs = rel.startsWith('/') ? rel : `${projectPath}/${rel}`;
-                        onFileOpen(abs);
+                        onFileOpen(abs, line);
                       } else if (href) {
                         window.sai.openExternal(href);
                       }

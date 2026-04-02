@@ -526,7 +526,7 @@ export default function App() {
     });
   }, [activeProjectPath, updateWorkspace, focusedChat]);
 
-  const handleFileOpen = useCallback(async (filePath: string) => {
+  const handleFileOpen = useCallback(async (filePath: string, line?: number) => {
     if (!activeProjectPath) return;
     try {
       const [content, { mtime }] = await Promise.all([
@@ -537,7 +537,9 @@ export default function App() {
         const exists = ws.openFiles.some(f => f.path === filePath);
         return {
           ...ws,
-          openFiles: exists ? ws.openFiles : [...ws.openFiles, { path: filePath, viewMode: 'editor', content, savedContent: content, diskMtime: mtime }],
+          openFiles: exists
+            ? ws.openFiles.map(f => f.path === filePath ? { ...f, pendingLine: line } : f)
+            : [...ws.openFiles, { path: filePath, viewMode: 'editor', content, savedContent: content, diskMtime: mtime, pendingLine: line }],
           activeFilePath: filePath,
         };
       });
@@ -1036,6 +1038,14 @@ export default function App() {
                 externallyModified={externallyModified}
                 onReloadFile={handleReloadFile}
                 onKeepMyEdits={handleKeepMyEdits}
+                onLineRevealed={(path: string) => {
+                  if (activeProjectPath) {
+                    updateWorkspace(activeProjectPath, ws => ({
+                      ...ws,
+                      openFiles: ws.openFiles.map(f => f.path === path ? { ...f, pendingLine: undefined } : f),
+                    }));
+                  }
+                }}
               />
             )}
             {panel === 'terminal' && Array.from(workspaces.entries()).map(([wsPath]) => (
