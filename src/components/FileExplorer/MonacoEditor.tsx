@@ -77,9 +77,10 @@ interface MonacoEditorProps {
   onDirtyChange?: (dirty: boolean) => void;
   onContentChange?: (filePath: string, content: string) => void;
   onLineRevealed?: () => void;
+  onTogglePreview?: () => void;
 }
 
-export default function MonacoEditor({ filePath, content, fontSize = 13, minimap = true, initialLine, onSave, onDirtyChange, onContentChange, onLineRevealed }: MonacoEditorProps) {
+export default function MonacoEditor({ filePath, content, fontSize = 13, minimap = true, initialLine, onSave, onDirtyChange, onContentChange, onLineRevealed, onTogglePreview }: MonacoEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const onContentChangeRef = useRef(onContentChange);
@@ -182,8 +183,20 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
           <span>{language}</span>
           {saveError && <span style={{ color: 'var(--red)' }}>Save failed</span>}
         </div>
-        <span>Ln {cursorPosition.line}, Col {cursorPosition.column}</span>
-        <span>UTF-8</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span>Ln {cursorPosition.line}, Col {cursorPosition.column}</span>
+          <span>UTF-8</span>
+          {language === 'markdown' && onTogglePreview && (
+            <button
+              className="md-editor-preview-btn"
+              onClick={onTogglePreview}
+              title="Preview markdown (Ctrl+Shift+M)"
+              aria-label="Preview"
+            >
+              Preview
+            </button>
+          )}
+        </div>
       </div>
 
       <style>{`
@@ -205,6 +218,20 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
           border-radius: 50%;
           background: var(--accent);
           flex-shrink: 0;
+        }
+        .md-editor-preview-btn {
+          background: none;
+          border: 1px solid var(--border);
+          border-radius: 3px;
+          color: var(--text-muted);
+          font-size: 11px;
+          padding: 1px 8px;
+          cursor: pointer;
+          font-family: 'JetBrains Mono', monospace;
+        }
+        .md-editor-preview-btn:hover {
+          background: var(--bg-hover);
+          color: var(--text);
         }
       `}</style>
     </div>
