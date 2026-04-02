@@ -329,7 +329,7 @@ interface ChatPanelProps {
   messageQueue?: QueuedMessage[];
   onQueueAdd?: (sessionId: string, text: string) => void;
   onQueueRemove?: (sessionId: string, id: string) => void;
-  onQueueShift?: (sessionId: string) => QueuedMessage | undefined;
+  onQueueShift?: (sessionId: string) => void;
   sessionId?: string;
 }
 
@@ -1040,10 +1040,9 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const prevStreamingRef = useRef(false);
   useEffect(() => {
     if (prevStreamingRef.current && !isStreaming && messageQueue.length > 0 && onQueueShift && sessionId) {
-      const next = onQueueShift(sessionId);
-      if (next) {
-        setTimeout(() => handleSend(next.text), 300);
-      }
+      const next = messageQueue[0];
+      onQueueShift(sessionId);
+      setTimeout(() => handleSend(next.text), 300);
     }
     prevStreamingRef.current = isStreaming;
   }, [isStreaming]);

@@ -178,17 +178,14 @@ export default function App() {
     });
   }, []);
 
-  const handleQueueShift = useCallback((sessionId: string): QueuedMessage | undefined => {
-    let shifted: QueuedMessage | undefined;
+  const handleQueueShift = useCallback((sessionId: string): void => {
     setMessageQueues(prev => {
       const queue = prev.get(sessionId) || [];
       if (queue.length === 0) return prev;
-      shifted = queue[0];
       const next = new Map(prev);
       next.set(sessionId, queue.slice(1));
       return next;
     });
-    return shifted;
   }, []);
 
   // Derived state for the active workspace
