@@ -103,7 +103,7 @@ describe('TerminalPanel', () => {
     mockSai.terminalCreate.mockResolvedValue(terminalId);
     render(<TerminalPanel projectPath="/tmp/test" />);
     await vi.waitFor(() => {
-      expect(registerTerminal).toHaveBeenCalledWith(terminalId, expect.any(Object));
+      expect(registerTerminal).toHaveBeenCalledWith(terminalId, expect.any(Object), '/tmp/test');
     });
   });
 
