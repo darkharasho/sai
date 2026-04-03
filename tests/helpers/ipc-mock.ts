@@ -11,6 +11,8 @@ export interface MockSai {
   terminalCreate: ReturnType<typeof vi.fn>;
   terminalWrite: ReturnType<typeof vi.fn>;
   terminalResize: ReturnType<typeof vi.fn>;
+  terminalKill: ReturnType<typeof vi.fn>;
+  terminalGetProcess: ReturnType<typeof vi.fn>;
   terminalOnData: ReturnType<typeof vi.fn>;
 
   // Claude
@@ -123,6 +125,8 @@ export function createMockSai(): MockSai {
     terminalCreate: vi.fn().mockResolvedValue(1),
     terminalWrite: vi.fn(),
     terminalResize: vi.fn(),
+    terminalKill: vi.fn(),
+    terminalGetProcess: vi.fn().mockResolvedValue('bash'),
     terminalOnData: noopUnsubscribe,
 
     // Claude

@@ -163,11 +163,11 @@ export default function App() {
     });
   }, []);
 
-  const tabIdCounter = useRef(0);
+  const tabIdCounter = useRef(0); // counts down from -1; negative IDs are temp (pre-PTY)
 
   const handleTabCreate = useCallback(() => {
     if (!activeProjectPath) return;
-    const tempId = ++tabIdCounter.current;
+    const tempId = --tabIdCounter.current;
     updateWorkspace(activeProjectPath, ws => {
       const nextOrder = ws.terminalTabs.length > 0
         ? Math.max(...ws.terminalTabs.map(t => t.order)) + 1

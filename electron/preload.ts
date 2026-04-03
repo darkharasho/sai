@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('sai', {
   terminalWrite: (id: number, data: string) => ipcRenderer.send('terminal:write', id, data),
   terminalResize: (id: number, cols: number, rows: number) => ipcRenderer.send('terminal:resize', id, cols, rows),
   terminalGetProcess: (id: number) => ipcRenderer.invoke('terminal:getProcess', id),
+  terminalKill: (id: number) => ipcRenderer.send('terminal:kill', id),
   terminalOnData: (callback: (id: number, data: string) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, id: number, data: string) => callback(id, data);
     ipcRenderer.on('terminal:data', listener);

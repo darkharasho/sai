@@ -128,6 +128,20 @@ export function registerTerminalHandlers(win: BrowserWindow) {
   ipcMain.on('terminal:resize', (_event, id: number, cols: number, rows: number) => {
     allTerminals.get(id)?.resize(cols, rows);
   });
+
+  ipcMain.on('terminal:kill', (_event, id: number) => {
+    const term = allTerminals.get(id);
+    if (term) {
+      term.kill();
+      allTerminals.delete(id);
+      const owner = terminalOwner.get(id);
+      if (owner) {
+        const ownerWs = get(owner);
+        ownerWs?.terminals.delete(id);
+        terminalOwner.delete(id);
+      }
+    }
+  });
 }
 
 export function destroyAllTerminals() {

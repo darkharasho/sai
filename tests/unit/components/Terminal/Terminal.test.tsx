@@ -76,11 +76,6 @@ describe('TerminalPanel', () => {
 
   beforeEach(() => {
     mockSai = installMockSai();
-    // Add terminalGetProcess mock if not present
-    if (!mockSai.terminalGetProcess) {
-      (mockSai as any).terminalGetProcess = vi.fn().mockResolvedValue('bash');
-      (window.sai as any).terminalGetProcess = (mockSai as any).terminalGetProcess;
-    }
     vi.clearAllMocks();
   });
 

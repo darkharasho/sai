@@ -9,6 +9,7 @@ import {
 import {
   getTerminalContent, getTerminalLastCommand, getLastCommandName,
   getTerminalById, getTerminalByName, getTerminalByIndex,
+  getTerminalLastCommandById, getTerminalLastCommandByIndex,
 } from '../../terminalBuffer';
 
 type EffortLevel = 'low' | 'medium' | 'high' | 'max';
@@ -457,31 +458,18 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
       let content: string | null = null;
       if (isName) {
         const tabName = inner.slice('NAME_'.length);
-        if (isLast) {
-          // For last-command by name, find tab id and use getTerminalById with last-command semantics
-          // We fall back to getTerminalByName which gives full buffer; for :last we need the tab id
-          const matchingTab = terminalTabs.find(t => t.name === tabName);
-          if (matchingTab) {
-            // Use getTerminalLastCommand-equivalent via id: read via getTerminalById isn't last-cmd aware
-            // Instead, temporarily use getTerminalByName — we don't have a per-tab last-command function
-            // so we use getTerminalById on the tab id and apply same approach as active terminal
-            content = getTerminalById(matchingTab.id);
-          }
-        } else {
-          const matchingTab = terminalTabs.find(t => t.name === tabName);
-          if (matchingTab) {
-            content = getTerminalById(matchingTab.id);
-          }
+        const matchingTab = terminalTabs.find(t => t.name === tabName);
+        if (matchingTab) {
+          content = isLast
+            ? getTerminalLastCommandById(matchingTab.id)
+            : getTerminalById(matchingTab.id);
         }
       } else {
         const index = parseInt(inner, 10);
         const orderedIds = terminalTabs.map(t => t.id);
-        if (isLast) {
-          // For :last by index, use getTerminalByIndex (full buffer — no per-tab last-cmd fn yet)
-          content = getTerminalByIndex(index, orderedIds);
-        } else {
-          content = getTerminalByIndex(index, orderedIds);
-        }
+        content = isLast
+          ? getTerminalLastCommandByIndex(index, orderedIds)
+          : getTerminalByIndex(index, orderedIds);
       }
       // Remove the @terminal:... text the user typed
       const cursorPos = textareaRef.current?.selectionStart ?? value.length;

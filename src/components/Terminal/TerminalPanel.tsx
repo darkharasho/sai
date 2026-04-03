@@ -126,7 +126,10 @@ function TerminalInstance({ tabId, projectPath, visible, onTerminalReady }: Term
     intersectionObserver.observe(container);
 
     return () => {
-      if (termIdRef.current !== null) unregisterTerminal(termIdRef.current);
+      if (termIdRef.current !== null) {
+        unregisterTerminal(termIdRef.current);
+        window.sai.terminalKill(termIdRef.current);
+      }
       cleanup();
       resizeObserver.disconnect();
       intersectionObserver.disconnect();
@@ -178,7 +181,7 @@ export default function TerminalPanel({
   onTabRename,
   onTerminalReady,
 }: TerminalPanelProps) {
-  const [restartKey, setRestartKey] = useState(0);
+  const [restartKeys, setRestartKeys] = useState<Map<number, number>>(new Map());
   const prevSuspendedRef = useRef(wasSuspended);
 
   // process name polling state: tabId → processName
@@ -194,14 +197,29 @@ export default function TerminalPanel({
   // Auto-restart only when workspace resumes after suspension (PTY was killed)
   useEffect(() => {
     if (!wasSuspended && prevSuspendedRef.current) {
-      setRestartKey(k => k + 1);
+      // Bump all tab restart keys on resume (all PTYs were killed)
+      setRestartKeys(prev => {
+        const next = new Map(prev);
+        for (const tab of terminalTabs) {
+          next.set(tab.id, (next.get(tab.id) ?? 0) + 1);
+        }
+        return next;
+      });
     }
     prevSuspendedRef.current = wasSuspended;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wasSuspended]);
 
   const handleRestart = useCallback(() => {
-    setRestartKey(k => k + 1);
-  }, []);
+    // Only restart the active terminal
+    if (activeTerminalId !== null) {
+      setRestartKeys(prev => {
+        const next = new Map(prev);
+        next.set(activeTerminalId, (next.get(activeTerminalId) ?? 0) + 1);
+        return next;
+      });
+    }
+  }, [activeTerminalId]);
 
   // Update active terminal in buffer when activeTerminalId changes
   useEffect(() => {
@@ -217,6 +235,7 @@ export default function TerminalPanel({
     const poll = async () => {
       const updates: Record<number, string> = {};
       for (const tab of terminalTabs) {
+        if (tab.id <= 0) continue; // skip temp IDs (negative) — no PTY exists yet
         try {
           const name: string = await window.sai.terminalGetProcess(tab.id);
           if (name) updates[tab.id] = name;
@@ -282,7 +301,7 @@ export default function TerminalPanel({
   const multiTab = terminalTabs.length > 1;
 
   // Build a stable key for each TerminalInstance that restarts when needed
-  const instanceKey = (tab: TerminalTab) => `${tab.id}-${restartKey}`;
+  const instanceKey = (tab: TerminalTab) => `${tab.id}-${restartKeys.get(tab.id) ?? 0}`;
 
   return (
     <div className="terminal-panel">

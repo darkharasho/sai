@@ -218,8 +218,12 @@ export function getLastCommandName(): string | null {
 export function getTerminalLastCommand(maxLines = 500): string | null {
   const target = getActiveTerminal();
   if (!target) return null;
+  return extractLastCommand(target, maxLines);
+}
 
-  const buf = target.buffer.active;
+/** Shared implementation for extracting the last command from a terminal buffer. */
+function extractLastCommand(term: Terminal, maxLines: number): string | null {
+  const buf = term.buffer.active;
   const totalLines = buf.length;
   const start = Math.max(0, totalLines - maxLines);
   const lines: string[] = [];
@@ -260,4 +264,31 @@ export function getTerminalLastCommand(maxLines = 500): string | null {
     result.pop();
   }
   return result.length > 0 ? result.join('\n') : null;
+}
+
+/** Extract the last command from the terminal with the given PTY ID. */
+export function getTerminalLastCommandById(id: number, maxLines = 500): string | null {
+  const term = terminals.get(id);
+  if (!term) return null;
+  return extractLastCommand(term, maxLines);
+}
+
+/** Extract the last command from the terminal matching the given name in a workspace. */
+export function getTerminalLastCommandByName(name: string, workspacePath: string, maxLines = 500): string | null {
+  for (const [id, termName] of terminalNames) {
+    if (termName === name && terminalWorkspace.get(id) === workspacePath) {
+      const term = terminals.get(id);
+      if (term) return extractLastCommand(term, maxLines);
+    }
+  }
+  return null;
+}
+
+/** Extract the last command from the terminal at the given 1-based index in an ordered ID array. */
+export function getTerminalLastCommandByIndex(index: number, orderedIds: number[], maxLines = 500): string | null {
+  if (index < 1 || index > orderedIds.length) return null;
+  const id = orderedIds[index - 1];
+  const term = terminals.get(id);
+  if (!term) return null;
+  return extractLastCommand(term, maxLines);
 }

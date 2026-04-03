@@ -29,6 +29,9 @@ import {
   getTerminalById,
   getTerminalByName,
   getTerminalByIndex,
+  getTerminalLastCommandById,
+  getTerminalLastCommandByName,
+  getTerminalLastCommandByIndex,
 } from '../../src/terminalBuffer';
 
 describe('getTerminalLastCommand', () => {
@@ -336,5 +339,115 @@ describe('getTerminalByIndex', () => {
     const term = createMockTerminal(lines);
     registerTerminal(10, term as any, '/proj');
     expect(getTerminalByIndex(1, [10], 2)).toBe('c\nd');
+  });
+});
+
+describe('getTerminalLastCommandById', () => {
+  beforeEach(() => {
+    for (let i = 0; i < 100; i++) unregisterTerminal(i);
+    setActiveWorkspace(null);
+  });
+
+  it('returns null for unknown terminal ID', () => {
+    expect(getTerminalLastCommandById(999)).toBeNull();
+  });
+
+  it('returns last command output from the specified terminal by ID', () => {
+    const lines = [
+      '$ git status',
+      'On branch main',
+      '$ npm test',
+      'PASS all tests',
+      '$ ',
+    ];
+    const term = createMockTerminal(lines);
+    registerTerminal(42, term as any, '/proj');
+
+    const result = getTerminalLastCommandById(42);
+    expect(result).toBe('$ npm test\nPASS all tests');
+  });
+
+  it('does NOT use the active terminal — only the specified ID', () => {
+    const activeLines = ['$ active-cmd', 'active output', '$ '];
+    const otherLines = ['$ other-cmd', 'other output', '$ '];
+    registerTerminal(10, createMockTerminal(activeLines) as any, '/proj');
+    registerTerminal(20, createMockTerminal(otherLines) as any, '/proj');
+    setActiveWorkspace('/proj');
+    setActiveTerminalId('/proj', 10);
+
+    // Should return last command from terminal 20, not 10
+    const result = getTerminalLastCommandById(20);
+    expect(result).toBe('$ other-cmd\nother output');
+  });
+
+  it('falls back to full buffer when no prompt detected', () => {
+    const lines = ['some output', 'more output'];
+    const term = createMockTerminal(lines);
+    registerTerminal(5, term as any, '/proj');
+
+    expect(getTerminalLastCommandById(5)).toBe('some output\nmore output');
+  });
+});
+
+describe('getTerminalLastCommandByName', () => {
+  beforeEach(() => {
+    for (let i = 0; i < 100; i++) unregisterTerminal(i);
+    setActiveWorkspace(null);
+  });
+
+  it('returns null when no terminal has the given name', () => {
+    expect(getTerminalLastCommandByName('nonexistent', '/proj')).toBeNull();
+  });
+
+  it('returns null when name matches but workspace does not', () => {
+    const term = createMockTerminal(['$ cmd', 'output', '$ ']);
+    registerTerminal(7, term as any, '/proj-a');
+    updateTerminalName(7, 'my-app');
+    expect(getTerminalLastCommandByName('my-app', '/proj-b')).toBeNull();
+  });
+
+  it('returns last command output for the named terminal', () => {
+    const lines = ['$ build', 'compiled ok', '$ run', 'listening on :3000', '$ '];
+    const term = createMockTerminal(lines);
+    registerTerminal(7, term as any, '/proj');
+    updateTerminalName(7, 'server');
+
+    const result = getTerminalLastCommandByName('server', '/proj');
+    expect(result).toBe('$ run\nlistening on :3000');
+  });
+});
+
+describe('getTerminalLastCommandByIndex', () => {
+  beforeEach(() => {
+    for (let i = 0; i < 100; i++) unregisterTerminal(i);
+    setActiveWorkspace(null);
+  });
+
+  it('returns null for out-of-range index', () => {
+    const term = createMockTerminal(['$ cmd', 'output']);
+    registerTerminal(10, term as any, '/proj');
+    expect(getTerminalLastCommandByIndex(0, [10])).toBeNull();
+    expect(getTerminalLastCommandByIndex(2, [10])).toBeNull();
+  });
+
+  it('returns null for empty orderedIds', () => {
+    expect(getTerminalLastCommandByIndex(1, [])).toBeNull();
+  });
+
+  it('returns null when ID at index is not registered', () => {
+    expect(getTerminalLastCommandByIndex(1, [999])).toBeNull();
+  });
+
+  it('returns last command output for the terminal at the given 1-based index', () => {
+    const linesA = ['$ cmd-a', 'output-a', '$ '];
+    const linesB = ['$ cmd-b', 'output-b', '$ '];
+    const linesC = ['$ cmd-c', 'output-c', '$ '];
+    registerTerminal(10, createMockTerminal(linesA) as any, '/proj');
+    registerTerminal(20, createMockTerminal(linesB) as any, '/proj');
+    registerTerminal(30, createMockTerminal(linesC) as any, '/proj');
+
+    expect(getTerminalLastCommandByIndex(1, [10, 20, 30])).toBe('$ cmd-a\noutput-a');
+    expect(getTerminalLastCommandByIndex(2, [10, 20, 30])).toBe('$ cmd-b\noutput-b');
+    expect(getTerminalLastCommandByIndex(3, [10, 20, 30])).toBe('$ cmd-c\noutput-c');
   });
 });
