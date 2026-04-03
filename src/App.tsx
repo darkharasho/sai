@@ -470,10 +470,30 @@ export default function App() {
 
   useEffect(() => {
     const cleanup = window.sai.onWorkspaceSuspended?.((suspendedPath: string) => {
-      updateWorkspace(suspendedPath, ws => ({ ...ws, status: 'suspended' }));
+      updateWorkspace(suspendedPath, ws => ({
+        ...ws,
+        status: 'suspended',
+        terminalIds: [], // PTYs are dead
+      }));
     });
     return cleanup;
   }, [updateWorkspace]);
+
+  useEffect(() => {
+    if (!activeProjectPath) return;
+    const ws = getWorkspace(activeProjectPath);
+    if (!ws || ws.status !== 'suspended') return;
+    // Mark as active and regenerate temp IDs for tabs so TerminalInstances remount
+    updateWorkspace(activeProjectPath, ws => ({
+      ...ws,
+      status: 'active',
+      terminalTabs: ws.terminalTabs.map((t, i) => ({
+        ...t,
+        id: -(i + 1), // negative temp IDs, will be replaced by onTerminalReady
+      })),
+      activeTerminalId: ws.terminalTabs.length > 0 ? -1 : null,
+    }));
+  }, [activeProjectPath, getWorkspace, updateWorkspace]);
 
   // Listen for background workspace completions
   useEffect(() => {
