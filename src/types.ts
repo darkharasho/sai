@@ -76,6 +76,12 @@ export interface DirEntry {
 
 export type WorkspaceStatus = 'active' | 'suspended' | 'recent';
 
+export interface TerminalTab {
+  id: number;          // PTY id from main process
+  name: string | null; // user-assigned name (null = auto from process)
+  order: number;       // display order in tab list (1-based)
+}
+
 export interface WorkspaceContext {
   projectPath: string;
   sessions: ChatSession[];
@@ -83,6 +89,8 @@ export interface WorkspaceContext {
   openFiles: OpenFile[];
   activeFilePath: string | null;
   terminalIds: number[];
+  terminalTabs: TerminalTab[];
+  activeTerminalId: number | null;
   status: WorkspaceStatus;
   lastActivity: number;
 }

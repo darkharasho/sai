@@ -134,6 +134,8 @@ export default function App() {
       openFiles: [],
       activeFilePath: null,
       terminalIds: [],
+      terminalTabs: [],
+      activeTerminalId: null,
       status: 'recent',
       lastActivity: Date.now(),
     };
@@ -151,6 +153,8 @@ export default function App() {
         openFiles: [],
         activeFilePath: null,
         terminalIds: [],
+        terminalTabs: [],
+        activeTerminalId: null,
         status: 'active' as const,
         lastActivity: Date.now(),
       };
@@ -309,6 +313,8 @@ export default function App() {
           openFiles: [],
           activeFilePath: null,
           terminalIds: [],
+          terminalTabs: [],
+          activeTerminalId: null,
           status: 'active',
           lastActivity: Date.now(),
         }]]));
@@ -682,6 +688,8 @@ export default function App() {
           openFiles: [],
           activeFilePath: null,
           terminalIds: [],
+          terminalTabs: [],
+          activeTerminalId: null,
           status: 'active',
           lastActivity: Date.now(),
         });
