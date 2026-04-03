@@ -235,7 +235,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
   terminalTabsRef.current = terminalTabs;
   // Derive a stable key for the useEffect dependency so it only re-runs when
   // tabs are actually added, removed, or renamed.
-  const terminalTabsKey = terminalTabs.map(t => `${t.id}:${t.name ?? ''}`).join(',');
+  const terminalTabsKey = terminalTabs.map(t => `${t.uid}:${t.name ?? ''}`).join(',');
 
   // Close menus on outside click
   useEffect(() => {

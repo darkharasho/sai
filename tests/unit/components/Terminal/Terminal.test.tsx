@@ -63,8 +63,8 @@ import { Terminal } from '@xterm/xterm';
 import { registerTerminal, unregisterTerminal } from '../../../../src/terminalBuffer';
 
 const defaultTabProps = {
-  terminalTabs: [{ id: 1, name: null, order: 1 }],
-  activeTerminalId: 1,
+  terminalTabs: [{ uid: 1, id: 1, name: null, order: 1 }],
+  activeTerminalId: 1, // this is the uid
   onTabCreate: vi.fn(),
   onTabClose: vi.fn(),
   onTabSwitch: vi.fn(),
@@ -194,8 +194,8 @@ describe('TerminalPanel', () => {
     const multiTabProps = {
       ...defaultTabProps,
       terminalTabs: [
-        { id: 1, name: null, order: 1 },
-        { id: 2, name: null, order: 2 },
+        { uid: 1, id: 1, name: null, order: 1 },
+        { uid: 2, id: 2, name: null, order: 2 },
       ],
     };
     const { getByTestId } = render(
@@ -228,8 +228,8 @@ describe('TerminalPanel', () => {
     const multiTabProps = {
       ...defaultTabProps,
       terminalTabs: [
-        { id: 1, name: null, order: 1 },
-        { id: 2, name: 'my-tab', order: 2 },
+        { uid: 1, id: 1, name: null, order: 1 },
+        { uid: 2, id: 2, name: 'my-tab', order: 2 },
       ],
       onTabSwitch,
     };
@@ -239,7 +239,7 @@ describe('TerminalPanel', () => {
     const pane = getByTestId('terminal-tab-pane');
     const tabItems = pane.querySelectorAll('.terminal-tab-item');
     expect(tabItems.length).toBe(2);
-    // Click the second tab
+    // Click the second tab — onTabSwitch receives the uid
     fireEvent.click(tabItems[1]);
     expect(onTabSwitch).toHaveBeenCalledWith(2);
   });

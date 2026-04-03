@@ -232,8 +232,8 @@ describe('ChatInput', () => {
 
   describe('terminalTabs prop', () => {
     const STABLE_TERMINAL_TABS = [
-      { id: 1, name: null, order: 1 },
-      { id: 2, name: 'server', order: 2 },
+      { uid: 1, id: 1, name: null, order: 1 },
+      { uid: 2, id: 2, name: 'server', order: 2 },
     ];
 
     it('accepts terminalTabs prop without errors', () => {

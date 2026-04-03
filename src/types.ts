@@ -77,7 +77,8 @@ export interface DirEntry {
 export type WorkspaceStatus = 'active' | 'suspended' | 'recent';
 
 export interface TerminalTab {
-  id: number;          // PTY id from main process
+  uid: number;         // stable unique ID for React keys (never changes)
+  id: number;          // PTY id from main process (updated when PTY is created)
   name: string | null; // user-assigned name (null = auto from process)
   order: number;       // display order in tab list (1-based)
 }

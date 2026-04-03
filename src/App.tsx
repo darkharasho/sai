@@ -163,67 +163,74 @@ export default function App() {
     });
   }, []);
 
-  const tabIdCounter = useRef(0); // counts down from -1; negative IDs are temp (pre-PTY)
+  // uid is the stable identity for tabs (used for React keys, activeTerminalId).
+  // id is the PTY ID assigned when the terminal process is created.
+  const tabUidCounter = useRef(0);
 
   const handleTabCreate = useCallback(() => {
     if (!activeProjectPath) return;
-    const tempId = --tabIdCounter.current;
+    const uid = ++tabUidCounter.current;
     updateWorkspace(activeProjectPath, ws => {
       const nextOrder = ws.terminalTabs.length > 0
         ? Math.max(...ws.terminalTabs.map(t => t.order)) + 1
         : 1;
       return {
         ...ws,
-        terminalTabs: [...ws.terminalTabs, { id: tempId, name: null, order: nextOrder }],
-        activeTerminalId: tempId,
+        terminalTabs: [...ws.terminalTabs, { uid, id: 0, name: null, order: nextOrder }],
+        activeTerminalId: uid,
       };
     });
   }, [activeProjectPath, updateWorkspace]);
 
-  const handleTabClose = useCallback((id: number) => {
+  const handleTabClose = useCallback((uid: number) => {
     if (!activeProjectPath) return;
     updateWorkspace(activeProjectPath, ws => {
-      const remaining = ws.terminalTabs.filter(t => t.id !== id);
+      const remaining = ws.terminalTabs.filter(t => t.uid !== uid);
       const renumbered = remaining.map((t, i) => ({ ...t, order: i + 1 }));
       let nextActive = ws.activeTerminalId;
-      if (nextActive === id) {
-        nextActive = renumbered.length > 0 ? renumbered[renumbered.length - 1].id : null;
+      if (nextActive === uid) {
+        nextActive = renumbered.length > 0 ? renumbered[renumbered.length - 1].uid : null;
       }
       return {
         ...ws,
         terminalTabs: renumbered,
-        terminalIds: ws.terminalIds.filter(tid => tid !== id),
+        terminalIds: ws.terminalIds.filter(tid => {
+          const closedTab = ws.terminalTabs.find(t => t.uid === uid);
+          return closedTab ? tid !== closedTab.id : true;
+        }),
         activeTerminalId: nextActive,
       };
     });
   }, [activeProjectPath, updateWorkspace]);
 
-  const handleTabSwitch = useCallback((id: number) => {
+  const handleTabSwitch = useCallback((uid: number) => {
     if (!activeProjectPath) return;
     updateWorkspace(activeProjectPath, ws => ({
       ...ws,
-      activeTerminalId: id,
+      activeTerminalId: uid,
     }));
   }, [activeProjectPath, updateWorkspace]);
 
-  const handleTabRename = useCallback((id: number, name: string) => {
+  const handleTabRename = useCallback((uid: number, name: string) => {
     if (!activeProjectPath) return;
-    updateWorkspace(activeProjectPath, ws => ({
-      ...ws,
-      terminalTabs: ws.terminalTabs.map(t =>
-        t.id === id ? { ...t, name: name || null } : t
-      ),
-    }));
-    updateTerminalName(id, name || null);
+    updateWorkspace(activeProjectPath, ws => {
+      const tab = ws.terminalTabs.find(t => t.uid === uid);
+      if (tab && tab.id > 0) updateTerminalName(tab.id, name || null);
+      return {
+        ...ws,
+        terminalTabs: ws.terminalTabs.map(t =>
+          t.uid === uid ? { ...t, name: name || null } : t
+        ),
+      };
+    });
   }, [activeProjectPath, updateWorkspace]);
 
-  const handleTerminalReady = useCallback((tabId: number, ptyId: number) => {
+  const handleTerminalReady = useCallback((tabUid: number, ptyId: number) => {
     if (!activeProjectPath) return;
     updateWorkspace(activeProjectPath, ws => ({
       ...ws,
-      terminalTabs: ws.terminalTabs.map(t => t.id === tabId ? { ...t, id: ptyId } : t),
+      terminalTabs: ws.terminalTabs.map(t => t.uid === tabUid ? { ...t, id: ptyId } : t),
       terminalIds: [...ws.terminalIds, ptyId],
-      activeTerminalId: ws.activeTerminalId === tabId ? ptyId : ws.activeTerminalId,
     }));
   }, [activeProjectPath, updateWorkspace]);
 
@@ -483,16 +490,20 @@ export default function App() {
     if (!activeProjectPath) return;
     const ws = getWorkspace(activeProjectPath);
     if (!ws || ws.status !== 'suspended') return;
-    // Mark as active and regenerate temp IDs for tabs so TerminalInstances remount
-    updateWorkspace(activeProjectPath, ws => ({
-      ...ws,
-      status: 'active',
-      terminalTabs: ws.terminalTabs.map((t, i) => ({
+    // Mark as active, assign fresh uids so TerminalInstances remount, reset PTY ids
+    updateWorkspace(activeProjectPath, ws => {
+      const newTabs = ws.terminalTabs.map((t, i) => ({
         ...t,
-        id: -(i + 1), // negative temp IDs, will be replaced by onTerminalReady
-      })),
-      activeTerminalId: ws.terminalTabs.length > 0 ? -1 : null,
-    }));
+        uid: ++tabUidCounter.current,
+        id: 0, // PTY dead, will be reassigned by onTerminalReady
+      }));
+      return {
+        ...ws,
+        status: 'active',
+        terminalTabs: newTabs,
+        activeTerminalId: newTabs.length > 0 ? newTabs[0].uid : null,
+      };
+    });
   }, [activeProjectPath, getWorkspace, updateWorkspace]);
 
   // Listen for background workspace completions

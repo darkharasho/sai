@@ -10,17 +10,18 @@ import '@xterm/xterm/css/xterm.css';
 // ─── TerminalInstance ────────────────────────────────────────────────────────
 
 interface TerminalInstanceProps {
-  tabId: number;
+  tabUid: number;
   projectPath: string;
   visible: boolean;
-  onTerminalReady?: (tabId: number, ptyId: number) => void;
+  onTerminalReady?: (tabUid: number, ptyId: number) => void;
 }
 
-function TerminalInstance({ tabId, projectPath, visible, onTerminalReady }: TerminalInstanceProps) {
+function TerminalInstance({ tabUid, projectPath, visible, onTerminalReady }: TerminalInstanceProps) {
   const termRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const termIdRef = useRef<number | null>(null);
+  const openedRef = useRef(false);
 
   useEffect(() => {
     if (!termRef.current) return;
@@ -53,11 +54,16 @@ function TerminalInstance({ tabId, projectPath, visible, onTerminalReady }: Term
     xterm.loadAddon(new WebLinksAddon((_event, url) => {
       window.sai.openExternal(url);
     }));
-    xterm.open(termRef.current);
-    // Delay initial fit so xterm's renderer has time to initialize dimensions
-    requestAnimationFrame(() => {
-      try { fit.fit(); } catch { /* terminal not ready yet */ }
-    });
+
+    // Only open xterm when container is visible (non-zero dimensions).
+    // Opening into a display:none container causes xterm renderer crashes.
+    if (visible && termRef.current.offsetWidth > 0) {
+      xterm.open(termRef.current);
+      openedRef.current = true;
+      requestAnimationFrame(() => {
+        try { fit.fit(); } catch { /* terminal not ready yet */ }
+      });
+    }
 
     xtermRef.current = xterm;
     fitRef.current = fit;
@@ -86,7 +92,7 @@ function TerminalInstance({ tabId, projectPath, visible, onTerminalReady }: Term
     window.sai.terminalCreate(cwd).then((id: number) => {
       termIdRef.current = id;
       registerTerminal(id, xterm, projectPath);
-      onTerminalReady?.(tabId, id);
+      onTerminalReady?.(tabUid, id);
 
       xterm.onData((data) => {
         window.sai.terminalWrite(id, data);
@@ -136,12 +142,21 @@ function TerminalInstance({ tabId, projectPath, visible, onTerminalReady }: Term
       xterm.dispose();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectPath, tabId]);
+  }, [projectPath, tabUid]);
 
-  // Re-fit when this terminal becomes visible
+  // Open xterm when first becoming visible, or re-fit if already open
   useEffect(() => {
-    if (visible && fitRef.current) {
-      try { fitRef.current.fit(); } catch { /* ignore */ }
+    if (!visible || !termRef.current) return;
+    if (!openedRef.current && xtermRef.current) {
+      xtermRef.current.open(termRef.current);
+      openedRef.current = true;
+      requestAnimationFrame(() => {
+        try { fitRef.current?.fit(); } catch { /* ignore */ }
+      });
+    } else if (fitRef.current) {
+      requestAnimationFrame(() => {
+        try { fitRef.current?.fit(); } catch { /* ignore */ }
+      });
     }
   }, [visible]);
 
@@ -181,6 +196,7 @@ export default function TerminalPanel({
   onTabRename,
   onTerminalReady,
 }: TerminalPanelProps) {
+  // restartKeys keyed by tab uid
   const [restartKeys, setRestartKeys] = useState<Map<number, number>>(new Map());
   const prevSuspendedRef = useRef(wasSuspended);
 
@@ -201,7 +217,7 @@ export default function TerminalPanel({
       setRestartKeys(prev => {
         const next = new Map(prev);
         for (const tab of terminalTabs) {
-          next.set(tab.id, (next.get(tab.id) ?? 0) + 1);
+          next.set(tab.uid, (next.get(tab.uid) ?? 0) + 1);
         }
         return next;
       });
@@ -211,7 +227,7 @@ export default function TerminalPanel({
   }, [wasSuspended]);
 
   const handleRestart = useCallback(() => {
-    // Only restart the active terminal
+    // Only restart the active terminal (activeTerminalId is a uid)
     if (activeTerminalId !== null) {
       setRestartKeys(prev => {
         const next = new Map(prev);
@@ -221,12 +237,15 @@ export default function TerminalPanel({
     }
   }, [activeTerminalId]);
 
-  // Update active terminal in buffer when activeTerminalId changes
+  // Update active terminal in buffer when active tab changes (use PTY id for buffer)
   useEffect(() => {
     if (activeTerminalId !== null) {
-      setActiveTerminalId(projectPath, activeTerminalId);
+      const activeTab = terminalTabs.find(t => t.uid === activeTerminalId);
+      if (activeTab && activeTab.id > 0) {
+        setActiveTerminalId(projectPath, activeTab.id);
+      }
     }
-  }, [projectPath, activeTerminalId]);
+  }, [projectPath, activeTerminalId, terminalTabs]);
 
   // Poll process names every 3 seconds when active
   useEffect(() => {
@@ -235,10 +254,10 @@ export default function TerminalPanel({
     const poll = async () => {
       const updates: Record<number, string> = {};
       for (const tab of terminalTabs) {
-        if (tab.id <= 0) continue; // skip temp IDs (negative) — no PTY exists yet
+        if (tab.id <= 0) continue; // no PTY assigned yet
         try {
           const name: string = await window.sai.terminalGetProcess(tab.id);
-          if (name) updates[tab.id] = name;
+          if (name) updates[tab.uid] = name;
         } catch {
           // ignore
         }
@@ -254,17 +273,17 @@ export default function TerminalPanel({
   // ── Tab rename helpers ─────────────────────────────────────────────────────
 
   const startRename = (tab: TerminalTab) => {
-    setRenamingId(tab.id);
+    setRenamingId(tab.uid);
     setRenameValue(tab.name ?? '');
   };
 
-  const commitRename = (id: number) => {
+  const commitRename = (uid: number) => {
     const trimmed = renameValue.trim();
     if (trimmed.toLowerCase() === 'last') {
       setRenamingId(null);
       return; // reserved word — reject silently
     }
-    onTabRename(id, trimmed);
+    onTabRename(uid, trimmed);
     setRenamingId(null);
   };
 
@@ -276,12 +295,12 @@ export default function TerminalPanel({
   // ── Tab close helpers ──────────────────────────────────────────────────────
 
   const handleCloseRequest = (tab: TerminalTab) => {
-    const processName = processNames[tab.id];
+    const processName = processNames[tab.uid];
     const isShell = !processName || /^(bash|sh|zsh|fish|dash|ksh|tcsh|csh)$/.test(processName);
     if (!isShell) {
-      setConfirmCloseId(tab.id);
+      setConfirmCloseId(tab.uid);
     } else {
-      onTabClose(tab.id);
+      onTabClose(tab.uid);
     }
   };
 
@@ -300,8 +319,8 @@ export default function TerminalPanel({
 
   const multiTab = terminalTabs.length > 1;
 
-  // Build a stable key for each TerminalInstance that restarts when needed
-  const instanceKey = (tab: TerminalTab) => `${tab.id}-${restartKeys.get(tab.id) ?? 0}`;
+  // Build a stable key for each TerminalInstance — uses uid (never changes) + restart counter
+  const instanceKey = (tab: TerminalTab) => `${tab.uid}-${restartKeys.get(tab.uid) ?? 0}`;
 
   return (
     <div className="terminal-panel">
@@ -333,9 +352,9 @@ export default function TerminalPanel({
           {terminalTabs.map(tab => (
             <TerminalInstance
               key={instanceKey(tab)}
-              tabId={tab.id}
+              tabUid={tab.uid}
               projectPath={projectPath}
-              visible={tab.id === activeTerminalId}
+              visible={tab.uid === activeTerminalId}
               onTerminalReady={onTerminalReady}
             />
           ))}
@@ -345,24 +364,24 @@ export default function TerminalPanel({
         {multiTab && (
           <div className="terminal-tab-pane" data-testid="terminal-tab-pane">
             {terminalTabs.map(tab => {
-              const isTabActive = tab.id === activeTerminalId;
-              const label = tab.name ?? processNames[tab.id] ?? `Terminal ${tab.order}`;
+              const isTabActive = tab.uid === activeTerminalId;
+              const label = tab.name ?? processNames[tab.uid] ?? `Terminal ${tab.order}`;
               return (
                 <div
-                  key={tab.id}
+                  key={tab.uid}
                   className={`terminal-tab-item${isTabActive ? ' terminal-tab-active' : ''}`}
-                  onClick={() => onTabSwitch(tab.id)}
+                  onClick={() => onTabSwitch(tab.uid)}
                 >
-                  {renamingId === tab.id ? (
+                  {renamingId === tab.uid ? (
                     <input
                       className="terminal-tab-rename-input"
                       value={renameValue}
                       onChange={e => setRenameValue(e.target.value)}
                       onKeyDown={e => {
-                        if (e.key === 'Enter') commitRename(tab.id);
+                        if (e.key === 'Enter') commitRename(tab.uid);
                         if (e.key === 'Escape') cancelRename();
                       }}
-                      onBlur={() => commitRename(tab.id)}
+                      onBlur={() => commitRename(tab.uid)}
                       autoFocus
                       onClick={e => e.stopPropagation()}
                     />
