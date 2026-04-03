@@ -74,6 +74,7 @@ vi.mock('node-pty', () => ({
   }),
 }));
 
+
 // ---------------------------------------------------------------------------
 // Mutable ipcMain reference so we can replace it per-test
 // ---------------------------------------------------------------------------
@@ -105,11 +106,12 @@ vi.mock('../../../electron/services/workspace', () => ({
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** (Re-)import the service fresh — needed because the module caches state */
-async function loadService() {
-  // Vitest caches modules; use importActual to force a fresh evaluation each
-  // time by resetting the module registry via vi.resetModules() before import.
+/** (Re-)import the service fresh — needed because the module caches state.
+ *  By default disables systemd scope detection so existing tests see direct shell spawn. */
+async function loadService(opts?: { enableSystemdScope?: boolean }) {
   const mod = await import('../../../electron/services/pty');
+  // Default: no systemd scope wrapping (keeps existing test expectations stable)
+  mod._setSystemdScopeDetector(() => opts?.enableSystemdScope ?? false);
   return mod;
 }
 
@@ -124,7 +126,7 @@ beforeEach(() => {
   mockPtyInstances.length = 0;
   mockWorkspaceGet.mockReturnValue(undefined);
   mockTouchActivity.mockReset();
-  // Reset modules so nextId and the Maps start fresh
+  // Reset modules so nextId and the Maps start fresh (also resets hasSystemdRun cache)
   vi.resetModules();
 });
 
@@ -574,5 +576,42 @@ describe('terminal:resize IPC handler', () => {
     mockIpcMain._emit('terminal:resize', 88888, 80, 24);
 
     expect(term.resize).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// systemd-run --user --scope: cgroup isolation on Linux
+// ---------------------------------------------------------------------------
+
+describe('systemd scope isolation (Linux cgroup ungrouping)', () => {
+  /** Helper to capture the spawn command and args from the pty.spawn mock. */
+  async function spawnArgsFor(enableScope: boolean) {
+    const win = createMockBrowserWindow();
+    const mod = await loadService({ enableSystemdScope: enableScope });
+    mod.registerTerminalHandlers(win as never);
+    await mockIpcMain._invoke('terminal:create', '/tmp');
+
+    const ptyModule = await import('node-pty');
+    const calls = (ptyModule.spawn as ReturnType<typeof vi.fn>).mock.calls;
+    const lastCall = calls[calls.length - 1];
+    return { cmd: lastCall[0] as string, args: lastCall[1] as string[] };
+  }
+
+  it('spawns via systemd-run when canUseSystemdScope returns true', async () => {
+    const { cmd, args } = await spawnArgsFor(true);
+    expect(cmd).toBe('systemd-run');
+    expect(args).toContain('--user');
+    expect(args).toContain('--scope');
+    expect(args).toContain('--quiet');
+    // The actual shell should appear after '--'
+    const dashDashIdx = args.indexOf('--');
+    expect(dashDashIdx).toBeGreaterThan(-1);
+    expect(args[dashDashIdx + 2]).toBe('--login');
+  });
+
+  it('falls back to direct shell spawn when canUseSystemdScope returns false', async () => {
+    const { cmd, args } = await spawnArgsFor(false);
+    expect(cmd).not.toBe('systemd-run');
+    expect(args).toEqual(['--login']);
   });
 });

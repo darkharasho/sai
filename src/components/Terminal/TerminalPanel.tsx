@@ -6,21 +6,21 @@ import { RotateCw } from 'lucide-react';
 import { registerTerminal, unregisterTerminal } from '../../terminalBuffer';
 import '@xterm/xterm/css/xterm.css';
 
-export default function TerminalPanel({ projectPath, isActive }: { projectPath: string; isActive: boolean }) {
+export default function TerminalPanel({ projectPath, isActive, wasSuspended }: { projectPath: string; isActive: boolean; wasSuspended: boolean }) {
   const termRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const termIdRef = useRef<number | null>(null);
   const [restartKey, setRestartKey] = useState(0);
-  const wasActiveRef = useRef(isActive);
+  const prevSuspendedRef = useRef(wasSuspended);
 
-  // Auto-restart when workspace resumes after suspension
+  // Auto-restart only when workspace resumes after suspension (PTY was killed)
   useEffect(() => {
-    if (isActive && !wasActiveRef.current) {
+    if (!wasSuspended && prevSuspendedRef.current) {
       setRestartKey(k => k + 1);
     }
-    wasActiveRef.current = isActive;
-  }, [isActive]);
+    prevSuspendedRef.current = wasSuspended;
+  }, [wasSuspended]);
 
   const handleRestart = useCallback(() => {
     setRestartKey(k => k + 1);

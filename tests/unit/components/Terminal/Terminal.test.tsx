@@ -70,18 +70,18 @@ describe('TerminalPanel', () => {
   });
 
   it('renders without crashing', () => {
-    const { container } = render(<TerminalPanel projectPath="/tmp/test" />);
+    const { container } = render(<TerminalPanel projectPath="/tmp/test" isActive wasSuspended={false} />);
     expect(container).toBeTruthy();
   });
 
   it('renders a div container for the terminal', () => {
-    const { container } = render(<TerminalPanel projectPath="/tmp/test" />);
+    const { container } = render(<TerminalPanel projectPath="/tmp/test" isActive wasSuspended={false} />);
     // The component renders a ref'd div for xterm to mount into
     expect(container.querySelector('div')).toBeTruthy();
   });
 
   it('calls terminalCreate on mount', async () => {
-    render(<TerminalPanel projectPath="/home/user/project" />);
+    render(<TerminalPanel projectPath="/home/user/project" isActive wasSuspended={false} />);
     // Allow effects to run
     await vi.waitFor(() => {
       expect(mockSai.terminalCreate).toHaveBeenCalledWith('/home/user/project');
@@ -92,7 +92,7 @@ describe('TerminalPanel', () => {
     // Verify that the component renders and xterm infrastructure initializes
     // by confirming that terminalCreate is called (which only happens after
     // the Terminal is created and opened)
-    render(<TerminalPanel projectPath="/tmp/test" />);
+    render(<TerminalPanel projectPath="/tmp/test" isActive wasSuspended={false} />);
     await vi.waitFor(() => {
       expect(mockSai.terminalCreate).toHaveBeenCalled();
     });
@@ -101,28 +101,28 @@ describe('TerminalPanel', () => {
   it('registers terminal with terminalBuffer after creation', async () => {
     const terminalId = 42;
     mockSai.terminalCreate.mockResolvedValue(terminalId);
-    render(<TerminalPanel projectPath="/tmp/test" />);
+    render(<TerminalPanel projectPath="/tmp/test" isActive wasSuspended={false} />);
     await vi.waitFor(() => {
       expect(registerTerminal).toHaveBeenCalledWith(terminalId, expect.any(Object), '/tmp/test');
     });
   });
 
   it('registers onData listener', async () => {
-    render(<TerminalPanel projectPath="/tmp/test" />);
+    render(<TerminalPanel projectPath="/tmp/test" isActive wasSuspended={false} />);
     await vi.waitFor(() => {
       expect(mockSai.terminalOnData).toHaveBeenCalled();
     });
   });
 
   it('calls terminalResize on initial size sync', async () => {
-    render(<TerminalPanel projectPath="/tmp/test" />);
+    render(<TerminalPanel projectPath="/tmp/test" isActive wasSuspended={false} />);
     await vi.waitFor(() => {
       expect(mockSai.terminalResize).toHaveBeenCalled();
     });
   });
 
   it('cleans up on unmount', async () => {
-    const { unmount } = render(<TerminalPanel projectPath="/tmp/test" />);
+    const { unmount } = render(<TerminalPanel projectPath="/tmp/test" isActive wasSuspended={false} />);
     await vi.waitFor(() => {
       expect(mockSai.terminalCreate).toHaveBeenCalled();
     });
@@ -134,7 +134,7 @@ describe('TerminalPanel', () => {
   });
 
   it('renders restart button', () => {
-    const { container } = render(<TerminalPanel projectPath="/tmp/test" />);
+    const { container } = render(<TerminalPanel projectPath="/tmp/test" isActive wasSuspended={false} />);
     // There should be a restart/reload button
     const buttons = container.querySelectorAll('button');
     expect(buttons.length).toBeGreaterThan(0);

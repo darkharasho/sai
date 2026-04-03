@@ -12,7 +12,7 @@ import { useWhatsNew } from './hooks/useWhatsNew';
 import WhatsNewModal from './components/WhatsNewModal';
 import { setActiveWorkspace } from './terminalBuffer';
 import { loadSessions, saveSessions, createSession, upsertSession, migrateLegacySessions, loadSessionMessages } from './sessions';
-import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext } from './types';
+import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage } from './types';
 import { MessageSquare, TerminalSquare, Code2, ChevronRight, MessageCirclePlus, Clock } from 'lucide-react';
 import { formatSessionDate, formatSessionTime } from './sessions';
 
@@ -99,6 +99,7 @@ export default function App() {
   const [geminiConversationMode, setGeminiConversationMode] = useState<GeminiConversationMode>('planning');
   const [geminiLoadingPhrases, setGeminiLoadingPhrases] = useState<'witty' | 'tips' | 'all' | 'off'>('all');
   const [workspaces, setWorkspaces] = useState<Map<string, WorkspaceContext>>(new Map());
+  const [messageQueues, setMessageQueues] = useState<Map<string, QueuedMessage[]>>(new Map());
   const [pendingClose, setPendingClose] = useState<string | null>(null);
   // Ref to hold latest messages per workspace without triggering re-renders during streaming
   const wsMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
@@ -154,6 +155,35 @@ export default function App() {
         lastActivity: Date.now(),
       };
       next.set(path, updater(current));
+      return next;
+    });
+  }, []);
+
+  const handleQueueAdd = useCallback((sessionId: string, text: string) => {
+    setMessageQueues(prev => {
+      const queue = prev.get(sessionId) || [];
+      if (queue.length >= 5) return prev;
+      const next = new Map(prev);
+      next.set(sessionId, [...queue, { id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, text }]);
+      return next;
+    });
+  }, []);
+
+  const handleQueueRemove = useCallback((sessionId: string, id: string) => {
+    setMessageQueues(prev => {
+      const queue = prev.get(sessionId) || [];
+      const next = new Map(prev);
+      next.set(sessionId, queue.filter(m => m.id !== id));
+      return next;
+    });
+  }, []);
+
+  const handleQueueShift = useCallback((sessionId: string): void => {
+    setMessageQueues(prev => {
+      const queue = prev.get(sessionId) || [];
+      if (queue.length === 0) return prev;
+      const next = new Map(prev);
+      next.set(sessionId, queue.slice(1));
       return next;
     });
   }, []);
@@ -1023,6 +1053,11 @@ export default function App() {
                   activeFilePath={ws.activeFilePath}
                   onFileOpen={handleFileOpen}
                   isActive={wsPath === activeProjectPath}
+                  messageQueue={messageQueues.get(ws.activeSession.id) || []}
+                  onQueueAdd={handleQueueAdd}
+                  onQueueRemove={handleQueueRemove}
+                  onQueueShift={handleQueueShift}
+                  sessionId={ws.activeSession.id}
                   onMessagesChange={(messages: ChatMessage[]) => {
                     wsMessagesRef.current.set(wsPath, messages);
                   }}
@@ -1092,7 +1127,7 @@ export default function App() {
                   overflow: 'hidden',
                 }}
               >
-                <TerminalPanel projectPath={wsPath} isActive={wsPath === activeProjectPath && ws.status === 'active'} />
+                <TerminalPanel projectPath={wsPath} isActive={wsPath === activeProjectPath} wasSuspended={ws.status === 'suspended'} />
               </div>
             ))}
           </div>

@@ -292,7 +292,8 @@ function GeminiThinkingAnimation({ loadingPhrases = 'all' }: { loadingPhrases?: 
 
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
-import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval } from '../../types';
+import MessageQueue from './MessageQueue';
+import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, QueuedMessage } from '../../types';
 
 type CodexPermission = 'auto' | 'read-only' | 'full-access';
 
@@ -325,6 +326,11 @@ interface ChatPanelProps {
   activeFilePath?: string | null;
   onFileOpen?: (path: string, line?: number) => void;
   isActive?: boolean;
+  messageQueue?: QueuedMessage[];
+  onQueueAdd?: (sessionId: string, text: string) => void;
+  onQueueRemove?: (sessionId: string, id: string) => void;
+  onQueueShift?: (sessionId: string) => void;
+  sessionId?: string;
 }
 
 const EMPTY_PROMPTS = [
@@ -480,7 +486,7 @@ const EMPTY_PROMPTS = [
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, activeFilePath, onFileOpen, isActive }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, activeFilePath, onFileOpen, isActive, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, sessionId }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessageType[]>(initialMessages || []);
   const emptyPrompt = useMemo(() => EMPTY_PROMPTS[Math.floor(Math.random() * EMPTY_PROMPTS.length)], []);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -1025,6 +1031,22 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     }
   };
 
+  const handleQueue = (text: string) => {
+    if (sessionId && onQueueAdd) {
+      onQueueAdd(sessionId, text);
+    }
+  };
+
+  const prevStreamingRef = useRef(false);
+  useEffect(() => {
+    if (prevStreamingRef.current && !isStreaming && messageQueue.length > 0 && onQueueShift && sessionId) {
+      const next = messageQueue[0];
+      onQueueShift(sessionId);
+      setTimeout(() => handleSend(next.text), 300);
+    }
+    prevStreamingRef.current = isStreaming;
+  }, [isStreaming]);
+
   return (
     <div className="chat-panel">
       {showPinnedPrompt && lastUserMessage && (
@@ -1076,10 +1098,16 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           </button>
         )}
       </div>
+      <MessageQueue
+        queue={messageQueue}
+        onRemove={(id) => sessionId && onQueueRemove?.(sessionId, id)}
+      />
       <ChatInput
         onSend={handleSend}
         disabled={!ready}
         slashCommands={slashCommands}
+        onQueue={handleQueue}
+        queueCount={messageQueue.length}
         pendingApproval={pendingApproval}
         onApprove={handleApprove}
         onDeny={handleDeny}

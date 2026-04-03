@@ -14,6 +14,8 @@ import { installMockSai } from '../../../helpers/ipc-mock';
 // Must be hoisted before the component import
 vi.mock('../../../../src/terminalBuffer', () => ({
   getTerminalContent: vi.fn().mockReturnValue(''),
+  getTerminalLastCommand: vi.fn().mockReturnValue(''),
+  getLastCommandName: vi.fn().mockReturnValue(null),
 }));
 
 import ChatInput from '../../../../src/components/Chat/ChatInput';
@@ -124,5 +126,104 @@ describe('ChatInput', () => {
       <ChatInput {...defaultProps} isStreaming={true} onStop={vi.fn()} />
     );
     expect(container).toBeTruthy();
+  });
+
+  describe('message queueing', () => {
+    it('calls onQueue on Ctrl+Enter when streaming and queue not full', () => {
+      const onQueue = vi.fn();
+      render(
+        <ChatInput
+          {...defaultProps}
+          isStreaming={true}
+          onQueue={onQueue}
+          queueCount={0}
+        />
+      );
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: 'queued message' } });
+      fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+      expect(onQueue).toHaveBeenCalledWith('queued message');
+    });
+
+    it('clears input after queueing', () => {
+      const onQueue = vi.fn();
+      render(
+        <ChatInput
+          {...defaultProps}
+          isStreaming={true}
+          onQueue={onQueue}
+          queueCount={0}
+        />
+      );
+      const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+      fireEvent.change(textarea, { target: { value: 'queued message' } });
+      fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+      expect(textarea.value).toBe('');
+    });
+
+    it('does not queue when at max capacity (5)', () => {
+      const onQueue = vi.fn();
+      render(
+        <ChatInput
+          {...defaultProps}
+          isStreaming={true}
+          onQueue={onQueue}
+          queueCount={5}
+        />
+      );
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: 'queued message' } });
+      fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+      expect(onQueue).not.toHaveBeenCalled();
+    });
+
+    it('does not queue when not streaming (Ctrl+Enter is no-op)', () => {
+      const onQueue = vi.fn();
+      render(
+        <ChatInput
+          {...defaultProps}
+          isStreaming={false}
+          onQueue={onQueue}
+          queueCount={0}
+        />
+      );
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: 'queued message' } });
+      fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+      expect(onQueue).not.toHaveBeenCalled();
+    });
+
+    it('does not queue when input is empty', () => {
+      const onQueue = vi.fn();
+      render(
+        <ChatInput
+          {...defaultProps}
+          isStreaming={true}
+          onQueue={onQueue}
+          queueCount={0}
+        />
+      );
+      const textarea = screen.getByRole('textbox');
+      fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+      expect(onQueue).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('@terminal:last autocomplete', () => {
+    it('shows @terminal:last suggestion when typing @t', async () => {
+      render(<ChatInput {...defaultProps} slashCommands={STABLE_SLASH_COMMANDS} />);
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: '@t' } });
+      expect(await screen.findByText('@terminal')).toBeTruthy();
+      expect(await screen.findByText('@terminal:last')).toBeTruthy();
+    });
+
+    it('shows only @terminal:last when typing @terminal:', async () => {
+      render(<ChatInput {...defaultProps} slashCommands={STABLE_SLASH_COMMANDS} />);
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: '@terminal:' } });
+      expect(await screen.findByText('@terminal:last')).toBeTruthy();
+      expect(screen.queryByText('@terminal')).toBeNull();
+    });
   });
 });

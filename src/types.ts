@@ -33,6 +33,11 @@ export interface PendingApproval {
   input: Record<string, any>;
 }
 
+export interface QueuedMessage {
+  id: string;
+  text: string;
+}
+
 export interface GitFile {
   path: string;
   status: 'modified' | 'added' | 'deleted' | 'renamed';

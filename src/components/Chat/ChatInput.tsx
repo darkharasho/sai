@@ -6,7 +6,7 @@ import {
   MessageSquare, Zap, Send, Square, ShieldCheck, ShieldOff,
   Paperclip, Image, ChevronDown, Minus, ChevronUp, ChevronsUp, Clock, Check, EyeOff,
 } from 'lucide-react';
-import { getTerminalContent } from '../../terminalBuffer';
+import { getTerminalContent, getTerminalLastCommand, getLastCommandName } from '../../terminalBuffer';
 
 type EffortLevel = 'low' | 'medium' | 'high' | 'max';
 type ModelChoice = 'sonnet' | 'opus' | 'haiku';
@@ -17,6 +17,8 @@ interface ChatInputProps {
   slashCommands?: string[];
   isStreaming?: boolean;
   onStop?: () => void;
+  onQueue?: (text: string) => void;
+  queueCount?: number;
   permissionMode: 'default' | 'bypass';
   onPermissionChange: (mode: 'default' | 'bypass') => void;
   effortLevel: EffortLevel;
@@ -78,6 +80,7 @@ const BUILTIN_COMMANDS: AutocompleteItem[] = [
 
 const ADD_MENU_ITEMS: AutocompleteItem[] = [
   { label: 'Add Terminal', value: '__TERMINAL__', description: 'Attach terminal output', icon: <TerminalIcon size={14} /> },
+  { label: 'Add Last Command', value: '__TERMINAL_LAST__', description: 'Attach output from last terminal command', icon: <Clock size={14} /> },
   { label: 'Add File', value: '__FILE__', description: 'Attach a file', icon: <FileText size={14} /> },
   { label: 'Add Image', value: '__IMAGE__', description: 'Attach an image', icon: <Image size={14} /> },
   { label: 'Add URL', value: '@url ', description: 'Reference a URL', icon: <AtSign size={14} /> },
@@ -205,7 +208,7 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, sessionCost, rateLimits, billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange }: ChatInputProps) {
+export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, sessionCost, rateLimits, billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange }: ChatInputProps) {
   const [value, setValue] = useState('');
   const [suggestions, setSuggestions] = useState<AutocompleteItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -280,11 +283,21 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
     const currentWord = textBeforeCursor.slice(wordStart).toLowerCase();
 
     if (currentWord.startsWith('@') && currentWord.length > 1) {
-      // Show @terminal suggestion when user types @t, @te, @terminal, etc.
       const query = currentWord.slice(1);
       const atItems: AutocompleteItem[] = [];
       if ('terminal'.startsWith(query)) {
         atItems.push({ label: '@terminal', value: '__TERMINAL__', description: 'Attach terminal output', icon: <TerminalIcon size={14} /> });
+      }
+      if ('terminal:last'.startsWith(query)) {
+        atItems.push({ label: '@terminal:last', value: '__TERMINAL_LAST__', description: 'Attach output from last terminal command', icon: <Clock size={14} /> });
+      }
+      // Add dynamic @terminal:<command> based on last command in buffer
+      const cmdName = getLastCommandName();
+      if (cmdName) {
+        const procLabel = `terminal:${cmdName}`;
+        if (procLabel.startsWith(query)) {
+          atItems.push({ label: `@${procLabel}`, value: '__TERMINAL_LAST__', description: `Attach output from ${cmdName}`, icon: <TerminalIcon size={14} /> });
+        }
       }
       setSuggestions(atItems);
       setSelectedIndex(0);
@@ -322,6 +335,21 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
     }
   };
 
+  const handleAddTerminalLast = () => {
+    const content = getTerminalLastCommand();
+    if (content) {
+      setContextItems(prev => {
+        const filtered = prev.filter(c => c.type !== 'terminal');
+        const lines = content.split('\n').length;
+        return [...filtered, {
+          label: `Terminal: last cmd (${lines} lines)`,
+          type: 'terminal',
+          data: content,
+        }];
+      });
+    }
+  };
+
   const applySuggestion = (item: AutocompleteItem) => {
     if (item.value === '__TERMINAL__') {
       // Remove the @terminal text the user typed
@@ -336,6 +364,23 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
         setValue((before + after).trim() ? before + after : '');
       }
       handleAddTerminal();
+      setSuggestions([]);
+      setShowAddMenu(false);
+      setSlashMenuOpen(false);
+      return;
+    }
+    if (item.value === '__TERMINAL_LAST__') {
+      if (!showAddMenu) {
+        const cursorPos = textareaRef.current?.selectionStart ?? value.length;
+        const textBeforeCursor = value.slice(0, cursorPos);
+        const lastSpace = textBeforeCursor.lastIndexOf(' ');
+        const lastNewline = textBeforeCursor.lastIndexOf('\n');
+        const wordStart = Math.max(lastSpace, lastNewline) + 1;
+        const before = value.slice(0, wordStart);
+        const after = value.slice(cursorPos);
+        setValue((before + after).trim() ? before + after : '');
+      }
+      handleAddTerminalLast();
       setSuggestions([]);
       setShowAddMenu(false);
       setSlashMenuOpen(false);
@@ -445,6 +490,15 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
         setTimeout(() => setTickerDir(null), 200);
         return;
       }
+    }
+    if (e.key === 'Enter' && e.ctrlKey) {
+      e.preventDefault();
+      const trimmed = value.trim();
+      if (trimmed && isStreaming && onQueue && (queueCount ?? 0) < 5) {
+        onQueue(trimmed);
+        setValue('');
+      }
+      return;
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
