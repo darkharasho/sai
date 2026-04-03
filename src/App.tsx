@@ -10,9 +10,9 @@ import UnsavedChangesModal from './components/UnsavedChangesModal';
 import WorkspaceToast from './components/WorkspaceToast';
 import { useWhatsNew } from './hooks/useWhatsNew';
 import WhatsNewModal from './components/WhatsNewModal';
-import { setActiveWorkspace } from './terminalBuffer';
+import { setActiveWorkspace, updateTerminalName } from './terminalBuffer';
 import { loadSessions, saveSessions, createSession, upsertSession, migrateLegacySessions, loadSessionMessages } from './sessions';
-import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage } from './types';
+import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab } from './types';
 import { MessageSquare, TerminalSquare, Code2, ChevronRight, MessageCirclePlus, Clock } from 'lucide-react';
 import { formatSessionDate, formatSessionTime } from './sessions';
 
@@ -162,6 +162,77 @@ export default function App() {
       return next;
     });
   }, []);
+
+  const tabIdCounter = useRef(0);
+
+  const handleTabCreate = useCallback(() => {
+    if (!activeProjectPath) return;
+    const tempId = ++tabIdCounter.current;
+    updateWorkspace(activeProjectPath, ws => {
+      const nextOrder = ws.terminalTabs.length > 0
+        ? Math.max(...ws.terminalTabs.map(t => t.order)) + 1
+        : 1;
+      return {
+        ...ws,
+        terminalTabs: [...ws.terminalTabs, { id: tempId, name: null, order: nextOrder }],
+        activeTerminalId: tempId,
+      };
+    });
+  }, [activeProjectPath, updateWorkspace]);
+
+  const handleTabClose = useCallback((id: number) => {
+    if (!activeProjectPath) return;
+    updateWorkspace(activeProjectPath, ws => {
+      const remaining = ws.terminalTabs.filter(t => t.id !== id);
+      const renumbered = remaining.map((t, i) => ({ ...t, order: i + 1 }));
+      let nextActive = ws.activeTerminalId;
+      if (nextActive === id) {
+        nextActive = renumbered.length > 0 ? renumbered[renumbered.length - 1].id : null;
+      }
+      return {
+        ...ws,
+        terminalTabs: renumbered,
+        terminalIds: ws.terminalIds.filter(tid => tid !== id),
+        activeTerminalId: nextActive,
+      };
+    });
+  }, [activeProjectPath, updateWorkspace]);
+
+  const handleTabSwitch = useCallback((id: number) => {
+    if (!activeProjectPath) return;
+    updateWorkspace(activeProjectPath, ws => ({
+      ...ws,
+      activeTerminalId: id,
+    }));
+  }, [activeProjectPath, updateWorkspace]);
+
+  const handleTabRename = useCallback((id: number, name: string) => {
+    if (!activeProjectPath) return;
+    updateWorkspace(activeProjectPath, ws => ({
+      ...ws,
+      terminalTabs: ws.terminalTabs.map(t =>
+        t.id === id ? { ...t, name: name || null } : t
+      ),
+    }));
+    updateTerminalName(id, name || null);
+  }, [activeProjectPath, updateWorkspace]);
+
+  const handleTerminalReady = useCallback((tabId: number, ptyId: number) => {
+    if (!activeProjectPath) return;
+    updateWorkspace(activeProjectPath, ws => ({
+      ...ws,
+      terminalTabs: ws.terminalTabs.map(t => t.id === tabId ? { ...t, id: ptyId } : t),
+      terminalIds: [...ws.terminalIds, ptyId],
+      activeTerminalId: ws.activeTerminalId === tabId ? ptyId : ws.activeTerminalId,
+    }));
+  }, [activeProjectPath, updateWorkspace]);
+
+  useEffect(() => {
+    if (!activeProjectPath) return;
+    const ws = getWorkspace(activeProjectPath);
+    if (!ws || ws.terminalTabs.length > 0 || ws.status === 'suspended' || ws.status === 'recent') return;
+    handleTabCreate();
+  }, [activeProjectPath, handleTabCreate, getWorkspace]);
 
   const handleQueueAdd = useCallback((sessionId: string, text: string) => {
     setMessageQueues(prev => {
@@ -1135,7 +1206,18 @@ export default function App() {
                   overflow: 'hidden',
                 }}
               >
-                <TerminalPanel projectPath={wsPath} isActive={wsPath === activeProjectPath} wasSuspended={ws.status === 'suspended'} />
+                <TerminalPanel
+                  projectPath={wsPath}
+                  isActive={wsPath === activeProjectPath}
+                  wasSuspended={ws.status === 'suspended'}
+                  terminalTabs={ws.terminalTabs}
+                  activeTerminalId={ws.activeTerminalId}
+                  onTabCreate={handleTabCreate}
+                  onTabClose={handleTabClose}
+                  onTabSwitch={handleTabSwitch}
+                  onTabRename={handleTabRename}
+                  onTerminalReady={handleTerminalReady}
+                />
               </div>
             ))}
           </div>
