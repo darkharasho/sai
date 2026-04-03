@@ -1127,10 +1127,31 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
 
         .input-box {
           background: var(--bg-input);
-          border: 1px solid var(--accent);
-          border-radius: 10px;
+          border: none;
+          border-radius: 12px;
           overflow: visible;
           position: relative;
+        }
+        .input-box::before {
+          content: '';
+          position: absolute;
+          inset: -2px;
+          border-radius: 14px;
+          padding: 2px;
+          background: linear-gradient(135deg, var(--accent) 0%, var(--orange) 20%, var(--red) 50%, var(--orange) 80%, var(--accent) 100%);
+          background-size: 300% 300%;
+          animation: gradient-sweep 20s ease-in-out infinite alternate;
+          -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+          -webkit-mask-composite: xor;
+          mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+          mask-composite: exclude;
+          pointer-events: none;
+          z-index: 0;
+          opacity: 0.7;
+          transition: opacity 0.2s ease;
+        }
+        .input-box:focus-within::before {
+          opacity: 1;
         }
         .chat-placeholder {
           position: absolute;
@@ -1169,6 +1190,10 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
         }
         .input-box.ticker-down .chat-textarea {
           animation: ticker-slide-down 0.2s ease-out;
+        }
+        @keyframes gradient-sweep {
+          0% { background-position: 0% 0%; }
+          100% { background-position: 100% 100%; }
         }
         @keyframes ticker-slide-up {
           0% { transform: translateY(8px); opacity: 0.3; }
