@@ -36,6 +36,9 @@ export interface PendingApproval {
 export interface QueuedMessage {
   id: string;
   text: string;
+  fullText: string;
+  images?: string[];
+  attachments?: { images: number; files: number; terminal: boolean };
 }
 
 export interface GitFile {

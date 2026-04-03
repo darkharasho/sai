@@ -241,12 +241,12 @@ export default function App() {
     handleTabCreate();
   }, [activeProjectPath, handleTabCreate, getWorkspace]);
 
-  const handleQueueAdd = useCallback((sessionId: string, text: string) => {
+  const handleQueueAdd = useCallback((sessionId: string, text: string, fullText: string, images?: string[], attachments?: { images: number; files: number; terminal: boolean }) => {
     setMessageQueues(prev => {
       const queue = prev.get(sessionId) || [];
       if (queue.length >= 5) return prev;
       const next = new Map(prev);
-      next.set(sessionId, [...queue, { id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, text }]);
+      next.set(sessionId, [...queue, { id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, text, fullText, images, attachments }]);
       return next;
     });
   }, []);

@@ -21,7 +21,7 @@ interface ChatInputProps {
   slashCommands?: string[];
   isStreaming?: boolean;
   onStop?: () => void;
-  onQueue?: (text: string) => void;
+  onQueue?: (text: string, fullText: string, images?: string[], attachments?: { images: number; files: number; terminal: boolean }) => void;
   queueCount?: number;
   permissionMode: 'default' | 'bypass';
   onPermissionChange: (mode: 'default' | 'bypass') => void;
@@ -605,8 +605,21 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
       e.preventDefault();
       const trimmed = value.trim();
       if (trimmed && isStreaming && onQueue && (queueCount ?? 0) < 5) {
-        onQueue(trimmed);
+        const queueImages = contextItems.filter(c => c.type === 'image' && c.data).map(c => c.data!);
+        const attachments = {
+          images: queueImages.length,
+          files: contextItems.filter(c => c.type === 'file').length,
+          terminal: contextItems.some(c => c.type === 'terminal'),
+        };
+        const hasAttachments = attachments.images > 0 || attachments.files > 0 || attachments.terminal;
+        onQueue(
+          trimmed,
+          buildMessage(trimmed),
+          queueImages.length > 0 ? queueImages : undefined,
+          hasAttachments ? attachments : undefined,
+        );
         setValue('');
+        setContextItems([]);
       }
       return;
     }

@@ -1,5 +1,5 @@
 import type { QueuedMessage } from '../../types';
-import { X } from 'lucide-react';
+import { X, Image, FileText, Terminal } from 'lucide-react';
 
 interface MessageQueueProps {
   queue: QueuedMessage[];
@@ -14,6 +14,13 @@ export default function MessageQueue({ queue, onRemove }: MessageQueueProps) {
       {queue.map((msg, i) => (
         <div key={msg.id} className="message-queue-card">
           <span className="message-queue-index">{i + 1}.</span>
+          {msg.attachments && (
+            <span className="message-queue-attachments">
+              {msg.attachments.terminal && <Terminal size={11} />}
+              {msg.attachments.files > 0 && <FileText size={11} />}
+              {msg.attachments.images > 0 && <><Image size={11} />{msg.attachments.images > 1 && <span className="message-queue-attach-count">{msg.attachments.images}</span>}</>}
+            </span>
+          )}
           <span className="message-queue-text">{msg.text}</span>
           <button
             className="message-queue-remove"
@@ -49,6 +56,18 @@ export default function MessageQueue({ queue, onRemove }: MessageQueueProps) {
           font-size: 11px;
           min-width: 14px;
           flex-shrink: 0;
+        }
+        .message-queue-attachments {
+          display: flex;
+          align-items: center;
+          gap: 3px;
+          margin-right: 6px;
+          opacity: 0.55;
+          flex-shrink: 0;
+        }
+        .message-queue-attach-count {
+          font-size: 10px;
+          margin-left: -1px;
         }
         .message-queue-text {
           flex: 1;

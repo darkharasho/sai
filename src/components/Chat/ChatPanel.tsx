@@ -327,7 +327,7 @@ interface ChatPanelProps {
   onFileOpen?: (path: string, line?: number) => void;
   isActive?: boolean;
   messageQueue?: QueuedMessage[];
-  onQueueAdd?: (sessionId: string, text: string) => void;
+  onQueueAdd?: (sessionId: string, text: string, fullText: string, images?: string[], attachments?: { images: number; files: number; terminal: boolean }) => void;
   onQueueRemove?: (sessionId: string, id: string) => void;
   onQueueShift?: (sessionId: string) => void;
   sessionId?: string;
@@ -1032,9 +1032,9 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     }
   };
 
-  const handleQueue = (text: string) => {
+  const handleQueue = (text: string, fullText: string, images?: string[], attachments?: { images: number; files: number; terminal: boolean }) => {
     if (sessionId && onQueueAdd) {
-      onQueueAdd(sessionId, text);
+      onQueueAdd(sessionId, text, fullText, images, attachments);
     }
   };
 
@@ -1043,7 +1043,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     if (prevStreamingRef.current && !isStreaming && messageQueue.length > 0 && onQueueShift && sessionId) {
       const next = messageQueue[0];
       onQueueShift(sessionId);
-      setTimeout(() => handleSend(next.text), 300);
+      setTimeout(() => handleSend(next.fullText, next.images), 300);
     }
     prevStreamingRef.current = isStreaming;
   }, [isStreaming]);
