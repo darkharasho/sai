@@ -16,6 +16,9 @@ vi.mock('../../../../src/terminalBuffer', () => ({
   getTerminalContent: vi.fn().mockReturnValue(''),
   getTerminalLastCommand: vi.fn().mockReturnValue(''),
   getLastCommandName: vi.fn().mockReturnValue(null),
+  getTerminalById: vi.fn().mockReturnValue(null),
+  getTerminalByName: vi.fn().mockReturnValue(null),
+  getTerminalByIndex: vi.fn().mockReturnValue(null),
 }));
 
 import ChatInput from '../../../../src/components/Chat/ChatInput';
@@ -224,6 +227,50 @@ describe('ChatInput', () => {
       fireEvent.change(textarea, { target: { value: '@terminal:' } });
       expect(await screen.findByText('@terminal:last')).toBeTruthy();
       expect(screen.queryByText('@terminal')).toBeNull();
+    });
+  });
+
+  describe('terminalTabs prop', () => {
+    const STABLE_TERMINAL_TABS = [
+      { id: 1, name: null, order: 1 },
+      { id: 2, name: 'server', order: 2 },
+    ];
+
+    it('accepts terminalTabs prop without errors', () => {
+      render(<ChatInput {...defaultProps} terminalTabs={STABLE_TERMINAL_TABS} />);
+      expect(screen.getByRole('textbox')).toBeTruthy();
+    });
+
+    it('shows tab-number suggestion when typing @terminal:1', async () => {
+      const { container } = render(<ChatInput {...defaultProps} terminalTabs={STABLE_TERMINAL_TABS} />);
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: '@terminal:1' } });
+      // Wait for the autocomplete dropdown to appear with the tab suggestion
+      const dropdown = await screen.findByText('Tab 1 — full buffer');
+      expect(dropdown).toBeTruthy();
+      // Also verify the label is in the dropdown
+      const labels = container.querySelectorAll('.ac-label');
+      const labelTexts = Array.from(labels).map(el => el.textContent);
+      expect(labelTexts).toContain('@terminal:1');
+    });
+
+    it('shows tab-name suggestion when typing @terminal:se', async () => {
+      const { container } = render(<ChatInput {...defaultProps} terminalTabs={STABLE_TERMINAL_TABS} />);
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: '@terminal:se' } });
+      // Wait for the description to appear as a unique identifier
+      const desc = await screen.findByText('Tab "server" — full buffer');
+      expect(desc).toBeTruthy();
+      const labels = container.querySelectorAll('.ac-label');
+      const labelTexts = Array.from(labels).map(el => el.textContent);
+      expect(labelTexts).toContain('@terminal:server');
+    });
+
+    it('shows :last variant for tab number', async () => {
+      render(<ChatInput {...defaultProps} terminalTabs={STABLE_TERMINAL_TABS} />);
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: '@terminal:1:' } });
+      expect(await screen.findByText('@terminal:1:last')).toBeTruthy();
     });
   });
 });

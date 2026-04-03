@@ -1146,6 +1146,7 @@ export default function App() {
                       activeSession: { ...w.activeSession, claudeSessionId: sessionId },
                     }));
                   }}
+                  terminalTabs={ws.terminalTabs ?? []}
                   onTurnComplete={() => {
                     const latestMessages = wsMessagesRef.current.get(wsPath) || [];
                     if (latestMessages.length === 0) return;

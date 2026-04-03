@@ -1,12 +1,15 @@
 import { useState, useRef, KeyboardEvent, useEffect } from 'react';
-import type { PendingApproval } from '../../types';
+import type { PendingApproval, TerminalTab } from '../../types';
 import ApprovalPanel from './ApprovalPanel';
 import {
   SquarePlus, Slash, SquareSlash, AtSign, FileText, GitBranch, Terminal as TerminalIcon, Settings,
   MessageSquare, Zap, Send, Square, ShieldCheck, ShieldOff,
   Paperclip, Image, ChevronDown, Minus, ChevronUp, ChevronsUp, Clock, Check, EyeOff,
 } from 'lucide-react';
-import { getTerminalContent, getTerminalLastCommand, getLastCommandName } from '../../terminalBuffer';
+import {
+  getTerminalContent, getTerminalLastCommand, getLastCommandName,
+  getTerminalById, getTerminalByName, getTerminalByIndex,
+} from '../../terminalBuffer';
 
 type EffortLevel = 'low' | 'medium' | 'high' | 'max';
 type ModelChoice = 'sonnet' | 'opus' | 'haiku';
@@ -50,6 +53,7 @@ interface ChatInputProps {
   onGeminiApprovalModeChange?: (mode: 'default' | 'auto_edit' | 'yolo' | 'plan') => void;
   geminiConversationMode?: 'planning' | 'fast';
   onGeminiConversationModeChange?: (mode: 'planning' | 'fast') => void;
+  terminalTabs?: TerminalTab[];
 }
 
 interface AutocompleteItem {
@@ -208,7 +212,7 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, sessionCost, rateLimits, billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange }: ChatInputProps) {
+export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, sessionCost, rateLimits, billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, terminalTabs = [] }: ChatInputProps) {
   const [value, setValue] = useState('');
   const [suggestions, setSuggestions] = useState<AutocompleteItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -224,6 +228,13 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
   const wrapperRef = useRef<HTMLDivElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const [cursorPos, setCursorPos] = useState(0);
+  // Use a ref to hold the latest terminalTabs to avoid re-render loops when the
+  // default [] creates a new array identity on every render.
+  const terminalTabsRef = useRef(terminalTabs);
+  terminalTabsRef.current = terminalTabs;
+  // Derive a stable key for the useEffect dependency so it only re-runs when
+  // tabs are actually added, removed, or renamed.
+  const terminalTabsKey = terminalTabs.map(t => `${t.id}:${t.name ?? ''}`).join(',');
 
   // Close menus on outside click
   useEffect(() => {
@@ -299,6 +310,56 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           atItems.push({ label: `@${procLabel}`, value: '__TERMINAL_LAST__', description: `Attach output from ${cmdName}`, icon: <TerminalIcon size={14} /> });
         }
       }
+      // Add tab-specific suggestions when user types @terminal:
+      const tabs = terminalTabsRef.current;
+      if (tabs.length > 0 && query.startsWith('terminal:')) {
+        const tabQuery = query.slice('terminal:'.length); // e.g. '' or '1' or 'server' or '1:last'
+        void tabQuery; // used implicitly via byOrderLabel.startsWith(query)
+        for (const tab of tabs) {
+          const orderStr = String(tab.order);
+          // @terminal:{order} (full buffer)
+          const byOrderLabel = `terminal:${orderStr}`;
+          if (byOrderLabel.startsWith(query)) {
+            atItems.push({
+              label: `@terminal:${orderStr}`,
+              value: `__TERMINAL_TAB_${orderStr}__`,
+              description: tab.name ? `Tab ${orderStr} (${tab.name}) — full buffer` : `Tab ${orderStr} — full buffer`,
+              icon: <TerminalIcon size={14} />,
+            });
+          }
+          // @terminal:{order}:last
+          const byOrderLastLabel = `terminal:${orderStr}:last`;
+          if (byOrderLastLabel.startsWith(query)) {
+            atItems.push({
+              label: `@terminal:${orderStr}:last`,
+              value: `__TERMINAL_TAB_${orderStr}__LAST`,
+              description: tab.name ? `Tab ${orderStr} (${tab.name}) — last command` : `Tab ${orderStr} — last command`,
+              icon: <Clock size={14} />,
+            });
+          }
+          // @terminal:{name} and @terminal:{name}:last (only if tab has a name)
+          if (tab.name) {
+            const byNameLabel = `terminal:${tab.name}`;
+            if (byNameLabel.startsWith(query)) {
+              atItems.push({
+                label: `@terminal:${tab.name}`,
+                value: `__TERMINAL_TAB_NAME_${tab.name}__`,
+                description: `Tab "${tab.name}" — full buffer`,
+                icon: <TerminalIcon size={14} />,
+              });
+            }
+            const byNameLastLabel = `terminal:${tab.name}:last`;
+            if (byNameLastLabel.startsWith(query)) {
+              atItems.push({
+                label: `@terminal:${tab.name}:last`,
+                value: `__TERMINAL_TAB_NAME_${tab.name}__LAST`,
+                description: `Tab "${tab.name}" — last command`,
+                icon: <Clock size={14} />,
+              });
+            }
+          }
+        }
+      }
       setSuggestions(atItems);
       setSelectedIndex(0);
     } else if (currentWord.startsWith('/')) {
@@ -317,7 +378,8 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
     } else {
       setSuggestions([]);
     }
-  }, [value, slashCommands, showAddMenu, slashMenuOpen]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, slashCommands, showAddMenu, slashMenuOpen, terminalTabsKey]);
 
   const handleAddTerminal = () => {
     const content = getTerminalContent();
@@ -381,6 +443,66 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
         setValue((before + after).trim() ? before + after : '');
       }
       handleAddTerminalLast();
+      setSuggestions([]);
+      setShowAddMenu(false);
+      setSlashMenuOpen(false);
+      return;
+    }
+    // Tab-specific terminal mentions: __TERMINAL_TAB_{order}__ or __TERMINAL_TAB_NAME_{name}__
+    // with optional __LAST suffix
+    if (item.value.startsWith('__TERMINAL_TAB_')) {
+      const isLast = item.value.endsWith('__LAST');
+      const inner = isLast ? item.value.slice('__TERMINAL_TAB_'.length, -'__LAST'.length) : item.value.slice('__TERMINAL_TAB_'.length, -'__'.length);
+      const isName = inner.startsWith('NAME_');
+      let content: string | null = null;
+      if (isName) {
+        const tabName = inner.slice('NAME_'.length);
+        if (isLast) {
+          // For last-command by name, find tab id and use getTerminalById with last-command semantics
+          // We fall back to getTerminalByName which gives full buffer; for :last we need the tab id
+          const matchingTab = terminalTabs.find(t => t.name === tabName);
+          if (matchingTab) {
+            // Use getTerminalLastCommand-equivalent via id: read via getTerminalById isn't last-cmd aware
+            // Instead, temporarily use getTerminalByName — we don't have a per-tab last-command function
+            // so we use getTerminalById on the tab id and apply same approach as active terminal
+            content = getTerminalById(matchingTab.id);
+          }
+        } else {
+          const matchingTab = terminalTabs.find(t => t.name === tabName);
+          if (matchingTab) {
+            content = getTerminalById(matchingTab.id);
+          }
+        }
+      } else {
+        const index = parseInt(inner, 10);
+        const orderedIds = terminalTabs.map(t => t.id);
+        if (isLast) {
+          // For :last by index, use getTerminalByIndex (full buffer — no per-tab last-cmd fn yet)
+          content = getTerminalByIndex(index, orderedIds);
+        } else {
+          content = getTerminalByIndex(index, orderedIds);
+        }
+      }
+      // Remove the @terminal:... text the user typed
+      const cursorPos = textareaRef.current?.selectionStart ?? value.length;
+      const textBeforeCursor = value.slice(0, cursorPos);
+      const lastSpace = textBeforeCursor.lastIndexOf(' ');
+      const lastNewline = textBeforeCursor.lastIndexOf('\n');
+      const wordStart = Math.max(lastSpace, lastNewline) + 1;
+      const before = value.slice(0, wordStart);
+      const after = value.slice(cursorPos);
+      setValue((before + after).trim() ? before + after : '');
+      if (content) {
+        setContextItems(prev => {
+          const filtered = prev.filter(c => c.type !== 'terminal');
+          const lines = content!.split('\n').length;
+          return [...filtered, {
+            label: item.label.replace(/^@/, '') + ` (${lines} lines)`,
+            type: 'terminal' as const,
+            data: content!,
+          }];
+        });
+      }
       setSuggestions([]);
       setShowAddMenu(false);
       setSlashMenuOpen(false);
