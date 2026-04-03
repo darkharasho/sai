@@ -22,6 +22,13 @@ import {
   unregisterTerminal,
   setActiveWorkspace,
   getTerminalLastCommand,
+  getTerminalContent,
+  setActiveTerminalId,
+  getActiveTerminalId,
+  updateTerminalName,
+  getTerminalById,
+  getTerminalByName,
+  getTerminalByIndex,
 } from '../../src/terminalBuffer';
 
 describe('getTerminalLastCommand', () => {
@@ -176,5 +183,158 @@ describe('getTerminalLastCommand', () => {
       'Building...\n' +
       'Done.'
     );
+  });
+});
+
+describe('active terminal tracking', () => {
+  beforeEach(() => {
+    for (let i = 0; i < 100; i++) unregisterTerminal(i);
+    setActiveWorkspace(null);
+  });
+
+  it('setActiveTerminalId and getActiveTerminalId round-trip', () => {
+    registerTerminal(10, createMockTerminal(['line1']) as any, '/proj');
+    setActiveWorkspace('/proj');
+    setActiveTerminalId('/proj', 10);
+    expect(getActiveTerminalId()).toBe(10);
+  });
+
+  it('getActiveTerminalId returns null when no terminals registered', () => {
+    setActiveWorkspace('/proj');
+    expect(getActiveTerminalId()).toBeNull();
+  });
+
+  it('getTerminalContent uses explicitly set active terminal, not just last registered', () => {
+    const term10 = createMockTerminal(['terminal ten output']);
+    const term20 = createMockTerminal(['terminal twenty output']);
+    registerTerminal(10, term10 as any, '/proj');
+    registerTerminal(20, term20 as any, '/proj');
+    setActiveWorkspace('/proj');
+
+    // Set terminal 10 as explicitly active
+    setActiveTerminalId('/proj', 10);
+
+    const content = getTerminalContent();
+    expect(content).toBe('terminal ten output');
+  });
+
+  it('unregisterTerminal cleans up active terminal tracking', () => {
+    const term10 = createMockTerminal(['output']);
+    registerTerminal(10, term10 as any, '/proj');
+    setActiveWorkspace('/proj');
+    setActiveTerminalId('/proj', 10);
+    expect(getActiveTerminalId()).toBe(10);
+
+    unregisterTerminal(10);
+    // After unregistering, the active terminal ID for workspace should be cleared
+    expect(getActiveTerminalId()).toBeNull();
+  });
+
+  it('unregisterTerminal cleans up terminal name', () => {
+    const term10 = createMockTerminal(['output']);
+    registerTerminal(10, term10 as any, '/proj');
+    updateTerminalName(10, 'my-server');
+    unregisterTerminal(10);
+    expect(getTerminalByName('my-server', '/proj')).toBeNull();
+  });
+});
+
+describe('getTerminalById', () => {
+  beforeEach(() => {
+    for (let i = 0; i < 100; i++) unregisterTerminal(i);
+    setActiveWorkspace(null);
+  });
+
+  it('returns buffer content for a known terminal ID', () => {
+    const term = createMockTerminal(['hello from id 5']);
+    registerTerminal(5, term as any, '/proj');
+    expect(getTerminalById(5)).toBe('hello from id 5');
+  });
+
+  it('returns null for an unknown terminal ID', () => {
+    expect(getTerminalById(999)).toBeNull();
+  });
+
+  it('respects maxLines parameter', () => {
+    const lines = ['line1', 'line2', 'line3', 'line4', 'line5'];
+    const term = createMockTerminal(lines);
+    registerTerminal(5, term as any, '/proj');
+    const content = getTerminalById(5, 3);
+    expect(content).toBe('line3\nline4\nline5');
+  });
+});
+
+describe('getTerminalByName', () => {
+  beforeEach(() => {
+    for (let i = 0; i < 100; i++) unregisterTerminal(i);
+    setActiveWorkspace(null);
+  });
+
+  it('returns content when name matches', () => {
+    const term = createMockTerminal(['named terminal output']);
+    registerTerminal(7, term as any, '/proj');
+    updateTerminalName(7, 'my-app');
+    expect(getTerminalByName('my-app', '/proj')).toBe('named terminal output');
+  });
+
+  it('returns null when no terminal has that name', () => {
+    expect(getTerminalByName('nonexistent', '/proj')).toBeNull();
+  });
+
+  it('returns null when name matches but workspace does not', () => {
+    const term = createMockTerminal(['output']);
+    registerTerminal(7, term as any, '/proj-a');
+    updateTerminalName(7, 'my-app');
+    expect(getTerminalByName('my-app', '/proj-b')).toBeNull();
+  });
+
+  it('updateTerminalName with null clears the name', () => {
+    const term = createMockTerminal(['output']);
+    registerTerminal(7, term as any, '/proj');
+    updateTerminalName(7, 'my-app');
+    updateTerminalName(7, null);
+    expect(getTerminalByName('my-app', '/proj')).toBeNull();
+  });
+});
+
+describe('getTerminalByIndex', () => {
+  beforeEach(() => {
+    for (let i = 0; i < 100; i++) unregisterTerminal(i);
+    setActiveWorkspace(null);
+  });
+
+  it('returns content at 1-based index from orderedIds', () => {
+    const termA = createMockTerminal(['terminal A']);
+    const termB = createMockTerminal(['terminal B']);
+    const termC = createMockTerminal(['terminal C']);
+    registerTerminal(10, termA as any, '/proj');
+    registerTerminal(20, termB as any, '/proj');
+    registerTerminal(30, termC as any, '/proj');
+
+    expect(getTerminalByIndex(1, [10, 20, 30])).toBe('terminal A');
+    expect(getTerminalByIndex(2, [10, 20, 30])).toBe('terminal B');
+    expect(getTerminalByIndex(3, [10, 20, 30])).toBe('terminal C');
+  });
+
+  it('returns null for out-of-range index', () => {
+    const term = createMockTerminal(['output']);
+    registerTerminal(10, term as any, '/proj');
+    expect(getTerminalByIndex(0, [10])).toBeNull();
+    expect(getTerminalByIndex(2, [10])).toBeNull();
+  });
+
+  it('returns null for empty orderedIds', () => {
+    expect(getTerminalByIndex(1, [])).toBeNull();
+  });
+
+  it('returns null when ID at index is not registered', () => {
+    expect(getTerminalByIndex(1, [999])).toBeNull();
+  });
+
+  it('respects maxLines parameter', () => {
+    const lines = ['a', 'b', 'c', 'd'];
+    const term = createMockTerminal(lines);
+    registerTerminal(10, term as any, '/proj');
+    expect(getTerminalByIndex(1, [10], 2)).toBe('c\nd');
   });
 });
