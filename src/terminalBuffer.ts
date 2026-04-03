@@ -93,6 +93,56 @@ export function getTerminalContent(maxLines = 200): string | null {
 const PROMPT_RE = /^(\S+[@:]\S+[\$#%>❯]|[\$#%❯])\s/;
 
 /**
+ * Get the name of the last command entered in the terminal.
+ * Parses the prompt line to extract the first word after the prompt character.
+ * Returns null if no prompt/command is found or if the terminal is idle.
+ */
+export function getLastCommandName(): string | null {
+  const target = getActiveTerminal();
+  if (!target) return null;
+
+  const buf = target.buffer.active;
+  const totalLines = buf.length;
+  const start = Math.max(0, totalLines - 200);
+  const lines: string[] = [];
+
+  for (let i = start; i < totalLines; i++) {
+    const line = buf.getLine(i);
+    if (line) lines.push(line.translateToString(true));
+  }
+
+  // Trim trailing empty lines
+  while (lines.length > 0 && lines[lines.length - 1].trim() === '') {
+    lines.pop();
+  }
+
+  if (lines.length === 0) return null;
+
+  // Skip idle prompt at bottom
+  let searchEnd = lines.length;
+  const lastLine = lines[lines.length - 1].trim();
+  if (PROMPT_RE.test(lines[lines.length - 1]) && lastLine.match(/^(\S+[@:]\S+)?[\$#%>❯]\s*$/)) {
+    searchEnd = lines.length - 1;
+  }
+
+  // Find the last prompt line with a command
+  for (let i = searchEnd - 1; i >= 0; i--) {
+    const match = lines[i].match(PROMPT_RE);
+    if (match) {
+      // Text after the prompt is the command — get the first word
+      const afterPrompt = lines[i].slice(match[0].length).trim();
+      if (!afterPrompt) continue;
+      const cmd = afterPrompt.split(/\s/)[0];
+      // Strip path prefixes and common wrappers like sudo, env, etc.
+      const base = cmd.split('/').pop() || cmd;
+      return base || null;
+    }
+  }
+
+  return null;
+}
+
+/**
  * Extract the output from the last terminal command.
  * Scans backwards to find the last prompt line.
  * If the last non-empty line is an idle prompt, skips it.

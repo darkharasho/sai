@@ -6,7 +6,7 @@ import {
   MessageSquare, Zap, Send, Square, ShieldCheck, ShieldOff,
   Paperclip, Image, ChevronDown, Minus, ChevronUp, ChevronsUp, Clock, Check, EyeOff,
 } from 'lucide-react';
-import { getTerminalContent, getTerminalLastCommand, getActiveTerminalId } from '../../terminalBuffer';
+import { getTerminalContent, getTerminalLastCommand, getLastCommandName } from '../../terminalBuffer';
 
 type EffortLevel = 'low' | 'medium' | 'high' | 'max';
 type ModelChoice = 'sonnet' | 'opus' | 'haiku';
@@ -212,7 +212,6 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
   const [value, setValue] = useState('');
   const [suggestions, setSuggestions] = useState<AutocompleteItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [runningProcess, setRunningProcess] = useState<string | null>(null);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [contextItems, setContextItems] = useState<ContextItem[]>([]);
   const [history, setHistory] = useState<string[]>([]);
@@ -292,28 +291,16 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
       if ('terminal:last'.startsWith(query)) {
         atItems.push({ label: '@terminal:last', value: '__TERMINAL_LAST__', description: 'Attach output from last terminal command', icon: <Clock size={14} /> });
       }
-      // Add dynamic @terminal:<process> if a process is running
-      if (runningProcess) {
-        const procLabel = `terminal:${runningProcess}`;
+      // Add dynamic @terminal:<command> based on last command in buffer
+      const cmdName = getLastCommandName();
+      if (cmdName) {
+        const procLabel = `terminal:${cmdName}`;
         if (procLabel.startsWith(query)) {
-          atItems.push({ label: `@${procLabel}`, value: '__TERMINAL_LAST__', description: `Attach output from ${runningProcess}`, icon: <TerminalIcon size={14} /> });
+          atItems.push({ label: `@${procLabel}`, value: '__TERMINAL_LAST__', description: `Attach output from ${cmdName}`, icon: <TerminalIcon size={14} /> });
         }
       }
       setSuggestions(atItems);
       setSelectedIndex(0);
-      // Async: query running process for next render
-      const termId = getActiveTerminalId();
-      if (termId !== null && typeof window.sai.terminalGetProcess === 'function') {
-        const SHELLS = ['bash', 'zsh', 'fish', 'sh', 'dash', 'tcsh', 'csh', 'login'];
-        window.sai.terminalGetProcess(termId).then((proc: string | null) => {
-          if (proc) {
-            const name = proc.split('/').pop() || proc;
-            setRunningProcess(SHELLS.includes(name) ? null : name);
-          } else {
-            setRunningProcess(null);
-          }
-        }).catch(() => setRunningProcess(null));
-      }
     } else if (currentWord.startsWith('/')) {
       const query = currentWord.slice(1); // without the leading /
       setSuggestions(unique.filter(c => {
@@ -330,7 +317,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
     } else {
       setSuggestions([]);
     }
-  }, [value, slashCommands, showAddMenu, slashMenuOpen, runningProcess]);
+  }, [value, slashCommands, showAddMenu, slashMenuOpen]);
 
   const handleAddTerminal = () => {
     const content = getTerminalContent();
