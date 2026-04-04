@@ -145,7 +145,7 @@ describe('ChatInput', () => {
       const textarea = screen.getByRole('textbox');
       fireEvent.change(textarea, { target: { value: 'queued message' } });
       fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
-      expect(onQueue).toHaveBeenCalledWith('queued message');
+      expect(onQueue).toHaveBeenCalledWith('queued message', 'queued message', undefined, undefined);
     });
 
     it('clears input after queueing', () => {
