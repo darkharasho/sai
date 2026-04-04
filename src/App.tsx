@@ -109,12 +109,20 @@ export default function App() {
   const [completedWorkspaces, setCompletedWorkspaces] = useState<Set<string>>(new Set());
   const [busyWorkspaces, setBusyWorkspaces] = useState<Set<string>>(new Set());
   const [approvalWorkspaces, setApprovalWorkspaces] = useState<Map<string, PendingApproval>>(new Map());
+  const [notificationCounts, setNotificationCounts] = useState<Map<string, number>>(new Map());
   const wsTurnSeqRef = useRef<Map<string, number>>(new Map());
   const [focusedChat, setFocusedChat] = useState(false);
   const [toast, setToast] = useState<{ message: string; key: number } | null>(null);
   const { isOpen: whatsNewOpen, version: whatsNewVersion, releaseNotes, fetchStatus, openWhatsNew, closeWhatsNew } = useWhatsNew();
   const workspacesRef = useRef(workspaces);
   const activeProjectPathRef = useRef(activeProjectPath);
+
+  // Update taskbar badge count when notifications are pending
+  useEffect(() => {
+    let total = 0;
+    for (const count of notificationCounts.values()) total += count;
+    window.sai.setBadgeCount(total);
+  }, [notificationCounts]);
 
   useEffect(() => { workspacesRef.current = workspaces; }, [workspaces]);
   useEffect(() => {
@@ -537,6 +545,13 @@ export default function App() {
           });
           return next;
         });
+        if (msg.projectPath !== activeProjectPathRef.current) {
+          setNotificationCounts(p => {
+            const next = new Map(p);
+            next.set(msg.projectPath, (next.get(msg.projectPath) || 0) + 1);
+            return next;
+          });
+        }
       }
       if (msg.type === 'approval_resolved') {
         setApprovalWorkspaces(prev => {
@@ -566,6 +581,11 @@ export default function App() {
             const wsName = msg.projectPath.split('/').pop() || msg.projectPath;
             setTimeout(() => {
               setCompletedWorkspaces(p => new Set(p).add(msg.projectPath));
+              setNotificationCounts(p => {
+                const next = new Map(p);
+                next.set(msg.projectPath, (next.get(msg.projectPath) || 0) + 1);
+                return next;
+              });
               setToast({ message: `${wsName} has finished`, key: Date.now() });
             }, 300);
           }
@@ -836,6 +856,12 @@ export default function App() {
     setActiveProjectPath(newPath);
     setCompletedWorkspaces(prev => {
       const next = new Set(prev);
+      next.delete(newPath);
+      return next;
+    });
+    setNotificationCounts(prev => {
+      if (!prev.has(newPath)) return prev;
+      const next = new Map(prev);
       next.delete(newPath);
       return next;
     });

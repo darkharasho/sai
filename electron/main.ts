@@ -115,6 +115,10 @@ function createWindow() {
     return typeof s.suspendTimeout === 'number' ? s.suspendTimeout : DEFAULT_SUSPEND_TIMEOUT;
   });
 
+  ipcMain.on('app:setBadgeCount', (_event, count: number) => {
+    app.setBadgeCount(count);
+  });
+
   ipcMain.on('workspace:setActive', (_event, projectPath: string) => {
     setActiveWorkspace(projectPath || '');
   });

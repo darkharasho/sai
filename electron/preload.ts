@@ -108,6 +108,7 @@ contextBridge.exposeInMainWorld('sai', {
   getRecentProjects: () => ipcRenderer.invoke('project:getRecent'),
   openRecentProject: (path: string) => ipcRenderer.invoke('project:openRecent', path),
   openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
+  setBadgeCount: (count: number) => ipcRenderer.send('app:setBadgeCount', count),
   // Usage API polling
   usageFetch: () => ipcRenderer.invoke('usage:fetch'),
   usageMode: () => ipcRenderer.invoke('usage:mode'),
