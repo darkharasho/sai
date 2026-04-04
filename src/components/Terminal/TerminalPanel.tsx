@@ -460,16 +460,12 @@ export default function TerminalPanel({
           background: var(--bg-hover);
         }
         .terminal-content {
-          flex: 1;
-          margin: 4px 4px 8px 4px;
           overflow: hidden;
-          height: 100%;
-          width: 100%;
           position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
+          top: 4px;
+          left: 4px;
+          right: 4px;
+          bottom: 6px;
         }
         .terminal-tab-pane {
           width: 140px;
