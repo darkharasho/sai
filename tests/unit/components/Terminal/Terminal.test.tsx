@@ -30,6 +30,7 @@ vi.mock('@xterm/xterm', () => {
     getSelection = vi.fn().mockReturnValue('');
     paste = vi.fn();
     dispose = vi.fn();
+    options: Record<string, unknown> = {};
     cols = 80;
     rows = 24;
   }

@@ -148,9 +148,12 @@ describe('SettingsModal', () => {
     }
   });
 
-  it('renders font size controls', () => {
+  it('renders font size controls on Editor page', async () => {
     render(<SettingsModal {...defaultProps} />);
-    expect(screen.getByText(/font size/i)).toBeTruthy();
+    fireEvent.click(screen.getByText('Editor'));
+    await waitFor(() => {
+      expect(screen.getByText(/font size/i)).toBeTruthy();
+    });
   });
 
   it('calls settingsSet and onSettingChange when font size changes', async () => {
@@ -162,6 +165,9 @@ describe('SettingsModal', () => {
 
     render(<SettingsModal onClose={vi.fn()} onSettingChange={onSettingChange} />);
     await waitFor(() => expect(mock.settingsGet).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByText('Editor'));
+    await waitFor(() => expect(screen.getByText('Font size')).toBeTruthy());
 
     // Find a font size button and click it
     const fontSizeBtns = document.querySelectorAll('.font-size-btn');
@@ -214,10 +220,10 @@ describe('SettingsModal', () => {
     expect(sidebar.textContent).toContain('Gemini');
   });
 
-  it('shows General page by default with Editor section', () => {
+  it('shows General page by default with Workspaces section', () => {
     render(<SettingsModal {...defaultProps} />);
-    expect(screen.getByText('Editor')).toBeTruthy();
-    expect(screen.getByText('Font size')).toBeTruthy();
+    expect(screen.getByText('Workspaces')).toBeTruthy();
+    expect(screen.getByText('Auto-suspend after')).toBeTruthy();
   });
 
   it('shows Provider page when Provider nav is clicked', async () => {
