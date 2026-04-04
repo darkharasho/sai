@@ -459,6 +459,22 @@ describe('environment variable stripping', () => {
     expect(spawnEnv).not.toHaveProperty('BAMF_DESKTOP_FILE_HINT');
   });
 
+  it('strips XDG_ACTIVATION_TOKEN from child env', async () => {
+    const spawnEnv = await spawnEnvFor(
+      () => { process.env.XDG_ACTIVATION_TOKEN = 'some-wayland-token'; },
+      () => { delete process.env.XDG_ACTIVATION_TOKEN; },
+    );
+    expect(spawnEnv).not.toHaveProperty('XDG_ACTIVATION_TOKEN');
+  });
+
+  it('strips DESKTOP_STARTUP_ID from child env', async () => {
+    const spawnEnv = await spawnEnvFor(
+      () => { process.env.DESKTOP_STARTUP_ID = 'sai_TIME12345'; },
+      () => { delete process.env.DESKTOP_STARTUP_ID; },
+    );
+    expect(spawnEnv).not.toHaveProperty('DESKTOP_STARTUP_ID');
+  });
+
   it('preserves other environment variables', async () => {
     const spawnEnv = await spawnEnvFor(
       () => { process.env.MY_CUSTOM_VAR = 'kept'; },

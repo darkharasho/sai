@@ -57,6 +57,10 @@ export function registerTerminalHandlers(win: BrowserWindow) {
     delete env.GIO_LAUNCHED_DESKTOP_FILE;
     delete env.GIO_LAUNCHED_DESKTOP_FILE_PID;
     delete env.BAMF_DESKTOP_FILE_HINT;
+    // KDE Plasma / Wayland: clear startup notification tokens so spawned
+    // GUI apps (e.g. electron dev servers, browsers) get their own taskbar entry
+    delete env.XDG_ACTIVATION_TOKEN;
+    delete env.DESKTOP_STARTUP_ID;
     // On Linux with systemd, spawn via systemd-run --user --scope so the shell
     // lives in its own cgroup. This prevents desktop environments (GNOME, KDE)
     // from grouping GUI apps launched from the terminal under SAI's taskbar icon.
