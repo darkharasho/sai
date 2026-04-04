@@ -12,7 +12,8 @@ import { useWhatsNew } from './hooks/useWhatsNew';
 import WhatsNewModal from './components/WhatsNewModal';
 import { setActiveWorkspace, updateTerminalName } from './terminalBuffer';
 import { loadSessions, saveSessions, createSession, upsertSession, migrateLegacySessions, loadSessionMessages } from './sessions';
-import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab } from './types';
+import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval } from './types';
+import ApprovalBanner from './components/ApprovalBanner';
 import { MessageSquare, TerminalSquare, Code2, ChevronRight, MessageCirclePlus, Clock } from 'lucide-react';
 import { formatSessionDate, formatSessionTime } from './sessions';
 
@@ -106,6 +107,7 @@ export default function App() {
   const [externallyModified, setExternallyModified] = useState<Set<string>>(new Set());
   const [completedWorkspaces, setCompletedWorkspaces] = useState<Set<string>>(new Set());
   const [busyWorkspaces, setBusyWorkspaces] = useState<Set<string>>(new Set());
+  const [approvalWorkspaces, setApprovalWorkspaces] = useState<Map<string, PendingApproval>>(new Map());
   const wsTurnSeqRef = useRef<Map<string, number>>(new Map());
   const [focusedChat, setFocusedChat] = useState(false);
   const [toast, setToast] = useState<{ message: string; key: number } | null>(null);
@@ -513,6 +515,27 @@ export default function App() {
       if (msg.type === 'streaming_start') {
         if (msg.turnSeq != null) wsTurnSeqRef.current.set(msg.projectPath, msg.turnSeq);
         setBusyWorkspaces(prev => new Set(prev).add(msg.projectPath));
+      }
+      if (msg.type === 'approval_needed') {
+        setApprovalWorkspaces(prev => {
+          const next = new Map(prev);
+          next.set(msg.projectPath, {
+            toolName: msg.toolName,
+            toolUseId: msg.toolUseId,
+            command: msg.command,
+            description: msg.description,
+            input: msg.input,
+          });
+          return next;
+        });
+      }
+      if (msg.type === 'approval_resolved') {
+        setApprovalWorkspaces(prev => {
+          if (!prev.has(msg.projectPath)) return prev;
+          const next = new Map(prev);
+          next.delete(msg.projectPath);
+          return next;
+        });
       }
       // Treat 'result' as authoritative end-of-turn — clear busy immediately
       // so the titlebar spinner doesn't stay stuck if the 'done' message is lost.
@@ -1265,6 +1288,7 @@ export default function App() {
         onProjectChange={handleProjectSwitch}
         completedWorkspaces={completedWorkspaces}
         busyWorkspaces={busyWorkspaces}
+        approvalWorkspaces={new Set(approvalWorkspaces.keys())}
         onSettingChange={(key, value) => {
           if (key === 'editorFontSize') setEditorFontSize(value);
           if (key === 'editorMinimap') setEditorMinimap(value);
@@ -1275,6 +1299,11 @@ export default function App() {
           if (key === 'sidebarWidth') document.documentElement.style.setProperty('--sidebar-width', `${value}px`);
         }}
         onOpenWhatsNew={openWhatsNew}
+      />
+      <ApprovalBanner
+        approvalWorkspaces={approvalWorkspaces}
+        currentProjectPath={projectPath}
+        onSwitchToWorkspace={handleProjectSwitch}
       />
       <div className="app-body">
         <NavBar activeSidebar={sidebarOpen} onToggle={toggleSidebar} gitChangeCount={gitChangeCount} />
