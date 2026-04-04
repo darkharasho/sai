@@ -22,11 +22,12 @@ interface TitleBarProps {
   onProjectChange: (path: string) => void;
   completedWorkspaces?: Set<string>;
   busyWorkspaces?: Set<string>;
+  approvalWorkspaces?: Set<string>;
   onSettingChange?: (key: string, value: any) => void;
   onOpenWhatsNew?: () => void;
 }
 
-export default function TitleBar({ projectPath, onProjectChange, completedWorkspaces, busyWorkspaces, onSettingChange, onOpenWhatsNew }: TitleBarProps) {
+export default function TitleBar({ projectPath, onProjectChange, completedWorkspaces, busyWorkspaces, approvalWorkspaces, onSettingChange, onOpenWhatsNew }: TitleBarProps) {
   const [open, setOpen] = useState(false);
   const [workspaceList, setWorkspaceList] = useState<WorkspaceInfo[]>([]);
   const [version, setVersion] = useState('');
@@ -135,7 +136,9 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         <button className="project-selector" onClick={() => setOpen(!open)}>
           {projectName} ▾
           {(() => {
+            const approvalCount = approvalWorkspaces ? approvalWorkspaces.size : 0;
             const bgBusyCount = busyWorkspaces ? [...busyWorkspaces].filter(p => p !== projectPath).length : 0;
+            if (approvalCount > 0) return <span className="titlebar-approval-dot" />;
             if (completedWorkspaces && completedWorkspaces.size > 0) return <span className="workspace-done-dot" />;
             if (bgBusyCount > 0) return (
               <span className="titlebar-busy-indicator">
@@ -169,11 +172,15 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                             className={`dropdown-item workspace-item ${w.projectPath === projectPath ? 'active' : ''}`}
                             onClick={() => { onProjectChange(w.projectPath); setOpen(false); }}
                           >
-                            {busyWorkspaces?.has(w.projectPath)
-                              ? <span className="workspace-spinner" title="Working..." />
-                              : <span className="workspace-status-dot workspace-dot-active" />}
+                            {approvalWorkspaces?.has(w.projectPath)
+                              ? <span className="workspace-approval-icon" title="Approval needed">!</span>
+                              : busyWorkspaces?.has(w.projectPath)
+                                ? <span className="workspace-spinner" title="Working..." />
+                                : <span className="workspace-status-dot workspace-dot-active" />}
                             <span className="dropdown-item-name">{w.projectPath.split('/').pop()}</span>
-                            {completedWorkspaces?.has(w.projectPath) && <span className="workspace-completed-icon" title="Response complete">!</span>}
+                            {approvalWorkspaces?.has(w.projectPath)
+                              ? <span className="workspace-approval-label">Approval needed</span>
+                              : completedWorkspaces?.has(w.projectPath) && <span className="workspace-completed-icon" title="Response complete">!</span>}
                             <span className="dropdown-item-path">{w.projectPath}</span>
                           </button>
                           {w.projectPath !== projectPath && (<>
@@ -537,6 +544,47 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         @keyframes done-pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.4; }
+        }
+        @keyframes approval-blink {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.2; }
+        }
+        .titlebar-approval-dot {
+          display: inline-block;
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          background: #f59e0b;
+          margin-left: 6px;
+          vertical-align: middle;
+          animation: approval-blink 1s ease-in-out infinite;
+        }
+        .workspace-approval-icon {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 14px;
+          height: 14px;
+          border-radius: 50%;
+          background: #f59e0b;
+          color: #000;
+          font-size: 10px;
+          font-weight: 800;
+          flex-shrink: 0;
+          animation: approval-blink 1s ease-in-out infinite;
+        }
+        .dropdown-item.active .workspace-approval-icon {
+          background: #000;
+          color: #f59e0b;
+        }
+        .workspace-approval-label {
+          font-size: 11px;
+          color: #f59e0b;
+          margin-left: 4px;
+        }
+        .dropdown-item.active .workspace-approval-label {
+          color: #000;
+          opacity: 0.8;
         }
         .project-selector:hover {
           background: var(--bg-hover);
