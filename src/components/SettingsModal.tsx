@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Check, ChevronDown, Settings as SettingsIcon, Monitor } from 'lucide-react';
+import { X, Check, ChevronDown, Settings as SettingsIcon, Monitor, Type, PanelLeft, Palette } from 'lucide-react';
+import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, getActiveHighlightTheme, setActiveHighlightTheme, getShikiHighlighter, type HighlightThemeId } from '../themes';
 
 interface Props {
   onClose: () => void;
@@ -37,7 +38,7 @@ const AUTO_COMPACT_OPTIONS = [
 ];
 
 type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error';
-type SettingsPage = 'general' | 'provider' | 'claude' | 'codex' | 'gemini';
+type SettingsPage = 'general' | 'editor' | 'layout' | 'style' | 'provider' | 'claude' | 'codex' | 'gemini';
 
 function formatRelative(ts: number): string {
   const secs = Math.floor((Date.now() - ts) / 1000);
@@ -72,6 +73,9 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [lastSynced, setLastSynced] = useState<number | null>(null);
   const [isAuthed, setIsAuthed] = useState(false);
+  const [theme, setTheme] = useState<ThemeId>('default');
+  const [highlightTheme, setHighlightTheme] = useState<HighlightThemeId>('monokai');
+  const [previewHtml, setPreviewHtml] = useState('');
 
   const [activePage, setActivePage] = useState<SettingsPage>('general');
 
@@ -86,6 +90,13 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.settingsGet('focusedChat', false).then((v: boolean) => setFocusedChat(v));
     window.sai.settingsGet('sidebarWidth', 300).then((v: number) => setSidebarWidth(v));
     window.sai.settingsGet('autoCompactThreshold', 0).then((v: number) => setAutoCompactThreshold(v));
+    window.sai.settingsGet('theme', 'default').then((v: string) => {
+      const id = v as ThemeId;
+      if (THEMES.some(t => t.id === id)) setTheme(id);
+    });
+    window.sai.settingsGet('highlightTheme', 'monokai').then((v: string) => {
+      if (HIGHLIGHT_THEMES.some(t => t.id === v)) setHighlightTheme(v as HighlightThemeId);
+    });
     window.sai.settingsGet('aiProvider', 'claude').then((v: string) => {
       if (v === 'claude' || v === 'codex' || v === 'gemini') setAiProvider(v as 'claude' | 'codex' | 'gemini');
     });
@@ -110,10 +121,28 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if ('focusedChat' in remote) setFocusedChat(remote.focusedChat);
       if ('sidebarWidth' in remote) setSidebarWidth(remote.sidebarWidth);
       if ('autoCompactThreshold' in remote) setAutoCompactThreshold(remote.autoCompactThreshold);
+      if ('theme' in remote && THEMES.some(t => t.id === remote.theme)) {
+        setTheme(remote.theme);
+        applyTheme(remote.theme);
+      }
+      if ('highlightTheme' in remote && HIGHLIGHT_THEMES.some(t => t.id === remote.highlightTheme)) {
+        setHighlightTheme(remote.highlightTheme);
+        setActiveHighlightTheme(remote.highlightTheme);
+      }
     });
 
     return () => { unsubSync(); unsubApplied(); };
   }, []);
+
+  // Render code preview for highlight theme
+  useEffect(() => {
+    const sample = `function greet(name: string) {\n  const msg = \`Hello, \${name}!\`;\n  console.log(msg);\n  return msg;\n}`;
+    getShikiHighlighter().then(hl => {
+      try {
+        setPreviewHtml(hl.codeToHtml(sample, { lang: 'typescript', theme: highlightTheme }));
+      } catch { /* theme not loaded */ }
+    });
+  }, [highlightTheme]);
 
   // Close provider dropdown on outside click
   useEffect(() => {
@@ -133,6 +162,20 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [commitProviderOpen]);
+
+  const handleThemeChange = (id: ThemeId) => {
+    setTheme(id);
+    applyTheme(id);
+    window.sai.settingsSet('theme', id);
+    onSettingChange?.('theme', id);
+  };
+
+  const handleHighlightThemeChange = (id: HighlightThemeId) => {
+    setHighlightTheme(id);
+    setActiveHighlightTheme(id);
+    window.sai.settingsSet('highlightTheme', id);
+    onSettingChange?.('highlightTheme', id);
+  };
 
   const handleTimeoutChange = (value: number) => {
     setSuspendTimeout(value);
@@ -199,81 +242,137 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.githubSyncNow();
   };
 
-  const renderGeneralPage = () => (
+  const renderEditorPage = () => (
+    <section className="settings-section">
+      <div className="settings-section-label">Editor</div>
+
+      <div className="settings-row">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Font size</div>
+        </div>
+        <select
+          className="settings-select"
+          value={editorFontSize}
+          onChange={e => handleFontSizeChange(Number(e.target.value))}
+        >
+          {FONT_SIZES.map(s => (
+            <option key={s} value={s}>{s}px</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="settings-row settings-row-spaced">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Minimap</div>
+          <div className="settings-row-desc">Code overview on the right edge of the editor</div>
+        </div>
+        <button
+          className={`settings-toggle${editorMinimap ? ' on' : ''}`}
+          onClick={() => handleMinimapChange(!editorMinimap)}
+          role="switch"
+          aria-checked={editorMinimap}
+        >
+          <span className="settings-toggle-thumb" />
+        </button>
+      </div>
+    </section>
+  );
+
+  const renderLayoutPage = () => (
+    <section className="settings-section">
+      <div className="settings-section-label">Layout</div>
+
+      <div className="settings-row">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Focused chat</div>
+          <div className="settings-row-desc">Chat stays at 66%, editor and terminal toggle in the remaining space</div>
+        </div>
+        <button
+          className={`settings-toggle${focusedChat ? ' on' : ''}`}
+          onClick={() => handleFocusedChatChange(!focusedChat)}
+          role="switch"
+          aria-checked={focusedChat}
+        >
+          <span className="settings-toggle-thumb" />
+        </button>
+      </div>
+
+      <div className="settings-row settings-row-spaced">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Sidebar width</div>
+          <div className="settings-row-desc">Width of the file explorer and git sidebars</div>
+        </div>
+        <select
+          className="settings-select"
+          value={sidebarWidth}
+          onChange={e => handleSidebarWidthChange(Number(e.target.value))}
+        >
+          {SIDEBAR_WIDTH_OPTIONS.map(opt => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
+      </div>
+    </section>
+  );
+
+  const renderStylePage = () => (
     <>
       <section className="settings-section">
-        <div className="settings-section-label">Editor</div>
-
-        <div className="settings-row">
-          <div className="settings-row-info">
-            <div className="settings-row-name">Font size</div>
-          </div>
-          <select
-            className="settings-select"
-            value={editorFontSize}
-            onChange={e => handleFontSizeChange(Number(e.target.value))}
-          >
-            {FONT_SIZES.map(s => (
-              <option key={s} value={s}>{s}px</option>
-            ))}
-          </select>
-        </div>
-
-        <div className="settings-row settings-row-spaced">
-          <div className="settings-row-info">
-            <div className="settings-row-name">Minimap</div>
-            <div className="settings-row-desc">Code overview on the right edge of the editor</div>
-          </div>
-          <button
-            className={`settings-toggle${editorMinimap ? ' on' : ''}`}
-            onClick={() => handleMinimapChange(!editorMinimap)}
-            role="switch"
-            aria-checked={editorMinimap}
-          >
-            <span className="settings-toggle-thumb" />
-          </button>
+        <div className="settings-section-label">Theme</div>
+        <div className="theme-grid">
+          {THEMES.map(t => (
+            <button
+              key={t.id}
+              className={`theme-card${theme === t.id ? ' active' : ''}`}
+              onClick={() => handleThemeChange(t.id)}
+            >
+              <div className="theme-preview" style={{
+                background: t.vars['--bg-primary'],
+                borderColor: theme === t.id ? 'var(--accent)' : t.vars['--border'],
+              }}>
+                <div className="theme-preview-sidebar" style={{ background: t.vars['--bg-secondary'] }} />
+                <div className="theme-preview-content">
+                  <div className="theme-preview-bar" style={{ background: t.vars['--bg-elevated'] }} />
+                  <div className="theme-preview-line" style={{ background: t.vars['--text-muted'], width: '70%' }} />
+                  <div className="theme-preview-line" style={{ background: t.vars['--text-muted'], width: '50%' }} />
+                  <div className="theme-preview-line" style={{ background: t.vars['--text-muted'], width: '60%' }} />
+                </div>
+              </div>
+              <div className="theme-card-label">{t.label}</div>
+              {theme === t.id && <Check size={12} className="theme-check" />}
+            </button>
+          ))}
         </div>
       </section>
 
       <div className="settings-divider" />
 
       <section className="settings-section">
-        <div className="settings-section-label">Layout</div>
-
+        <div className="settings-section-label">Code Highlighting</div>
         <div className="settings-row">
           <div className="settings-row-info">
-            <div className="settings-row-name">Focused chat</div>
-            <div className="settings-row-desc">Chat stays at 66%, editor and terminal toggle in the remaining space</div>
-          </div>
-          <button
-            className={`settings-toggle${focusedChat ? ' on' : ''}`}
-            onClick={() => handleFocusedChatChange(!focusedChat)}
-            role="switch"
-            aria-checked={focusedChat}
-          >
-            <span className="settings-toggle-thumb" />
-          </button>
-        </div>
-
-        <div className="settings-row settings-row-spaced">
-          <div className="settings-row-info">
-            <div className="settings-row-name">Sidebar width</div>
-            <div className="settings-row-desc">Width of the file explorer and git sidebars</div>
+            <div className="settings-row-name">Syntax theme</div>
+            <div className="settings-row-desc">Colors used for code blocks, diffs, and tool call output</div>
           </div>
           <select
             className="settings-select"
-            value={sidebarWidth}
-            onChange={e => handleSidebarWidthChange(Number(e.target.value))}
+            value={highlightTheme}
+            onChange={e => handleHighlightThemeChange(e.target.value as HighlightThemeId)}
           >
-            {SIDEBAR_WIDTH_OPTIONS.map(opt => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            {HIGHLIGHT_THEMES.map(t => (
+              <option key={t.id} value={t.id}>{t.label}</option>
             ))}
           </select>
         </div>
+        {previewHtml && (
+          <div className="highlight-preview" dangerouslySetInnerHTML={{ __html: previewHtml }} />
+        )}
       </section>
+    </>
+  );
 
-      <div className="settings-divider" />
-
+  const renderGeneralPage = () => (
+    <>
       <section className="settings-section">
         <div className="settings-section-label">Workspaces</div>
 
@@ -496,6 +595,9 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const renderActivePage = () => {
     switch (activePage) {
       case 'general': return renderGeneralPage();
+      case 'editor': return renderEditorPage();
+      case 'layout': return renderLayoutPage();
+      case 'style': return renderStylePage();
       case 'provider': return renderProviderPage();
       case 'claude': return renderClaudePage();
       case 'codex': return renderCodexPage();
@@ -533,6 +635,27 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             >
               <SettingsIcon size={14} />
               <span>General</span>
+            </button>
+            <button
+              className={`settings-nav-item${activePage === 'editor' ? ' active' : ''}`}
+              onClick={() => setActivePage('editor')}
+            >
+              <Type size={14} />
+              <span>Editor</span>
+            </button>
+            <button
+              className={`settings-nav-item${activePage === 'layout' ? ' active' : ''}`}
+              onClick={() => setActivePage('layout')}
+            >
+              <PanelLeft size={14} />
+              <span>Layout</span>
+            </button>
+            <button
+              className={`settings-nav-item${activePage === 'style' ? ' active' : ''}`}
+              onClick={() => setActivePage('style')}
+            >
+              <Palette size={14} />
+              <span>Style</span>
             </button>
             <button
               className={`settings-nav-item${activePage === 'provider' ? ' active' : ''}`}
@@ -822,6 +945,84 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             padding: 1px 4px;
             border-radius: 3px;
             color: var(--accent);
+          }
+          .theme-grid {
+            display: flex;
+            gap: 12px;
+          }
+          .theme-card {
+            background: none;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            position: relative;
+            padding: 0;
+          }
+          .theme-preview {
+            width: 120px;
+            height: 80px;
+            border-radius: 6px;
+            border: 2px solid;
+            display: flex;
+            overflow: hidden;
+            transition: border-color 0.15s;
+          }
+          .theme-card:hover .theme-preview {
+            border-color: var(--accent) !important;
+          }
+          .theme-preview-sidebar {
+            width: 24px;
+            min-width: 24px;
+            height: 100%;
+          }
+          .theme-preview-content {
+            flex: 1;
+            padding: 8px 6px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+          }
+          .theme-preview-bar {
+            height: 8px;
+            border-radius: 2px;
+            width: 100%;
+          }
+          .theme-preview-line {
+            height: 4px;
+            border-radius: 1px;
+          }
+          .theme-card-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            transition: color 0.15s;
+          }
+          .theme-card.active .theme-card-label {
+            color: var(--text);
+          }
+          .theme-check {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            color: var(--accent);
+          }
+          .highlight-preview {
+            margin-top: 12px;
+            border-radius: 6px;
+            overflow: hidden;
+            font-size: 12px;
+            line-height: 1.5;
+          }
+          .highlight-preview pre {
+            margin: 0 !important;
+            border-radius: 6px !important;
+            padding: 12px 14px !important;
+          }
+          .highlight-preview code {
+            font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
+            font-size: 12px !important;
           }
         `}</style>
       </div>

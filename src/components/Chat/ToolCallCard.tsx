@@ -1,20 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { FileEdit, Terminal, FileText, Wrench, ChevronRight, ChevronDown, Maximize2, X, Circle, Globe } from 'lucide-react';
 import type { ToolCall } from '../../types';
-
-// Lazy-load shiki for syntax highlighting
-let highlighterPromise: Promise<any> | null = null;
-function getHighlighter() {
-  if (!highlighterPromise) {
-    highlighterPromise = import('shiki').then(({ createHighlighter }) =>
-      createHighlighter({
-        themes: ['monokai'],
-        langs: ['json', 'typescript', 'javascript', 'bash', 'python', 'html', 'css', 'markdown', 'yaml', 'toml', 'rust', 'go', 'diff'],
-      })
-    );
-  }
-  return highlighterPromise;
-}
+import { getShikiHighlighter, getActiveHighlightTheme } from '../../themes';
 
 function detectLang(toolCall: ToolCall): string {
   if (toolCall.type === 'terminal_command') return 'bash';
@@ -39,18 +26,25 @@ function HighlightedCode({ code, lang, showLineNumbers }: { code: string; lang: 
   const isDiff = lang === 'diff';
   const ref = useRef<HTMLDivElement>(null);
   const [html, setHtml] = useState<string>('');
+  const [hlTheme, setHlTheme] = useState(getActiveHighlightTheme());
+
+  useEffect(() => {
+    const handler = () => setHlTheme(getActiveHighlightTheme());
+    window.addEventListener('sai-highlight-theme-change', handler);
+    return () => window.removeEventListener('sai-highlight-theme-change', handler);
+  }, []);
 
   useEffect(() => {
     if (!code || lang === 'text') return;
-    getHighlighter().then(highlighter => {
+    getShikiHighlighter().then(highlighter => {
       try {
-        const result = highlighter.codeToHtml(code, { lang, theme: 'monokai' });
+        const result = highlighter.codeToHtml(code, { lang, theme: hlTheme });
         setHtml(result);
       } catch {
         // Language not loaded
       }
     });
-  }, [code, lang]);
+  }, [code, lang, hlTheme]);
 
   if (showLineNumbers) {
     const lines = code.split('\n');
@@ -125,7 +119,7 @@ function DiffHighlightedCode({ oldString, newString, lang }: { oldString: string
       setReady(true);
       return;
     }
-    getHighlighter().then(highlighter => {
+    getShikiHighlighter().then(highlighter => {
       try {
         const oldHtml = highlighter.codeToHtml(oldString, { lang, theme: 'monokai' });
         const newHtml = highlighter.codeToHtml(newString, { lang, theme: 'monokai' });

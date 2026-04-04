@@ -101,6 +101,7 @@ contextBridge.exposeInMainWorld('sai', {
   saveImage: (base64Data: string) => ipcRenderer.invoke('project:saveImage', base64Data),
   settingsGet: (key: string, defaultValue?: any) => ipcRenderer.invoke('settings:get', key, defaultValue),
   settingsSet: (key: string, value: any) => ipcRenderer.invoke('settings:set', key, value),
+  setTitleBarOverlay: (color: string, symbolColor: string) => ipcRenderer.invoke('titlebar:setOverlay', color, symbolColor),
   getCwd: () => ipcRenderer.invoke('project:getCwd'),
   selectFolder: () => ipcRenderer.invoke('project:selectFolder'),
   selectFile: () => ipcRenderer.invoke('project:selectFile'),

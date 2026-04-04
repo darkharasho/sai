@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as monaco from 'monaco-editor';
+import { getActiveHighlightTheme, buildMonacoThemeData } from '../../themes';
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
 import cssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker';
@@ -128,6 +129,20 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
 
     editorRef.current = editor;
 
+    // Apply saved highlight theme
+    const hlTheme = getActiveHighlightTheme();
+    if (hlTheme !== 'monokai') {
+      buildMonacoThemeData(hlTheme).then(data => {
+        monaco.editor.defineTheme('sai-dark', {
+          base: data.base,
+          inherit: true,
+          rules: data.rules,
+          colors: data.colors,
+        });
+        monaco.editor.setTheme('sai-dark');
+      });
+    }
+
     editor.onDidChangeModelContent(() => {
       setDirty(true);
       onDirtyChange?.(true);
@@ -166,6 +181,22 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
       onLineRevealed?.();
     }
   }, [initialLine]);
+
+  // Listen for highlight theme changes and apply to Monaco
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const data = (e as CustomEvent).detail;
+      monaco.editor.defineTheme('sai-dark', {
+        base: data.base,
+        inherit: true,
+        rules: data.rules,
+        colors: data.colors,
+      });
+      monaco.editor.setTheme('sai-dark');
+    };
+    window.addEventListener('sai-monaco-theme', handler);
+    return () => window.removeEventListener('sai-monaco-theme', handler);
+  }, []);
 
   // Apply font/minimap changes live without remounting
   useEffect(() => {

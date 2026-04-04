@@ -13,6 +13,7 @@ import WhatsNewModal from './components/WhatsNewModal';
 import { setActiveWorkspace, updateTerminalName } from './terminalBuffer';
 import { loadSessions, saveSessions, createSession, upsertSession, migrateLegacySessions, loadSessionMessages } from './sessions';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval } from './types';
+import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, setActiveHighlightTheme, type HighlightThemeId } from './themes';
 import ApprovalBanner from './components/ApprovalBanner';
 import { MessageSquare, TerminalSquare, Code2, ChevronRight, MessageCirclePlus, Clock } from 'lucide-react';
 import { formatSessionDate, formatSessionTime } from './sessions';
@@ -287,6 +288,12 @@ export default function App() {
     });
     window.sai.settingsGet('editorFontSize', 13).then((v: number) => setEditorFontSize(v));
     window.sai.settingsGet('editorMinimap', true).then((v: boolean) => setEditorMinimap(v));
+    window.sai.settingsGet('theme', 'default').then((v: string) => {
+      if (v !== 'default' && THEMES.some(t => t.id === v)) applyTheme(v as ThemeId);
+    });
+    window.sai.settingsGet('highlightTheme', 'monokai').then((v: string) => {
+      if (v !== 'monokai' && HIGHLIGHT_THEMES.some(t => t.id === v)) setActiveHighlightTheme(v as HighlightThemeId);
+    });
     window.sai.settingsGet('aiProvider', 'claude').then((v: string) => {
       if (v === 'claude' || v === 'codex' || v === 'gemini') setAiProvider(v as AIProvider);
     });
@@ -341,6 +348,8 @@ export default function App() {
       if ('editorFontSize' in remote) setEditorFontSize(remote.editorFontSize);
       if ('editorMinimap' in remote) setEditorMinimap(remote.editorMinimap);
       if ('sidebarWidth' in remote) document.documentElement.style.setProperty('--sidebar-width', `${remote.sidebarWidth}px`);
+      if ('theme' in remote && THEMES.some(t => t.id === remote.theme)) applyTheme(remote.theme as ThemeId);
+      if ('highlightTheme' in remote && HIGHLIGHT_THEMES.some(t => t.id === remote.highlightTheme)) setActiveHighlightTheme(remote.highlightTheme as HighlightThemeId);
       if ('aiProvider' in remote && (remote.aiProvider === 'claude' || remote.aiProvider === 'codex' || remote.aiProvider === 'gemini')) setAiProvider(remote.aiProvider);
       if ('commitMessageProvider' in remote && (remote.commitMessageProvider === 'claude' || remote.commitMessageProvider === 'codex' || remote.commitMessageProvider === 'gemini')) setCommitMessageProvider(remote.commitMessageProvider);
       if ('claude' in remote && typeof remote.claude === 'object') {

@@ -21,7 +21,19 @@ if (process.env.SAI_USER_DATA_DIR) {
 
 let mainWindow: BrowserWindow | null = null;
 
+const THEME_TITLEBAR: Record<string, { color: string; symbolColor: string; bg: string }> = {
+  default:  { color: '#0c0f11', symbolColor: '#bec6d0', bg: '#111418' },
+  midnight: { color: '#131316', symbolColor: '#c8c8d0', bg: '#1a1a1e' },
+  steel:    { color: '#2c2d33', symbolColor: '#d5d5dc', bg: '#36373e' },
+};
+
 function createWindow() {
+  let tb = THEME_TITLEBAR.default;
+  try {
+    const s = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'), 'utf-8'));
+    if (s.theme && THEME_TITLEBAR[s.theme]) tb = THEME_TITLEBAR[s.theme];
+  } catch { /* use default */ }
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -29,11 +41,11 @@ function createWindow() {
     minHeight: 600,
     titleBarStyle: 'hidden',
     titleBarOverlay: {
-      color: '#0c0f11',
-      symbolColor: '#bec6d0',
+      color: tb.color,
+      symbolColor: tb.symbolColor,
       height: 38,
     },
-    backgroundColor: '#111418',
+    backgroundColor: tb.bg,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -160,6 +172,12 @@ function createWindow() {
 
   ipcMain.handle('settings:set', (_event, key: string, value: any) => {
     writeSetting(key, value);
+  });
+
+  ipcMain.handle('titlebar:setOverlay', (_event, color: string, symbolColor: string) => {
+    if (mainWindow) {
+      mainWindow.setTitleBarOverlay({ color, symbolColor, height: 38 });
+    }
   });
 
   ipcMain.handle('github:syncNow', async () => {

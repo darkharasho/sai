@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { RotateCw } from 'lucide-react';
 import { registerTerminal, unregisterTerminal, setActiveTerminalId } from '../../terminalBuffer';
+import { getTerminalTheme, type ThemeId } from '../../themes';
 import type { TerminalTab } from '../../types';
 import '@xterm/xterm/css/xterm.css';
 
@@ -28,25 +29,15 @@ function TerminalInstance({ tabUid, projectPath, visible, onTerminalReady }: Ter
     const cwd = projectPath || '';
 
     const xterm = new Terminal({
-      theme: {
-        background: '#0e1114',
-        foreground: '#bec6d0',
-        cursor: '#c7910c',
-        selectionBackground: '#c7910c44',
-        black: '#000000',
-        brightBlack: '#475262',
-        red: '#E35535',
-        green: '#00a884',
-        yellow: '#c7910c',
-        blue: '#11B7D4',
-        magenta: '#d46ec0',
-        cyan: '#38c7bd',
-        white: '#FFFFFF',
-        brightWhite: '#dce0e5',
-      },
+      theme: getTerminalTheme('default'),
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
       fontSize: 13,
       cursorBlink: true,
+    });
+
+    // Apply saved theme
+    window.sai.settingsGet('theme', 'default').then((v: string) => {
+      if (v !== 'default') xterm.options.theme = getTerminalTheme(v as ThemeId);
     });
 
     const fit = new FitAddon();
@@ -64,6 +55,13 @@ function TerminalInstance({ tabUid, projectPath, visible, onTerminalReady }: Ter
         try { fit.fit(); } catch { /* terminal not ready yet */ }
       });
     }
+
+    // Listen for live theme changes
+    const onThemeChange = (e: Event) => {
+      const { terminal } = (e as CustomEvent).detail;
+      xterm.options.theme = terminal;
+    };
+    window.addEventListener('sai-theme-change', onThemeChange);
 
     xtermRef.current = xterm;
     fitRef.current = fit;
@@ -137,6 +135,7 @@ function TerminalInstance({ tabUid, projectPath, visible, onTerminalReady }: Ter
         window.sai.terminalKill(termIdRef.current);
       }
       cleanup();
+      window.removeEventListener('sai-theme-change', onThemeChange);
       resizeObserver.disconnect();
       intersectionObserver.disconnect();
       xterm.dispose();

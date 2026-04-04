@@ -1,24 +1,11 @@
 import { useState, useEffect } from 'react';
+import { getShikiHighlighter, getActiveHighlightTheme } from '../../themes';
 
 interface DiffViewerProps {
   projectPath: string;
   filePath: string;
   staged: boolean;
   mode: 'unified' | 'split';
-}
-
-// Reuse the same shiki highlighter singleton from ToolCallCard
-let highlighterPromise: Promise<any> | null = null;
-function getHighlighter() {
-  if (!highlighterPromise) {
-    highlighterPromise = import('shiki').then(({ createHighlighter }) =>
-      createHighlighter({
-        themes: ['monokai'],
-        langs: ['json', 'typescript', 'javascript', 'bash', 'python', 'html', 'css', 'markdown', 'yaml', 'toml', 'rust', 'go', 'diff'],
-      })
-    );
-  }
-  return highlighterPromise;
 }
 
 function langFromPath(filePath: string): string {
@@ -92,7 +79,7 @@ async function highlightDiffLines(diffLines: DiffLine[], lang: string): Promise<
     }));
   }
 
-  const highlighter = await getHighlighter();
+  const highlighter = await getShikiHighlighter();
 
   // Build old and new file content to highlight as coherent blocks
   const oldLines: { idx: number; content: string }[] = [];
@@ -116,8 +103,8 @@ async function highlightDiffLines(diffLines: DiffLine[], lang: string): Promise<
     const oldText = oldLines.map(l => l.content).join('\n');
     const newText = newLines.map(l => l.content).join('\n');
 
-    const oldHtml = highlighter.codeToHtml(oldText, { lang, theme: 'monokai' });
-    const newHtml = highlighter.codeToHtml(newText, { lang, theme: 'monokai' });
+    const oldHtml = highlighter.codeToHtml(oldText, { lang, theme: getActiveHighlightTheme() });
+    const newHtml = highlighter.codeToHtml(newText, { lang, theme: getActiveHighlightTheme() });
 
     const oldHighlighted = extractLineHtmls(oldHtml);
     const newHighlighted = extractLineHtmls(newHtml);
@@ -155,6 +142,13 @@ export default function DiffViewer({ projectPath, filePath, staged, mode }: Diff
   const [lines, setLines] = useState<DiffLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hlTheme, setHlTheme] = useState(getActiveHighlightTheme());
+
+  useEffect(() => {
+    const handler = () => setHlTheme(getActiveHighlightTheme());
+    window.addEventListener('sai-highlight-theme-change', handler);
+    return () => window.removeEventListener('sai-highlight-theme-change', handler);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -184,7 +178,7 @@ export default function DiffViewer({ projectPath, filePath, staged, mode }: Diff
       });
 
     return () => { cancelled = true; };
-  }, [projectPath, filePath, staged, mode]);
+  }, [projectPath, filePath, staged, mode, hlTheme]);
 
   if (loading) {
     return (
