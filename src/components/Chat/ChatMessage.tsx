@@ -3,7 +3,7 @@ import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 import 'highlight.js/styles/monokai.css';
-import { Circle, ChevronRight, X } from 'lucide-react';
+import { Circle, Terminal, X } from 'lucide-react';
 import ToolCallCard from './ToolCallCard';
 import type { ChatMessage as ChatMessageType } from '../../types';
 
@@ -132,7 +132,7 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
       {message.content && (
         <div className="chat-msg-content">
           {message.role === 'user'
-            ? <ChevronRight size={14} color="var(--green)" strokeWidth={3} className="chat-msg-dot chat-msg-chevron" />
+            ? <Terminal size={14} color="var(--green)" strokeWidth={2.5} className="chat-msg-dot chat-msg-chevron" />
             : message.role === 'assistant'
             ? <span className={`chat-msg-dot ${aiProvider === 'gemini' ? 'chat-msg-gemini' : aiProvider === 'codex' ? 'chat-msg-openai' : 'chat-msg-claude'}`} />
             : <Circle size={8} fill={dotColor} stroke={dotColor} className="chat-msg-dot" />}
