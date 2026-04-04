@@ -83,3 +83,22 @@ export function notifyCompletion(win: BrowserWindow, projectPath: string, info?:
     }).show();
   }
 }
+
+/**
+ * Fire an immediate system notification when a workspace needs approval.
+ * Unlike completion notifications, this always fires regardless of focus.
+ */
+export function notifyApproval(win: BrowserWindow, workspaceName: string, toolName: string, command: string) {
+  if (win.isDestroyed()) return;
+  if (!isEnabled()) return;
+
+  win.flashFrame(true);
+
+  if (Notification.isSupported()) {
+    const cmdSnippet = command.length > 100 ? command.slice(0, 100) + '…' : command;
+    new Notification({
+      title: `Approval needed — ${workspaceName}`,
+      body: `${toolName}: ${cmdSnippet}`,
+    }).show();
+  }
+}

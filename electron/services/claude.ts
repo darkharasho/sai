@@ -4,7 +4,7 @@ import { getOrCreate, get, touchActivity } from './workspace';
 import type { PendingToolUse } from './workspace';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { notifyCompletion } from './notify';
+import { notifyCompletion, notifyApproval } from './notify';
 import { extractCodexCommitMessage } from './commit-message-parser';
 
 const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
@@ -216,6 +216,8 @@ function ensureProcess(
               description,
               input: tu.input,
             });
+            const wsName = ws.projectPath.split('/').pop() || ws.projectPath;
+            notifyApproval(win, wsName, tu.toolName, command);
             continue;
           }
         }
@@ -449,6 +451,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
       ws.claude.approvalBuffered = [];
       ws.claude.awaitingApproval = false;
       ws.claude.pendingToolUse = null;
+      safeSend(win, 'claude:message', { type: 'approval_resolved', projectPath: ws.projectPath });
       return;
     }
 
@@ -543,6 +546,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
     ws.claude.awaitingApproval = false;
     // Keep busy = true — Claude will continue processing the follow-up
     ws.claude.pendingToolUse = null;
+    safeSend(win, 'claude:message', { type: 'approval_resolved', projectPath: ws.projectPath });
 
     // Send a compact follow-up to the CLI with the actual tool result
     const proc = ws.claude.process;
