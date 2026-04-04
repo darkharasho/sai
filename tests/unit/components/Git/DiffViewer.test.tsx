@@ -2,12 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { installMockSai, createMockSai } from '../../../helpers/ipc-mock';
 
-// Mock diff2html — it manipulates the DOM in ways jsdom doesn't support
-vi.mock('diff2html', () => ({
-  html: vi.fn().mockReturnValue('<div class="d2h-file-wrapper">mocked diff</div>'),
+// Mock shiki — it requires wasm that jsdom doesn't support
+vi.mock('shiki', () => ({
+  createHighlighter: vi.fn().mockResolvedValue({
+    codeToHtml: vi.fn().mockReturnValue('<pre class="shiki"><code><span class="line"><span>mock</span></span></code></pre>'),
+  }),
 }));
-
-vi.mock('diff2html/bundles/css/diff2html.min.css', () => ({}));
 
 import DiffViewer from '../../../../src/components/CodePanel/DiffViewer';
 
@@ -66,17 +66,16 @@ describe('DiffViewer', () => {
     });
   });
 
-  it('renders diff HTML when diff data is present', async () => {
-    const { html: diff2htmlFn } = await import('diff2html');
-    (diff2htmlFn as ReturnType<typeof vi.fn>).mockReturnValue('<div class="d2h-file-wrapper">diff content here</div>');
-
+  it('renders diff lines when diff data is present', async () => {
     const mock = createMockSai();
     mock.gitDiff.mockResolvedValue('--- a/file\n+++ b/file\n@@ -1 +1 @@\n-old\n+new');
     installMockSai(mock);
 
     const { container } = render(<DiffViewer {...defaultProps} />);
     await waitFor(() => {
-      expect(container.querySelector('.diff-container')).toBeTruthy();
+      expect(container.querySelector('.diff-viewer')).toBeTruthy();
+      expect(container.querySelector('.diff-line.diff-del')).toBeTruthy();
+      expect(container.querySelector('.diff-line.diff-add')).toBeTruthy();
     });
   });
 
