@@ -275,6 +275,13 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
         .chat-msg-body pre code.hljs.language-diff .hljs-meta {
           color: var(--text-muted);
         }
+        .chat-msg-body blockquote {
+          border-left: 3px solid var(--accent);
+          margin: 8px 0;
+          padding: 4px 12px;
+          color: var(--text-muted);
+        }
+        .chat-msg-body blockquote p:last-child { margin-bottom: 0; }
         .chat-msg-body table {
           border-collapse: collapse;
           width: 100%;
