@@ -135,11 +135,17 @@ function CodeBlock({ children, ...props }: any) {
     <div className="code-block-wrapper">
       <div className="code-block-actions">
         {isShell && (
-          <TerminalSquare size={14} className="code-block-icon" title="Paste to terminal" onClick={handlePasteToTerminal} />
+          <span className="code-block-icon" title="Paste to terminal" onClick={handlePasteToTerminal}>
+            <TerminalSquare size={14} />
+          </span>
         )}
         {copied
-          ? <Check size={14} className="code-block-icon code-block-icon-check" title="Copied" />
-          : <Copy size={14} className="code-block-icon" title="Copy" onClick={handleCopy} />}
+          ? <span className="code-block-icon code-block-icon-check" title="Copied">
+              <Check size={14} />
+            </span>
+          : <span className="code-block-icon" title="Copy" onClick={handleCopy}>
+              <Copy size={14} />
+            </span>}
       </div>
       <pre ref={codeRef} {...props}>{children}</pre>
     </div>
@@ -309,6 +315,7 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
           z-index: 1;
         }
         .code-block-icon {
+          display: flex;
           color: var(--text-muted);
           opacity: 0.4;
           cursor: pointer;
