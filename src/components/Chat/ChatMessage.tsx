@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 import 'highlight.js/styles/monokai.css';
-import { Circle, Terminal, X } from 'lucide-react';
+import { Check, Circle, Copy, Terminal, TerminalSquare, X } from 'lucide-react';
 import ToolCallCard from './ToolCallCard';
 import type { ChatMessage as ChatMessageType } from '../../types';
+import { getActiveTerminalId } from '../../terminalBuffer';
 
 const FILE_PATH_RE = /(?<![:/])\b((?:\.{1,2}\/)?(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte)|(?:\/[\w.-]+)+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte))(?::(\d+))?\b/g;
 
@@ -102,6 +103,49 @@ function rehypeFilePaths() {
   };
 }
 
+const SHELL_LANGUAGES = new Set(['language-bash', 'language-sh', 'language-shell', 'language-zsh']);
+
+function CodeBlock({ children, ...props }: any) {
+  const codeRef = useRef<HTMLPreElement>(null);
+  const [copied, setCopied] = useState(false);
+
+  const codeChild = Array.isArray(children) ? children[0] : children;
+  const codeClassName: string = codeChild?.props?.className || '';
+  const classes = codeClassName.split(/\s+/);
+  const isShell = classes.some((c: string) => SHELL_LANGUAGES.has(c));
+
+  const getCode = useCallback(() => {
+    return codeRef.current?.textContent || '';
+  }, []);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(getCode());
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }, [getCode]);
+
+  const handlePasteToTerminal = useCallback(() => {
+    const id = getActiveTerminalId();
+    if (id !== null) {
+      window.sai.terminalWrite(id, getCode());
+    }
+  }, [getCode]);
+
+  return (
+    <div className="code-block-wrapper">
+      <div className="code-block-actions">
+        {isShell && (
+          <TerminalSquare size={14} className="code-block-icon" title="Paste to terminal" onClick={handlePasteToTerminal} />
+        )}
+        {copied
+          ? <Check size={14} className="code-block-icon code-block-icon-check" title="Copied" />
+          : <Copy size={14} className="code-block-icon" title="Copy" onClick={handleCopy} />}
+      </div>
+      <pre ref={codeRef} {...props}>{children}</pre>
+    </div>
+  );
+}
+
 function getDotColor(role: string): string {
   if (role === 'assistant') return 'var(--accent)';
   if (role === 'user') return 'var(--green)';
@@ -142,6 +186,9 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
               rehypePlugins={[rehypeHighlight, rehypeFilePaths]}
               urlTransform={(url) => url.startsWith('sai-file://') ? url : defaultUrlTransform(url)}
               components={{
+                pre: ({ children, ...props }) => (
+                  <CodeBlock {...props}>{children}</CodeBlock>
+                ),
                 a: ({ href, children }) => (
                   <a
                     href={href}
@@ -250,6 +297,32 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
         .chat-msg-body a.file-link { color: var(--green); text-decoration: none; font-family: monospace; font-size: 12px; background: var(--bg-secondary); padding: 1px 5px; border-radius: 3px; }
         .chat-msg-body a.file-link:hover { opacity: 0.8; }
         .chat-msg-body pre code { background: none; padding: 0; }
+        .code-block-wrapper {
+          position: relative;
+        }
+        .code-block-actions {
+          position: absolute;
+          top: 8px;
+          right: 8px;
+          display: flex;
+          gap: 6px;
+          z-index: 1;
+        }
+        .code-block-icon {
+          color: var(--text-muted);
+          opacity: 0.4;
+          cursor: pointer;
+          transition: opacity 0.15s, color 0.15s;
+        }
+        .code-block-icon:hover {
+          opacity: 1;
+          color: var(--text);
+        }
+        .code-block-icon-check {
+          color: var(--green);
+          opacity: 0.8;
+          cursor: default;
+        }
         .chat-msg-body pre {
           background: var(--bg-secondary);
           border-radius: 6px;
