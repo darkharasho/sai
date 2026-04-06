@@ -691,7 +691,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
 
   return (
     <div className="tm-view">
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, overflow: 'hidden', position: 'relative' }}>
         {ptyId !== null && (
           <HiddenXterm
             ref={hiddenXtermRef}

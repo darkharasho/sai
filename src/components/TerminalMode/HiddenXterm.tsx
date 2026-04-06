@@ -139,15 +139,17 @@ export default forwardRef<HiddenXtermHandle, HiddenXtermProps>(
       <div
         ref={containerRef}
         className="tm-hidden-xterm"
-        style={{
-          position: visible ? 'relative' : 'absolute',
-          width: visible ? '100%' : 0,
-          height: visible ? '100%' : 0,
+        style={visible ? {
+          position: 'relative',
+          flex: 1,
+          minHeight: 0,
           overflow: 'hidden',
-          opacity: visible ? 1 : 0,
-          pointerEvents: visible ? 'auto' : 'none',
-          flex: visible ? 1 : undefined,
-          minHeight: visible ? 0 : undefined,
+        } : {
+          position: 'absolute',
+          inset: 0,
+          visibility: 'hidden',
+          pointerEvents: 'none',
+          overflow: 'hidden',
         }}
       />
     );
