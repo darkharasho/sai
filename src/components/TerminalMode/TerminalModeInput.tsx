@@ -32,6 +32,10 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
   const savedInputRef = useRef('');
   // When user manually toggles mode, suppress auto-detect until submit/clear
   const manualOverrideRef = useRef(false);
+  // Tab completion cycling state
+  const tabCompletionsRef = useRef<string[]>([]);
+  const tabIndexRef = useRef(-1);
+  const tabPrefixRef = useRef('');
 
   useImperativeHandle(ref, () => ({
     paste: (text: string) => {
@@ -65,16 +69,28 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
       e.preventDefault();
       const text = value;
       if (!text) return;
+
+      // If we already have completions cached, cycle through them
+      if (tabCompletionsRef.current.length > 1 && tabPrefixRef.current) {
+        const next = (tabIndexRef.current + 1) % tabCompletionsRef.current.length;
+        tabIndexRef.current = next;
+        const c = tabCompletionsRef.current[next];
+        setValue(tabPrefixRef.current + c);
+        return;
+      }
+
       window.sai.terminalTabComplete(text, cwd).then((completions: string[]) => {
         if (completions.length === 0) return;
         const lastWord = text.split(/\s+/).pop() || '';
         const prefix = text.slice(0, text.length - lastWord.length);
         if (completions.length === 1) {
-          // Single match — complete fully, add space if not a directory
           const c = completions[0];
           setValue(prefix + c + (c.endsWith('/') ? '' : ' '));
+          tabCompletionsRef.current = [];
+          tabIndexRef.current = -1;
+          tabPrefixRef.current = '';
         } else {
-          // Multiple matches — complete to longest common prefix
+          // Try longest common prefix first
           let common = completions[0];
           for (let i = 1; i < completions.length; i++) {
             let j = 0;
@@ -83,6 +99,15 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
           }
           if (common.length > lastWord.length) {
             setValue(prefix + common);
+            tabCompletionsRef.current = [];
+            tabIndexRef.current = -1;
+            tabPrefixRef.current = '';
+          } else {
+            // No common prefix to extend — start cycling
+            tabCompletionsRef.current = completions;
+            tabIndexRef.current = 0;
+            tabPrefixRef.current = prefix;
+            setValue(prefix + completions[0]);
           }
         }
       });
@@ -152,6 +177,9 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
       manualOverrideRef.current = false;
       historyIndexRef.current = -1;
       savedInputRef.current = '';
+      tabCompletionsRef.current = [];
+      tabIndexRef.current = -1;
+      tabPrefixRef.current = '';
       requestAnimationFrame(() => inputRef.current?.focus());
     }
   };
@@ -159,6 +187,10 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newVal = e.target.value;
     setValue(newVal);
+    // Clear tab completion cycling on any typed input
+    tabCompletionsRef.current = [];
+    tabIndexRef.current = -1;
+    tabPrefixRef.current = '';
     if (detectAI && onModeChange && !manualOverrideRef.current) {
       const trimmed = newVal.trim();
       if (trimmed.length === 0) {
