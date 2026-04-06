@@ -86,6 +86,7 @@ function WelcomeTypewriter() {
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<'default' | 'terminal-mode'>('default');
+
   const [activeProjectPath, setActiveProjectPath] = useState<string>('');
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
   const [effortLevel, setEffortLevel] = useState<EffortLevel>('high');
@@ -292,6 +293,9 @@ export default function App() {
 
   // Load persisted settings from main process (file-based, works in dev+prod)
   useEffect(() => {
+    window.sai.settingsGet('defaultView', 'default').then((v: string) => {
+      if (v === 'terminal-mode') setActiveView('terminal-mode');
+    });
     window.sai.settingsGet('focusedChat', false).then((v: boolean) => setFocusedChat(v));
     window.sai.settingsGet('sidebarWidth', 300).then((v: number) => {
       document.documentElement.style.setProperty('--sidebar-width', `${v}px`);
@@ -831,6 +835,8 @@ export default function App() {
   }, [activeProjectPath, workspaces, handleToggleMdPreview]);
 
   const handleProjectSwitch = useCallback((newPath: string) => {
+    // Always exit terminal mode when selecting a workspace
+    setActiveView('default');
     if (newPath === activeProjectPath) return;
     window.sai.openRecentProject(newPath);
     const sessions = loadSessions(newPath);
@@ -956,7 +962,7 @@ export default function App() {
       setActiveView(prev => prev === 'terminal-mode' ? 'default' : 'terminal-mode');
       return;
     }
-    if (activeView === 'terminal-mode') setActiveView('default');
+    // Folder/Git toggles work independently — don't exit terminal mode
     setSidebarOpen(prev => prev === id ? null : id);
   };
 
@@ -1338,6 +1344,7 @@ export default function App() {
           if (key === 'commitMessageProvider') setCommitMessageProvider(value);
           if (key === 'geminiLoadingPhrases') handleGeminiLoadingPhrasesChange(value);
           if (key === 'focusedChat') { setFocusedChat(value); if (value) { setExpanded(['chat', 'terminal']); setSplitRatio(0.66); } }
+          if (key === 'defaultView') { /* persisted only, applies on next launch */ }
           if (key === 'sidebarWidth') document.documentElement.style.setProperty('--sidebar-width', `${value}px`);
         }}
         onOpenWhatsNew={openWhatsNew}
@@ -1348,15 +1355,14 @@ export default function App() {
         onSwitchToWorkspace={handleProjectSwitch}
       />
       <div className="app-body">
-        <NavBar activeSidebar={sidebarOpen} onToggle={toggleSidebar} gitChangeCount={gitChangeCount} />
+        <NavBar activeSidebar={sidebarOpen} activeTerminal={activeView === 'terminal-mode'} onToggle={toggleSidebar} gitChangeCount={gitChangeCount} />
         {sidebarOpen === 'files' && <FileExplorerSidebar projectPath={projectPath} onFileOpen={handleFileOpen} />}
         {sidebarOpen === 'git' && <GitSidebar projectPath={projectPath} onFileClick={handleFileClick} commitMessageProvider={commitMessageProvider} />}
-        {activeView === 'terminal-mode' ? (
-          <div className="main-content" style={{ display: 'flex' }}>
-            <TerminalModeView projectPath={projectPath} />
-          </div>
-        ) : (
-          <div className="main-content" ref={mainContentRef}>
+        <div className="tm-views-wrapper">
+          {activeView === 'terminal-mode' && (
+            <TerminalModeView projectPath={projectPath} aiProvider={aiProvider} />
+          )}
+          <div className="main-content" ref={mainContentRef} style={activeView === 'terminal-mode' ? { display: 'none' } : undefined}>
             {allPanels.map((panel, i) => (
               <div key={panel} style={{ display: 'contents' }}>
                 {renderPanel(panel)}
@@ -1369,7 +1375,7 @@ export default function App() {
               </div>
             ))}
           </div>
-        )}
+        </div>
       </div>
 
       {isDragging && <div className="drag-overlay" />}

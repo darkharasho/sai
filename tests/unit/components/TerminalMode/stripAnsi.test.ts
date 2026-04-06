@@ -29,4 +29,20 @@ describe('stripAnsi', () => {
   it('strips multiple sequences in one string', () => {
     expect(stripAnsi('\x1b[32mgreen\x1b[0m \x1b[1mbold\x1b[0m')).toBe('green bold');
   });
+
+  it('strips bracketed paste mode sequences', () => {
+    expect(stripAnsi('\x1b[?2004htext\x1b[?2004l')).toBe('text');
+  });
+
+  it('strips carriage returns', () => {
+    expect(stripAnsi('line1\r\nline2\r\n')).toBe('line1\nline2\n');
+  });
+
+  it('strips OSC sequences with ST terminator', () => {
+    expect(stripAnsi('\x1b]0;title\x1b\\text')).toBe('text');
+  });
+
+  it('preserves exit markers through ANSI stripping', () => {
+    expect(stripAnsi('\x1b[?2004l__EXIT:0__\r\n')).toBe('__EXIT:0__\n');
+  });
 });

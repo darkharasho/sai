@@ -122,6 +122,50 @@ export function registerTerminalHandlers(win: BrowserWindow) {
     return term.process;
   });
 
+  ipcMain.handle('terminal:getCwd', (_event, id: number) => {
+    const term = allTerminals.get(id);
+    if (!term) return null;
+    if (process.platform === 'linux') {
+      try {
+        const fs = require('fs') as typeof import('fs');
+        return fs.readlinkSync(`/proc/${term.pid}/cwd`);
+      } catch {
+        return null;
+      }
+    }
+    // macOS: node-pty doesn't expose cwd directly; could use lsof but skip for now
+    return null;
+  });
+
+  ipcMain.handle('terminal:tabComplete', async (_event, text: string, cwd: string) => {
+    const lastWord = text.split(/\s+/).pop() || '';
+    const { execFile } = require('child_process') as typeof import('child_process');
+    const fs = require('fs') as typeof import('fs');
+    const path = require('path') as typeof import('path');
+    const isFirstWord = !text.includes(' ');
+    // compgen -c for commands (first word), -f for files, -d for dirs
+    const flags = isFirstWord ? '-c -f' : '-f -d';
+    const escaped = lastWord ? lastWord.replace(/'/g, "'\\''") : '';
+    const cmd = escaped
+      ? `compgen ${flags} -- '${escaped}' 2>/dev/null | head -50`
+      : `compgen ${flags} 2>/dev/null | head -50`;
+    return new Promise<string[]>((resolve) => {
+      execFile('bash', ['-c', cmd], { cwd, timeout: 2000 }, (err, stdout) => {
+        if (err || !stdout.trim()) { resolve([]); return; }
+        const raw = [...new Set(stdout.trim().split('\n').filter(Boolean))];
+        // Append / to directories
+        const results = raw.map(entry => {
+          const absPath = path.isAbsolute(entry) ? entry : path.resolve(cwd, entry);
+          try {
+            if (fs.statSync(absPath).isDirectory()) return entry + '/';
+          } catch { /* not a path — command name etc */ }
+          return entry;
+        });
+        resolve(results);
+      });
+    });
+  });
+
   ipcMain.on('terminal:write', (_event, id: number, data: string) => {
     allTerminals.get(id)?.write(data);
     // Update activity for owning workspace

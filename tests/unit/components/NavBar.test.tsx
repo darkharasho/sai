@@ -125,9 +125,9 @@ describe('NavBar', () => {
     expect(onToggle).toHaveBeenCalledWith('terminal-mode');
   });
 
-  it('adds active class to terminal mode button when activeSidebar is "terminal-mode"', () => {
+  it('adds active class to terminal mode button when activeTerminal is true', () => {
     const { container } = render(
-      <NavBar activeSidebar="terminal-mode" onToggle={vi.fn()} />
+      <NavBar activeSidebar={null} activeTerminal={true} onToggle={vi.fn()} />
     );
     const btn = getNavButton(container, 'Terminal Mode');
     expect(btn.className).toContain('active');

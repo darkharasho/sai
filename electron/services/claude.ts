@@ -110,6 +110,7 @@ function ensureProcess(
   if (ws.claude.process) {
     ws.claude.process.kill();
     ws.claude.process = null;
+  } else {
   }
 
   const args = buildArgs(permMode, effort, model);
@@ -131,7 +132,9 @@ function ensureProcess(
 
   proc.stdout?.on('data', (data: Buffer) => {
     // Ignore if this process has been replaced
-    if (ws.claude.process !== proc) return;
+    if (ws.claude.process !== proc) {
+      return;
+    }
 
     ws.claude.buffer += data.toString();
     const lines = ws.claude.buffer.split('\n');
@@ -141,7 +144,6 @@ function ensureProcess(
       if (!line.trim()) continue;
       try {
         const msg = JSON.parse(line);
-
         // Capture session ID and forward to renderer
         if (msg.session_id && !ws.claude.sessionId) {
           ws.claude.sessionId = msg.session_id;
@@ -259,7 +261,7 @@ function ensureProcess(
     }
   });
 
-  proc.on('exit', () => {
+  proc.on('exit', (code, signal) => {
     if (ws.claude.process !== proc) return;
 
     // Flush remaining buffer
