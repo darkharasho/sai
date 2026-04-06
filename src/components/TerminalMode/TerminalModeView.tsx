@@ -187,6 +187,8 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
   const segmenterRef = useRef<BlockSegmenter>(new BlockSegmenter());
   const hiddenXtermRef = useRef<HiddenXtermHandle>(null);
   const aiSuggestedCommands = useRef<Set<string>>(new Set());
+  const altScreenRef = useRef(false);
+  altScreenRef.current = altScreenVisible;
 
   // Update cwd when projectPath changes (workspace switch)
   useEffect(() => {
@@ -631,9 +633,60 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
     });
   }, []);
 
+  // When alt-screen is active, forward all keyboard input directly to the PTY
+  useEffect(() => {
+    const handleAltScreenKey = (e: KeyboardEvent) => {
+      if (!altScreenRef.current) return;
+      const termId = getActiveTerminalId() ?? fallbackPtyRef.current;
+      if (termId === null) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Map key events to terminal sequences
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+        window.sai.terminalWrite(termId, e.key);
+      } else if (e.ctrlKey && e.key.length === 1) {
+        // Ctrl+letter → control character (e.g. Ctrl+C → \x03)
+        const code = e.key.toLowerCase().charCodeAt(0) - 96;
+        if (code > 0 && code < 27) {
+          window.sai.terminalWrite(termId, String.fromCharCode(code));
+        }
+      } else {
+        // Special keys
+        const keyMap: Record<string, string> = {
+          Enter: '\r',
+          Backspace: '\x7f',
+          Tab: '\t',
+          Escape: '\x1b',
+          ArrowUp: '\x1b[A',
+          ArrowDown: '\x1b[B',
+          ArrowRight: '\x1b[C',
+          ArrowLeft: '\x1b[D',
+          Home: '\x1b[H',
+          End: '\x1b[F',
+          Delete: '\x1b[3~',
+          PageUp: '\x1b[5~',
+          PageDown: '\x1b[6~',
+          F1: '\x1bOP', F2: '\x1bOQ', F3: '\x1bOR', F4: '\x1bOS',
+          F5: '\x1b[15~', F6: '\x1b[17~', F7: '\x1b[18~', F8: '\x1b[19~',
+          F9: '\x1b[20~', F10: '\x1b[21~', F11: '\x1b[23~', F12: '\x1b[24~',
+        };
+        const seq = keyMap[e.key];
+        if (seq) window.sai.terminalWrite(termId, seq);
+      }
+    };
+
+    window.addEventListener('keydown', handleAltScreenKey, true);
+    return () => window.removeEventListener('keydown', handleAltScreenKey, true);
+  }, []);
+
   // Ctrl+C = kill, Ctrl+Shift+C = copy, Ctrl+Shift+V = paste
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // When alt-screen is active (htop, vim, etc.), handled by alt-screen handler
+      if (altScreenRef.current) return;
+
       const ctrlOrMeta = e.ctrlKey || e.metaKey;
       if (!ctrlOrMeta) return;
 
