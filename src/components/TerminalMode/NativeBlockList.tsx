@@ -127,7 +127,7 @@ export default function NativeBlockList({
           const collapsed = isCollapsed(item);
           const id = item.block.id;
           return (
-            <div key={id} style={i > 0 ? { marginTop: 6 } : undefined}>
+            <div key={id} style={undefined}>
               <NativeCommandBlock
                 block={item.block}
                 collapsed={collapsed}
@@ -144,7 +144,7 @@ export default function NativeBlockList({
 
         if (item.type === 'ai') {
           return (
-            <div key={item.id} style={i > 0 ? { marginTop: 6 } : undefined}>
+            <div key={item.id} style={undefined}>
               <InlineAIBlock
                 question={item.question}
                 content={item.content}
@@ -160,7 +160,7 @@ export default function NativeBlockList({
 
         if (item.type === 'approval') {
           return (
-            <div key={item.block.id} style={i > 0 ? { marginTop: 6 } : undefined}>
+            <div key={item.block.id} style={undefined}>
               <ApprovalBlock
                 block={item.block}
                 onApprove={onApprove}
@@ -174,7 +174,7 @@ export default function NativeBlockList({
         if (item.type === 'tool-approval') {
           const block = item.block;
           return (
-            <div key={block.id} style={i > 0 ? { marginTop: 6 } : undefined}>
+            <div key={block.id} style={undefined}>
               <div className={`tm-tool-approval ${block.status !== 'pending' ? 'tm-tool-resolved' : ''}`}>
                 <div className="tm-tool-approval-header">
                   <span className="tm-tool-approval-label">
@@ -208,7 +208,7 @@ export default function NativeBlockList({
         .tn-block-list {
           flex: 1;
           min-height: 0;
-          padding: 16px 15% 0;
+          padding: 14px 15% 0;
           overflow-y: auto;
           display: flex;
           flex-direction: column;

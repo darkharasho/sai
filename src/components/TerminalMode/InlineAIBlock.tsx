@@ -38,23 +38,16 @@ export default function InlineAIBlock({
 
   return (
     <div className="tn-ai-block">
+      {/* Header with question inline */}
       <div className="tn-ai-header">
         <span className="tn-ai-icon">⬡</span>
         <span className="tn-ai-label">{providerLabel}</span>
         {streaming && <span className="tn-ai-streaming" />}
-        {onCopy && content && (
-          <button
-            className="tn-ai-copy"
-            onClick={() => onCopy(content)}
-            title="Copy"
-          >
-            Copy
-          </button>
-        )}
+        <span className="tn-ai-sep">·</span>
+        <span className="tn-ai-question">{question}</span>
       </div>
 
-      <div className="tn-ai-question">{question}</div>
-
+      {/* Response content */}
       {content && (
         <div className="tn-ai-content">{content}</div>
       )}
@@ -71,6 +64,7 @@ export default function InlineAIBlock({
         </div>
       )}
 
+      {/* Suggested commands */}
       {suggestedCommands && suggestedCommands.length > 0 && (
         <div className="tn-ai-commands">
           {suggestedCommands.map((cmd, i) => {
@@ -78,154 +72,160 @@ export default function InlineAIBlock({
             return (
               <div key={i} className="tn-ai-cmd-row">
                 <code>{cmd}</code>
-                <button
-                  className="tn-ai-cmd-run"
-                  data-action="run"
-                  onClick={() => onRunCommand(cmd)}
-                >
-                  Run
-                </button>
-                <button
-                  className="tn-ai-cmd-skip"
-                  data-action="skip"
-                  onClick={() => handleSkip(i)}
-                >
-                  Skip
-                </button>
+                <div className="tn-ai-cmd-actions">
+                  <span
+                    className="tn-ai-cmd-run"
+                    data-action="run"
+                    onClick={() => onRunCommand(cmd)}
+                  >
+                    ⏎ Run
+                  </span>
+                  <span
+                    className="tn-ai-cmd-skip"
+                    data-action="skip"
+                    onClick={() => handleSkip(i)}
+                  >
+                    Skip
+                  </span>
+                </div>
               </div>
             );
           })}
         </div>
       )}
 
-      <style>{`
-        .tn-ai-block {
-          background: #13111e;
-          border: 1px solid #2d2454;
-          border-radius: 4px;
-          overflow: hidden;
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 12px;
-        }
-        .tn-ai-header {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          padding: 6px 10px;
-          border-bottom: 1px solid #2d2454;
-        }
-        .tn-ai-icon {
-          color: #8b5cf6;
-          font-size: 14px;
-          line-height: 1;
-        }
-        .tn-ai-label {
-          color: #8b5cf6;
-          font-size: 11px;
-          font-weight: 500;
-        }
-        .tn-ai-streaming {
-          width: 7px;
-          height: 7px;
-          border-radius: 50%;
-          background: #8b5cf6;
-          animation: tn-ai-pulse 1.2s ease-in-out infinite;
-          flex-shrink: 0;
-        }
-        @keyframes tn-ai-pulse {
-          0%, 100% { opacity: 0.35; }
-          50% { opacity: 1; }
-        }
-        .tn-ai-copy {
-          margin-left: auto;
-          background: none;
-          border: none;
-          color: #8b5cf6;
-          font-size: 10px;
-          cursor: pointer;
-          padding: 2px 6px;
-        }
-        .tn-ai-question {
-          padding: 8px 12px 4px;
-          color: #a89ec9;
-          font-style: italic;
-          font-size: 12px;
-          line-height: 1.5;
-        }
-        .tn-ai-content {
-          padding: 4px 12px 10px;
-          color: #e2dff0;
-          font-size: 12px;
-          line-height: 1.6;
-          white-space: pre-wrap;
-          word-break: break-word;
-        }
-        .tn-ai-entries {
-          padding: 4px 12px 10px;
-        }
-        .tn-ai-entry-text {
-          color: #e2dff0;
-          font-size: 12px;
-          line-height: 1.6;
-          margin-bottom: 4px;
-        }
-        .tn-ai-entry-tool {
-          color: #8b5cf6;
-          font-size: 11px;
-          margin-bottom: 4px;
-        }
-        .tn-ai-commands {
-          padding: 4px 12px 10px;
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-        }
-        .tn-ai-cmd-row {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          background: #0a0d0f;
-          padding: 5px 8px;
-          border-radius: 4px;
-        }
-        .tn-ai-cmd-row code {
-          flex: 1;
-          color: #e2dff0;
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 11px;
-          white-space: pre;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-        .tn-ai-cmd-run {
-          background: rgba(34, 197, 94, 0.15);
-          color: #22c55e;
-          border: 1px solid rgba(34, 197, 94, 0.3);
-          border-radius: 3px;
-          padding: 2px 10px;
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 10px;
-          cursor: pointer;
-          flex-shrink: 0;
-        }
-        .tn-ai-cmd-run:hover {
-          background: rgba(34, 197, 94, 0.25);
-        }
-        .tn-ai-cmd-skip {
-          background: rgba(107, 114, 128, 0.15);
-          color: #6b7280;
-          border: 1px solid rgba(107, 114, 128, 0.3);
-          border-radius: 3px;
-          padding: 2px 10px;
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 10px;
-          cursor: pointer;
-          flex-shrink: 0;
-        }
-        .tn-ai-cmd-skip:hover {
-          background: rgba(107, 114, 128, 0.25);
-        }
-      `}</style>
+      <style>{styles}</style>
     </div>
   );
 }
+
+const styles = `
+  .tn-ai-block {
+    background: #13111e;
+    border-radius: 5px;
+    padding: 10px 11px;
+    border: 1px solid #2d2454;
+    margin-bottom: 10px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 12px;
+  }
+  .tn-ai-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .tn-ai-icon {
+    color: #8b5cf6;
+    font-size: 12px;
+    line-height: 1;
+  }
+  .tn-ai-label {
+    color: #8b5cf6;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .tn-ai-streaming {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #8b5cf6;
+    animation: tn-ai-pulse 1.2s ease-in-out infinite;
+    flex-shrink: 0;
+  }
+  @keyframes tn-ai-pulse {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 1; }
+  }
+  .tn-ai-sep {
+    color: #4b5563;
+    font-size: 11px;
+  }
+  .tn-ai-question {
+    color: #7c7f85;
+    font-size: 11px;
+    font-style: italic;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tn-ai-content {
+    color: #b4b8c0;
+    font-size: 11.5px;
+    line-height: 1.6;
+    padding-left: 20px;
+    margin-bottom: 10px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .tn-ai-content code {
+    background: #1a1e24;
+    padding: 1px 4px;
+    border-radius: 2px;
+    color: #e5e7eb;
+    font-size: 11px;
+  }
+  .tn-ai-entries {
+    padding-left: 20px;
+    margin-bottom: 10px;
+  }
+  .tn-ai-entry-text {
+    color: #b4b8c0;
+    font-size: 11.5px;
+    line-height: 1.6;
+    margin-bottom: 4px;
+  }
+  .tn-ai-entry-tool {
+    color: #8b5cf6;
+    font-size: 11px;
+    margin-bottom: 4px;
+  }
+  .tn-ai-commands {
+    margin-left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .tn-ai-cmd-row {
+    background: #0a0d0f;
+    border-radius: 4px;
+    padding: 6px 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border: 1px solid #1e2328;
+  }
+  .tn-ai-cmd-row code {
+    color: #e5e7eb;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 11px;
+    white-space: pre;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+  }
+  .tn-ai-cmd-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .tn-ai-cmd-run {
+    color: #22c55e;
+    font-size: 10px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: rgba(34, 197, 94, 0.06);
+  }
+  .tn-ai-cmd-run:hover {
+    background: rgba(34, 197, 94, 0.15);
+  }
+  .tn-ai-cmd-skip {
+    color: #6b7280;
+    font-size: 10px;
+    cursor: pointer;
+  }
+  .tn-ai-cmd-skip:hover {
+    color: #9ca3af;
+  }
+`;

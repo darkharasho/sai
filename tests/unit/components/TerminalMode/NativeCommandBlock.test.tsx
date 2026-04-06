@@ -49,6 +49,8 @@ describe('NativeCommandBlock', () => {
       <NativeCommandBlock block={baseBlock} collapsed={true} onCopy={vi.fn()} onAskAI={vi.fn()} onRerun={vi.fn()} />
     );
     expect(container.textContent).not.toContain('built in 2.1s');
+    // Collapsed blocks show ▶ chevron
+    expect(container.textContent).toContain('▶');
   });
 
   it('uses amber prompt color for remote blocks', () => {
@@ -56,9 +58,8 @@ describe('NativeCommandBlock', () => {
     const { container } = render(
       <NativeCommandBlock block={remoteBlock} onCopy={vi.fn()} onAskAI={vi.fn()} onRerun={vi.fn()} />
     );
-    const prompt = container.querySelector('.tn-prompt') as HTMLElement;
-    // jsdom normalises hex colours to rgb; check the data attribute which preserves the original hex
-    expect(prompt.dataset.color).toContain('#f59e0b');
+    const user = container.querySelector('.tn-user') as HTMLElement;
+    expect(user.dataset.color).toContain('#f59e0b');
   });
 
   it('shows "via AI" label when aiSuggested is true', () => {
