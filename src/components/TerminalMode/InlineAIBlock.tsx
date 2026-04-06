@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Play, Copy } from 'lucide-react';
 import type { AIEntry } from './types';
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -37,13 +38,14 @@ export default function InlineAIBlock({
   onRunCommand,
   onCopy,
 }: InlineAIBlockProps) {
-  const [dismissedIndices, setDismissedIndices] = useState<Set<number>>(new Set());
-
   const providerLabel = PROVIDER_LABELS[aiProvider] ?? 'Claude';
 
-  function handleSkip(index: number) {
-    setDismissedIndices(prev => new Set([...prev, index]));
-  }
+  const runnableCommands = new Set(suggestedCommands ?? []);
+
+  const handleCopyCode = useCallback((text: string) => {
+    if (onCopy) onCopy(text);
+    else navigator.clipboard.writeText(text);
+  }, [onCopy]);
 
   return (
     <div className="tn-ai-block">
@@ -64,7 +66,43 @@ export default function InlineAIBlock({
       {/* Response content — rendered as markdown */}
       {content && (
         <div className="tn-ai-content">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              pre({ children }) {
+                // Extract text content from the code element inside pre
+                const codeEl = children as React.ReactElement;
+                const codeText = extractText(codeEl);
+                const isRunnable = runnableCommands.has(codeText.trim());
+
+                return (
+                  <div className="tn-ai-code-wrapper">
+                    <pre>{children}</pre>
+                    <div className="tn-ai-code-actions">
+                      {isRunnable && (
+                        <span
+                          className="tn-ai-code-btn tn-ai-code-run"
+                          title="Run"
+                          onClick={() => onRunCommand(codeText.trim())}
+                        >
+                          <Play size={10} />
+                        </span>
+                      )}
+                      <span
+                        className="tn-ai-code-btn tn-ai-code-copy"
+                        title="Copy"
+                        onClick={() => handleCopyCode(codeText)}
+                      >
+                        <Copy size={10} />
+                      </span>
+                    </div>
+                  </div>
+                );
+              },
+            }}
+          >
+            {content}
+          </ReactMarkdown>
         </div>
       )}
 
@@ -80,39 +118,21 @@ export default function InlineAIBlock({
         </div>
       )}
 
-      {/* Suggested commands */}
-      {suggestedCommands && suggestedCommands.length > 0 && (
-        <div className="tn-ai-commands">
-          {suggestedCommands.map((cmd, i) => {
-            if (dismissedIndices.has(i)) return null;
-            return (
-              <div key={i} className="tn-ai-cmd-row">
-                <code>{cmd}</code>
-                <div className="tn-ai-cmd-actions">
-                  <span
-                    className="tn-ai-cmd-run"
-                    data-action="run"
-                    onClick={() => onRunCommand(cmd)}
-                  >
-                    ⏎ Run
-                  </span>
-                  <span
-                    className="tn-ai-cmd-skip"
-                    data-action="skip"
-                    onClick={() => handleSkip(i)}
-                  >
-                    Skip
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
       <style>{styles}</style>
     </div>
   );
+}
+
+/** Recursively extract text from React elements */
+function extractText(node: React.ReactNode): string {
+  if (typeof node === 'string') return node;
+  if (typeof node === 'number') return String(node);
+  if (!node) return '';
+  if (Array.isArray(node)) return node.map(extractText).join('');
+  if (typeof node === 'object' && 'props' in node) {
+    return extractText(node.props.children);
+  }
+  return '';
 }
 
 const styles = `
@@ -208,19 +228,60 @@ const styles = `
     color: #e5e7eb;
     font-size: 11px;
   }
-  .tn-ai-content pre {
+  .tn-ai-code-wrapper {
+    position: relative;
+  }
+  .tn-ai-code-wrapper pre {
     background: #0a0d0f;
     border: 1px solid #1e2328;
     border-radius: 4px;
     padding: 8px 10px;
+    padding-right: 56px;
     margin: 6px 0;
     overflow-x: auto;
   }
-  .tn-ai-content pre code {
+  .tn-ai-code-wrapper pre code {
     background: none;
     padding: 0;
     font-size: 11px;
-    color: #b4b8c0;
+    color: #e5e7eb;
+  }
+  .tn-ai-code-actions {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .tn-ai-code-wrapper:hover .tn-ai-code-actions {
+    opacity: 1;
+  }
+  .tn-ai-code-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .tn-ai-code-run {
+    color: #22c55e;
+    background: rgba(34, 197, 94, 0.1);
+  }
+  .tn-ai-code-run:hover {
+    background: rgba(34, 197, 94, 0.25);
+  }
+  .tn-ai-code-copy {
+    color: #6b7280;
+    background: rgba(107, 114, 128, 0.1);
+  }
+  .tn-ai-code-copy:hover {
+    background: rgba(107, 114, 128, 0.25);
+    color: #9ca3af;
   }
   .tn-ai-content ul, .tn-ai-content ol {
     margin: 4px 0;
@@ -250,53 +311,5 @@ const styles = `
     color: #8b5cf6;
     font-size: 11px;
     margin-bottom: 4px;
-  }
-  .tn-ai-commands {
-    margin-left: 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .tn-ai-cmd-row {
-    background: #0a0d0f;
-    border-radius: 4px;
-    padding: 6px 10px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border: 1px solid #1e2328;
-  }
-  .tn-ai-cmd-row code {
-    color: #e5e7eb;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    font-size: 11px;
-    white-space: pre;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    flex: 1;
-  }
-  .tn-ai-cmd-actions {
-    display: flex;
-    gap: 8px;
-    flex-shrink: 0;
-  }
-  .tn-ai-cmd-run {
-    color: #22c55e;
-    font-size: 10px;
-    cursor: pointer;
-    padding: 2px 6px;
-    border-radius: 3px;
-    background: rgba(34, 197, 94, 0.06);
-  }
-  .tn-ai-cmd-run:hover {
-    background: rgba(34, 197, 94, 0.15);
-  }
-  .tn-ai-cmd-skip {
-    color: #6b7280;
-    font-size: 10px;
-    cursor: pointer;
-  }
-  .tn-ai-cmd-skip:hover {
-    color: #9ca3af;
   }
 `;

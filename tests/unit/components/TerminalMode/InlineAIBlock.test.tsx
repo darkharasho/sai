@@ -10,38 +10,39 @@ describe('InlineAIBlock', () => {
     expect(container.textContent).toContain('is this healthy?');
   });
 
-  it('renders the AI response content', () => {
+  it('renders the AI response content as markdown', () => {
     const { container } = render(
-      <InlineAIBlock question="test" content="The server is fine." onRunCommand={vi.fn()} />
+      <InlineAIBlock question="test" content="The **server** is fine." onRunCommand={vi.fn()} />
     );
     expect(container.textContent).toContain('The server is fine.');
+    // Bold should be rendered
+    expect(container.querySelector('strong')?.textContent).toBe('server');
   });
 
-  it('renders suggested commands with Run/Skip buttons', () => {
+  it('renders code blocks with copy button', () => {
     const { container } = render(
       <InlineAIBlock
         question="test"
-        content="Try this:"
-        suggestedCommands={['tail -20 /var/log/syslog', 'systemctl restart nginx']}
+        content={'Try this:\n```bash\necho hello\n```'}
         onRunCommand={vi.fn()}
       />
     );
-    expect(container.textContent).toContain('tail -20 /var/log/syslog');
-    expect(container.textContent).toContain('Run');
-    expect(container.textContent).toContain('Skip');
+    expect(container.querySelector('.tn-ai-code-wrapper')).toBeTruthy();
+    expect(container.querySelector('.tn-ai-code-copy')).toBeTruthy();
   });
 
-  it('calls onRunCommand when Run is clicked', () => {
+  it('shows run button on runnable code blocks', () => {
     const onRun = vi.fn();
     const { container } = render(
       <InlineAIBlock
         question="test"
-        content="Try:"
+        content={'Try:\n```bash\necho hello\n```'}
         suggestedCommands={['echo hello']}
         onRunCommand={onRun}
       />
     );
-    const runBtn = container.querySelector('[data-action="run"]') as HTMLElement;
+    const runBtn = container.querySelector('.tn-ai-code-run') as HTMLElement;
+    expect(runBtn).toBeTruthy();
     fireEvent.click(runBtn);
     expect(onRun).toHaveBeenCalledWith('echo hello');
   });
