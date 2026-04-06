@@ -187,6 +187,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
   const segmenterRef = useRef<BlockSegmenter>(new BlockSegmenter());
   const hiddenXtermRef = useRef<HiddenXtermHandle>(null);
   const aiSuggestedCommands = useRef<Set<string>>(new Set());
+  const pendingCommandRef = useRef<string | null>(null);
   const altScreenRef = useRef(false);
   altScreenRef.current = altScreenVisible;
 
@@ -212,7 +213,20 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
       if (cancelled) return;
       const isSuggested = aiSuggestedCommands.current.has(block.command);
       if (isSuggested) aiSuggestedCommands.current.delete(block.command);
-      setDisplayItems(prev => [...prev, { type: 'command', block, aiSuggested: isSuggested }]);
+      const pending = pendingCommandRef.current;
+      pendingCommandRef.current = null;
+      setDisplayItems(prev => {
+        // Replace the pending block if it exists
+        if (pending) {
+          const idx = prev.findIndex(item => item.type === 'command' && item.block.id === 'pending');
+          if (idx !== -1) {
+            const next = [...prev];
+            next[idx] = { type: 'command', block, aiSuggested: isSuggested };
+            return next;
+          }
+        }
+        return [...prev, { type: 'command', block, aiSuggested: isSuggested }];
+      });
       const termId = getActiveTerminalId() ?? fallbackPtyRef.current;
       if (termId !== null) refreshCwd(termId);
     });
@@ -269,6 +283,18 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
 
   const handleSubmit = useCallback((value: string) => {
     if (inputMode === 'shell') {
+      // Add a pending block immediately so the user sees feedback
+      const pendingBlock = {
+        id: 'pending',
+        command: value,
+        output: '',
+        promptText: '',
+        startTime: Date.now(),
+        duration: 0,
+        isRemote: false,
+      };
+      pendingCommandRef.current = value;
+      setDisplayItems(prev => [...prev, { type: 'command' as const, block: pendingBlock, active: true }]);
       executeCommand(value);
       setEditValue(undefined);
     } else {

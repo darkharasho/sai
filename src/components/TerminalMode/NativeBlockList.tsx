@@ -7,7 +7,7 @@ import type { SegmentedBlock } from './BlockSegmenter';
 import type { ApprovalBlock as ApprovalBlockType, ToolApprovalBlock as ToolApprovalBlockType } from './types';
 
 export type DisplayItem =
-  | { type: 'command'; block: SegmentedBlock; aiSuggested?: boolean }
+  | { type: 'command'; block: SegmentedBlock; aiSuggested?: boolean; active?: boolean }
   | { type: 'ai'; id: string; question: string; content: string; suggestedCommands: string[]; streaming: boolean; aiProvider?: 'claude' | 'codex' | 'gemini'; duration?: number }
   | { type: 'approval'; block: ApprovalBlockType }
   | { type: 'tool-approval'; block: ToolApprovalBlockType };
@@ -83,7 +83,7 @@ export default function NativeBlockList({
 
   function isCollapsed(item: DisplayItem & { type: 'command' }): boolean {
     const id = item.block.id;
-    const isActive = id === activeBlockId;
+    const isActive = item.active || id === activeBlockId;
 
     // Active block is never collapsed
     if (isActive) return false;
@@ -134,7 +134,7 @@ export default function NativeBlockList({
                 block={item.block}
                 collapsed={collapsed}
                 onToggleCollapse={() => handleToggleCollapse(id, collapsed)}
-                active={id === activeBlockId}
+                active={item.active || id === activeBlockId}
                 aiSuggested={item.aiSuggested}
                 cwd={cwd}
                 onCopy={onCopy}

@@ -85,8 +85,11 @@ export default function NativeCommandBlock({
           {aiSuggested && <span className="tn-via-ai">via AI</span>}
         </div>
         <div className="tn-header-right">
-          {active && <span className="tn-active-dot" />}
-          <span className="tn-duration-dim">{formatDuration(block.duration)}</span>
+          {active ? (
+            <span className="tn-active-dot" />
+          ) : (
+            <span className="tn-duration-dim">{formatDuration(block.duration)}</span>
+          )}
         </div>
       </div>
 
