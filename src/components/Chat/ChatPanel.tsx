@@ -1,18 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Dot, Minus, Plus, Asterisk, SunDim, SunMedium, Sun, ChevronDown, LocateFixed } from 'lucide-react';
-
-const THINKING_WORDS = [
-  'Thinking', 'Pondering', 'Ruminating', 'Cogitating', 'Deliberating',
-  'Musing', 'Contemplating', 'Considering', 'Reflecting', 'Computing',
-  'Evaluating', 'Reasoning', 'Noodling', 'Percolating', 'Mulling',
-  'Scheming', 'Plotting', 'Hatching', 'Crafting', 'Concocting',
-  'Formulating', 'Devising', 'Imagining', 'Envisioning', 'Ideating',
-  'Fathoming', 'Deciphering', 'Unraveling', 'Exploring', 'Parsing',
-  'Dissecting', 'Elucidating', 'Illuminating', 'Flibbertigibbeting',
-  'Calculating', 'Solving',
-];
-
-const SPINNER_ICONS = [Dot, Minus, Plus, Asterisk, SunDim, SunMedium, Sun];
+import { ChevronDown, LocateFixed } from 'lucide-react';
+import ThinkingAnimation from '../ThinkingAnimation';
 
 function ContextMeter({ used, total }: { used: number; total: number }) {
   const pct = Math.min((used / total) * 100, 100);
@@ -42,57 +30,6 @@ function ContextMeter({ used, total }: { used: number; total: number }) {
   );
 }
 
-function ThinkingAnimation({ hasContent }: { hasContent: boolean }) {
-  const [wordIndex, setWordIndex] = useState(() => Math.floor(Math.random() * THINKING_WORDS.length));
-  const [charIndex, setCharIndex] = useState(0);
-  const [phase, setPhase] = useState<'typing' | 'pause' | 'erasing'>('typing');
-  const [iconIndex, setIconIndex] = useState(0);
-
-  const word = THINKING_WORDS[wordIndex];
-  const Icon = SPINNER_ICONS[iconIndex % SPINNER_ICONS.length];
-
-  // Cycle icons
-  useEffect(() => {
-    const interval = setInterval(() => setIconIndex(i => i + 1), 150);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    let timeout: ReturnType<typeof setTimeout>;
-
-    if (phase === 'typing') {
-      if (charIndex < word.length) {
-        timeout = setTimeout(() => setCharIndex(c => c + 1), 40 + Math.random() * 30);
-      } else {
-        timeout = setTimeout(() => setPhase('pause'), 1200 + Math.random() * 600);
-      }
-    } else if (phase === 'pause') {
-      timeout = setTimeout(() => setPhase('erasing'), 100);
-    } else if (phase === 'erasing') {
-      if (charIndex > 0) {
-        timeout = setTimeout(() => setCharIndex(c => c - 1), 20);
-      } else {
-        setWordIndex(i => (i + 1 + Math.floor(Math.random() * 3)) % THINKING_WORDS.length);
-        setPhase('typing');
-      }
-    }
-
-    return () => clearTimeout(timeout);
-  }, [charIndex, phase, word.length]);
-
-  const displayText = word.slice(0, charIndex);
-
-  return (
-    <div className="thinking-animation">
-      <Icon size={16} className="thinking-icon" />
-      <span className="thinking-text">
-        {displayText}
-        <span className="thinking-cursor">|</span>
-        ...
-      </span>
-    </div>
-  );
-}
 function CodexThinkingAnimation() {
   return (
     <div className="codex-thinking">
@@ -1087,7 +1024,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           ? <GeminiThinkingAnimation loadingPhrases={geminiLoadingPhrases} />
           : aiProvider === 'codex'
           ? <CodexThinkingAnimation />
-          : <ThinkingAnimation hasContent={messages[messages.length - 1]?.role === 'assistant'} />
+          : <ThinkingAnimation />
         )}
         <div ref={messagesEndRef} />
       </div>
