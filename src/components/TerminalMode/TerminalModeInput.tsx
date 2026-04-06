@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
-import { CornerDownLeft, ShieldCheck, ShieldOff, ChevronsLeftRight } from 'lucide-react';
 import type { InputMode } from './types';
+
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
 
 export interface TerminalModeInputHandle {
   paste: (text: string) => void;
@@ -143,203 +144,138 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
   };
 
   const isAI = mode === 'ai';
+  const shortCwd = cwd.replace(/^\/var\/home\/[^/]+/, '~').replace(/^\/home\/[^/]+/, '~');
+  const modKey = isMac ? '\u2318' : 'Ctrl+';
 
   return (
-    <div className={`tm-input-wrapper ${fullWidth ? 'tm-input-full-width' : ''}`}>
-      <div className={`tm-input-box ${isAI ? 'tm-input-box-ai' : ''}`}>
-        <div className="tm-input-cwd">{cwd.replace(/^\/var\/home\/[^/]+/, '~').replace(/^\/home\/[^/]+/, '~')}</div>
-        <div className="tm-input-row">
-          <span className={`tm-input-prompt ${isAI ? 'tm-input-prompt-ai' : ''}`}>
-            {isAI ? '\u2726' : '$'}
-          </span>
+    <div className={`tn-input-wrapper ${fullWidth ? 'tn-input-full-width' : ''}`}>
+      <div className={`tn-input-box ${isAI ? 'tn-input-box-ai' : ''}`}>
+        <div className="tn-input-row">
+          {isAI ? (
+            <span className="tn-input-prompt-ai">{'\u2726'}</span>
+          ) : (
+            <>
+              <span className="tn-input-user">{shortCwd}</span>
+              <span className="tn-input-dollar">$</span>
+            </>
+          )}
           <input
             ref={inputRef}
-            className="tm-input-field"
+            className="tn-input-field"
             value={value}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
-            placeholder={isAI ? 'Ask AI...' : 'Enter command...'}
+            placeholder={isAI ? 'Ask AI...' : ''}
             disabled={disabled}
             spellCheck={false}
             autoComplete="off"
           />
-        </div>
-        <div className="tm-input-toolbar">
-          <div className="tm-input-toolbar-left">
-            <button
-              className={`tm-perm-btn ${permissionMode === 'bypass' ? 'tm-perm-bypass' : ''}`}
-              onClick={() => onPermissionChange(permissionMode === 'default' ? 'bypass' : 'default')}
-              title={permissionMode === 'default' ? 'Default permissions — tools need approval' : 'Bypass — tools auto-approved'}
-            >
-              {permissionMode === 'default'
-                ? <><ShieldCheck size={12} /> <span>Default</span></>
-                : <><ShieldOff size={12} /> <span>Bypass</span></>
-              }
-            </button>
-            <button
-              className={`tm-perm-btn ${fullWidth ? 'tm-width-active' : ''}`}
-              onClick={onToggleFullWidth}
-              title={fullWidth ? 'Centered layout' : 'Full width'}
-            >
-              <ChevronsLeftRight size={12} />
-            </button>
-          </div>
-          <div className="tm-input-toolbar-right">
-            <span className="tm-input-hint">
-              {'\u21E7'}tab {'\u2192'} {isAI
-                ? <span>$ shell</span>
-                : <span className="tm-input-hint-ai">{'\u2726'} ai</span>}
-            </span>
-            <span className="tm-input-divider">{'\u2502'}</span>
-            <span className="tm-icon" onClick={() => value.trim() && onSubmit(value.trim())}>
-              <CornerDownLeft size={14} color={isAI ? '#a371f7' : 'var(--accent)'} />
-            </span>
+          <div className="tn-input-hint">
+            <span className="tn-input-kbd">{modKey}K</span>
+            <span className="tn-input-hint-label">{isAI ? 'Shell' : 'AI'}</span>
           </div>
         </div>
       </div>
 
       <style>{`
-        .tm-input-wrapper {
-          padding: 12px 15% 14px;
+        .tn-input-wrapper {
+          padding: 8px 15% 10px;
           flex-shrink: 0;
           transition: padding 0.3s ease;
         }
-        .tm-input-wrapper.tm-input-full-width {
+        .tn-input-wrapper.tn-input-full-width {
           padding-left: 16px;
           padding-right: 16px;
         }
-        .tm-input-box {
+        .tn-input-box {
           position: relative;
-          border-radius: 4px;
-          background: var(--bg);
+          border-radius: 5px;
+          background: #111417;
           overflow: visible;
         }
-        .tm-input-box::before {
+        .tn-input-box::before {
           content: '';
           position: absolute;
-          inset: -2px;
-          border-radius: 6px;
-          padding: 2px;
+          inset: -1.5px;
+          border-radius: 6.5px;
+          padding: 1.5px;
           background: linear-gradient(135deg, var(--accent) 0%, var(--orange) 20%, var(--red) 50%, var(--orange) 80%, var(--accent) 100%);
           background-size: 300% 300%;
-          animation: tm-gradient-sweep 20s ease-in-out infinite alternate;
+          animation: tn-gradient-sweep 20s ease-in-out infinite alternate;
           -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
           -webkit-mask-composite: xor;
           mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
           mask-composite: exclude;
           pointer-events: none;
           z-index: 0;
-          opacity: 0.7;
+          opacity: 0.5;
           transition: opacity 0.2s ease;
         }
-        .tm-input-box:focus-within::before {
+        .tn-input-box:focus-within::before {
           opacity: 1;
         }
-        .tm-input-box-ai::before {
+        .tn-input-box-ai::before {
           background: linear-gradient(135deg, #a371f7 0%, #c084fc 25%, #7c3aed 50%, #c084fc 75%, #a371f7 100%);
           background-size: 300% 300%;
-          animation: tm-gradient-sweep 20s ease-in-out infinite alternate;
+          animation: tn-gradient-sweep 20s ease-in-out infinite alternate;
         }
-        .tm-input-cwd {
+        .tn-input-row {
           position: relative;
           z-index: 1;
-          padding: 6px 14px 0;
-          color: var(--text-muted);
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 11px;
-        }
-        .tm-input-row {
-          position: relative;
-          z-index: 1;
-          padding: 6px 14px 10px;
+          padding: 8px 12px;
           display: flex;
           align-items: center;
           gap: 8px;
-        }
-        .tm-input-prompt {
-          color: var(--accent);
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'JetBrains Mono', 'Fira Code', monospace;
           font-size: 13px;
-          font-weight: 600;
+        }
+        .tn-input-user {
+          color: #22c55e;
+          flex-shrink: 0;
+          font-size: 12px;
+        }
+        .tn-input-dollar {
+          color: #4b5563;
           flex-shrink: 0;
         }
-        .tm-input-prompt-ai {
+        .tn-input-prompt-ai {
           color: #a371f7;
+          font-size: 14px;
+          flex-shrink: 0;
         }
-        .tm-input-field {
+        .tn-input-field {
           flex: 1;
           background: none;
           border: none;
           outline: none;
           color: var(--text);
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'JetBrains Mono', 'Fira Code', monospace;
           font-size: 13px;
+          min-width: 0;
         }
-        .tm-input-field::placeholder {
-          color: var(--text-muted);
+        .tn-input-field::placeholder {
+          color: #4b5563;
         }
-        .tm-input-toolbar {
-          position: relative;
-          z-index: 1;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 4px 8px 6px;
-          gap: 4px;
-          border-top: 1px solid var(--bg-hover);
-        }
-        .tm-input-toolbar-left {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          padding-left: 6px;
-        }
-        .tm-perm-btn {
+        .tn-input-hint {
           display: flex;
           align-items: center;
           gap: 4px;
-          font-family: 'JetBrains Mono', monospace;
+          flex-shrink: 0;
+          margin-left: auto;
+        }
+        .tn-input-kbd {
+          color: #4b5563;
           font-size: 10px;
-          padding: 2px 7px;
+          border: 1px solid #1e2328;
+          padding: 1px 5px;
           border-radius: 3px;
-          border: 1px solid transparent;
-          background: none;
-          color: var(--text-muted);
-          cursor: pointer;
-          transition: all 0.15s;
+          background: #0a0d0f;
         }
-        .tm-perm-btn:hover {
-          background: var(--bg-hover);
-        }
-        .tm-perm-bypass {
-          color: var(--red);
-          border-color: var(--red);
-          background: rgba(227, 85, 53, 0.1);
-        }
-        .tm-perm-bypass:hover {
-          background: rgba(227, 85, 53, 0.2);
-        }
-        .tm-width-active {
-          color: var(--accent);
-        }
-        .tm-input-toolbar-right {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding-right: 6px;
-        }
-        .tm-input-hint {
-          color: var(--text-muted);
+        .tn-input-hint-label {
+          color: #4b5563;
           font-size: 10px;
-          font-family: 'JetBrains Mono', monospace;
         }
-        .tm-input-hint-ai {
-          color: #a371f7;
-        }
-        .tm-input-divider {
-          color: var(--border);
-        }
-        @keyframes tm-gradient-sweep {
+        @keyframes tn-gradient-sweep {
           0% { background-position: 0% 0%; }
           100% { background-position: 100% 100%; }
         }

@@ -14,7 +14,7 @@ describe('TerminalModeInput', () => {
     const { container } = render(
       <TerminalModeInput onSubmit={vi.fn()} mode="ai" onToggleMode={vi.fn()} permissionMode="default" onPermissionChange={vi.fn()} cwd="/home/user/project" />
     );
-    const prompt = container.querySelector('.tm-input-prompt');
+    const prompt = container.querySelector('.tn-input-prompt-ai');
     expect(prompt?.textContent).toContain('\u2726');
   });
 
