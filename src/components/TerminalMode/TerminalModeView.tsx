@@ -684,13 +684,6 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [projectPath]);
 
-  // Focus xterm when alt-screen becomes visible (e.g. htop, vim)
-  useEffect(() => {
-    if (altScreenVisible) {
-      hiddenXtermRef.current?.focus();
-    }
-  }, [altScreenVisible]);
-
   // Build input history from submitted commands and AI prompts
   const inputHistory = displayItems
     .filter(item => item.type === 'command' || item.type === 'ai')

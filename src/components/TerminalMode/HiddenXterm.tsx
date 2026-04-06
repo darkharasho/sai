@@ -86,7 +86,7 @@ export default forwardRef<HiddenXtermHandle, HiddenXtermProps>(
       };
     }, [ptyId]);
 
-    // Fit when visibility changes
+    // Fit and focus when visibility changes
     useEffect(() => {
       if (visible && fitRef.current && containerRef.current) {
         requestAnimationFrame(() => {
@@ -94,6 +94,7 @@ export default forwardRef<HiddenXtermHandle, HiddenXtermProps>(
             fitRef.current?.fit();
             if (xtermRef.current) {
               window.sai.terminalResize(ptyId, xtermRef.current.cols, xtermRef.current.rows);
+              xtermRef.current.focus();
             }
           } catch { /* ignore */ }
         });
