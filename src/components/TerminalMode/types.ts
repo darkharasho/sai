@@ -62,3 +62,7 @@ export interface ToolApprovalBlock {
 export type Block = CommandBlock | AIResponseBlock | AIPromptBlock | ApprovalBlock | ToolApprovalBlock;
 
 export type InputMode = 'shell' | 'ai';
+
+// Terminal-native mode types
+export type { SegmentedBlock } from './BlockSegmenter';
+export type { DisplayItem } from './NativeBlockList';
