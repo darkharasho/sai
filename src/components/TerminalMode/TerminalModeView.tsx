@@ -152,6 +152,7 @@ function looksLikeShellCommand(input: string): boolean {
 export default function TerminalModeView({ projectPath, aiProvider = 'claude' }: TerminalModeViewProps) {
   const [displayItems, setDisplayItems] = useState<DisplayItem[]>([]);
   const [altScreenVisible, setAltScreenVisible] = useState(false);
+  const [ptyId, setPtyId] = useState<number | null>(null);
   const [inputMode, setInputMode] = useState<InputMode>('shell');
   const [editValue, setEditValue] = useState<string | undefined>(undefined);
   const [cwd, setCwd] = useState(projectPath || '~');
@@ -233,6 +234,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
     const ptyPromise = window.sai.terminalCreate(projectPath).then((id: number) => {
       if (cancelled) { window.sai.terminalKill(id); return id; }
       fallbackPtyRef.current = id;
+      setPtyId(id);
       refreshCwd(id);
       return id;
     });
@@ -245,6 +247,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
       if (fallbackPtyRef.current !== null) {
         window.sai.terminalKill(fallbackPtyRef.current);
         fallbackPtyRef.current = null;
+        setPtyId(null);
       }
       if (aiCleanupRef.current) {
         window.sai.claudeStop(projectPath, 'terminal');
@@ -690,12 +693,14 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
   return (
     <div className="tm-view">
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
-        <HiddenXterm
-          ref={hiddenXtermRef}
-          ptyId={fallbackPtyRef.current ?? 0}
-          visible={altScreenVisible}
-          onData={(data) => segmenterRef.current.feed(data)}
-        />
+        {ptyId !== null && (
+          <HiddenXterm
+            ref={hiddenXtermRef}
+            ptyId={ptyId}
+            visible={altScreenVisible}
+            onData={(data) => segmenterRef.current.feed(data)}
+          />
+        )}
         {!altScreenVisible && (
           <NativeBlockList
             items={displayItems}

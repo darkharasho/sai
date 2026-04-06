@@ -184,5 +184,7 @@ export class BlockSegmenter {
     this._partialLine = '';
     this._seenFirstPrompt = false;
     this._inAltScreen = false;
+    this._blockCallbacks = [];
+    this._altScreenCallbacks = [];
   }
 }

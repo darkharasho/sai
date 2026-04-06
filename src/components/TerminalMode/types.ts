@@ -1,24 +1,5 @@
 // src/components/TerminalMode/types.ts
 
-export type BlockType = 'command' | 'ai-response' | 'ai-prompt' | 'approval' | 'tool-approval';
-
-export interface AIPromptBlock {
-  type: 'ai-prompt';
-  id: string;
-  content: string;
-}
-
-export interface CommandBlock {
-  type: 'command';
-  id: string;
-  command: string;
-  output: string;
-  exitCode: number | null;  // null = still running
-  startTime: number;
-  duration: number | null;
-  groupId?: string;
-}
-
 export interface AIToolCall {
   id: string;        // tool_use_id for matching results
   name: string;      // tool name (Bash, Read, etc.)
@@ -58,8 +39,6 @@ export interface ToolApprovalBlock {
   description: string;
   status: 'pending' | 'approved' | 'rejected';
 }
-
-export type Block = CommandBlock | AIResponseBlock | AIPromptBlock | ApprovalBlock | ToolApprovalBlock;
 
 export type InputMode = 'shell' | 'ai';
 
