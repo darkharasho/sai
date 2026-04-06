@@ -532,11 +532,17 @@ export default function App() {
   }, [activeProjectPath, getWorkspace, updateWorkspace]);
 
   // Listen for background workspace completions
+  // Track busy scope count per workspace so overlapping chat+terminal don't cancel each other
+  const busyScopeCountRef = useRef(new Map<string, number>());
   useEffect(() => {
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
       if (!msg.projectPath) return;
+      // Use composite key (projectPath:scope) for turnSeq tracking
+      const scopeKey = `${msg.projectPath}:${msg.scope || 'chat'}`;
       if (msg.type === 'streaming_start') {
-        if (msg.turnSeq != null) wsTurnSeqRef.current.set(msg.projectPath, msg.turnSeq);
+        if (msg.turnSeq != null) wsTurnSeqRef.current.set(scopeKey, msg.turnSeq);
+        const count = busyScopeCountRef.current.get(msg.projectPath) || 0;
+        busyScopeCountRef.current.set(msg.projectPath, count + 1);
         setBusyWorkspaces(prev => new Set(prev).add(msg.projectPath));
       }
       if (msg.type === 'approval_needed') {
@@ -570,33 +576,37 @@ export default function App() {
       // Treat 'result' as authoritative end-of-turn — clear busy immediately
       // so the titlebar spinner doesn't stay stuck if the 'done' message is lost.
       if (msg.type === 'result' || msg.type === 'done') {
-        // For 'done', ignore stale messages from a previous turn
+        // For 'done', ignore stale messages from a previous turn (per scope)
         if (msg.type === 'done' && msg.turnSeq != null) {
-          const expected = wsTurnSeqRef.current.get(msg.projectPath);
+          const expected = wsTurnSeqRef.current.get(scopeKey);
           if (expected != null && msg.turnSeq !== expected) return;
         }
-        // Consume the turnSeq so duplicates are rejected
-        wsTurnSeqRef.current.set(msg.projectPath, -1);
-        setBusyWorkspaces(prev => {
-          if (!prev.has(msg.projectPath)) return prev;
-          const next = new Set(prev);
-          next.delete(msg.projectPath);
-          // Notify if this was a background workspace (and app isn't focused)
-          // Delay slightly so the ChatPanel has time to render the final content
-          if (msg.projectPath !== activeProjectPathRef.current) {
-            const wsName = msg.projectPath.split('/').pop() || msg.projectPath;
-            setTimeout(() => {
-              setCompletedWorkspaces(p => new Set(p).add(msg.projectPath));
-              setNotificationCounts(p => {
-                const next = new Map(p);
-                next.set(msg.projectPath, (next.get(msg.projectPath) || 0) + 1);
-                return next;
-              });
-              setToast({ message: `${wsName} has finished`, key: Date.now() });
-            }, 300);
-          }
-          return next;
-        });
+        wsTurnSeqRef.current.set(scopeKey, -1);
+        // Decrement busy scope count
+        const count = busyScopeCountRef.current.get(msg.projectPath) || 0;
+        const newCount = Math.max(0, count - 1);
+        busyScopeCountRef.current.set(msg.projectPath, newCount);
+        // Only remove from busyWorkspaces when ALL scopes are done
+        if (newCount === 0) {
+          setBusyWorkspaces(prev => {
+            if (!prev.has(msg.projectPath)) return prev;
+            const next = new Set(prev);
+            next.delete(msg.projectPath);
+            if (msg.projectPath !== activeProjectPathRef.current) {
+              const wsName = msg.projectPath.split('/').pop() || msg.projectPath;
+              setTimeout(() => {
+                setCompletedWorkspaces(p => new Set(p).add(msg.projectPath));
+                setNotificationCounts(p => {
+                  const next = new Map(p);
+                  next.set(msg.projectPath, (next.get(msg.projectPath) || 0) + 1);
+                  return next;
+                });
+                setToast({ message: `${wsName} has finished`, key: Date.now() });
+              }, 300);
+            }
+            return next;
+          });
+        }
       }
     });
     return cleanup;

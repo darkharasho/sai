@@ -516,8 +516,9 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     });
 
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
-      // Only process messages for this workspace
+      // Only process messages for this workspace and chat scope
       if (msg.projectPath && msg.projectPath !== projectPath) return;
+      if (msg.scope && msg.scope !== 'chat') return;
 
       if (msg.type === 'ready') {
         setReady(true);

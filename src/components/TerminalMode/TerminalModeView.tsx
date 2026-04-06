@@ -332,9 +332,9 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
         fallbackPtyRef.current = null;
       }
       pendingBlocksRef.current.clear();
-      // Stop any active AI request so it doesn't leak into workspace chat
+      // Stop any active AI request
       if (aiCleanupRef.current) {
-        window.sai.claudeStop(projectPath);
+        window.sai.claudeStop(projectPath, 'terminal');
         aiCleanupRef.current();
         aiCleanupRef.current = null;
         aiBlockIdRef.current = null;
@@ -390,9 +390,10 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
 
   const handleAIRequest = useCallback((prompt: string) => {
     const promptBlockId = nextBlockId();
-    const aiBlockId = nextBlockId();
+    let aiBlockId = nextBlockId();
     let turnSeq: number | null = null;
     let gotContent = false;
+    let needsNewBlock = false; // true after approval_needed — next assistant msg gets a new block
 
     setBlocks(prev => [...prev,
       {
@@ -435,6 +436,8 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
     let knownToolIds = new Set<string>();
     // Track the last text we set so we can detect new vs updated text
     let lastTextEntry = '';
+    // Keep refs to previous block entries so tool_results arriving after block split can still match
+    let prevBlockEntries: Map<string, { entries: import('./types').AIEntry[]; blockId: string }> = new Map();
 
     const updateBlock = () => {
       // Build a plain content string from text entries for copy/finalize
@@ -448,6 +451,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
 
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
       if (msg.projectPath && msg.projectPath !== projectPath) return;
+      if (msg.scope && msg.scope !== 'terminal') return;
 
       if (msg.type === 'session_id' && msg.sessionId) {
         sessionIdRef.current = msg.sessionId;
@@ -458,29 +462,75 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
         return;
       }
 
-      // Tool results — match output to existing tool entries
+      // Tool results — match output to existing tool entries (current or previous blocks)
       if (msg.type === 'user' && msg.message?.content) {
         const content = Array.isArray(msg.message.content) ? msg.message.content : [];
         for (const block of content) {
           if (block.type === 'tool_result' && block.tool_use_id) {
+            const output = typeof block.content === 'string'
+              ? block.content
+              : Array.isArray(block.content)
+                ? block.content.map((c: any) => c.text || '').join('')
+                : '';
+
+            // Check current entries first
             const toolEntry = entries.find(
               e => e.kind === 'tool' && e.call.id === block.tool_use_id
             );
             if (toolEntry && toolEntry.kind === 'tool') {
-              const output = typeof block.content === 'string'
-                ? block.content
-                : Array.isArray(block.content)
-                  ? block.content.map((c: any) => c.text || '').join('')
-                  : '';
               toolEntry.call.output = output;
               toolEntry.call.isError = !!block.is_error;
               updateBlock();
+            } else {
+              // Check previous block entries (tool result arrived after block split)
+              const prev = prevBlockEntries.get(block.tool_use_id);
+              if (prev) {
+                const prevTool = prev.entries.find(
+                  e => e.kind === 'tool' && e.call.id === block.tool_use_id
+                );
+                if (prevTool && prevTool.kind === 'tool') {
+                  prevTool.call.output = output;
+                  prevTool.call.isError = !!block.is_error;
+                  // Update the previous block
+                  const prevContentParts = prev.entries.filter(e => e.kind === 'text').map(e => e.text);
+                  const prevContent = prevContentParts.join('\n\n');
+                  setBlocks(b => b.map(blk =>
+                    blk.id === prev.blockId && blk.type === 'ai-response'
+                      ? { ...blk, content: prevContent, entries: [...prev.entries] }
+                      : blk
+                  ));
+                }
+              }
             }
           }
         }
       }
 
       if (msg.type === 'assistant' && msg.message?.content) {
+        // After a tool approval, start a fresh ai-response block below the approval
+        if (needsNewBlock) {
+          needsNewBlock = false;
+          // Save current entries so tool_results can still find them
+          const oldBlockId = aiBlockId;
+          const oldEntries = entries;
+          for (const e of oldEntries) {
+            if (e.kind === 'tool') prevBlockEntries.set(e.call.id, { entries: oldEntries, blockId: oldBlockId });
+          }
+          aiBlockId = nextBlockId();
+          entries = [];
+          allToolNames = [];
+          knownToolIds = new Set<string>();
+          lastTextEntry = '';
+          setBlocks(prev => [...prev, {
+            type: 'ai-response' as const,
+            id: aiBlockId,
+            content: '',
+            parentBlockId: promptBlockId,
+            streaming: true,
+          }]);
+          aiBlockIdRef.current = aiBlockId;
+        }
+
         const contentBlocks = Array.isArray(msg.message.content) ? msg.message.content : [];
         let hasNewData = false;
 
@@ -534,15 +584,24 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
 
       // Tool approval request — Claude wants to run a tool
       if (msg.type === 'approval_needed') {
-        setBlocks(prev => [...prev, {
-          type: 'tool-approval' as const,
-          id: nextBlockId(),
-          toolName: msg.toolName,
-          toolUseId: msg.toolUseId,
-          command: msg.command || '',
-          description: msg.description || '',
-          status: 'pending' as const,
-        }]);
+        // Freeze the current ai-response block (stop streaming indicator)
+        setBlocks(prev => {
+          const updated = prev.map(b =>
+            b.id === aiBlockId && b.type === 'ai-response'
+              ? { ...b, streaming: false }
+              : b
+          );
+          return [...updated, {
+            type: 'tool-approval' as const,
+            id: nextBlockId(),
+            toolName: msg.toolName,
+            toolUseId: msg.toolUseId,
+            command: msg.command || '',
+            description: msg.description || '',
+            status: 'pending' as const,
+          }];
+        });
+        needsNewBlock = true;
       }
 
       // Result message carries the final answer text — don't cleanup here,
@@ -610,7 +669,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
     }
 
     // Send after listener is registered to avoid race condition
-    window.sai.claudeSend(projectPath, fullPrompt, undefined, permissionModeRef.current, 'high', 'sonnet');
+    window.sai.claudeSend(projectPath, fullPrompt, undefined, permissionModeRef.current, 'high', 'sonnet', 'terminal');
   }, [projectPath]);
 
   const handleAskAI = useCallback((block: CommandBlockType) => {
@@ -650,14 +709,14 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
   }, []);
 
   const handleToolApprove = useCallback((block: ToolApprovalBlockType) => {
-    window.sai.claudeApprove(projectPath, block.toolUseId, true);
+    window.sai.claudeApprove(projectPath, block.toolUseId, true, undefined, 'terminal');
     setBlocks(prev => prev.map(b =>
       b.id === block.id ? { ...b, status: 'approved' as const } : b
     ));
   }, [projectPath]);
 
   const handleToolReject = useCallback((block: ToolApprovalBlockType) => {
-    window.sai.claudeApprove(projectPath, block.toolUseId, false);
+    window.sai.claudeApprove(projectPath, block.toolUseId, false, undefined, 'terminal');
     setBlocks(prev => prev.map(b =>
       b.id === block.id ? { ...b, status: 'rejected' as const } : b
     ));
@@ -666,7 +725,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
   const handleToolAlwaysAllow = useCallback(async (block: ToolApprovalBlockType) => {
     const pattern = `${block.toolName}(*)`;
     await window.sai.claudeAlwaysAllow(projectPath, pattern);
-    window.sai.claudeApprove(projectPath, block.toolUseId, true);
+    window.sai.claudeApprove(projectPath, block.toolUseId, true, undefined, 'terminal');
     setBlocks(prev => prev.map(b =>
       b.id === block.id ? { ...b, status: 'approved' as const } : b
     ));
@@ -734,7 +793,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
         // Kill any running AI request
         if (aiCleanupRef.current) {
           const blockId = aiBlockIdRef.current;
-          window.sai.claudeStop(projectPath);
+          window.sai.claudeStop(projectPath, 'terminal');
           if (blockId) {
             setBlocks(prev => prev.map(b =>
               b.id === blockId && b.type === 'ai-response'

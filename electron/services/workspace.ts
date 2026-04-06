@@ -47,12 +47,39 @@ export interface WorkspaceGemini {
 
 export interface Workspace {
   projectPath: string;
-  claude: WorkspaceClaude;
+  claudeScopes: Map<string, WorkspaceClaude>;
   codex: WorkspaceCodex;
   gemini: WorkspaceGemini;
   terminals: Map<number, pty.IPty>;
   lastActivity: number;
   status: 'active' | 'suspended';
+}
+
+/** Default Claude state for a new scope */
+function newClaudeScope(cwd: string): WorkspaceClaude {
+  return {
+    process: null,
+    sessionId: undefined,
+    buffer: '',
+    cwd,
+    processConfig: null,
+    busy: false,
+    turnSeq: 0,
+    suppressForward: false,
+    pendingToolUse: null,
+    approvalBuffered: [],
+    awaitingApproval: false,
+  };
+}
+
+/** Get (or create) the Claude instance for a given scope within a workspace */
+export function getClaude(ws: Workspace, scope: string = 'chat'): WorkspaceClaude {
+  let c = ws.claudeScopes.get(scope);
+  if (!c) {
+    c = newClaudeScope(ws.projectPath);
+    ws.claudeScopes.set(scope, c);
+  }
+  return c;
 }
 
 const workspaces = new Map<string, Workspace>();
@@ -66,19 +93,7 @@ export function getOrCreate(projectPath: string): Workspace {
   }
   const ws: Workspace = {
     projectPath,
-    claude: {
-      process: null,
-      sessionId: undefined,
-      buffer: '',
-      cwd: projectPath,
-      processConfig: null,
-      busy: false,
-      turnSeq: 0,
-      suppressForward: false,
-      pendingToolUse: null,
-      approvalBuffered: [],
-      awaitingApproval: false,
-    },
+    claudeScopes: new Map([['chat', newClaudeScope(projectPath)]]),
     codex: {
       process: null,
       buffer: '',
@@ -118,20 +133,22 @@ export function suspend(projectPath: string, win: BrowserWindow): void {
     try { if (!win.isDestroyed() && win.webContents) win.webContents.send(channel, ...args); } catch { /* destroyed */ }
   };
 
-  // Kill Claude process — send done first so the frontend clears streaming state
-  if (ws.claude.busy) {
-    safeSend('claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.claude.turnSeq });
+  // Kill all Claude scoped processes
+  for (const [scope, claude] of ws.claudeScopes) {
+    if (claude.busy) {
+      safeSend('claude:message', { type: 'done', projectPath: ws.projectPath, scope, turnSeq: claude.turnSeq });
+    }
+    if (claude.process) {
+      claude.process.kill();
+      claude.process = null;
+    }
+    claude.processConfig = null;
+    claude.busy = false;
+    claude.suppressForward = false;
+    claude.pendingToolUse = null;
+    claude.approvalBuffered = [];
+    claude.awaitingApproval = false;
   }
-  if (ws.claude.process) {
-    ws.claude.process.kill();
-    ws.claude.process = null;
-  }
-  ws.claude.processConfig = null;
-  ws.claude.busy = false;
-  ws.claude.suppressForward = false;
-  ws.claude.pendingToolUse = null;
-  ws.claude.approvalBuffered = [];
-  ws.claude.awaitingApproval = false;
 
   // Kill Codex process
   if (ws.codex.busy) {

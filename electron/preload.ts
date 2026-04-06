@@ -14,14 +14,14 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.on('terminal:data', listener);
     return () => ipcRenderer.removeListener('terminal:data', listener);
   },
-  claudeStart: (cwd: string) => ipcRenderer.invoke('claude:start', cwd),
-  claudeSend: (projectPath: string, message: string, imagePaths?: string[], permMode?: string, effort?: string, model?: string) => ipcRenderer.send('claude:send', projectPath, message, imagePaths, permMode, effort, model),
+  claudeStart: (cwd: string, scope?: string) => ipcRenderer.invoke('claude:start', cwd, scope),
+  claudeSend: (projectPath: string, message: string, imagePaths?: string[], permMode?: string, effort?: string, model?: string, scope?: string) => ipcRenderer.send('claude:send', projectPath, message, imagePaths, permMode, effort, model, scope),
   claudeGenerateCommitMessage: (cwd: string, aiProvider?: string) => ipcRenderer.invoke('claude:generateCommitMessage', cwd, aiProvider),
-  claudeCompact: (projectPath: string, permMode?: string, effort?: string, model?: string) => ipcRenderer.send('claude:compact', projectPath, permMode, effort, model),
-  claudeStop: (projectPath: string) => ipcRenderer.send('claude:stop', projectPath),
-  claudeSetSessionId: (projectPath: string, sessionId: string | undefined) => ipcRenderer.send('claude:setSessionId', projectPath, sessionId),
-  claudeApprove: (projectPath: string, toolUseId: string, approved: boolean, modifiedCommand?: string) =>
-    ipcRenderer.invoke('claude:approve', projectPath, toolUseId, approved, modifiedCommand),
+  claudeCompact: (projectPath: string, permMode?: string, effort?: string, model?: string, scope?: string) => ipcRenderer.send('claude:compact', projectPath, permMode, effort, model, scope),
+  claudeStop: (projectPath: string, scope?: string) => ipcRenderer.send('claude:stop', projectPath, scope),
+  claudeSetSessionId: (projectPath: string, sessionId: string | undefined, scope?: string) => ipcRenderer.send('claude:setSessionId', projectPath, sessionId, scope),
+  claudeApprove: (projectPath: string, toolUseId: string, approved: boolean, modifiedCommand?: string, scope?: string) =>
+    ipcRenderer.invoke('claude:approve', projectPath, toolUseId, approved, modifiedCommand, scope),
   claudeAlwaysAllow: (projectPath: string, toolPattern: string) =>
     ipcRenderer.invoke('claude:alwaysAllow', projectPath, toolPattern),
   // Codex CLI
