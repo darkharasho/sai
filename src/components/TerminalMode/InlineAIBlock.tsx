@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Play, Copy } from 'lucide-react';
+import { SquareTerminal, Copy } from 'lucide-react';
 import type { AIEntry } from './types';
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -81,19 +81,19 @@ export default function InlineAIBlock({
                     <div className="tn-ai-code-actions">
                       {isRunnable && (
                         <span
-                          className="tn-ai-code-btn tn-ai-code-run"
+                          className="tn-ai-code-icon tn-ai-code-run"
                           title="Run"
                           onClick={() => onRunCommand(codeText.trim())}
                         >
-                          <Play size={10} />
+                          <SquareTerminal size={12} />
                         </span>
                       )}
                       <span
-                        className="tn-ai-code-btn tn-ai-code-copy"
+                        className="tn-ai-code-icon tn-ai-code-copy"
                         title="Copy"
                         onClick={() => handleCopyCode(codeText)}
                       >
-                        <Copy size={10} />
+                        <Copy size={12} />
                       </span>
                     </div>
                   </div>
@@ -248,39 +248,29 @@ const styles = `
   }
   .tn-ai-code-actions {
     position: absolute;
-    top: 10px;
+    top: 0;
+    bottom: 0;
     right: 10px;
     display: flex;
-    gap: 4px;
-    opacity: 0;
-    transition: opacity 0.15s;
+    align-items: center;
+    gap: 6px;
   }
-  .tn-ai-code-wrapper:hover .tn-ai-code-actions {
-    opacity: 1;
-  }
-  .tn-ai-code-btn {
+  .tn-ai-code-icon {
     display: flex;
     align-items: center;
-    justify-content: center;
-    width: 22px;
-    height: 22px;
-    border-radius: 3px;
     cursor: pointer;
-    transition: background 0.15s;
+    transition: color 0.15s;
   }
   .tn-ai-code-run {
-    color: #22c55e;
-    background: rgba(34, 197, 94, 0.1);
+    color: #4b5563;
   }
   .tn-ai-code-run:hover {
-    background: rgba(34, 197, 94, 0.25);
+    color: #22c55e;
   }
   .tn-ai-code-copy {
-    color: #6b7280;
-    background: rgba(107, 114, 128, 0.1);
+    color: #4b5563;
   }
   .tn-ai-code-copy:hover {
-    background: rgba(107, 114, 128, 0.25);
     color: #9ca3af;
   }
   .tn-ai-content ul, .tn-ai-content ol {

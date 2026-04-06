@@ -28,7 +28,7 @@ describe('InlineAIBlock', () => {
       />
     );
     expect(container.querySelector('.tn-ai-code-wrapper')).toBeTruthy();
-    expect(container.querySelector('.tn-ai-code-copy')).toBeTruthy();
+    expect(container.querySelector('.tn-ai-code-icon.tn-ai-code-copy')).toBeTruthy();
   });
 
   it('shows run button on runnable code blocks', () => {
