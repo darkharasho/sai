@@ -60,6 +60,21 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
       onToggleMode();
       return;
     }
+    // Tab — shell tab completion
+    if (e.key === 'Tab' && !e.shiftKey && mode === 'shell') {
+      e.preventDefault();
+      const text = value;
+      if (!text) return;
+      window.sai.terminalTabComplete(text, cwd).then((completions: string[]) => {
+        if (completions.length === 1) {
+          const lastWord = text.split(/\s+/).pop() || '';
+          const completed = text.slice(0, text.length - lastWord.length) + completions[0];
+          setValue(completed);
+        }
+        // TODO: multiple completions could show a dropdown
+      });
+      return;
+    }
     // Ctrl+L — clear screen
     if (e.key === 'l' && e.ctrlKey && !e.shiftKey) {
       e.preventDefault();
