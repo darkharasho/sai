@@ -974,7 +974,10 @@ export default function App() {
   const toggleSidebar = (id: string) => {
     if (id === 'terminal-mode') {
       setActiveView(prev => {
-        if (prev !== 'terminal-mode') setTerminalModeActivated(true);
+        if (prev !== 'terminal-mode') {
+          setTerminalModeActivated(true);
+          setSidebarOpen(null);
+        }
         return prev === 'terminal-mode' ? 'default' : 'terminal-mode';
       });
       return;
