@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { FileEdit, Terminal, FileText, Wrench, ChevronRight, ChevronDown, Maximize2, X, Circle, Globe } from 'lucide-react';
+import { FileEdit, Terminal, FileText, Wrench, ChevronRight, ChevronDown, Maximize2, X, Circle, Globe, AlertCircle } from 'lucide-react';
 import type { ToolCall } from '../../types';
 import { getShikiHighlighter, getActiveHighlightTheme } from '../../themes';
 
@@ -428,11 +428,46 @@ function TodoListView({ input }: { input: string }) {
   );
 }
 
+/** Detect and strip <tool_error>, <error>, or tool_use_error wrapper tags from output */
+function parseToolError(output: string): { isToolError: boolean; message: string } {
+  const stripped = output.trim();
+  const tagMatch = stripped.match(/^<(?:tool_error|error)>([\s\S]*?)<\/(?:tool_error|error)>$/);
+  if (tagMatch) return { isToolError: true, message: tagMatch[1].trim() };
+  if (/tool_use_error/i.test(stripped)) {
+    return { isToolError: true, message: stripped.replace(/tool_use_error[:\s]*/i, '').trim() || stripped };
+  }
+  return { isToolError: false, message: output };
+}
+
+function ToolErrorDisplay({ message }: { message: string }) {
+  return (
+    <div className="tool-error-display">
+      <AlertCircle size={13} />
+      <span>{message}</span>
+    </div>
+  );
+}
+
 function BashInOut({ output, onFullscreen }: {
   output?: string;
   onFullscreen: (code: string, lang: string, label: string) => void;
 }) {
   if (!output) return null;
+  const parsed = parseToolError(output);
+
+  if (parsed.isToolError) {
+    return (
+      <div className="tool-call-body bash-inout-body">
+        <div className="bash-io-row bash-out-row">
+          <span className="bash-io-label bash-out-label">OUT</span>
+          <div className="bash-out-lines">
+            <ToolErrorDisplay message={parsed.message} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const outputLines = output.split('\n').filter(l => l.trim());
   const MAX_OUT = 8;
   const truncatedLines = outputLines.slice(0, MAX_OUT);
@@ -517,29 +552,39 @@ export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
                     Show all ({code.split('\n').length} lines)
                   </button>
                 )}
-                {toolCall.output && (
-                  <div className="tool-call-output">
-                    <div className="tool-call-output-header">
-                      <span className="tool-call-output-label">Output</span>
-                      <button
-                        className="tool-call-fullscreen"
-                        onClick={() => setFullscreenCode({ code: toolCall.output!, lang: 'text', label: 'Output' })}
-                        title="View full output"
-                      >
-                        <Maximize2 size={12} />
-                      </button>
+                {toolCall.output && (() => {
+                  const parsedOutput = parseToolError(toolCall.output);
+                  if (parsedOutput.isToolError) {
+                    return (
+                      <div className="tool-call-output">
+                        <ToolErrorDisplay message={parsedOutput.message} />
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="tool-call-output">
+                      <div className="tool-call-output-header">
+                        <span className="tool-call-output-label">Output</span>
+                        <button
+                          className="tool-call-fullscreen"
+                          onClick={() => setFullscreenCode({ code: toolCall.output!, lang: 'text', label: 'Output' })}
+                          title="View full output"
+                        >
+                          <Maximize2 size={12} />
+                        </button>
+                      </div>
+                      <HighlightedCode code={truncateCode(toolCall.output, MAX_PREVIEW_LINES).truncated} lang="text" />
+                      {truncateCode(toolCall.output, MAX_PREVIEW_LINES).isTruncated && (
+                        <button
+                          className="tool-call-show-more"
+                          onClick={() => setFullscreenCode({ code: toolCall.output!, lang: 'text', label: 'Output' })}
+                        >
+                          Show all ({toolCall.output.split('\n').length} lines)
+                        </button>
+                      )}
                     </div>
-                    <HighlightedCode code={truncateCode(toolCall.output, MAX_PREVIEW_LINES).truncated} lang="text" />
-                    {truncateCode(toolCall.output, MAX_PREVIEW_LINES).isTruncated && (
-                      <button
-                        className="tool-call-show-more"
-                        onClick={() => setFullscreenCode({ code: toolCall.output!, lang: 'text', label: 'Output' })}
-                      >
-                        Show all ({toolCall.output.split('\n').length} lines)
-                      </button>
-                    )}
-                  </div>
-                )}
+                  );
+                })()}
               </div>
             )}
           </>
@@ -683,6 +728,22 @@ export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
             text-transform: uppercase;
             color: var(--text-muted);
             letter-spacing: 0.5px;
+          }
+          .tool-error-display {
+            display: flex;
+            align-items: flex-start;
+            gap: 6px;
+            color: var(--red, #f85149);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            padding: 6px 12px;
+            white-space: pre-wrap;
+            word-break: break-word;
+          }
+          .tool-error-display svg {
+            flex-shrink: 0;
+            margin-top: 2px;
           }
           /* Bash IN/OUT */
           .bash-inout-body {

@@ -13,21 +13,46 @@ const PROVIDER_CONFIG: Record<string, { svg: string; label: string }> = {
 
 const MAX_OUTPUT_LINES = 12;
 
+/** Detect and strip <tool_error>, <error>, or tool_use_error wrapper tags from output */
+function parseToolError(output: string): { isToolError: boolean; message: string } {
+  const stripped = output.trim();
+  // Match <tool_error>...</tool_error> or <error>...</error>
+  const tagMatch = stripped.match(/^<(?:tool_error|error)>([\s\S]*?)<\/(?:tool_error|error)>$/);
+  if (tagMatch) return { isToolError: true, message: tagMatch[1].trim() };
+  // Match tool_use_error in the string
+  if (/tool_use_error/i.test(stripped)) {
+    return { isToolError: true, message: stripped.replace(/tool_use_error[:\s]*/i, '').trim() || stripped };
+  }
+  return { isToolError: false, message: output };
+}
+
+function ToolErrorDisplay({ message }: { message: string }) {
+  return (
+    <span className="tm-tool-error-display">
+      <AlertCircle size={11} />
+      <span>{message}</span>
+    </span>
+  );
+}
+
 function ToolCallEntry({ call }: { call: AIToolCall }) {
   const [expanded, setExpanded] = useState(false);
   const isBash = /bash/i.test(call.name);
-  const outputLines = call.output?.split('\n') || [];
+  const parsed = call.output != null ? parseToolError(call.output) : null;
+  const isError = call.isError || (parsed?.isToolError ?? false);
+  const effectiveOutput = parsed ? parsed.message : call.output;
+  const outputLines = effectiveOutput?.split('\n') || [];
   const isTruncated = outputLines.length > MAX_OUTPUT_LINES;
-  const displayOutput = expanded ? call.output : outputLines.slice(0, MAX_OUTPUT_LINES).join('\n');
+  const displayOutput = expanded ? effectiveOutput : outputLines.slice(0, MAX_OUTPUT_LINES).join('\n');
 
   return (
-    <div className={`tm-tool-entry ${call.isError ? 'tm-tool-entry-error' : ''}`}>
+    <div className={`tm-tool-entry ${isError ? 'tm-tool-entry-error' : ''}`}>
       <div className="tm-tool-entry-header">
         <span className="tm-tool-entry-icon">
           {isBash ? <Terminal size={11} /> : <FileText size={11} />}
         </span>
         <span className="tm-tool-entry-name">{call.name}</span>
-        {call.isError && <span className="tm-tool-entry-error-icon"><AlertCircle size={10} /></span>}
+        {isError && <span className="tm-tool-entry-error-icon"><AlertCircle size={10} /></span>}
       </div>
       <div className="tm-tool-entry-io">
         <div className="tm-tool-io-row">
@@ -37,7 +62,13 @@ function ToolCallEntry({ call }: { call: AIToolCall }) {
         {call.output !== undefined && (
           <div className="tm-tool-io-row">
             <span className="tm-tool-io-label tm-tool-io-label-out">OUT</span>
-            <pre className="tm-tool-io-content tm-tool-io-output">{displayOutput || '(empty)'}</pre>
+            {isError ? (
+              <div className="tm-tool-io-content tm-tool-io-output">
+                <ToolErrorDisplay message={displayOutput || '(empty)'} />
+              </div>
+            ) : (
+              <pre className="tm-tool-io-content tm-tool-io-output">{displayOutput || '(empty)'}</pre>
+            )}
           </div>
         )}
         {call.output === undefined && (
@@ -274,6 +305,18 @@ export default function AIResponseBlock({ block, onCopy, aiProvider = 'claude' }
         .tm-tool-io-output {
           color: var(--text-secondary);
           max-height: none;
+        }
+        .tm-tool-error-display {
+          display: flex;
+          align-items: flex-start;
+          gap: 6px;
+          color: var(--red, #f85149);
+          white-space: pre-wrap;
+          word-break: break-all;
+        }
+        .tm-tool-error-display svg {
+          flex-shrink: 0;
+          margin-top: 2px;
         }
         .tm-tool-io-pending {
           color: #a371f7;
