@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { parse as shellParse } from 'shell-quote';
 import TerminalModeBlockList from './TerminalModeBlockList';
 import TerminalModeInput from './TerminalModeInput';
 import type { TerminalModeInputHandle } from './TerminalModeInput';
@@ -94,6 +95,9 @@ function looksLikeShellCommand(input: string): boolean {
   // Contains shell operators — very likely a command
   if (/[|><;&]/.test(trimmed)) return true;
 
+  // Contains flags (e.g. -v, --verbose) — strong command signal
+  if (/\s-{1,2}[a-zA-Z]/.test(trimmed)) return true;
+
   // Contains a question mark — very likely natural language
   if (trimmed.includes('?')) return false;
 
@@ -105,6 +109,17 @@ function looksLikeShellCommand(input: string): boolean {
   // Starts with a natural language word
   if (NL_STARTERS.test(trimmed)) return false;
 
+  // Common natural language words/phrases that are never commands
+  const NL_WORDS = new Set([
+    'there', 'here', 'ok', 'okay', 'hold', 'wait', 'but', 'so',
+    'actually', 'maybe', 'also', 'just', 'well', 'yeah', 'yes', 'no',
+    'nah', 'nope', 'hmm', 'hm', 'ah', 'oh', 'ooh', 'um', 'uh',
+    'never', 'always', 'only', 'not', 'dont', 'like', 'let', 'lets',
+    'i', 'im', 'its', 'thats', 'whats', 'heres', 'theres',
+    'in', 'on', 'at', 'to', 'the', 'a', 'an', 'it', 'we',
+  ]);
+  if (NL_WORDS.has(firstWord)) return false;
+
   // Single word — treat as a command (could be any binary)
   if (!trimmed.includes(' ')) return true;
 
@@ -112,10 +127,38 @@ function looksLikeShellCommand(input: string): boolean {
   const words = trimmed.split(/\s+/);
   if (words.length <= 3 && /^[a-z0-9_][\w.-]*$/i.test(firstWord)) return true;
 
-  // Longer input with common natural language articles/prepositions — likely NL
-  const nlWords = new Set(['the', 'a', 'an', 'this', 'that', 'my', 'our', 'its', 'of', 'for', 'with', 'about', 'into', 'from', 'between']);
-  const nlCount = words.filter(w => nlWords.has(w.toLowerCase())).length;
+  // Personal pronouns — almost never appear in shell commands
+  const pronouns = new Set(['i', 'me', 'my', 'you', 'your', 'we', 'our', 'they', 'their', 'he', 'she', 'him', 'her', 'us', 'them']);
+  if (words.some(w => pronouns.has(w.toLowerCase()))) return false;
+
+  // Sentence structure words — articles, prepositions, conjunctions, common verbs
+  const sentenceWords = new Set([
+    // articles & determiners
+    'the', 'a', 'an', 'this', 'that', 'these', 'those', 'some', 'any', 'every',
+    // prepositions
+    'of', 'for', 'with', 'about', 'into', 'from', 'between', 'through', 'during', 'before', 'after', 'above', 'below', 'under', 'over',
+    // conjunctions
+    'and', 'or', 'but', 'because', 'since', 'although', 'whether', 'wether', 'while', 'if', 'then', 'than', 'either', 'neither',
+    // common verbs that aren't commands
+    'have', 'has', 'had', 'was', 'were', 'been', 'being', 'am', 'are', 'is',
+    'do', 'does', 'did', 'done', 'doing',
+    'get', 'got', 'getting', 'gets',
+    'know', 'known', 'knew', 'think', 'thought', 'want', 'need', 'see', 'saw', 'seen',
+    'going', 'gonna', 'wanna', 'gotta',
+    // adverbs
+    'not', 'very', 'really', 'already', 'still', 'even', 'probably', 'definitely',
+  ]);
+  const nlCount = words.filter(w => sentenceWords.has(w.toLowerCase())).length;
   if (nlCount >= 2) return false;
+
+  // shell-quote: if parsing produces operators ({op}) or glob patterns, likely a command
+  try {
+    const parsed = shellParse(trimmed);
+    const hasShellTokens = parsed.some(t => typeof t === 'object');
+    if (hasShellTokens) return true;
+  } catch {
+    // parse failure — not a valid shell command
+  }
 
   // Default: if it starts with something that looks like a command name, run it
   if (/^[a-z0-9_][\w.-]*$/i.test(firstWord)) return true;

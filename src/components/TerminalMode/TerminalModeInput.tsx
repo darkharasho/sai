@@ -228,9 +228,11 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
     clearCompletions();
     if (detectAI && onModeChange && !manualOverrideRef.current) {
       const trimmed = newVal.trim();
-      if (mode === 'shell' && trimmed.length > 0 && detectAI(trimmed)) {
+      if (trimmed.length === 0) {
+        if (mode !== 'shell') onModeChange('shell');
+      } else if (mode === 'shell' && detectAI(trimmed)) {
         onModeChange('ai');
-      } else if (mode === 'ai' && trimmed.length > 0 && !detectAI(trimmed)) {
+      } else if (mode === 'ai' && !detectAI(trimmed)) {
         onModeChange('shell');
       }
     }
@@ -305,7 +307,7 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
 
       <style>{`
         .tm-input-wrapper {
-          padding: 0 15% 14px;
+          padding: 12px 15% 14px;
           flex-shrink: 0;
           transition: padding 0.3s ease;
         }
