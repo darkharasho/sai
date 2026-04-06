@@ -23,6 +23,7 @@ interface NativeCommandBlockProps {
   onToggleCollapse?: () => void;
   active?: boolean;
   aiSuggested?: boolean;
+  cwd?: string;
   onCopy: (text: string) => void;
   onAskAI: (block: SegmentedBlock) => void;
   onRerun: (command: string) => void;
@@ -34,6 +35,7 @@ export default function NativeCommandBlock({
   onToggleCollapse,
   active,
   aiSuggested,
+  cwd,
   onCopy,
   onAskAI,
   onRerun,
@@ -44,7 +46,12 @@ export default function NativeCommandBlock({
   const isLong = outputLines.length > LONG_OUTPUT_LINES;
   const isClamped = isLong && !showAll;
 
-  const { user, path } = extractPromptParts(block.promptText);
+  let { user, path } = extractPromptParts(block.promptText);
+  // Fall back to cwd when prompt doesn't contain user/path info
+  if (!user && !path && cwd) {
+    const shortCwd = cwd.replace(/^\/var\/home\/[^/]+/, '~').replace(/^\/home\/[^/]+/, '~');
+    path = shortCwd;
+  }
   const isRemote = block.isRemote;
 
   if (collapsed) {

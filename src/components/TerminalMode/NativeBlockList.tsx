@@ -16,6 +16,7 @@ interface NativeBlockListProps {
   items: DisplayItem[];
   activeBlockId: string | null;
   fullWidth?: boolean;
+  cwd?: string;
   onCopy: (text: string) => void;
   onAskAI: (block: SegmentedBlock) => void;
   onRerun: (command: string) => void;
@@ -34,6 +35,7 @@ export default function NativeBlockList({
   items,
   activeBlockId,
   fullWidth,
+  cwd,
   onCopy,
   onAskAI,
   onRerun,
@@ -134,6 +136,7 @@ export default function NativeBlockList({
                 onToggleCollapse={() => handleToggleCollapse(id, collapsed)}
                 active={id === activeBlockId}
                 aiSuggested={item.aiSuggested}
+                cwd={cwd}
                 onCopy={onCopy}
                 onAskAI={onAskAI}
                 onRerun={onRerun}

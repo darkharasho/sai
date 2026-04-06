@@ -758,6 +758,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
             items={displayItems}
             activeBlockId={null}
             fullWidth={fullWidth}
+            cwd={cwd}
             onCopy={handleCopy}
             onAskAI={handleAskAI}
             onRerun={handleRerun}
