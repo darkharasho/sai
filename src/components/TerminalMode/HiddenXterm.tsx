@@ -65,6 +65,12 @@ export default forwardRef<HiddenXtermHandle, HiddenXtermProps>(
       xterm.loadAddon(fit);
       xterm.open(containerRef.current);
 
+      // Capture Tab so the shell receives it for completion
+      xterm.attachCustomKeyEventHandler((e) => {
+        if (e.key === 'Tab') return true;
+        return true;
+      });
+
       // Forward keyboard input to PTY
       xterm.onData((data) => {
         window.sai.terminalWrite(ptyId, data);
