@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import NavBar from './components/NavBar';
 import ChatPanel from './components/Chat/ChatPanel';
 import TerminalPanel from './components/Terminal/TerminalPanel';
+import TerminalModeView from './components/TerminalMode/TerminalModeView';
 import GitSidebar from './components/Git/GitSidebar';
 import FileExplorerSidebar from './components/FileExplorer/FileExplorerSidebar';
 import TitleBar from './components/TitleBar';
@@ -84,6 +85,7 @@ function WelcomeTypewriter() {
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<'default' | 'terminal-mode'>('default');
   const [activeProjectPath, setActiveProjectPath] = useState<string>('');
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
   const [effortLevel, setEffortLevel] = useState<EffortLevel>('high');
@@ -950,6 +952,11 @@ export default function App() {
   }, [activeProjectPath, persistSessionForWorkspace]);
 
   const toggleSidebar = (id: string) => {
+    if (id === 'terminal-mode') {
+      setActiveView(prev => prev === 'terminal-mode' ? 'default' : 'terminal-mode');
+      return;
+    }
+    if (activeView === 'terminal-mode') setActiveView('default');
     setSidebarOpen(prev => prev === id ? null : id);
   };
 
@@ -1344,19 +1351,25 @@ export default function App() {
         <NavBar activeSidebar={sidebarOpen} onToggle={toggleSidebar} gitChangeCount={gitChangeCount} />
         {sidebarOpen === 'files' && <FileExplorerSidebar projectPath={projectPath} onFileOpen={handleFileOpen} />}
         {sidebarOpen === 'git' && <GitSidebar projectPath={projectPath} onFileClick={handleFileClick} commitMessageProvider={commitMessageProvider} />}
-        <div className="main-content" ref={mainContentRef}>
-          {allPanels.map((panel, i) => (
-            <div key={panel} style={{ display: 'contents' }}>
-              {renderPanel(panel)}
-              {showHandleAfter(panel) && (
-                <div
-                  className={`drag-handle ${isDragging ? 'dragging' : ''}`}
-                  onMouseDown={handleDragStart}
-                />
-              )}
-            </div>
-          ))}
-        </div>
+        {activeView === 'terminal-mode' ? (
+          <div className="main-content" style={{ display: 'flex' }}>
+            <TerminalModeView projectPath={projectPath} />
+          </div>
+        ) : (
+          <div className="main-content" ref={mainContentRef}>
+            {allPanels.map((panel, i) => (
+              <div key={panel} style={{ display: 'contents' }}>
+                {renderPanel(panel)}
+                {showHandleAfter(panel) && (
+                  <div
+                    className={`drag-handle ${isDragging ? 'dragging' : ''}`}
+                    onMouseDown={handleDragStart}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {isDragging && <div className="drag-overlay" />}
