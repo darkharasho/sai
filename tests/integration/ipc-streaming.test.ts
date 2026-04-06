@@ -50,7 +50,7 @@ const { mockIpcMain, workspaceState } = vi.hoisted(() => {
     approvalBuffered: any[];
     awaitingApproval: boolean;
   };
-  type Workspace = { projectPath: string; claude: WorkspaceClaude };
+  type Workspace = { projectPath: string; claudeScopes: Map<string, WorkspaceClaude> };
 
   const map = new Map<string, Workspace>();
 
@@ -62,15 +62,22 @@ const { mockIpcMain, workspaceState } = vi.hoisted(() => {
     };
   }
 
+  function getClaude(ws: Workspace, scope: string = 'chat'): WorkspaceClaude {
+    let c = ws.claudeScopes.get(scope);
+    if (!c) { c = makeClaude(); ws.claudeScopes.set(scope, c); }
+    return c;
+  }
+
   const workspaceState = {
     map,
     getOrCreate(p: string): Workspace {
-      if (!map.has(p)) map.set(p, { projectPath: p, claude: makeClaude() });
+      if (!map.has(p)) map.set(p, { projectPath: p, claudeScopes: new Map([['chat', makeClaude()]]) });
       return map.get(p)!;
     },
     get(p: string): Workspace | undefined { return map.get(p); },
     clear() { map.clear(); },
     makeClaude,
+    getClaude,
   };
 
   return { mockIpcMain, workspaceState };
@@ -89,6 +96,7 @@ vi.mock('electron', () => ({
 vi.mock('@electron/services/workspace', () => ({
   getOrCreate: vi.fn((p: string) => workspaceState.getOrCreate(p)),
   get: vi.fn((p: string) => workspaceState.get(p)),
+  getClaude: vi.fn((ws: any, scope?: string) => workspaceState.getClaude(ws, scope)),
   touchActivity: vi.fn(),
 }));
 
@@ -237,7 +245,7 @@ describe('IPC streaming lifecycle', () => {
 
     // Workspace session id should be captured
     const ws = workspaceState.get(PROJECT)!;
-    expect(ws.claude.sessionId).toBe('abc-123');
+    expect(ws.claudeScopes.get('chat')!.sessionId).toBe('abc-123');
   });
 
   it('abort mid-stream: claude:stop kills process and sends done', async () => {
@@ -341,7 +349,7 @@ describe('IPC streaming lifecycle', () => {
     // Each project has its own process
     const wsA = workspaceState.get(PROJECT_A)!;
     const wsB = workspaceState.get(PROJECT_B)!;
-    expect(wsA.claude.process).not.toBe(wsB.claude.process);
+    expect(wsA.claudeScopes.get('chat')!.process).not.toBe(wsB.claudeScopes.get('chat')!.process);
   });
 
   it('workspace switch mid-stream: old process is killed', async () => {

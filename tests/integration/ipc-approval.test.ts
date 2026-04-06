@@ -56,7 +56,7 @@ const { mockIpcMain, workspaceState } = vi.hoisted(() => {
     approvalBuffered: any[];
     awaitingApproval: boolean;
   };
-  type Workspace = { projectPath: string; claude: WorkspaceClaude };
+  type Workspace = { projectPath: string; claudeScopes: Map<string, WorkspaceClaude> };
 
   const map = new Map<string, Workspace>();
 
@@ -68,14 +68,21 @@ const { mockIpcMain, workspaceState } = vi.hoisted(() => {
     };
   }
 
+  function getClaude(ws: Workspace, scope: string = 'chat'): WorkspaceClaude {
+    let c = ws.claudeScopes.get(scope);
+    if (!c) { c = makeClaude(); ws.claudeScopes.set(scope, c); }
+    return c;
+  }
+
   const workspaceState = {
     map,
     getOrCreate(p: string): Workspace {
-      if (!map.has(p)) map.set(p, { projectPath: p, claude: makeClaude() });
+      if (!map.has(p)) map.set(p, { projectPath: p, claudeScopes: new Map([['chat', makeClaude()]]) });
       return map.get(p)!;
     },
     get(p: string): Workspace | undefined { return map.get(p); },
     clear() { map.clear(); },
+    getClaude,
   };
 
   return { mockIpcMain, workspaceState };
@@ -94,6 +101,7 @@ vi.mock('electron', () => ({
 vi.mock('@electron/services/workspace', () => ({
   getOrCreate: vi.fn((p: string) => workspaceState.getOrCreate(p)),
   get: vi.fn((p: string) => workspaceState.get(p)),
+  getClaude: vi.fn((ws: any, scope?: string) => workspaceState.getClaude(ws, scope)),
   touchActivity: vi.fn(),
 }));
 
@@ -252,9 +260,9 @@ describe('IPC approval flow', () => {
     await driveToApprovalNeeded(win, PROJECT);
 
     const ws = workspaceState.get(PROJECT)!;
-    expect(ws.claude.awaitingApproval).toBe(true);
-    expect(ws.claude.pendingToolUse).toBeDefined();
-    expect(ws.claude.pendingToolUse?.toolUseId).toBe('tool-abc');
+    expect(ws.claudeScopes.get('chat')!.awaitingApproval).toBe(true);
+    expect(ws.claudeScopes.get('chat')!.pendingToolUse).toBeDefined();
+    expect(ws.claudeScopes.get('chat')!.pendingToolUse?.toolUseId).toBe('tool-abc');
   });
 
   it('approval: execute bash, send tool_result to renderer, write follow-up to stdin', async () => {
@@ -285,9 +293,9 @@ describe('IPC approval flow', () => {
     await flushAsync();
 
     const ws = workspaceState.get(PROJECT)!;
-    expect(ws.claude.awaitingApproval).toBe(false);
-    expect(ws.claude.pendingToolUse).toBeNull();
-    expect(ws.claude.approvalBuffered).toHaveLength(0);
+    expect(ws.claudeScopes.get('chat')!.awaitingApproval).toBe(false);
+    expect(ws.claudeScopes.get('chat')!.pendingToolUse).toBeNull();
+    expect(ws.claudeScopes.get('chat')!.approvalBuffered).toHaveLength(0);
   });
 
   it('denial flow: buffered messages flushed to renderer', async () => {
@@ -295,7 +303,7 @@ describe('IPC approval flow', () => {
 
     const ws = workspaceState.get(PROJECT)!;
     // Manually add a buffered result message (would normally come from CLI while blocked)
-    ws.claude.approvalBuffered = [
+    ws.claudeScopes.get('chat')!.approvalBuffered = [
       { type: 'assistant', message: { content: [] } },
       { type: 'result', duration_ms: 100 },
     ];
@@ -317,9 +325,9 @@ describe('IPC approval flow', () => {
     await flushAsync();
 
     const ws = workspaceState.get(PROJECT)!;
-    expect(ws.claude.awaitingApproval).toBe(false);
-    expect(ws.claude.pendingToolUse).toBeNull();
-    expect(ws.claude.approvalBuffered).toHaveLength(0);
+    expect(ws.claudeScopes.get('chat')!.awaitingApproval).toBe(false);
+    expect(ws.claudeScopes.get('chat')!.pendingToolUse).toBeNull();
+    expect(ws.claudeScopes.get('chat')!.approvalBuffered).toHaveLength(0);
   });
 
   it('messages while awaiting approval are buffered, not forwarded', async () => {
@@ -337,7 +345,7 @@ describe('IPC approval flow', () => {
     expect(sendCountAfter).toBe(sendCountBeforeBuffer);
 
     const ws = workspaceState.get(PROJECT)!;
-    expect(ws.claude.approvalBuffered).toHaveLength(1);
+    expect(ws.claudeScopes.get('chat')!.approvalBuffered).toHaveLength(1);
   });
 
   it('multiple sequential approvals each complete independently', async () => {
@@ -348,7 +356,7 @@ describe('IPC approval flow', () => {
 
     // After first approval, workspace should be ready for another cycle
     const ws = workspaceState.get(PROJECT)!;
-    expect(ws.claude.awaitingApproval).toBe(false);
+    expect(ws.claudeScopes.get('chat')!.awaitingApproval).toBe(false);
 
     // Simulate second tool_use denial cycle
     const proc = getLatest();
@@ -376,15 +384,15 @@ describe('IPC approval flow', () => {
     await flushAsync();
 
     const ws2 = workspaceState.get(PROJECT)!;
-    expect(ws2.claude.awaitingApproval).toBe(true);
-    expect(ws2.claude.pendingToolUse?.toolUseId).toBe('tool-xyz');
+    expect(ws2.claudeScopes.get('chat')!.awaitingApproval).toBe(true);
+    expect(ws2.claudeScopes.get('chat')!.pendingToolUse?.toolUseId).toBe('tool-xyz');
 
     // Second approval
     await mockIpcMain._invoke('claude:approve', PROJECT, 'tool-xyz', true);
     await flushAsync();
 
     const ws3 = workspaceState.get(PROJECT)!;
-    expect(ws3.claude.awaitingApproval).toBe(false);
+    expect(ws3.claudeScopes.get('chat')!.awaitingApproval).toBe(false);
   });
 
   it('approve with no pending approval is a no-op', async () => {

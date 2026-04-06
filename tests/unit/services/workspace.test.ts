@@ -85,17 +85,18 @@ async function loadService() {
 
 describe('getOrCreate', () => {
   it('creates a new workspace with correct defaults', async () => {
-    const { getOrCreate } = await loadService();
+    const { getOrCreate, getClaude } = await loadService();
     const ws = getOrCreate('/home/user/project');
 
     expect(ws.projectPath).toBe('/home/user/project');
     expect(ws.status).toBe('active');
-    expect(ws.claude.process).toBeNull();
-    expect(ws.claude.busy).toBe(false);
-    expect(ws.claude.suppressForward).toBe(false);
-    expect(ws.claude.pendingToolUse).toBeNull();
-    expect(ws.claude.approvalBuffered).toEqual([]);
-    expect(ws.claude.awaitingApproval).toBe(false);
+    const claude = getClaude(ws);
+    expect(claude.process).toBeNull();
+    expect(claude.busy).toBe(false);
+    expect(claude.suppressForward).toBe(false);
+    expect(claude.pendingToolUse).toBeNull();
+    expect(claude.approvalBuffered).toEqual([]);
+    expect(claude.awaitingApproval).toBe(false);
     expect(ws.codex.process).toBeNull();
     expect(ws.codex.busy).toBe(false);
     expect(ws.gemini.process).toBeNull();
@@ -106,10 +107,10 @@ describe('getOrCreate', () => {
   });
 
   it('sets cwd to projectPath for all agents', async () => {
-    const { getOrCreate } = await loadService();
+    const { getOrCreate, getClaude } = await loadService();
     const ws = getOrCreate('/workspace/abc');
 
-    expect(ws.claude.cwd).toBe('/workspace/abc');
+    expect(getClaude(ws).cwd).toBe('/workspace/abc');
     expect(ws.codex.cwd).toBe('/workspace/abc');
     expect(ws.gemini.cwd).toBe('/workspace/abc');
   });
@@ -182,15 +183,16 @@ describe('touchActivity', () => {
 
 describe('suspend', () => {
   it('kills Claude process and nullifies it', async () => {
-    const { getOrCreate, suspend } = await loadService();
+    const { getOrCreate, getClaude, suspend } = await loadService();
     const ws = getOrCreate('/suspend/proj');
+    const claude = getClaude(ws);
     const proc = createMockProcess();
-    ws.claude.process = proc as never;
+    claude.process = proc as never;
 
     suspend('/suspend/proj', createWin() as never);
 
     expect(proc.kill).toHaveBeenCalledTimes(1);
-    expect(ws.claude.process).toBeNull();
+    expect(claude.process).toBeNull();
   });
 
   it('kills Codex process and nullifies it', async () => {
@@ -233,19 +235,20 @@ describe('suspend', () => {
   });
 
   it('clears Claude buffers and resets flags', async () => {
-    const { getOrCreate, suspend } = await loadService();
+    const { getOrCreate, getClaude, suspend } = await loadService();
     const ws = getOrCreate('/suspend/flags');
-    ws.claude.busy = true;
-    ws.claude.suppressForward = true;
-    ws.claude.approvalBuffered = [{ x: 1 }];
-    ws.claude.awaitingApproval = true;
+    const claude = getClaude(ws);
+    claude.busy = true;
+    claude.suppressForward = true;
+    claude.approvalBuffered = [{ x: 1 }];
+    claude.awaitingApproval = true;
 
     suspend('/suspend/flags', createWin() as never);
 
-    expect(ws.claude.busy).toBe(false);
-    expect(ws.claude.suppressForward).toBe(false);
-    expect(ws.claude.approvalBuffered).toEqual([]);
-    expect(ws.claude.awaitingApproval).toBe(false);
+    expect(claude.busy).toBe(false);
+    expect(claude.suppressForward).toBe(false);
+    expect(claude.approvalBuffered).toEqual([]);
+    expect(claude.awaitingApproval).toBe(false);
   });
 
   it('sets status to suspended', async () => {
@@ -310,13 +313,13 @@ describe('remove', () => {
 
 describe('destroyAll', () => {
   it('suspends all workspaces and clears the map', async () => {
-    const { getOrCreate, destroyAll, getAll } = await loadService();
+    const { getOrCreate, getClaude, destroyAll, getAll } = await loadService();
     const ws1 = getOrCreate('/a/proj');
     const ws2 = getOrCreate('/b/proj');
     const p1 = createMockProcess();
     const p2 = createMockProcess();
-    ws1.claude.process = p1 as never;
-    ws2.claude.process = p2 as never;
+    getClaude(ws1).process = p1 as never;
+    getClaude(ws2).process = p2 as never;
 
     destroyAll(createWin() as never);
 

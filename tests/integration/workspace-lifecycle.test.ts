@@ -77,9 +77,10 @@ describe('workspace lifecycle — getOrCreate', () => {
 
     expect(created.projectPath).toBe('/project/alpha');
     expect(created.status).toBe('active');
-    expect(created.claude.process).toBeNull();
-    expect(created.claude.busy).toBe(false);
-    expect(created.claude.awaitingApproval).toBe(false);
+    const claude = ws.getClaude(created);
+    expect(claude.process).toBeNull();
+    expect(claude.busy).toBe(false);
+    expect(claude.awaitingApproval).toBe(false);
     expect(created.codex.process).toBeNull();
     expect(created.gemini.process).toBeNull();
     expect(created.terminals.size).toBe(0);
@@ -155,14 +156,15 @@ describe('workspace lifecycle — suspend', () => {
     const workspace = ws.getOrCreate('/project/suspend1');
 
     const claudeProc = createMockProcess();
-    workspace.claude.process = claudeProc as any;
-    workspace.claude.busy = true;
+    const claude = ws.getClaude(workspace);
+    claude.process = claudeProc as any;
+    claude.busy = true;
 
     ws.suspend('/project/suspend1', win as any);
 
     expect(claudeProc.kill).toHaveBeenCalled();
-    expect(workspace.claude.process).toBeNull();
-    expect(workspace.claude.busy).toBe(false);
+    expect(claude.process).toBeNull();
+    expect(claude.busy).toBe(false);
     expect(workspace.status).toBe('suspended');
   });
 
@@ -231,7 +233,7 @@ describe('workspace lifecycle — suspend', () => {
     const workspace = ws.getOrCreate('/project/suspend-idem');
 
     const proc = createMockProcess();
-    workspace.claude.process = proc as any;
+    ws.getClaude(workspace).process = proc as any;
 
     ws.suspend('/project/suspend-idem', win as any);
     ws.suspend('/project/suspend-idem', win as any);
@@ -246,15 +248,16 @@ describe('workspace lifecycle — suspend', () => {
     const win = createWin();
     const workspace = ws.getOrCreate('/project/suspend-approval');
 
-    workspace.claude.awaitingApproval = true;
-    workspace.claude.pendingToolUse = { toolName: 'Bash', toolUseId: 'x', input: {} };
-    workspace.claude.approvalBuffered = [{ type: 'test' }];
+    const claude = ws.getClaude(workspace);
+    claude.awaitingApproval = true;
+    claude.pendingToolUse = { toolName: 'Bash', toolUseId: 'x', input: {} };
+    claude.approvalBuffered = [{ type: 'test' }];
 
     ws.suspend('/project/suspend-approval', win as any);
 
-    expect(workspace.claude.awaitingApproval).toBe(false);
-    expect(workspace.claude.pendingToolUse).toBeNull();
-    expect(workspace.claude.approvalBuffered).toHaveLength(0);
+    expect(claude.awaitingApproval).toBe(false);
+    expect(claude.pendingToolUse).toBeNull();
+    expect(claude.approvalBuffered).toHaveLength(0);
   });
 
   it('is no-op for unknown project path', async () => {
@@ -271,7 +274,7 @@ describe('workspace lifecycle — remove', () => {
     const workspace = ws.getOrCreate('/project/remove1');
 
     const proc = createMockProcess();
-    workspace.claude.process = proc as any;
+    ws.getClaude(workspace).process = proc as any;
 
     ws.remove('/project/remove1', win as any);
 
@@ -305,8 +308,8 @@ describe('workspace lifecycle — destroyAll', () => {
 
     const proc1 = createMockProcess();
     const proc2 = createMockProcess();
-    p1.claude.process = proc1 as any;
-    p2.claude.process = proc2 as any;
+    ws.getClaude(p1).process = proc1 as any;
+    ws.getClaude(p2).process = proc2 as any;
 
     ws.destroyAll(win as any);
 

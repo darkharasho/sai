@@ -73,7 +73,7 @@ const {
 
   type Workspace = {
     projectPath: string;
-    claude: WorkspaceClaude;
+    claudeScopes: Map<string, WorkspaceClaude>;
   };
 
   const map = new Map<string, Workspace>();
@@ -93,11 +93,20 @@ const {
     };
   }
 
+  function getClaude(ws: Workspace, scope: string = 'chat'): WorkspaceClaude {
+    let c = ws.claudeScopes.get(scope);
+    if (!c) {
+      c = makeClaude();
+      ws.claudeScopes.set(scope, c);
+    }
+    return c;
+  }
+
   const workspaceState = {
     map,
     getOrCreate(projectPath: string): Workspace {
       if (!map.has(projectPath)) {
-        map.set(projectPath, { projectPath, claude: makeClaude() });
+        map.set(projectPath, { projectPath, claudeScopes: new Map([['chat', makeClaude()]]) });
       }
       return map.get(projectPath)!;
     },
@@ -108,6 +117,7 @@ const {
       map.clear();
     },
     makeClaude,
+    getClaude,
   };
 
   return { mockIpcMain, workspaceState };
@@ -128,6 +138,7 @@ vi.mock('electron', () => ({
 vi.mock('@electron/services/workspace', () => ({
   getOrCreate: vi.fn((p: string) => workspaceState.getOrCreate(p)),
   get: vi.fn((p: string) => workspaceState.get(p)),
+  getClaude: vi.fn((ws: any, scope?: string) => workspaceState.getClaude(ws, scope)),
   touchActivity: vi.fn(),
 }));
 
@@ -251,7 +262,7 @@ describe('buildArgs (via ensureProcess, observed from spawn calls)', () => {
     effort?: string;
     model?: string;
   } = {}): Promise<string[]> {
-    workspaceState.getOrCreate(PROJECT).claude.cwd = PROJECT;
+    workspaceState.getOrCreate(PROJECT).claudeScopes.get('chat')!.cwd = PROJECT;
     mockIpcMain._emit('claude:send', PROJECT, 'hello', [], opts.permMode, opts.effort, opts.model);
     await flushAsync();
 
@@ -310,7 +321,7 @@ describe('buildArgs (via ensureProcess, observed from spawn calls)', () => {
 
   it('adds --resume flag when session_id is already cached', async () => {
     const ws = workspaceState.getOrCreate(PROJECT);
-    ws.claude.sessionId = 'existing-session-123';
+    ws.claudeScopes.get('chat')!.sessionId = 'existing-session-123';
     const args = await sendAndGetArgs();
     expect(args).toContain('--resume');
     expect(args[args.indexOf('--resume') + 1]).toBe('existing-session-123');
@@ -325,7 +336,7 @@ describe('NDJSON parsing', () => {
   const PROJECT = '/ndjson/project';
 
   beforeEach(async () => {
-    workspaceState.getOrCreate(PROJECT).claude.cwd = PROJECT;
+    workspaceState.getOrCreate(PROJECT).claudeScopes.get('chat')!.cwd = PROJECT;
     mockIpcMain._emit('claude:send', PROJECT, 'hello', []);
     await flushAsync();
   });
@@ -363,16 +374,16 @@ describe('NDJSON parsing', () => {
     const proc = getLatestProcess();
     pushLines(proc, { type: 'system', subtype: 'init', session_id: 'sess-abc' });
     await flushAsync();
-    expect(workspaceState.get(PROJECT)!.claude.sessionId).toBe('sess-abc');
+    expect(workspaceState.get(PROJECT)!.claudeScopes.get('chat')!.sessionId).toBe('sess-abc');
   });
 
   it('does not overwrite session_id once set', async () => {
     const ws = workspaceState.get(PROJECT)!;
-    ws.claude.sessionId = 'original-session';
+    ws.claudeScopes.get('chat')!.sessionId = 'original-session';
     const proc = getLatestProcess();
     pushLines(proc, { type: 'system', subtype: 'init', session_id: 'new-session' });
     await flushAsync();
-    expect(ws.claude.sessionId).toBe('original-session');
+    expect(ws.claudeScopes.get('chat')!.sessionId).toBe('original-session');
   });
 
   it('sends session_id message to renderer when first captured', async () => {
@@ -386,7 +397,7 @@ describe('NDJSON parsing', () => {
   it('flushes buffered remainder on process exit', async () => {
     const proc = getLatestProcess();
     const ws = workspaceState.get(PROJECT)!;
-    ws.claude.buffer = JSON.stringify({ type: 'assistant', message: { content: [] } });
+    ws.claudeScopes.get('chat')!.buffer = JSON.stringify({ type: 'assistant', message: { content: [] } });
     proc.emitExit(0);
     await flushAsync();
     expect(sentMessages(win).some((m) => m.type === 'assistant')).toBe(true);
@@ -402,7 +413,7 @@ describe('Session management', () => {
 
   it('caches session_id and passes --resume on subsequent spawns', async () => {
     const ws = workspaceState.getOrCreate(PROJECT);
-    ws.claude.cwd = PROJECT;
+    ws.claudeScopes.get('chat')!.cwd = PROJECT;
 
     mockIpcMain._emit('claude:send', PROJECT, 'msg1', []);
     await flushAsync();
@@ -411,11 +422,11 @@ describe('Session management', () => {
     pushLines(proc1, { session_id: 'sess-cached', type: 'system', subtype: 'init' });
     await flushAsync();
 
-    expect(ws.claude.sessionId).toBe('sess-cached');
+    expect(ws.claudeScopes.get('chat')!.sessionId).toBe('sess-cached');
 
     // Force respawn by clearing process state
-    ws.claude.process = null;
-    ws.claude.processConfig = null;
+    ws.claudeScopes.get('chat')!.process = null;
+    ws.claudeScopes.get('chat')!.processConfig = null;
 
     vi.mocked(spawn).mockClear();
     mockIpcMain._emit('claude:send', PROJECT, 'msg2', [], 'bypass');
@@ -431,7 +442,7 @@ describe('Session management', () => {
 
   it('respawns process when config changes', async () => {
     const ws = workspaceState.getOrCreate(PROJECT);
-    ws.claude.cwd = PROJECT;
+    ws.claudeScopes.get('chat')!.cwd = PROJECT;
 
     mockIpcMain._emit('claude:send', PROJECT, 'msg1', [], undefined, 'low');
     await flushAsync();
@@ -444,7 +455,7 @@ describe('Session management', () => {
 
   it('reuses process when config unchanged', async () => {
     const ws = workspaceState.getOrCreate(PROJECT);
-    ws.claude.cwd = PROJECT;
+    ws.claudeScopes.get('chat')!.cwd = PROJECT;
 
     mockIpcMain._emit('claude:send', PROJECT, 'msg1', [], undefined, 'low');
     await flushAsync();
@@ -457,7 +468,7 @@ describe('Session management', () => {
 
   it('claude:setSessionId kills process and stores new session_id', async () => {
     const ws = workspaceState.getOrCreate(PROJECT);
-    ws.claude.cwd = PROJECT;
+    ws.claudeScopes.get('chat')!.cwd = PROJECT;
 
     mockIpcMain._emit('claude:send', PROJECT, 'hi', []);
     await flushAsync();
@@ -467,16 +478,16 @@ describe('Session management', () => {
     await flushAsync();
 
     expect(proc.kill).toHaveBeenCalled();
-    expect(ws.claude.sessionId).toBe('new-session-id');
-    expect(ws.claude.process).toBeNull();
+    expect(ws.claudeScopes.get('chat')!.sessionId).toBe('new-session-id');
+    expect(ws.claudeScopes.get('chat')!.process).toBeNull();
   });
 
   it('claude:setSessionId can clear session_id with undefined', async () => {
     const ws = workspaceState.getOrCreate(PROJECT);
-    ws.claude.sessionId = 'existing';
+    ws.claudeScopes.get('chat')!.sessionId = 'existing';
     mockIpcMain._emit('claude:setSessionId', PROJECT, undefined);
     await flushAsync();
-    expect(ws.claude.sessionId).toBeUndefined();
+    expect(ws.claudeScopes.get('chat')!.sessionId).toBeUndefined();
   });
 });
 
@@ -496,7 +507,7 @@ describe('claude:start handler', () => {
 
   it('sets cwd on the workspace', async () => {
     await mockIpcMain._invoke('claude:start', '/start/project');
-    expect(workspaceState.get('/start/project')?.claude.cwd).toBe('/start/project');
+    expect(workspaceState.get('/start/project')?.claudeScopes.get('chat')!.cwd).toBe('/start/project');
   });
 
   it('returns early when cwd is empty', async () => {
@@ -514,7 +525,7 @@ describe('claude:stop handler', () => {
 
   async function startProcess() {
     const ws = workspaceState.getOrCreate(PROJECT);
-    ws.claude.cwd = PROJECT;
+    ws.claudeScopes.get('chat')!.cwd = PROJECT;
     mockIpcMain._emit('claude:send', PROJECT, 'hi', []);
     await flushAsync();
     return { ws, proc: getLatestProcess() };
@@ -527,23 +538,23 @@ describe('claude:stop handler', () => {
 
     expect(proc.kill).toHaveBeenCalled();
     expect(sentMessages(win).some((m) => m.type === 'done')).toBe(true);
-    expect(ws.claude.process).toBeNull();
-    expect(ws.claude.busy).toBe(false);
-    expect(ws.claude.awaitingApproval).toBe(false);
+    expect(ws.claudeScopes.get('chat')!.process).toBeNull();
+    expect(ws.claudeScopes.get('chat')!.busy).toBe(false);
+    expect(ws.claudeScopes.get('chat')!.awaitingApproval).toBe(false);
   });
 
   it('clears all approval state on stop', async () => {
     const { ws } = await startProcess();
-    ws.claude.awaitingApproval = true;
-    ws.claude.approvalBuffered = [{ type: 'assistant' }];
-    ws.claude.pendingToolUse = { toolName: 'Bash', toolUseId: 'tu1', input: {} };
+    ws.claudeScopes.get('chat')!.awaitingApproval = true;
+    ws.claudeScopes.get('chat')!.approvalBuffered = [{ type: 'assistant' }];
+    ws.claudeScopes.get('chat')!.pendingToolUse = { toolName: 'Bash', toolUseId: 'tu1', input: {} };
 
     mockIpcMain._emit('claude:stop', PROJECT);
     await flushAsync();
 
-    expect(ws.claude.awaitingApproval).toBe(false);
-    expect(ws.claude.approvalBuffered).toHaveLength(0);
-    expect(ws.claude.pendingToolUse).toBeNull();
+    expect(ws.claudeScopes.get('chat')!.awaitingApproval).toBe(false);
+    expect(ws.claudeScopes.get('chat')!.approvalBuffered).toHaveLength(0);
+    expect(ws.claudeScopes.get('chat')!.pendingToolUse).toBeNull();
   });
 });
 
@@ -556,7 +567,7 @@ describe('Approval flow', () => {
 
   async function startProcess() {
     const ws = workspaceState.getOrCreate(PROJECT);
-    ws.claude.cwd = PROJECT;
+    ws.claudeScopes.get('chat')!.cwd = PROJECT;
     mockIpcMain._emit('claude:send', PROJECT, 'do something', []);
     await flushAsync();
     return { ws, proc: getLatestProcess() };
@@ -574,7 +585,7 @@ describe('Approval flow', () => {
     });
     await flushAsync();
 
-    expect(ws.claude.pendingToolUse).toMatchObject({
+    expect(ws.claudeScopes.get('chat')!.pendingToolUse).toMatchObject({
       toolName: 'Bash',
       toolUseId: 'tu-001',
       input: { command: 'rm -rf /tmp/test' },
@@ -607,7 +618,7 @@ describe('Approval flow', () => {
     });
     await flushAsync();
 
-    expect(ws.claude.awaitingApproval).toBe(true);
+    expect(ws.claudeScopes.get('chat')!.awaitingApproval).toBe(true);
     const approvalMsg = sentMessages(win).find((m) => m.type === 'approval_needed');
     expect(approvalMsg).toBeDefined();
     expect(approvalMsg?.toolName).toBe('Bash');
@@ -616,7 +627,7 @@ describe('Approval flow', () => {
 
   it('detects "requested permissions" denial pattern', async () => {
     const { ws, proc } = await startProcess();
-    ws.claude.pendingToolUse = { toolName: 'Bash', toolUseId: 'tu-req', input: { command: 'whoami' } };
+    ws.claudeScopes.get('chat')!.pendingToolUse = { toolName: 'Bash', toolUseId: 'tu-req', input: { command: 'whoami' } };
 
     pushLines(proc, {
       type: 'user',
@@ -629,12 +640,12 @@ describe('Approval flow', () => {
       },
     });
     await flushAsync();
-    expect(ws.claude.awaitingApproval).toBe(true);
+    expect(ws.claudeScopes.get('chat')!.awaitingApproval).toBe(true);
   });
 
   it('detects "was blocked" denial pattern', async () => {
     const { ws, proc } = await startProcess();
-    ws.claude.pendingToolUse = { toolName: 'Bash', toolUseId: 'tu-blk', input: { command: 'cat /etc/passwd' } };
+    ws.claudeScopes.get('chat')!.pendingToolUse = { toolName: 'Bash', toolUseId: 'tu-blk', input: { command: 'cat /etc/passwd' } };
 
     pushLines(proc, {
       type: 'user',
@@ -647,12 +658,12 @@ describe('Approval flow', () => {
       },
     });
     await flushAsync();
-    expect(ws.claude.awaitingApproval).toBe(true);
+    expect(ws.claudeScopes.get('chat')!.awaitingApproval).toBe(true);
   });
 
   it('buffers messages arriving while awaitingApproval without forwarding them', async () => {
     const { ws, proc } = await startProcess();
-    ws.claude.pendingToolUse = { toolName: 'Bash', toolUseId: 'tu-buf', input: { command: 'echo hi' } };
+    ws.claudeScopes.get('chat')!.pendingToolUse = { toolName: 'Bash', toolUseId: 'tu-buf', input: { command: 'echo hi' } };
 
     pushLines(proc, {
       type: 'user',
@@ -661,7 +672,7 @@ describe('Approval flow', () => {
       },
     });
     await flushAsync();
-    expect(ws.claude.awaitingApproval).toBe(true);
+    expect(ws.claudeScopes.get('chat')!.awaitingApproval).toBe(true);
 
     const sendCountBefore = (win.webContents.send as ReturnType<typeof vi.fn>).mock.calls.length;
 
@@ -674,14 +685,14 @@ describe('Approval flow', () => {
       .filter((m: any) => m?.type === 'assistant');
 
     expect(newMsgs).toHaveLength(0);
-    expect(ws.claude.approvalBuffered).toHaveLength(1);
+    expect(ws.claudeScopes.get('chat')!.approvalBuffered).toHaveLength(1);
   });
 
   it('deny path: flushes buffered messages to renderer and clears state', async () => {
     const { ws } = await startProcess();
-    ws.claude.awaitingApproval = true;
-    ws.claude.pendingToolUse = { toolName: 'Bash', toolUseId: 'tu-deny', input: { command: 'ls' } };
-    ws.claude.approvalBuffered = [
+    ws.claudeScopes.get('chat')!.awaitingApproval = true;
+    ws.claudeScopes.get('chat')!.pendingToolUse = { toolName: 'Bash', toolUseId: 'tu-deny', input: { command: 'ls' } };
+    ws.claudeScopes.get('chat')!.approvalBuffered = [
       { type: 'assistant', message: { content: [] } },
       { type: 'result', duration_ms: 1000 },
     ];
@@ -692,73 +703,73 @@ describe('Approval flow', () => {
     const msgs = sentMessages(win);
     expect(msgs.some((m) => m.type === 'assistant')).toBe(true);
     expect(msgs.some((m) => m.type === 'done')).toBe(true);
-    expect(ws.claude.awaitingApproval).toBe(false);
-    expect(ws.claude.approvalBuffered).toHaveLength(0);
-    expect(ws.claude.pendingToolUse).toBeNull();
+    expect(ws.claudeScopes.get('chat')!.awaitingApproval).toBe(false);
+    expect(ws.claudeScopes.get('chat')!.approvalBuffered).toHaveLength(0);
+    expect(ws.claudeScopes.get('chat')!.pendingToolUse).toBeNull();
   });
 
   it('deny path: sets busy=false when result is in buffered messages', async () => {
     const { ws } = await startProcess();
-    ws.claude.awaitingApproval = true;
-    ws.claude.busy = true;
-    ws.claude.pendingToolUse = { toolName: 'Bash', toolUseId: 'tu-deny2', input: { command: 'ls' } };
-    ws.claude.approvalBuffered = [{ type: 'result', duration_ms: 500 }];
+    ws.claudeScopes.get('chat')!.awaitingApproval = true;
+    ws.claudeScopes.get('chat')!.busy = true;
+    ws.claudeScopes.get('chat')!.pendingToolUse = { toolName: 'Bash', toolUseId: 'tu-deny2', input: { command: 'ls' } };
+    ws.claudeScopes.get('chat')!.approvalBuffered = [{ type: 'result', duration_ms: 500 }];
 
     await mockIpcMain._invoke('claude:approve', PROJECT, 'tu-deny2', false);
     await flushAsync();
-    expect(ws.claude.busy).toBe(false);
+    expect(ws.claudeScopes.get('chat')!.busy).toBe(false);
   });
 
   it('approve path (Read): clears state, reports error for nonexistent file', async () => {
     const { ws } = await startProcess();
-    ws.claude.awaitingApproval = true;
-    ws.claude.pendingToolUse = {
+    ws.claudeScopes.get('chat')!.awaitingApproval = true;
+    ws.claudeScopes.get('chat')!.pendingToolUse = {
       toolName: 'Read',
       toolUseId: 'tu-read',
       input: { file_path: '/tmp/nonexistent-file-sai-test.txt' },
     };
-    ws.claude.approvalBuffered = [];
+    ws.claudeScopes.get('chat')!.approvalBuffered = [];
 
     const result = await mockIpcMain._invoke('claude:approve', PROJECT, 'tu-read', true) as any;
     await flushAsync();
 
-    expect(ws.claude.awaitingApproval).toBe(false);
-    expect(ws.claude.pendingToolUse).toBeNull();
-    expect(ws.claude.approvalBuffered).toHaveLength(0);
+    expect(ws.claudeScopes.get('chat')!.awaitingApproval).toBe(false);
+    expect(ws.claudeScopes.get('chat')!.pendingToolUse).toBeNull();
+    expect(ws.claudeScopes.get('chat')!.approvalBuffered).toHaveLength(0);
     expect(result?.isError).toBe(true);
   });
 
   it('approve path: discards buffered denial response', async () => {
     const { ws } = await startProcess();
-    ws.claude.awaitingApproval = true;
-    ws.claude.pendingToolUse = {
+    ws.claudeScopes.get('chat')!.awaitingApproval = true;
+    ws.claudeScopes.get('chat')!.pendingToolUse = {
       toolName: 'Read',
       toolUseId: 'tu-read2',
       input: { file_path: '/tmp/gone.txt' },
     };
-    ws.claude.approvalBuffered = [
+    ws.claudeScopes.get('chat')!.approvalBuffered = [
       { type: 'assistant', message: { content: [{ type: 'text', text: 'I cannot do that' }] } },
     ];
 
     await mockIpcMain._invoke('claude:approve', PROJECT, 'tu-read2', true);
     await flushAsync();
-    expect(ws.claude.approvalBuffered).toHaveLength(0);
+    expect(ws.claudeScopes.get('chat')!.approvalBuffered).toHaveLength(0);
   });
 
   it('regression 4a11646: approval state does not leak between turns', async () => {
     const { ws, proc } = await startProcess();
 
     // Turn 1: user denies
-    ws.claude.pendingToolUse = { toolName: 'Bash', toolUseId: 'tu-leak1', input: { command: 'ls' } };
-    ws.claude.awaitingApproval = true;
-    ws.claude.approvalBuffered = [{ type: 'assistant', message: { content: [] } }];
+    ws.claudeScopes.get('chat')!.pendingToolUse = { toolName: 'Bash', toolUseId: 'tu-leak1', input: { command: 'ls' } };
+    ws.claudeScopes.get('chat')!.awaitingApproval = true;
+    ws.claudeScopes.get('chat')!.approvalBuffered = [{ type: 'assistant', message: { content: [] } }];
 
     await mockIpcMain._invoke('claude:approve', PROJECT, 'tu-leak1', false);
     await flushAsync();
 
-    expect(ws.claude.awaitingApproval).toBe(false);
-    expect(ws.claude.approvalBuffered).toHaveLength(0);
-    expect(ws.claude.pendingToolUse).toBeNull();
+    expect(ws.claudeScopes.get('chat')!.awaitingApproval).toBe(false);
+    expect(ws.claudeScopes.get('chat')!.approvalBuffered).toHaveLength(0);
+    expect(ws.claudeScopes.get('chat')!.pendingToolUse).toBeNull();
 
     // Turn 2: new tool_use should be independent
     pushLines(proc, {
@@ -769,14 +780,14 @@ describe('Approval flow', () => {
     });
     await flushAsync();
 
-    expect(ws.claude.pendingToolUse?.toolUseId).toBe('tu-leak2');
-    expect(ws.claude.awaitingApproval).toBe(false);
+    expect(ws.claudeScopes.get('chat')!.pendingToolUse?.toolUseId).toBe('tu-leak2');
+    expect(ws.claudeScopes.get('chat')!.awaitingApproval).toBe(false);
   });
 
   it('does nothing when approve is called with no pending tool use', async () => {
     const { ws } = await startProcess();
-    ws.claude.awaitingApproval = false;
-    ws.claude.pendingToolUse = null;
+    ws.claudeScopes.get('chat')!.awaitingApproval = false;
+    ws.claudeScopes.get('chat')!.pendingToolUse = null;
 
     const before = (win.webContents.send as ReturnType<typeof vi.fn>).mock.calls.length;
     await mockIpcMain._invoke('claude:approve', PROJECT, 'tu-none', true);
@@ -794,7 +805,7 @@ describe('Streaming state (regression tests)', () => {
 
   async function startProcess() {
     const ws = workspaceState.getOrCreate(PROJECT);
-    ws.claude.cwd = PROJECT;
+    ws.claudeScopes.get('chat')!.cwd = PROJECT;
     mockIpcMain._emit('claude:send', PROJECT, 'do work', []);
     await flushAsync();
     return { ws, proc: getLatestProcess() };
@@ -802,12 +813,12 @@ describe('Streaming state (regression tests)', () => {
 
   it('regression e96d1c1: busy resets to false when result message arrives', async () => {
     const { ws, proc } = await startProcess();
-    expect(ws.claude.busy).toBe(true);
+    expect(ws.claudeScopes.get('chat')!.busy).toBe(true);
 
     pushLines(proc, { type: 'result', duration_ms: 500, num_turns: 1, total_cost_usd: 0.001, result: 'done' });
     await flushAsync();
 
-    expect(ws.claude.busy).toBe(false);
+    expect(ws.claudeScopes.get('chat')!.busy).toBe(false);
   });
 
   it('regression f476162: no false positive done during active stream', async () => {
@@ -820,7 +831,7 @@ describe('Streaming state (regression tests)', () => {
     await flushAsync();
 
     expect(sentMessages(win).filter((m) => m.type === 'done')).toHaveLength(0);
-    expect(ws.claude.busy).toBe(true);
+    expect(ws.claudeScopes.get('chat')!.busy).toBe(true);
   });
 
   it('regression f476162: done is sent exactly once after result message', async () => {
@@ -850,41 +861,41 @@ describe('Streaming state (regression tests)', () => {
     await flushAsync();
 
     expect(sentMessages(win).filter((m) => m.type === 'assistant')).toHaveLength(1);
-    expect(ws.claude.busy).toBe(true);
+    expect(ws.claudeScopes.get('chat')!.busy).toBe(true);
   });
 
   it('regression dd4d6a0: process exit clears all state', async () => {
     const { ws, proc } = await startProcess();
-    ws.claude.awaitingApproval = true;
-    ws.claude.approvalBuffered = [{ type: 'assistant' }];
-    ws.claude.pendingToolUse = { toolName: 'Bash', toolUseId: 'tu-x', input: {} };
+    ws.claudeScopes.get('chat')!.awaitingApproval = true;
+    ws.claudeScopes.get('chat')!.approvalBuffered = [{ type: 'assistant' }];
+    ws.claudeScopes.get('chat')!.pendingToolUse = { toolName: 'Bash', toolUseId: 'tu-x', input: {} };
 
     proc.emitExit(0);
     await flushAsync();
 
-    expect(ws.claude.busy).toBe(false);
-    expect(ws.claude.awaitingApproval).toBe(false);
-    expect(ws.claude.approvalBuffered).toHaveLength(0);
-    expect(ws.claude.pendingToolUse).toBeNull();
-    expect(ws.claude.process).toBeNull();
-    expect(ws.claude.suppressForward).toBe(false);
+    expect(ws.claudeScopes.get('chat')!.busy).toBe(false);
+    expect(ws.claudeScopes.get('chat')!.awaitingApproval).toBe(false);
+    expect(ws.claudeScopes.get('chat')!.approvalBuffered).toHaveLength(0);
+    expect(ws.claudeScopes.get('chat')!.pendingToolUse).toBeNull();
+    expect(ws.claudeScopes.get('chat')!.process).toBeNull();
+    expect(ws.claudeScopes.get('chat')!.suppressForward).toBe(false);
   });
 
   it('regression dd4d6a0: process error event clears all state', async () => {
     const { ws, proc } = await startProcess();
-    ws.claude.awaitingApproval = true;
-    ws.claude.approvalBuffered = [{ type: 'assistant' }];
-    ws.claude.pendingToolUse = { toolName: 'Bash', toolUseId: 'tu-y', input: {} };
+    ws.claudeScopes.get('chat')!.awaitingApproval = true;
+    ws.claudeScopes.get('chat')!.approvalBuffered = [{ type: 'assistant' }];
+    ws.claudeScopes.get('chat')!.pendingToolUse = { toolName: 'Bash', toolUseId: 'tu-y', input: {} };
 
     proc.emit('error', new Error('spawn ENOENT'));
     await flushAsync();
 
-    expect(ws.claude.busy).toBe(false);
-    expect(ws.claude.awaitingApproval).toBe(false);
-    expect(ws.claude.approvalBuffered).toHaveLength(0);
-    expect(ws.claude.pendingToolUse).toBeNull();
-    expect(ws.claude.process).toBeNull();
-    expect(ws.claude.suppressForward).toBe(false);
+    expect(ws.claudeScopes.get('chat')!.busy).toBe(false);
+    expect(ws.claudeScopes.get('chat')!.awaitingApproval).toBe(false);
+    expect(ws.claudeScopes.get('chat')!.approvalBuffered).toHaveLength(0);
+    expect(ws.claudeScopes.get('chat')!.pendingToolUse).toBeNull();
+    expect(ws.claudeScopes.get('chat')!.process).toBeNull();
+    expect(ws.claudeScopes.get('chat')!.suppressForward).toBe(false);
 
     const msgs = sentMessages(win);
     expect(msgs.some((m) => m.type === 'error')).toBe(true);
@@ -901,7 +912,7 @@ describe('Streaming state (regression tests)', () => {
 
     // Simulate process replacement
     const fakeNewProc = new MockChildProcess();
-    ws.claude.process = fakeNewProc as any;
+    ws.claudeScopes.get('chat')!.process = fakeNewProc as any;
 
     const sendCountBefore = (win.webContents.send as ReturnType<typeof vi.fn>).mock.calls.length;
 

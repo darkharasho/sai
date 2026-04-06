@@ -50,9 +50,23 @@ const { mockIpcMain, workspaceState } = vi.hoisted(() => {
     approvalBuffered: any[];
     awaitingApproval: boolean;
   };
-  type Workspace = { projectPath: string; claude: WorkspaceClaude };
+  type Workspace = { projectPath: string; claudeScopes: Map<string, WorkspaceClaude> };
 
   const map = new Map<string, Workspace>();
+
+  function makeClaude(): WorkspaceClaude {
+    return {
+      process: null, sessionId: undefined, buffer: '', cwd: '',
+      processConfig: null, busy: false, suppressForward: false,
+      pendingToolUse: null, approvalBuffered: [], awaitingApproval: false,
+    };
+  }
+
+  function getClaude(ws: Workspace, scope: string = 'chat'): WorkspaceClaude {
+    let c = ws.claudeScopes.get(scope);
+    if (!c) { c = makeClaude(); ws.claudeScopes.set(scope, c); }
+    return c;
+  }
 
   const workspaceState = {
     map,
@@ -60,17 +74,14 @@ const { mockIpcMain, workspaceState } = vi.hoisted(() => {
       if (!map.has(p)) {
         map.set(p, {
           projectPath: p,
-          claude: {
-            process: null, sessionId: undefined, buffer: '', cwd: '',
-            processConfig: null, busy: false, suppressForward: false,
-            pendingToolUse: null, approvalBuffered: [], awaitingApproval: false,
-          },
+          claudeScopes: new Map([['chat', makeClaude()]]),
         });
       }
       return map.get(p)!;
     },
     get(p: string): Workspace | undefined { return map.get(p); },
     clear() { map.clear(); },
+    getClaude,
   };
 
   return { mockIpcMain, workspaceState };
@@ -112,6 +123,7 @@ vi.mock('electron', () => ({
 vi.mock('@electron/services/workspace', () => ({
   getOrCreate: vi.fn((p: string) => workspaceState.getOrCreate(p)),
   get: vi.fn((p: string) => workspaceState.get(p)),
+  getClaude: vi.fn((ws: any, scope?: string) => workspaceState.getClaude(ws, scope)),
   touchActivity: vi.fn(),
 }));
 
