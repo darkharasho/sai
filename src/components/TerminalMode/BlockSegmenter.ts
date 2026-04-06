@@ -17,13 +17,10 @@ export interface SegmentedBlock {
 type BlockCallback = (block: SegmentedBlock) => void;
 type AltScreenCallback = (entered: boolean) => void;
 
-let idCounter = 0;
-function nextId(): string {
-  return `seg-block-${++idCounter}`;
-}
-
 export class BlockSegmenter {
+  private _idCounter: number = 0;
   private _currentPrompt: string = '';
+  private _initialPrompt: string = '';
   private _startTime: number = 0;
   private _pendingLines: string[] = [];   // lines after the prompt (stripped)
   private _partialLine: string = '';       // current incomplete line (stripped)
@@ -33,6 +30,13 @@ export class BlockSegmenter {
 
   // Whether we have seen at least one prompt yet
   private _seenFirstPrompt: boolean = false;
+
+  // Whether we are currently in alt-screen mode
+  private _inAltScreen: boolean = false;
+
+  private _nextId(): string {
+    return `seg-block-${++this._idCounter}`;
+  }
 
   onBlock(cb: BlockCallback): void {
     this._blockCallbacks.push(cb);
@@ -49,11 +53,16 @@ export class BlockSegmenter {
   feed(rawData: string): void {
     // Check for alt screen sequences BEFORE stripping ANSI
     if (rawData.includes(ALT_SCREEN_ENTER)) {
+      this._inAltScreen = true;
       this._altScreenCallbacks.forEach((cb) => cb(true));
     }
     if (rawData.includes(ALT_SCREEN_EXIT)) {
+      this._inAltScreen = false;
       this._altScreenCallbacks.forEach((cb) => cb(false));
     }
+
+    // Skip all segmentation while in alt-screen mode
+    if (this._inAltScreen) return;
 
     const clean = stripAnsi(rawData);
 
@@ -95,12 +104,23 @@ export class BlockSegmenter {
     if (this._pendingLines.length === 0 && !this._seenFirstPrompt) {
       this._seenFirstPrompt = true;
       this._currentPrompt = newPromptText;
+      this._initialPrompt = newPromptText;
       this._startTime = Date.now();
       this._partialLine = '';
       return;
     }
 
-    // We have pending content OR we've already seen the first prompt — emit a block
+    // Guard: skip emission when pendingLines is empty and we've already seen the
+    // first prompt — this handles spurious double-prompt (e.g. terminal resize)
+    // where no actual command was typed.
+    if (this._pendingLines.length === 0 && this._seenFirstPrompt) {
+      this._currentPrompt = newPromptText;
+      this._startTime = Date.now();
+      this._partialLine = '';
+      return;
+    }
+
+    // We have pending content — emit a block
     this._seenFirstPrompt = true;
     this._finalizeBlock(newPromptText);
   }
@@ -138,16 +158,13 @@ export class BlockSegmenter {
       .trim();
 
     const block: SegmentedBlock = {
-      id: nextId(),
+      id: this._nextId(),
       command,
       output,
       promptText: this._currentPrompt,
       startTime: this._startTime,
       duration: Date.now() - this._startTime,
-      isRemote: newPromptText.includes('@') &&
-        this._currentPrompt.includes('@') &&
-        newPromptText.split('@')[1]?.split(':')[0] !==
-          this._currentPrompt.split('@')[1]?.split(':')[0],
+      isRemote: this._initialPrompt !== '' && newPromptText !== this._initialPrompt,
     };
 
     this._blockCallbacks.forEach((cb) => cb(block));
@@ -161,9 +178,11 @@ export class BlockSegmenter {
 
   reset(): void {
     this._currentPrompt = '';
+    this._initialPrompt = '';
     this._startTime = 0;
     this._pendingLines = [];
     this._partialLine = '';
     this._seenFirstPrompt = false;
+    this._inAltScreen = false;
   }
 }
