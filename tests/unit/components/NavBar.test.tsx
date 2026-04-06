@@ -108,4 +108,28 @@ describe('NavBar', () => {
     );
     expect(container.querySelector('.navbar')).toBeTruthy();
   });
+
+  it('renders terminal mode toggle button', () => {
+    const { container } = render(
+      <NavBar activeSidebar={null} onToggle={vi.fn()} />
+    );
+    expect(getNavButton(container, 'Terminal Mode')).toBeTruthy();
+  });
+
+  it('calls onToggle with "terminal-mode" when terminal mode button is clicked', () => {
+    const onToggle = vi.fn();
+    const { container } = render(
+      <NavBar activeSidebar={null} onToggle={onToggle} />
+    );
+    fireEvent.click(getNavButton(container, 'Terminal Mode'));
+    expect(onToggle).toHaveBeenCalledWith('terminal-mode');
+  });
+
+  it('adds active class to terminal mode button when activeSidebar is "terminal-mode"', () => {
+    const { container } = render(
+      <NavBar activeSidebar="terminal-mode" onToggle={vi.fn()} />
+    );
+    const btn = getNavButton(container, 'Terminal Mode');
+    expect(btn.className).toContain('active');
+  });
 });
