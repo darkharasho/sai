@@ -86,6 +86,7 @@ function WelcomeTypewriter() {
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<'default' | 'terminal-mode'>('default');
+  const [terminalModeActivated, setTerminalModeActivated] = useState(false);
 
   const [activeProjectPath, setActiveProjectPath] = useState<string>('');
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
@@ -294,7 +295,7 @@ export default function App() {
   // Load persisted settings from main process (file-based, works in dev+prod)
   useEffect(() => {
     window.sai.settingsGet('defaultView', 'default').then((v: string) => {
-      if (v === 'terminal-mode') setActiveView('terminal-mode');
+      if (v === 'terminal-mode') { setActiveView('terminal-mode'); setTerminalModeActivated(true); }
     });
     window.sai.settingsGet('focusedChat', false).then((v: boolean) => setFocusedChat(v));
     window.sai.settingsGet('sidebarWidth', 300).then((v: number) => {
@@ -972,7 +973,10 @@ export default function App() {
 
   const toggleSidebar = (id: string) => {
     if (id === 'terminal-mode') {
-      setActiveView(prev => prev === 'terminal-mode' ? 'default' : 'terminal-mode');
+      setActiveView(prev => {
+        if (prev !== 'terminal-mode') setTerminalModeActivated(true);
+        return prev === 'terminal-mode' ? 'default' : 'terminal-mode';
+      });
       return;
     }
     // Folder/Git toggles work independently — don't exit terminal mode
@@ -1372,8 +1376,10 @@ export default function App() {
         {sidebarOpen === 'files' && <FileExplorerSidebar projectPath={projectPath} onFileOpen={handleFileOpen} />}
         {sidebarOpen === 'git' && <GitSidebar projectPath={projectPath} onFileClick={handleFileClick} commitMessageProvider={commitMessageProvider} />}
         <div className="tm-views-wrapper">
-          {activeView === 'terminal-mode' && (
-            <TerminalModeView projectPath={projectPath} aiProvider={aiProvider} />
+          {terminalModeActivated && (
+            <div style={{ display: activeView === 'terminal-mode' ? 'flex' : 'none', flex: 1, minHeight: 0, minWidth: 0 }}>
+              <TerminalModeView projectPath={projectPath} aiProvider={aiProvider} />
+            </div>
           )}
           <div className="main-content" ref={mainContentRef} style={activeView === 'terminal-mode' ? { display: 'none' } : undefined}>
             {allPanels.map((panel, i) => (
