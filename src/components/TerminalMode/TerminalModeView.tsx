@@ -279,6 +279,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
 
   const handleAIRequest = useCallback((prompt: string) => {
     const aiId = nextBlockId();
+    const aiStartTime = Date.now();
     let turnSeq: number | null = null;
     let gotContent = false;
 
@@ -466,7 +467,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
         setDisplayItems(prev => {
           const updated = prev.map(item =>
             item.type === 'ai' && item.id === currentAiId
-              ? { ...item, streaming: false }
+              ? { ...item, streaming: false, duration: Date.now() - aiStartTime }
               : item
           );
           return [...updated, {
@@ -511,7 +512,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
         if (!gotContent && turnSeq === null) return;
         setDisplayItems(prev => prev.map(item =>
           item.type === 'ai' && item.id === currentAiId
-            ? { ...item, streaming: false }
+            ? { ...item, streaming: false, duration: Date.now() - aiStartTime }
             : item
         ));
         aiCleanupRef.current = null;

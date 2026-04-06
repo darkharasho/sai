@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { AIEntry } from './types';
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -7,11 +9,17 @@ const PROVIDER_LABELS: Record<string, string> = {
   gemini: 'Gemini',
 };
 
+function formatDuration(ms: number): string {
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
+}
+
 interface InlineAIBlockProps {
   question: string;
   content: string;
   suggestedCommands?: string[];
   streaming?: boolean;
+  duration?: number;
   entries?: AIEntry[];
   aiProvider?: 'claude' | 'codex' | 'gemini';
   onRunCommand: (cmd: string) => void;
@@ -23,6 +31,7 @@ export default function InlineAIBlock({
   content,
   suggestedCommands,
   streaming,
+  duration,
   entries,
   aiProvider = 'claude',
   onRunCommand,
@@ -40,16 +49,23 @@ export default function InlineAIBlock({
     <div className="tn-ai-block">
       {/* Header with question inline */}
       <div className="tn-ai-header">
-        <span className="tn-ai-icon">⬡</span>
-        <span className="tn-ai-label">{providerLabel}</span>
-        {streaming && <span className="tn-ai-streaming" />}
-        <span className="tn-ai-sep">·</span>
-        <span className="tn-ai-question">{question}</span>
+        <div className="tn-ai-header-left">
+          <span className="tn-ai-icon">⬡</span>
+          <span className="tn-ai-label">{providerLabel}</span>
+          {streaming && <span className="tn-ai-streaming" />}
+          <span className="tn-ai-sep">·</span>
+          <span className="tn-ai-question">{question}</span>
+        </div>
+        {!streaming && duration != null && (
+          <span className="tn-ai-duration">{formatDuration(duration)}</span>
+        )}
       </div>
 
-      {/* Response content */}
+      {/* Response content — rendered as markdown */}
       {content && (
-        <div className="tn-ai-content">{content}</div>
+        <div className="tn-ai-content">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+        </div>
       )}
 
       {entries && entries.length > 0 && (
@@ -112,18 +128,28 @@ const styles = `
   .tn-ai-header {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 6px;
     margin-bottom: 8px;
+  }
+  .tn-ai-header-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    overflow: hidden;
   }
   .tn-ai-icon {
     color: #8b5cf6;
     font-size: 12px;
     line-height: 1;
+    flex-shrink: 0;
   }
   .tn-ai-label {
     color: #8b5cf6;
     font-size: 11px;
     font-weight: 600;
+    flex-shrink: 0;
   }
   .tn-ai-streaming {
     width: 6px;
@@ -140,6 +166,7 @@ const styles = `
   .tn-ai-sep {
     color: #4b5563;
     font-size: 11px;
+    flex-shrink: 0;
   }
   .tn-ai-question {
     color: #7c7f85;
@@ -149,14 +176,30 @@ const styles = `
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .tn-ai-duration {
+    color: #4b5563;
+    font-size: 10px;
+    flex-shrink: 0;
+  }
   .tn-ai-content {
     color: #b4b8c0;
     font-size: 11.5px;
     line-height: 1.6;
     padding-left: 20px;
     margin-bottom: 10px;
-    white-space: pre-wrap;
-    word-break: break-word;
+  }
+  .tn-ai-content p {
+    margin: 0 0 6px;
+  }
+  .tn-ai-content p:last-child {
+    margin-bottom: 0;
+  }
+  .tn-ai-content strong {
+    color: #e5e7eb;
+    font-weight: 600;
+  }
+  .tn-ai-content em {
+    color: #9ca3af;
   }
   .tn-ai-content code {
     background: #1a1e24;
@@ -164,6 +207,34 @@ const styles = `
     border-radius: 2px;
     color: #e5e7eb;
     font-size: 11px;
+  }
+  .tn-ai-content pre {
+    background: #0a0d0f;
+    border: 1px solid #1e2328;
+    border-radius: 4px;
+    padding: 8px 10px;
+    margin: 6px 0;
+    overflow-x: auto;
+  }
+  .tn-ai-content pre code {
+    background: none;
+    padding: 0;
+    font-size: 11px;
+    color: #b4b8c0;
+  }
+  .tn-ai-content ul, .tn-ai-content ol {
+    margin: 4px 0;
+    padding-left: 18px;
+  }
+  .tn-ai-content li {
+    margin-bottom: 2px;
+  }
+  .tn-ai-content a {
+    color: #58a6ff;
+    text-decoration: none;
+  }
+  .tn-ai-content a:hover {
+    text-decoration: underline;
   }
   .tn-ai-entries {
     padding-left: 20px;

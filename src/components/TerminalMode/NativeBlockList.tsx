@@ -8,7 +8,7 @@ import type { ApprovalBlock as ApprovalBlockType, ToolApprovalBlock as ToolAppro
 
 export type DisplayItem =
   | { type: 'command'; block: SegmentedBlock; aiSuggested?: boolean }
-  | { type: 'ai'; id: string; question: string; content: string; suggestedCommands: string[]; streaming: boolean; aiProvider?: 'claude' | 'codex' | 'gemini' }
+  | { type: 'ai'; id: string; question: string; content: string; suggestedCommands: string[]; streaming: boolean; aiProvider?: 'claude' | 'codex' | 'gemini'; duration?: number }
   | { type: 'approval'; block: ApprovalBlockType }
   | { type: 'tool-approval'; block: ToolApprovalBlockType };
 
@@ -153,6 +153,7 @@ export default function NativeBlockList({
                 content={item.content}
                 suggestedCommands={item.suggestedCommands}
                 streaming={item.streaming}
+                duration={item.duration}
                 aiProvider={item.aiProvider}
                 onRunCommand={onRunSuggested}
                 onCopy={onCopy}
