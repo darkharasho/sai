@@ -66,12 +66,25 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
       const text = value;
       if (!text) return;
       window.sai.terminalTabComplete(text, cwd).then((completions: string[]) => {
+        if (completions.length === 0) return;
+        const lastWord = text.split(/\s+/).pop() || '';
+        const prefix = text.slice(0, text.length - lastWord.length);
         if (completions.length === 1) {
-          const lastWord = text.split(/\s+/).pop() || '';
-          const completed = text.slice(0, text.length - lastWord.length) + completions[0];
-          setValue(completed);
+          // Single match — complete fully, add space if not a directory
+          const c = completions[0];
+          setValue(prefix + c + (c.endsWith('/') ? '' : ' '));
+        } else {
+          // Multiple matches — complete to longest common prefix
+          let common = completions[0];
+          for (let i = 1; i < completions.length; i++) {
+            let j = 0;
+            while (j < common.length && j < completions[i].length && common[j] === completions[i][j]) j++;
+            common = common.slice(0, j);
+          }
+          if (common.length > lastWord.length) {
+            setValue(prefix + common);
+          }
         }
-        // TODO: multiple completions could show a dropdown
       });
       return;
     }
