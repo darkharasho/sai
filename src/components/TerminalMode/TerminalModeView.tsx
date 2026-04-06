@@ -12,8 +12,6 @@ import NativeBlockList from './NativeBlockList';
 import type { DisplayItem } from './NativeBlockList';
 import type { ApprovalBlock as ApprovalBlockType, ToolApprovalBlock as ToolApprovalBlockType, InputMode } from './types';
 
-const PROMPT_RE = /(\S+[@:]\S+[\$#%>❯]|[\$#%❯])\s*$/;
-
 interface TerminalModeViewProps {
   projectPath: string;
   aiProvider?: 'claude' | 'codex' | 'gemini';

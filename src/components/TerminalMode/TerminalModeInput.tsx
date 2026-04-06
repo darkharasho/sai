@@ -10,7 +10,6 @@ interface TerminalModeInputProps {
   onSubmit: (value: string) => void;
   mode: InputMode;
   onToggleMode: () => void;
-  onTabComplete?: (text: string) => Promise<string[]>;
   permissionMode: 'default' | 'bypass';
   onPermissionChange: (mode: 'default' | 'bypass') => void;
   initialValue?: string;
@@ -24,13 +23,9 @@ interface TerminalModeInputProps {
   onModeChange?: (mode: InputMode) => void;
 }
 
-const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputProps>(function TerminalModeInput({ onSubmit, mode, onToggleMode, onTabComplete, permissionMode, onPermissionChange, initialValue, disabled, cwd, history = [], onClear, fullWidth, onToggleFullWidth, detectAI, onModeChange }, ref) {
+const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputProps>(function TerminalModeInput({ onSubmit, mode, onToggleMode, permissionMode, onPermissionChange, initialValue, disabled, cwd, history = [], onClear, fullWidth, onToggleFullWidth, detectAI, onModeChange }, ref) {
   const [value, setValue] = useState(initialValue || '');
-  const [completions, setCompletions] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
-  // Tracks state between consecutive Tab presses
-  const tabStateRef = useRef<{ candidates: string[]; hitCount: number; selectedIndex: number } | null>(null);
-  const [selectedCompletion, setSelectedCompletion] = useState(-1);
   // History navigation: -1 = current input, 0 = most recent, 1 = second most recent, etc.
   const historyIndexRef = useRef(-1);
   const savedInputRef = useRef('');
@@ -52,99 +47,16 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
     inputRef.current?.focus();
   }, [mode]);
 
-  const clearCompletions = () => {
-    setCompletions([]);
-    setSelectedCompletion(-1);
-    tabStateRef.current = null;
-  };
-
-  const applyCompletion = (completion: string) => {
-    const words = value.split(/(\s+)/); // preserve whitespace
-    // Find last non-whitespace token index
-    let lastTokenIdx = words.length - 1;
-    while (lastTokenIdx >= 0 && /^\s*$/.test(words[lastTokenIdx])) lastTokenIdx--;
-    if (lastTokenIdx < 0) {
-      // All whitespace — append completion
-      words.push(completion);
-    } else {
-      words[lastTokenIdx] = completion;
-    }
-    const joined = words.join('');
-    // Directory: no trailing space (user will Tab into it)
-    // File: add trailing space
-    const newValue = completion.endsWith('/') ? joined : joined + ' ';
-    setValue(newValue);
-  };
-
-  const handleTabComplete = async () => {
-    if (!onTabComplete || !value.trim()) return;
-
-    const state = tabStateRef.current;
-
-    // Completions already visible — cycle through them
-    if (state && state.hitCount >= 2) {
-      const nextIdx = (state.selectedIndex + 1) % state.candidates.length;
-      state.selectedIndex = nextIdx;
-      setSelectedCompletion(nextIdx);
-      applyCompletion(state.candidates[nextIdx]);
-      return;
-    }
-
-    // Second Tab — show candidates and select the first one
-    if (state && state.hitCount === 1 && state.candidates.length > 1) {
-      state.hitCount = 2;
-      state.selectedIndex = 0;
-      setCompletions(state.candidates);
-      setSelectedCompletion(0);
-      applyCompletion(state.candidates[0]);
-      return;
-    }
-
-    // First Tab — fetch completions
-    const candidates = await onTabComplete(value);
-    if (candidates.length === 0) return;
-
-    if (candidates.length === 1) {
-      applyCompletion(candidates[0]);
-      clearCompletions();
-      return;
-    }
-
-    // Multiple matches — apply common prefix on first Tab
-    const commonPrefix = candidates.reduce((prefix, candidate) => {
-      let i = 0;
-      while (i < prefix.length && i < candidate.length && prefix[i] === candidate[i]) i++;
-      return prefix.slice(0, i);
-    });
-
-    const lastWord = value.split(/\s+/).pop() || '';
-    if (commonPrefix.length > lastWord.length) {
-      if (commonPrefix.endsWith('/')) {
-        applyCompletion(commonPrefix);
-      } else {
-        const words = value.split(/(\s+)/);
-        let lastTokenIdx = words.length - 1;
-        while (lastTokenIdx >= 0 && /^\s*$/.test(words[lastTokenIdx])) lastTokenIdx--;
-        if (lastTokenIdx >= 0) words[lastTokenIdx] = commonPrefix;
-        setValue(words.join(''));
-      }
-    }
-
-    // Store candidates — second Tab will reveal them
-    tabStateRef.current = { candidates, hitCount: 1, selectedIndex: -1 };
-  };
-
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      onToggleMode();
+      return;
+    }
     if (e.key === 'Tab' && e.shiftKey) {
       e.preventDefault();
       manualOverrideRef.current = true;
       onToggleMode();
-      clearCompletions();
-      return;
-    }
-    if (e.key === 'Tab' && !e.shiftKey && mode === 'shell') {
-      e.preventDefault();
-      handleTabComplete();
       return;
     }
     // Ctrl+L — clear screen
@@ -159,7 +71,6 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
       const pos = inputRef.current?.selectionStart ?? value.length;
       setValue(value.slice(pos));
       requestAnimationFrame(() => inputRef.current?.setSelectionRange(0, 0));
-      clearCompletions();
       return;
     }
     // Ctrl+W — delete previous word
@@ -175,18 +86,13 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
       setValue(newBefore + after);
       const newPos = newBefore.length;
       requestAnimationFrame(() => inputRef.current?.setSelectionRange(newPos, newPos));
-      clearCompletions();
       return;
     }
-    // Escape — dismiss completions or clear input
+    // Escape — clear input
     if (e.key === 'Escape') {
       e.preventDefault();
-      if (completions.length > 0) {
-        clearCompletions();
-      } else {
-        setValue('');
-        manualOverrideRef.current = false;
-      }
+      setValue('');
+      manualOverrideRef.current = false;
       return;
     }
     if (e.key === 'ArrowUp') {
@@ -215,7 +121,6 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
       onSubmit(value.trim());
       setValue('');
       manualOverrideRef.current = false;
-      clearCompletions();
       historyIndexRef.current = -1;
       savedInputRef.current = '';
       requestAnimationFrame(() => inputRef.current?.focus());
@@ -225,7 +130,6 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newVal = e.target.value;
     setValue(newVal);
-    clearCompletions();
     if (detectAI && onModeChange && !manualOverrideRef.current) {
       const trimmed = newVal.trim();
       if (trimmed.length === 0) {
@@ -260,17 +164,6 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
             autoComplete="off"
           />
         </div>
-        {completions.length > 1 && (
-          <div className="tm-completions">
-            {completions.map((c, i) => (
-              <span key={c} className={`tm-completion-item ${i === selectedCompletion ? 'tm-completion-active' : ''}`} onClick={() => {
-                applyCompletion(c);
-                clearCompletions();
-                inputRef.current?.focus();
-              }}>{c}</span>
-            ))}
-          </div>
-        )}
         <div className="tm-input-toolbar">
           <div className="tm-input-toolbar-left">
             <button
@@ -384,29 +277,6 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
         }
         .tm-input-field::placeholder {
           color: var(--text-muted);
-        }
-        .tm-completions {
-          position: relative;
-          z-index: 1;
-          padding: 4px 14px 6px;
-          display: flex;
-          flex-wrap: wrap;
-          gap: 4px 12px;
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 11px;
-          color: var(--text-muted);
-          border-top: 1px solid var(--bg-hover);
-        }
-        .tm-completion-item {
-          white-space: nowrap;
-          cursor: pointer;
-          padding: 1px 4px;
-          border-radius: 2px;
-        }
-        .tm-completion-item:hover,
-        .tm-completion-active {
-          background: var(--bg-hover);
-          color: var(--accent);
         }
         .tm-input-toolbar {
           position: relative;
