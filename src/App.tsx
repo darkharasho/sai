@@ -612,7 +612,10 @@ export default function App() {
     return cleanup;
   }, []);
 
-  const groupedSessions = sessions.reduce<{ label: string; sessions: ChatSession[] }[]>((groups, session) => {
+  // Filter history to only show sessions from the current provider
+  const providerSessions = sessions.filter(s => !s.aiProvider || s.aiProvider === aiProvider);
+
+  const groupedSessions = providerSessions.reduce<{ label: string; sessions: ChatSession[] }[]>((groups, session) => {
     const label = formatSessionDate(session.updatedAt);
     const existing = groups.find(g => g.label === label);
     if (existing) existing.sessions.push(session);
@@ -1149,7 +1152,7 @@ export default function App() {
               </button>
               {historyOpen && (
                 <div className="chat-history-dropdown">
-                  {sessions.length === 0 ? (
+                  {providerSessions.length === 0 ? (
                     <div className="dropdown-label" style={{ padding: '12px' }}>
                       No recent conversations
                     </div>
