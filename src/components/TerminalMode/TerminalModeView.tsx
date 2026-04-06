@@ -720,23 +720,25 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
             onToolAlwaysAllow={handleToolAlwaysAllow}
           />
         )}
-        <TerminalModeInput
-          ref={inputRef}
-          onSubmit={handleSubmit}
-          mode={inputMode}
-          onToggleMode={toggleMode}
-          permissionMode={permissionMode}
-          onPermissionChange={setPermissionMode}
-          cwd={cwd}
-          initialValue={editValue}
-          disabled={false}
-          history={inputHistory}
-          onClear={() => setDisplayItems([])}
-          fullWidth={fullWidth}
-          onToggleFullWidth={toggleFullWidth}
-          detectAI={(text) => !looksLikeShellCommand(text)}
-          onModeChange={setInputMode}
-        />
+        {!altScreenVisible && (
+          <TerminalModeInput
+            ref={inputRef}
+            onSubmit={handleSubmit}
+            mode={inputMode}
+            onToggleMode={toggleMode}
+            permissionMode={permissionMode}
+            onPermissionChange={setPermissionMode}
+            cwd={cwd}
+            initialValue={editValue}
+            disabled={false}
+            history={inputHistory}
+            onClear={() => setDisplayItems([])}
+            fullWidth={fullWidth}
+            onToggleFullWidth={toggleFullWidth}
+            detectAI={(text) => !looksLikeShellCommand(text)}
+            onModeChange={setInputMode}
+          />
+        )}
       </div>
       {editorOpen && (
         <TerminalModeEditor

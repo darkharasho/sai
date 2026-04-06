@@ -89,7 +89,8 @@ export default forwardRef<HiddenXtermHandle, HiddenXtermProps>(
     // Fit and focus when visibility changes
     useEffect(() => {
       if (visible && fitRef.current && containerRef.current) {
-        requestAnimationFrame(() => {
+        // Use setTimeout to ensure DOM is fully laid out before fit + focus
+        const timer = setTimeout(() => {
           try {
             fitRef.current?.fit();
             if (xtermRef.current) {
@@ -97,7 +98,8 @@ export default forwardRef<HiddenXtermHandle, HiddenXtermProps>(
               xtermRef.current.focus();
             }
           } catch { /* ignore */ }
-        });
+        }, 50);
+        return () => clearTimeout(timer);
       }
     }, [visible, ptyId]);
 
@@ -139,6 +141,7 @@ export default forwardRef<HiddenXtermHandle, HiddenXtermProps>(
       <div
         ref={containerRef}
         className="tm-hidden-xterm"
+        onClick={() => visible && xtermRef.current?.focus()}
         style={visible ? {
           position: 'relative',
           flex: 1,
