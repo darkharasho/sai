@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { SquareTerminal, Copy } from 'lucide-react';
+import { Terminal, Copy } from 'lucide-react';
 import type { AIEntry } from './types';
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -85,7 +85,7 @@ export default function InlineAIBlock({
                           title="Run"
                           onClick={() => onRunCommand(codeText.trim())}
                         >
-                          <SquareTerminal size={12} />
+                          <Terminal size={12} />
                         </span>
                       )}
                       <span
