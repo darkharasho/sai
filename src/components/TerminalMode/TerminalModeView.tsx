@@ -219,7 +219,6 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
     segmenter.onAltScreen((entered) => {
       if (cancelled) return;
       setAltScreenVisible(entered);
-      if (entered) hiddenXtermRef.current?.focus();
     });
 
     // Listen for PTY data and forward to hidden xterm
@@ -684,6 +683,13 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [projectPath]);
+
+  // Focus xterm when alt-screen becomes visible (e.g. htop, vim)
+  useEffect(() => {
+    if (altScreenVisible) {
+      hiddenXtermRef.current?.focus();
+    }
+  }, [altScreenVisible]);
 
   // Build input history from submitted commands and AI prompts
   const inputHistory = displayItems
