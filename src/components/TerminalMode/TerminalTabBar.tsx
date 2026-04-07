@@ -26,10 +26,30 @@ export default function TerminalTabBar({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const editRef = useRef<HTMLInputElement>(null);
+  const [contextMenu, setContextMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (editingId) editRef.current?.focus();
   }, [editingId]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleMouseDown = (e: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
+    document.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [contextMenu]);
 
   const startRename = (tab: TabInfo) => {
     setEditingId(tab.id);
@@ -52,6 +72,7 @@ export default function TerminalTabBar({
             className={`tt-tab ${tab.id === activeTabId ? 'tt-tab-active' : ''}`}
             onClick={() => onSelect(tab.id)}
             onDoubleClick={() => startRename(tab)}
+            onContextMenu={(e) => { e.preventDefault(); setContextMenu({ tabId: tab.id, x: e.clientX, y: e.clientY }); }}
           >
             {editingId === tab.id ? (
               <input
@@ -82,6 +103,25 @@ export default function TerminalTabBar({
           </div>
         ))}
       </div>
+      {contextMenu && (
+        <div
+          ref={contextMenuRef}
+          className="tt-context-menu"
+          style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x }}
+        >
+          <div
+            className="tt-context-item"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              const tab = tabs.find(t => t.id === contextMenu.tabId);
+              if (tab) startRename(tab);
+              setContextMenu(null);
+            }}
+          >
+            Rename
+          </div>
+        </div>
+      )}
       <button className="tt-new" onClick={onCreate} title="New tab (Ctrl+T)">+</button>
 
       <style>{`
@@ -176,6 +216,27 @@ export default function TerminalTabBar({
         .tt-new:hover {
           background: #111417;
           color: #9ca3af;
+        }
+        .tt-context-menu {
+          background: #1a1e24;
+          border: 1px solid #2d333b;
+          border-radius: 4px;
+          padding: 4px 0;
+          min-width: 100px;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+          z-index: 1000;
+        }
+        .tt-context-item {
+          padding: 6px 14px;
+          font-family: 'JetBrains Mono NF', 'JetBrains Mono', monospace;
+          font-size: 11px;
+          color: #9ca3af;
+          cursor: pointer;
+          user-select: none;
+        }
+        .tt-context-item:hover {
+          background: #21262d;
+          color: #e5e7eb;
         }
       `}</style>
     </div>
