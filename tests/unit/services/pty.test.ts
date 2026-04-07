@@ -475,6 +475,22 @@ describe('environment variable stripping', () => {
     expect(spawnEnv).not.toHaveProperty('DESKTOP_STARTUP_ID');
   });
 
+  it('strips CHROME_DESKTOP from child env', async () => {
+    const spawnEnv = await spawnEnvFor(
+      () => { process.env.CHROME_DESKTOP = 'sai.desktop'; },
+      () => { delete process.env.CHROME_DESKTOP; },
+    );
+    expect(spawnEnv).not.toHaveProperty('CHROME_DESKTOP');
+  });
+
+  it('strips INVOCATION_ID from child env', async () => {
+    const spawnEnv = await spawnEnvFor(
+      () => { process.env.INVOCATION_ID = 'abc123'; },
+      () => { delete process.env.INVOCATION_ID; },
+    );
+    expect(spawnEnv).not.toHaveProperty('INVOCATION_ID');
+  });
+
   it('preserves other environment variables', async () => {
     const spawnEnv = await spawnEnvFor(
       () => { process.env.MY_CUSTOM_VAR = 'kept'; },

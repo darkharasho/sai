@@ -61,6 +61,13 @@ export function registerTerminalHandlers(win: BrowserWindow) {
     // GUI apps (e.g. electron dev servers, browsers) get their own taskbar entry
     delete env.XDG_ACTIVATION_TOKEN;
     delete env.DESKTOP_STARTUP_ID;
+    // Chromium/Electron sets CHROME_DESKTOP to the .desktop filename (e.g.
+    // "sai.desktop").  Child Electron apps inherit this and use it for their
+    // WM_CLASS / app_id, causing the DE to group them under SAI's taskbar icon.
+    delete env.CHROME_DESKTOP;
+    // INVOCATION_ID ties the process to SAI's systemd service unit; clear it so
+    // child processes aren't associated with this unit's lifecycle.
+    delete env.INVOCATION_ID;
     // On Linux with systemd, spawn via systemd-run --user --scope so the shell
     // lives in its own cgroup. This prevents desktop environments (GNOME, KDE)
     // from grouping GUI apps launched from the terminal under SAI's taskbar icon.
