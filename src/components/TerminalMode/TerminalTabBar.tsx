@@ -72,7 +72,7 @@ export default function TerminalTabBar({
             className={`tt-tab ${tab.id === activeTabId ? 'tt-tab-active' : ''}`}
             onClick={() => onSelect(tab.id)}
             onDoubleClick={() => startRename(tab)}
-            onContextMenu={(e) => { e.preventDefault(); setContextMenu({ tabId: tab.id, x: e.clientX, y: e.clientY }); }}
+            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setContextMenu({ tabId: tab.id, x: e.clientX, y: e.clientY }); }}
           >
             {editingId === tab.id ? (
               <input
