@@ -15,6 +15,7 @@ import type { ApprovalBlock as ApprovalBlockType, ToolApprovalBlock as ToolAppro
 interface TerminalModeViewProps {
   projectPath: string;
   aiProvider?: 'claude' | 'codex' | 'gemini';
+  active?: boolean;
 }
 
 function nextBlockId(): string {
@@ -149,7 +150,7 @@ function looksLikeShellCommand(input: string): boolean {
   return false;
 }
 
-export default function TerminalModeView({ projectPath, aiProvider = 'claude' }: TerminalModeViewProps) {
+export default function TerminalModeView({ projectPath, aiProvider = 'claude', active = true }: TerminalModeViewProps) {
   const [displayItems, setDisplayItems] = useState<DisplayItem[]>([]);
   const [altScreenVisible, setAltScreenVisible] = useState(false);
   const [ptyId, setPtyId] = useState<number | null>(null);
@@ -158,9 +159,12 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
   const [cwd, setCwd] = useState(projectPath || '~');
   const [permissionMode, setPermissionMode] = useState<'default' | 'bypass'>('default');
   const [fullWidth, setFullWidth] = useState(false);
+  const [promptInfo, setPromptInfo] = useState<{ text: string; isRemote: boolean; sshTarget?: string } | null>(null);
+  const [shellHistory, setShellHistory] = useState<string[]>([]);
 
   useEffect(() => {
     window.sai.settingsGet('terminalFullWidth', false).then((v: boolean) => setFullWidth(v));
+    window.sai.terminalGetShellHistory(500).then((lines: string[]) => setShellHistory(lines));
   }, []);
   const permissionModeRef = useRef(permissionMode);
   permissionModeRef.current = permissionMode;
@@ -187,7 +191,8 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
   const segmenterRef = useRef<BlockSegmenter>(new BlockSegmenter());
   const hiddenXtermRef = useRef<HiddenXtermHandle>(null);
   const aiSuggestedCommands = useRef<Set<string>>(new Set());
-  const pendingCommandRef = useRef<string | null>(null);
+  const pendingCommandRef = useRef<{ command: string; startTime: number } | null>(null);
+  const lastSshTargetRef = useRef<string | null>(null);
   const altScreenRef = useRef(false);
   altScreenRef.current = altScreenVisible;
 
@@ -195,6 +200,13 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
   useEffect(() => {
     if (projectPath) setCwd(projectPath);
   }, [projectPath]);
+
+  // Focus the input when this tab becomes active
+  useEffect(() => {
+    if (active) {
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  }, [active]);
 
   const refreshCwd = useCallback(async (ptyId: number) => {
     try {
@@ -211,21 +223,58 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
     // Register block callback
     segmenter.onBlock((block) => {
       if (cancelled) return;
+
+      // Intercept internal history-fetch command — parse output as history, suppress block
+      // Match by sentinel marker in the command (added when we send it through PTY)
+      const cleanBlockCmd = block.command.replace(/[^\x20-\x7E]/g, '').trim();
+      if (cleanBlockCmd.includes('#__sai_hist__')) {
+        pendingCommandRef.current = null;
+        if (block.output) {
+          const lines = block.output.split('\n')
+            .map(l => {
+              // Strip zsh extended history format ": timestamp:0;command"
+              const zshMatch = l.match(/^:\s*\d+:\d+;(.*)$/);
+              if (zshMatch) return zshMatch[1].trim();
+              return l.trim();
+            })
+            .filter(Boolean);
+          // Deduplicate, keeping most recent
+          const seen = new Set<string>();
+          const unique: string[] = [];
+          for (let i = lines.length - 1; i >= 0; i--) {
+            if (!seen.has(lines[i])) {
+              seen.add(lines[i]);
+              unique.push(lines[i]);
+            }
+          }
+          setShellHistory(unique.reverse());
+        }
+        return;
+      }
+
       const isSuggested = aiSuggestedCommands.current.has(block.command);
       if (isSuggested) aiSuggestedCommands.current.delete(block.command);
       const pending = pendingCommandRef.current;
       pendingCommandRef.current = null;
+      // Use the submit timestamp for duration instead of the segmenter's
+      // prompt-to-prompt timing (which includes user typing time)
+      // Use the command the user actually typed (from our input) rather than
+      // what the segmenter extracted from PTY output (which can include leaked
+      // prompt glyphs from remote shells).
+      const fixedBlock = pending
+        ? { ...block, command: pending.command, duration: Date.now() - pending.startTime }
+        : block;
       setDisplayItems(prev => {
         // Replace the pending block if it exists
         if (pending) {
           const idx = prev.findIndex(item => item.type === 'command' && item.block.id === 'pending');
           if (idx !== -1) {
             const next = [...prev];
-            next[idx] = { type: 'command', block, aiSuggested: isSuggested };
+            next[idx] = { type: 'command', block: fixedBlock, aiSuggested: isSuggested };
             return next;
           }
         }
-        return [...prev, { type: 'command', block, aiSuggested: isSuggested }];
+        return [...prev, { type: 'command', block: fixedBlock, aiSuggested: isSuggested }];
       });
       const termId = getActiveTerminalId() ?? fallbackPtyRef.current;
       if (termId !== null) refreshCwd(termId);
@@ -235,6 +284,30 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
     segmenter.onAltScreen((entered) => {
       if (cancelled) return;
       setAltScreenVisible(entered);
+    });
+
+    // Register prompt-change callback (updates input bar for SSH etc.)
+    segmenter.onPromptChange((prompt, isRemote, sshTarget) => {
+      if (cancelled) return;
+      setPromptInfo({ text: prompt, isRemote, sshTarget });
+
+      const target = isRemote ? (sshTarget || '__remote__') : null;
+      if (target !== lastSshTargetRef.current) {
+        lastSshTargetRef.current = target;
+        if (isRemote) {
+          // Fetch remote shell history by reading history files through the PTY
+          // The #__sai_hist__ comment is a sentinel so we can identify and suppress this block
+          const termId = getActiveTerminalId() ?? fallbackPtyRef.current;
+          if (termId !== null) {
+            window.sai.terminalWrite(termId, 'tail -500 ~/.bash_history 2>/dev/null || tail -500 ~/.zsh_history 2>/dev/null #__sai_hist__\n');
+          }
+        } else {
+          // Back to local — reload local shell history
+          window.sai.terminalGetShellHistory(500).then((lines: string[]) => {
+            if (!cancelled) setShellHistory(lines);
+          });
+        }
+      }
     });
 
     // Listen for PTY data and forward to hidden xterm
@@ -293,7 +366,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
         duration: 0,
         isRemote: false,
       };
-      pendingCommandRef.current = value;
+      pendingCommandRef.current = { command: value, startTime: Date.now() };
       setDisplayItems(prev => [...prev, { type: 'command' as const, block: pendingBlock, active: true }]);
       executeCommand(value);
       setEditValue(undefined);
@@ -764,10 +837,11 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [projectPath]);
 
-  // Build input history from submitted commands and AI prompts
-  const inputHistory = displayItems
+  // Build input history: shell history file entries + session commands/AI prompts
+  const sessionHistory = displayItems
     .filter(item => item.type === 'command' || item.type === 'ai')
     .map(item => item.type === 'command' ? item.block.command : item.question);
+  const inputHistory = [...shellHistory, ...sessionHistory];
 
   return (
     <div className="tm-view">
@@ -810,6 +884,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
             permissionMode={permissionMode}
             onPermissionChange={setPermissionMode}
             cwd={cwd}
+            promptInfo={promptInfo}
             initialValue={editValue}
             disabled={false}
             history={inputHistory}

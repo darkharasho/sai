@@ -1502,7 +1502,7 @@ export default function App() {
                   key={tab.id}
                   style={{ display: tab.id === activeTermTabId ? 'flex' : 'none', flex: 1, minHeight: 0, minWidth: 0 }}
                 >
-                  <TerminalModeView projectPath={projectPath} aiProvider={aiProvider} />
+                  <TerminalModeView projectPath={projectPath} aiProvider={aiProvider} active={tab.id === activeTermTabId} />
                 </div>
               ))}
             </div>

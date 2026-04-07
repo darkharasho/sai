@@ -1,10 +1,53 @@
-import { useState, useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
+import { useState, useRef, useEffect, useImperativeHandle, forwardRef, useMemo } from 'react';
 import type { InputMode } from './types';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
 
+/** Score history entries by frequency + recency, return best prefix match. */
+function predictCommand(prefix: string, history: string[]): string | null {
+  if (!prefix || !prefix.trim()) return null;
+  const lower = prefix.toLowerCase();
+  const total = history.length;
+  if (total === 0) return null;
+
+  const scores = new Map<string, number>();
+  for (let i = 0; i < total; i++) {
+    const cmd = history[i];
+    if (!cmd.toLowerCase().startsWith(lower) || cmd.toLowerCase() === lower) continue;
+    const recency = (i + 1) / total; // 0→1, higher = more recent
+    scores.set(cmd, (scores.get(cmd) || 0) + 1 + recency);
+  }
+
+  let best: string | null = null;
+  let bestScore = 0;
+  for (const [cmd, score] of scores) {
+    if (score > bestScore) {
+      bestScore = score;
+      best = cmd;
+    }
+  }
+  return best;
+}
+
 export interface TerminalModeInputHandle {
   paste: (text: string) => void;
+  focus: () => void;
+}
+
+function stripPromptGlyphs(text: string): string {
+  return text
+    .replace(/[\uE0A0-\uE0D4\uE200-\uE2A9\uE5FA-\uE6B5\uE700-\uE7C5\uF000-\uFD46\uDB80-\uDBFF][\uDC00-\uDFFF]?/g, '')
+    .replace(/[^\x20-\x7E\u00A0-\u00FF\u0100-\u024F\u2000-\u206F❯]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function extractPromptParts(promptText: string): { user: string; path: string } {
+  const cleaned = stripPromptGlyphs(promptText);
+  const match = cleaned.match(/^(\S+?)[@:]?\s*(~[^\s$#%]*|\/[^\s$#%]*)/);
+  if (match) return { user: match[1], path: match[2] };
+  const clean = cleaned.replace(/[\$#%>\s]+$/, '').trim();
+  return { user: clean, path: '' };
 }
 
 interface TerminalModeInputProps {
@@ -16,6 +59,7 @@ interface TerminalModeInputProps {
   initialValue?: string;
   disabled?: boolean;
   cwd: string;
+  promptInfo?: { text: string; isRemote: boolean; sshTarget?: string } | null;
   history?: string[];
   onClear?: () => void;
   fullWidth?: boolean;
@@ -24,7 +68,7 @@ interface TerminalModeInputProps {
   onModeChange?: (mode: InputMode) => void;
 }
 
-const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputProps>(function TerminalModeInput({ onSubmit, mode, onToggleMode, permissionMode, onPermissionChange, initialValue, disabled, cwd, history = [], onClear, fullWidth, onToggleFullWidth, detectAI, onModeChange }, ref) {
+const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputProps>(function TerminalModeInput({ onSubmit, mode, onToggleMode, permissionMode, onPermissionChange, initialValue, disabled, cwd, promptInfo, history = [], onClear, fullWidth, onToggleFullWidth, detectAI, onModeChange }, ref) {
   const [value, setValue] = useState(initialValue || '');
   const inputRef = useRef<HTMLInputElement>(null);
   // History navigation: -1 = current input, 0 = most recent, 1 = second most recent, etc.
@@ -37,9 +81,17 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
   const tabIndexRef = useRef(-1);
   const tabPrefixRef = useRef('');
 
+  const prediction = useMemo(
+    () => mode === 'shell' ? predictCommand(value, history) : null,
+    [value, history, mode],
+  );
+
   useImperativeHandle(ref, () => ({
     paste: (text: string) => {
       setValue(prev => prev + text);
+      inputRef.current?.focus();
+    },
+    focus: () => {
       inputRef.current?.focus();
     },
   }));
@@ -64,9 +116,17 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
       onToggleMode();
       return;
     }
-    // Tab — shell tab completion
+    // Tab — accept prediction first, then shell tab completion
     if (e.key === 'Tab' && !e.shiftKey && mode === 'shell') {
       e.preventDefault();
+      // Accept inline prediction if one exists
+      if (prediction) {
+        setValue(prediction);
+        tabCompletionsRef.current = [];
+        tabIndexRef.current = -1;
+        tabPrefixRef.current = '';
+        return;
+      }
       const text = value;
       if (!text) return;
 
@@ -149,6 +209,12 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
       manualOverrideRef.current = false;
       return;
     }
+    // Right arrow at end of input — accept prediction
+    if (e.key === 'ArrowRight' && prediction && inputRef.current?.selectionStart === value.length) {
+      e.preventDefault();
+      setValue(prediction);
+      return;
+    }
     if (e.key === 'ArrowUp') {
       e.preventDefault();
       if (history.length === 0) return;
@@ -207,6 +273,14 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
   const shortCwd = cwd.replace(/^\/var\/home\/[^/]+/, '~').replace(/^\/home\/[^/]+/, '~');
   const modKey = isMac ? '\u2318' : 'Ctrl+';
 
+  // Determine prompt display: use SSH target when remote
+  let promptLabel = shortCwd;
+  let promptIsRemote = false;
+  if (promptInfo?.isRemote && promptInfo.sshTarget) {
+    promptIsRemote = true;
+    promptLabel = promptInfo.sshTarget;
+  }
+
   return (
     <div className={`tn-input-wrapper ${fullWidth ? 'tn-input-full-width' : ''}`}>
       <div className={`tn-input-box ${isAI ? 'tn-input-box-ai' : ''}`}>
@@ -215,21 +289,28 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
             <span className="tn-input-prompt-ai">{'\u2726'}</span>
           ) : (
             <>
-              <span className="tn-input-user">{shortCwd}</span>
+              <span className="tn-input-user" style={promptIsRemote ? { color: '#f59e0b' } : undefined}>{promptLabel}</span>
               <span className="tn-input-dollar">$</span>
             </>
           )}
-          <input
-            ref={inputRef}
-            className="tn-input-field"
-            value={value}
-            onChange={handleChange}
-            onKeyDown={handleKeyDown}
-            placeholder={isAI ? 'Ask AI...' : ''}
-            disabled={disabled}
-            spellCheck={false}
-            autoComplete="off"
-          />
+          <div className="tn-input-field-wrap">
+            {prediction && (
+              <span className="tn-input-ghost" aria-hidden="true">
+                <span style={{ visibility: 'hidden' }}>{value}</span>{prediction.slice(value.length)}
+              </span>
+            )}
+            <input
+              ref={inputRef}
+              className="tn-input-field"
+              value={value}
+              onChange={handleChange}
+              onKeyDown={handleKeyDown}
+              placeholder={isAI ? 'Ask AI...' : ''}
+              disabled={disabled}
+              spellCheck={false}
+              autoComplete="off"
+            />
+          </div>
           <div className="tn-input-hint">
             <span className="tn-input-kbd">{modKey}K</span>
             <span className="tn-input-hint-label">{isAI ? 'Shell' : 'AI'}</span>
@@ -286,7 +367,7 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
           display: flex;
           align-items: center;
           gap: 8px;
-          font-family: 'JetBrains Mono', 'Fira Code', monospace;
+          font-family: 'JetBrains Mono NF', 'JetBrains Mono', monospace;
           font-size: 13px;
         }
         .tn-input-user {
@@ -303,13 +384,31 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
           font-size: 14px;
           flex-shrink: 0;
         }
-        .tn-input-field {
+        .tn-input-field-wrap {
           flex: 1;
+          position: relative;
+          min-width: 0;
+        }
+        .tn-input-ghost {
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          pointer-events: none;
+          color: #3a3f47;
+          font-family: 'JetBrains Mono NF', 'JetBrains Mono', monospace;
+          font-size: 13px;
+          white-space: pre;
+          overflow: hidden;
+        }
+        .tn-input-field {
+          position: relative;
+          width: 100%;
           background: none;
           border: none;
           outline: none;
           color: var(--text);
-          font-family: 'JetBrains Mono', 'Fira Code', monospace;
+          font-family: 'JetBrains Mono NF', 'JetBrains Mono', monospace;
           font-size: 13px;
           min-width: 0;
         }
