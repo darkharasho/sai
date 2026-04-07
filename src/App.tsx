@@ -892,6 +892,70 @@ export default function App() {
     return () => document.removeEventListener('keydown', handler);
   }, [activeProjectPath, workspaces, handleToggleMdPreview]);
 
+  // Terminal tab hotkeys
+  useEffect(() => {
+    if (activeView !== 'terminal-mode') return;
+
+    const handleTabHotkey = (e: KeyboardEvent) => {
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (!ctrl) return;
+
+      // Ctrl+T — new tab
+      if (e.key === 't' && !e.shiftKey) {
+        e.preventDefault();
+        createTermTab();
+        return;
+      }
+
+      // Ctrl+W — close tab
+      if (e.key === 'w' && !e.shiftKey) {
+        e.preventDefault();
+        closeTermTab(activeTermTabId);
+        return;
+      }
+
+      // Ctrl+Tab / Ctrl+PageDown — next tab
+      if ((e.key === 'Tab' && !e.shiftKey) || e.key === 'PageDown') {
+        e.preventDefault();
+        setTermTabs(current => {
+          const idx = current.findIndex(t => t.id === activeTermTabId);
+          const next = current[(idx + 1) % current.length];
+          setActiveTermTabId(next.id);
+          return current;
+        });
+        return;
+      }
+
+      // Ctrl+Shift+Tab / Ctrl+PageUp — previous tab
+      if ((e.key === 'Tab' && e.shiftKey) || e.key === 'PageUp') {
+        e.preventDefault();
+        setTermTabs(current => {
+          const idx = current.findIndex(t => t.id === activeTermTabId);
+          const prev = current[(idx - 1 + current.length) % current.length];
+          setActiveTermTabId(prev.id);
+          return current;
+        });
+        return;
+      }
+
+      // Ctrl+1 through Ctrl+9 — go to tab N
+      if (e.key >= '1' && e.key <= '9') {
+        e.preventDefault();
+        const n = parseInt(e.key) - 1;
+        setTermTabs(current => {
+          if (n < current.length) {
+            setActiveTermTabId(current[n].id);
+          }
+          return current;
+        });
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleTabHotkey, true);
+    return () => window.removeEventListener('keydown', handleTabHotkey, true);
+  }, [activeView, activeTermTabId, createTermTab, closeTermTab]);
+
   const handleProjectSwitch = useCallback((newPath: string) => {
     // Always exit terminal mode when selecting a workspace
     setActiveView('default');
