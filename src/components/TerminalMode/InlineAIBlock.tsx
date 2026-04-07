@@ -55,44 +55,85 @@ export default function InlineAIBlock({
           <span className="tn-ai-icon">⬡</span>
           <span className="tn-ai-label">{providerLabel}</span>
           {streaming && <span className="tn-ai-streaming" />}
-          <span className="tn-ai-sep">·</span>
-          <span className="tn-ai-question">{question}</span>
+          {question && <span className="tn-ai-sep">·</span>}
+          {question && <span className="tn-ai-question">{question}</span>}
         </div>
         {!streaming && duration != null && (
           <span className="tn-ai-duration">{formatDuration(duration)}</span>
         )}
       </div>
 
-      {/* Response content — rendered as markdown */}
-      {content && (
+      {/* Response content — render entries in natural order when available */}
+      {entries && entries.length > 0 ? (
+        <div className="tn-ai-body">
+          {entries.map((entry, i) => {
+            if (entry.kind === 'text') {
+              return (
+                <div key={`text-${i}`} className="tn-ai-content">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      pre({ children }) {
+                        const codeEl = children as React.ReactElement;
+                        const codeText = extractText(codeEl);
+                        const isRunnable = runnableCommands.has(codeText.trim());
+                        return (
+                          <div className="tn-ai-code-wrapper">
+                            <pre>{children}</pre>
+                            <div className="tn-ai-code-actions">
+                              {isRunnable && (
+                                <span className="tn-ai-code-icon tn-ai-code-run" title="Run" onClick={() => onRunCommand(codeText.trim())}>
+                                  <Terminal size={12} />
+                                </span>
+                              )}
+                              <span className="tn-ai-code-icon tn-ai-code-copy" title="Copy" onClick={() => handleCopyCode(codeText)}>
+                                <Copy size={12} />
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      },
+                    }}
+                  >
+                    {entry.text}
+                  </ReactMarkdown>
+                </div>
+              );
+            }
+            if (entry.kind === 'tool') {
+              const hasOutput = entry.call.output != null;
+              return (
+                <div key={entry.call.id || `tool-${i}`} className={`tn-ai-entry-tool ${hasOutput ? '' : 'tn-ai-entry-tool-active'}`}>
+                  <span className="tn-ai-tool-name">{entry.call.name}</span>
+                  <span className="tn-ai-tool-input">{entry.call.input}</span>
+                  {hasOutput && !entry.call.isError && <span className="tn-ai-tool-done"> ✓</span>}
+                  {entry.call.isError && <span className="tn-ai-tool-error"> ✗</span>}
+                  {!hasOutput && streaming && <span className="tn-ai-tool-spinner" />}
+                </div>
+              );
+            }
+            return null;
+          })}
+        </div>
+      ) : content ? (
         <div className="tn-ai-content">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
               pre({ children }) {
-                // Extract text content from the code element inside pre
                 const codeEl = children as React.ReactElement;
                 const codeText = extractText(codeEl);
                 const isRunnable = runnableCommands.has(codeText.trim());
-
                 return (
                   <div className="tn-ai-code-wrapper">
                     <pre>{children}</pre>
                     <div className="tn-ai-code-actions">
                       {isRunnable && (
-                        <span
-                          className="tn-ai-code-icon tn-ai-code-run"
-                          title="Run"
-                          onClick={() => onRunCommand(codeText.trim())}
-                        >
+                        <span className="tn-ai-code-icon tn-ai-code-run" title="Run" onClick={() => onRunCommand(codeText.trim())}>
                           <Terminal size={12} />
                         </span>
                       )}
-                      <span
-                        className="tn-ai-code-icon tn-ai-code-copy"
-                        title="Copy"
-                        onClick={() => handleCopyCode(codeText)}
-                      >
+                      <span className="tn-ai-code-icon tn-ai-code-copy" title="Copy" onClick={() => handleCopyCode(codeText)}>
                         <Copy size={12} />
                       </span>
                     </div>
@@ -104,19 +145,7 @@ export default function InlineAIBlock({
             {content}
           </ReactMarkdown>
         </div>
-      )}
-
-      {entries && entries.length > 0 && (
-        <div className="tn-ai-entries">
-          {entries.map((entry, i) =>
-            entry.kind === 'text' ? (
-              <div key={i} className="tn-ai-entry-text">{entry.text}</div>
-            ) : (
-              <div key={i} className="tn-ai-entry-tool">{entry.call.name}: {entry.call.input}</div>
-            )
-          )}
-        </div>
-      )}
+      ) : null}
 
       <style>{styles}</style>
     </div>
@@ -201,10 +230,16 @@ const styles = `
     font-size: 10px;
     flex-shrink: 0;
   }
+  .tn-ai-body {
+    padding-left: 20px;
+  }
   .tn-ai-content {
     color: #b4b8c0;
     font-size: 11.5px;
     line-height: 1.6;
+    margin-bottom: 6px;
+  }
+  .tn-ai-block > .tn-ai-content {
     padding-left: 20px;
     margin-bottom: 10px;
   }
@@ -287,19 +322,45 @@ const styles = `
   .tn-ai-content a:hover {
     text-decoration: underline;
   }
-  .tn-ai-entries {
-    padding-left: 20px;
-    margin-bottom: 10px;
-  }
-  .tn-ai-entry-text {
-    color: #b4b8c0;
-    font-size: 11.5px;
-    line-height: 1.6;
-    margin-bottom: 4px;
-  }
   .tn-ai-entry-tool {
-    color: #8b5cf6;
-    font-size: 11px;
+    color: #6b7280;
+    font-size: 10.5px;
     margin-bottom: 4px;
+    padding: 3px 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .tn-ai-entry-tool-active {
+    color: #8b5cf6;
+  }
+  .tn-ai-tool-name {
+    color: #8b5cf6;
+    font-weight: 500;
+  }
+  .tn-ai-tool-input {
+    color: #6b7280;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    direction: rtl;
+    text-align: left;
+  }
+  .tn-ai-tool-done {
+    color: #22c55e;
+    font-size: 10px;
+  }
+  .tn-ai-tool-error {
+    color: #ef4444;
+    font-size: 10px;
+  }
+  .tn-ai-tool-spinner {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #8b5cf6;
+    animation: tn-ai-pulse 1.2s ease-in-out infinite;
   }
 `;

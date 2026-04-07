@@ -101,8 +101,22 @@ function looksLikeShellCommand(input: string): boolean {
     'never', 'always', 'only', 'not', 'dont', 'like', 'let', 'lets',
     'i', 'im', 'its', 'thats', 'whats', 'heres', 'theres',
     'in', 'on', 'at', 'to', 'the', 'a', 'an', 'it', 'we',
+    'yep', 'looks', 'good', 'great', 'nice', 'cool', 'sure', 'perfect',
+    'sounds', 'awesome', 'fine', 'right', 'correct', 'exactly',
+    // demonstratives & common starters
+    'that', 'this', 'these', 'those', 'some', 'any', 'every',
+    'pretty', 'really', 'very', 'quite', 'super', 'totally',
+    // contractions without apostrophes
+    'id', 'ill', 'ive', 'youre', 'youll', 'youd', 'youve',
+    'wed', 'weve', 'were', 'theyre', 'theyd', 'theyve', 'theyll',
+    'hes', 'shes', 'hed', 'shed', 'itll', 'wont', 'cant', 'didnt',
+    'doesnt', 'isnt', 'arent', 'wasnt', 'werent', 'hasnt', 'havent',
+    'wouldnt', 'couldnt', 'shouldnt', 'mustnt',
   ]);
   if (NL_WORDS.has(firstWord)) return false;
+
+  // Single character or single digit — not a real command, treat as NL
+  if (trimmed.length === 1) return false;
 
   // Single word — treat as a command (could be any binary)
   if (!trimmed.includes(' ')) return true;
@@ -421,9 +435,10 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude', a
     const updateItem = () => {
       const contentParts = entries.filter(e => e.kind === 'text').map(e => e.text);
       const content = contentParts.join('\n\n');
+      const entriesSnapshot = [...entries];
       setDisplayItems(prev => prev.map(item =>
         item.type === 'ai' && item.id === currentAiId
-          ? { ...item, content }
+          ? { ...item, content, entries: entriesSnapshot }
           : item
       ));
     };
