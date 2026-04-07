@@ -91,6 +91,7 @@ describe('TerminalTabBar', () => {
   it('starts rename when Rename is clicked in context menu', () => {
     renderBar();
     fireEvent.contextMenu(screen.getByText('Tab 1'));
+    expect(document.querySelector('.tt-context-menu')).toBeTruthy();
     fireEvent.mouseDown(screen.getByText('Rename'));
     const input = document.querySelector('.tt-rename-input') as HTMLInputElement;
     expect(input).toBeTruthy();
