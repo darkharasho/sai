@@ -224,7 +224,14 @@ export class BlockSegmenter {
       promptText: this._currentPrompt,
       startTime: this._startTime,
       duration: Date.now() - this._startTime,
-      isRemote: this._initialPrompt !== '' && newPromptText !== this._initialPrompt,
+      isRemote: (() => {
+        const initId = this._extractIdentity(this._initialPrompt);
+        const newId = this._extractIdentity(newPromptText);
+        return this._initialPrompt !== '' && (
+          (initId !== null && newId !== null && newId !== initId) ||
+          (initId === null && newId !== null && newPromptText !== this._initialPrompt)
+        );
+      })(),
     };
 
     this._blockCallbacks.forEach((cb) => cb(block));
@@ -237,10 +244,26 @@ export class BlockSegmenter {
     this._firePromptChange(newPromptText);
   }
 
+  /**
+   * Extract the user@host identity from a prompt string.
+   * Returns e.g. "michaelstephens@Michaels-Mac-mini" or null.
+   */
+  private _extractIdentity(prompt: string): string | null {
+    const m = prompt.match(SSH_TARGET_RE);
+    return m ? `${m[1]}@${m[2]}` : null;
+  }
+
   private _firePromptChange(prompt: string): void {
-    const isRemote = this._initialPrompt !== '' && prompt !== this._initialPrompt;
-    const sshMatch = isRemote ? prompt.match(SSH_TARGET_RE) : null;
-    const sshTarget = sshMatch ? `${sshMatch[1]}@${sshMatch[2]}` : null;
+    // Compare user@host identity rather than full prompt text,
+    // since the prompt changes with cwd, venv activation, etc.
+    const initialId = this._extractIdentity(this._initialPrompt);
+    const currentId = this._extractIdentity(prompt);
+    // Remote if: identities differ, or a user@host appeared when initial had none
+    const isRemote = this._initialPrompt !== '' && (
+      (initialId !== null && currentId !== null && currentId !== initialId) ||
+      (initialId === null && currentId !== null && prompt !== this._initialPrompt)
+    );
+    const sshTarget = isRemote && currentId ? currentId : null;
     this._promptChangeCallbacks.forEach((cb) => cb(prompt, isRemote, sshTarget));
   }
 
