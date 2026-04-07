@@ -94,7 +94,6 @@ export default function App() {
     { id: crypto.randomUUID(), name: 'Tab 1', createdAt: Date.now() },
   ]);
   const [activeTermTabId, setActiveTermTabId] = useState<string>(() => '');
-  const termTabCounterRef = useRef(1);
 
   // Initialize activeTermTabId from first tab
   useEffect(() => {
@@ -776,19 +775,18 @@ export default function App() {
   }, [activeProjectPath, updateWorkspace, focusedChat]);
 
   const createTermTab = useCallback(() => {
-    const num = ++termTabCounterRef.current;
+    const num = termTabs.length + 1;
     const tab = { id: crypto.randomUUID(), name: `Tab ${num}`, createdAt: Date.now() };
     setTermTabs(prev => [...prev, tab]);
     setActiveTermTabId(tab.id);
-  }, []);
+  }, [termTabs.length]);
 
   const closeTermTab = useCallback((tabId: string) => {
     setTermTabs(prev => {
       const idx = prev.findIndex(t => t.id === tabId);
       const next = prev.filter(t => t.id !== tabId);
       if (next.length === 0) {
-        const num = ++termTabCounterRef.current;
-        const fresh = { id: crypto.randomUUID(), name: `Tab ${num}`, createdAt: Date.now() };
+        const fresh = { id: crypto.randomUUID(), name: 'Tab 1', createdAt: Date.now() };
         setActiveTermTabId(fresh.id);
         return [fresh];
       }
