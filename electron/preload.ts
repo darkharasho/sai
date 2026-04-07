@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('sai', {
   terminalGetCwd: (id: number) => ipcRenderer.invoke('terminal:getCwd', id),
   terminalTabComplete: (text: string, cwd: string) => ipcRenderer.invoke('terminal:tabComplete', text, cwd),
   terminalKill: (id: number) => ipcRenderer.send('terminal:kill', id),
+  terminalGetShellHistory: (count: number) => ipcRenderer.invoke('terminal:getShellHistory', count),
   terminalOnData: (callback: (id: number, data: string) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, id: number, data: string) => callback(id, data);
     ipcRenderer.on('terminal:data', listener);

@@ -173,6 +173,32 @@ export function registerTerminalHandlers(win: BrowserWindow) {
     });
   });
 
+  ipcMain.handle('terminal:getShellHistory', async (_event, count: number) => {
+    const fs = require('fs') as typeof import('fs');
+    const path = require('path') as typeof import('path');
+    const os = require('os') as typeof import('os');
+    const home = os.homedir();
+    const candidates = [
+      path.join(home, '.zsh_history'),
+      path.join(home, '.bash_history'),
+    ];
+    for (const histFile of candidates) {
+      try {
+        const content = fs.readFileSync(histFile, 'utf-8');
+        const lines = content.split('\n').filter(Boolean);
+        // zsh extended history format: lines starting with ": timestamp:0;" — extract the command part
+        const parsed = lines.map(l => {
+          const m = l.match(/^: \d+:\d+;(.*)$/);
+          return m ? m[1] : l;
+        });
+        return parsed.slice(-count);
+      } catch {
+        continue;
+      }
+    }
+    return [];
+  });
+
   ipcMain.on('terminal:write', (_event, id: number, data: string) => {
     allTerminals.get(id)?.write(data);
     // Update activity for owning workspace
