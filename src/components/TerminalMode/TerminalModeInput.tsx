@@ -1,21 +1,65 @@
-import { useState, useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
-import { CornerDownLeft, ShieldCheck, ShieldOff, ChevronsLeftRight } from 'lucide-react';
+import { useState, useRef, useEffect, useImperativeHandle, forwardRef, useMemo } from 'react';
 import type { InputMode } from './types';
+
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
+
+/** Score history entries by frequency + recency, return best prefix match. */
+function predictCommand(prefix: string, history: string[]): string | null {
+  if (!prefix || !prefix.trim()) return null;
+  const lower = prefix.toLowerCase();
+  const total = history.length;
+  if (total === 0) return null;
+
+  const scores = new Map<string, number>();
+  for (let i = 0; i < total; i++) {
+    const cmd = history[i];
+    if (!cmd.toLowerCase().startsWith(lower) || cmd.toLowerCase() === lower) continue;
+    const recency = (i + 1) / total; // 0→1, higher = more recent
+    scores.set(cmd, (scores.get(cmd) || 0) + 1 + recency);
+  }
+
+  let best: string | null = null;
+  let bestScore = 0;
+  for (const [cmd, score] of scores) {
+    if (score > bestScore) {
+      bestScore = score;
+      best = cmd;
+    }
+  }
+  return best;
+}
 
 export interface TerminalModeInputHandle {
   paste: (text: string) => void;
+  focus: () => void;
+}
+
+function stripPromptGlyphs(text: string): string {
+  return text
+    .replace(/[\uE0A0-\uE0D4\uE200-\uE2A9\uE5FA-\uE6B5\uE700-\uE7C5\uF000-\uFD46\uDB80-\uDBFF][\uDC00-\uDFFF]?/g, '')
+    .replace(/[^\x20-\x7E\u00A0-\u00FF\u0100-\u024F\u2000-\u206F❯]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function extractPromptParts(promptText: string): { user: string; path: string } {
+  const cleaned = stripPromptGlyphs(promptText);
+  const match = cleaned.match(/^(\S+?)[@:]?\s*(~[^\s$#%]*|\/[^\s$#%]*)/);
+  if (match) return { user: match[1], path: match[2] };
+  const clean = cleaned.replace(/[\$#%>\s]+$/, '').trim();
+  return { user: clean, path: '' };
 }
 
 interface TerminalModeInputProps {
   onSubmit: (value: string) => void;
   mode: InputMode;
   onToggleMode: () => void;
-  onTabComplete?: (text: string) => Promise<string[]>;
   permissionMode: 'default' | 'bypass';
   onPermissionChange: (mode: 'default' | 'bypass') => void;
   initialValue?: string;
   disabled?: boolean;
   cwd: string;
+  promptInfo?: { text: string; isRemote: boolean; sshTarget?: string } | null;
   history?: string[];
   onClear?: () => void;
   fullWidth?: boolean;
@@ -24,22 +68,30 @@ interface TerminalModeInputProps {
   onModeChange?: (mode: InputMode) => void;
 }
 
-const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputProps>(function TerminalModeInput({ onSubmit, mode, onToggleMode, onTabComplete, permissionMode, onPermissionChange, initialValue, disabled, cwd, history = [], onClear, fullWidth, onToggleFullWidth, detectAI, onModeChange }, ref) {
+const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputProps>(function TerminalModeInput({ onSubmit, mode, onToggleMode, permissionMode, onPermissionChange, initialValue, disabled, cwd, promptInfo, history = [], onClear, fullWidth, onToggleFullWidth, detectAI, onModeChange }, ref) {
   const [value, setValue] = useState(initialValue || '');
-  const [completions, setCompletions] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
-  // Tracks state between consecutive Tab presses
-  const tabStateRef = useRef<{ candidates: string[]; hitCount: number; selectedIndex: number } | null>(null);
-  const [selectedCompletion, setSelectedCompletion] = useState(-1);
   // History navigation: -1 = current input, 0 = most recent, 1 = second most recent, etc.
   const historyIndexRef = useRef(-1);
   const savedInputRef = useRef('');
   // When user manually toggles mode, suppress auto-detect until submit/clear
   const manualOverrideRef = useRef(false);
+  // Tab completion cycling state
+  const tabCompletionsRef = useRef<string[]>([]);
+  const tabIndexRef = useRef(-1);
+  const tabPrefixRef = useRef('');
+
+  const prediction = useMemo(
+    () => mode === 'shell' ? predictCommand(value, history) : null,
+    [value, history, mode],
+  );
 
   useImperativeHandle(ref, () => ({
     paste: (text: string) => {
       setValue(prev => prev + text);
+      inputRef.current?.focus();
+    },
+    focus: () => {
       inputRef.current?.focus();
     },
   }));
@@ -52,99 +104,73 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
     inputRef.current?.focus();
   }, [mode]);
 
-  const clearCompletions = () => {
-    setCompletions([]);
-    setSelectedCompletion(-1);
-    tabStateRef.current = null;
-  };
-
-  const applyCompletion = (completion: string) => {
-    const words = value.split(/(\s+)/); // preserve whitespace
-    // Find last non-whitespace token index
-    let lastTokenIdx = words.length - 1;
-    while (lastTokenIdx >= 0 && /^\s*$/.test(words[lastTokenIdx])) lastTokenIdx--;
-    if (lastTokenIdx < 0) {
-      // All whitespace — append completion
-      words.push(completion);
-    } else {
-      words[lastTokenIdx] = completion;
-    }
-    const joined = words.join('');
-    // Directory: no trailing space (user will Tab into it)
-    // File: add trailing space
-    const newValue = completion.endsWith('/') ? joined : joined + ' ';
-    setValue(newValue);
-  };
-
-  const handleTabComplete = async () => {
-    if (!onTabComplete || !value.trim()) return;
-
-    const state = tabStateRef.current;
-
-    // Completions already visible — cycle through them
-    if (state && state.hitCount >= 2) {
-      const nextIdx = (state.selectedIndex + 1) % state.candidates.length;
-      state.selectedIndex = nextIdx;
-      setSelectedCompletion(nextIdx);
-      applyCompletion(state.candidates[nextIdx]);
-      return;
-    }
-
-    // Second Tab — show candidates and select the first one
-    if (state && state.hitCount === 1 && state.candidates.length > 1) {
-      state.hitCount = 2;
-      state.selectedIndex = 0;
-      setCompletions(state.candidates);
-      setSelectedCompletion(0);
-      applyCompletion(state.candidates[0]);
-      return;
-    }
-
-    // First Tab — fetch completions
-    const candidates = await onTabComplete(value);
-    if (candidates.length === 0) return;
-
-    if (candidates.length === 1) {
-      applyCompletion(candidates[0]);
-      clearCompletions();
-      return;
-    }
-
-    // Multiple matches — apply common prefix on first Tab
-    const commonPrefix = candidates.reduce((prefix, candidate) => {
-      let i = 0;
-      while (i < prefix.length && i < candidate.length && prefix[i] === candidate[i]) i++;
-      return prefix.slice(0, i);
-    });
-
-    const lastWord = value.split(/\s+/).pop() || '';
-    if (commonPrefix.length > lastWord.length) {
-      if (commonPrefix.endsWith('/')) {
-        applyCompletion(commonPrefix);
-      } else {
-        const words = value.split(/(\s+)/);
-        let lastTokenIdx = words.length - 1;
-        while (lastTokenIdx >= 0 && /^\s*$/.test(words[lastTokenIdx])) lastTokenIdx--;
-        if (lastTokenIdx >= 0) words[lastTokenIdx] = commonPrefix;
-        setValue(words.join(''));
-      }
-    }
-
-    // Store candidates — second Tab will reveal them
-    tabStateRef.current = { candidates, hitCount: 1, selectedIndex: -1 };
-  };
-
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      onToggleMode();
+      return;
+    }
     if (e.key === 'Tab' && e.shiftKey) {
       e.preventDefault();
       manualOverrideRef.current = true;
       onToggleMode();
-      clearCompletions();
       return;
     }
+    // Tab — accept prediction first, then shell tab completion
     if (e.key === 'Tab' && !e.shiftKey && mode === 'shell') {
       e.preventDefault();
-      handleTabComplete();
+      // Accept inline prediction if one exists
+      if (prediction) {
+        setValue(prediction);
+        tabCompletionsRef.current = [];
+        tabIndexRef.current = -1;
+        tabPrefixRef.current = '';
+        return;
+      }
+      const text = value;
+      if (!text) return;
+
+      // If we already have completions cached, cycle through them
+      if (tabCompletionsRef.current.length > 1 && tabPrefixRef.current) {
+        const next = (tabIndexRef.current + 1) % tabCompletionsRef.current.length;
+        tabIndexRef.current = next;
+        const c = tabCompletionsRef.current[next];
+        setValue(tabPrefixRef.current + c);
+        return;
+      }
+
+      window.sai.terminalTabComplete(text, cwd).then((completions: string[]) => {
+        if (completions.length === 0) return;
+        const lastWord = text.split(/\s+/).pop() || '';
+        const prefix = text.slice(0, text.length - lastWord.length);
+        if (completions.length === 1) {
+          const c = completions[0];
+          setValue(prefix + c + (c.endsWith('/') ? '' : ' '));
+          tabCompletionsRef.current = [];
+          tabIndexRef.current = -1;
+          tabPrefixRef.current = '';
+        } else {
+          // Try longest common prefix first
+          let common = completions[0];
+          for (let i = 1; i < completions.length; i++) {
+            let j = 0;
+            while (j < common.length && j < completions[i].length && common[j] === completions[i][j]) j++;
+            common = common.slice(0, j);
+          }
+          if (common.length > lastWord.length) {
+            setValue(prefix + common);
+            tabCompletionsRef.current = [];
+            tabIndexRef.current = -1;
+            tabPrefixRef.current = '';
+          } else {
+            // No common prefix to extend — start cycling
+            tabCompletionsRef.current = completions;
+            tabIndexRef.current = 0;
+            tabPrefixRef.current = prefix;
+            setValue(prefix + completions[0]);
+          }
+        }
+      });
       return;
     }
     // Ctrl+L — clear screen
@@ -159,7 +185,6 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
       const pos = inputRef.current?.selectionStart ?? value.length;
       setValue(value.slice(pos));
       requestAnimationFrame(() => inputRef.current?.setSelectionRange(0, 0));
-      clearCompletions();
       return;
     }
     // Ctrl+W — delete previous word
@@ -175,18 +200,19 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
       setValue(newBefore + after);
       const newPos = newBefore.length;
       requestAnimationFrame(() => inputRef.current?.setSelectionRange(newPos, newPos));
-      clearCompletions();
       return;
     }
-    // Escape — dismiss completions or clear input
+    // Escape — clear input
     if (e.key === 'Escape') {
       e.preventDefault();
-      if (completions.length > 0) {
-        clearCompletions();
-      } else {
-        setValue('');
-        manualOverrideRef.current = false;
-      }
+      setValue('');
+      manualOverrideRef.current = false;
+      return;
+    }
+    // Right arrow at end of input — accept prediction
+    if (e.key === 'ArrowRight' && prediction && inputRef.current?.selectionStart === value.length) {
+      e.preventDefault();
+      setValue(prediction);
       return;
     }
     if (e.key === 'ArrowUp') {
@@ -215,9 +241,11 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
       onSubmit(value.trim());
       setValue('');
       manualOverrideRef.current = false;
-      clearCompletions();
       historyIndexRef.current = -1;
       savedInputRef.current = '';
+      tabCompletionsRef.current = [];
+      tabIndexRef.current = -1;
+      tabPrefixRef.current = '';
       requestAnimationFrame(() => inputRef.current?.focus());
     }
   };
@@ -225,7 +253,10 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newVal = e.target.value;
     setValue(newVal);
-    clearCompletions();
+    // Clear tab completion cycling on any typed input
+    tabCompletionsRef.current = [];
+    tabIndexRef.current = -1;
+    tabPrefixRef.current = '';
     if (detectAI && onModeChange && !manualOverrideRef.current) {
       const trimmed = newVal.trim();
       if (trimmed.length === 0) {
@@ -239,237 +270,171 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
   };
 
   const isAI = mode === 'ai';
+  const shortCwd = cwd.replace(/^\/var\/home\/[^/]+/, '~').replace(/^\/home\/[^/]+/, '~');
+  const modKey = isMac ? '\u2318' : 'Ctrl+';
+
+  // Determine prompt display: use SSH target when remote
+  let promptLabel = shortCwd;
+  let promptIsRemote = false;
+  if (promptInfo?.isRemote && promptInfo.sshTarget) {
+    promptIsRemote = true;
+    promptLabel = promptInfo.sshTarget;
+  }
 
   return (
-    <div className={`tm-input-wrapper ${fullWidth ? 'tm-input-full-width' : ''}`}>
-      <div className={`tm-input-box ${isAI ? 'tm-input-box-ai' : ''}`}>
-        <div className="tm-input-cwd">{cwd.replace(/^\/var\/home\/[^/]+/, '~').replace(/^\/home\/[^/]+/, '~')}</div>
-        <div className="tm-input-row">
-          <span className={`tm-input-prompt ${isAI ? 'tm-input-prompt-ai' : ''}`}>
-            {isAI ? '\u2726' : '$'}
-          </span>
-          <input
-            ref={inputRef}
-            className="tm-input-field"
-            value={value}
-            onChange={handleChange}
-            onKeyDown={handleKeyDown}
-            placeholder={isAI ? 'Ask AI...' : 'Enter command...'}
-            disabled={disabled}
-            spellCheck={false}
-            autoComplete="off"
-          />
-        </div>
-        {completions.length > 1 && (
-          <div className="tm-completions">
-            {completions.map((c, i) => (
-              <span key={c} className={`tm-completion-item ${i === selectedCompletion ? 'tm-completion-active' : ''}`} onClick={() => {
-                applyCompletion(c);
-                clearCompletions();
-                inputRef.current?.focus();
-              }}>{c}</span>
-            ))}
+    <div className={`tn-input-wrapper ${fullWidth ? 'tn-input-full-width' : ''}`}>
+      <div className={`tn-input-box ${isAI ? 'tn-input-box-ai' : ''}`}>
+        <div className="tn-input-row">
+          {isAI ? (
+            <span className="tn-input-prompt-ai">{'\u2726'}</span>
+          ) : (
+            <>
+              <span className="tn-input-user" style={promptIsRemote ? { color: '#f59e0b' } : undefined}>{promptLabel}</span>
+              <span className="tn-input-dollar">$</span>
+            </>
+          )}
+          <div className="tn-input-field-wrap">
+            {prediction && (
+              <span className="tn-input-ghost" aria-hidden="true">
+                <span style={{ visibility: 'hidden' }}>{value}</span>{prediction.slice(value.length)}
+              </span>
+            )}
+            <input
+              ref={inputRef}
+              className="tn-input-field"
+              value={value}
+              onChange={handleChange}
+              onKeyDown={handleKeyDown}
+              placeholder={isAI ? 'Ask AI...' : ''}
+              disabled={disabled}
+              spellCheck={false}
+              autoComplete="off"
+            />
           </div>
-        )}
-        <div className="tm-input-toolbar">
-          <div className="tm-input-toolbar-left">
-            <button
-              className={`tm-perm-btn ${permissionMode === 'bypass' ? 'tm-perm-bypass' : ''}`}
-              onClick={() => onPermissionChange(permissionMode === 'default' ? 'bypass' : 'default')}
-              title={permissionMode === 'default' ? 'Default permissions — tools need approval' : 'Bypass — tools auto-approved'}
-            >
-              {permissionMode === 'default'
-                ? <><ShieldCheck size={12} /> <span>Default</span></>
-                : <><ShieldOff size={12} /> <span>Bypass</span></>
-              }
-            </button>
-            <button
-              className={`tm-perm-btn ${fullWidth ? 'tm-width-active' : ''}`}
-              onClick={onToggleFullWidth}
-              title={fullWidth ? 'Centered layout' : 'Full width'}
-            >
-              <ChevronsLeftRight size={12} />
-            </button>
-          </div>
-          <div className="tm-input-toolbar-right">
-            <span className="tm-input-hint">
-              {'\u21E7'}tab {'\u2192'} {isAI
-                ? <span>$ shell</span>
-                : <span className="tm-input-hint-ai">{'\u2726'} ai</span>}
-            </span>
-            <span className="tm-input-divider">{'\u2502'}</span>
-            <span className="tm-icon" onClick={() => value.trim() && onSubmit(value.trim())}>
-              <CornerDownLeft size={14} color={isAI ? '#a371f7' : 'var(--accent)'} />
-            </span>
+          <div className="tn-input-hint">
+            <span className="tn-input-kbd">{modKey}K</span>
+            <span className="tn-input-hint-label">{isAI ? 'Shell' : 'AI'}</span>
           </div>
         </div>
       </div>
 
       <style>{`
-        .tm-input-wrapper {
-          padding: 12px 15% 14px;
+        .tn-input-wrapper {
+          padding: 8px 15% 10px;
           flex-shrink: 0;
           transition: padding 0.3s ease;
         }
-        .tm-input-wrapper.tm-input-full-width {
+        .tn-input-wrapper.tn-input-full-width {
           padding-left: 16px;
           padding-right: 16px;
         }
-        .tm-input-box {
+        .tn-input-box {
           position: relative;
-          border-radius: 4px;
-          background: var(--bg);
+          border-radius: 5px;
+          background: #111417;
           overflow: visible;
         }
-        .tm-input-box::before {
+        .tn-input-box::before {
           content: '';
           position: absolute;
-          inset: -2px;
-          border-radius: 6px;
-          padding: 2px;
+          inset: -1.5px;
+          border-radius: 6.5px;
+          padding: 1.5px;
           background: linear-gradient(135deg, var(--accent) 0%, var(--orange) 20%, var(--red) 50%, var(--orange) 80%, var(--accent) 100%);
           background-size: 300% 300%;
-          animation: tm-gradient-sweep 20s ease-in-out infinite alternate;
+          animation: tn-gradient-sweep 20s ease-in-out infinite alternate;
           -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
           -webkit-mask-composite: xor;
           mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
           mask-composite: exclude;
           pointer-events: none;
           z-index: 0;
-          opacity: 0.7;
+          opacity: 0.5;
           transition: opacity 0.2s ease;
         }
-        .tm-input-box:focus-within::before {
+        .tn-input-box:focus-within::before {
           opacity: 1;
         }
-        .tm-input-box-ai::before {
+        .tn-input-box-ai::before {
           background: linear-gradient(135deg, #a371f7 0%, #c084fc 25%, #7c3aed 50%, #c084fc 75%, #a371f7 100%);
           background-size: 300% 300%;
-          animation: tm-gradient-sweep 20s ease-in-out infinite alternate;
+          animation: tn-gradient-sweep 20s ease-in-out infinite alternate;
         }
-        .tm-input-cwd {
+        .tn-input-row {
           position: relative;
           z-index: 1;
-          padding: 6px 14px 0;
-          color: var(--text-muted);
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 11px;
-        }
-        .tm-input-row {
-          position: relative;
-          z-index: 1;
-          padding: 6px 14px 10px;
+          padding: 8px 12px;
           display: flex;
           align-items: center;
           gap: 8px;
-        }
-        .tm-input-prompt {
-          color: var(--accent);
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'JetBrains Mono NF', 'JetBrains Mono', monospace;
           font-size: 13px;
-          font-weight: 600;
+        }
+        .tn-input-user {
+          color: #22c55e;
+          flex-shrink: 0;
+          font-size: 12px;
+        }
+        .tn-input-dollar {
+          color: #4b5563;
           flex-shrink: 0;
         }
-        .tm-input-prompt-ai {
+        .tn-input-prompt-ai {
           color: #a371f7;
+          font-size: 14px;
+          flex-shrink: 0;
         }
-        .tm-input-field {
+        .tn-input-field-wrap {
           flex: 1;
+          position: relative;
+          min-width: 0;
+        }
+        .tn-input-ghost {
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          pointer-events: none;
+          color: #3a3f47;
+          font-family: 'JetBrains Mono NF', 'JetBrains Mono', monospace;
+          font-size: 13px;
+          white-space: pre;
+          overflow: hidden;
+        }
+        .tn-input-field {
+          position: relative;
+          width: 100%;
           background: none;
           border: none;
           outline: none;
           color: var(--text);
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'JetBrains Mono NF', 'JetBrains Mono', monospace;
           font-size: 13px;
+          min-width: 0;
         }
-        .tm-input-field::placeholder {
-          color: var(--text-muted);
+        .tn-input-field::placeholder {
+          color: #4b5563;
         }
-        .tm-completions {
-          position: relative;
-          z-index: 1;
-          padding: 4px 14px 6px;
-          display: flex;
-          flex-wrap: wrap;
-          gap: 4px 12px;
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 11px;
-          color: var(--text-muted);
-          border-top: 1px solid var(--bg-hover);
-        }
-        .tm-completion-item {
-          white-space: nowrap;
-          cursor: pointer;
-          padding: 1px 4px;
-          border-radius: 2px;
-        }
-        .tm-completion-item:hover,
-        .tm-completion-active {
-          background: var(--bg-hover);
-          color: var(--accent);
-        }
-        .tm-input-toolbar {
-          position: relative;
-          z-index: 1;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 4px 8px 6px;
-          gap: 4px;
-          border-top: 1px solid var(--bg-hover);
-        }
-        .tm-input-toolbar-left {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          padding-left: 6px;
-        }
-        .tm-perm-btn {
+        .tn-input-hint {
           display: flex;
           align-items: center;
           gap: 4px;
-          font-family: 'JetBrains Mono', monospace;
+          flex-shrink: 0;
+          margin-left: auto;
+        }
+        .tn-input-kbd {
+          color: #4b5563;
           font-size: 10px;
-          padding: 2px 7px;
+          border: 1px solid #1e2328;
+          padding: 1px 5px;
           border-radius: 3px;
-          border: 1px solid transparent;
-          background: none;
-          color: var(--text-muted);
-          cursor: pointer;
-          transition: all 0.15s;
+          background: #0a0d0f;
         }
-        .tm-perm-btn:hover {
-          background: var(--bg-hover);
-        }
-        .tm-perm-bypass {
-          color: var(--red);
-          border-color: var(--red);
-          background: rgba(227, 85, 53, 0.1);
-        }
-        .tm-perm-bypass:hover {
-          background: rgba(227, 85, 53, 0.2);
-        }
-        .tm-width-active {
-          color: var(--accent);
-        }
-        .tm-input-toolbar-right {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding-right: 6px;
-        }
-        .tm-input-hint {
-          color: var(--text-muted);
+        .tn-input-hint-label {
+          color: #4b5563;
           font-size: 10px;
-          font-family: 'JetBrains Mono', monospace;
         }
-        .tm-input-hint-ai {
-          color: #a371f7;
-        }
-        .tm-input-divider {
-          color: var(--border);
-        }
-        @keyframes tm-gradient-sweep {
+        @keyframes tn-gradient-sweep {
           0% { background-position: 0% 0%; }
           100% { background-position: 100% 100%; }
         }

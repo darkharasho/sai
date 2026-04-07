@@ -1,19 +1,21 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { parse as shellParse } from 'shell-quote';
-import TerminalModeBlockList from './TerminalModeBlockList';
 import TerminalModeInput from './TerminalModeInput';
 import type { TerminalModeInputHandle } from './TerminalModeInput';
 import TerminalModeEditor from './TerminalModeEditor';
-import { stripAnsi } from './stripAnsi';
 import { getActiveTerminalId } from '../../terminalBuffer';
-import LiveTerminal, { extractTerminalOutput } from './InteractiveTerminalBlock';
-import type { Block, CommandBlock as CommandBlockType, ApprovalBlock as ApprovalBlockType, ToolApprovalBlock as ToolApprovalBlockType, InputMode } from './types';
-
-const PROMPT_RE = /(\S+[@:]\S+[\$#%>❯]|[\$#%❯])\s*$/;
+import HiddenXterm from './HiddenXterm';
+import type { HiddenXtermHandle } from './HiddenXterm';
+import { BlockSegmenter } from './BlockSegmenter';
+import type { SegmentedBlock } from './BlockSegmenter';
+import NativeBlockList from './NativeBlockList';
+import type { DisplayItem } from './NativeBlockList';
+import type { ApprovalBlock as ApprovalBlockType, ToolApprovalBlock as ToolApprovalBlockType, InputMode } from './types';
 
 interface TerminalModeViewProps {
   projectPath: string;
   aiProvider?: 'claude' | 'codex' | 'gemini';
+  active?: boolean;
 }
 
 function nextBlockId(): string {
@@ -22,24 +24,6 @@ function nextBlockId(): string {
 
 function nextGroupId(): string {
   return `grp-${crypto.randomUUID()}`;
-}
-
-interface PendingCommand {
-  blockId: string;
-  command: string;
-  startTime: number;
-  echoSkipped: boolean;
-  echoCommand: string;
-  lineBuffer: string;
-  dataReceived: number; // bytes of data received so far
-  outputBuffer: string; // raw output collected before live terminal mounts
-  liveShown: boolean;   // whether the live terminal has been shown
-}
-
-interface LiveTerminalState {
-  ptyId: number;
-  command: string;
-  blockId: string;
 }
 
 // Common shell commands and builtins for auto-detection
@@ -166,16 +150,21 @@ function looksLikeShellCommand(input: string): boolean {
   return false;
 }
 
-export default function TerminalModeView({ projectPath, aiProvider = 'claude' }: TerminalModeViewProps) {
-  const [blocks, setBlocks] = useState<Block[]>([]);
+export default function TerminalModeView({ projectPath, aiProvider = 'claude', active = true }: TerminalModeViewProps) {
+  const [displayItems, setDisplayItems] = useState<DisplayItem[]>([]);
+  const [altScreenVisible, setAltScreenVisible] = useState(false);
+  const [ptyId, setPtyId] = useState<number | null>(null);
   const [inputMode, setInputMode] = useState<InputMode>('shell');
   const [editValue, setEditValue] = useState<string | undefined>(undefined);
   const [cwd, setCwd] = useState(projectPath || '~');
   const [permissionMode, setPermissionMode] = useState<'default' | 'bypass'>('default');
   const [fullWidth, setFullWidth] = useState(false);
+  const [promptInfo, setPromptInfo] = useState<{ text: string; isRemote: boolean; sshTarget?: string } | null>(null);
+  const [shellHistory, setShellHistory] = useState<string[]>([]);
 
   useEffect(() => {
     window.sai.settingsGet('terminalFullWidth', false).then((v: boolean) => setFullWidth(v));
+    window.sai.terminalGetShellHistory(500).then((lines: string[]) => setShellHistory(lines));
   }, []);
   const permissionModeRef = useRef(permissionMode);
   permissionModeRef.current = permissionMode;
@@ -190,12 +179,6 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
   // Fallback PTY for when no regular terminal is available
   const fallbackPtyRef = useRef<number | null>(null);
   const fallbackPtyReadyRef = useRef<Promise<number> | null>(null);
-  // Active pending commands per PTY (for prompt detection)
-  const pendingBlocksRef = useRef<Map<number, PendingCommand>>(new Map());
-  // Live terminal state — when a command is running, this replaces the input
-  const [liveTerminal, setLiveTerminal] = useState<LiveTerminalState | null>(null);
-  // Direct ref to the live terminal's xterm instance for output extraction
-  const liveTermXtermRef = useRef<import('@xterm/xterm').Terminal | null>(null);
   // Track active AI cleanup so Ctrl+C can abort it
   const aiCleanupRef = useRef<(() => void) | null>(null);
   const aiBlockIdRef = useRef<string | null>(null);
@@ -204,10 +187,26 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
   // Track whether the system preamble has been sent this session
   const preambleSentRef = useRef(false);
 
+  // Terminal-native architecture refs
+  const segmenterRef = useRef<BlockSegmenter>(new BlockSegmenter());
+  const hiddenXtermRef = useRef<HiddenXtermHandle>(null);
+  const aiSuggestedCommands = useRef<Set<string>>(new Set());
+  const pendingCommandRef = useRef<{ command: string; startTime: number } | null>(null);
+  const lastSshTargetRef = useRef<string | null>(null);
+  const altScreenRef = useRef(false);
+  altScreenRef.current = altScreenVisible;
+
   // Update cwd when projectPath changes (workspace switch)
   useEffect(() => {
     if (projectPath) setCwd(projectPath);
   }, [projectPath]);
+
+  // Focus the input when this tab becomes active
+  useEffect(() => {
+    if (active) {
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  }, [active]);
 
   const refreshCwd = useCallback(async (ptyId: number) => {
     try {
@@ -216,109 +215,114 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
     } catch { /* ignore */ }
   }, []);
 
-  // Create fallback PTY + listen to ALL terminal data
+  // PTY data listener + fallback PTY creation
   useEffect(() => {
     let cancelled = false;
+    const segmenter = segmenterRef.current;
 
-    // Data listener for prompt detection — xterm handles rendering
-    const cleanupData = window.sai.terminalOnData((ptyId: number, data: string) => {
+    // Register block callback
+    segmenter.onBlock((block) => {
       if (cancelled) return;
 
-      const pending = pendingBlocksRef.current.get(ptyId);
-      if (!pending) return;
-
-      pending.dataReceived += data.length;
-
-      // Buffer raw output when live terminal isn't shown yet
-      if (!pending.liveShown) {
-        pending.outputBuffer += data;
+      // Intercept internal history-fetch command — parse output as history, suppress block
+      // Match by sentinel marker in the command (added when we send it through PTY)
+      const cleanBlockCmd = block.command.replace(/[^\x20-\x7E]/g, '').trim();
+      if (cleanBlockCmd.includes('#__sai_hist__')) {
+        pendingCommandRef.current = null;
+        if (block.output) {
+          const lines = block.output.split('\n')
+            .map(l => {
+              // Strip zsh extended history format ": timestamp:0;command"
+              const zshMatch = l.match(/^:\s*\d+:\d+;(.*)$/);
+              if (zshMatch) return zshMatch[1].trim();
+              return l.trim();
+            })
+            .filter(Boolean);
+          // Deduplicate, keeping most recent
+          const seen = new Set<string>();
+          const unique: string[] = [];
+          for (let i = lines.length - 1; i >= 0; i--) {
+            if (!seen.has(lines[i])) {
+              seen.add(lines[i]);
+              unique.push(lines[i]);
+            }
+          }
+          setShellHistory(unique.reverse());
+        }
+        return;
       }
 
-      // After enough data, assume echo has been consumed (TUI apps scramble it)
-      if (!pending.echoSkipped && pending.dataReceived > 200) {
-        pending.echoSkipped = true;
-      }
+      const isSuggested = aiSuggestedCommands.current.has(block.command);
+      if (isSuggested) aiSuggestedCommands.current.delete(block.command);
+      const pending = pendingCommandRef.current;
+      pendingCommandRef.current = null;
+      // Use the submit timestamp for duration instead of the segmenter's
+      // prompt-to-prompt timing (which includes user typing time)
+      // Use the command the user actually typed (from our input) rather than
+      // what the segmenter extracted from PTY output (which can include leaked
+      // prompt glyphs from remote shells).
+      const fixedBlock = pending
+        ? { ...block, command: pending.command, duration: Date.now() - pending.startTime }
+        : block;
+      setDisplayItems(prev => {
+        // Replace the pending block if it exists
+        if (pending) {
+          const idx = prev.findIndex(item => item.type === 'command' && item.block.id === 'pending');
+          if (idx !== -1) {
+            const next = [...prev];
+            next[idx] = { type: 'command', block: fixedBlock, aiSuggested: isSuggested };
+            return next;
+          }
+        }
+        return [...prev, { type: 'command', block: fixedBlock, aiSuggested: isSuggested }];
+      });
+      const termId = getActiveTerminalId() ?? fallbackPtyRef.current;
+      if (termId !== null) refreshCwd(termId);
+    });
 
-      const stripped = stripAnsi(data);
-      const chunks = (pending.lineBuffer + stripped).split('\n');
-      pending.lineBuffer = chunks.pop() || '';
+    // Register alt-screen callback
+    segmenter.onAltScreen((entered) => {
+      if (cancelled) return;
+      setAltScreenVisible(entered);
+    });
 
-      const finishCommand = () => {
-        const dur = Date.now() - pending.startTime;
-        let output = '';
-        if (pending.liveShown && liveTermXtermRef.current) {
-          // Extract from xterm buffer
-          output = extractTerminalOutput(liveTermXtermRef.current, pending.command);
+    // Register prompt-change callback (updates input bar for SSH etc.)
+    segmenter.onPromptChange((prompt, isRemote, sshTarget) => {
+      if (cancelled) return;
+      setPromptInfo({ text: prompt, isRemote, sshTarget });
+
+      const target = isRemote ? (sshTarget || '__remote__') : null;
+      if (target !== lastSshTargetRef.current) {
+        lastSshTargetRef.current = target;
+        if (isRemote) {
+          // Fetch remote shell history by reading history files through the PTY
+          // The #__sai_hist__ comment is a sentinel so we can identify and suppress this block
+          const termId = getActiveTerminalId() ?? fallbackPtyRef.current;
+          if (termId !== null) {
+            window.sai.terminalWrite(termId, 'tail -500 ~/.bash_history 2>/dev/null || tail -500 ~/.zsh_history 2>/dev/null #__sai_hist__\n');
+          }
         } else {
-          // Use buffered output, strip ANSI and clean up
-          output = stripAnsi(pending.outputBuffer).trim();
-          // Strip echoed command from start
-          const cmdIdx = output.indexOf(pending.command);
-          if (cmdIdx !== -1) {
-            output = output.slice(cmdIdx + pending.command.length).replace(/^\r?\n/, '');
-          }
-          // Strip trailing prompt
-          const lines = output.split('\n');
-          while (lines.length > 0) {
-            const last = lines[lines.length - 1].trim();
-            if (!last || PROMPT_RE.test(last)) lines.pop();
-            else break;
-          }
-          output = lines.join('\n').trimEnd();
-        }
-        const block: CommandBlockType = {
-          type: 'command',
-          id: pending.blockId,
-          command: pending.command,
-          output,
-          exitCode: 0,
-          startTime: pending.startTime,
-          duration: dur,
-          groupId: currentGroupRef.current,
-        };
-        pendingBlocksRef.current.delete(ptyId);
-        // Cancel live terminal timer if command finished before it fired
-        if (liveTerminalTimerRef.current) {
-          clearTimeout(liveTerminalTimerRef.current);
-          liveTerminalTimerRef.current = null;
-        }
-        setBlocks(prev => [...prev, block]);
-        if (pending.liveShown) {
-          setLiveTerminal(null);
-          liveTermXtermRef.current = null;
-        }
-        refreshCwd(ptyId);
-      };
-
-      for (const line of chunks) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-
-        if (!pending.echoSkipped && trimmed.includes(pending.echoCommand)) {
-          pending.echoSkipped = true;
-          continue;
-        }
-
-        if (pending.echoSkipped && PROMPT_RE.test(trimmed)) {
-          finishCommand();
-          return;
+          // Back to local — reload local shell history
+          window.sai.terminalGetShellHistory(500).then((lines: string[]) => {
+            if (!cancelled) setShellHistory(lines);
+          });
         }
       }
+    });
 
-      // Check partial line buffer for prompt
-      const partialTrimmed = pending.lineBuffer.trim();
-      if (partialTrimmed && pending.echoSkipped && PROMPT_RE.test(partialTrimmed)) {
-        finishCommand();
+    // Listen for PTY data and forward to hidden xterm
+    const cleanupData = window.sai.terminalOnData((ptyId: number, data: string) => {
+      if (cancelled) return;
+      if (ptyId === (getActiveTerminalId() ?? fallbackPtyRef.current)) {
+        hiddenXtermRef.current?.write(data); // This feeds both xterm and BlockSegmenter via onData
       }
     });
 
     // Create fallback PTY
     const ptyPromise = window.sai.terminalCreate(projectPath).then((id: number) => {
-      if (cancelled) {
-        window.sai.terminalKill(id);
-        return id;
-      }
+      if (cancelled) { window.sai.terminalKill(id); return id; }
       fallbackPtyRef.current = id;
+      setPtyId(id);
       refreshCwd(id);
       return id;
     });
@@ -327,22 +331,19 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
     return () => {
       cancelled = true;
       cleanupData();
+      segmenter.reset();
       if (fallbackPtyRef.current !== null) {
         window.sai.terminalKill(fallbackPtyRef.current);
         fallbackPtyRef.current = null;
+        setPtyId(null);
       }
-      pendingBlocksRef.current.clear();
-      // Stop any active AI request
       if (aiCleanupRef.current) {
         window.sai.claudeStop(projectPath, 'terminal');
         aiCleanupRef.current();
         aiCleanupRef.current = null;
-        aiBlockIdRef.current = null;
       }
     };
   }, [projectPath, refreshCwd]);
-
-  const liveTerminalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const executeCommand = useCallback(async (command: string) => {
     let termId = getActiveTerminalId() ?? fallbackPtyRef.current;
@@ -350,36 +351,23 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
       termId = await fallbackPtyReadyRef.current;
     }
     if (termId === null) return;
-
-    const blockId = nextBlockId();
-
-    pendingBlocksRef.current.set(termId, {
-      blockId,
-      command,
-      startTime: Date.now(),
-      echoSkipped: false,
-      echoCommand: command,
-      lineBuffer: '',
-      dataReceived: 0,
-      outputBuffer: '',
-      liveShown: false,
-    });
-
-    // Delay showing live terminal — fast commands finish before this fires
-    const tid = termId;
-    liveTerminalTimerRef.current = setTimeout(() => {
-      const pending = pendingBlocksRef.current.get(tid);
-      if (pending) {
-        pending.liveShown = true;
-        setLiveTerminal({ ptyId: tid, command, blockId });
-      }
-    }, 300);
-
     window.sai.terminalWrite(termId, command + '\n');
   }, []);
 
   const handleSubmit = useCallback((value: string) => {
     if (inputMode === 'shell') {
+      // Add a pending block immediately so the user sees feedback
+      const pendingBlock = {
+        id: 'pending',
+        command: value,
+        output: '',
+        promptText: '',
+        startTime: Date.now(),
+        duration: 0,
+        isRemote: false,
+      };
+      pendingCommandRef.current = { command: value, startTime: Date.now() };
+      setDisplayItems(prev => [...prev, { type: 'command' as const, block: pendingBlock, active: true }]);
       executeCommand(value);
       setEditValue(undefined);
     } else {
@@ -389,43 +377,31 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
   }, [inputMode, executeCommand]);
 
   const handleAIRequest = useCallback((prompt: string) => {
-    const promptBlockId = nextBlockId();
-    let aiBlockId = nextBlockId();
+    const aiId = nextBlockId();
+    const aiStartTime = Date.now();
     let turnSeq: number | null = null;
     let gotContent = false;
-    let needsNewBlock = false; // true after approval_needed — next assistant msg gets a new block
 
-    setBlocks(prev => [...prev,
-      {
-        type: 'ai-prompt' as const,
-        id: promptBlockId,
-        content: prompt,
-      },
-      {
-        type: 'ai-response' as const,
-        id: aiBlockId,
-        content: '',
-        parentBlockId: promptBlockId,
-        streaming: true,
-      },
+    // Add AI display items: the question and streaming response
+    setDisplayItems(prev => [...prev,
+      { type: 'ai', id: aiId, question: prompt, content: '', suggestedCommands: [], streaming: true, aiProvider },
     ]);
 
     const finalize = () => {
-      setBlocks(prev => {
-        const aiBlock = prev.find(b => b.id === aiBlockId);
-        if (!aiBlock || aiBlock.type !== 'ai-response') return prev;
+      setDisplayItems(prev => {
+        const aiItem = prev.find((item): item is DisplayItem & { type: 'ai' } => item.type === 'ai' && item.id === aiId);
+        if (!aiItem || aiItem.type !== 'ai') return prev;
 
-        const bashMatches = [...aiBlock.content.matchAll(/```(?:bash|sh|shell)\n([\s\S]*?)```/g)];
+        const bashMatches = [...aiItem.content.matchAll(/```(?:bash|sh|shell)\n([\s\S]*?)```/g)];
         if (bashMatches.length === 0) return prev;
 
-        const approvalBlocks = bashMatches.map(m => ({
-          type: 'approval' as const,
-          id: nextBlockId(),
-          command: m[1].trim(),
-          parentBlockId: aiBlockId,
-          status: 'pending' as const,
-        }));
-        return [...prev, ...approvalBlocks];
+        const commands = bashMatches.map(m => m[1].trim());
+        // Update the AI item with suggested commands
+        return prev.map(item =>
+          item.type === 'ai' && item.id === aiId
+            ? { ...item, suggestedCommands: commands }
+            : item
+        );
       });
     };
 
@@ -438,15 +414,18 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
     let lastTextEntry = '';
     // Keep refs to previous block entries so tool_results arriving after block split can still match
     let prevBlockEntries: Map<string, { entries: import('./types').AIEntry[]; blockId: string }> = new Map();
+    // The current ai block ID (may change after tool approvals)
+    let currentAiId = aiId;
+    let needsNewBlock = false;
 
-    const updateBlock = () => {
-      // Build a plain content string from text entries for copy/finalize
+    const updateItem = () => {
       const contentParts = entries.filter(e => e.kind === 'text').map(e => e.text);
       const content = contentParts.join('\n\n');
-      setBlocks(prev => prev.map(b => {
-        if (b.id !== aiBlockId || b.type !== 'ai-response') return b;
-        return { ...b, content, entries: [...entries], toolActivity: [...allToolNames] };
-      }));
+      setDisplayItems(prev => prev.map(item =>
+        item.type === 'ai' && item.id === currentAiId
+          ? { ...item, content }
+          : item
+      ));
     };
 
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
@@ -480,7 +459,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
             if (toolEntry && toolEntry.kind === 'tool') {
               toolEntry.call.output = output;
               toolEntry.call.isError = !!block.is_error;
-              updateBlock();
+              updateItem();
             } else {
               // Check previous block entries (tool result arrived after block split)
               const prev = prevBlockEntries.get(block.tool_use_id);
@@ -491,13 +470,13 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
                 if (prevTool && prevTool.kind === 'tool') {
                   prevTool.call.output = output;
                   prevTool.call.isError = !!block.is_error;
-                  // Update the previous block
+                  // Update the previous AI display item
                   const prevContentParts = prev.entries.filter(e => e.kind === 'text').map(e => e.text);
                   const prevContent = prevContentParts.join('\n\n');
-                  setBlocks(b => b.map(blk =>
-                    blk.id === prev.blockId && blk.type === 'ai-response'
-                      ? { ...blk, content: prevContent, entries: [...prev.entries] }
-                      : blk
+                  setDisplayItems(items => items.map(item =>
+                    item.type === 'ai' && item.id === prev.blockId
+                      ? { ...item, content: prevContent }
+                      : item
                   ));
                 }
               }
@@ -507,34 +486,36 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
       }
 
       if (msg.type === 'assistant' && msg.message?.content) {
-        // After a tool approval, start a fresh ai-response block below the approval
+        // After a tool approval, start a fresh ai display item below the approval
         if (needsNewBlock) {
           needsNewBlock = false;
           // Save current entries so tool_results can still find them
-          const oldBlockId = aiBlockId;
+          const oldBlockId = currentAiId;
           const oldEntries = entries;
           for (const e of oldEntries) {
             if (e.kind === 'tool') prevBlockEntries.set(e.call.id, { entries: oldEntries, blockId: oldBlockId });
           }
-          aiBlockId = nextBlockId();
+          currentAiId = nextBlockId();
           entries = [];
           allToolNames = [];
           knownToolIds = new Set<string>();
           lastTextEntry = '';
-          setBlocks(prev => [...prev, {
-            type: 'ai-response' as const,
-            id: aiBlockId,
+          setDisplayItems(prev => [...prev, {
+            type: 'ai' as const,
+            id: currentAiId,
+            question: '',
             content: '',
-            parentBlockId: promptBlockId,
+            suggestedCommands: [],
             streaming: true,
+            aiProvider,
           }]);
-          aiBlockIdRef.current = aiBlockId;
+          aiBlockIdRef.current = currentAiId;
         }
 
         const contentBlocks = Array.isArray(msg.message.content) ? msg.message.content : [];
         let hasNewData = false;
 
-        // Extract text — each assistant partial has full accumulated text for this turn
+        // Extract text
         const textParts: string[] = [];
         for (const block of contentBlocks) {
           if (block.type === 'text' && block.text) {
@@ -545,22 +526,19 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
 
         if (text && text !== lastTextEntry) {
           gotContent = true;
-          // Find the last text entry to update, or add a new one
           const lastIdx = entries.length - 1;
           const lastEntry = lastIdx >= 0 ? entries[lastIdx] : null;
 
           if (lastEntry && lastEntry.kind === 'text') {
-            // Update existing text entry (streaming partial for same turn)
             lastEntry.text = text;
           } else {
-            // New text after tool calls — add new text entry
             entries.push({ kind: 'text', text });
           }
           lastTextEntry = text;
           hasNewData = true;
         }
 
-        // Extract tool_use blocks — add as entries
+        // Extract tool_use blocks
         for (const block of contentBlocks) {
           if (block.type === 'tool_use' && block.id && !knownToolIds.has(block.id)) {
             knownToolIds.add(block.id);
@@ -579,33 +557,35 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
           }
         }
 
-        if (hasNewData) updateBlock();
+        if (hasNewData) updateItem();
       }
 
       // Tool approval request — Claude wants to run a tool
       if (msg.type === 'approval_needed') {
-        // Freeze the current ai-response block (stop streaming indicator)
-        setBlocks(prev => {
-          const updated = prev.map(b =>
-            b.id === aiBlockId && b.type === 'ai-response'
-              ? { ...b, streaming: false }
-              : b
+        // Freeze the current AI item (stop streaming indicator)
+        setDisplayItems(prev => {
+          const updated = prev.map(item =>
+            item.type === 'ai' && item.id === currentAiId
+              ? { ...item, streaming: false, duration: Date.now() - aiStartTime }
+              : item
           );
           return [...updated, {
             type: 'tool-approval' as const,
-            id: nextBlockId(),
-            toolName: msg.toolName,
-            toolUseId: msg.toolUseId,
-            command: msg.command || '',
-            description: msg.description || '',
-            status: 'pending' as const,
+            block: {
+              type: 'tool-approval' as const,
+              id: nextBlockId(),
+              toolName: msg.toolName,
+              toolUseId: msg.toolUseId,
+              command: msg.command || '',
+              description: msg.description || '',
+              status: 'pending' as const,
+            },
           }];
         });
         needsNewBlock = true;
       }
 
-      // Result message carries the final answer text — don't cleanup here,
-      // Claude may do multiple tool-use turns before the final 'done'.
+      // Result message carries the final answer text
       if (msg.type === 'result') {
         if (msg.result) {
           const text = typeof msg.result === 'string' ? msg.result : '';
@@ -619,23 +599,20 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
               entries.push({ kind: 'text', text });
             }
             lastTextEntry = text;
-            updateBlock();
+            updateItem();
           }
         }
         return;
       }
 
-      // Done signals true end of the entire turn — cleanup here
+      // Done signals true end of the entire turn
       if (msg.type === 'done') {
-        // If we have a turnSeq, only honor done with matching seq
         if (turnSeq != null && msg.turnSeq != null && msg.turnSeq !== turnSeq) return;
-        // If we haven't received any content or result yet, this is likely a stale done
-        // from a process restart — ignore it
         if (!gotContent && turnSeq === null) return;
-        setBlocks(prev => prev.map(b =>
-          b.id === aiBlockId && b.type === 'ai-response'
-            ? { ...b, streaming: false }
-            : b
+        setDisplayItems(prev => prev.map(item =>
+          item.type === 'ai' && item.id === currentAiId
+            ? { ...item, streaming: false, duration: Date.now() - aiStartTime }
+            : item
         ));
         aiCleanupRef.current = null;
         aiBlockIdRef.current = null;
@@ -646,7 +623,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
 
     // Track this request so Ctrl+C can abort it
     aiCleanupRef.current = cleanup;
-    aiBlockIdRef.current = aiBlockId;
+    aiBlockIdRef.current = aiId;
 
     // Inject system preamble on the first message of the session
     let fullPrompt = prompt;
@@ -670,11 +647,11 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
 
     // Send after listener is registered to avoid race condition
     window.sai.claudeSend(projectPath, fullPrompt, undefined, permissionModeRef.current, 'high', 'sonnet', 'terminal');
-  }, [projectPath]);
+  }, [projectPath, aiProvider]);
 
-  const handleAskAI = useCallback((block: CommandBlockType) => {
+  const handleAskAI = useCallback((block: SegmentedBlock) => {
     currentGroupRef.current = nextGroupId();
-    const prompt = `The following command ${block.exitCode === 0 ? 'succeeded' : 'failed'} with exit code ${block.exitCode}:\n\n\`\`\`\n$ ${block.command}\n${block.output}\n\`\`\`\n\nAnalyze this and suggest a fix if needed. If you suggest a command, put it in a \`\`\`bash code block.`;
+    const prompt = `The following command ran:\n\n\`\`\`\n$ ${block.command}\n${block.output}\n\`\`\`\n\nAnalyze this and suggest a fix if needed. If you suggest a command, put it in a \`\`\`bash code block.`;
     handleAIRequest(prompt);
   }, [handleAIRequest]);
 
@@ -687,22 +664,29 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
   }, [executeCommand]);
 
   const handleApprove = useCallback((block: ApprovalBlockType) => {
-    setBlocks(prev => prev.map(b =>
-      b.id === block.id ? { ...b, status: 'approved' as const } : b
+    setDisplayItems(prev => prev.map(item =>
+      item.type === 'approval' && item.block.id === block.id
+        ? { ...item, block: { ...item.block, status: 'approved' as const } }
+        : item
     ));
     currentGroupRef.current = nextGroupId();
+    aiSuggestedCommands.current.add(block.command);
     executeCommand(block.command);
   }, [executeCommand]);
 
   const handleReject = useCallback((block: ApprovalBlockType) => {
-    setBlocks(prev => prev.map(b =>
-      b.id === block.id ? { ...b, status: 'rejected' as const } : b
+    setDisplayItems(prev => prev.map(item =>
+      item.type === 'approval' && item.block.id === block.id
+        ? { ...item, block: { ...item.block, status: 'rejected' as const } }
+        : item
     ));
   }, []);
 
   const handleEdit = useCallback((block: ApprovalBlockType) => {
-    setBlocks(prev => prev.map(b =>
-      b.id === block.id && b.type === 'approval' ? { ...b, status: 'edited' as const } : b
+    setDisplayItems(prev => prev.map(item =>
+      item.type === 'approval' && item.block.id === block.id
+        ? { ...item, block: { ...item.block, status: 'edited' as const } }
+        : item
     ));
     setEditValue(block.command);
     setInputMode('shell');
@@ -710,15 +694,19 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
 
   const handleToolApprove = useCallback((block: ToolApprovalBlockType) => {
     window.sai.claudeApprove(projectPath, block.toolUseId, true, undefined, 'terminal');
-    setBlocks(prev => prev.map(b =>
-      b.id === block.id ? { ...b, status: 'approved' as const } : b
+    setDisplayItems(prev => prev.map(item =>
+      item.type === 'tool-approval' && item.block.id === block.id
+        ? { ...item, block: { ...item.block, status: 'approved' as const } }
+        : item
     ));
   }, [projectPath]);
 
   const handleToolReject = useCallback((block: ToolApprovalBlockType) => {
     window.sai.claudeApprove(projectPath, block.toolUseId, false, undefined, 'terminal');
-    setBlocks(prev => prev.map(b =>
-      b.id === block.id ? { ...b, status: 'rejected' as const } : b
+    setDisplayItems(prev => prev.map(item =>
+      item.type === 'tool-approval' && item.block.id === block.id
+        ? { ...item, block: { ...item.block, status: 'rejected' as const } }
+        : item
     ));
   }, [projectPath]);
 
@@ -726,8 +714,10 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
     const pattern = `${block.toolName}(*)`;
     await window.sai.claudeAlwaysAllow(projectPath, pattern);
     window.sai.claudeApprove(projectPath, block.toolUseId, true, undefined, 'terminal');
-    setBlocks(prev => prev.map(b =>
-      b.id === block.id ? { ...b, status: 'approved' as const } : b
+    setDisplayItems(prev => prev.map(item =>
+      item.type === 'tool-approval' && item.block.id === block.id
+        ? { ...item, block: { ...item.block, status: 'approved' as const } }
+        : item
     ));
   }, [projectPath]);
 
@@ -743,29 +733,60 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
     });
   }, []);
 
-  const handleTabComplete = useCallback(async (text: string) => {
-    return window.sai.terminalTabComplete(text, cwd);
-  }, [cwd]);
+  // When alt-screen is active, forward all keyboard input directly to the PTY
+  useEffect(() => {
+    const handleAltScreenKey = (e: KeyboardEvent) => {
+      if (!altScreenRef.current) return;
+      const termId = getActiveTerminalId() ?? fallbackPtyRef.current;
+      if (termId === null) return;
 
-  const openFileInEditor = useCallback(async (filePath: string, line?: number) => {
-    const absPath = filePath.startsWith('/') ? filePath : `${projectPath}/${filePath}`;
-    const content = await window.sai.readFile(absPath);
-    if (content === null) return;
+      e.preventDefault();
+      e.stopPropagation();
 
-    setEditorFiles(prev => {
-      const existing = prev.find(f => f.path === absPath);
-      if (existing) {
-        return prev.map(f => f.path === absPath ? { ...f, highlightLine: line } : f);
+      // Map key events to terminal sequences
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+        window.sai.terminalWrite(termId, e.key);
+      } else if (e.ctrlKey && e.key.length === 1) {
+        // Ctrl+letter → control character (e.g. Ctrl+C → \x03)
+        const code = e.key.toLowerCase().charCodeAt(0) - 96;
+        if (code > 0 && code < 27) {
+          window.sai.terminalWrite(termId, String.fromCharCode(code));
+        }
+      } else {
+        // Special keys
+        const keyMap: Record<string, string> = {
+          Enter: '\r',
+          Backspace: '\x7f',
+          Tab: '\t',
+          Escape: '\x1b',
+          ArrowUp: '\x1b[A',
+          ArrowDown: '\x1b[B',
+          ArrowRight: '\x1b[C',
+          ArrowLeft: '\x1b[D',
+          Home: '\x1b[H',
+          End: '\x1b[F',
+          Delete: '\x1b[3~',
+          PageUp: '\x1b[5~',
+          PageDown: '\x1b[6~',
+          F1: '\x1bOP', F2: '\x1bOQ', F3: '\x1bOR', F4: '\x1bOS',
+          F5: '\x1b[15~', F6: '\x1b[17~', F7: '\x1b[18~', F8: '\x1b[19~',
+          F9: '\x1b[20~', F10: '\x1b[21~', F11: '\x1b[23~', F12: '\x1b[24~',
+        };
+        const seq = keyMap[e.key];
+        if (seq) window.sai.terminalWrite(termId, seq);
       }
-      return [...prev, { path: absPath, content, highlightLine: line }];
-    });
-    setActiveEditorFile(absPath);
-    setEditorOpen(true);
-  }, [projectPath]);
+    };
+
+    window.addEventListener('keydown', handleAltScreenKey, true);
+    return () => window.removeEventListener('keydown', handleAltScreenKey, true);
+  }, []);
 
   // Ctrl+C = kill, Ctrl+Shift+C = copy, Ctrl+Shift+V = paste
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // When alt-screen is active (htop, vim, etc.), handled by alt-screen handler
+      if (altScreenRef.current) return;
+
       const ctrlOrMeta = e.ctrlKey || e.metaKey;
       if (!ctrlOrMeta) return;
 
@@ -795,10 +816,10 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
           const blockId = aiBlockIdRef.current;
           window.sai.claudeStop(projectPath, 'terminal');
           if (blockId) {
-            setBlocks(prev => prev.map(b =>
-              b.id === blockId && b.type === 'ai-response'
-                ? { ...b, streaming: false }
-                : b
+            setDisplayItems(prev => prev.map(item =>
+              item.type === 'ai' && item.id === blockId
+                ? { ...item, streaming: false }
+                : item
             ));
           }
           aiCleanupRef.current();
@@ -806,36 +827,9 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
           aiBlockIdRef.current = null;
         }
 
-        // Cancel live terminal timer
-        if (liveTerminalTimerRef.current) {
-          clearTimeout(liveTerminalTimerRef.current);
-          liveTerminalTimerRef.current = null;
-        }
-
-        // Send SIGINT to any running PTY commands
-        for (const [ptyId, pending] of pendingBlocksRef.current.entries()) {
-          window.sai.terminalWrite(ptyId, '\x03');
-          const dur = Date.now() - pending.startTime;
-          let output = '';
-          if (pending.liveShown && liveTermXtermRef.current) {
-            output = extractTerminalOutput(liveTermXtermRef.current, pending.command);
-          } else {
-            output = stripAnsi(pending.outputBuffer).trim();
-          }
-          setBlocks(prev => [...prev, {
-            type: 'command' as const,
-            id: pending.blockId,
-            command: pending.command,
-            output,
-            exitCode: 130,
-            startTime: pending.startTime,
-            duration: dur,
-            groupId: currentGroupRef.current,
-          }]);
-          pendingBlocksRef.current.delete(ptyId);
-        }
-        setLiveTerminal(null);
-        liveTermXtermRef.current = null;
+        // Send SIGINT to PTY
+        const termId = getActiveTerminalId() ?? fallbackPtyRef.current;
+        if (termId !== null) window.sai.terminalWrite(termId, '\x03');
       }
     };
 
@@ -843,56 +837,64 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude' }:
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [projectPath]);
 
-  // Build input history from submitted commands and AI prompts
-  const inputHistory = blocks
-    .filter(b => b.type === 'command' || b.type === 'ai-prompt')
-    .map(b => b.type === 'command' ? b.command : b.content);
+  // Build input history: shell history file entries + session commands/AI prompts
+  const sessionHistory = displayItems
+    .filter(item => item.type === 'command' || item.type === 'ai')
+    .map(item => item.type === 'command' ? item.block.command : item.question);
+  const inputHistory = [...shellHistory, ...sessionHistory];
 
   return (
     <div className="tm-view">
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
-        <TerminalModeBlockList
-          blocks={blocks}
-          aiProvider={aiProvider}
-          fullWidth={fullWidth}
-          onCopy={handleCopy}
-          onAskAI={handleAskAI}
-          onRerun={handleRerun}
-          onApprove={handleApprove}
-          onReject={handleReject}
-          onEdit={handleEdit}
-          onToolApprove={handleToolApprove}
-          onToolReject={handleToolReject}
-          onToolAlwaysAllow={handleToolAlwaysAllow}
-          shrink={!!liveTerminal}
-        />
-        {liveTerminal && (
-          <LiveTerminal
-            ptyId={liveTerminal.ptyId}
-            command={liveTerminal.command}
-            cwd={cwd}
-            fullWidth={fullWidth}
-            onXtermReady={(xterm) => { liveTermXtermRef.current = xterm; }}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, overflow: 'hidden', position: 'relative' }}>
+        {ptyId !== null && (
+          <HiddenXterm
+            ref={hiddenXtermRef}
+            ptyId={ptyId}
+            visible={altScreenVisible}
+            onData={(data) => segmenterRef.current.feed(data)}
           />
         )}
-        <TerminalModeInput
-          ref={inputRef}
-          onSubmit={handleSubmit}
-          mode={inputMode}
-          onToggleMode={toggleMode}
-          onTabComplete={handleTabComplete}
-          permissionMode={permissionMode}
-          onPermissionChange={setPermissionMode}
-          cwd={cwd}
-          initialValue={editValue}
-          disabled={false}
-          history={inputHistory}
-          onClear={() => setBlocks([])}
-          fullWidth={fullWidth}
-          onToggleFullWidth={toggleFullWidth}
-          detectAI={(text) => !looksLikeShellCommand(text)}
-          onModeChange={setInputMode}
-        />
+        {!altScreenVisible && (
+          <NativeBlockList
+            items={displayItems}
+            activeBlockId={null}
+            fullWidth={fullWidth}
+            cwd={cwd}
+            onCopy={handleCopy}
+            onAskAI={handleAskAI}
+            onRerun={handleRerun}
+            onRunSuggested={(cmd) => {
+              aiSuggestedCommands.current.add(cmd);
+              executeCommand(cmd);
+            }}
+            onApprove={handleApprove}
+            onReject={handleReject}
+            onEdit={handleEdit}
+            onToolApprove={handleToolApprove}
+            onToolReject={handleToolReject}
+            onToolAlwaysAllow={handleToolAlwaysAllow}
+          />
+        )}
+        {!altScreenVisible && (
+          <TerminalModeInput
+            ref={inputRef}
+            onSubmit={handleSubmit}
+            mode={inputMode}
+            onToggleMode={toggleMode}
+            permissionMode={permissionMode}
+            onPermissionChange={setPermissionMode}
+            cwd={cwd}
+            promptInfo={promptInfo}
+            initialValue={editValue}
+            disabled={false}
+            history={inputHistory}
+            onClear={() => setDisplayItems([])}
+            fullWidth={fullWidth}
+            onToggleFullWidth={toggleFullWidth}
+            detectAI={(text) => !looksLikeShellCommand(text)}
+            onModeChange={setInputMode}
+          />
+        )}
       </div>
       {editorOpen && (
         <TerminalModeEditor

@@ -3,6 +3,7 @@ import NavBar from './components/NavBar';
 import ChatPanel from './components/Chat/ChatPanel';
 import TerminalPanel from './components/Terminal/TerminalPanel';
 import TerminalModeView from './components/TerminalMode/TerminalModeView';
+import TerminalTabBar from './components/TerminalMode/TerminalTabBar';
 import GitSidebar from './components/Git/GitSidebar';
 import FileExplorerSidebar from './components/FileExplorer/FileExplorerSidebar';
 import TitleBar from './components/TitleBar';
@@ -87,6 +88,20 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<'default' | 'terminal-mode'>('default');
   const [terminalModeActivated, setTerminalModeActivated] = useState(false);
+
+  // Terminal tabs state
+  const [termTabs, setTermTabs] = useState<{ id: string; name: string; createdAt: number }[]>([
+    { id: crypto.randomUUID(), name: 'Tab 1', createdAt: Date.now() },
+  ]);
+  const [activeTermTabId, setActiveTermTabId] = useState<string>(() => '');
+  const termTabCounterRef = useRef(1);
+
+  // Initialize activeTermTabId from first tab
+  useEffect(() => {
+    if (termTabs.length > 0 && !termTabs.find(t => t.id === activeTermTabId)) {
+      setActiveTermTabId(termTabs[0].id);
+    }
+  }, [termTabs, activeTermTabId]);
 
   const [activeProjectPath, setActiveProjectPath] = useState<string>('');
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
@@ -760,6 +775,35 @@ export default function App() {
     });
   }, [activeProjectPath, updateWorkspace, focusedChat]);
 
+  const createTermTab = useCallback(() => {
+    const num = ++termTabCounterRef.current;
+    const tab = { id: crypto.randomUUID(), name: `Tab ${num}`, createdAt: Date.now() };
+    setTermTabs(prev => [...prev, tab]);
+    setActiveTermTabId(tab.id);
+  }, []);
+
+  const closeTermTab = useCallback((tabId: string) => {
+    setTermTabs(prev => {
+      const idx = prev.findIndex(t => t.id === tabId);
+      const next = prev.filter(t => t.id !== tabId);
+      if (next.length === 0) {
+        const num = ++termTabCounterRef.current;
+        const fresh = { id: crypto.randomUUID(), name: `Tab ${num}`, createdAt: Date.now() };
+        setActiveTermTabId(fresh.id);
+        return [fresh];
+      }
+      if (tabId === activeTermTabId) {
+        const neighbor = next[Math.min(idx, next.length - 1)];
+        setActiveTermTabId(neighbor.id);
+      }
+      return next;
+    });
+  }, [activeTermTabId]);
+
+  const renameTermTab = useCallback((tabId: string, name: string) => {
+    setTermTabs(prev => prev.map(t => t.id === tabId ? { ...t, name } : t));
+  }, []);
+
   const handleFileOpen = useCallback(async (filePath: string, line?: number) => {
     if (!activeProjectPath) return;
     try {
@@ -865,6 +909,70 @@ export default function App() {
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, [activeProjectPath, workspaces, handleToggleMdPreview]);
+
+  // Terminal tab hotkeys
+  useEffect(() => {
+    if (activeView !== 'terminal-mode') return;
+
+    const handleTabHotkey = (e: KeyboardEvent) => {
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (!ctrl) return;
+
+      // Ctrl+T — new tab
+      if (e.key === 't' && !e.shiftKey) {
+        e.preventDefault();
+        createTermTab();
+        return;
+      }
+
+      // Ctrl+W — close tab
+      if (e.key === 'w' && !e.shiftKey) {
+        e.preventDefault();
+        closeTermTab(activeTermTabId);
+        return;
+      }
+
+      // Ctrl+Tab / Ctrl+PageDown — next tab
+      if ((e.key === 'Tab' && !e.shiftKey) || e.key === 'PageDown') {
+        e.preventDefault();
+        setTermTabs(current => {
+          const idx = current.findIndex(t => t.id === activeTermTabId);
+          const next = current[(idx + 1) % current.length];
+          setActiveTermTabId(next.id);
+          return current;
+        });
+        return;
+      }
+
+      // Ctrl+Shift+Tab / Ctrl+PageUp — previous tab
+      if ((e.key === 'Tab' && e.shiftKey) || e.key === 'PageUp') {
+        e.preventDefault();
+        setTermTabs(current => {
+          const idx = current.findIndex(t => t.id === activeTermTabId);
+          const prev = current[(idx - 1 + current.length) % current.length];
+          setActiveTermTabId(prev.id);
+          return current;
+        });
+        return;
+      }
+
+      // Ctrl+1 through Ctrl+9 — go to tab N
+      if (e.key >= '1' && e.key <= '9') {
+        e.preventDefault();
+        const n = parseInt(e.key) - 1;
+        setTermTabs(current => {
+          if (n < current.length) {
+            setActiveTermTabId(current[n].id);
+          }
+          return current;
+        });
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleTabHotkey, true);
+    return () => window.removeEventListener('keydown', handleTabHotkey, true);
+  }, [activeView, activeTermTabId, createTermTab, closeTermTab]);
 
   const handleProjectSwitch = useCallback((newPath: string) => {
     // Always exit terminal mode when selecting a workspace
@@ -1392,8 +1500,23 @@ export default function App() {
         {sidebarOpen === 'git' && <GitSidebar projectPath={projectPath} onFileClick={handleFileClick} commitMessageProvider={commitMessageProvider} />}
         <div className="tm-views-wrapper">
           {terminalModeActivated && (
-            <div style={{ display: activeView === 'terminal-mode' ? 'flex' : 'none', flex: 1, minHeight: 0, minWidth: 0 }}>
-              <TerminalModeView projectPath={projectPath} aiProvider={aiProvider} />
+            <div style={{ display: activeView === 'terminal-mode' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, minWidth: 0 }}>
+              <TerminalTabBar
+                tabs={termTabs}
+                activeTabId={activeTermTabId}
+                onSelect={setActiveTermTabId}
+                onClose={closeTermTab}
+                onCreate={createTermTab}
+                onRename={renameTermTab}
+              />
+              {termTabs.map((tab) => (
+                <div
+                  key={tab.id}
+                  style={{ display: tab.id === activeTermTabId ? 'flex' : 'none', flex: 1, minHeight: 0, minWidth: 0 }}
+                >
+                  <TerminalModeView projectPath={projectPath} aiProvider={aiProvider} active={tab.id === activeTermTabId} />
+                </div>
+              ))}
             </div>
           )}
           <div className="main-content" ref={mainContentRef} style={activeView === 'terminal-mode' ? { display: 'none' } : undefined}>
