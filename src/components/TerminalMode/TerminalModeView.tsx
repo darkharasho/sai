@@ -289,7 +289,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude', a
     // Register prompt-change callback (updates input bar for SSH etc.)
     segmenter.onPromptChange((prompt, isRemote, sshTarget) => {
       if (cancelled) return;
-      setPromptInfo({ text: prompt, isRemote, sshTarget });
+      setPromptInfo({ text: prompt, isRemote, sshTarget: sshTarget ?? undefined });
 
       const target = isRemote ? (sshTarget || '__remote__') : null;
       if (target !== lastSshTargetRef.current) {

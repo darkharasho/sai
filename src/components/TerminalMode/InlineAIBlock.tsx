@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import React, { useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Terminal, Copy } from 'lucide-react';
@@ -129,8 +129,8 @@ function extractText(node: React.ReactNode): string {
   if (typeof node === 'number') return String(node);
   if (!node) return '';
   if (Array.isArray(node)) return node.map(extractText).join('');
-  if (typeof node === 'object' && 'props' in node) {
-    return extractText(node.props.children);
+  if (React.isValidElement(node)) {
+    return extractText((node.props as { children?: React.ReactNode }).children);
   }
   return '';
 }

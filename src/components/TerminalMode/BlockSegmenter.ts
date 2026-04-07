@@ -1,6 +1,7 @@
 import { stripAnsi } from './stripAnsi';
 
 const PROMPT_RE = /(\S+[@:]\S+[\$#%>❯]|[\$#%❯])\s*$/;
+const SSH_TARGET_RE = /(\S+)@(\S+?)[\s:]/;
 const ALT_SCREEN_ENTER = '\x1b[?1049h';
 const ALT_SCREEN_EXIT = '\x1b[?1049l';
 
@@ -16,6 +17,7 @@ export interface SegmentedBlock {
 
 type BlockCallback = (block: SegmentedBlock) => void;
 type AltScreenCallback = (entered: boolean) => void;
+type PromptChangeCallback = (prompt: string, isRemote: boolean, sshTarget: string | null) => void;
 
 export class BlockSegmenter {
   private _idCounter: number = 0;
@@ -27,6 +29,7 @@ export class BlockSegmenter {
 
   private _blockCallbacks: BlockCallback[] = [];
   private _altScreenCallbacks: AltScreenCallback[] = [];
+  private _promptChangeCallbacks: PromptChangeCallback[] = [];
 
   // Whether we have seen at least one prompt yet
   private _seenFirstPrompt: boolean = false;
@@ -44,6 +47,10 @@ export class BlockSegmenter {
 
   onAltScreen(cb: AltScreenCallback): void {
     this._altScreenCallbacks.push(cb);
+  }
+
+  onPromptChange(cb: PromptChangeCallback): void {
+    this._promptChangeCallbacks.push(cb);
   }
 
   get currentPrompt(): string {
@@ -107,6 +114,7 @@ export class BlockSegmenter {
       this._initialPrompt = newPromptText;
       this._startTime = Date.now();
       this._partialLine = '';
+      this._firePromptChange(newPromptText);
       return;
     }
 
@@ -114,9 +122,11 @@ export class BlockSegmenter {
     // first prompt — this handles spurious double-prompt (e.g. terminal resize)
     // where no actual command was typed.
     if (this._pendingLines.length === 0 && this._seenFirstPrompt) {
+      const changed = newPromptText !== this._currentPrompt;
       this._currentPrompt = newPromptText;
       this._startTime = Date.now();
       this._partialLine = '';
+      if (changed) this._firePromptChange(newPromptText);
       return;
     }
 
@@ -174,6 +184,14 @@ export class BlockSegmenter {
     this._startTime = Date.now();
     this._pendingLines = [];
     this._partialLine = '';
+    this._firePromptChange(newPromptText);
+  }
+
+  private _firePromptChange(prompt: string): void {
+    const isRemote = this._initialPrompt !== '' && prompt !== this._initialPrompt;
+    const sshMatch = isRemote ? prompt.match(SSH_TARGET_RE) : null;
+    const sshTarget = sshMatch ? `${sshMatch[1]}@${sshMatch[2]}` : null;
+    this._promptChangeCallbacks.forEach((cb) => cb(prompt, isRemote, sshTarget));
   }
 
   reset(): void {
@@ -186,5 +204,6 @@ export class BlockSegmenter {
     this._inAltScreen = false;
     this._blockCallbacks = [];
     this._altScreenCallbacks = [];
+    this._promptChangeCallbacks = [];
   }
 }
