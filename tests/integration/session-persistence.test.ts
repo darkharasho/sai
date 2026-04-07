@@ -225,15 +225,15 @@ describe('session persistence — upsertSession', () => {
     expect(result).toHaveLength(0);
   });
 
-  it('removes existing empty session', () => {
-    const session = makeSession('ToRemove');
+  it('preserves existing session when called with empty messages', () => {
+    const session = makeSession('ToKeep');
     let sessions = upsertSession([], session);
     expect(sessions).toHaveLength(1);
 
-    // Remove messages — should be removed from list
+    // Empty messages should not remove existing session
     const emptied = { ...session, messages: [] };
     sessions = upsertSession(sessions, emptied);
-    expect(sessions).toHaveLength(0);
+    expect(sessions).toHaveLength(1);
   });
 
   it('sets title from first user message when title is empty', () => {

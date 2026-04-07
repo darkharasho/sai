@@ -426,6 +426,24 @@ export default function App() {
     });
   }, []);
 
+  // Persist active sessions to localStorage before the window closes
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      workspacesRef.current.forEach((ws, wsPath) => {
+        const latestMessages = wsMessagesRef.current.get(wsPath);
+        const sessionToSave = (latestMessages && latestMessages.length > 0)
+          ? { ...ws.activeSession, messages: latestMessages, updatedAt: Date.now() }
+          : ws.activeSession;
+        if (sessionToSave.messages.length > 0) {
+          const updatedSessions = upsertSession(ws.sessions, sessionToSave);
+          saveSessions(wsPath, updatedSessions);
+        }
+      });
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
+
   const [gitChangeCount, setGitChangeCount] = useState(0);
 
   useEffect(() => {
@@ -958,19 +976,6 @@ export default function App() {
     });
   }, [activeProjectPath, updateWorkspace]);
 
-  const persistSessionForWorkspace = useCallback((wsPath: string, session: ChatSession) => {
-    updateWorkspace(wsPath, ws => {
-      const updated = upsertSession(ws.sessions, session);
-      saveSessions(wsPath, updated);
-      return { ...ws, sessions: updated };
-    });
-  }, [updateWorkspace]);
-
-  const persistSession = useCallback((session: ChatSession) => {
-    if (!activeProjectPath) return;
-    persistSessionForWorkspace(activeProjectPath, session);
-  }, [activeProjectPath, persistSessionForWorkspace]);
-
   const toggleSidebar = (id: string) => {
     if (id === 'terminal-mode') {
       setActiveView(prev => {
@@ -986,24 +991,32 @@ export default function App() {
     setSidebarOpen(prev => prev === id ? null : id);
   };
 
-  // Flush latest messages from ref into workspace state
-  const flushMessages = useCallback((wsPath: string) => {
-    const latestMessages = wsMessagesRef.current.get(wsPath);
-    if (!latestMessages || latestMessages.length === 0) return;
+  // Flush latest messages from ref into workspace state AND persist to localStorage atomically.
+  // Returns the workspace state updater so callers can chain additional updates.
+  const flushAndPersist = useCallback((wsPath: string) => {
     updateWorkspace(wsPath, ws => {
-      const updated = { ...ws.activeSession, messages: latestMessages, updatedAt: Date.now() };
-      if (!updated.title) {
-        const firstUserMsg = latestMessages.find(m => m.role === 'user');
-        if (firstUserMsg) updated.title = firstUserMsg.content.slice(0, 40);
+      const latestMessages = wsMessagesRef.current.get(wsPath);
+      // Merge ref messages into activeSession if available
+      const sessionToSave = (latestMessages && latestMessages.length > 0)
+        ? { ...ws.activeSession, messages: latestMessages, updatedAt: Date.now() }
+        : ws.activeSession;
+      if (!sessionToSave.title && sessionToSave.messages.length > 0) {
+        const firstUserMsg = sessionToSave.messages.find(m => m.role === 'user');
+        if (firstUserMsg) sessionToSave.title = firstUserMsg.content.slice(0, 40);
       }
-      return { ...ws, activeSession: updated };
+      // Persist to localStorage
+      if (sessionToSave.messages.length > 0) {
+        const updatedSessions = upsertSession(ws.sessions, sessionToSave);
+        saveSessions(wsPath, updatedSessions);
+        return { ...ws, activeSession: sessionToSave, sessions: updatedSessions };
+      }
+      return ws;
     });
   }, [updateWorkspace]);
 
   const handleNewChat = () => {
     if (!activeProjectPath) return;
-    flushMessages(activeProjectPath);
-    persistSession(activeSession);
+    flushAndPersist(activeProjectPath);
     // Clear backend session so next message starts fresh
     window.sai.claudeSetSessionId(activeProjectPath, undefined);
     updateWorkspace(activeProjectPath, ws => ({
@@ -1014,8 +1027,7 @@ export default function App() {
 
   const handleSelectSession = (id: string) => {
     if (!activeProjectPath) return;
-    flushMessages(activeProjectPath);
-    persistSession(activeSession);
+    flushAndPersist(activeProjectPath);
     const selected = sessions.find(s => s.id === id);
     if (selected) {
       // Tell backend to switch to the selected session's Claude session ID

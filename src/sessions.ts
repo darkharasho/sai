@@ -105,9 +105,9 @@ export function createSession(): ChatSession {
 }
 
 export function upsertSession(sessions: ChatSession[], session: ChatSession): ChatSession[] {
-  // Don't save empty sessions
+  // Skip empty sessions — don't add or update, but never remove existing entries
   if (session.messages.length === 0) {
-    return sessions.filter(s => s.id !== session.id);
+    return sessions;
   }
 
   // Set title from first user message if not set

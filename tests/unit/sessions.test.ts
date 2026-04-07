@@ -207,14 +207,14 @@ describe('upsertSession', () => {
     expect(result[0].title).toBe('Updated');
   });
 
-  it('removes a session from the list when its messages array is empty', () => {
+  it('preserves existing session when called with empty messages', () => {
     const session = makeSession();
     const list = upsertSession([], session);
     expect(list).toHaveLength(1);
 
     const emptied = { ...session, messages: [] };
     const result = upsertSession(list, emptied);
-    expect(result).toHaveLength(0);
+    expect(result).toHaveLength(1);
   });
 
   it('does not add a session with empty messages', () => {

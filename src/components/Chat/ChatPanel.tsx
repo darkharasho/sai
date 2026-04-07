@@ -442,9 +442,9 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const [billingMode, setBillingMode] = useState<'subscription' | 'api'>('subscription');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
-  const lastUserMsgRef = useRef<HTMLDivElement>(null);
+  const userMsgRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const isAtBottomRef = useRef(true);
-  const [showPinnedPrompt, setShowPinnedPrompt] = useState(false);
+  const [pinnedUserMessage, setPinnedUserMessage] = useState<ChatMessageType | null>(null);
   const [showNewMessages, setShowNewMessages] = useState(false);
 
   // Windowed rendering: only render messages from renderStart onward
@@ -864,6 +864,11 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  const userMessages = useMemo(
+    () => messages.filter(m => m.role === 'user'),
+    [messages]
+  );
+
   const handleScroll = () => {
     const el = chatContainerRef.current;
     if (!el) return;
@@ -872,6 +877,17 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       isAtBottomRef.current = true;
       setShowNewMessages(false);
     }
+    // Find the nearest user message scrolled above the visible area to pin
+    const containerTop = el.getBoundingClientRect().top;
+    let pinTarget: ChatMessageType | null = null;
+    for (let i = userMessages.length - 1; i >= 0; i--) {
+      const dom = userMsgRefs.current.get(userMessages[i].id);
+      if (dom && dom.getBoundingClientRect().bottom < containerTop) {
+        pinTarget = userMessages[i];
+        break;
+      }
+    }
+    setPinnedUserMessage(pinTarget);
   };
 
   const visibleMessages = useMemo(
@@ -879,21 +895,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     [messages, renderStart]
   );
   const hasHiddenMessages = renderStart > 0;
-
-  const lastUserMessage = [...messages].reverse().find(m => m.role === 'user');
-
-  useEffect(() => {
-    const el = lastUserMsgRef.current;
-    const container = chatContainerRef.current;
-    if (!el || !container) return;
-    setShowPinnedPrompt(false);
-    const observer = new IntersectionObserver(
-      ([entry]) => setShowPinnedPrompt(!entry.isIntersecting),
-      { root: container, threshold: 0 }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [lastUserMessage?.id]);
 
   useEffect(() => {
     onMessagesChange?.(messages);
@@ -988,12 +989,16 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
   return (
     <div className="chat-panel">
-      {showPinnedPrompt && lastUserMessage && (
+      {pinnedUserMessage && (
         <div className="pinned-prompt-bar">
-          <span className="pinned-prompt-text">{lastUserMessage.content}</span>
+          <span className="pinned-prompt-text">{pinnedUserMessage.content}</span>
           <button
             className="pinned-prompt-jump"
-            onClick={() => { isAtBottomRef.current = false; lastUserMsgRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }}
+            onClick={() => {
+              isAtBottomRef.current = false;
+              const el = userMsgRefs.current.get(pinnedUserMessage.id);
+              el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }}
             title="Jump to message"
           >
             <LocateFixed size={12} />
@@ -1015,8 +1020,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
                 <span className="chat-load-sentinel-text">Loading earlier messages...</span>
               </div>
             )}
-            {visibleMessages.map(msg => msg.id === lastUserMessage?.id
-              ? <div key={msg.id} ref={lastUserMsgRef}><ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} /></div>
+            {visibleMessages.map(msg => msg.role === 'user'
+              ? <div key={msg.id} ref={el => { if (el) userMsgRefs.current.set(msg.id, el); else userMsgRefs.current.delete(msg.id); }}><ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} /></div>
               : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} />
             )}
           </>
