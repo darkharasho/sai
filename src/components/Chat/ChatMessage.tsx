@@ -216,7 +216,13 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
                   </a>
                 ),
               }}
-            >{typeof message.content === 'string' ? message.content : String(message.content ?? '')}</ReactMarkdown>
+            >{(() => {
+              const raw = typeof message.content === 'string' ? message.content : String(message.content ?? '');
+              // Preserve user newlines as hard line breaks (trailing double-space)
+              // so Shift+Enter in the chat input renders visually.
+              if (message.role === 'user') return raw.replace(/\n/g, '  \n');
+              return raw;
+            })()}</ReactMarkdown>
             {message.images && message.images.length > 0 && (
               <div className="chat-msg-images">
                 {message.images.map((src, i) => (
