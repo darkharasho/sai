@@ -80,4 +80,36 @@ describe('TerminalTabBar', () => {
     expect(props.onRename).not.toHaveBeenCalled();
     expect(screen.getByText('Tab 1')).toBeDefined();
   });
+
+  it('shows context menu on right-click', () => {
+    renderBar();
+    fireEvent.contextMenu(screen.getByText('Tab 1'));
+    expect(document.querySelector('.tt-context-menu')).toBeTruthy();
+    expect(screen.getByText('Rename')).toBeDefined();
+  });
+
+  it('starts rename when Rename is clicked in context menu', () => {
+    renderBar();
+    fireEvent.contextMenu(screen.getByText('Tab 1'));
+    fireEvent.mouseDown(screen.getByText('Rename'));
+    const input = document.querySelector('.tt-rename-input') as HTMLInputElement;
+    expect(input).toBeTruthy();
+    expect(input.value).toBe('Tab 1');
+  });
+
+  it('closes context menu when clicking outside', () => {
+    renderBar();
+    fireEvent.contextMenu(screen.getByText('Tab 1'));
+    expect(document.querySelector('.tt-context-menu')).toBeTruthy();
+    fireEvent.mouseDown(document.body);
+    expect(document.querySelector('.tt-context-menu')).toBeNull();
+  });
+
+  it('closes context menu on Escape', () => {
+    renderBar();
+    fireEvent.contextMenu(screen.getByText('Tab 1'));
+    expect(document.querySelector('.tt-context-menu')).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(document.querySelector('.tt-context-menu')).toBeNull();
+  });
 });
