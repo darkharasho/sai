@@ -16,6 +16,7 @@ export interface SegmentedBlock {
 }
 
 type BlockCallback = (block: SegmentedBlock) => void;
+type OutputCallback = (output: string) => void;
 type AltScreenCallback = (entered: boolean) => void;
 type PromptChangeCallback = (prompt: string, isRemote: boolean, sshTarget: string | null) => void;
 
@@ -28,6 +29,7 @@ export class BlockSegmenter {
   private _partialLine: string = '';       // current incomplete line (stripped)
 
   private _blockCallbacks: BlockCallback[] = [];
+  private _outputCallbacks: OutputCallback[] = [];
   private _altScreenCallbacks: AltScreenCallback[] = [];
   private _promptChangeCallbacks: PromptChangeCallback[] = [];
 
@@ -43,6 +45,10 @@ export class BlockSegmenter {
 
   onBlock(cb: BlockCallback): void {
     this._blockCallbacks.push(cb);
+  }
+
+  onOutput(cb: OutputCallback): void {
+    this._outputCallbacks.push(cb);
   }
 
   onAltScreen(cb: AltScreenCallback): void {
@@ -94,18 +100,48 @@ export class BlockSegmenter {
       }
     }
 
-    // After updating the partial line, check if it looks like a prompt
-    this._checkPartialForPrompt();
+    // After updating lines, check for a prompt in either the partial line
+    // or the last completed line (some shells send the prompt with a trailing newline)
+    this._checkForPrompt();
+
+    // Emit streaming output for in-progress commands
+    if (this._seenFirstPrompt && this._pendingLines.length > 1) {
+      const outputLines = this._pendingLines.slice(1);
+      const partialSuffix = this._partialLine ? '\n' + this._partialLine : '';
+      const output = outputLines
+        .map((l) => l.trimEnd())
+        .join('\n')
+        .trim() + partialSuffix;
+      if (output) {
+        this._outputCallbacks.forEach((cb) => cb(output));
+      }
+    }
   }
 
-  private _checkPartialForPrompt(): void {
-    const candidate = this._partialLine;
-    if (!PROMPT_RE.test(candidate)) {
+  private _checkForPrompt(): void {
+    // First check the partial line (prompt sent without trailing newline)
+    if (this._partialLine && PROMPT_RE.test(this._partialLine)) {
+      this._handlePromptDetected(this._partialLine, 'partial');
       return;
     }
 
-    // We have a new prompt
-    const newPromptText = candidate;
+    // Also check the last completed line for a prompt pattern. Some shells
+    // send the prompt with a trailing newline, putting it in _pendingLines
+    // instead of _partialLine. We only check when _partialLine is empty.
+    // After bootstrapping, require multiple pending lines to distinguish
+    // a real prompt boundary (with output above it) from an echoed empty
+    // command (bare Enter), which is a single prompt-matching line.
+    if (this._pendingLines.length > 0 && this._partialLine === '') {
+      const lastLine = this._pendingLines[this._pendingLines.length - 1];
+      if (PROMPT_RE.test(lastLine) && (!this._seenFirstPrompt || this._pendingLines.length > 1)) {
+        this._pendingLines.pop();
+        this._handlePromptDetected(lastLine, 'completed');
+      }
+    }
+  }
+
+  private _handlePromptDetected(promptText: string, _source: 'partial' | 'completed'): void {
+    const newPromptText = promptText;
 
     // If we have no pending lines, this is the initial prompt (nothing to emit)
     if (this._pendingLines.length === 0 && !this._seenFirstPrompt) {
@@ -203,6 +239,7 @@ export class BlockSegmenter {
     this._seenFirstPrompt = false;
     this._inAltScreen = false;
     this._blockCallbacks = [];
+    this._outputCallbacks = [];
     this._altScreenCallbacks = [];
     this._promptChangeCallbacks = [];
   }

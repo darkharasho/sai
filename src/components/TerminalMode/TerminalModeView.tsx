@@ -294,6 +294,32 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude', a
       if (termId !== null) refreshCwd(termId);
     });
 
+    // Stream output to the pending block in real time (throttled to 60fps)
+    let outputRafId: number | null = null;
+    let latestOutput: string | null = null;
+    segmenter.onOutput((output) => {
+      if (cancelled) return;
+      if (!pendingCommandRef.current) return;
+      latestOutput = output;
+      if (outputRafId !== null) return;
+      outputRafId = requestAnimationFrame(() => {
+        outputRafId = null;
+        const currentOutput = latestOutput;
+        if (currentOutput === null) return;
+        latestOutput = null;
+        setDisplayItems(prev => {
+          const idx = prev.findIndex(item => item.type === 'command' && item.block.id === 'pending');
+          if (idx === -1) return prev;
+          const next = [...prev];
+          const item = next[idx];
+          if (item.type === 'command') {
+            next[idx] = { ...item, block: { ...item.block, output: currentOutput } };
+          }
+          return next;
+        });
+      });
+    });
+
     // Register alt-screen callback
     segmenter.onAltScreen((entered) => {
       if (cancelled) return;
@@ -345,6 +371,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude', a
     return () => {
       cancelled = true;
       cleanupData();
+      if (outputRafId !== null) cancelAnimationFrame(outputRafId);
       segmenter.reset();
       if (fallbackPtyRef.current !== null) {
         window.sai.terminalKill(fallbackPtyRef.current);
