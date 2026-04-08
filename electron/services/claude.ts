@@ -157,6 +157,7 @@ function ensureProcess(
             writeCachedSlashCommands(msg.slash_commands);
           }
           safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath, scope });
+          continue;
         }
 
         // When suppressForward is true (silent compact), skip IPC forwarding.

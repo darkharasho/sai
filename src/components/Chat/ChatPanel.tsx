@@ -585,6 +585,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         if (msg.turnSeq != null && msg.turnSeq !== turnSeqRef.current) return;
         // Consume the turnSeq so a duplicate done (e.g. from exit handler) is rejected
         turnSeqRef.current = -1;
+
         setIsStreaming(false);
         onTurnComplete?.();
         return;
@@ -592,6 +593,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
       if (msg.type === 'process_exit') {
         setReady(false);
+
         setIsStreaming(false);
         return;
       }
@@ -727,13 +729,15 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         if (text || tools.length > 0) {
           setMessages(prev => {
             const last = prev[prev.length - 1];
-            // Append text to the last assistant message only if it's a pure text message
-            // (no tool calls). This handles streaming deltas from Gemini.
+            // Update the last assistant message if it's a pure text message (no tool calls).
+            // Claude/Codex with --include-partial-messages send full content snapshots,
+            // so we REPLACE. Gemini sends streaming deltas, so we APPEND.
             // If the last message has tool calls, always create a new message so
             // tool cards stay above the follow-up text response.
             if (last?.role === 'assistant' && text && !tools.length && !last.toolCalls) {
               const updated = [...prev];
-              updated[updated.length - 1] = { ...last, content: last.content + text };
+              const newContent = aiProvider === 'gemini' ? last.content + text : text;
+              updated[updated.length - 1] = { ...last, content: newContent };
               return updated;
             }
             return [...prev, {
@@ -744,16 +748,17 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
               toolCalls: tools.length > 0 ? tools : undefined,
             }];
           });
+
         }
       }
 
       // Result — final answer for this turn, also has usage data.
-      // Treat result as the authoritative end-of-turn: clear streaming immediately
-      // so the UI doesn't stay stuck if the subsequent 'done' message is lost.
+      // Set isStreaming(false) eagerly so the UI updates, but leave turnSeqRef
+      // intact so the subsequent 'done' message also processes (as the
+      // authoritative end-of-turn that fires onTurnComplete).
       if (msg.type === 'result') {
+
         setIsStreaming(false);
-        onTurnComplete?.();
-        turnSeqRef.current = -1;
         // Update context usage
         if (msg.usage) {
           const inputTokens = msg.usage.input_tokens || 0;
@@ -806,6 +811,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
     return () => {
       cleanup();
+      if (streamingIdleTimer.current) { clearTimeout(streamingIdleTimer.current); streamingIdleTimer.current = null; }
     };
   }, [projectPath, aiProvider]);
 
