@@ -41,6 +41,32 @@ function getSessionPreview(session: ChatSession): string {
   return '';
 }
 
+/** Extract a snippet around the first match, returning { before, match, after } */
+function getMatchSnippet(text: string, query: string, contextChars = 30): { before: string; match: string; after: string } | null {
+  if (!query) return null;
+  const lower = text.toLowerCase();
+  const idx = lower.indexOf(query.toLowerCase());
+  if (idx === -1) return null;
+
+  const matchText = text.slice(idx, idx + query.length);
+  let start = Math.max(0, idx - contextChars);
+  let end = Math.min(text.length, idx + query.length + contextChars);
+
+  // Snap to word boundaries
+  if (start > 0) {
+    const spaceIdx = text.indexOf(' ', start);
+    if (spaceIdx !== -1 && spaceIdx < idx) start = spaceIdx + 1;
+  }
+  if (end < text.length) {
+    const spaceIdx = text.lastIndexOf(' ', end);
+    if (spaceIdx > idx + query.length) end = spaceIdx;
+  }
+
+  const before = (start > 0 ? '...' : '') + text.slice(start, idx);
+  const after = text.slice(idx + query.length, end) + (end < text.length ? '...' : '');
+  return { before, match: matchText, after };
+}
+
 export default function ChatHistorySidebar({
   sessions,
   activeSessionId,
@@ -56,7 +82,7 @@ export default function ChatHistorySidebar({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const renameRef = useRef<HTMLInputElement>(null);
-  const searchCacheRef = useRef<Map<string, string>>(new Map());
+  const searchCacheRef = useRef<Map<string, { raw: string; lower: string }>>(new Map());
 
   // Debounce search input
   useEffect(() => {
@@ -74,14 +100,21 @@ export default function ChatHistorySidebar({
 
   // Build search cache on first search
   const getSearchContent = useCallback((sessionId: string): string => {
-    if (searchCacheRef.current.has(sessionId)) {
-      return searchCacheRef.current.get(sessionId)!;
-    }
+    const cached = searchCacheRef.current.get(sessionId);
+    if (cached) return cached.lower;
     const messages = loadSessionMessages(sessionId);
-    const content = messages.map(m => m.content).join(' ');
-    searchCacheRef.current.set(sessionId, content.toLowerCase());
-    return searchCacheRef.current.get(sessionId)!;
+    const raw = messages.map(m => m.content).join(' ');
+    searchCacheRef.current.set(sessionId, { raw, lower: raw.toLowerCase() });
+    return raw.toLowerCase();
   }, []);
+
+  const getRawSearchContent = useCallback((sessionId: string): string => {
+    const cached = searchCacheRef.current.get(sessionId);
+    if (cached) return cached.raw;
+    // Trigger cache population
+    getSearchContent(sessionId);
+    return searchCacheRef.current.get(sessionId)?.raw || '';
+  }, [getSearchContent]);
 
   // Invalidate cache when sessions change
   useEffect(() => {
@@ -128,6 +161,20 @@ export default function ChatHistorySidebar({
 
     return groups;
   }, [filteredSessions, debouncedQuery]);
+
+  // Get a search snippet for the session when searching
+  const getSearchSnippet = useCallback((sessionId: string): { before: string; match: string; after: string } | null => {
+    if (!debouncedQuery.trim()) return null;
+    // Try title first
+    const session = providerSessions.find(s => s.id === sessionId);
+    if (session) {
+      const titleSnippet = getMatchSnippet(session.title, debouncedQuery);
+      if (titleSnippet) return titleSnippet;
+    }
+    // Try message content
+    const raw = getRawSearchContent(sessionId);
+    return getMatchSnippet(raw, debouncedQuery);
+  }, [debouncedQuery, providerSessions, getRawSearchContent]);
 
   const getMessageCount = useCallback((session: ChatSession): number => {
     if (session.messages && session.messages.length > 0) return session.messages.length;
@@ -266,10 +313,22 @@ export default function ChatHistorySidebar({
                           <span className="chat-history-active-badge">ACTIVE</span>
                         )}
                       </div>
-                      {getSessionPreview(session) && (
-                        <div className="chat-history-card-preview">
-                          {getSessionPreview(session)}
-                        </div>
+                      {debouncedQuery.trim() ? (
+                        (() => {
+                          const snippet = getSearchSnippet(session.id);
+                          if (!snippet) return null;
+                          return (
+                            <div className="chat-history-card-preview">
+                              {snippet.before}<mark className="chat-history-match">{snippet.match}</mark>{snippet.after}
+                            </div>
+                          );
+                        })()
+                      ) : (
+                        getSessionPreview(session) && (
+                          <div className="chat-history-card-preview">
+                            {getSessionPreview(session)}
+                          </div>
+                        )
                       )}
                       <div className="chat-history-card-meta">
                         <span>{getMessageCount(session)} msgs</span>
@@ -460,6 +519,12 @@ export default function ChatHistorySidebar({
           font-size: 13px;
           font-family: inherit;
           outline: none;
+        }
+        .chat-history-match {
+          background: rgba(199, 145, 12, 0.3);
+          color: var(--accent);
+          border-radius: 2px;
+          padding: 0 1px;
         }
       `}</style>
     </div>
