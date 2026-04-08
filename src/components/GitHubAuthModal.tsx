@@ -239,7 +239,7 @@ export default function GitHubAuthModal({ onSuccess, onClose }: Props) {
           }
           .gh-code-block:hover { border-color: var(--accent); }
           .gh-code-text {
-            font-family: 'JetBrains Mono', monospace;
+            font-family: 'Geist Mono', 'JetBrains Mono', monospace;
             font-size: 22px;
             font-weight: 700;
             letter-spacing: 4px;

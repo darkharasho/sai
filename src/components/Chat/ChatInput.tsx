@@ -1213,7 +1213,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           background: var(--bg-hover);
         }
         .ac-icon { color: var(--accent); flex-shrink: 0; display: flex; }
-        .ac-label { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text); }
+        .ac-label { font-family: 'Geist Mono', 'JetBrains Mono', monospace; font-size: 12px; color: var(--text); }
         .ac-desc { font-size: 11px; color: var(--text-muted); flex: 1; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
         .context-row {
@@ -1380,7 +1380,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           background: var(--bg-hover);
           border: 1px solid var(--border);
           border-radius: 4px;
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 11px;
           color: var(--text-muted);
           white-space: nowrap;
@@ -1411,7 +1411,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
         .context-ring-label {
           font-size: 11px;
           color: var(--text-muted);
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-weight: 500;
         }
         .toolbar-btn {
@@ -1440,7 +1440,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           align-items: center;
           gap: 4px;
           font-size: 11px;
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           color: var(--text-muted);
           padding: 3px 8px;
           border-radius: 4px;
@@ -1503,7 +1503,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           color: var(--text-muted);
         }
         .usage-tooltip-value {
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 11px;
           color: var(--text);
         }
@@ -1562,7 +1562,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
         }
         .usage-bar-pct {
           font-size: 11px;
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           color: var(--text-muted);
           white-space: nowrap;
         }
@@ -1586,16 +1586,16 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           flex-shrink: 0;
         }
         .context-breakdown-value {
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 10px;
         }
         .context-breakdown-pct {
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 10px;
           color: var(--text-muted);
         }
         .session-cost-value {
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 12px;
           font-weight: 600;
           color: var(--text);
@@ -1611,7 +1611,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
         }
         .effort-label {
           font-size: 11px;
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
         }
         .model-selector {
           position: relative;
@@ -1627,7 +1627,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
         }
         .model-label {
           font-size: 11px;
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-weight: 600;
         }
         .model-dropdown {

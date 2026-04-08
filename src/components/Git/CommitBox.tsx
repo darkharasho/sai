@@ -491,7 +491,7 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
           cursor: pointer;
           text-align: left;
           font-size: 12px;
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
         }
         .branch-item:hover {
           background: var(--bg-hover);

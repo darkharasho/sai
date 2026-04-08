@@ -316,7 +316,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         .titlebar {
           height: var(--titlebar-height);
           background: var(--bg-secondary);
-          border-bottom: 1px solid var(--border);
+          border-bottom: none;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -324,6 +324,17 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           user-select: none;
           position: relative;
           z-index: 100;
+        }
+        .titlebar::after {
+          content: '';
+          position: absolute;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          height: 1px;
+          background: linear-gradient(90deg, var(--accent) 0%, var(--accent) 20%, transparent 85%);
+          z-index: 200;
+          pointer-events: none;
         }
         .titlebar-brand {
           -webkit-app-region: no-drag;
@@ -350,7 +361,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         .titlebar-version {
           color: var(--text-secondary);
           font-size: 10px;
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           cursor: pointer;
           -webkit-app-region: no-drag;
         }
@@ -358,7 +369,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         .titlebar-dev-pill {
           font-size: 9px;
           font-weight: 700;
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           letter-spacing: 0.5px;
           color: #c7910c;
           background: rgba(199, 145, 12, 0.12);
@@ -436,6 +447,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           box-shadow: 0 8px 24px rgba(0,0,0,0.4);
           overflow: hidden;
           z-index: 500;
+          animation: dropdown-in 0.15s ease-out;
         }
         .gh-dropdown-header {
           display: flex;
@@ -522,7 +534,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         }
         .titlebar-busy-count {
           font-size: 10px;
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           color: var(--text-muted);
           opacity: 0.6;
           font-weight: 500;
@@ -598,10 +610,15 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           margin-top: 4px;
           background: var(--bg-elevated);
           border: 1px solid var(--border);
-          border-radius: 6px;
+          border-radius: 8px;
           min-width: 300px;
           max-width: 450px;
           box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+          animation: fade-in 0.15s ease-out;
+        }
+        @keyframes fade-in {
+          from { opacity: 0; }
+          to   { opacity: 1; }
         }
         .dropdown-label {
           padding: 8px 12px 4px;

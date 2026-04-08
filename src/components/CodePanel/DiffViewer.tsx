@@ -333,7 +333,7 @@ function DiffStyles() {
     <style>{`
       .diff-viewer {
         background: var(--bg-primary);
-        font-family: 'JetBrains Mono', 'Fira Code', monospace;
+        font-family: 'Geist Mono', 'JetBrains Mono', 'Fira Code', monospace;
         font-size: 12px;
       }
       .diff-pre {

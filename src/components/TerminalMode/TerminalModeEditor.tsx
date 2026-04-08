@@ -88,7 +88,7 @@ export default function TerminalModeEditor({ files, activeFile, onSelectFile, on
         .tm-editor-content {
           flex: 1;
           padding: 12px;
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 11px;
           color: var(--text-muted);
           line-height: 1.8;

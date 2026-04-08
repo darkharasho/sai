@@ -63,6 +63,8 @@ contextBridge.exposeInMainWorld('sai', {
   fsCreateFile: (filePath: string) => ipcRenderer.invoke('fs:createFile', filePath),
   fsCreateDir: (dirPath: string) => ipcRenderer.invoke('fs:createDir', dirPath),
   fsCheckIgnored: (rootPath: string, paths: string[]) => ipcRenderer.invoke('fs:checkIgnored', rootPath, paths),
+  fsWalkFiles: (rootPath: string) => ipcRenderer.invoke('fs:walkFiles', rootPath),
+  fsGrep: (rootPath: string, query: string, maxResults?: number) => ipcRenderer.invoke('fs:grep', rootPath, query, maxResults),
   // Auto-updater
   updateCheck: () => ipcRenderer.send('update:check'),
   updateInstall: () => ipcRenderer.send('update:install'),

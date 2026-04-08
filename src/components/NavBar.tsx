@@ -18,7 +18,8 @@ export default function NavBar({ activeSidebar, activeTerminal = false, onToggle
         title="Explorer"
         disabled={activeTerminal}
       >
-        <FolderClosed size={20} />
+        <FolderClosed size={18} />
+        <span className="nav-label">Files</span>
       </button>
       <button
         className={`nav-btn ${activeSidebar === 'git' ? 'active' : ''} ${activeTerminal ? 'disabled' : ''}`}
@@ -26,7 +27,8 @@ export default function NavBar({ activeSidebar, activeTerminal = false, onToggle
         title="Source Control"
         disabled={activeTerminal}
       >
-        <GitBranch size={20} />
+        <GitBranch size={18} />
+        <span className="nav-label">Git</span>
         {gitChangeCount > 0 && <span className="git-badge">{badgeLabel}</span>}
       </button>
       <button
@@ -34,8 +36,8 @@ export default function NavBar({ activeSidebar, activeTerminal = false, onToggle
         onClick={() => onToggle('terminal-mode')}
         title="Terminal Mode"
       >
-        <SquareTerminal size={20} />
-        <span className="nav-beta">beta</span>
+        <SquareTerminal size={18} />
+        <span className="nav-label">Term</span>
       </button>
       <style>{`
         .navbar {
@@ -45,32 +47,42 @@ export default function NavBar({ activeSidebar, activeTerminal = false, onToggle
           flex-direction: column;
           align-items: center;
           padding-top: 8px;
-          gap: 4px;
+          gap: 2px;
           border-right: 1px solid var(--border);
           flex-shrink: 0;
         }
         .nav-btn {
-          width: 40px;
-          height: 40px;
+          width: 42px;
+          height: 44px;
           display: flex;
+          flex-direction: column;
           align-items: center;
           justify-content: center;
+          gap: 2px;
           background: none;
           border: none;
-          color: var(--text-secondary);
+          color: var(--text-muted);
           cursor: pointer;
-          border-radius: 6px;
+          border-radius: 8px;
           position: relative;
+          transition: color 0.15s, background 0.15s;
+        }
+        .nav-label {
+          font-size: 8px;
+          font-weight: 500;
+          font-family: 'Geist', sans-serif;
+          letter-spacing: 0.3px;
+          line-height: 1;
         }
         .git-badge {
           position: absolute;
-          top: 4px;
-          right: 2px;
+          top: 2px;
+          right: 0px;
           background: var(--accent);
           color: #000;
           font-size: 9px;
           font-weight: 700;
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           min-width: 16px;
           height: 16px;
           line-height: 16px;
@@ -78,26 +90,15 @@ export default function NavBar({ activeSidebar, activeTerminal = false, onToggle
           border-radius: 8px;
           padding: 0 3px;
         }
-        .nav-beta {
-          position: absolute;
-          bottom: 2px;
-          right: 0px;
-          font-size: 7px;
-          font-weight: 600;
-          font-family: 'JetBrains Mono', monospace;
-          color: var(--accent);
-          letter-spacing: 0.3px;
-          line-height: 1;
-          pointer-events: none;
-        }
         .nav-btn:hover {
           color: var(--text);
           background: var(--bg-hover);
         }
         .nav-btn.active {
           color: var(--accent);
+          background: rgba(199, 145, 12, 0.08);
           border-left: 2px solid var(--accent);
-          border-radius: 0 6px 6px 0;
+          border-radius: 0 8px 8px 0;
         }
         .nav-btn.disabled {
           color: var(--text-muted);

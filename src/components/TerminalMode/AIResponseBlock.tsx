@@ -208,7 +208,7 @@ export default function AIResponseBlock({ block, onCopy, aiProvider = 'claude' }
           background: var(--bg);
           padding: 10px 12px;
           color: var(--text);
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 12px;
           line-height: 1.6;
         }
@@ -233,7 +233,7 @@ export default function AIResponseBlock({ block, onCopy, aiProvider = 'claude' }
           border: 1px solid var(--border);
           border-radius: 4px;
           overflow: hidden;
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 11px;
         }
         .tm-tool-entry-error {
@@ -298,7 +298,7 @@ export default function AIResponseBlock({ block, onCopy, aiProvider = 'claude' }
           word-break: break-all;
           color: var(--text);
           background: none;
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 11px;
           line-height: 1.5;
         }
@@ -330,7 +330,7 @@ export default function AIResponseBlock({ block, onCopy, aiProvider = 'claude' }
           border-top: 1px solid var(--border);
           background: var(--bg-secondary);
           color: var(--text-muted);
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 10px;
           cursor: pointer;
         }

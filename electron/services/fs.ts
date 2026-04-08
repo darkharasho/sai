@@ -73,4 +73,113 @@ export function registerFsHandlers(mainWindow: BrowserWindow) {
       return [];
     }
   });
+
+  ipcMain.handle('fs:walkFiles', async (_event, rootPath: string) => {
+    try {
+      const result = spawnSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
+        cwd: rootPath,
+        encoding: 'utf-8',
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      if (result.status === 0 && result.stdout.trim()) {
+        return result.stdout.trim().split('\n').filter(Boolean);
+      }
+    } catch {
+      // Not a git repo, fall through
+    }
+
+    const EXCLUDED = new Set(['node_modules', '.git', 'dist', 'build', '.next', '__pycache__', '.venv']);
+    const files: string[] = [];
+    const walk = (dir: string, prefix: string) => {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (EXCLUDED.has(entry.name)) continue;
+        const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) {
+          walk(path.join(dir, entry.name), rel);
+        } else {
+          files.push(rel);
+        }
+      }
+    };
+    walk(rootPath, '');
+    return files;
+  });
+
+  ipcMain.handle('fs:grep', async (_event, rootPath: string, query: string, maxResults: number = 50) => {
+    if (!query || query.length < 2) return [];
+
+    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    try {
+      const rgResult = spawnSync('rg', [
+        '--json',
+        '--max-count', '3',
+        '--max-filesize', '1M',
+        '-i',
+        escaped,
+      ], {
+        cwd: rootPath,
+        encoding: 'utf-8',
+        maxBuffer: 5 * 1024 * 1024,
+        timeout: 5000,
+      });
+
+      if (rgResult.status !== null && rgResult.status <= 1) {
+        const results: { file: string; line: number; text: string }[] = [];
+        const lines = rgResult.stdout.split('\n').filter(Boolean);
+        for (const line of lines) {
+          if (results.length >= maxResults) break;
+          try {
+            const parsed = JSON.parse(line);
+            if (parsed.type === 'match') {
+              const rel = path.relative(rootPath, parsed.data.path.text);
+              results.push({
+                file: rel,
+                line: parsed.data.line_number,
+                text: parsed.data.lines.text.trim().slice(0, 200),
+              });
+            }
+          } catch {
+            // skip malformed JSON lines
+          }
+        }
+        return results;
+      }
+    } catch {
+      // rg not found, fall through
+    }
+
+    try {
+      const grepResult = spawnSync('grep', [
+        '-rn', '-i',
+        '--include=*.{ts,tsx,js,jsx,py,rs,go,java,c,cpp,h,css,html,json,md,yaml,yml,toml}',
+        '-m', '3',
+        escaped,
+        '.',
+      ], {
+        cwd: rootPath,
+        encoding: 'utf-8',
+        maxBuffer: 5 * 1024 * 1024,
+        timeout: 5000,
+      });
+
+      const results: { file: string; line: number; text: string }[] = [];
+      const lines = grepResult.stdout.split('\n').filter(Boolean);
+      for (const line of lines) {
+        if (results.length >= maxResults) break;
+        const match = line.match(/^\.\/(.+?):(\d+):(.*)$/);
+        if (match) {
+          results.push({
+            file: match[1],
+            line: parseInt(match[2], 10),
+            text: match[3].trim().slice(0, 200),
+          });
+        }
+      }
+      return results;
+    } catch {
+      return [];
+    }
+  });
 }

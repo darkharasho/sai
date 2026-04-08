@@ -173,7 +173,7 @@ function ImageModal({ src, onClose }: { src: string; onClose: () => void }) {
   );
 }
 
-export default function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude' }: { message: ChatMessageType; projectPath?: string; onFileOpen?: (path: string, line?: number) => void; aiProvider?: 'claude' | 'codex' | 'gemini' }) {
+export default function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', toolCallsExpanded = true }: { message: ChatMessageType; projectPath?: string; onFileOpen?: (path: string, line?: number) => void; aiProvider?: 'claude' | 'codex' | 'gemini'; toolCallsExpanded?: boolean }) {
   const dotColor = getDotColor(message.role);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
@@ -234,15 +234,28 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
         </div>
       )}
       {message.toolCalls?.map((tc, i) => (
-        <ToolCallCard key={i} toolCall={tc} />
+        <ToolCallCard key={i} toolCall={tc} defaultExpanded={toolCallsExpanded} />
       ))}
       {lightboxSrc && <ImageModal src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
       <style>{`
-        .chat-msg { margin-bottom: 12px; }
+        .chat-msg {
+          margin-bottom: 16px;
+          animation: msg-enter 0.25s ease-out both;
+        }
+        @keyframes msg-enter {
+          from { opacity: 0; transform: translateY(6px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
         .chat-msg-user {
-          background: rgba(255, 255, 255, 0.02);
-          border-radius: 8px;
-          padding: 8px 10px;
+          background: var(--bg-input);
+          border: 1px solid var(--border);
+          border-radius: 10px;
+          padding: 10px 14px;
+          margin-left: -10px;
+          margin-right: -10px;
+        }
+        .chat-msg-assistant {
+          padding: 4px 14px;
           margin-left: -10px;
           margin-right: -10px;
         }
@@ -342,6 +355,7 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
           padding: 12px;
           overflow-x: auto;
           margin: 8px 0;
+          border-left: 3px solid var(--accent);
         }
         .chat-msg-body pre code.hljs.language-diff {
           padding: 0;

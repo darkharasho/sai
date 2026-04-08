@@ -66,6 +66,7 @@
     "@xterm/xterm": "^5.5.0",
     "diff2html": "^3.4.56",
     "electron-updater": "^6.8.3",
+    "geist": "^1.7.0",
     "lucide-react": "^1.7.0",
     "monaco-editor": "^0.55.1",
     "node-pty": "^1.0.0",

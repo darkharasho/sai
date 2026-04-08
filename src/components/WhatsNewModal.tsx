@@ -167,7 +167,7 @@ export default function WhatsNewModal({ isOpen, version, releaseNotes, fetchStat
           background: var(--bg-secondary);
           border-radius: 3px;
           padding: 1px 4px;
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 12px;
         }
         .whats-new-markdown a { color: var(--accent); }

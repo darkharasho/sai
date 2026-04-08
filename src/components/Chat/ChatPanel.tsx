@@ -269,6 +269,7 @@ interface ChatPanelProps {
   onQueueShift?: (sessionId: string) => void;
   sessionId?: string;
   terminalTabs?: TerminalTab[];
+  onSlashCommandsUpdate?: (commands: string[]) => void;
 }
 
 const EMPTY_PROMPTS = [
@@ -421,10 +422,50 @@ const EMPTY_PROMPTS = [
   "What's the skeleton? We'll flesh it out from there.",
 ];
 
+const HINT_GROUPS = [
+  [
+    { key: '/', label: 'Slash commands' },
+    { key: '@', label: 'Attach context' },
+    { key: 'Shift+Enter', label: 'New line' },
+  ],
+  [
+    { key: 'Ctrl+K', label: 'Command palette' },
+    { key: '#', label: 'Search in files' },
+    { key: '>', label: 'Run command' },
+  ],
+];
+
+function CyclingHints() {
+  const [groupIdx, setGroupIdx] = useState(0);
+  const [fading, setFading] = useState(false);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setFading(true);
+      setTimeout(() => {
+        setGroupIdx(i => (i + 1) % HINT_GROUPS.length);
+        setFading(false);
+      }, 500);
+    }, 8000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className={`chat-empty-hints${fading ? ' fading' : ''}`}>
+      {HINT_GROUPS[groupIdx].map(h => (
+        <div key={h.key} className="chat-empty-hint">
+          <kbd>{h.key}</kbd>
+          <span>{h.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, activeFilePath, onFileOpen, isActive, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, sessionId, terminalTabs = [] }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, activeFilePath, onFileOpen, isActive, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, sessionId, terminalTabs = [], onSlashCommandsUpdate }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessageType[]>(initialMessages || []);
   const emptyPrompt = useMemo(() => EMPTY_PROMPTS[Math.floor(Math.random() * EMPTY_PROMPTS.length)], []);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -437,6 +478,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const [sessionUsage, setSessionUsage] = useState<{ inputTokens: number; outputTokens: number }>({ inputTokens: 0, outputTokens: 0 });
   const [sessionCost, setSessionCost] = useState(0);
   const [autoCompactThreshold, setAutoCompactThreshold] = useState(0); // 0 = off
+  const [toolCallsExpanded, setToolCallsExpanded] = useState(true);
   const autoCompactCooldownRef = useRef(0); // timestamp — don't re-compact until after this
   const [rateLimits, setRateLimits] = useState<Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number; utilization?: number }>>(new Map());
   const [billingMode, setBillingMode] = useState<'subscription' | 'api'>('subscription');
@@ -486,6 +528,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   // Load auto-compact threshold setting
   useEffect(() => {
     window.sai.settingsGet('autoCompactThreshold', 0).then((v: number) => setAutoCompactThreshold(v));
+    window.sai.settingsGet('toolCallsExpanded', true).then((v: boolean) => setToolCallsExpanded(v));
   }, []);
 
   // Auto-compact when context exceeds threshold
@@ -568,6 +611,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       // Capture slash commands from init
       if (msg.type === 'system' && msg.subtype === 'init' && msg.slash_commands) {
         setSlashCommands(msg.slash_commands);
+        onSlashCommandsUpdate?.(msg.slash_commands);
         return;
       }
 
@@ -1008,10 +1052,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       <div className="chat-messages" ref={chatContainerRef} onScroll={handleScroll}>
         {messages.length === 0 ? (
           <div className="chat-empty">
+            <img src="svg/sai.svg" alt="SAI" className="chat-empty-logo" />
             <div className="chat-empty-title">SAI</div>
             <div className="chat-empty-subtitle">
               {projectPath ? emptyPrompt : 'Select a project to get started'}
             </div>
+            {projectPath && <CyclingHints />}
           </div>
         ) : (
           <>
@@ -1021,8 +1067,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
               </div>
             )}
             {visibleMessages.map(msg => msg.role === 'user'
-              ? <div key={msg.id} ref={el => { if (el) userMsgRefs.current.set(msg.id, el); else userMsgRefs.current.delete(msg.id); }}><ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} /></div>
-              : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} />
+              ? <div key={msg.id} ref={el => { if (el) userMsgRefs.current.set(msg.id, el); else userMsgRefs.current.delete(msg.id); }}><ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} /></div>
+              : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} />
             )}
           </>
         )}
@@ -1115,7 +1161,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           border-radius: 12px;
           color: var(--text-muted);
           font-size: 11px;
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           padding: 4px 12px;
           cursor: pointer;
           box-shadow: 0 2px 12px rgba(0,0,0,0.3);
@@ -1142,7 +1188,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
         }
         .pinned-prompt-jump {
           flex-shrink: 0;
@@ -1177,7 +1223,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           font-size: 11px;
           color: var(--text-muted);
           opacity: 0.5;
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
         }
         .chat-empty {
           display: flex;
@@ -1185,18 +1231,55 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           align-items: center;
           justify-content: center;
           height: 100%;
-          gap: 8px;
+          gap: 12px;
+          animation: empty-fade 0.5s ease-out;
+        }
+        @keyframes empty-fade {
+          from { opacity: 0; transform: scale(0.97); }
+          to   { opacity: 1; transform: scale(1); }
+        }
+        .chat-empty-logo {
+          width: 48px;
+          height: 48px;
+          opacity: 0.25;
+          margin-bottom: 4px;
         }
         .chat-empty-title {
-          font-size: 28px;
+          font-size: 32px;
           font-weight: 700;
           color: var(--accent);
-          letter-spacing: 2px;
+          letter-spacing: 4px;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
         }
         .chat-empty-subtitle {
           font-size: 14px;
-          color: var(--text-secondary);
+          color: var(--text-muted);
           font-style: italic;
+        }
+        .chat-empty-hints {
+          display: flex;
+          gap: 20px;
+          margin-top: 16px;
+          transition: opacity 0.5s ease;
+        }
+        .chat-empty-hints.fading {
+          opacity: 0;
+        }
+        .chat-empty-hint {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          color: var(--text-muted);
+          font-size: 12px;
+        }
+        .chat-empty-hint kbd {
+          background: var(--bg-input);
+          border: 1px solid var(--border);
+          border-radius: 4px;
+          padding: 2px 7px;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
+          font-size: 11px;
+          color: var(--text-secondary);
         }
         .thinking-animation {
           display: flex;

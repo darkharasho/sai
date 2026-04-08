@@ -171,7 +171,7 @@ export default function UpdateNotification() {
           transition: width 0.3s ease;
         }
         .update-percent {
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 10px;
           min-width: 28px;
           text-align: right;

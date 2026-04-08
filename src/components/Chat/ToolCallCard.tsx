@@ -313,12 +313,12 @@ function FullscreenModal({ code, lang, label, onClose }: { code: string; lang: s
           gap: 12px;
         }
         .modal-title {
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 13px;
           color: var(--text);
         }
         .modal-meta {
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 11px;
           color: var(--text-muted);
         }
@@ -350,7 +350,7 @@ function FullscreenModal({ code, lang, label, onClose }: { code: string; lang: s
         .editor-code {
           display: flex;
           min-height: 100%;
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 13px;
           line-height: 20px;
         }
@@ -495,8 +495,8 @@ function BashInOut({ output, onFullscreen }: {
   );
 }
 
-export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
-  const [expanded, setExpanded] = useState(true); // Start expanded
+export default function ToolCallCard({ toolCall, defaultExpanded = true }: { toolCall: ToolCall; defaultExpanded?: boolean }) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const [fullscreenCode, setFullscreenCode] = useState<{ code: string; lang: string; label: string } | null>(null);
   const Icon = iconMap[toolCall.type] || Wrench;
   const { label, code, langOverride, diff } = formatInput(toolCall);
@@ -591,11 +591,12 @@ export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
         )}
         <style>{`
           .tool-call-card {
-            margin: 8px 0;
+            margin: 2px 0;
             background: var(--bg-secondary);
             border: 1px solid var(--border);
-            border-radius: 6px;
+            border-radius: 8px;
             overflow: hidden;
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
           }
           .tool-call-dot {
             flex-shrink: 0;
@@ -619,13 +620,13 @@ export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
             flex-shrink: 0;
           }
           .tool-call-name {
-            font-family: 'JetBrains Mono', monospace;
+            font-family: 'Geist Mono', 'JetBrains Mono', monospace;
             font-size: 12px;
             color: var(--text);
           }
           .tool-call-label {
             flex: 1;
-            font-family: 'JetBrains Mono', monospace;
+            font-family: 'Geist Mono', 'JetBrains Mono', monospace;
             font-size: 11px;
             color: var(--text-muted);
             overflow: hidden;
@@ -734,7 +735,7 @@ export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
             align-items: flex-start;
             gap: 6px;
             color: var(--red, #f85149);
-            font-family: 'JetBrains Mono', monospace;
+            font-family: 'Geist Mono', 'JetBrains Mono', monospace;
             font-size: 12px;
             line-height: 1.5;
             padding: 6px 12px;
@@ -763,7 +764,7 @@ export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
             align-items: flex-start;
           }
           .bash-io-label {
-            font-family: 'JetBrains Mono', monospace;
+            font-family: 'Geist Mono', 'JetBrains Mono', monospace;
             font-size: 10px;
             font-weight: 600;
             letter-spacing: 0.5px;
@@ -778,7 +779,7 @@ export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
             color: var(--text-muted);
           }
           .bash-io-command {
-            font-family: 'JetBrains Mono', monospace;
+            font-family: 'Geist Mono', 'JetBrains Mono', monospace;
             font-size: 12px;
             color: var(--text);
             white-space: pre-wrap;
@@ -794,7 +795,7 @@ export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
             display: flex;
             align-items: baseline;
             gap: 6px;
-            font-family: 'JetBrains Mono', monospace;
+            font-family: 'Geist Mono', 'JetBrains Mono', monospace;
             font-size: 11px;
             color: var(--text-secondary);
           }
@@ -820,7 +821,7 @@ export default function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
             align-items: baseline;
             gap: 8px;
             padding: 3px 12px;
-            font-family: 'JetBrains Mono', monospace;
+            font-family: 'Geist Mono', 'JetBrains Mono', monospace;
             font-size: 12px;
           }
           .todo-icon {
