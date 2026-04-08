@@ -10,6 +10,7 @@ import TitleBar from './components/TitleBar';
 import CodePanel from './components/CodePanel/CodePanel';
 import UnsavedChangesModal from './components/UnsavedChangesModal';
 import WorkspaceToast from './components/WorkspaceToast';
+import CommandPalette from './components/CommandPalette';
 import { useWhatsNew } from './hooks/useWhatsNew';
 import WhatsNewModal from './components/WhatsNewModal';
 import { setActiveWorkspace, updateTerminalName } from './terminalBuffer';
@@ -130,8 +131,11 @@ export default function App() {
   const [notificationCounts, setNotificationCounts] = useState<Map<string, number>>(new Map());
   const wsTurnSeqRef = useRef<Map<string, number>>(new Map());
   const [focusedChat, setFocusedChat] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [fileIndex, setFileIndex] = useState<string[]>([]);
   const [toast, setToast] = useState<{ message: string; key: number } | null>(null);
   const { isOpen: whatsNewOpen, version: whatsNewVersion, releaseNotes, fetchStatus, openWhatsNew, closeWhatsNew } = useWhatsNew();
+  const slashCommandsRef = useRef<string[]>([]);
   const workspacesRef = useRef(workspaces);
   const activeProjectPathRef = useRef(activeProjectPath);
 
@@ -152,6 +156,39 @@ export default function App() {
   useEffect(() => {
     setExternallyModified(new Set());
   }, [activeProjectPath]);
+
+  // Global Ctrl+K / Cmd+K handler for command palette
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setCommandPaletteOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  // Build file index for command palette
+  useEffect(() => {
+    if (!activeProjectPath) { setFileIndex([]); return; }
+    let cancelled = false;
+    (window as any).sai.fsWalkFiles(activeProjectPath).then((files: string[]) => {
+      if (!cancelled) setFileIndex(files);
+    }).catch(() => {
+      if (!cancelled) setFileIndex([]);
+    });
+    return () => { cancelled = true; };
+  }, [activeProjectPath]);
+
+  const [paletteWorkspaces, setPaletteWorkspaces] = useState<{ projectPath: string; status?: string; lastActivity?: number }[]>([]);
+
+  useEffect(() => {
+    if (!commandPaletteOpen) return;
+    (window as any).sai.workspaceGetAll().then((ws: any[]) => {
+      setPaletteWorkspaces(ws);
+    }).catch(() => setPaletteWorkspaces([]));
+  }, [commandPaletteOpen]);
 
   const getWorkspace = useCallback((path: string): WorkspaceContext => {
     const existing = workspaces.get(path);
@@ -1013,6 +1050,18 @@ export default function App() {
     });
   }, [activeProjectPath]);
 
+  const handlePaletteCommand = useCallback((command: string) => {
+    if (command === 'clear' && activeProjectPath) {
+      updateWorkspace(activeProjectPath, ws => ({
+        ...ws,
+        sessions: ws.sessions.map(s =>
+          s.id === ws.activeSession.id ? { ...s, messages: [] } : s
+        ),
+        activeSession: { ...ws.activeSession, messages: [] },
+      }));
+    }
+  }, [activeProjectPath, updateWorkspace]);
+
   const handleEditorSave = useCallback(async (filePath: string, content: string) => {
     await window.sai.fsWriteFile(filePath, content);
     const { mtime } = await window.sai.fsMtime(filePath) as { mtime: number };
@@ -1571,6 +1620,18 @@ export default function App() {
       {toast && (
         <WorkspaceToast key={toast.key} message={toast.message} onDismiss={() => setToast(null)} />
       )}
+
+      <CommandPalette
+        open={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        fileIndex={fileIndex}
+        slashCommands={slashCommandsRef.current}
+        workspaces={paletteWorkspaces}
+        projectPath={projectPath}
+        onFileOpen={handleFileOpen}
+        onCommand={handlePaletteCommand}
+        onWorkspaceSwitch={handleProjectSwitch}
+      />
 
       <style>{`
         .accordion-panel {
