@@ -822,6 +822,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude', a
 
   // When alt-screen is active, forward all keyboard input directly to the PTY
   useEffect(() => {
+    if (!active) return;
     const handleAltScreenKey = (e: KeyboardEvent) => {
       if (!altScreenRef.current) return;
       const termId = getActiveTerminalId() ?? fallbackPtyRef.current;
@@ -866,10 +867,11 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude', a
 
     window.addEventListener('keydown', handleAltScreenKey, true);
     return () => window.removeEventListener('keydown', handleAltScreenKey, true);
-  }, []);
+  }, [active]);
 
   // Ctrl+C = kill, Ctrl+Shift+C = copy, Ctrl+Shift+V = paste
   useEffect(() => {
+    if (!active) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       // When alt-screen is active (htop, vim, etc.), handled by alt-screen handler
       if (altScreenRef.current) return;
@@ -922,7 +924,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude', a
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [projectPath]);
+  }, [projectPath, active]);
 
   // Build input history: shell history file entries + session commands/AI prompts
   const sessionHistory = displayItems
