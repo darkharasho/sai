@@ -105,11 +105,6 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
   }, [mode]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      onToggleMode();
-      return;
-    }
     if (e.key === 'Tab' && e.shiftKey) {
       e.preventDefault();
       manualOverrideRef.current = true;
