@@ -321,7 +321,7 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
         .chat-msg-body a:hover { opacity: 0.8; }
         .chat-msg-body a.file-link { color: var(--green); text-decoration: none; font-family: monospace; font-size: 12px; background: var(--bg-secondary); padding: 1px 5px; border-radius: 3px; }
         .chat-msg-body a.file-link:hover { opacity: 0.8; }
-        .chat-msg-body pre code { background: none; padding: 0; }
+        .chat-msg-body pre code { background: none; padding: 0; border: none; }
         .code-block-wrapper {
           position: relative;
         }
