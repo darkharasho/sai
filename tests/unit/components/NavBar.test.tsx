@@ -132,4 +132,28 @@ describe('NavBar', () => {
     const btn = getNavButton(container, 'Terminal Mode');
     expect(btn.className).toContain('active');
   });
+
+  it('renders chats toggle button', () => {
+    const { container } = render(<NavBar activeSidebar={null} onToggle={vi.fn()} />);
+    expect(getNavButton(container, 'Chat History')).toBeTruthy();
+  });
+
+  it('calls onToggle with "chats" when chats button is clicked', () => {
+    const onToggle = vi.fn();
+    const { container } = render(<NavBar activeSidebar={null} onToggle={onToggle} />);
+    fireEvent.click(getNavButton(container, 'Chat History'));
+    expect(onToggle).toHaveBeenCalledWith('chats');
+  });
+
+  it('adds active class to chats button when activeSidebar is "chats"', () => {
+    const { container } = render(<NavBar activeSidebar="chats" onToggle={vi.fn()} />);
+    const chatsBtn = getNavButton(container, 'Chat History');
+    expect(chatsBtn.className).toContain('active');
+  });
+
+  it('disables chats button when terminal mode is active', () => {
+    const { container } = render(<NavBar activeSidebar={null} activeTerminal={true} onToggle={vi.fn()} />);
+    const chatsBtn = getNavButton(container, 'Chat History');
+    expect(chatsBtn.className).toContain('disabled');
+  });
 });

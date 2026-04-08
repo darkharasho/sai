@@ -1,4 +1,4 @@
-import { FolderClosed, GitBranch, SquareTerminal } from 'lucide-react';
+import { FolderClosed, GitBranch, SquareTerminal, Clock } from 'lucide-react';
 
 interface NavBarProps {
   activeSidebar: string | null;
@@ -30,6 +30,15 @@ export default function NavBar({ activeSidebar, activeTerminal = false, onToggle
         <GitBranch size={18} />
         <span className="nav-label">Git</span>
         {gitChangeCount > 0 && <span className="git-badge">{badgeLabel}</span>}
+      </button>
+      <button
+        className={`nav-btn ${activeSidebar === 'chats' ? 'active' : ''} ${activeTerminal ? 'disabled' : ''}`}
+        onClick={() => !activeTerminal && onToggle('chats')}
+        title="Chat History"
+        disabled={activeTerminal}
+      >
+        <Clock size={18} />
+        <span className="nav-label">Chats</span>
       </button>
       <button
         className={`nav-btn ${activeTerminal ? 'active' : ''}`}
