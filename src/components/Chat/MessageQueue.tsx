@@ -42,13 +42,13 @@ export default function MessageQueue({ queue, onRemove }: MessageQueueProps) {
         .message-queue-card {
           display: flex;
           align-items: center;
-          background: rgba(99, 102, 241, 0.12);
-          border: 1px solid rgba(99, 102, 241, 0.25);
+          background: var(--bg-secondary);
+          border: 1px solid var(--border);
           border-radius: 4px;
           padding: 2px 8px;
           font-size: 12px;
           height: 24px;
-          color: var(--text-secondary, #c4c4e0);
+          color: var(--text-muted);
         }
         .message-queue-index {
           opacity: 0.4;
