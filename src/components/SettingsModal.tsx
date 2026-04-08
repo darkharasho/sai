@@ -72,6 +72,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [focusedChat, setFocusedChat] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(300);
   const [autoCompactThreshold, setAutoCompactThreshold] = useState(0);
+  const [aiTitleGeneration, setAiTitleGeneration] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [lastSynced, setLastSynced] = useState<number | null>(null);
   const [isAuthed, setIsAuthed] = useState(false);
@@ -96,6 +97,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.settingsGet('focusedChat', false).then((v: boolean) => setFocusedChat(v));
     window.sai.settingsGet('sidebarWidth', 300).then((v: number) => setSidebarWidth(v));
     window.sai.settingsGet('autoCompactThreshold', 0).then((v: number) => setAutoCompactThreshold(v));
+    window.sai.settingsGet('aiTitleGeneration', false).then((v: boolean) => setAiTitleGeneration(!!v));
     window.sai.settingsGet('theme', 'default').then((v: string) => {
       const id = v as ThemeId;
       if (THEMES.some(t => t.id === id)) setTheme(id);
@@ -231,6 +233,12 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     setSidebarWidth(value);
     window.sai.settingsSet('sidebarWidth', value);
     onSettingChange?.('sidebarWidth', value);
+  };
+
+  const handleAiTitleGenerationChange = (value: boolean) => {
+    setAiTitleGeneration(value);
+    window.sai.settingsSet('aiTitleGeneration', value);
+    onSettingChange?.('aiTitleGeneration', value);
   };
 
   const handleAutoCompactChange = (value: number) => {
@@ -587,6 +595,19 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
               </div>
             )}
           </div>
+        </div>
+
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <div className="settings-row-name">AI conversation titles</div>
+            <div className="settings-row-desc">Use a lightweight AI call to generate better conversation titles (uses the cheapest model)</div>
+          </div>
+          <button
+            className={`settings-toggle ${aiTitleGeneration ? 'on' : 'off'}`}
+            onClick={() => handleAiTitleGenerationChange(!aiTitleGeneration)}
+          >
+            <span className="settings-toggle-thumb" />
+          </button>
         </div>
       </section>
     </>

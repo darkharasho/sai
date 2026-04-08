@@ -636,6 +636,50 @@ export function registerClaudeHandlers(win: BrowserWindow) {
       proc.on('error', () => resolve(''));
     });
   });
+
+  // claude:generateTitle — one-shot lightweight title generation for chat sessions
+  // Always uses the cheapest/fastest model per provider.
+  ipcMain.handle('claude:generateTitle', async (_event, cwd: string, userMessage: string, aiProvider?: string) => {
+    const ws = get(cwd);
+    const effectiveCwd = cwd || ws?.claude.cwd || process.env.HOME || '/';
+
+    const titlePrompt = `Summarize this conversation in 3-5 words as a title. Respond with only the title, no quotes or punctuation. User said: ${userMessage.slice(0, 500)}`;
+
+    const env = enrichedEnv();
+
+    let cmd: string;
+    let args: string[];
+    if (aiProvider === 'codex') {
+      cmd = 'codex';
+      args = ['exec', '-q', '--json', '-m', 'codex-mini', titlePrompt];
+    } else if (aiProvider === 'gemini') {
+      cmd = 'gemini';
+      args = ['-p', titlePrompt, '--output-format', 'text', '-m', 'flash'];
+    } else {
+      cmd = 'claude';
+      args = ['-p', titlePrompt, '--output-format', 'text', '--max-turns', '1', '--model', 'haiku'];
+    }
+
+    return new Promise<string>((resolve) => {
+      const proc = spawn(cmd, args, {
+        cwd: effectiveCwd,
+        env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      proc.stdin?.end();
+
+      let output = '';
+      proc.stdout?.on('data', (data: Buffer) => { output += data.toString(); });
+      proc.on('exit', () => {
+        let result = output.trim();
+        if (aiProvider === 'codex') result = extractCodexCommitMessage(result);
+        // Clean up: remove quotes, trailing punctuation
+        result = result.replace(/^["']|["']$/g, '').trim();
+        resolve(result || '');
+      });
+      proc.on('error', () => resolve(''));
+    });
+  });
 }
 
 export function destroyClaude() {

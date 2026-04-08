@@ -94,6 +94,37 @@ export function migrateLegacySessions(projectPath: string): void {
   }
 }
 
+const FILLER_PREFIXES = [
+  'can you ', 'could you ', 'would you ',
+  'please ', 'help me ', 'i need to ', 'i want to ',
+  "let's ", 'let me ', 'we need to ', 'we should ',
+];
+
+export function generateSmartTitle(text: string): string {
+  let result = text.trim();
+  if (!result) return '';
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const lower = result.toLowerCase();
+    for (const prefix of FILLER_PREFIXES) {
+      if (lower.startsWith(prefix)) {
+        result = result.slice(prefix.length).trim();
+        changed = true;
+        break;
+      }
+    }
+  }
+
+  if (!result) return '';
+  result = result.charAt(0).toUpperCase() + result.slice(1);
+  if (result.length > 40) {
+    result = result.slice(0, 40);
+  }
+  return result;
+}
+
 export function createSession(): ChatSession {
   return {
     id: crypto.randomUUID(),
@@ -114,7 +145,7 @@ export function upsertSession(sessions: ChatSession[], session: ChatSession): Ch
   if (!session.title) {
     const firstUserMsg = session.messages.find(m => m.role === 'user');
     if (firstUserMsg) {
-      session.title = firstUserMsg.content.slice(0, 40);
+      session.title = generateSmartTitle(firstUserMsg.content);
     }
   }
 
@@ -156,4 +187,29 @@ export function formatSessionTime(timestamp: number): string {
     minute: '2-digit',
     hour12: true,
   });
+}
+
+export function toggleSessionPin(sessions: ChatSession[], sessionId: string): ChatSession[] {
+  return sessions.map(s =>
+    s.id === sessionId ? { ...s, pinned: !s.pinned } : s
+  );
+}
+
+export function deleteSession(sessions: ChatSession[], sessionId: string): ChatSession[] {
+  try {
+    localStorage.removeItem(messagesKey(sessionId));
+  } catch {
+    // Ignore
+  }
+  return sessions.filter(s => s.id !== sessionId);
+}
+
+export function exportSessionAsMarkdown(title: string, messages: ChatMessage[]): string {
+  const lines: string[] = [`# ${title}`, ''];
+  for (const msg of messages) {
+    if (msg.role === 'system') continue;
+    const roleLabel = msg.role === 'user' ? 'User' : 'Assistant';
+    lines.push(`## ${roleLabel}`, '', msg.content, '');
+  }
+  return lines.join('\n');
 }

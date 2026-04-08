@@ -14,12 +14,12 @@ import CommandPalette from './components/CommandPalette';
 import { useWhatsNew } from './hooks/useWhatsNew';
 import WhatsNewModal from './components/WhatsNewModal';
 import { setActiveWorkspace, updateTerminalName } from './terminalBuffer';
-import { loadSessions, saveSessions, createSession, upsertSession, migrateLegacySessions, loadSessionMessages } from './sessions';
+import { loadSessions, saveSessions, createSession, upsertSession, migrateLegacySessions, loadSessionMessages, generateSmartTitle } from './sessions';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval } from './types';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, setActiveHighlightTheme, type HighlightThemeId } from './themes';
 import ApprovalBanner from './components/ApprovalBanner';
-import { MessageSquare, TerminalSquare, Code2, ChevronRight, MessageCirclePlus, Clock } from 'lucide-react';
-import { formatSessionDate, formatSessionTime } from './sessions';
+import { MessageSquare, TerminalSquare, Code2, ChevronRight, MessageCirclePlus } from 'lucide-react';
+import ChatHistorySidebar from './components/Chat/ChatHistorySidebar';
 
 type PermissionMode = 'default' | 'bypass';
 type EffortLevel = 'low' | 'medium' | 'high' | 'max';
@@ -110,6 +110,8 @@ export default function App() {
   const [editorFontSize, setEditorFontSize] = useState(13);
   const [editorMinimap, setEditorMinimap] = useState(true);
   const [aiProvider, setAiProvider] = useState<AIProvider>('claude');
+  const [aiTitleGeneration, setAiTitleGeneration] = useState(false);
+  const [titleGeneratingIds, setTitleGeneratingIds] = useState<Set<string>>(new Set());
   const [commitMessageProvider, setCommitMessageProvider] = useState<AIProvider>('claude');
   const [codexModel, setCodexModel] = useState('');
   const [codexModels, setCodexModels] = useState<{ id: string; name: string }[]>([]);
@@ -195,7 +197,7 @@ export default function App() {
     if (existing) return existing;
     return {
       projectPath: path,
-      sessions: [],
+      sessions: loadSessions(path),
       activeSession: createSession(),
       openFiles: [],
       activeFilePath: null,
@@ -214,7 +216,7 @@ export default function App() {
       const next = new Map(prev);
       const current = next.get(path) || {
         projectPath: path,
-        sessions: [],
+        sessions: loadSessions(path),
         activeSession: createSession(),
         openFiles: [],
         activeFilePath: null,
@@ -366,6 +368,9 @@ export default function App() {
     window.sai.settingsGet('commitMessageProvider', 'claude').then((v: string) => {
       if (v === 'claude' || v === 'codex' || v === 'gemini') setCommitMessageProvider(v as AIProvider);
     });
+    window.sai.settingsGet('aiTitleGeneration', false).then((v: boolean) => {
+      setAiTitleGeneration(!!v);
+    });
     // Load nested provider settings
     window.sai.settingsGet('claude', {}).then((c: any) => {
       if (c.model === 'sonnet' || c.model === 'opus' || c.model === 'haiku') setModelChoice(c.model);
@@ -418,6 +423,7 @@ export default function App() {
       if ('highlightTheme' in remote && HIGHLIGHT_THEMES.some(t => t.id === remote.highlightTheme)) setActiveHighlightTheme(remote.highlightTheme as HighlightThemeId);
       if ('aiProvider' in remote && (remote.aiProvider === 'claude' || remote.aiProvider === 'codex' || remote.aiProvider === 'gemini')) setAiProvider(remote.aiProvider);
       if ('commitMessageProvider' in remote && (remote.commitMessageProvider === 'claude' || remote.commitMessageProvider === 'codex' || remote.commitMessageProvider === 'gemini')) setCommitMessageProvider(remote.commitMessageProvider);
+      if ('aiTitleGeneration' in remote) setAiTitleGeneration(!!remote.aiTitleGeneration);
       if ('claude' in remote && typeof remote.claude === 'object') {
         const c = remote.claude;
         if (c.model === 'sonnet' || c.model === 'opus' || c.model === 'haiku') setModelChoice(c.model);
@@ -557,18 +563,19 @@ export default function App() {
     return () => clearInterval(id);
   }, [projectPath, updateWorkspace]);
 
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const historyRef = useRef<HTMLDivElement>(null);
-
+  // Global Ctrl+H handler for chat history sidebar
   useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (historyRef.current && !historyRef.current.contains(e.target as Node)) {
-        setHistoryOpen(false);
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'h' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        if (activeView !== 'terminal-mode') {
+          setSidebarOpen(prev => prev === 'chats' ? null : 'chats');
+        }
       }
     };
-    if (historyOpen) document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [historyOpen]);
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [activeView]);
 
   useEffect(() => {
     const cleanup = window.sai.onWorkspaceSuspended?.((suspendedPath: string) => {
@@ -682,16 +689,6 @@ export default function App() {
     return cleanup;
   }, []);
 
-  // Filter history to only show sessions from the current provider
-  const providerSessions = sessions.filter(s => !s.aiProvider || s.aiProvider === aiProvider);
-
-  const groupedSessions = providerSessions.reduce<{ label: string; sessions: ChatSession[] }[]>((groups, session) => {
-    const label = formatSessionDate(session.updatedAt);
-    const existing = groups.find(g => g.label === label);
-    if (existing) existing.sessions.push(session);
-    else groups.push({ label, sessions: [session] });
-    return groups;
-  }, []);
 
   // Accordion state
   const [expanded, setExpanded] = useState<PanelId[]>(['chat', 'terminal']);
@@ -1014,6 +1011,7 @@ export default function App() {
     setActiveView('default');
     if (newPath === activeProjectPath) return;
     window.sai.openRecentProject(newPath);
+    migrateLegacySessions(newPath);
     const sessions = loadSessions(newPath);
     setWorkspaces(prev => {
       const next = new Map(prev);
@@ -1172,7 +1170,7 @@ export default function App() {
         : ws.activeSession;
       if (!sessionToSave.title && sessionToSave.messages.length > 0) {
         const firstUserMsg = sessionToSave.messages.find(m => m.role === 'user');
-        if (firstUserMsg) sessionToSave.title = firstUserMsg.content.slice(0, 40);
+        if (firstUserMsg) sessionToSave.title = generateSmartTitle(firstUserMsg.content);
       }
       // Persist to localStorage
       if (sessionToSave.messages.length > 0) {
@@ -1210,6 +1208,14 @@ export default function App() {
       }));
     }
   };
+
+  const handleUpdateSessions = useCallback((updated: ChatSession[]) => {
+    if (!activeProjectPath) return;
+    updateWorkspace(activeProjectPath, ws => ({
+      ...ws,
+      sessions: updated,
+    }));
+  }, [activeProjectPath, updateWorkspace]);
 
   const saveClaudeSetting = (key: string, value: any) => {
     window.sai.settingsGet('claude', {}).then((existing: any) => {
@@ -1324,14 +1330,7 @@ export default function App() {
             </span>
           )}
           {panel === 'chat' && (
-            <div className="accordion-bar-actions" ref={historyRef}>
-              <button
-                className="accordion-bar-btn"
-                onClick={(e) => { e.stopPropagation(); setHistoryOpen(!historyOpen); }}
-                title="Recent conversations"
-              >
-                <Clock size={12} />
-              </button>
+            <div className="accordion-bar-actions">
               <button
                 className="accordion-bar-btn"
                 onClick={(e) => { e.stopPropagation(); handleNewChat(); }}
@@ -1339,45 +1338,6 @@ export default function App() {
               >
                 <MessageCirclePlus size={12} />
               </button>
-              {historyOpen && (
-                <div className="chat-history-dropdown">
-                  {providerSessions.length === 0 ? (
-                    <div className="dropdown-label" style={{ padding: '12px' }}>
-                      No recent conversations
-                    </div>
-                  ) : (
-                    groupedSessions.map((group, gi) => (
-                      <div key={group.label}>
-                        {gi > 0 && <div className="dropdown-divider" />}
-                        <div className="dropdown-label">{group.label}</div>
-                        {group.sessions.map(session => (
-                          <button
-                            key={session.id}
-                            className={`dropdown-item history-item ${session.id === activeSession.id ? 'active' : ''}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleSelectSession(session.id);
-                              setHistoryOpen(false);
-                            }}
-                          >
-                            <span className="dropdown-item-title-row">
-                              {session.aiProvider && (
-                                <img
-                                  src={session.aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : session.aiProvider === 'codex' ? 'svg/openai.svg' : 'svg/claude.svg'}
-                                  alt={session.aiProvider}
-                                  className="history-provider-icon"
-                                />
-                              )}
-                              <span className="dropdown-item-name">{session.title || 'Untitled'}</span>
-                            </span>
-                            <span className="dropdown-item-path">{formatSessionTime(session.updatedAt)}</span>
-                          </button>
-                        ))}
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -1459,10 +1419,39 @@ export default function App() {
                       const updated = { ...w.activeSession, messages: latestMessages, updatedAt: Date.now(), aiProvider };
                       if (!updated.title) {
                         const firstUserMsg = latestMessages.find(m => m.role === 'user');
-                        if (firstUserMsg) updated.title = firstUserMsg.content.slice(0, 40);
+                        if (firstUserMsg) updated.title = generateSmartTitle(firstUserMsg.content);
                       }
                       const updatedSessions = upsertSession(w.sessions, updated);
                       saveSessions(wsPath, updatedSessions);
+
+                      // Fire-and-forget AI title generation if enabled
+                      if (aiTitleGeneration && !updated.titleEdited) {
+                        const userMsgs = latestMessages.filter(m => m.role === 'user');
+                        if (userMsgs.length === 1 && userMsgs[0]) {
+                          const sessionId = updated.id;
+                          setTitleGeneratingIds(prev => new Set(prev).add(sessionId));
+                          window.sai.claudeGenerateTitle(wsPath, userMsgs[0].content, aiProvider)
+                            .then((title: string) => {
+                              if (!title) return;
+                              updateWorkspace(wsPath, w2 => {
+                                if (w2.activeSession.titleEdited) return w2;
+                                const newSession = { ...w2.activeSession, title };
+                                const newSessions = w2.sessions.map(s => s.id === newSession.id ? { ...s, title } : s);
+                                saveSessions(wsPath, newSessions);
+                                return { ...w2, activeSession: newSession, sessions: newSessions };
+                              });
+                            })
+                            .catch(() => { /* title generation failed, keep smart title */ })
+                            .finally(() => {
+                              setTitleGeneratingIds(prev => {
+                                const next = new Set(prev);
+                                next.delete(sessionId);
+                                return next;
+                              });
+                            });
+                        }
+                      }
+
                       return { ...w, activeSession: updated, sessions: updatedSessions };
                     });
                   }}
@@ -1545,6 +1534,7 @@ export default function App() {
           if (key === 'editorMinimap') setEditorMinimap(value);
           if (key === 'aiProvider') { setAiProvider(value); handleNewChat(); }
           if (key === 'commitMessageProvider') setCommitMessageProvider(value);
+          if (key === 'aiTitleGeneration') setAiTitleGeneration(value);
           if (key === 'geminiLoadingPhrases') handleGeminiLoadingPhrasesChange(value);
           if (key === 'focusedChat') { setFocusedChat(value); if (value) { setExpanded(['chat', 'terminal']); setSplitRatio(0.66); } }
           if (key === 'defaultView') { /* persisted only, applies on next launch */ }
@@ -1561,6 +1551,18 @@ export default function App() {
         <NavBar activeSidebar={sidebarOpen} activeTerminal={activeView === 'terminal-mode'} onToggle={toggleSidebar} gitChangeCount={gitChangeCount} />
         {sidebarOpen === 'files' && <FileExplorerSidebar projectPath={projectPath} onFileOpen={handleFileOpen} />}
         {sidebarOpen === 'git' && <GitSidebar projectPath={projectPath} onFileClick={handleFileClick} commitMessageProvider={commitMessageProvider} />}
+        {sidebarOpen === 'chats' && (
+          <ChatHistorySidebar
+            sessions={sessions}
+            activeSessionId={activeSession.id}
+            aiProvider={aiProvider}
+            onSelectSession={handleSelectSession}
+            onNewChat={handleNewChat}
+            onUpdateSessions={handleUpdateSessions}
+            projectPath={projectPath}
+            titleGeneratingIds={titleGeneratingIds}
+          />
+        )}
         <div className="tm-views-wrapper">
           {terminalModeActivated && (
             <div style={{ display: activeView === 'terminal-mode' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, minWidth: 0 }}>
@@ -1722,76 +1724,6 @@ export default function App() {
           mask-repeat: no-repeat;
           -webkit-mask-repeat: no-repeat;
           flex-shrink: 0;
-        }
-        .chat-history-dropdown {
-          position: absolute;
-          top: 100%;
-          right: 0;
-          margin-top: 4px;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
-          border-radius: 6px;
-          min-width: 280px;
-          max-width: 350px;
-          max-height: 400px;
-          overflow-y: auto;
-          box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-          z-index: 200;
-          text-transform: none;
-          letter-spacing: 0;
-          font-weight: 400;
-        }
-        .chat-history-dropdown .dropdown-label {
-          padding: 8px 12px 4px;
-          font-size: 10px;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-          color: var(--text-muted);
-        }
-        .chat-history-dropdown .dropdown-item {
-          display: flex;
-          flex-direction: column;
-          width: 100%;
-          padding: 6px 12px;
-          background: none;
-          border: none;
-          color: var(--text);
-          cursor: pointer;
-          text-align: left;
-          font-size: 13px;
-        }
-        .chat-history-dropdown .dropdown-item:hover {
-          background: var(--bg-hover);
-        }
-        .chat-history-dropdown .dropdown-item-name {
-          font-weight: 500;
-        }
-        .chat-history-dropdown .dropdown-item-path {
-          font-size: 11px;
-          color: var(--text-muted);
-        }
-        .chat-history-dropdown .dropdown-divider {
-          height: 1px;
-          background: var(--border);
-          margin: 4px 0;
-        }
-        .chat-history-dropdown .history-item.active {
-          border-left: 2px solid var(--accent);
-          background: rgba(126,184,247,0.05);
-        }
-        .chat-history-dropdown .history-item.active .dropdown-item-path {
-          color: #fff;
-        }
-        .dropdown-item-title-row {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-        }
-        .history-provider-icon {
-          width: 12px;
-          height: 12px;
-          flex-shrink: 0;
-          opacity: 0.6;
         }
         .accordion-bar-detail {
           font-weight: 400;
