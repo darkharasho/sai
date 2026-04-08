@@ -225,6 +225,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const draftRef = useRef('');
+  const sendingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
@@ -625,8 +626,10 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
+      if (sendingRef.current) return;
       const sendValue = value;
       if (sendValue.trim()) {
+        sendingRef.current = true;
         setHistory(prev => {
           const trimmed = sendValue.trim();
           if (prev[prev.length - 1] === trimmed) return prev;
@@ -639,6 +642,8 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
         setValue('');
         setContextItems([]);
         setSuggestions([]);
+        // Reset guard after React re-renders with cleared value
+        requestAnimationFrame(() => { sendingRef.current = false; });
       }
     }
   };
@@ -1159,7 +1164,9 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
             <button
               className="send-btn"
               onClick={() => {
+                if (sendingRef.current) return;
                 if (value.trim()) {
+                  sendingRef.current = true;
                   setHistory(prev => {
                     const trimmed = value.trim();
                     if (prev[prev.length - 1] === trimmed) return prev;
@@ -1171,6 +1178,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
                   onSend(buildMessage(value.trim()), images.length > 0 ? images : undefined);
                   setValue('');
                   setContextItems([]);
+                  requestAnimationFrame(() => { sendingRef.current = false; });
                 }
               }}
               disabled={disabled || !value.trim()}
