@@ -237,7 +237,7 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
           justify-content: space-between;
           padding: 4px 16px;
           border-top: 1px solid var(--border);
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 11px;
           color: var(--text-muted);
           flex-shrink: 0;
@@ -258,7 +258,7 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
           font-size: 11px;
           padding: 1px 8px;
           cursor: pointer;
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
         }
         .md-editor-preview-btn:hover {
           background: var(--bg-hover);

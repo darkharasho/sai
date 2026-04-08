@@ -1798,7 +1798,7 @@ export default function App() {
           text-transform: none;
           letter-spacing: 0;
           color: var(--text-muted);
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 11px;
           opacity: 0.6;
           overflow: hidden;

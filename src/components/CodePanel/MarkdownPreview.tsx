@@ -124,7 +124,7 @@ export default function MarkdownPreview({ content, onTogglePreview }: MarkdownPr
           font-size: 11px;
           padding: 1px 8px;
           cursor: pointer;
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           display: flex;
           align-items: center;
           gap: 4px;

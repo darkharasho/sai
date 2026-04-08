@@ -119,7 +119,7 @@ const collapsedStyles = `
     margin-bottom: 8px;
   }
   .tn-block-collapsed-inner {
-    background: #111417;
+    background: var(--bg-primary);
     border-radius: 5px;
     padding: 7px 11px;
     border: 1px solid #161a1e;
@@ -128,7 +128,7 @@ const collapsedStyles = `
     align-items: center;
     cursor: pointer;
     opacity: 0.6;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-family: 'Geist Mono', 'JetBrains Mono', 'Fira Code', monospace;
     font-size: 12px;
   }
   .tn-block-collapsed-inner:hover {
@@ -161,12 +161,12 @@ const collapsedStyles = `
 
 const expandedStyles = `
   .tn-block {
-    background: #111417;
+    background: var(--bg-primary);
     border-radius: 5px;
     padding: 10px 11px;
     border: 1px solid #1a1e24;
     margin-bottom: 10px;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-family: 'Geist Mono', 'JetBrains Mono', 'Fira Code', monospace;
     font-size: 12px;
   }
   .tn-block-active {

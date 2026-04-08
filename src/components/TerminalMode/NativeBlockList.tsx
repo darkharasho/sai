@@ -364,7 +364,7 @@ export default function NativeBlockList({
           overflow-anchor: none;
         }
         .tn-welcome {
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 12px;
           color: var(--text-secondary);
           line-height: 1.8;
@@ -398,7 +398,7 @@ export default function NativeBlockList({
           margin-top: 4px;
         }
         .tm-tool-approval {
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 12px;
           border: 1px solid rgba(163, 113, 247, 0.3);
           border-radius: 4px;
@@ -438,7 +438,7 @@ export default function NativeBlockList({
           border-top: 1px solid rgba(163, 113, 247, 0.13);
         }
         .tm-tool-btn {
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 11px;
           padding: 3px 10px;
           border-radius: 3px;
@@ -503,7 +503,7 @@ export default function NativeBlockList({
           min-width: 0;
         }
         .tn-thread-user-msg {
-          font-family: 'JetBrains Mono', 'Fira Code', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', 'Fira Code', monospace;
           background: rgba(139, 92, 246, 0.06);
           border: 1px solid rgba(139, 92, 246, 0.15);
           border-radius: 5px;

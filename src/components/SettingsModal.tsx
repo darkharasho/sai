@@ -67,6 +67,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const commitProviderRef = useRef<HTMLDivElement>(null);
   const [geminiLoadingPhrases, setGeminiLoadingPhrases] = useState<'witty' | 'tips' | 'all' | 'off'>('all');
   const [systemNotifications, setSystemNotifications] = useState(false);
+  const [toolCallsExpanded, setToolCallsExpanded] = useState(true);
   const [defaultView, setDefaultView] = useState<'default' | 'terminal-mode'>('default');
   const [focusedChat, setFocusedChat] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(300);
@@ -88,6 +89,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if (g.loadingPhrases === 'witty' || g.loadingPhrases === 'tips' || g.loadingPhrases === 'all' || g.loadingPhrases === 'off') setGeminiLoadingPhrases(g.loadingPhrases);
     });
     window.sai.settingsGet('systemNotifications', false).then((v: boolean) => setSystemNotifications(v));
+    window.sai.settingsGet('toolCallsExpanded', true).then((v: boolean) => setToolCallsExpanded(v));
     window.sai.settingsGet('defaultView', 'default').then((v: string) => {
       if (v === 'default' || v === 'terminal-mode') setDefaultView(v);
     });
@@ -122,6 +124,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if ('aiProvider' in remote && (remote.aiProvider === 'claude' || remote.aiProvider === 'codex' || remote.aiProvider === 'gemini')) setAiProvider(remote.aiProvider);
       if ('commitMessageProvider' in remote && (remote.commitMessageProvider === 'claude' || remote.commitMessageProvider === 'codex' || remote.commitMessageProvider === 'gemini')) setCommitMessageProvider(remote.commitMessageProvider);
       if ('systemNotifications' in remote) setSystemNotifications(remote.systemNotifications);
+      if ('toolCallsExpanded' in remote) setToolCallsExpanded(remote.toolCallsExpanded);
       if ('focusedChat' in remote) setFocusedChat(remote.focusedChat);
       if ('sidebarWidth' in remote) setSidebarWidth(remote.sidebarWidth);
       if ('autoCompactThreshold' in remote) setAutoCompactThreshold(remote.autoCompactThreshold);
@@ -241,6 +244,12 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.settingsSet('systemNotifications', value);
   };
 
+  const handleToolCallsExpandedChange = (value: boolean) => {
+    setToolCallsExpanded(value);
+    window.sai.settingsSet('toolCallsExpanded', value);
+    onSettingChange?.('toolCallsExpanded', value);
+  };
+
   const handleDefaultViewChange = (value: 'default' | 'terminal-mode') => {
     setDefaultView(value);
     window.sai.settingsSet('defaultView', value);
@@ -338,14 +347,17 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             >
               <div className="theme-preview" style={{
                 background: t.vars['--bg-primary'],
-                borderColor: theme === t.id ? 'var(--accent)' : t.vars['--border'],
+                borderColor: theme === t.id ? (t.vars['--accent'] || 'var(--accent)') : t.vars['--border'],
               }}>
-                <div className="theme-preview-sidebar" style={{ background: t.vars['--bg-secondary'] }} />
-                <div className="theme-preview-content">
-                  <div className="theme-preview-bar" style={{ background: t.vars['--bg-elevated'] }} />
-                  <div className="theme-preview-line" style={{ background: t.vars['--text-muted'], width: '70%' }} />
-                  <div className="theme-preview-line" style={{ background: t.vars['--text-muted'], width: '50%' }} />
-                  <div className="theme-preview-line" style={{ background: t.vars['--text-muted'], width: '60%' }} />
+                <div className="theme-preview-accent" style={{ background: t.vars['--accent'] || 'var(--accent)' }} />
+                <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+                  <div className="theme-preview-sidebar" style={{ background: t.vars['--bg-secondary'] }} />
+                  <div className="theme-preview-content">
+                    <div className="theme-preview-bar" style={{ background: t.vars['--bg-elevated'] }} />
+                    <div className="theme-preview-line" style={{ background: t.vars['--text-muted'], width: '70%' }} />
+                    <div className="theme-preview-line" style={{ background: t.vars['--text-muted'], width: '50%' }} />
+                    <div className="theme-preview-line" style={{ background: t.vars['--text-muted'], width: '60%' }} />
+                  </div>
                 </div>
               </div>
               <div className="theme-card-label">{t.label}</div>
@@ -435,6 +447,21 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             onClick={() => handleSystemNotificationsChange(!systemNotifications)}
             role="switch"
             aria-checked={systemNotifications}
+          >
+            <span className="settings-toggle-thumb" />
+          </button>
+        </div>
+
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <div className="settings-row-name">Expand tool calls</div>
+            <div className="settings-row-desc">Show tool call details expanded by default in the chat</div>
+          </div>
+          <button
+            className={`settings-toggle${toolCallsExpanded ? ' on' : ''}`}
+            onClick={() => handleToolCallsExpandedChange(!toolCallsExpanded)}
+            role="switch"
+            aria-checked={toolCallsExpanded}
           >
             <span className="settings-toggle-thumb" />
           </button>
@@ -967,7 +994,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             line-height: 1.5;
           }
           .settings-sync-note code {
-            font-family: 'JetBrains Mono', monospace;
+            font-family: 'Geist Mono', 'JetBrains Mono', monospace;
             background: var(--bg-secondary);
             padding: 1px 4px;
             border-radius: 3px;
@@ -994,8 +1021,14 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             border-radius: 6px;
             border: 2px solid;
             display: flex;
+            flex-direction: column;
             overflow: hidden;
             transition: border-color 0.15s;
+          }
+          .theme-preview-accent {
+            height: 3px;
+            flex-shrink: 0;
+            width: 100%;
           }
           .theme-card:hover .theme-preview {
             border-color: var(--accent) !important;
@@ -1048,7 +1081,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             padding: 12px 14px !important;
           }
           .highlight-preview code {
-            font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
+            font-family: 'Geist Mono', 'JetBrains Mono', 'Fira Code', monospace !important;
             font-size: 12px !important;
           }
         `}</style>

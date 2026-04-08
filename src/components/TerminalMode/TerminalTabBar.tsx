@@ -128,7 +128,7 @@ export default function TerminalTabBar({
         .tt-bar {
           display: flex;
           align-items: center;
-          background: #0c0f11;
+          background: var(--bg-secondary);
           border-bottom: 1px solid #1a1e24;
           height: 32px;
           flex-shrink: 0;
@@ -155,7 +155,7 @@ export default function TerminalTabBar({
           padding: 4px 10px;
           border-radius: 4px;
           cursor: pointer;
-          font-family: 'JetBrains Mono NF', 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono NF', 'JetBrains Mono', monospace;
           font-size: 11px;
           color: #6b7280;
           white-space: nowrap;
@@ -164,11 +164,11 @@ export default function TerminalTabBar({
           -webkit-app-region: no-drag;
         }
         .tt-tab:hover {
-          background: #111417;
+          background: var(--bg-primary);
           color: #9ca3af;
         }
         .tt-tab-active {
-          background: #111417;
+          background: var(--bg-primary);
           color: #e5e7eb;
           box-shadow: inset 0 -2px 0 var(--accent, #58a6ff);
         }
@@ -196,7 +196,7 @@ export default function TerminalTabBar({
           border: 1px solid #2d333b;
           border-radius: 2px;
           color: #e5e7eb;
-          font-family: 'JetBrains Mono NF', 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono NF', 'JetBrains Mono', monospace;
           font-size: 11px;
           width: 80px;
           padding: 0 4px;
@@ -214,11 +214,11 @@ export default function TerminalTabBar({
           -webkit-app-region: no-drag;
         }
         .tt-new:hover {
-          background: #111417;
+          background: var(--bg-primary);
           color: #9ca3af;
         }
         .tt-context-menu {
-          background: #1a1e24;
+          background: var(--bg-input);
           border: 1px solid #2d333b;
           border-radius: 4px;
           padding: 4px 0;
@@ -228,14 +228,14 @@ export default function TerminalTabBar({
         }
         .tt-context-item {
           padding: 6px 14px;
-          font-family: 'JetBrains Mono NF', 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono NF', 'JetBrains Mono', monospace;
           font-size: 11px;
           color: #9ca3af;
           cursor: pointer;
           user-select: none;
         }
         .tt-context-item:hover {
-          background: #21262d;
+          background: var(--bg-hover);
           color: #e5e7eb;
         }
       `}</style>

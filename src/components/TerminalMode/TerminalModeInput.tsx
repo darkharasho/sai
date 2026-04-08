@@ -326,7 +326,7 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
         .tn-input-box {
           position: relative;
           border-radius: 5px;
-          background: #111417;
+          background: var(--bg-primary);
           overflow: visible;
         }
         .tn-input-box::before {
@@ -362,7 +362,7 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
           display: flex;
           align-items: center;
           gap: 8px;
-          font-family: 'JetBrains Mono NF', 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono NF', 'JetBrains Mono', monospace;
           font-size: 13px;
         }
         .tn-input-user {
@@ -391,7 +391,7 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
           right: 0;
           pointer-events: none;
           color: #3a3f47;
-          font-family: 'JetBrains Mono NF', 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono NF', 'JetBrains Mono', monospace;
           font-size: 13px;
           white-space: pre;
           overflow: hidden;
@@ -403,7 +403,7 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
           border: none;
           outline: none;
           color: var(--text);
-          font-family: 'JetBrains Mono NF', 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono NF', 'JetBrains Mono', monospace;
           font-size: 13px;
           min-width: 0;
         }
@@ -423,7 +423,7 @@ const TerminalModeInput = forwardRef<TerminalModeInputHandle, TerminalModeInputP
           border: 1px solid #1e2328;
           padding: 1px 5px;
           border-radius: 3px;
-          background: #0a0d0f;
+          background: var(--bg-secondary);
         }
         .tn-input-hint-label {
           color: #4b5563;

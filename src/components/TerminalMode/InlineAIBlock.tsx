@@ -166,12 +166,12 @@ function extractText(node: React.ReactNode): string {
 
 const styles = `
   .tn-ai-block {
-    background: #13111e;
+    background: var(--bg-secondary);
     border-radius: 5px;
     padding: 10px 11px;
     border: 1px solid #2d2454;
     margin-bottom: 10px;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-family: 'Geist Mono', 'JetBrains Mono', 'Fira Code', monospace;
     font-size: 12px;
   }
   .tn-ai-header {
@@ -257,7 +257,7 @@ const styles = `
     color: #9ca3af;
   }
   .tn-ai-content code {
-    background: #1a1e24;
+    background: var(--bg-input);
     padding: 1px 4px;
     border-radius: 2px;
     color: #e5e7eb;
@@ -267,7 +267,7 @@ const styles = `
     position: relative;
   }
   .tn-ai-code-wrapper pre {
-    background: #0a0d0f;
+    background: var(--bg-secondary);
     border: 1px solid #1e2328;
     border-radius: 4px;
     padding: 8px 10px;

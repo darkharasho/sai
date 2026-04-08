@@ -9,10 +9,28 @@ const CODE_EXTENSIONS = new Set([
   '.toml', '.md', '.sh', '.bash', '.vue', '.svelte',
 ]);
 
-function getFileIcon(name: string) {
+const EXT_COLORS: Record<string, string> = {
+  '.ts': 'var(--blue)', '.tsx': 'var(--blue)',
+  '.js': 'var(--yellow)', '.jsx': 'var(--yellow)',
+  '.py': 'var(--green)',
+  '.rs': 'var(--orange)',
+  '.go': 'var(--turquoise)',
+  '.java': 'var(--red)',
+  '.css': 'var(--pink)', '.scss': 'var(--pink)',
+  '.html': 'var(--orange)',
+  '.json': 'var(--yellow)',
+  '.md': 'var(--text-secondary)',
+  '.yaml': 'var(--purple)', '.yml': 'var(--purple)', '.toml': 'var(--purple)',
+  '.sh': 'var(--green)', '.bash': 'var(--green)',
+  '.vue': 'var(--green)', '.svelte': 'var(--orange)',
+  '.c': 'var(--blue)', '.cpp': 'var(--blue)', '.h': 'var(--blue)',
+};
+
+function getFileIcon(name: string): { icon: typeof FileCode2; color: string } {
   const ext = '.' + name.split('.').pop()?.toLowerCase();
-  if (CODE_EXTENSIONS.has(ext)) return FileCode2;
-  return FileText;
+  const color = EXT_COLORS[ext] || 'var(--text-muted)';
+  if (CODE_EXTENSIONS.has(ext)) return { icon: FileCode2, color };
+  return { icon: FileText, color };
 }
 
 interface TreeState {
@@ -291,7 +309,7 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
       );
     }
 
-    const FileIcon = getFileIcon(entry.name);
+    const { icon: FileIcon, color: fileColor } = getFileIcon(entry.name);
     return (
       <div
         key={entry.path}
@@ -303,7 +321,7 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
         onContextMenu={e => handleContextMenu(e, entry, parentPath)}
       >
         <span style={{ width: 14, flexShrink: 0 }} />
-        <FileIcon size={14} className="tree-icon file" />
+        <FileIcon size={14} className="tree-icon file" style={{ color: fileColor }} />
         {isRenaming ? (
           <InlineNameInput initialValue={inlineInput!.initialValue} onSubmit={handleInlineSubmit} onCancel={() => setInlineInput(null)} />
         ) : (
@@ -418,7 +436,7 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
           padding-right: 8px;
           cursor: pointer;
           color: var(--text-secondary);
-          font-family: 'JetBrains Mono', 'Fira Code', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', 'Fira Code', monospace;
           font-size: 13px;
           white-space: nowrap;
           overflow: hidden;

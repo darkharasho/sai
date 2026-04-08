@@ -52,7 +52,7 @@ export default function ApprovalBlock({ block, onApprove, onReject, onEdit }: Ap
           gap: 10px;
         }
         .tm-approval-command {
-          font-family: 'JetBrains Mono', monospace;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 12px;
           color: var(--text);
           flex: 1;
