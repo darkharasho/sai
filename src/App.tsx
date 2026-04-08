@@ -136,7 +136,7 @@ export default function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [fileIndex, setFileIndex] = useState<string[]>([]);
   const [toast, setToast] = useState<{ message: string; key: number } | null>(null);
-  const { isOpen: whatsNewOpen, version: whatsNewVersion, releaseNotes, fetchStatus, openWhatsNew, closeWhatsNew } = useWhatsNew();
+  const { isOpen: whatsNewOpen, version: whatsNewVersion, releases, fetchStatus, openWhatsNew, closeWhatsNew } = useWhatsNew();
   const slashCommandsRef = useRef<string[]>([]);
   const workspacesRef = useRef(workspaces);
   const activeProjectPathRef = useRef(activeProjectPath);
@@ -1629,7 +1629,7 @@ export default function App() {
         <WhatsNewModal
           isOpen={whatsNewOpen}
           version={whatsNewVersion}
-          releaseNotes={releaseNotes}
+          releases={releases}
           fetchStatus={fetchStatus}
           onClose={closeWhatsNew}
         />

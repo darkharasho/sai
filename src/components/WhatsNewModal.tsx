@@ -2,17 +2,17 @@ import { useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { X } from 'lucide-react';
-import type { FetchStatus } from '../hooks/useWhatsNew';
+import type { FetchStatus, ReleaseEntry } from '../hooks/useWhatsNew';
 
 interface Props {
   isOpen: boolean;
   version: string;
-  releaseNotes: string | null;
+  releases: ReleaseEntry[];
   fetchStatus: FetchStatus;
   onClose: () => void;
 }
 
-export default function WhatsNewModal({ isOpen, version, releaseNotes, fetchStatus, onClose }: Props) {
+export default function WhatsNewModal({ isOpen, version, releases, fetchStatus, onClose }: Props) {
   useEffect(() => {
     if (!isOpen) return;
     const handler = (e: KeyboardEvent) => {
@@ -24,7 +24,8 @@ export default function WhatsNewModal({ isOpen, version, releaseNotes, fetchStat
 
   if (!isOpen) return null;
 
-  const githubUrl = `https://github.com/darkharasho/sai/releases/tag/v${version}`;
+  const githubUrl = `https://github.com/darkharasho/sai/releases`;
+  const multiVersion = releases.length > 1;
 
   return (
     <div
@@ -66,7 +67,7 @@ export default function WhatsNewModal({ isOpen, version, releaseNotes, fetchStat
           flexShrink: 0,
         }}>
           <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>
-            What's New in v{version}
+            {multiVersion ? "What's New" : `What's New in v${version}`}
           </span>
           <button
             data-testid="whats-new-close-btn"
@@ -112,13 +113,29 @@ export default function WhatsNewModal({ isOpen, version, releaseNotes, fetchStat
             </a>
           )}
 
-          {fetchStatus === 'success' && releaseNotes === '' && (
+          {fetchStatus === 'success' && releases.length === 0 && (
             <span style={{ color: 'var(--text-muted)' }}>No release notes available for this version.</span>
           )}
 
-          {fetchStatus === 'success' && releaseNotes && (
+          {fetchStatus === 'success' && releases.length > 0 && (
             <div className="whats-new-markdown">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{releaseNotes}</ReactMarkdown>
+              {releases.map((r, i) => (
+                <div key={r.version}>
+                  {multiVersion && (
+                    <h2 style={{
+                      fontSize: 14,
+                      fontWeight: 600,
+                      color: 'var(--text)',
+                      margin: i === 0 ? '0 0 8px' : '20px 0 8px',
+                      paddingBottom: 6,
+                      borderBottom: '1px solid var(--border)',
+                    }}>
+                      v{r.version}
+                    </h2>
+                  )}
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.notes}</ReactMarkdown>
+                </div>
+              ))}
             </div>
           )}
         </div>

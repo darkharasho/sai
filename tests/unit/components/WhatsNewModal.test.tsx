@@ -25,7 +25,7 @@ vi.mock('remark-gfm', () => ({ default: () => () => {} }));
 const defaultProps = {
   isOpen: true,
   version: '1.2.3',
-  releaseNotes: null,
+  releases: [] as Array<{ version: string; notes: string }>,
   fetchStatus: 'loading' as const,
   onClose: vi.fn(),
 };
@@ -41,9 +41,17 @@ describe('WhatsNewModal', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders the header with version number', () => {
-    render(<WhatsNewModal {...defaultProps} />);
+  it('renders the header with version number for single release', () => {
+    render(<WhatsNewModal {...defaultProps} fetchStatus="success" releases={[{ version: '1.2.3', notes: 'Notes' }]} />);
     expect(screen.getByText("What's New in v1.2.3")).toBeTruthy();
+  });
+
+  it('renders generic header for multiple releases', () => {
+    render(<WhatsNewModal {...defaultProps} fetchStatus="success" releases={[
+      { version: '1.2.3', notes: 'Notes 1' },
+      { version: '1.2.2', notes: 'Notes 2' },
+    ]} />);
+    expect(screen.getByText("What's New")).toBeTruthy();
   });
 
   it('shows loading text when fetchStatus is "loading"', () => {
@@ -61,16 +69,33 @@ describe('WhatsNewModal', () => {
       <WhatsNewModal
         {...defaultProps}
         fetchStatus="success"
-        releaseNotes="## Hello\n\nSome release notes here."
+        releases={[{ version: '1.2.3', notes: "## Hello\n\nSome release notes here." }]}
       />
     );
     expect(screen.getByText('Hello')).toBeTruthy();
     expect(screen.getByText('Some release notes here.')).toBeTruthy();
   });
 
-  it('shows "no notes" message when fetchStatus is success but releaseNotes is empty string', () => {
-    render(<WhatsNewModal {...defaultProps} fetchStatus="success" releaseNotes="" />);
+  it('shows "no notes" message when fetchStatus is success but releases is empty', () => {
+    render(<WhatsNewModal {...defaultProps} fetchStatus="success" releases={[]} />);
     expect(screen.getByText('No release notes available for this version.')).toBeTruthy();
+  });
+
+  it('renders version headers for multiple releases', () => {
+    render(
+      <WhatsNewModal
+        {...defaultProps}
+        fetchStatus="success"
+        releases={[
+          { version: '1.2.3', notes: 'Latest notes' },
+          { version: '1.2.2', notes: 'Previous notes' },
+        ]}
+      />
+    );
+    expect(screen.getByText('v1.2.3')).toBeTruthy();
+    expect(screen.getByText('v1.2.2')).toBeTruthy();
+    expect(screen.getByText('Latest notes')).toBeTruthy();
+    expect(screen.getByText('Previous notes')).toBeTruthy();
   });
 
   it('calls onClose when close button (X) is clicked', () => {
