@@ -14,7 +14,7 @@ import CommandPalette from './components/CommandPalette';
 import { useWhatsNew } from './hooks/useWhatsNew';
 import WhatsNewModal from './components/WhatsNewModal';
 import { setActiveWorkspace, updateTerminalName } from './terminalBuffer';
-import { loadSessions, saveSessions, createSession, upsertSession, migrateLegacySessions, loadSessionMessages } from './sessions';
+import { loadSessions, saveSessions, createSession, upsertSession, migrateLegacySessions, loadSessionMessages, generateSmartTitle } from './sessions';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval } from './types';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, setActiveHighlightTheme, type HighlightThemeId } from './themes';
 import ApprovalBanner from './components/ApprovalBanner';
@@ -110,6 +110,7 @@ export default function App() {
   const [editorFontSize, setEditorFontSize] = useState(13);
   const [editorMinimap, setEditorMinimap] = useState(true);
   const [aiProvider, setAiProvider] = useState<AIProvider>('claude');
+  const [aiTitleGeneration, setAiTitleGeneration] = useState(false);
   const [commitMessageProvider, setCommitMessageProvider] = useState<AIProvider>('claude');
   const [codexModel, setCodexModel] = useState('');
   const [codexModels, setCodexModels] = useState<{ id: string; name: string }[]>([]);
@@ -366,6 +367,9 @@ export default function App() {
     window.sai.settingsGet('commitMessageProvider', 'claude').then((v: string) => {
       if (v === 'claude' || v === 'codex' || v === 'gemini') setCommitMessageProvider(v as AIProvider);
     });
+    window.sai.settingsGet('aiTitleGeneration', false).then((v: boolean) => {
+      setAiTitleGeneration(!!v);
+    });
     // Load nested provider settings
     window.sai.settingsGet('claude', {}).then((c: any) => {
       if (c.model === 'sonnet' || c.model === 'opus' || c.model === 'haiku') setModelChoice(c.model);
@@ -418,6 +422,7 @@ export default function App() {
       if ('highlightTheme' in remote && HIGHLIGHT_THEMES.some(t => t.id === remote.highlightTheme)) setActiveHighlightTheme(remote.highlightTheme as HighlightThemeId);
       if ('aiProvider' in remote && (remote.aiProvider === 'claude' || remote.aiProvider === 'codex' || remote.aiProvider === 'gemini')) setAiProvider(remote.aiProvider);
       if ('commitMessageProvider' in remote && (remote.commitMessageProvider === 'claude' || remote.commitMessageProvider === 'codex' || remote.commitMessageProvider === 'gemini')) setCommitMessageProvider(remote.commitMessageProvider);
+      if ('aiTitleGeneration' in remote) setAiTitleGeneration(!!remote.aiTitleGeneration);
       if ('claude' in remote && typeof remote.claude === 'object') {
         const c = remote.claude;
         if (c.model === 'sonnet' || c.model === 'opus' || c.model === 'haiku') setModelChoice(c.model);
@@ -1412,10 +1417,31 @@ export default function App() {
                       const updated = { ...w.activeSession, messages: latestMessages, updatedAt: Date.now(), aiProvider };
                       if (!updated.title) {
                         const firstUserMsg = latestMessages.find(m => m.role === 'user');
-                        if (firstUserMsg) updated.title = firstUserMsg.content.slice(0, 40);
+                        if (firstUserMsg) updated.title = generateSmartTitle(firstUserMsg.content);
                       }
                       const updatedSessions = upsertSession(w.sessions, updated);
                       saveSessions(wsPath, updatedSessions);
+
+                      // Fire-and-forget AI title generation if enabled
+                      if (aiTitleGeneration && !updated.titleEdited) {
+                        const userMsgs = latestMessages.filter(m => m.role === 'user');
+                        if (userMsgs.length === 1 && userMsgs[0]) {
+                          window.sai.claudeGenerateTitle(wsPath, userMsgs[0].content, aiProvider)
+                            .then((title: string) => {
+                              if (!title) return;
+                              updateWorkspace(wsPath, w2 => {
+                                // Don't overwrite if user renamed in the meantime
+                                if (w2.activeSession.titleEdited) return w2;
+                                const newSession = { ...w2.activeSession, title };
+                                const newSessions = w2.sessions.map(s => s.id === newSession.id ? { ...s, title } : s);
+                                saveSessions(wsPath, newSessions);
+                                return { ...w2, activeSession: newSession, sessions: newSessions };
+                              });
+                            })
+                            .catch(() => { /* title generation failed, keep smart title */ });
+                        }
+                      }
+
                       return { ...w, activeSession: updated, sessions: updatedSessions };
                     });
                   }}
@@ -1498,6 +1524,7 @@ export default function App() {
           if (key === 'editorMinimap') setEditorMinimap(value);
           if (key === 'aiProvider') { setAiProvider(value); handleNewChat(); }
           if (key === 'commitMessageProvider') setCommitMessageProvider(value);
+          if (key === 'aiTitleGeneration') setAiTitleGeneration(value);
           if (key === 'geminiLoadingPhrases') handleGeminiLoadingPhrasesChange(value);
           if (key === 'focusedChat') { setFocusedChat(value); if (value) { setExpanded(['chat', 'terminal']); setSplitRatio(0.66); } }
           if (key === 'defaultView') { /* persisted only, applies on next launch */ }
