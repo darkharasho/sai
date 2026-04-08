@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search, X, Plus, Pin } from 'lucide-react';
+import { Search, X, Plus, Pin, Loader2 } from 'lucide-react';
 import { formatSessionDate, formatSessionTime, loadSessionMessages, toggleSessionPin, deleteSession, exportSessionAsMarkdown, saveSessions } from '../../sessions';
 import ChatHistoryContextMenu from './ChatHistoryContextMenu';
 import type { ChatSession } from '../../types';
@@ -12,6 +12,7 @@ interface ChatHistorySidebarProps {
   onNewChat: () => void;
   onUpdateSessions: (sessions: ChatSession[]) => void;
   projectPath: string;
+  titleGeneratingIds?: Set<string>;
 }
 
 const PROVIDER_COLORS: Record<string, string> = {
@@ -75,6 +76,7 @@ export default function ChatHistorySidebar({
   onNewChat,
   onUpdateSessions,
   projectPath,
+  titleGeneratingIds,
 }: ChatHistorySidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -309,6 +311,9 @@ export default function ChatHistorySidebar({
                           style={{ background: PROVIDER_COLORS[session.aiProvider || aiProvider] || providerColor }}
                         />
                         <span className="chat-history-card-title">{session.title || 'Untitled'}</span>
+                        {titleGeneratingIds?.has(session.id) && (
+                          <Loader2 size={11} className="chat-history-title-spinner" />
+                        )}
                         {session.id === activeSessionId && (
                           <span className="chat-history-active-badge">ACTIVE</span>
                         )}
@@ -519,6 +524,15 @@ export default function ChatHistorySidebar({
           font-size: 13px;
           font-family: inherit;
           outline: none;
+        }
+        .chat-history-title-spinner {
+          flex-shrink: 0;
+          color: var(--text-muted);
+          animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
         }
         .chat-history-match {
           background: rgba(199, 145, 12, 0.3);

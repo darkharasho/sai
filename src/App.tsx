@@ -111,6 +111,7 @@ export default function App() {
   const [editorMinimap, setEditorMinimap] = useState(true);
   const [aiProvider, setAiProvider] = useState<AIProvider>('claude');
   const [aiTitleGeneration, setAiTitleGeneration] = useState(false);
+  const [titleGeneratingIds, setTitleGeneratingIds] = useState<Set<string>>(new Set());
   const [commitMessageProvider, setCommitMessageProvider] = useState<AIProvider>('claude');
   const [codexModel, setCodexModel] = useState('');
   const [codexModels, setCodexModels] = useState<{ id: string; name: string }[]>([]);
@@ -196,7 +197,7 @@ export default function App() {
     if (existing) return existing;
     return {
       projectPath: path,
-      sessions: [],
+      sessions: loadSessions(path),
       activeSession: createSession(),
       openFiles: [],
       activeFilePath: null,
@@ -215,7 +216,7 @@ export default function App() {
       const next = new Map(prev);
       const current = next.get(path) || {
         projectPath: path,
-        sessions: [],
+        sessions: loadSessions(path),
         activeSession: createSession(),
         openFiles: [],
         activeFilePath: null,
@@ -1010,6 +1011,7 @@ export default function App() {
     setActiveView('default');
     if (newPath === activeProjectPath) return;
     window.sai.openRecentProject(newPath);
+    migrateLegacySessions(newPath);
     const sessions = loadSessions(newPath);
     setWorkspaces(prev => {
       const next = new Map(prev);
@@ -1168,7 +1170,7 @@ export default function App() {
         : ws.activeSession;
       if (!sessionToSave.title && sessionToSave.messages.length > 0) {
         const firstUserMsg = sessionToSave.messages.find(m => m.role === 'user');
-        if (firstUserMsg) sessionToSave.title = firstUserMsg.content.slice(0, 40);
+        if (firstUserMsg) sessionToSave.title = generateSmartTitle(firstUserMsg.content);
       }
       // Persist to localStorage
       if (sessionToSave.messages.length > 0) {
@@ -1426,11 +1428,12 @@ export default function App() {
                       if (aiTitleGeneration && !updated.titleEdited) {
                         const userMsgs = latestMessages.filter(m => m.role === 'user');
                         if (userMsgs.length === 1 && userMsgs[0]) {
+                          const sessionId = updated.id;
+                          setTitleGeneratingIds(prev => new Set(prev).add(sessionId));
                           window.sai.claudeGenerateTitle(wsPath, userMsgs[0].content, aiProvider)
                             .then((title: string) => {
                               if (!title) return;
                               updateWorkspace(wsPath, w2 => {
-                                // Don't overwrite if user renamed in the meantime
                                 if (w2.activeSession.titleEdited) return w2;
                                 const newSession = { ...w2.activeSession, title };
                                 const newSessions = w2.sessions.map(s => s.id === newSession.id ? { ...s, title } : s);
@@ -1438,7 +1441,14 @@ export default function App() {
                                 return { ...w2, activeSession: newSession, sessions: newSessions };
                               });
                             })
-                            .catch(() => { /* title generation failed, keep smart title */ });
+                            .catch(() => { /* title generation failed, keep smart title */ })
+                            .finally(() => {
+                              setTitleGeneratingIds(prev => {
+                                const next = new Set(prev);
+                                next.delete(sessionId);
+                                return next;
+                              });
+                            });
                         }
                       }
 
@@ -1550,6 +1560,7 @@ export default function App() {
             onNewChat={handleNewChat}
             onUpdateSessions={handleUpdateSessions}
             projectPath={projectPath}
+            titleGeneratingIds={titleGeneratingIds}
           />
         )}
         <div className="tm-views-wrapper">
