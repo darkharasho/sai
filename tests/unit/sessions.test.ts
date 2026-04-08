@@ -9,6 +9,7 @@ import {
   formatSessionDate,
   formatSessionTime,
   migrateLegacySessions,
+  generateSmartTitle,
 } from '@/sessions';
 import type { ChatSession, ChatMessage } from '@/types';
 
@@ -487,5 +488,60 @@ describe('migrateLegacySessions', () => {
     // Should not throw
     expect(() => migrateLegacySessions('/clean/project')).not.toThrow();
     expect(loadSessions('/clean/project')).toEqual([]);
+  });
+});
+
+describe('generateSmartTitle', () => {
+  it('strips "can you" prefix', () => {
+    expect(generateSmartTitle('Can you fix the border?')).toBe('Fix the border?');
+  });
+  it('strips "could you" prefix', () => {
+    expect(generateSmartTitle('Could you help me debug this?')).toBe('Debug this?');
+  });
+  it('strips "would you" prefix', () => {
+    expect(generateSmartTitle('Would you refactor this function?')).toBe('Refactor this function?');
+  });
+  it('strips "please" prefix', () => {
+    expect(generateSmartTitle('Please update the config')).toBe('Update the config');
+  });
+  it('strips "help me" prefix', () => {
+    expect(generateSmartTitle('help me fix the auth bug')).toBe('Fix the auth bug');
+  });
+  it('strips "I need to" prefix', () => {
+    expect(generateSmartTitle('I need to implement a sidebar')).toBe('Implement a sidebar');
+  });
+  it('strips "I want to" prefix', () => {
+    expect(generateSmartTitle('I want to add dark mode')).toBe('Add dark mode');
+  });
+  it('strips "let\'s" prefix', () => {
+    expect(generateSmartTitle("let's build a command palette")).toBe('Build a command palette');
+  });
+  it('strips "let me" prefix', () => {
+    expect(generateSmartTitle('let me see the logs')).toBe('See the logs');
+  });
+  it('strips "we need to" prefix', () => {
+    expect(generateSmartTitle('we need to fix the tests')).toBe('Fix the tests');
+  });
+  it('strips "we should" prefix', () => {
+    expect(generateSmartTitle('we should refactor this')).toBe('Refactor this');
+  });
+  it('strips multiple chained prefixes', () => {
+    expect(generateSmartTitle('Can you please help me fix this?')).toBe('Fix this?');
+  });
+  it('capitalizes first letter after stripping', () => {
+    expect(generateSmartTitle('can you fix it')).toBe('Fix it');
+  });
+  it('truncates to 40 characters', () => {
+    const long = 'Fix ' + 'a'.repeat(50);
+    expect(generateSmartTitle(long).length).toBeLessThanOrEqual(40);
+  });
+  it('returns original text when no prefix matches', () => {
+    expect(generateSmartTitle('Fix the border on code blocks')).toBe('Fix the border on code blocks');
+  });
+  it('returns empty string for empty input', () => {
+    expect(generateSmartTitle('')).toBe('');
+  });
+  it('handles whitespace-only input', () => {
+    expect(generateSmartTitle('   ')).toBe('');
   });
 });
