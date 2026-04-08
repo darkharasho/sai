@@ -1,10 +1,39 @@
 import simpleGit from 'simple-git';
 import { ipcMain } from 'electron';
+import * as path from 'node:path';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+
+/**
+ * Build an enriched PATH so git hooks can find tools like git-lfs
+ * even when Electron doesn't inherit the user's interactive shell PATH.
+ * (GUI apps on macOS don't get /opt/homebrew/bin by default.)
+ */
+function enrichedEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  const home = os.homedir();
+  const extraPaths: string[] = [];
+  const nvmDir = path.join(home, '.nvm', 'versions', 'node');
+  if (fs.existsSync(nvmDir)) {
+    try { for (const v of fs.readdirSync(nvmDir)) extraPaths.push(path.join(nvmDir, v, 'bin')); } catch {}
+  }
+  extraPaths.push(
+    path.join(home, '.local', 'bin'),
+    path.join(home, '.volta', 'bin'),
+    '/usr/local/bin',
+    '/opt/homebrew/bin',
+  );
+  env.PATH = [...extraPaths, env.PATH || ''].join(':');
+  return env;
+}
+
+function git(cwd: string) {
+  return simpleGit({ baseDir: cwd, binary: 'git' }).env(enrichedEnv());
+}
 
 export function registerGitHandlers() {
   ipcMain.handle('git:status', async (_event, cwd: string) => {
-    const git = simpleGit(cwd);
-    const status = await git.status();
+    const status = await git(cwd).status();
     return {
       branch: status.current,
       staged: status.staged.map(f => ({ path: f, status: 'staged' })),
@@ -18,31 +47,31 @@ export function registerGitHandlers() {
   });
 
   ipcMain.handle('git:stage', async (_event, cwd: string, filepath: string) => {
-    await simpleGit(cwd).add(filepath);
+    await git(cwd).add(filepath);
   });
 
   ipcMain.handle('git:unstage', async (_event, cwd: string, filepath: string) => {
-    await simpleGit(cwd).reset(['HEAD', '--', filepath]);
+    await git(cwd).reset(['HEAD', '--', filepath]);
   });
 
   ipcMain.handle('git:commit', async (_event, cwd: string, message: string) => {
-    await simpleGit(cwd).commit(message);
+    await git(cwd).commit(message);
   });
 
   ipcMain.handle('git:push', async (_event, cwd: string) => {
-    await simpleGit(cwd).push();
+    await git(cwd).push();
   });
 
   ipcMain.handle('git:pull', async (_event, cwd: string) => {
-    await simpleGit(cwd).pull();
+    await git(cwd).pull();
   });
 
   ipcMain.handle('git:fetch', async (_event, cwd: string) => {
-    await simpleGit(cwd).fetch();
+    await git(cwd).fetch();
   });
 
   ipcMain.handle('git:log', async (_event, cwd: string, count: number) => {
-    const log = await simpleGit(cwd).log({ maxCount: count });
+    const log = await git(cwd).log({ maxCount: count });
     return log.all.map(entry => ({
       hash: entry.hash,
       message: entry.message,
@@ -54,8 +83,7 @@ export function registerGitHandlers() {
   });
 
   ipcMain.handle('git:branches', async (_event, cwd: string) => {
-    const git = simpleGit(cwd);
-    const summary = await git.branch([]);
+    const summary = await git(cwd).branch([]);
     return {
       current: summary.current,
       branches: Object.keys(summary.branches),
@@ -63,29 +91,28 @@ export function registerGitHandlers() {
   });
 
   ipcMain.handle('git:checkout', async (_event, cwd: string, branchName: string) => {
-    await simpleGit(cwd).checkout(branchName);
+    await git(cwd).checkout(branchName);
   });
 
   ipcMain.handle('git:createBranch', async (_event, cwd: string, branchName: string) => {
-    await simpleGit(cwd).checkoutLocalBranch(branchName);
+    await git(cwd).checkoutLocalBranch(branchName);
   });
 
   ipcMain.handle('git:diff', async (_event, cwd: string, filepath: string, staged: boolean) => {
-    const git = simpleGit(cwd);
     const args = staged ? ['--cached', '--', filepath] : ['--', filepath];
-    return await git.diff(args);
+    return await git(cwd).diff(args);
   });
 
   ipcMain.handle('git:discard', async (_event, cwd: string, filepath: string) => {
-    const git = simpleGit(cwd);
-    const status = await git.status();
+    const g = git(cwd);
+    const status = await g.status();
     const isUntracked = status.not_added.includes(filepath);
     if (isUntracked) {
       const { unlink } = await import('fs/promises');
       const { join } = await import('path');
       await unlink(join(cwd, filepath));
     } else {
-      await git.checkout(['--', filepath]);
+      await g.checkout(['--', filepath]);
     }
   });
 }
