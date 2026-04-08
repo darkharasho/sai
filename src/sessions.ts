@@ -188,3 +188,28 @@ export function formatSessionTime(timestamp: number): string {
     hour12: true,
   });
 }
+
+export function toggleSessionPin(sessions: ChatSession[], sessionId: string): ChatSession[] {
+  return sessions.map(s =>
+    s.id === sessionId ? { ...s, pinned: !s.pinned } : s
+  );
+}
+
+export function deleteSession(sessions: ChatSession[], sessionId: string): ChatSession[] {
+  try {
+    localStorage.removeItem(messagesKey(sessionId));
+  } catch {
+    // Ignore
+  }
+  return sessions.filter(s => s.id !== sessionId);
+}
+
+export function exportSessionAsMarkdown(title: string, messages: ChatMessage[]): string {
+  const lines: string[] = [`# ${title}`, ''];
+  for (const msg of messages) {
+    if (msg.role === 'system') continue;
+    const roleLabel = msg.role === 'user' ? 'User' : 'Assistant';
+    lines.push(`## ${roleLabel}`, '', msg.content, '');
+  }
+  return lines.join('\n');
+}
