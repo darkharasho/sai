@@ -59,6 +59,21 @@ function getExtInfo(filename: string) {
   return EXT_COLORS[ext] || { bg: 'rgba(160,172,187,0.12)', fg: '#a0acbb', label: ext.toUpperCase().slice(0, 4) || '?' };
 }
 
+function highlightGrepMatch(text: string, query: string) {
+  if (!query) return <>{text}</>;
+  const lower = text.toLowerCase();
+  const lq = query.toLowerCase();
+  const idx = lower.indexOf(lq);
+  if (idx === -1) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark>{text.slice(idx, idx + query.length)}</mark>
+      {text.slice(idx + query.length)}
+    </>
+  );
+}
+
 function highlightFilename(name: string, indices: number[]) {
   if (!indices.length) return <>{name}</>;
   const chars: React.ReactNode[] = [];
@@ -260,7 +275,7 @@ export default function CommandPalette({
             autoComplete="off"
           />
           {mode === 'grep' && grepLoading && (
-            <Loader2 size={14} style={{ color: 'var(--text-muted)', animation: 'spin 1s linear infinite' }} />
+            <Loader2 size={14} style={{ color: 'var(--text-muted)', animation: 'cp-spin 1s linear infinite' }} />
           )}
         </div>
 
@@ -329,7 +344,7 @@ export default function CommandPalette({
                 <div className="cp-result-icon" style={{ background: ext.bg, color: ext.fg }}>{ext.label}</div>
                 <div className="cp-result-info">
                   <div className="cp-result-name">{filename}<span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>:{r.line}</span></div>
-                  <div className="cp-result-path cp-grep-snippet">{r.text}</div>
+                  <div className="cp-result-path cp-grep-snippet">{highlightGrepMatch(r.text, query)}</div>
                 </div>
               </div>
             );
@@ -538,7 +553,7 @@ export default function CommandPalette({
           from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
           to { opacity: 1; transform: translateX(-50%) translateY(0); }
         }
-        @keyframes spin {
+        @keyframes cp-spin {
           to { transform: rotate(360deg); }
         }
       `}</style>

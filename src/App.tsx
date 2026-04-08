@@ -1059,8 +1059,23 @@ export default function App() {
         ),
         activeSession: { ...ws.activeSession, messages: [] },
       }));
+      return;
     }
-  }, [activeProjectPath, updateWorkspace]);
+    // Send as a slash command message to the active chat
+    if (activeProjectPath) {
+      const ws = getWorkspace(activeProjectPath);
+      if (!ws) return;
+      const sessionId = ws.activeSession.id;
+      const text = `/${command}`;
+      const msg: QueuedMessage = { id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, text, fullText: text, images: [] };
+      setMessageQueues(prev => {
+        const next = new Map(prev);
+        const queue = next.get(sessionId) || [];
+        next.set(sessionId, [...queue, msg]);
+        return next;
+      });
+    }
+  }, [activeProjectPath, updateWorkspace, getWorkspace]);
 
   const handleEditorSave = useCallback(async (filePath: string, content: string) => {
     await window.sai.fsWriteFile(filePath, content);
@@ -1435,6 +1450,7 @@ export default function App() {
                       activeSession: { ...w.activeSession, claudeSessionId: sessionId },
                     }));
                   }}
+                  onSlashCommandsUpdate={(cmds: string[]) => { slashCommandsRef.current = cmds; }}
                   terminalTabs={ws.terminalTabs ?? []}
                   onTurnComplete={() => {
                     const latestMessages = wsMessagesRef.current.get(wsPath) || [];
@@ -1621,7 +1637,7 @@ export default function App() {
         <WorkspaceToast key={toast.key} message={toast.message} onDismiss={() => setToast(null)} />
       )}
 
-      <CommandPalette
+      {projectPath && <CommandPalette
         open={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
         fileIndex={fileIndex}
@@ -1631,7 +1647,7 @@ export default function App() {
         onFileOpen={handleFileOpen}
         onCommand={handlePaletteCommand}
         onWorkspaceSwitch={handleProjectSwitch}
-      />
+      />}
 
       <style>{`
         .accordion-panel {

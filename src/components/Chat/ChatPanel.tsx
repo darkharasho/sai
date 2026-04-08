@@ -269,6 +269,7 @@ interface ChatPanelProps {
   onQueueShift?: (sessionId: string) => void;
   sessionId?: string;
   terminalTabs?: TerminalTab[];
+  onSlashCommandsUpdate?: (commands: string[]) => void;
 }
 
 const EMPTY_PROMPTS = [
@@ -424,7 +425,7 @@ const EMPTY_PROMPTS = [
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, activeFilePath, onFileOpen, isActive, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, sessionId, terminalTabs = [] }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, activeFilePath, onFileOpen, isActive, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, sessionId, terminalTabs = [], onSlashCommandsUpdate }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessageType[]>(initialMessages || []);
   const emptyPrompt = useMemo(() => EMPTY_PROMPTS[Math.floor(Math.random() * EMPTY_PROMPTS.length)], []);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -568,6 +569,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       // Capture slash commands from init
       if (msg.type === 'system' && msg.subtype === 'init' && msg.slash_commands) {
         setSlashCommands(msg.slash_commands);
+        onSlashCommandsUpdate?.(msg.slash_commands);
         return;
       }
 
