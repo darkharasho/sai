@@ -175,6 +175,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude', a
   const [fullWidth, setFullWidth] = useState(false);
   const [promptInfo, setPromptInfo] = useState<{ text: string; isRemote: boolean; sshTarget?: string } | null>(null);
   const [shellHistory, setShellHistory] = useState<string[]>([]);
+  const [awaitingInput, setAwaitingInput] = useState(false);
 
   useEffect(() => {
     window.sai.settingsGet('terminalFullWidth', false).then((v: boolean) => setFullWidth(v));
@@ -228,6 +229,32 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude', a
       if (dir) setCwd(dir);
     } catch { /* ignore */ }
   }, []);
+
+  // Poll awaiting-input state while a command is pending
+  useEffect(() => {
+    // Only poll when there's an active pending command
+    const hasPending = displayItems.some(item => item.type === 'command' && item.active);
+    if (!hasPending) {
+      if (awaitingInput) setAwaitingInput(false);
+      return;
+    }
+
+    let cancelled = false;
+    const poll = async () => {
+      if (cancelled) return;
+      // Use the ref directly — ptyId state can be stale after effect re-runs
+      const termId = getActiveTerminalId() ?? fallbackPtyRef.current;
+      if (termId === null) return;
+      try {
+        const awaiting: boolean = await window.sai.terminalIsAwaitingInput(termId);
+        if (!cancelled) setAwaitingInput(awaiting);
+      } catch { /* ignore */ }
+    };
+    poll();
+    const interval = setInterval(poll, 1500);
+    return () => { cancelled = true; clearInterval(interval); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displayItems.some(item => item.type === 'command' && item.active)]);
 
   // PTY data listener + fallback PTY creation
   useEffect(() => {
@@ -353,8 +380,15 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude', a
     // Listen for PTY data and forward to hidden xterm
     const cleanupData = window.sai.terminalOnData((ptyId: number, data: string) => {
       if (cancelled) return;
-      if (ptyId === (getActiveTerminalId() ?? fallbackPtyRef.current)) {
-        hiddenXtermRef.current?.write(data); // This feeds both xterm and BlockSegmenter via onData
+      const expectedId = getActiveTerminalId() ?? fallbackPtyRef.current;
+      if (ptyId === expectedId) {
+        if (hiddenXtermRef.current) {
+          hiddenXtermRef.current.write(data); // feeds both xterm and BlockSegmenter via onData
+        } else {
+          // HiddenXterm not mounted yet — feed segmenter directly so it
+          // captures the initial shell prompt before the component renders.
+          segmenterRef.current.feed(data);
+        }
       }
     });
 
@@ -387,6 +421,9 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude', a
   }, [projectPath, refreshCwd]);
 
   const executeCommand = useCallback(async (command: string) => {
+    // If the initial prompt was missed (IPC race on startup), bootstrap the
+    // segmenter so it can stream output for this command.
+    segmenterRef.current.bootstrapPrompt();
     let termId = getActiveTerminalId() ?? fallbackPtyRef.current;
     if (termId === null && fallbackPtyReadyRef.current) {
       termId = await fallbackPtyReadyRef.current;
@@ -408,7 +445,15 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude', a
         isRemote: false,
       };
       pendingCommandRef.current = { command: value, startTime: Date.now() };
-      setDisplayItems(prev => [...prev, { type: 'command' as const, block: pendingBlock, active: true }]);
+      setDisplayItems(prev => {
+        // Remove any stale pending blocks before adding the new one
+        const cleaned = prev.map(item =>
+          item.type === 'command' && item.block.id === 'pending'
+            ? { ...item, active: false, block: { ...item.block, id: `stale-${Date.now()}` } }
+            : item
+        );
+        return [...cleaned, { type: 'command' as const, block: pendingBlock, active: true }];
+      });
       executeCommand(value);
       setEditValue(undefined);
     } else {
@@ -900,6 +945,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude', a
           <NativeBlockList
             items={displayItems}
             activeBlockId={null}
+            awaitingInput={awaitingInput}
             fullWidth={fullWidth}
             cwd={cwd}
             onCopy={handleCopy}

@@ -7,7 +7,7 @@ import type { SegmentedBlock } from './BlockSegmenter';
 import type { ApprovalBlock as ApprovalBlockType, ToolApprovalBlock as ToolApprovalBlockType } from './types';
 
 export type DisplayItem =
-  | { type: 'command'; block: SegmentedBlock; aiSuggested?: boolean; active?: boolean }
+  | { type: 'command'; block: SegmentedBlock; aiSuggested?: boolean; active?: boolean; awaitingInput?: boolean }
   | { type: 'ai'; id: string; question: string; content: string; suggestedCommands: string[]; streaming: boolean; aiProvider?: 'claude' | 'codex' | 'gemini'; duration?: number; entries?: import('./types').AIEntry[] }
   | { type: 'approval'; block: ApprovalBlockType }
   | { type: 'tool-approval'; block: ToolApprovalBlockType };
@@ -15,6 +15,7 @@ export type DisplayItem =
 interface NativeBlockListProps {
   items: DisplayItem[];
   activeBlockId: string | null;
+  awaitingInput?: boolean;
   fullWidth?: boolean;
   cwd?: string;
   onCopy: (text: string) => void;
@@ -34,6 +35,7 @@ const AUTO_COLLAPSE_THRESHOLD = 10;
 export default function NativeBlockList({
   items,
   activeBlockId,
+  awaitingInput,
   fullWidth,
   cwd,
   onCopy,
@@ -200,6 +202,7 @@ export default function NativeBlockList({
                     collapsed={collapsed}
                     onToggleCollapse={() => handleToggleCollapse(id, collapsed)}
                     active={item.active || id === activeBlockId}
+                    awaitingInput={(item.active || id === activeBlockId) ? awaitingInput : false}
                     aiSuggested={item.aiSuggested}
                     cwd={cwd}
                     onCopy={onCopy}

@@ -129,6 +129,25 @@ export function registerTerminalHandlers(win: BrowserWindow) {
     return term.process;
   });
 
+  ipcMain.handle('terminal:isAwaitingInput', (_event, id: number) => {
+    const term = allTerminals.get(id);
+    if (!term) return false;
+    if (process.platform !== 'linux') return false;
+    try {
+      const fs = require('fs') as typeof import('fs');
+      const stat = fs.readFileSync(`/proc/${term.pid}/stat`, 'utf8');
+      const closeParenIdx = stat.lastIndexOf(')');
+      const fields = stat.slice(closeParenIdx + 2).split(' ');
+      const tpgid = parseInt(fields[5], 10);
+      if (tpgid <= 0) return false;
+      // Check if the foreground process is blocked reading from the terminal
+      const wchan = fs.readFileSync(`/proc/${tpgid}/wchan`, 'utf8').trim();
+      return wchan === 'n_tty_read' || wchan === 'read_chan' || wchan === 'wait_woken';
+    } catch {
+      return false;
+    }
+  });
+
   ipcMain.handle('terminal:getCwd', (_event, id: number) => {
     const term = allTerminals.get(id);
     if (!term) return null;

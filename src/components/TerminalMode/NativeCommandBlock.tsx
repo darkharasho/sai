@@ -22,6 +22,7 @@ interface NativeCommandBlockProps {
   collapsed?: boolean;
   onToggleCollapse?: () => void;
   active?: boolean;
+  awaitingInput?: boolean;
   aiSuggested?: boolean;
   cwd?: string;
   onCopy: (text: string) => void;
@@ -34,6 +35,7 @@ export default function NativeCommandBlock({
   collapsed,
   onToggleCollapse,
   active,
+  awaitingInput,
   aiSuggested,
   cwd,
   onCopy,
@@ -74,7 +76,7 @@ export default function NativeCommandBlock({
   }
 
   return (
-    <div className={`tn-block ${active ? 'tn-block-active' : ''}`}>
+    <div className={`tn-block ${active ? (awaitingInput ? 'tn-block-awaiting' : 'tn-block-active') : ''}`}>
       <div className="tn-block-header" onClick={() => onToggleCollapse?.()}>
         <div>
           <span className="tn-chevron">▼</span>
@@ -86,7 +88,14 @@ export default function NativeCommandBlock({
         </div>
         <div className="tn-header-right">
           {active ? (
-            <span className="tn-active-dot" />
+            awaitingInput ? (
+              <span className="tn-awaiting-input-badge" title="Waiting for input">
+                <span className="tn-awaiting-input-dot" />
+                <span className="tn-awaiting-input-label">INPUT</span>
+              </span>
+            ) : (
+              <span className="tn-active-dot" />
+            )
           ) : (
             <span className="tn-duration-dim">{formatDuration(block.duration)}</span>
           )}
@@ -172,6 +181,9 @@ const expandedStyles = `
   .tn-block-active {
     border-color: #22c55e40;
   }
+  .tn-block-awaiting {
+    border-color: rgba(234, 179, 8, 0.3);
+  }
   .tn-block-header {
     display: flex;
     justify-content: space-between;
@@ -228,6 +240,28 @@ const expandedStyles = `
   @keyframes tn-pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.3; }
+  }
+  .tn-awaiting-input-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: rgba(234, 179, 8, 0.15);
+    animation: tn-pulse 2s ease-in-out infinite;
+  }
+  .tn-awaiting-input-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #eab308;
+    flex-shrink: 0;
+  }
+  .tn-awaiting-input-label {
+    font-size: 9px;
+    font-weight: 600;
+    color: #eab308;
+    letter-spacing: 0.5px;
   }
   .tn-block-output {
     color: #9ca3af;

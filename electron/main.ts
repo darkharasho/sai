@@ -19,6 +19,11 @@ if (process.env.SAI_USER_DATA_DIR) {
   app.setPath('userData', process.env.SAI_USER_DATA_DIR);
 }
 
+// Enable remote debugging when requested (npm run dev:debug)
+if (process.env.SAI_REMOTE_DEBUG) {
+  app.commandLine.appendSwitch('remote-debugging-port', process.env.SAI_REMOTE_DEBUG);
+}
+
 let mainWindow: BrowserWindow | null = null;
 
 const THEME_TITLEBAR: Record<string, { color: string; symbolColor: string; bg: string }> = {

@@ -291,6 +291,48 @@ describe('BlockSegmenter', () => {
     expect(blocks[0].output).toContain('icmp_seq=0');
   });
 
+  it('streams partial line output for interactive commands waiting for input', () => {
+    const seg = new BlockSegmenter();
+    const outputs: string[] = [];
+    seg.onOutput((output) => outputs.push(output));
+
+    // Initial prompt
+    seg.feed('user@host:~$ ');
+    expect(outputs).toHaveLength(0);
+
+    // User runs an interactive command
+    seg.feed('user@host:~$ flatpak install flathub com.example.app\n');
+    // Just the echoed command, no output yet
+    expect(outputs).toHaveLength(0);
+
+    // Command produces output ending with an input prompt (no trailing newline)
+    seg.feed('Looking for matches…\n');
+    expect(outputs.length).toBeGreaterThanOrEqual(1);
+    expect(outputs[outputs.length - 1]).toContain('Looking for matches');
+
+    // Interactive prompt arrives as partial line (no \n) — should still stream
+    seg.feed('Which remote? [1-2]: ');
+    expect(outputs[outputs.length - 1]).toContain('Which remote?');
+  });
+
+  it('streams output arriving only as partial lines (carriage return without newline)', () => {
+    const seg = new BlockSegmenter();
+    const outputs: string[] = [];
+    seg.onOutput((output) => outputs.push(output));
+
+    // Initial prompt
+    seg.feed('user@host:~$ ');
+
+    // Command echo
+    seg.feed('user@host:~$ some-command\n');
+    expect(outputs).toHaveLength(0);
+
+    // Output arrives as partial line only (no newline, e.g. a prompt)
+    seg.feed('Enter password: ');
+    expect(outputs.length).toBeGreaterThanOrEqual(1);
+    expect(outputs[outputs.length - 1]).toContain('Enter password');
+  });
+
   it('does not stream output before first prompt is seen', () => {
     const seg = new BlockSegmenter();
     const outputs: string[] = [];

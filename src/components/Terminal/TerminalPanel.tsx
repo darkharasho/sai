@@ -246,26 +246,35 @@ export default function TerminalPanel({
     }
   }, [projectPath, activeTerminalId, terminalTabs]);
 
-  // Poll process names every 3 seconds when active
+  // Track which tabs are awaiting user input
+  const [awaitingInput, setAwaitingInput] = useState<Record<number, boolean>>({});
+
+  // Poll process names and awaiting-input state every 3 seconds when active
   useEffect(() => {
     if (!isActive) return;
 
     const poll = async () => {
-      const updates: Record<number, string> = {};
+      const nameUpdates: Record<number, string> = {};
+      const inputUpdates: Record<number, boolean> = {};
       for (const tab of terminalTabs) {
         if (tab.id <= 0) continue; // no PTY assigned yet
         try {
-          const name: string = await window.sai.terminalGetProcess(tab.id);
-          if (name) updates[tab.uid] = name;
+          const [name, awaiting]: [string, boolean] = await Promise.all([
+            window.sai.terminalGetProcess(tab.id),
+            window.sai.terminalIsAwaitingInput(tab.id),
+          ]);
+          if (name) nameUpdates[tab.uid] = name;
+          inputUpdates[tab.uid] = awaiting;
         } catch {
           // ignore
         }
       }
-      setProcessNames(prev => ({ ...prev, ...updates }));
+      setProcessNames(prev => ({ ...prev, ...nameUpdates }));
+      setAwaitingInput(prev => ({ ...prev, ...inputUpdates }));
     };
 
     poll();
-    const interval = setInterval(poll, 3000);
+    const interval = setInterval(poll, 2000);
     return () => clearInterval(interval);
   }, [isActive, terminalTabs]);
 
@@ -317,6 +326,7 @@ export default function TerminalPanel({
   // ── Render ─────────────────────────────────────────────────────────────────
 
   const multiTab = terminalTabs.length > 1;
+  const activeAwaiting = activeTerminalId !== null && awaitingInput[activeTerminalId];
 
   // Build a stable key for each TerminalInstance — uses uid (never changes) + restart counter
   const instanceKey = (tab: TerminalTab) => `${tab.uid}-${restartKeys.get(tab.uid) ?? 0}`;
@@ -324,7 +334,15 @@ export default function TerminalPanel({
   return (
     <div className="terminal-panel">
       <div className="terminal-header">
-        <span>TERMINAL</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          TERMINAL
+          {activeAwaiting && (
+            <span className="terminal-awaiting-badge" title="Waiting for input">
+              <span className="terminal-awaiting-dot" />
+              <span className="terminal-awaiting-label">INPUT</span>
+            </span>
+          )}
+        </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <button
             className="terminal-restart-btn"
@@ -389,6 +407,7 @@ export default function TerminalPanel({
                       className="terminal-tab-label"
                       onDoubleClick={e => { e.stopPropagation(); startRename(tab); }}
                     >
+                      {awaitingInput[tab.uid] && <span className="terminal-awaiting-dot terminal-tab-dot" />}
                       {tab.order}: {label}
                     </span>
                   )}
@@ -550,6 +569,39 @@ export default function TerminalPanel({
           align-items: center;
           justify-content: center;
           z-index: 10;
+        }
+        @keyframes awaiting-pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.3; }
+        }
+        .terminal-awaiting-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          padding: 1px 6px;
+          border-radius: 3px;
+          background: rgba(234, 179, 8, 0.15);
+          animation: awaiting-pulse 2s ease-in-out infinite;
+        }
+        .terminal-awaiting-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: #eab308;
+          display: inline-block;
+          flex-shrink: 0;
+        }
+        .terminal-awaiting-label {
+          font-size: 9px;
+          font-weight: 600;
+          color: #eab308;
+          letter-spacing: 0.5px;
+        }
+        .terminal-tab-dot {
+          width: 5px;
+          height: 5px;
+          margin-right: 4px;
+          animation: awaiting-pulse 2s ease-in-out infinite;
         }
         .terminal-confirm-dialog {
           background: var(--bg-mid);

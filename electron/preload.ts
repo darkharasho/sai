@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('sai', {
   terminalResize: (id: number, cols: number, rows: number) => ipcRenderer.send('terminal:resize', id, cols, rows),
   terminalGetProcess: (id: number) => ipcRenderer.invoke('terminal:getProcess', id),
   terminalGetCwd: (id: number) => ipcRenderer.invoke('terminal:getCwd', id),
+  terminalIsAwaitingInput: (id: number) => ipcRenderer.invoke('terminal:isAwaitingInput', id),
   terminalTabComplete: (text: string, cwd: string) => ipcRenderer.invoke('terminal:tabComplete', text, cwd),
   terminalKill: (id: number) => ipcRenderer.send('terminal:kill', id),
   terminalGetShellHistory: (count: number) => ipcRenderer.invoke('terminal:getShellHistory', count),

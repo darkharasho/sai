@@ -15,7 +15,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "npx playwright test",
-    "dev:update": "node scripts/fake-update.js && vite"
+    "dev:update": "node scripts/fake-update.js && vite",
+    "dev:debug": "SAI_REMOTE_DEBUG=9222 vite"
   },
   "build": {
     "appId": "com.sai.app",

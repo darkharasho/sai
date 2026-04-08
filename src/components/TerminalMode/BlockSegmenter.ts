@@ -63,6 +63,18 @@ export class BlockSegmenter {
     return this._currentPrompt;
   }
 
+  get seenFirstPrompt(): boolean {
+    return this._seenFirstPrompt;
+  }
+
+  /** Bootstrap the segmenter when the initial prompt was missed (IPC race). */
+  bootstrapPrompt(): void {
+    if (!this._seenFirstPrompt) {
+      this._seenFirstPrompt = true;
+      this._startTime = Date.now();
+    }
+  }
+
   feed(rawData: string): void {
     // Check for alt screen sequences BEFORE stripping ANSI
     if (rawData.includes(ALT_SCREEN_ENTER)) {
@@ -104,8 +116,10 @@ export class BlockSegmenter {
     // or the last completed line (some shells send the prompt with a trailing newline)
     this._checkForPrompt();
 
-    // Emit streaming output for in-progress commands
-    if (this._seenFirstPrompt && this._pendingLines.length > 1) {
+    // Emit streaming output for in-progress commands.
+    // Use >= 1 (not > 1) because output may arrive as partial lines (\r without \n)
+    // which accumulate in _partialLine rather than _pendingLines.
+    if (this._seenFirstPrompt && this._pendingLines.length >= 1) {
       const outputLines = this._pendingLines.slice(1);
       const partialSuffix = this._partialLine ? '\n' + this._partialLine : '';
       const output = outputLines
