@@ -50,6 +50,7 @@ const { mockIpcMain, mockSimpleGit, mockGitInstance, mockFsPromises } = vi.hoist
     checkout: vi.fn(),
     checkoutLocalBranch: vi.fn(),
     diff: vi.fn(),
+    env: vi.fn(function (this: unknown) { return this; }),
   };
 
   const mockSimpleGit = vi.fn(() => mockGitInstance);
@@ -175,7 +176,7 @@ describe('git:status', () => {
 
     await mockIpcMain._invoke('git:status', '/my/repo');
 
-    expect(mockSimpleGit).toHaveBeenCalledWith('/my/repo');
+    expect(mockSimpleGit).toHaveBeenCalledWith({ baseDir: '/my/repo', binary: 'git' });
   });
 });
 
