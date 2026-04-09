@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { ChevronDown, LocateFixed } from 'lucide-react';
+import { ChevronDown, CornerLeftUp } from 'lucide-react';
 import ThinkingAnimation from '../ThinkingAnimation';
 
 function ContextMeter({ used, total }: { used: number; total: number }) {
@@ -811,7 +811,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
     return () => {
       cleanup();
-      if (streamingIdleTimer.current) { clearTimeout(streamingIdleTimer.current); streamingIdleTimer.current = null; }
     };
   }, [projectPath, aiProvider]);
 
@@ -914,10 +913,24 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const userMessages = useMemo(
-    () => messages.filter(m => m.role === 'user'),
+  const lastUserMessage = useMemo(
+    () => [...messages].reverse().find(m => m.role === 'user') ?? null,
     [messages]
   );
+
+  // Show pinned prompt bar when the last user message scrolls out of view
+  useEffect(() => {
+    const el = lastUserMessage ? userMsgRefs.current.get(lastUserMessage.id) : null;
+    const container = chatContainerRef.current;
+    if (!el || !container) { setPinnedUserMessage(null); return; }
+    setPinnedUserMessage(null);
+    const observer = new IntersectionObserver(
+      ([entry]) => setPinnedUserMessage(entry.isIntersecting ? null : lastUserMessage),
+      { root: container, threshold: 0 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [lastUserMessage?.id]);
 
   const handleScroll = () => {
     const el = chatContainerRef.current;
@@ -927,17 +940,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       isAtBottomRef.current = true;
       setShowNewMessages(false);
     }
-    // Find the nearest user message scrolled above the visible area to pin
-    const containerTop = el.getBoundingClientRect().top;
-    let pinTarget: ChatMessageType | null = null;
-    for (let i = userMessages.length - 1; i >= 0; i--) {
-      const dom = userMsgRefs.current.get(userMessages[i].id);
-      if (dom && dom.getBoundingClientRect().bottom < containerTop) {
-        pinTarget = userMessages[i];
-        break;
-      }
-    }
-    setPinnedUserMessage(pinTarget);
   };
 
   const visibleMessages = useMemo(
@@ -1040,7 +1042,9 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   return (
     <div className="chat-panel">
       {pinnedUserMessage && (
-        <div className="pinned-prompt-bar">
+        <div className="pinned-prompt-bar" key={pinnedUserMessage.id}>
+          <div className="pinned-prompt-accent" />
+          <span className="pinned-prompt-label">You</span>
           <span className="pinned-prompt-text">{pinnedUserMessage.content}</span>
           <button
             className="pinned-prompt-jump"
@@ -1051,7 +1055,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             }}
             title="Jump to message"
           >
-            <LocateFixed size={12} />
+            <CornerLeftUp size={11} strokeWidth={2.5} />
+            <span>Jump</span>
           </button>
         </div>
       )}
@@ -1177,42 +1182,78 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         .new-messages-btn:hover {
           color: var(--text);
         }
+        @keyframes pinned-slide-in {
+          from { opacity: 0; transform: translateY(-100%); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
         .pinned-prompt-bar {
           flex-shrink: 0;
-          padding: 5px 16px;
+          padding: 0 16px 0 0;
           border-bottom: 1px solid var(--border);
-          background: var(--bg-primary);
+          background: color-mix(in srgb, var(--bg-secondary) 80%, transparent);
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
           display: flex;
-          align-items: center;
+          align-items: baseline;
+          gap: 8px;
           min-width: 0;
+          height: 32px;
+          animation: pinned-slide-in 0.2s ease-out;
+        }
+        .pinned-prompt-accent {
+          width: 3px;
+          align-self: stretch;
+          background: var(--accent);
+          border-radius: 0 2px 2px 0;
+          opacity: 0.7;
+          flex-shrink: 0;
+        }
+        .pinned-prompt-label {
+          flex-shrink: 0;
+          font-size: 11px;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+          line-height: 32px;
+          color: var(--accent);
+          opacity: 0.8;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
+          padding-left: 4px;
         }
         .pinned-prompt-text {
           flex: 1;
-          font-size: 12px;
-          color: var(--text-muted);
-          opacity: 0.6;
+          font-size: 11px;
+          line-height: 32px;
+          color: var(--text-secondary);
+          opacity: 0.7;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
           font-family: 'Geist Mono', 'JetBrains Mono', monospace;
+          min-width: 0;
         }
         .pinned-prompt-jump {
           flex-shrink: 0;
           background: none;
-          border: none;
+          border: 1px solid transparent;
           color: var(--text-muted);
-          opacity: 0.4;
           cursor: pointer;
-          padding: 2px;
-          margin-left: 8px;
+          padding: 3px 8px;
+          margin-left: auto;
           display: flex;
           align-items: center;
-          border-radius: 3px;
-          transition: opacity 0.15s;
+          gap: 4px;
+          border-radius: 6px;
+          font-size: 10px;
+          font-weight: 500;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
+          letter-spacing: 0.02em;
+          transition: all 0.15s ease;
         }
         .pinned-prompt-jump:hover {
-          opacity: 1;
           color: var(--accent);
+          background: color-mix(in srgb, var(--accent) 10%, transparent);
+          border-color: color-mix(in srgb, var(--accent) 25%, transparent);
         }
         .chat-messages {
           flex: 1;
