@@ -913,24 +913,35 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const lastUserMessage = useMemo(
-    () => [...messages].reverse().find(m => m.role === 'user') ?? null,
+  const userMessages = useMemo(
+    () => messages.filter(m => m.role === 'user'),
     [messages]
   );
 
-  // Show pinned prompt bar when the last user message scrolls out of view
+  // Track whether the last user message is out of view (reliable via IntersectionObserver)
+  const lastUserOutOfView = useRef(false);
   useEffect(() => {
-    const el = lastUserMessage ? userMsgRefs.current.get(lastUserMessage.id) : null;
+    const last = userMessages[userMessages.length - 1];
+    const el = last ? userMsgRefs.current.get(last.id) : null;
     const container = chatContainerRef.current;
-    if (!el || !container) { setPinnedUserMessage(null); return; }
+    if (!el || !container) { lastUserOutOfView.current = false; setPinnedUserMessage(null); return; }
+    lastUserOutOfView.current = false;
     setPinnedUserMessage(null);
     const observer = new IntersectionObserver(
-      ([entry]) => setPinnedUserMessage(entry.isIntersecting ? null : lastUserMessage),
+      ([entry]) => {
+        lastUserOutOfView.current = !entry.isIntersecting;
+        if (entry.isIntersecting) {
+          setPinnedUserMessage(null);
+        } else {
+          // Initial trigger — pin the last user message; handleScroll refines from here
+          setPinnedUserMessage(last);
+        }
+      },
       { root: container, threshold: 0 }
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [lastUserMessage?.id]);
+  }, [userMessages[userMessages.length - 1]?.id]);
 
   const handleScroll = () => {
     const el = chatContainerRef.current;
@@ -940,6 +951,18 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       isAtBottomRef.current = true;
       setShowNewMessages(false);
     }
+    // Update which user message is pinned as user scrolls through conversation
+    if (!lastUserOutOfView.current) return;
+    const containerTop = el.getBoundingClientRect().top;
+    let pinTarget: ChatMessageType | null = null;
+    for (let i = userMessages.length - 1; i >= 0; i--) {
+      const dom = userMsgRefs.current.get(userMessages[i].id);
+      if (dom && dom.getBoundingClientRect().bottom < containerTop) {
+        pinTarget = userMessages[i];
+        break;
+      }
+    }
+    if (pinTarget) setPinnedUserMessage(pinTarget);
   };
 
   const visibleMessages = useMemo(
