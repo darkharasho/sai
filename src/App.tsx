@@ -88,20 +88,6 @@ function WelcomeTypewriter() {
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<'default' | 'terminal-mode'>('default');
-  const [terminalModeActivated, setTerminalModeActivated] = useState(false);
-
-  // Terminal tabs state
-  const [termTabs, setTermTabs] = useState<{ id: string; name: string; createdAt: number }[]>([
-    { id: crypto.randomUUID(), name: 'Tab 1', createdAt: Date.now() },
-  ]);
-  const [activeTermTabId, setActiveTermTabId] = useState<string>(() => '');
-
-  // Initialize activeTermTabId from first tab
-  useEffect(() => {
-    if (termTabs.length > 0 && !termTabs.find(t => t.id === activeTermTabId)) {
-      setActiveTermTabId(termTabs[0].id);
-    }
-  }, [termTabs, activeTermTabId]);
 
   const [activeProjectPath, setActiveProjectPath] = useState<string>('');
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
@@ -195,6 +181,7 @@ export default function App() {
   const getWorkspace = useCallback((path: string): WorkspaceContext => {
     const existing = workspaces.get(path);
     if (existing) return existing;
+    const defaultTab = { id: crypto.randomUUID(), name: 'Tab 1', createdAt: Date.now() };
     return {
       projectPath: path,
       sessions: loadSessions(path),
@@ -206,6 +193,9 @@ export default function App() {
       activeTerminalId: null,
       status: 'recent',
       lastActivity: Date.now(),
+      termModeActivated: false,
+      termModeTabs: [defaultTab],
+      termModeActiveTabId: defaultTab.id,
     };
   }, [workspaces]);
 
@@ -214,6 +204,7 @@ export default function App() {
   const updateWorkspace = useCallback((path: string, updater: (ws: WorkspaceContext) => WorkspaceContext) => {
     setWorkspaces(prev => {
       const next = new Map(prev);
+      const defaultTab = { id: crypto.randomUUID(), name: 'Tab 1', createdAt: Date.now() };
       const current = next.get(path) || {
         projectPath: path,
         sessions: loadSessions(path),
@@ -225,11 +216,45 @@ export default function App() {
         activeTerminalId: null,
         status: 'active' as const,
         lastActivity: Date.now(),
+        termModeActivated: false,
+        termModeTabs: [defaultTab],
+        termModeActiveTabId: defaultTab.id,
       };
       next.set(path, updater(current));
       return next;
     });
   }, []);
+
+  // Derived terminal mode state from active workspace
+  const terminalModeActivated = activeWorkspace?.termModeActivated ?? false;
+  const termTabs = activeWorkspace?.termModeTabs ?? [];
+  const activeTermTabId = activeWorkspace?.termModeActiveTabId ?? '';
+
+  // Workspace-aware setters for terminal mode state
+  const setTerminalModeActivated = useCallback((v: boolean) => {
+    if (!activeProjectPath) return;
+    updateWorkspace(activeProjectPath, ws => ({ ...ws, termModeActivated: v }));
+  }, [activeProjectPath, updateWorkspace]);
+
+  const setTermTabs = useCallback((updater: (prev: { id: string; name: string; createdAt: number }[]) => { id: string; name: string; createdAt: number }[]) => {
+    if (!activeProjectPath) return;
+    updateWorkspace(activeProjectPath, ws => ({ ...ws, termModeTabs: updater(ws.termModeTabs) }));
+  }, [activeProjectPath, updateWorkspace]);
+
+  const setActiveTermTabId = useCallback((id: string) => {
+    if (!activeProjectPath) return;
+    updateWorkspace(activeProjectPath, ws => ({ ...ws, termModeActiveTabId: id }));
+  }, [activeProjectPath, updateWorkspace]);
+
+  // Sync activeTermTabId when tabs change
+  useEffect(() => {
+    if (!activeProjectPath || !activeWorkspace) return;
+    const tabs = activeWorkspace.termModeTabs;
+    const activeId = activeWorkspace.termModeActiveTabId;
+    if (tabs.length > 0 && !tabs.find(t => t.id === activeId)) {
+      updateWorkspace(activeProjectPath, ws => ({ ...ws, termModeActiveTabId: ws.termModeTabs[0]?.id ?? '' }));
+    }
+  }, [activeProjectPath, activeWorkspace, updateWorkspace]);
 
   // uid is the stable identity for tabs (used for React keys, activeTerminalId).
   // id is the PTY ID assigned when the terminal process is created.
@@ -467,6 +492,7 @@ export default function App() {
         migrateLegacySessions(cwd);
         const sessions = loadSessions(cwd);
         setActiveProjectPath(cwd);
+        const defaultTab = { id: crypto.randomUUID(), name: 'Tab 1', createdAt: Date.now() };
         setWorkspaces(new Map([[cwd, {
           projectPath: cwd,
           sessions,
@@ -478,6 +504,9 @@ export default function App() {
           activeTerminalId: null,
           status: 'active',
           lastActivity: Date.now(),
+          termModeActivated: false,
+          termModeTabs: [defaultTab],
+          termModeActiveTabId: defaultTab.id,
         }]]));
       }
     });
@@ -813,7 +842,7 @@ export default function App() {
     const tab = { id: crypto.randomUUID(), name: `Tab ${num}`, createdAt: Date.now() };
     setTermTabs(prev => [...prev, tab]);
     setActiveTermTabId(tab.id);
-  }, [termTabs.length]);
+  }, [termTabs.length, setTermTabs, setActiveTermTabId]);
 
   const closeTermTab = useCallback((tabId: string) => {
     setTermTabs(prev => {
@@ -830,11 +859,11 @@ export default function App() {
       }
       return next;
     });
-  }, [activeTermTabId]);
+  }, [activeTermTabId, setTermTabs, setActiveTermTabId]);
 
   const renameTermTab = useCallback((tabId: string, name: string) => {
     setTermTabs(prev => prev.map(t => t.id === tabId ? { ...t, name } : t));
-  }, []);
+  }, [setTermTabs]);
 
   const handleFileOpen = useCallback(async (filePath: string, line?: number) => {
     if (!activeProjectPath) return;
@@ -967,24 +996,18 @@ export default function App() {
       // Ctrl+Tab / Ctrl+PageDown — next tab
       if ((e.key === 'Tab' && !e.shiftKey) || e.key === 'PageDown') {
         e.preventDefault();
-        setTermTabs(current => {
-          const idx = current.findIndex(t => t.id === activeTermTabId);
-          const next = current[(idx + 1) % current.length];
-          setActiveTermTabId(next.id);
-          return current;
-        });
+        const idx = termTabs.findIndex(t => t.id === activeTermTabId);
+        const next = termTabs[(idx + 1) % termTabs.length];
+        if (next) setActiveTermTabId(next.id);
         return;
       }
 
       // Ctrl+Shift+Tab / Ctrl+PageUp — previous tab
       if ((e.key === 'Tab' && e.shiftKey) || e.key === 'PageUp') {
         e.preventDefault();
-        setTermTabs(current => {
-          const idx = current.findIndex(t => t.id === activeTermTabId);
-          const prev = current[(idx - 1 + current.length) % current.length];
-          setActiveTermTabId(prev.id);
-          return current;
-        });
+        const idx = termTabs.findIndex(t => t.id === activeTermTabId);
+        const prev = termTabs[(idx - 1 + termTabs.length) % termTabs.length];
+        if (prev) setActiveTermTabId(prev.id);
         return;
       }
 
@@ -992,30 +1015,28 @@ export default function App() {
       if (e.key >= '1' && e.key <= '9') {
         e.preventDefault();
         const n = parseInt(e.key) - 1;
-        setTermTabs(current => {
-          if (n < current.length) {
-            setActiveTermTabId(current[n].id);
-          }
-          return current;
-        });
+        if (n < termTabs.length) {
+          setActiveTermTabId(termTabs[n].id);
+        }
         return;
       }
     };
 
     window.addEventListener('keydown', handleTabHotkey, true);
     return () => window.removeEventListener('keydown', handleTabHotkey, true);
-  }, [activeView, activeTermTabId, createTermTab, closeTermTab]);
+  }, [activeView, activeTermTabId, termTabs, setActiveTermTabId, createTermTab, closeTermTab]);
 
   const handleProjectSwitch = useCallback((newPath: string) => {
-    // Always exit terminal mode when selecting a workspace
-    setActiveView('default');
     if (newPath === activeProjectPath) return;
+    const targetWs = workspaces.get(newPath);
+    setActiveView(targetWs?.termModeActivated ? 'terminal-mode' : 'default');
     window.sai.openRecentProject(newPath);
     migrateLegacySessions(newPath);
     const sessions = loadSessions(newPath);
     setWorkspaces(prev => {
       const next = new Map(prev);
       if (!next.has(newPath)) {
+        const defaultTab = { id: crypto.randomUUID(), name: 'Tab 1', createdAt: Date.now() };
         next.set(newPath, {
           projectPath: newPath,
           sessions,
@@ -1027,6 +1048,9 @@ export default function App() {
           activeTerminalId: null,
           status: 'active',
           lastActivity: Date.now(),
+          termModeActivated: false,
+          termModeTabs: [defaultTab],
+          termModeActiveTabId: defaultTab.id,
         });
       } else {
         const ws = next.get(newPath)!;
@@ -1046,7 +1070,7 @@ export default function App() {
       next.delete(newPath);
       return next;
     });
-  }, [activeProjectPath]);
+  }, [activeProjectPath, workspaces]);
 
   const handlePaletteCommand = useCallback((command: string) => {
     if (command === 'clear' && activeProjectPath) {
