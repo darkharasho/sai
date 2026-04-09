@@ -204,8 +204,9 @@ export default function App() {
   const updateWorkspace = useCallback((path: string, updater: (ws: WorkspaceContext) => WorkspaceContext) => {
     setWorkspaces(prev => {
       const next = new Map(prev);
-      const defaultTab = { id: crypto.randomUUID(), name: 'Tab 1', createdAt: Date.now() };
-      const current = next.get(path) || {
+      const current = next.get(path) || (() => {
+        const defaultTab = { id: crypto.randomUUID(), name: 'Tab 1', createdAt: Date.now() };
+        return {
         projectPath: path,
         sessions: loadSessions(path),
         activeSession: createSession(),
@@ -220,6 +221,7 @@ export default function App() {
         termModeTabs: [defaultTab],
         termModeActiveTabId: defaultTab.id,
       };
+      })();
       next.set(path, updater(current));
       return next;
     });
@@ -246,15 +248,15 @@ export default function App() {
     updateWorkspace(activeProjectPath, ws => ({ ...ws, termModeActiveTabId: id }));
   }, [activeProjectPath, updateWorkspace]);
 
-  // Sync activeTermTabId when tabs change
+  // Sync activeTermTabId when tabs change (use primitive deps to avoid infinite loops)
+  const termTabIds = termTabs.map(t => t.id).join(',');
   useEffect(() => {
-    if (!activeProjectPath || !activeWorkspace) return;
-    const tabs = activeWorkspace.termModeTabs;
-    const activeId = activeWorkspace.termModeActiveTabId;
-    if (tabs.length > 0 && !tabs.find(t => t.id === activeId)) {
+    if (!activeProjectPath || !termTabIds) return;
+    const ids = termTabIds.split(',');
+    if (ids.length > 0 && !ids.includes(activeTermTabId)) {
       updateWorkspace(activeProjectPath, ws => ({ ...ws, termModeActiveTabId: ws.termModeTabs[0]?.id ?? '' }));
     }
-  }, [activeProjectPath, activeWorkspace, updateWorkspace]);
+  }, [activeProjectPath, termTabIds, activeTermTabId, updateWorkspace]);
 
   // uid is the stable identity for tabs (used for React keys, activeTerminalId).
   // id is the PTY ID assigned when the terminal process is created.
@@ -1171,11 +1173,10 @@ export default function App() {
   const toggleSidebar = (id: string) => {
     if (id === 'terminal-mode') {
       setActiveView(prev => {
-        if (prev !== 'terminal-mode') {
-          setTerminalModeActivated(true);
-          setSidebarOpen(null);
-        }
-        return prev === 'terminal-mode' ? 'default' : 'terminal-mode';
+        const entering = prev !== 'terminal-mode';
+        setTerminalModeActivated(entering);
+        if (entering) setSidebarOpen(null);
+        return entering ? 'terminal-mode' : 'default';
       });
       return;
     }
