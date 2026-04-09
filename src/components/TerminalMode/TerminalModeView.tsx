@@ -380,8 +380,8 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude', a
     // Listen for PTY data and forward to hidden xterm
     const cleanupData = window.sai.terminalOnData((ptyId: number, data: string) => {
       if (cancelled) return;
-      const expectedId = getActiveTerminalId() ?? fallbackPtyRef.current;
-      if (ptyId === expectedId) {
+      if (ptyId !== fallbackPtyRef.current) return;
+      {
         if (hiddenXtermRef.current) {
           hiddenXtermRef.current.write(data); // feeds both xterm and BlockSegmenter via onData
         } else {
@@ -393,7 +393,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude', a
     });
 
     // Create fallback PTY
-    const ptyPromise = window.sai.terminalCreate(projectPath).then((id: number) => {
+    const ptyPromise = window.sai.terminalCreate(projectPath, 'terminal-mode').then((id: number) => {
       if (cancelled) { window.sai.terminalKill(id); return id; }
       fallbackPtyRef.current = id;
       setPtyId(id);
@@ -424,7 +424,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude', a
     // If the initial prompt was missed (IPC race on startup), bootstrap the
     // segmenter so it can stream output for this command.
     segmenterRef.current.bootstrapPrompt();
-    let termId = getActiveTerminalId() ?? fallbackPtyRef.current;
+    let termId = fallbackPtyRef.current;
     if (termId === null && fallbackPtyReadyRef.current) {
       termId = await fallbackPtyReadyRef.current;
     }
