@@ -17,9 +17,9 @@ const MAX_OUTPUT_LINES = 12;
 function parseToolError(output: string): { isToolError: boolean; message: string } {
   const stripped = output.trim();
   // Match <tool_error>...</tool_error> or <error>...</error>
-  const tagMatch = stripped.match(/^<(?:tool_error|error)>([\s\S]*?)<\/(?:tool_error|error)>$/);
+  const tagMatch = stripped.match(/^<(?:tool_use_error|tool_error|error)>([\s\S]*?)<\/(?:tool_use_error|tool_error|error)>$/);
   if (tagMatch) return { isToolError: true, message: tagMatch[1].trim() };
-  // Match tool_use_error in the string
+  // Match tool_use_error in the string (fallback for non-tag format)
   if (/tool_use_error/i.test(stripped)) {
     return { isToolError: true, message: stripped.replace(/tool_use_error[:\s]*/i, '').trim() || stripped };
   }

@@ -431,7 +431,7 @@ function TodoListView({ input }: { input: string }) {
 /** Detect and strip <tool_error>, <error>, or tool_use_error wrapper tags from output */
 function parseToolError(output: string): { isToolError: boolean; message: string } {
   const stripped = output.trim();
-  const tagMatch = stripped.match(/^<(?:tool_error|error)>([\s\S]*?)<\/(?:tool_error|error)>$/);
+  const tagMatch = stripped.match(/^<(?:tool_use_error|tool_error|error)>([\s\S]*?)<\/(?:tool_use_error|tool_error|error)>$/);
   if (tagMatch) return { isToolError: true, message: tagMatch[1].trim() };
   if (/tool_use_error/i.test(stripped)) {
     return { isToolError: true, message: stripped.replace(/tool_use_error[:\s]*/i, '').trim() || stripped };
