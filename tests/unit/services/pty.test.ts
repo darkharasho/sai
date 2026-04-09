@@ -412,7 +412,7 @@ describe('terminal:create', () => {
   });
 
   it('does not register terminal-mode PTYs with workspace', async () => {
-    const mockWs = { terminals: new Map(), claudeScopes: new Map() };
+    const mockWs = { terminals: new Map() };
     mockWorkspaceGet.mockReturnValue(mockWs);
     const win = createMockBrowserWindow();
     const { registerTerminalHandlers } = await loadService();
