@@ -1174,8 +1174,7 @@ export default function App() {
     if (id === 'terminal-mode') {
       setActiveView(prev => {
         const entering = prev !== 'terminal-mode';
-        setTerminalModeActivated(entering);
-        if (entering) setSidebarOpen(null);
+        if (entering) { setTerminalModeActivated(true); setSidebarOpen(null); }
         return entering ? 'terminal-mode' : 'default';
       });
       return;
