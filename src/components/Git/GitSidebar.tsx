@@ -248,6 +248,7 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
 
       {/* Commit / push / pull controls */}
       <CommitBox
+        key={projectPath}
         branch={branch}
         ahead={ahead}
         behind={behind}
