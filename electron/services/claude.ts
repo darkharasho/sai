@@ -618,7 +618,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
       args = ['-p', commitPrompt, '--output-format', 'text', '-m', 'flash'];
     } else {
       cmd = 'claude';
-      args = ['-p', commitPrompt, '--output-format', 'text', '--max-turns', '1', '--model', 'haiku', '--no-input'];
+      args = ['-p', commitPrompt, '--output-format', 'text', '--max-turns', '1', '--model', 'haiku'];
     }
 
     return new Promise<string>((resolve) => {
