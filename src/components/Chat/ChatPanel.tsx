@@ -581,17 +581,18 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         return;
       }
 
-
-      // Process exited — turn is fully complete
-      if (msg.type === 'done') {
-        // Ignore stale 'done' from a previous turn (e.g. buffered result flushed late)
-        if (msg.turnSeq != null && msg.turnSeq !== turnSeqRef.current) return;
-        // Consume the turnSeq so a duplicate done (e.g. from exit handler) is rejected
-        turnSeqRef.current = -1;
-
+      // End-of-turn: clear streaming immediately for both 'result' and 'done',
+      // matching App.tsx's workspace busy indicator pattern.
+      if (msg.type === 'result' || msg.type === 'done') {
+        // For 'done', ignore stale messages from a previous turn
+        if (msg.type === 'done' && msg.turnSeq != null && msg.turnSeq !== turnSeqRef.current) return;
+        if (msg.type === 'done') {
+          turnSeqRef.current = -1;
+          onTurnComplete?.();
+        }
         setIsStreaming(false);
-        onTurnComplete?.();
-        return;
+        // Don't return for 'result' — fall through to process usage data below
+        if (msg.type === 'done') return;
       }
 
       if (msg.type === 'process_exit') {
@@ -755,13 +756,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         }
       }
 
-      // Result — final answer for this turn, also has usage data.
-      // Set isStreaming(false) eagerly so the UI updates, but leave turnSeqRef
-      // intact so the subsequent 'done' message also processes (as the
-      // authoritative end-of-turn that fires onTurnComplete).
+      // Result — usage data processing (isStreaming already cleared at top of handler)
       if (msg.type === 'result') {
-
-        setIsStreaming(false);
         // Update context usage
         if (msg.usage) {
           const inputTokens = msg.usage.input_tokens || 0;
