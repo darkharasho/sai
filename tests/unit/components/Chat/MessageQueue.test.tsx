@@ -24,9 +24,9 @@ describe('MessageQueue', () => {
 
   it('shows numbered indices starting at 1', () => {
     render(<MessageQueue queue={mockQueue} onRemove={vi.fn()} />);
-    expect(screen.getByText('1.')).toBeTruthy();
-    expect(screen.getByText('2.')).toBeTruthy();
-    expect(screen.getByText('3.')).toBeTruthy();
+    expect(screen.getByText('1')).toBeTruthy();
+    expect(screen.getByText('2')).toBeTruthy();
+    expect(screen.getByText('3')).toBeTruthy();
   });
 
   it('calls onRemove with correct id when × is clicked', () => {

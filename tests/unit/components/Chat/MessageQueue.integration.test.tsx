@@ -23,9 +23,9 @@ describe('MessageQueue integration', () => {
     rerender(<MessageQueue queue={updated} onRemove={onRemove} />);
 
     // Should renumber to 1, 2
-    expect(screen.getByText('1.')).toBeTruthy();
-    expect(screen.getByText('2.')).toBeTruthy();
-    expect(screen.queryByText('3.')).toBeNull();
+    expect(screen.getByText('1')).toBeTruthy();
+    expect(screen.getByText('2')).toBeTruthy();
+    expect(screen.queryByText('3')).toBeNull();
   });
 
   it('renders nothing after all items removed', () => {
