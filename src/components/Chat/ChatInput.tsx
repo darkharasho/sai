@@ -743,11 +743,22 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
         </div>
       )}
 
-      {/* Context items row */}
+      {pendingApproval && onApprove && onDeny && onAlwaysAllow && (
+        <ApprovalPanel
+          approval={pendingApproval}
+          onApprove={onApprove}
+          onDeny={onDeny}
+          onAlwaysAllow={onAlwaysAllow}
+        />
+      )}
+
+      {/* Context pills - tabs poking out above input-box */}
       {contextItems.length > 0 && (
         <div className="context-row">
           {contextItems.map((ctx, i) => (
             <span key={i} className="context-chip">
+              <span className="chip-ear-l" />
+              <span className="chip-ear-r" />
               {ctx.type === 'image' && ctx.data ? (
                 <img src={ctx.data} alt={ctx.label} className="context-thumb" />
               ) : ctx.type === 'terminal' ? (
@@ -760,15 +771,6 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
             </span>
           ))}
         </div>
-      )}
-
-      {pendingApproval && onApprove && onDeny && onAlwaysAllow && (
-        <ApprovalPanel
-          approval={pendingApproval}
-          onApprove={onApprove}
-          onDeny={onDeny}
-          onAlwaysAllow={onAlwaysAllow}
-        />
       )}
 
       {/* Main input area */}
@@ -1224,25 +1226,94 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
         .ac-label { font-family: 'Geist Mono', 'JetBrains Mono', monospace; font-size: 12px; color: var(--text); }
         .ac-desc { font-size: 11px; color: var(--text-muted); flex: 1; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+        @keyframes chip-sprout {
+          from {
+            opacity: 0;
+            transform: translateY(8px) scaleY(0);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0) scaleY(1);
+          }
+        }
         .context-row {
           display: flex;
           flex-wrap: wrap;
-          gap: 4px;
-          padding: 6px 8px 0;
+          gap: 6px;
+          padding: 0 20px;
+          margin-bottom: -2px;
+          position: relative;
+          z-index: 2;
         }
         .context-chip {
           display: flex;
           align-items: center;
-          gap: 4px;
-          background: var(--bg-hover);
-          border-radius: 4px;
-          padding: 2px 8px;
+          gap: 5px;
+          background: var(--bg-input);
+          border-radius: 10px 10px 0 0;
+          padding: 5px 10px 4px 9px;
           font-size: 11px;
+          font-weight: 500;
           color: var(--text-secondary);
+          letter-spacing: 0.01em;
+          position: relative;
+          transition: color 0.2s ease;
+          animation: chip-sprout 0.25s ease-out both;
+          transform-origin: bottom center;
+        }
+        /* Gradient border on top + sides only */
+        .context-chip::before {
+          content: '';
+          position: absolute;
+          top: -2px;
+          left: -2px;
+          right: -2px;
+          bottom: 0;
+          border-radius: 12px 12px 0 0;
+          padding: 2px 2px 0 2px;
+          background: linear-gradient(135deg, var(--accent) 0%, var(--orange) 20%, var(--red) 50%, var(--orange) 80%, var(--accent) 100%);
+          background-size: 300% 300%;
+          animation: gradient-sweep 20s ease-in-out infinite alternate;
+          -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+          -webkit-mask-composite: xor;
+          mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+          mask-composite: exclude;
+          pointer-events: none;
+          z-index: -1;
+          opacity: 0.7;
+        }
+        .context-chip:hover::before {
+          opacity: 1;
+        }
+        .context-chip:hover {
+          color: var(--text);
+        }
+        .context-chip svg {
+          color: var(--accent);
+          flex-shrink: 0;
+        }
+        /* Inverse rounded ears at bottom corners */
+        .chip-ear-l, .chip-ear-r {
+          position: absolute;
+          bottom: -1px;
+          width: 10px;
+          height: 10px;
+          pointer-events: none;
+          background: transparent;
+        }
+        .chip-ear-l {
+          left: -10px;
+          border-bottom-right-radius: 10px;
+          box-shadow: 5px 0 0 0 var(--bg-input);
+        }
+        .chip-ear-r {
+          right: -10px;
+          border-bottom-left-radius: 10px;
+          box-shadow: -5px 0 0 0 var(--bg-input);
         }
         .context-thumb {
-          width: 20px;
-          height: 20px;
+          width: 18px;
+          height: 18px;
           object-fit: cover;
           border-radius: 3px;
           flex-shrink: 0;
@@ -1253,7 +1324,15 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
           color: var(--text-muted);
           cursor: pointer;
           padding: 0 2px;
-          font-size: 14px;
+          font-size: 13px;
+          line-height: 1;
+          opacity: 0.5;
+          transition: opacity 0.15s, color 0.15s;
+          margin-left: 2px;
+        }
+        .context-remove:hover {
+          opacity: 1;
+          color: var(--accent-hover);
         }
 
         .input-box {
@@ -1371,13 +1450,24 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
         .toolbar-context-chip {
           display: flex;
           align-items: center;
-          gap: 3px;
+          gap: 4px;
           font-size: 11px;
+          font-weight: 500;
           color: var(--text-muted);
-          background: var(--bg-hover);
-          padding: 2px 6px;
-          border-radius: 3px;
+          background: rgba(199, 145, 12, 0.06);
+          border: 1px solid rgba(199, 145, 12, 0.1);
+          padding: 2px 8px;
+          border-radius: 6px;
           white-space: nowrap;
+          transition: all 0.15s ease;
+        }
+        .toolbar-context-chip svg {
+          color: var(--accent);
+          opacity: 0.6;
+        }
+        .toolbar-context-chip:hover {
+          background: rgba(199, 145, 12, 0.1);
+          color: var(--text-secondary);
         }
         .active-file-chip {
           display: flex;

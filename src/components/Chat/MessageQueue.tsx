@@ -12,8 +12,13 @@ export default function MessageQueue({ queue, onRemove }: MessageQueueProps) {
   return (
     <div className="message-queue">
       {queue.map((msg, i) => (
-        <div key={msg.id} className="message-queue-card">
-          <span className="message-queue-index">{i + 1}.</span>
+        <div
+          key={msg.id}
+          className="message-queue-card"
+          style={{ animationDelay: `${i * 40}ms` }}
+        >
+          <span className="message-queue-accent" />
+          <span className="message-queue-index">{i + 1}</span>
           {msg.attachments && (
             <span className="message-queue-attachments">
               {msg.attachments.terminal && <Terminal size={11} />}
@@ -32,38 +37,74 @@ export default function MessageQueue({ queue, onRemove }: MessageQueueProps) {
         </div>
       ))}
       <style>{`
+        @keyframes queue-slide-in {
+          from {
+            opacity: 0;
+            transform: translateY(6px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
         .message-queue {
           display: flex;
           flex-direction: column;
-          gap: 2px;
-          padding: 0 15% 4px;
+          gap: 3px;
+          padding: 0 15% 6px;
           flex-shrink: 0;
         }
         .message-queue-card {
           display: flex;
           align-items: center;
-          background: var(--bg-secondary);
-          border: 1px solid var(--border);
-          border-radius: 4px;
-          padding: 2px 8px;
+          background: rgba(199, 145, 12, 0.04);
+          border: 1px solid rgba(199, 145, 12, 0.1);
+          border-radius: 8px;
+          padding: 0 10px 0 0;
           font-size: 12px;
-          height: 24px;
+          height: 28px;
           color: var(--text-muted);
+          overflow: hidden;
+          animation: queue-slide-in 0.25s ease-out both;
+          transition: background 0.15s ease, border-color 0.15s ease;
+        }
+        .message-queue-card:hover {
+          background: rgba(199, 145, 12, 0.08);
+          border-color: rgba(199, 145, 12, 0.18);
+        }
+        .message-queue-accent {
+          width: 3px;
+          align-self: stretch;
+          background: var(--accent);
+          opacity: 0.4;
+          border-radius: 3px 0 0 3px;
+          flex-shrink: 0;
+          margin-right: 8px;
+          transition: opacity 0.15s ease;
+        }
+        .message-queue-card:hover .message-queue-accent {
+          opacity: 0.7;
         }
         .message-queue-index {
-          opacity: 0.4;
-          margin-right: 6px;
-          font-size: 11px;
-          min-width: 14px;
+          opacity: 0.35;
+          font-size: 10px;
+          font-weight: 600;
+          min-width: 12px;
           flex-shrink: 0;
+          margin-right: 6px;
+          font-variant-numeric: tabular-nums;
         }
         .message-queue-attachments {
           display: flex;
           align-items: center;
           gap: 3px;
-          margin-right: 6px;
+          margin-right: 8px;
+          color: var(--accent);
           opacity: 0.55;
           flex-shrink: 0;
+        }
+        .message-queue-card:hover .message-queue-attachments {
+          opacity: 0.8;
         }
         .message-queue-attach-count {
           font-size: 10px;
@@ -75,21 +116,29 @@ export default function MessageQueue({ queue, onRemove }: MessageQueueProps) {
           white-space: nowrap;
           text-overflow: ellipsis;
           min-width: 0;
+          letter-spacing: 0.01em;
         }
         .message-queue-remove {
           margin-left: 8px;
-          opacity: 0.35;
+          opacity: 0;
           cursor: pointer;
           background: none;
           border: none;
-          color: inherit;
-          padding: 0 2px;
+          color: var(--text-muted);
+          padding: 2px;
           display: flex;
           align-items: center;
           flex-shrink: 0;
+          border-radius: 4px;
+          transition: all 0.15s ease;
+        }
+        .message-queue-card:hover .message-queue-remove {
+          opacity: 0.5;
         }
         .message-queue-remove:hover {
-          opacity: 1;
+          opacity: 1 !important;
+          color: var(--accent-hover);
+          background: rgba(199, 145, 12, 0.1);
         }
       `}</style>
     </div>
