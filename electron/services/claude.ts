@@ -162,10 +162,12 @@ function ensureProcess(
 
         // When suppressForward is true (silent compact), skip IPC forwarding.
         // Allow system messages through (compact notification) but suppress everything else.
-        // When a result arrives, the silent turn is done — clear the flag.
+        // When a result arrives, the silent turn is done — clear both flags so the
+        // next claude:send doesn't see stale busy state.
         if (claude.suppressForward) {
           if (msg.type === 'result') {
             claude.suppressForward = false;
+            claude.busy = false;
           }
           if (msg.type !== 'system') continue;
           // Fall through to forward system messages (e.g. context_compacted)

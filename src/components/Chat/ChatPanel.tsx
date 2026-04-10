@@ -469,6 +469,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const [messages, setMessages] = useState<ChatMessageType[]>(initialMessages || []);
   const emptyPrompt = useMemo(() => EMPTY_PROMPTS[Math.floor(Math.random() * EMPTY_PROMPTS.length)], []);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [messageComplete, setMessageComplete] = useState(false); // true after message_stop, before next streaming_start
   const turnSeqRef = useRef(0); // tracks the active turn's sequence number
   const [ready, setReady] = useState(false);
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
@@ -548,6 +549,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     setIsStreaming(false);
   }, [projectPath, aiProvider]);
 
+
+
   useEffect(() => {
     setReady(false);
     const startFn = aiProvider === 'gemini' ? (window.sai as any).geminiStart : aiProvider === 'codex' ? window.sai.codexStart : window.sai.claudeStart;
@@ -576,6 +579,14 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       if (msg.type === 'streaming_start') {
         if (msg.turnSeq != null) turnSeqRef.current = msg.turnSeq;
         setIsStreaming(true);
+        setMessageComplete(false);
+        return;
+      }
+
+      // message_stop from Claude CLI signals the current message is complete,
+      // even though result/done hasn't arrived yet. Hide thinking animation early.
+      if (msg.type === 'stream_event' && msg.event?.type === 'message_stop') {
+        setMessageComplete(true);
         return;
       }
 
@@ -1106,7 +1117,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             )}
           </>
         )}
-        {isStreaming && (aiProvider === 'gemini'
+        {isStreaming && !messageComplete && (aiProvider === 'gemini'
           ? <GeminiThinkingAnimation loadingPhrases={geminiLoadingPhrases} />
           : aiProvider === 'codex'
           ? <CodexThinkingAnimation />
