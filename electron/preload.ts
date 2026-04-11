@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('sai', {
   codexStart: (cwd: string) => ipcRenderer.invoke('codex:start', cwd),
   codexSend: (projectPath: string, message: string, imagePaths?: string[], permMode?: string, model?: string) => ipcRenderer.send('codex:send', projectPath, message, imagePaths, permMode, model),
   codexStop: (projectPath: string) => ipcRenderer.send('codex:stop', projectPath),
+  codexSetSessionId: (projectPath: string, sessionId: string | undefined) => ipcRenderer.send('codex:setSessionId', projectPath, sessionId),
   // Gemini CLI
   geminiModels: () => ipcRenderer.invoke('gemini:models'),
   geminiStart: (cwd: string) => ipcRenderer.invoke('gemini:start', cwd),

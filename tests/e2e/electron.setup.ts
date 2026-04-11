@@ -53,6 +53,7 @@ export const test = base.extend<{ window: Page }>({
         geminiStart: () => Promise.resolve({ message: 'ready' }),
         geminiSend: () => {},
         geminiStop: () => {},
+        codexSetSessionId: () => {},
         geminiSetSessionId: () => {},
         geminiOnMessage: (_cb: any) => noop(),
         // Terminal

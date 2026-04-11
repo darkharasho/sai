@@ -21,12 +21,14 @@ const {
     stderr: InstanceType<typeof Readable>;
     stdin: InstanceType<typeof Writable>;
     kill: ReturnType<typeof vi.fn>;
+    spawnArgs: string[];
 
     private _stdout: InstanceType<typeof Readable>;
     private _stderr: InstanceType<typeof Readable>;
 
-    constructor() {
+    constructor(args: string[] = []) {
       super();
+      this.spawnArgs = args;
       this._stdout = new Readable({ read() {} });
       this._stderr = new Readable({ read() {} });
       this.stdout = this._stdout;
@@ -51,7 +53,7 @@ const {
   // ---- spawn mock ----
   const spawnProcesses: MockChildProcess[] = [];
   const mockSpawnFn = vi.fn((_cmd: string, _args?: string[], _opts?: object) => {
-    const proc = new MockChildProcess();
+    const proc = new MockChildProcess(_args ?? []);
     spawnProcesses.push(proc);
     return proc;
   });
@@ -184,6 +186,7 @@ describe('Codex service', () => {
     ws.codex.busy = false;
     ws.codex.buffer = '';
     ws.codex.cwd = PROJECT;
+    ws.codex.sessionId = undefined;
   });
 
   afterEach(() => {
@@ -480,7 +483,7 @@ describe('Codex service', () => {
       expect(err?.text).toBe('Codex error');
     });
 
-    it('thread.started → emits no events', async () => {
+    it('thread.started → emits session_id and stores thread_id for resume', async () => {
       sendMessage();
       const proc = mockIpcMain.getLatestProcess();
       (mockWin.webContents.send as ReturnType<typeof vi.fn>).mockClear();
@@ -488,7 +491,28 @@ describe('Codex service', () => {
       proc.pushStdout(JSON.stringify({ type: 'thread.started', thread_id: 'abc' }) + '\n');
       await tick();
 
-      expect(collectSentEvents(mockWin)).toHaveLength(0);
+      const events = collectSentEvents(mockWin);
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: 'session_id', sessionId: 'abc', projectPath: PROJECT }),
+      );
+    });
+
+    it('uses exec resume on subsequent turns after thread_id captured', async () => {
+      // First turn — captures thread ID
+      sendMessage();
+      const proc1 = mockIpcMain.getLatestProcess();
+      proc1.pushStdout(JSON.stringify({ type: 'thread.started', thread_id: 'thread-789' }) + '\n');
+      await tick();
+      proc1.pushStdout(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }) + '\n');
+      await tick();
+      proc1.emitExit(0);
+      await tick();
+
+      // Second turn — should use exec resume
+      sendMessage({ message: 'follow up' });
+      const proc2 = mockIpcMain.getLatestProcess();
+      expect(proc2.spawnArgs).toContain('resume');
+      expect(proc2.spawnArgs).toContain('thread-789');
     });
 
     it('unknown event type → emits no events', async () => {

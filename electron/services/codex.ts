@@ -56,7 +56,9 @@ function translateEvent(msg: any, projectPath: string): any[] {
 
   switch (msg.type) {
     case 'thread.started':
-      // Don't emit anything — we handle ready separately
+      if (msg.thread_id) {
+        events.push({ type: 'session_id', sessionId: msg.thread_id, projectPath });
+      }
       break;
 
     case 'turn.started':
@@ -246,6 +248,17 @@ export function registerCodexHandlers(win: BrowserWindow) {
     }
   });
 
+  ipcMain.on('codex:setSessionId', (_event, projectPath: string, sessionId: string | undefined) => {
+    const ws = get(projectPath);
+    if (!ws) return;
+    if (ws.codex.process) {
+      ws.codex.process.kill();
+      ws.codex.process = null;
+      ws.codex.busy = false;
+    }
+    ws.codex.sessionId = sessionId;
+  });
+
   ipcMain.on('codex:send', (_event, projectPath: string, message: string, imagePaths?: string[], permMode?: string, model?: string) => {
     const ws = get(projectPath);
     if (!ws) return;
@@ -263,7 +276,13 @@ export function registerCodexHandlers(win: BrowserWindow) {
       prompt = `${imageRefs}\n\n${message}`;
     }
 
-    const args = ['exec', '--json'];
+    // Use 'exec resume <sessionId> <prompt>' for subsequent turns, 'exec <prompt>' for first turn
+    const args: string[] = [];
+    if (ws.codex.sessionId) {
+      args.push('exec', 'resume', '--json', ws.codex.sessionId);
+    } else {
+      args.push('exec', '--json');
+    }
 
     if (model) {
       args.push('-m', model);
@@ -305,6 +324,10 @@ export function registerCodexHandlers(win: BrowserWindow) {
         if (!line.trim()) continue;
         try {
           const msg = JSON.parse(line);
+          // Capture thread ID for conversation continuity
+          if (msg.type === 'thread.started' && msg.thread_id && !ws.codex.sessionId) {
+            ws.codex.sessionId = msg.thread_id;
+          }
           const events = translateEvent(msg, ws.projectPath);
           for (const ev of events) {
             if (ev.type === 'streaming_start' || ev.type === 'done') ev.turnSeq = ws.codex.turnSeq;
