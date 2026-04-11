@@ -248,15 +248,17 @@ describe('gemini service', () => {
       );
     }
 
-    it('translates init event to streaming_start', async () => {
+    it('ignores init event (streaming_start comes from IPC handler)', async () => {
       sendMessage();
       const proc = mockIpcMain.getLatestProcess();
+      // Clear the streaming_start sent by the IPC handler itself
+      (mockWin.webContents.send as ReturnType<typeof vi.fn>).mockClear();
+
       proc.pushStdout(JSON.stringify({ type: 'init' }) + '\n');
       await tick();
 
-      expect(collectSentEvents(mockWin)).toContainEqual(
-        expect.objectContaining({ type: 'streaming_start', projectPath: PROJECT }),
-      );
+      // init should not emit any additional events
+      expect(collectSentEvents(mockWin)).toHaveLength(0);
     });
 
     it('translates assistant message to assistant event with text', async () => {

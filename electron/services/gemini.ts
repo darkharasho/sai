@@ -68,8 +68,7 @@ function translateEvent(msg: any, projectPath: string): any[] {
 
   switch (msg.type) {
     case 'init':
-      // Session metadata — emit streaming_start
-      events.push({ type: 'streaming_start', projectPath });
+      // Session metadata — streaming_start is already sent by the IPC handler
       break;
 
     case 'message': {

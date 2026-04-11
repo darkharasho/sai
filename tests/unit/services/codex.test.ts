@@ -713,11 +713,11 @@ describe('Codex service', () => {
     it('handles a complete JSON line in one chunk', async () => {
       sendMessage();
       const proc = mockIpcMain.getLatestProcess();
-      proc.pushStdout(JSON.stringify({ type: 'turn.started' }) + '\n');
+      proc.pushStdout(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'hi' } }) + '\n');
       await tick();
 
       const types = collectSentEvents(mockWin).map((e: unknown) => (e as { type: string }).type);
-      expect(types).toContain('streaming_start');
+      expect(types).toContain('assistant');
     });
 
     it('handles split lines across chunks', async () => {
@@ -725,7 +725,7 @@ describe('Codex service', () => {
       const proc = mockIpcMain.getLatestProcess();
       (mockWin.webContents.send as ReturnType<typeof vi.fn>).mockClear();
 
-      const full = JSON.stringify({ type: 'turn.started' });
+      const full = JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'hi' } });
       // Push first half without newline — no complete line yet
       proc.pushStdout(full.slice(0, 10));
       await tick();
@@ -735,7 +735,7 @@ describe('Codex service', () => {
       proc.pushStdout(full.slice(10) + '\n');
       await tick();
       const types = collectSentEvents(mockWin).map((e: unknown) => (e as { type: string }).type);
-      expect(types).toContain('streaming_start');
+      expect(types).toContain('assistant');
     });
 
     it('handles multiple complete lines in one chunk', async () => {
@@ -750,7 +750,6 @@ describe('Codex service', () => {
       await tick();
 
       const types = collectSentEvents(mockWin).map((e: unknown) => (e as { type: string }).type);
-      expect(types).toContain('streaming_start');
       expect(types).toContain('assistant');
     });
 

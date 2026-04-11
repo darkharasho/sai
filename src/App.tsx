@@ -1031,7 +1031,10 @@ export default function App() {
   const handleProjectSwitch = useCallback((newPath: string) => {
     if (newPath === activeProjectPath) return;
     const targetWs = workspaces.get(newPath);
-    setActiveView(targetWs?.termModeActivated ? 'terminal-mode' : 'default');
+    // Only leave terminal-mode if the target workspace hasn't activated it
+    if (activeView === 'terminal-mode' && !targetWs?.termModeActivated) {
+      setActiveView('default');
+    }
     window.sai.openRecentProject(newPath);
     migrateLegacySessions(newPath);
     const sessions = loadSessions(newPath);
@@ -1072,7 +1075,7 @@ export default function App() {
       next.delete(newPath);
       return next;
     });
-  }, [activeProjectPath, workspaces]);
+  }, [activeProjectPath, activeView, workspaces]);
 
   const handlePaletteCommand = useCallback((command: string) => {
     if (command === 'clear' && activeProjectPath) {

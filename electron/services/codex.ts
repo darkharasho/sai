@@ -60,7 +60,7 @@ function translateEvent(msg: any, projectPath: string): any[] {
       break;
 
     case 'turn.started':
-      events.push({ type: 'streaming_start', projectPath });
+      // streaming_start is already sent by the IPC handler
       break;
 
     case 'item.started': {
