@@ -1212,8 +1212,9 @@ export default function App() {
   const handleNewChat = () => {
     if (!activeProjectPath) return;
     flushAndPersist(activeProjectPath);
-    // Clear backend session so next message starts fresh
+    // Clear backend sessions so next message starts fresh
     window.sai.claudeSetSessionId(activeProjectPath, undefined);
+    (window.sai as any).geminiSetSessionId(activeProjectPath, undefined);
     updateWorkspace(activeProjectPath, ws => ({
       ...ws,
       activeSession: createSession(),
@@ -1225,8 +1226,9 @@ export default function App() {
     flushAndPersist(activeProjectPath);
     const selected = sessions.find(s => s.id === id);
     if (selected) {
-      // Tell backend to switch to the selected session's Claude session ID
+      // Tell backend to switch to the selected session's provider session IDs
       window.sai.claudeSetSessionId(activeProjectPath, selected.claudeSessionId);
+      (window.sai as any).geminiSetSessionId(activeProjectPath, selected.geminiSessionId);
       // Load messages on demand from separate storage
       const messages = loadSessionMessages(selected.id);
       updateWorkspace(activeProjectPath, ws => ({
@@ -1435,6 +1437,12 @@ export default function App() {
                     updateWorkspace(wsPath, w => ({
                       ...w,
                       activeSession: { ...w.activeSession, claudeSessionId: sessionId },
+                    }));
+                  }}
+                  onGeminiSessionId={(sessionId: string) => {
+                    updateWorkspace(wsPath, w => ({
+                      ...w,
+                      activeSession: { ...w.activeSession, geminiSessionId: sessionId },
                     }));
                   }}
                   onSlashCommandsUpdate={(cmds: string[]) => { slashCommandsRef.current = cmds; }}

@@ -36,12 +36,14 @@ const {
     stderr: InstanceType<typeof Readable>;
     stdin: InstanceType<typeof Writable>;
     kill: ReturnType<typeof vi.fn>;
+    spawnArgs: string[];
 
     private _stdout: InstanceType<typeof Readable>;
     private _stderr: InstanceType<typeof Readable>;
 
-    constructor() {
+    constructor(args: string[] = []) {
       super();
+      this.spawnArgs = args;
       this._stdout = new Readable({ read() {} });
       this._stderr = new Readable({ read() {} });
       this.stdout = this._stdout;
@@ -66,7 +68,7 @@ const {
   // ---- Spawn mock ----
   const spawnProcesses: MockChildProcess[] = [];
   const mockSpawnFn = vi.fn((_cmd: string, _args?: string[], _opts?: object) => {
-    const proc = new MockChildProcess();
+    const proc = new MockChildProcess(_args ?? []);
     spawnProcesses.push(proc);
     return proc;
   });
@@ -193,6 +195,7 @@ describe('gemini service', () => {
     ws.gemini.busy = false;
     ws.gemini.buffer = '';
     ws.gemini.cwd = PROJECT;
+    ws.gemini.sessionId = undefined;
   });
 
   afterEach(() => {
@@ -248,16 +251,48 @@ describe('gemini service', () => {
       );
     }
 
-    it('ignores init event (streaming_start comes from IPC handler)', async () => {
+    it('emits session_id from init event and stores it for resume', async () => {
       sendMessage();
       const proc = mockIpcMain.getLatestProcess();
       // Clear the streaming_start sent by the IPC handler itself
       (mockWin.webContents.send as ReturnType<typeof vi.fn>).mockClear();
 
+      proc.pushStdout(JSON.stringify({ type: 'init', session_id: 'abc-123' }) + '\n');
+      await tick();
+
+      const events = collectSentEvents(mockWin);
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: 'session_id', sessionId: 'abc-123', projectPath: PROJECT }),
+      );
+    });
+
+    it('passes --resume on subsequent turns after session_id captured', async () => {
+      // First turn — captures session ID
+      sendMessage();
+      const proc1 = mockIpcMain.getLatestProcess();
+      proc1.pushStdout(JSON.stringify({ type: 'init', session_id: 'sess-456' }) + '\n');
+      await tick();
+      proc1.pushStdout(JSON.stringify({ type: 'result', status: 'success', stats: { input_tokens: 1, output_tokens: 1 } }) + '\n');
+      await tick();
+      proc1.emitExit(0);
+      await tick();
+
+      // Second turn — should include --resume
+      sendMessage({ message: 'follow up' });
+      const proc2 = mockIpcMain.getLatestProcess();
+      const resumeIdx = proc2.spawnArgs.indexOf('--resume');
+      expect(resumeIdx).toBeGreaterThanOrEqual(0);
+      expect(proc2.spawnArgs[resumeIdx + 1]).toBe('sess-456');
+    });
+
+    it('ignores init event without session_id', async () => {
+      sendMessage();
+      const proc = mockIpcMain.getLatestProcess();
+      (mockWin.webContents.send as ReturnType<typeof vi.fn>).mockClear();
+
       proc.pushStdout(JSON.stringify({ type: 'init' }) + '\n');
       await tick();
 
-      // init should not emit any additional events
       expect(collectSentEvents(mockWin)).toHaveLength(0);
     });
 

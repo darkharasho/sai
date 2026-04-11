@@ -69,6 +69,9 @@ function translateEvent(msg: any, projectPath: string): any[] {
   switch (msg.type) {
     case 'init':
       // Session metadata — streaming_start is already sent by the IPC handler
+      if (msg.session_id) {
+        events.push({ type: 'session_id', sessionId: msg.session_id, projectPath });
+      }
       break;
 
     case 'message': {
@@ -187,6 +190,17 @@ export function registerGeminiHandlers(win: BrowserWindow) {
     }
   });
 
+  ipcMain.on('gemini:setSessionId', (_event, projectPath: string, sessionId: string | undefined) => {
+    const ws = get(projectPath);
+    if (!ws) return;
+    if (ws.gemini.process) {
+      ws.gemini.process.kill();
+      ws.gemini.process = null;
+      ws.gemini.busy = false;
+    }
+    ws.gemini.sessionId = sessionId;
+  });
+
   ipcMain.on('gemini:send', (_event, projectPath: string, message: string, imagePaths?: string[], approvalMode?: string, conversationMode?: string, model?: string) => {
     const ws = get(projectPath);
     if (!ws) return;
@@ -205,6 +219,11 @@ export function registerGeminiHandlers(win: BrowserWindow) {
     }
 
     const args = ['-p', prompt, '--output-format', 'stream-json'];
+
+    // Resume previous session if we have one
+    if (ws.gemini.sessionId) {
+      args.push('--resume', ws.gemini.sessionId);
+    }
 
     // Conversation mode: 'fast' overrides model to flash
     const effectiveModel = conversationMode === 'fast' ? 'flash' : (model || GEMINI_DEFAULT_MODEL);
@@ -239,6 +258,10 @@ export function registerGeminiHandlers(win: BrowserWindow) {
         if (!line.trim()) continue;
         try {
           const msg = JSON.parse(line);
+          // Capture session ID for conversation continuity
+          if (msg.type === 'init' && msg.session_id && !ws.gemini.sessionId) {
+            ws.gemini.sessionId = msg.session_id;
+          }
           const events = translateEvent(msg, ws.projectPath);
           for (const ev of events) {
             if (ev.type === 'streaming_start' || ev.type === 'done') ev.turnSeq = ws.gemini.turnSeq;
