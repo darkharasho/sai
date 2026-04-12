@@ -32,7 +32,7 @@ interface ChatInputProps {
   contextUsage?: { used: number; total: number; inputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; outputTokens: number };
   sessionUsage?: { inputTokens: number; outputTokens: number };
   sessionCost?: number;
-  rateLimits?: Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number; utilization?: number }>;
+  rateLimits?: Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number; utilization?: number; lastUpdated: number }>;
   billingMode?: 'subscription' | 'api';
   activeFilePath?: string | null;
   fileContextEnabled?: boolean;
@@ -880,14 +880,16 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
                       <div className="usage-tooltip-heading">Plan usage limits</div>
                       {sessionLimits.map(rl => {
                         const pct = getRateLimitProgress(rl) * 100;
+                        const isStale = rl.lastUpdated && (Date.now() - rl.lastUpdated) > 120_000;
                         return (
-                          <UsageBar
-                            key={rl.rateLimitType}
-                            pct={pct}
-                            color={pct >= 0 ? getBarColor(pct, false) : 'var(--text-muted)'}
-                            label={getRateLimitLabel(rl.rateLimitType)}
-                            sublabel={`Resets in ${formatResetTime(rl.resetsAt)}`}
-                          />
+                          <div key={rl.rateLimitType} style={isStale ? { opacity: 0.5 } : undefined}>
+                            <UsageBar
+                              pct={pct}
+                              color={pct >= 0 ? getBarColor(pct, false) : 'var(--text-muted)'}
+                              label={getRateLimitLabel(rl.rateLimitType)}
+                              sublabel={isStale ? 'Data may be stale' : `Resets in ${formatResetTime(rl.resetsAt)}`}
+                            />
+                          </div>
                         );
                       })}
                       {overageSource && (() => {
@@ -911,14 +913,16 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
                       <div className="usage-tooltip-heading">Weekly limits</div>
                       {weeklyLimits.map(rl => {
                         const pct = getRateLimitProgress(rl) * 100;
+                        const isStale = rl.lastUpdated && (Date.now() - rl.lastUpdated) > 120_000;
                         return (
-                          <UsageBar
-                            key={rl.rateLimitType}
-                            pct={pct}
-                            color={pct >= 0 ? getBarColor(pct, false) : 'var(--text-muted)'}
-                            label={getRateLimitLabel(rl.rateLimitType)}
-                            sublabel={`Resets ${formatResetTime(rl.resetsAt, 'absolute')}`}
-                          />
+                          <div key={rl.rateLimitType} style={isStale ? { opacity: 0.5 } : undefined}>
+                            <UsageBar
+                              pct={pct}
+                              color={pct >= 0 ? getBarColor(pct, false) : 'var(--text-muted)'}
+                              label={getRateLimitLabel(rl.rateLimitType)}
+                              sublabel={isStale ? 'Data may be stale' : `Resets ${formatResetTime(rl.resetsAt, 'absolute')}`}
+                            />
+                          </div>
                         );
                       })}
                     </div>
