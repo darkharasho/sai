@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { notifyCompletion, notifyApproval } from './notify';
 import { extractCodexCommitMessage } from './commit-message-parser';
+import { ensureGeminiCommitSession, ensureGeminiTransport, promptGeminiText } from './gemini';
 
 const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
 
@@ -425,6 +426,37 @@ export function registerClaudeHandlers(win: BrowserWindow) {
     const ws = get(projectPath);
     if (!ws) return;
     const effectiveScope = scope || 'chat';
+
+    const pendingGemini = ws.gemini?.pendingApproval;
+    if (pendingGemini && pendingGemini.toolUseId === toolUseId && pendingGemini.scope === effectiveScope) {
+      const sessionId = effectiveScope === 'chat'
+        ? ws.gemini?.chatSessionId
+        : ws.gemini?.terminalSessions.get(effectiveScope);
+
+      try {
+        await ws.gemini?.transport?.request('tool/approve', {
+          sessionId,
+          scope: effectiveScope,
+          toolUseId,
+          approved,
+          modifiedCommand,
+        });
+        if (ws.gemini) ws.gemini.pendingApproval = null;
+        safeSend(win, 'claude:message', { type: 'approval_resolved', projectPath: ws.projectPath, scope: effectiveScope });
+        return true;
+      } catch (error: any) {
+        if (ws.gemini) ws.gemini.pendingApproval = null;
+        safeSend(win, 'claude:message', {
+          type: 'error',
+          text: `Gemini approval failed: ${error?.message || 'Unknown error'}`,
+          projectPath: ws.projectPath,
+          scope: effectiveScope,
+        });
+        safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: ws.gemini?.turnSeq });
+        return false;
+      }
+    }
+
     const claude = getClaude(ws, effectiveScope);
     if (!claude.pendingToolUse || !claude.awaitingApproval) return;
 
@@ -607,15 +639,31 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 
     const env = enrichedEnv();
 
+    if (aiProvider === 'gemini') {
+      try {
+        const geminiWs = getOrCreate(effectiveCwd);
+        geminiWs.gemini.cwd = effectiveCwd;
+        await ensureGeminiTransport(win, geminiWs);
+        const sessionId = await ensureGeminiCommitSession(win, geminiWs);
+        const result = await promptGeminiText(win, geminiWs, {
+          sessionId,
+          scope: 'commit',
+          prompt: commitPrompt,
+          approvalMode: 'plan',
+          model: 'gemini-2.5-flash',
+        });
+        return result.trim();
+      } catch {
+        return '';
+      }
+    }
+
     // Spawn the appropriate CLI with its fast model
     let cmd: string;
     let args: string[];
     if (aiProvider === 'codex') {
       cmd = 'codex';
       args = ['exec', '-q', '--json', '-m', 'codex-mini', commitPrompt];
-    } else if (aiProvider === 'gemini') {
-      cmd = 'gemini';
-      args = ['-p', commitPrompt, '--output-format', 'text', '-m', 'flash'];
     } else {
       cmd = 'claude';
       args = ['-p', commitPrompt, '--output-format', 'text', '--max-turns', '1', '--model', 'haiku'];

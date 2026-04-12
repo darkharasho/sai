@@ -2,6 +2,7 @@
 import { ChildProcess } from 'node:child_process';
 import type * as pty from 'node-pty';
 import { BrowserWindow } from 'electron';
+import type { GeminiAcpClient } from './gemini-acp';
 
 export interface PendingToolUse {
   toolName: string;
@@ -44,6 +45,23 @@ export interface WorkspaceGemini {
   cwd: string;
   busy: boolean;
   turnSeq: number;
+  transport: GeminiAcpClient | null;
+  loadedSessionIds: Set<string>;
+  bootstrappedSessionIds: Set<string>;
+  suppressedScopes: Set<string>;
+  chatSessionId: string | undefined;
+  commitSessionId: string | undefined;
+  terminalSessions: Map<string, string>;
+  activeRequestId: string | undefined;
+  availability: 'available' | 'disabled';
+  lastError?: string;
+  pendingApproval: {
+    toolUseId: string;
+    toolName: string;
+    input: Record<string, any>;
+    description?: string;
+    scope: string;
+  } | null;
 }
 
 export interface Workspace {
@@ -109,6 +127,17 @@ export function getOrCreate(projectPath: string): Workspace {
       cwd: projectPath,
       busy: false,
       turnSeq: 0,
+      transport: null,
+      loadedSessionIds: new Set(),
+      bootstrappedSessionIds: new Set(),
+      suppressedScopes: new Set(),
+      chatSessionId: undefined,
+      commitSessionId: undefined,
+      terminalSessions: new Map(),
+      activeRequestId: undefined,
+      availability: 'available',
+      lastError: undefined,
+      pendingApproval: null,
     },
     terminals: new Map(),
     lastActivity: Date.now(),
@@ -170,7 +199,19 @@ export function suspend(projectPath: string, win: BrowserWindow): void {
     ws.gemini.process.kill();
     ws.gemini.process = null;
   }
+  ws.gemini.transport?.dispose();
+  ws.gemini.transport = null;
+  ws.gemini.loadedSessionIds.clear();
+  ws.gemini.bootstrappedSessionIds.clear();
+  ws.gemini.suppressedScopes.clear();
   ws.gemini.busy = false;
+  ws.gemini.chatSessionId = undefined;
+  ws.gemini.commitSessionId = undefined;
+  ws.gemini.terminalSessions.clear();
+  ws.gemini.activeRequestId = undefined;
+  ws.gemini.availability = 'available';
+  ws.gemini.lastError = undefined;
+  ws.gemini.pendingApproval = null;
 
   // Kill all terminals
   for (const term of ws.terminals.values()) {

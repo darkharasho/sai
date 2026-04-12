@@ -16,6 +16,7 @@ export interface ChatSession {
   aiProvider?: 'claude' | 'codex' | 'gemini';
   claudeSessionId?: string;
   codexSessionId?: string;
+  geminiSessionId?: string;
   pinned?: boolean;
   titleEdited?: boolean;
 }
@@ -107,7 +108,11 @@ export interface WorkspaceContext {
 }
 
 declare global {
+  interface SaiBridge extends Record<string, any> {
+    geminiSetSessionId?: (projectPath: string, sessionId: string | undefined, scope?: string) => void;
+  }
+
   interface Window {
-    sai: Record<string, any>;
+    sai: SaiBridge;
   }
 }

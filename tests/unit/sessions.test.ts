@@ -129,6 +129,13 @@ describe('saveSessions / loadSessions', () => {
     expect(loaded.createdAt).toBe(1000);
     expect(loaded.updatedAt).toBe(2000);
   });
+
+  it('preserves geminiSessionId in saved index entries', () => {
+    const session = makeSession({ geminiSessionId: 'gemini-session-123' });
+    saveSessions('/project', [session]);
+    const [loaded] = loadSessions('/project');
+    expect(loaded.geminiSessionId).toBe('gemini-session-123');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -341,6 +348,15 @@ describe('upsertSession', () => {
     const session = makeSession({ messages: [makeMessage()] });
     const result = upsertSession([], session);
     expect(result[0].messages).toEqual([]);
+  });
+
+  it('preserves geminiSessionId on the returned index entry', () => {
+    const session = makeSession({
+      messages: [makeMessage()],
+      geminiSessionId: 'gemini-session-123',
+    });
+    const result = upsertSession([], session);
+    expect(result[0].geminiSessionId).toBe('gemini-session-123');
   });
 });
 

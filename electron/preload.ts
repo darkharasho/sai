@@ -36,8 +36,11 @@ contextBridge.exposeInMainWorld('sai', {
   // Gemini CLI
   geminiModels: () => ipcRenderer.invoke('gemini:models'),
   geminiStart: (cwd: string) => ipcRenderer.invoke('gemini:start', cwd),
-  geminiSend: (projectPath: string, message: string, imagePaths?: string[], approvalMode?: string, conversationMode?: string, model?: string) => ipcRenderer.send('gemini:send', projectPath, message, imagePaths, approvalMode, conversationMode, model),
-  geminiStop: (projectPath: string) => ipcRenderer.send('gemini:stop', projectPath),
+  geminiSend: (projectPath: string, message: string, imagePaths?: string[], approvalMode?: string, conversationMode?: string, model?: string, scope?: string) =>
+    ipcRenderer.send('gemini:send', projectPath, message, imagePaths, approvalMode, conversationMode, model, scope),
+  geminiStop: (projectPath: string, scope?: string) => ipcRenderer.send('gemini:stop', projectPath, scope),
+  geminiSetSessionId: (projectPath: string, sessionId: string | undefined, scope?: string) =>
+    ipcRenderer.send('gemini:setSessionId', projectPath, sessionId, scope),
   claudeOnMessage: (callback: (msg: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, msg: unknown) => callback(msg);
     ipcRenderer.on('claude:message', listener);

@@ -1,53 +1,42 @@
-import { spawn, ChildProcess } from 'node:child_process';
 import { BrowserWindow, ipcMain } from 'electron';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { getOrCreate, get, touchActivity } from './workspace';
+import type { Workspace } from './workspace';
 import { notifyCompletion } from './notify';
+import { createGeminiAcpClient } from './gemini-acp';
 
-/**
- * Build an enriched PATH that includes common locations for nvm/fnm/volta-installed binaries.
- * Electron apps launched from desktop entries don't inherit the user's shell PATH.
- */
 function getEnrichedEnv(): Record<string, string> {
   const env = { ...process.env };
   const home = os.homedir();
   const extraPaths: string[] = [];
-
-  // nvm: scan all installed versions
   const nvmDir = path.join(home, '.nvm', 'versions', 'node');
+
   if (fs.existsSync(nvmDir)) {
     try {
       const versions = fs.readdirSync(nvmDir);
-      for (const v of versions) {
-        extraPaths.push(path.join(nvmDir, v, 'bin'));
+      for (const version of versions) {
+        extraPaths.push(path.join(nvmDir, version, 'bin'));
       }
-    } catch { /* ignore */ }
+    } catch {
+      // Ignore PATH enrichment failures.
+    }
   }
 
-  // Common global bin locations
-  extraPaths.push(
-    path.join(home, '.local', 'bin'),
-    '/usr/local/bin',
-  );
-
-  const currentPath = env.PATH || '';
-  const pathSet = new Set(currentPath.split(':'));
-  const additions = extraPaths.filter(p => !pathSet.has(p));
-  if (additions.length > 0) {
-    env.PATH = currentPath + ':' + additions.join(':');
-  }
+  extraPaths.push(path.join(home, '.local', 'bin'), '/usr/local/bin');
+  env.PATH = [...new Set([...(env.PATH || '').split(':'), ...extraPaths].filter(Boolean))].join(':');
   return env;
 }
 
 function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
   try {
     if (!win.isDestroyed()) win.webContents.send(channel, ...args);
-  } catch { /* window destroyed */ }
+  } catch {
+    // Window already destroyed.
+  }
 }
 
-/** Hardcoded model list — Gemini CLI has no programmatic model enumeration */
 const GEMINI_MODELS: { id: string; name: string }[] = [
   { id: 'auto-gemini-3', name: 'Auto (Gemini 3)' },
   { id: 'auto-gemini-2.5', name: 'Auto (Gemini 2.5)' },
@@ -59,107 +48,448 @@ const GEMINI_MODELS: { id: string; name: string }[] = [
 ];
 
 const GEMINI_DEFAULT_MODEL = 'auto-gemini-3';
+const GEMINI_BOOTSTRAP_FILES = ['README.md', 'package.json', 'GEMINI.md', 'CLAUDE.md', 'tsconfig.json'];
 
-/**
- * Translate a Gemini stream-json event into one or more claude:message events.
- */
-function translateEvent(msg: any, projectPath: string): any[] {
-  const events: any[] = [];
+function readFileSnippet(filePath: string, maxChars: number): string | null {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    return fs.readFileSync(filePath, 'utf8').slice(0, maxChars).trim();
+  } catch {
+    return null;
+  }
+}
 
-  switch (msg.type) {
-    case 'init':
-      // Session metadata — ignored (stateless one-shot turns, no session continuity)
-      break;
+function collectProjectPaths(rootPath: string, maxEntries: number, maxDepth: number): string[] {
+  const results: string[] = [];
 
-    case 'message': {
-      // Skip user message echoes
-      if (msg.role === 'user') break;
-      if (msg.role === 'assistant' && msg.content) {
-        // msg.content can be a string or an object/array — ensure we emit a string
-        const text = typeof msg.content === 'string'
-          ? msg.content
-          : typeof msg.content === 'object' && msg.content !== null
-            ? (msg.content.text || JSON.stringify(msg.content))
-            : String(msg.content);
-        events.push({
-          type: 'assistant',
-          projectPath,
-          message: {
-            content: [{ type: 'text', text }],
-          },
-        });
+  function visit(currentPath: string, depth: number) {
+    if (results.length >= maxEntries || depth > maxDepth) return;
+
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(currentPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+
+    for (const entry of entries) {
+      if (results.length >= maxEntries) return;
+      if (entry.name === '.git' || entry.name === 'node_modules' || entry.name === 'dist' || entry.name === 'dist-electron') continue;
+
+      const absolutePath = path.join(currentPath, entry.name);
+      const relativePath = path.relative(rootPath, absolutePath) || '.';
+      results.push(entry.isDirectory() ? `${relativePath}/` : relativePath);
+
+      if (entry.isDirectory()) {
+        visit(absolutePath, depth + 1);
       }
-      break;
     }
-
-    case 'tool_use': {
-      const name = msg.tool_name || msg.name || msg.tool || 'unknown';
-      const input = msg.parameters || msg.arguments || msg.input || {};
-      events.push({
-        type: 'assistant',
-        projectPath,
-        message: {
-          content: [{
-            type: 'tool_use',
-            name,
-            input,
-          }],
-        },
-      });
-      break;
-    }
-
-    case 'tool_result':
-      // Ignored — result shown via tool_use card
-      break;
-
-    case 'result': {
-      const stats = msg.stats;
-      if (msg.status === 'error' || msg.error) {
-        const err = msg.error;
-        const errText = typeof err === 'string' ? err
-          : typeof err === 'object' && err !== null ? (err.message || JSON.stringify(err))
-          : msg.message || 'Gemini error';
-        events.push({
-          type: 'error',
-          projectPath,
-          text: errText,
-        });
-      } else if (stats) {
-        events.push({
-          type: 'result',
-          projectPath,
-          usage: {
-            input_tokens: stats.input_tokens || 0,
-            cache_read_input_tokens: stats.cached || 0,
-            cache_creation_input_tokens: 0,
-            output_tokens: stats.output_tokens || 0,
-          },
-        });
-      }
-      events.push({ type: 'done', projectPath });
-      break;
-    }
-
-    case 'error': {
-      const errMsg = typeof msg.message === 'string' ? msg.message
-        : typeof msg.error === 'string' ? msg.error
-        : typeof msg.error === 'object' && msg.error?.message ? msg.error.message
-        : 'Gemini error';
-      events.push({
-        type: 'error',
-        projectPath,
-        text: errMsg,
-      });
-      events.push({ type: 'done', projectPath });
-      break;
-    }
-
-    default:
-      break;
   }
 
-  return events;
+  visit(rootPath, 0);
+  return results;
+}
+
+function buildGeminiProjectBootstrap(rootPath: string): string {
+  const topLevel = (() => {
+    try {
+      return fs.readdirSync(rootPath).sort().slice(0, 40).join('\n');
+    } catch {
+      return '';
+    }
+  })();
+
+  const projectPaths = collectProjectPaths(rootPath, 120, 2).join('\n');
+  const fileSnippets = GEMINI_BOOTSTRAP_FILES
+    .map((name) => {
+      const snippet = readFileSnippet(path.join(rootPath, name), 2000);
+      if (!snippet) return null;
+      return `## ${name}\n${snippet}`;
+    })
+    .filter(Boolean)
+    .join('\n\n');
+
+  return [
+    'Project bootstrap context for this repository.',
+    'Use it as orientation for future edits and suggestions.',
+    'Do not answer this message or summarize it back.',
+    '',
+    `Repository root: ${rootPath}`,
+    '',
+    topLevel ? `Top-level entries:\n${topLevel}` : '',
+    projectPaths ? `Shallow project map:\n${projectPaths}` : '',
+    fileSnippets ? `Key file snippets:\n${fileSnippets}` : '',
+  ].filter(Boolean).join('\n');
+}
+
+function getMimeTypeForPath(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+
+  switch (ext) {
+    case '.png':
+      return 'image/png';
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.gif':
+      return 'image/gif';
+    case '.webp':
+      return 'image/webp';
+    case '.svg':
+      return 'image/svg+xml';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+function buildPromptItems(message: string, imagePaths?: string[], prefixText?: string) {
+  const prompt: Array<Record<string, unknown>> = [];
+
+  if (prefixText) {
+    prompt.push({ type: 'text', text: prefixText });
+  }
+
+  prompt.push({ type: 'text', text: message });
+
+  for (const imagePath of imagePaths || []) {
+    const absolutePath = path.isAbsolute(imagePath) ? imagePath : path.resolve(imagePath);
+    const imageData = fs.readFileSync(absolutePath).toString('base64');
+    prompt.push({
+      type: 'image',
+      mimeType: getMimeTypeForPath(absolutePath),
+      data: imageData,
+    });
+  }
+
+  return prompt;
+}
+
+function getScopeSessionId(ws: Workspace, scope: string): string | undefined {
+  return scope === 'chat' ? ws.gemini.chatSessionId : ws.gemini.terminalSessions.get(scope);
+}
+
+function setScopeSessionId(ws: Workspace, scope: string, sessionId: string | undefined) {
+  if (scope === 'chat') ws.gemini.chatSessionId = sessionId;
+  else if (sessionId) ws.gemini.terminalSessions.set(scope, sessionId);
+  else ws.gemini.terminalSessions.delete(scope);
+}
+
+function getApprovalCommand(input: Record<string, any>): string {
+  return input.command || input.file_path || JSON.stringify(input);
+}
+
+function getScopeForEvent(ws: Workspace, msg: any): string {
+  const explicitScope = msg?.params?.scope;
+  if (typeof explicitScope === 'string' && explicitScope.length > 0) {
+    return explicitScope;
+  }
+
+  const sessionId = msg?.params?.sessionId;
+  if (typeof sessionId === 'string' && sessionId.length > 0) {
+    if (sessionId === ws.gemini.commitSessionId) return 'commit';
+    if (sessionId === ws.gemini.chatSessionId) return 'chat';
+    for (const [scope, terminalSessionId] of ws.gemini.terminalSessions.entries()) {
+      if (terminalSessionId === sessionId) return scope;
+    }
+  }
+
+  return 'chat';
+}
+
+function renderToolContent(content: any[] | undefined): string {
+  if (!Array.isArray(content) || content.length === 0) return '';
+
+  return content.map((item) => {
+    if (item?.type === 'content' && item.content?.type === 'text') {
+      return item.content.text || '';
+    }
+    if (item?.type === 'diff') {
+      return JSON.stringify(item);
+    }
+    return JSON.stringify(item);
+  }).filter(Boolean).join('\n');
+}
+
+function translateAcpEvent(msg: any, projectPath: string, scope: string): any | null {
+  if (msg?.method === 'session/update') {
+    const update = msg.params?.update;
+    if (update?.sessionUpdate === 'agent_message_chunk') {
+      return {
+        type: 'assistant',
+        projectPath,
+        scope,
+        message: {
+          content: [{
+            type: 'text',
+            text: update.content?.text || '',
+            delta: true,
+          }],
+        },
+      };
+    }
+
+    if (update?.sessionUpdate === 'tool_call') {
+      return {
+        type: 'assistant',
+        projectPath,
+        scope,
+        message: {
+          content: [{
+            id: update.toolCallId,
+            type: 'tool_use',
+            name: update.title || 'tool',
+            input: {
+              kind: update.kind,
+              locations: update.locations,
+            },
+          }],
+        },
+      };
+    }
+
+    if (update?.sessionUpdate === 'tool_call_update') {
+      return {
+        type: 'user',
+        projectPath,
+        scope,
+        message: {
+          content: [{
+            type: 'tool_result',
+            tool_use_id: update.toolCallId,
+            content: renderToolContent(update.content),
+            is_error: update.status === 'failed',
+          }],
+        },
+      };
+    }
+
+    return null;
+  }
+
+  if (msg?.method === 'message/assistant') {
+    return {
+      type: 'assistant',
+      projectPath,
+      scope,
+      message: {
+        content: [{
+          type: 'text',
+          text: msg.params?.text || '',
+          delta: !!msg.params?.delta,
+        }],
+      },
+    };
+  }
+
+  if (msg?.method === 'tool/call') {
+    return {
+      type: 'assistant',
+      projectPath,
+      scope,
+      message: {
+        content: [{
+          id: msg.params?.id,
+          type: 'tool_use',
+          name: msg.params?.name || 'tool',
+          input: msg.params?.input || {},
+        }],
+      },
+    };
+  }
+
+  if (msg?.method === 'tool/result') {
+    return {
+      type: 'user',
+      projectPath,
+      scope,
+      message: {
+        content: [{
+          type: 'tool_result',
+          tool_use_id: msg.params?.id,
+          content: msg.params?.output || '',
+          is_error: !!msg.params?.isError,
+        }],
+      },
+    };
+  }
+
+  return null;
+}
+
+function disableGemini(win: BrowserWindow, ws: Workspace, scope: string, reason: string) {
+  ws.gemini.transport?.dispose();
+  ws.gemini.transport = null;
+  ws.gemini.loadedSessionIds.clear();
+  ws.gemini.bootstrappedSessionIds.clear();
+  ws.gemini.suppressedScopes.clear();
+  ws.gemini.availability = 'disabled';
+  ws.gemini.lastError = reason;
+  ws.gemini.busy = false;
+  ws.gemini.activeRequestId = undefined;
+  ws.gemini.pendingApproval = null;
+  safeSend(win, 'claude:message', {
+    type: 'error',
+    projectPath: ws.projectPath,
+    scope,
+    text: `Gemini unavailable: ${reason}`,
+  });
+  safeSend(win, 'claude:message', {
+    type: 'done',
+    projectPath: ws.projectPath,
+    scope,
+    turnSeq: ws.gemini.turnSeq,
+  });
+}
+
+export async function ensureGeminiTransport(win: BrowserWindow, ws: Workspace) {
+  if (ws.gemini.transport) return ws.gemini.transport;
+
+  const client = createGeminiAcpClient({
+    cwd: ws.gemini.cwd || ws.projectPath,
+    env: getEnrichedEnv(),
+    clientInfo: { name: 'sai', version: '1.0' },
+  });
+
+  client.onEvent((event: any) => {
+    const scope = getScopeForEvent(ws, event);
+    if (scope === 'commit') return;
+    if (event?.method === 'tool.approvalRequired' || event?.method === 'tool/approvalRequired') {
+      const input = event.params?.input || {};
+      ws.gemini.pendingApproval = {
+        toolUseId: event.params?.id || '',
+        toolName: event.params?.name || 'tool',
+        input,
+        description: event.params?.description,
+        scope,
+      };
+      safeSend(win, 'claude:message', {
+        type: 'approval_needed',
+        projectPath: ws.projectPath,
+        scope,
+        toolUseId: event.params?.id || '',
+        toolName: event.params?.name || 'tool',
+        command: getApprovalCommand(input),
+        description: event.params?.description || '',
+        input,
+      });
+      return;
+    }
+
+    const translated = translateAcpEvent(event, ws.projectPath, scope);
+    if (translated) {
+      safeSend(win, 'claude:message', translated);
+    }
+  });
+
+  await client.start();
+  ws.gemini.transport = client;
+  ws.gemini.loadedSessionIds.clear();
+  ws.gemini.bootstrappedSessionIds.clear();
+  ws.gemini.availability = 'available';
+  ws.gemini.lastError = undefined;
+  return client;
+}
+
+async function ensureSession(win: BrowserWindow, ws: Workspace, scope: string) {
+  const client = await ensureGeminiTransport(win, ws);
+  const existing = getScopeSessionId(ws, scope);
+
+  if (existing) {
+    if (ws.gemini.loadedSessionIds.has(existing)) {
+      return existing;
+    }
+
+    await client.request('session/load', {
+      sessionId: existing,
+      cwd: ws.gemini.cwd || ws.projectPath,
+      scope,
+      mcpServers: [],
+    });
+    ws.gemini.loadedSessionIds.add(existing);
+    return existing;
+  }
+
+  const result = await client.request<{ sessionId: string }>('session/new', {
+    cwd: ws.gemini.cwd || ws.projectPath,
+    scope,
+    mcpServers: [],
+  });
+  setScopeSessionId(ws, scope, result.sessionId);
+  ws.gemini.loadedSessionIds.add(result.sessionId);
+  safeSend(win, 'claude:message', {
+    type: 'session_id',
+    sessionId: result.sessionId,
+    projectPath: ws.projectPath,
+    scope,
+  });
+  return result.sessionId;
+}
+
+export async function ensureGeminiCommitSession(win: BrowserWindow, ws: Workspace): Promise<string> {
+  if (ws.gemini.commitSessionId) return ws.gemini.commitSessionId;
+
+  const client = await ensureGeminiTransport(win, ws);
+  const result = await client.request<{ sessionId: string }>('session/new', {
+    cwd: ws.gemini.cwd || ws.projectPath,
+    scope: 'commit',
+    mcpServers: [],
+  });
+  ws.gemini.commitSessionId = result.sessionId;
+  ws.gemini.loadedSessionIds.add(result.sessionId);
+  return result.sessionId;
+}
+
+export async function promptGeminiText(
+  win: BrowserWindow,
+  ws: Workspace,
+  options: {
+    sessionId: string;
+    scope: string;
+    prompt: string;
+    imagePaths?: string[];
+    approvalMode?: string;
+    conversationMode?: string;
+    model?: string;
+  },
+): Promise<string> {
+  const client = await ensureGeminiTransport(win, ws);
+  let text = '';
+
+  const unsubscribe = client.onEvent((event: any) => {
+    const scope = getScopeForEvent(ws, event);
+    if (scope !== options.scope) return;
+
+    if (event?.method === 'session/update' && event.params?.update?.sessionUpdate === 'agent_message_chunk') {
+      text += event.params.update.content?.text || '';
+      return;
+    }
+
+    if (event?.method !== 'message/assistant') return;
+
+    const nextText = event.params?.text || '';
+    if (event.params?.delta) text += nextText;
+    else text = nextText;
+  });
+
+  try {
+    const result = await client.request<any>('session/prompt', {
+      sessionId: options.sessionId,
+      scope: options.scope,
+      prompt: buildPromptItems(options.prompt, options.imagePaths),
+      approvalMode: options.approvalMode,
+      conversationMode: options.conversationMode,
+      model: options.model,
+    });
+
+    if (text.trim()) return text.trim();
+    if (typeof result?.result === 'string') return result.result.trim();
+    if (typeof result?.text === 'string') return result.text.trim();
+    return '';
+  } finally {
+    unsubscribe?.();
+  }
 }
 
 export function registerGeminiHandlers(win: BrowserWindow) {
@@ -168,138 +498,143 @@ export function registerGeminiHandlers(win: BrowserWindow) {
     defaultModel: GEMINI_DEFAULT_MODEL,
   }));
 
-  ipcMain.handle('gemini:start', (_event, cwd: string) => {
+  ipcMain.handle('gemini:start', async (_event, cwd: string) => {
     if (!cwd) return;
     const ws = getOrCreate(cwd);
     ws.gemini.cwd = cwd;
-    safeSend(win, 'claude:message', { type: 'ready', projectPath: ws.projectPath });
+    if (ws.gemini.availability === 'disabled') {
+      ws.gemini.transport?.dispose();
+      ws.gemini.transport = null;
+      ws.gemini.loadedSessionIds.clear();
+      ws.gemini.bootstrappedSessionIds.clear();
+      ws.gemini.lastError = undefined;
+      ws.gemini.availability = 'available';
+      ws.gemini.pendingApproval = null;
+    }
+    try {
+      await ensureGeminiTransport(win, ws);
+      safeSend(win, 'claude:message', { type: 'ready', projectPath: ws.projectPath });
+    } catch (error) {
+      disableGemini(win, ws, 'chat', error instanceof Error ? error.message : 'Gemini startup failed');
+    }
   });
 
-  ipcMain.on('gemini:stop', (_event, projectPath: string) => {
+  ipcMain.on('gemini:setSessionId', (_event, projectPath: string, sessionId: string | undefined, scope: string = 'chat') => {
     const ws = get(projectPath);
     if (!ws) return;
-    if (ws.gemini.process) {
-      const proc = ws.gemini.process;
-      ws.gemini.process = null;
-      ws.gemini.busy = false;
-      proc.kill();
-      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.gemini.turnSeq });
+    const previousSessionId = getScopeSessionId(ws, scope);
+    if (previousSessionId === sessionId) return;
+    if (previousSessionId) {
+      ws.gemini.loadedSessionIds.delete(previousSessionId);
+      ws.gemini.bootstrappedSessionIds.delete(previousSessionId);
     }
+    setScopeSessionId(ws, scope, sessionId);
   });
 
-  ipcMain.on('gemini:send', (_event, projectPath: string, message: string, imagePaths?: string[], approvalMode?: string, conversationMode?: string, model?: string) => {
+  ipcMain.on('gemini:stop', async (_event, projectPath: string, scope: string = 'chat') => {
     const ws = get(projectPath);
     if (!ws) return;
-    touchActivity(projectPath);
-    const effectiveScope = 'chat';
+    const sessionId = getScopeSessionId(ws, scope);
 
-    // Kill previous gemini process if still running
-    if (ws.gemini.process) {
-      ws.gemini.process.kill();
-      ws.gemini.process = null;
+    if (ws.gemini.transport && sessionId && ws.gemini.busy) {
+      try {
+        await ws.gemini.transport.request('session/cancel', {
+          sessionId,
+          requestId: ws.gemini.activeRequestId,
+          scope,
+        });
+      } catch {
+        // Ignore cancellation failures.
+      }
     }
 
-    let prompt = message;
-    if (imagePaths && imagePaths.length > 0) {
-      const imageRefs = imagePaths.map(p => `[Attached image: ${p}]`).join('\n');
-      prompt = `${imageRefs}\n\n${message}`;
-    }
-
-    const args = ['-p', prompt, '--output-format', 'stream-json'];
-
-    // Conversation mode: 'fast' overrides model to gemini-2.5-flash
-    const effectiveModel = conversationMode === 'fast' ? 'gemini-2.5-flash' : (model || GEMINI_DEFAULT_MODEL);
-    args.push('-m', effectiveModel);
-
-    // Approval mode — always pass explicitly since stdin is ignored and
-    // Gemini CLI's built-in default requires interactive approval.
-    // Default to auto_edit so file-modification tools remain available.
-    args.push('--approval-mode', approvalMode || 'auto_edit');
-
-    const proc = spawn('gemini', args, {
-      cwd: ws.gemini.cwd || projectPath,
-      env: getEnrichedEnv(),
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    ws.gemini.process = proc;
-    ws.gemini.turnSeq++;
-    ws.gemini.busy = true;
-    ws.gemini.buffer = '';
-
-    safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: ws.gemini.turnSeq });
-
-    proc.stdout?.on('data', (data: Buffer) => {
-      if (ws.gemini.process !== proc) return;
-
-      ws.gemini.buffer += data.toString();
-      const lines = ws.gemini.buffer.split('\n');
-      ws.gemini.buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const msg = JSON.parse(line);
-          const events = translateEvent(msg, ws.projectPath);
-          for (const ev of events) {
-            ev.scope = effectiveScope;
-            if (ev.type === 'streaming_start' || ev.type === 'done') ev.turnSeq = ws.gemini.turnSeq;
-            safeSend(win, 'claude:message', ev);
-          }
-          // Mark not busy on result
-          if (msg.type === 'result') {
-            const wasBusy = ws.gemini.busy;
-            ws.gemini.busy = false;
-            // Delay notification so renderer has time to process the result/done IPC
-            if (wasBusy) setTimeout(() => notifyCompletion(win, ws.projectPath, {
-              provider: 'Gemini',
-            }), 500);
-          }
-        } catch { /* malformed JSON */ }
-      }
-    });
-
-    proc.stderr?.on('data', (data: Buffer) => {
-      if (ws.gemini.process !== proc) return;
-      const text = data.toString().trim();
-      // Filter out CLI caching noise and 429 retry backoff spam
-      if (text && !text.startsWith('Loaded cached credentials') && !/Attempt \d+ failed|Retrying with backoff|GaxiosError|No capacity available/.test(text)) {
-        safeSend(win, 'claude:message', { type: 'error', text, projectPath: ws.projectPath, scope: effectiveScope });
-      }
-    });
-
-    proc.on('exit', () => {
-      if (ws.gemini.process !== proc) return;
-      // Flush remaining buffer
-      if (ws.gemini.buffer.trim()) {
-        try {
-          const msg = JSON.parse(ws.gemini.buffer);
-          const events = translateEvent(msg, ws.projectPath);
-          for (const ev of events) {
-            ev.scope = effectiveScope;
-            if (ev.type === 'streaming_start' || ev.type === 'done') ev.turnSeq = ws.gemini.turnSeq;
-            safeSend(win, 'claude:message', ev);
-          }
-        } catch { /* ignore */ }
-      }
-      const wasBusy = ws.gemini.busy;
-      ws.gemini.buffer = '';
-      ws.gemini.process = null;
-      ws.gemini.busy = false;
-      // Only send done if the turn didn't already complete normally via result event
-      if (wasBusy) {
-        safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: ws.gemini.turnSeq });
-      }
-    });
-
-    proc.on('error', (err) => {
-      if (ws.gemini.process !== proc) return;
-      ws.gemini.process = null;
-      ws.gemini.busy = false;
-      safeSend(win, 'claude:message', {
-        type: 'error', text: `Gemini process error: ${err.message}`, projectPath: ws.projectPath, scope: effectiveScope
-      });
-      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: ws.gemini.turnSeq });
+    ws.gemini.busy = false;
+    ws.gemini.activeRequestId = undefined;
+    safeSend(win, 'claude:message', {
+      type: 'done',
+      projectPath: ws.projectPath,
+      scope,
+      turnSeq: ws.gemini.turnSeq,
     });
   });
+
+  ipcMain.on(
+    'gemini:send',
+    async (_event, projectPath: string, message: string, imagePaths?: string[], approvalMode?: string, conversationMode?: string, model?: string, scope: string = 'chat') => {
+      const ws = get(projectPath);
+      if (!ws) return;
+      touchActivity(projectPath);
+
+      if (ws.gemini.availability === 'disabled') {
+        safeSend(win, 'claude:message', {
+          type: 'error',
+          projectPath: ws.projectPath,
+          scope,
+          text: `Gemini unavailable: ${ws.gemini.lastError || 'retry Gemini to continue'}`,
+        });
+        safeSend(win, 'claude:message', {
+          type: 'done',
+          projectPath: ws.projectPath,
+          scope,
+          turnSeq: ws.gemini.turnSeq,
+        });
+        return;
+      }
+
+      try {
+        const client = await ensureGeminiTransport(win, ws);
+        const sessionId = await ensureSession(win, ws, scope);
+        const bootstrapText = ws.gemini.bootstrappedSessionIds.has(sessionId)
+          ? undefined
+          : buildGeminiProjectBootstrap(ws.gemini.cwd || ws.projectPath);
+        ws.gemini.turnSeq += 1;
+        ws.gemini.busy = true;
+
+        safeSend(win, 'claude:message', {
+          type: 'streaming_start',
+          projectPath: ws.projectPath,
+          scope,
+          turnSeq: ws.gemini.turnSeq,
+        });
+
+        const result = await client.request<any>('session/prompt', {
+          sessionId,
+          scope,
+          prompt: buildPromptItems(message, imagePaths, bootstrapText),
+          approvalMode: approvalMode || 'auto_edit',
+          conversationMode,
+          model: conversationMode === 'fast' ? 'gemini-2.5-flash' : (model || GEMINI_DEFAULT_MODEL),
+        });
+
+        if (bootstrapText) {
+          ws.gemini.bootstrappedSessionIds.add(sessionId);
+        }
+        ws.gemini.activeRequestId = result?.requestId;
+        ws.gemini.busy = false;
+        ws.gemini.activeRequestId = undefined;
+
+        safeSend(win, 'claude:message', {
+          type: 'result',
+          projectPath: ws.projectPath,
+          scope,
+          usage: {
+            input_tokens: result?.usage?.input_tokens || 0,
+            cache_read_input_tokens: result?.usage?.cached || 0,
+            cache_creation_input_tokens: 0,
+            output_tokens: result?.usage?.output_tokens || 0,
+          },
+        });
+        safeSend(win, 'claude:message', {
+          type: 'done',
+          projectPath: ws.projectPath,
+          scope,
+          turnSeq: ws.gemini.turnSeq,
+        });
+
+        notifyCompletion(win, ws.projectPath, { provider: 'Gemini' });
+      } catch (error) {
+        disableGemini(win, ws, scope, error instanceof Error ? error.message : 'Gemini request failed');
+      }
+    },
+  );
 }
