@@ -5,7 +5,7 @@
  * Coverage:
  *   - git:status — branch, staged, modified, created, deleted, ahead, behind
  *   - git:stage / git:unstage / git:commit / git:push / git:pull / git:fetch
- *   - git:log — includes Claude-authored detection
+ *   - git:log — includes AI-provider detection
  *   - git:diff — staged vs unstaged
  *   - git:branches — list, current
  *   - git:checkout / git:createBranch
@@ -271,7 +271,7 @@ describe('git:fetch', () => {
 });
 
 // ===========================================================================
-// git:log — Claude-authored detection
+// git:log — AI-provider detection
 // ===========================================================================
 
 describe('git:log', () => {
@@ -297,21 +297,31 @@ describe('git:log', () => {
       author: 'Alice',
       date: '2024-01-01',
       files: [],
-      isClaude: false,
+      aiProvider: undefined,
     });
   });
 
-  it('marks entry as isClaude when author_name contains "Claude"', async () => {
+  it('marks entry as Claude when author_name contains "Claude"', async () => {
     await setup();
     mockGitInstance.log.mockResolvedValue({
       all: [{ hash: 'x', message: 'commit', author_name: 'Claude Opus', date: '2024-01-01' }],
     });
 
-    const result = await mockIpcMain._invoke('git:log', '/repo', 1) as Array<{ isClaude: boolean }>;
-    expect(result[0].isClaude).toBe(true);
+    const result = await mockIpcMain._invoke('git:log', '/repo', 1) as Array<{ aiProvider?: string }>;
+    expect(result[0].aiProvider).toBe('claude');
   });
 
-  it('marks entry as isClaude when message contains "Co-Authored-By: Claude"', async () => {
+  it('marks entry as Codex when author_name contains "Codex"', async () => {
+    await setup();
+    mockGitInstance.log.mockResolvedValue({
+      all: [{ hash: 'x', message: 'commit', author_name: 'OpenAI Codex', date: '2024-01-01' }],
+    });
+
+    const result = await mockIpcMain._invoke('git:log', '/repo', 1) as Array<{ aiProvider?: string }>;
+    expect(result[0].aiProvider).toBe('codex');
+  });
+
+  it('marks entry as Claude when message contains "Co-Authored-By: Claude"', async () => {
     await setup();
     mockGitInstance.log.mockResolvedValue({
       all: [{
@@ -322,18 +332,33 @@ describe('git:log', () => {
       }],
     });
 
-    const result = await mockIpcMain._invoke('git:log', '/repo', 1) as Array<{ isClaude: boolean }>;
-    expect(result[0].isClaude).toBe(true);
+    const result = await mockIpcMain._invoke('git:log', '/repo', 1) as Array<{ aiProvider?: string }>;
+    expect(result[0].aiProvider).toBe('claude');
   });
 
-  it('does not mark regular commits as isClaude', async () => {
+  it('marks entry as Gemini when message contains "Co-Authored-By: Gemini"', async () => {
+    await setup();
+    mockGitInstance.log.mockResolvedValue({
+      all: [{
+        hash: 'g',
+        message: 'fix: something\n\nCo-Authored-By: Gemini',
+        author_name: 'Human Dev',
+        date: '2024-01-01',
+      }],
+    });
+
+    const result = await mockIpcMain._invoke('git:log', '/repo', 1) as Array<{ aiProvider?: string }>;
+    expect(result[0].aiProvider).toBe('gemini');
+  });
+
+  it('does not mark regular commits as AI-authored', async () => {
     await setup();
     mockGitInstance.log.mockResolvedValue({
       all: [{ hash: 'z', message: 'normal commit', author_name: 'Dev', date: '2024-01-01' }],
     });
 
-    const result = await mockIpcMain._invoke('git:log', '/repo', 1) as Array<{ isClaude: boolean }>;
-    expect(result[0].isClaude).toBe(false);
+    const result = await mockIpcMain._invoke('git:log', '/repo', 1) as Array<{ aiProvider?: string }>;
+    expect(result[0].aiProvider).toBeUndefined();
   });
 
   it('passes maxCount to git.log', async () => {

@@ -231,6 +231,7 @@ import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import MessageQueue from './MessageQueue';
 import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, QueuedMessage, TerminalTab } from '../../types';
+import { buildHelpMessage } from './helpText';
 
 type CodexPermission = 'auto' | 'read-only' | 'full-access';
 
@@ -1011,13 +1012,10 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       return;
     }
     if (text === '/help') {
-      const cmds = slashCommands.length > 0
-        ? slashCommands.map(c => `  /${c}`).join('\n')
-        : '  No custom commands loaded';
       setMessages(prev => [...prev,
         { id: Date.now().toString(), role: 'user', content: text, timestamp: Date.now() },
         { id: `help-${Date.now()}`, role: 'system', content:
-          `**Available Commands**\n\n**Built-in:**\n  /clear — Clear conversation\n  /help — Show this help\n\n**Claude Skills:**\n${cmds}`,
+          buildHelpMessage(aiProvider, slashCommands),
           timestamp: Date.now() },
       ]);
       return;

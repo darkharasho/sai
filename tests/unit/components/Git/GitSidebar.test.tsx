@@ -122,4 +122,37 @@ describe('GitSidebar', () => {
     await new Promise(r => setTimeout(r, 50));
     expect(mockSai.gitStatus).not.toHaveBeenCalled();
   });
+
+  it('renders AI activity for Codex commits', async () => {
+    const mock = createMockSai();
+    mock.gitStatus.mockResolvedValue({
+      branch: 'main',
+      staged: [],
+      modified: [],
+      created: [],
+      deleted: [],
+      not_added: [],
+      ahead: 0,
+      behind: 0,
+    });
+    mock.gitLog.mockResolvedValue([
+      {
+        hash: 'abc1234',
+        message: 'feat: update app shell',
+        author: 'OpenAI Codex',
+        date: '2024-01-01',
+        files: [],
+        aiProvider: 'codex',
+      },
+    ]);
+    installMockSai(mock);
+
+    render(<GitSidebar {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('AI Activity')).toBeTruthy();
+      expect(screen.getByText('feat: update app shell')).toBeTruthy();
+      expect(screen.getByText('Codex')).toBeTruthy();
+    });
+  });
 });

@@ -11,6 +11,7 @@ import type { SegmentedBlock } from './BlockSegmenter';
 import NativeBlockList from './NativeBlockList';
 import type { DisplayItem } from './NativeBlockList';
 import type { ApprovalBlock as ApprovalBlockType, ToolApprovalBlock as ToolApprovalBlockType, InputMode } from './types';
+import { getTerminalProviderBridge } from './providerBridge';
 
 interface TerminalModeViewProps {
   projectPath: string;
@@ -183,6 +184,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude', a
   }, []);
   const permissionModeRef = useRef(permissionMode);
   permissionModeRef.current = permissionMode;
+  const providerBridge = getTerminalProviderBridge(window.sai as any, aiProvider);
   const sessionIdRef = useRef<string | undefined>(undefined);
 
   // Editor panel state
@@ -413,7 +415,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude', a
         setPtyId(null);
       }
       if (aiCleanupRef.current) {
-        window.sai.claudeStop(projectPath, 'terminal');
+        providerBridge.stop(projectPath);
         aiCleanupRef.current();
         aiCleanupRef.current = null;
       }
@@ -740,8 +742,8 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude', a
     }
 
     // Send after listener is registered to avoid race condition
-    window.sai.claudeSend(projectPath, fullPrompt, undefined, permissionModeRef.current, 'high', 'sonnet', 'terminal');
-  }, [projectPath, aiProvider]);
+    providerBridge.send(projectPath, fullPrompt, permissionModeRef.current);
+  }, [projectPath, aiProvider, providerBridge]);
 
   const handleAskAI = useCallback((block: SegmentedBlock) => {
     currentGroupRef.current = nextGroupId();
@@ -910,7 +912,7 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude', a
         // Kill any running AI request
         if (aiCleanupRef.current) {
           const blockId = aiBlockIdRef.current;
-          window.sai.claudeStop(projectPath, 'terminal');
+          providerBridge.stop(projectPath);
           if (blockId) {
             setDisplayItems(prev => prev.map(item =>
               item.type === 'ai' && item.id === blockId

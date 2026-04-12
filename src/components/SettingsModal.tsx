@@ -681,7 +681,14 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       <div className="settings-section-label">Codex</div>
       <div className="settings-row">
         <div className="settings-row-info">
-          <div className="settings-row-name" style={{ color: 'var(--text-muted)' }}>No Codex-specific settings yet</div>
+          <div className="settings-row-name">Chat toolbar controls</div>
+          <div className="settings-row-desc">Model and permission mode for Codex live in the chat toolbar so you can change them per conversation.</div>
+        </div>
+      </div>
+      <div className="settings-row">
+        <div className="settings-row-info">
+          <div className="settings-row-name">What to configure here</div>
+          <div className="settings-row-desc">Use the Provider page to choose Codex as your chat or commit-message provider. Use the chat toolbar when you need to change runtime behavior.</div>
         </div>
       </div>
     </section>

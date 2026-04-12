@@ -1,14 +1,20 @@
 import { GitCommit as GitCommitIcon } from 'lucide-react';
 import { GitCommit } from '../../types';
 
-interface ClaudeActivityProps {
+interface GitActivityProps {
   commits: GitCommit[];
 }
 
-export default function ClaudeActivity({ commits }: ClaudeActivityProps) {
-  const claudeCommits = commits.filter((c) => c.isClaude);
+const PROVIDER_LABELS = {
+  claude: 'Claude',
+  codex: 'Codex',
+  gemini: 'Gemini',
+} as const;
 
-  if (claudeCommits.length === 0) return null;
+export default function GitActivity({ commits }: GitActivityProps) {
+  const aiCommits = commits.filter((commit) => commit.aiProvider);
+
+  if (aiCommits.length === 0) return null;
 
   return (
     <div
@@ -29,10 +35,10 @@ export default function ClaudeActivity({ commits }: ClaudeActivityProps) {
           userSelect: 'none' as const,
         }}
       >
-        Claude Activity
+        AI Activity
       </div>
 
-      {claudeCommits.map((commit) => {
+      {aiCommits.map((commit) => {
         const shortHash = commit.hash.slice(0, 7);
         const date = new Date(commit.date);
         const dateStr = isNaN(date.getTime())
@@ -70,9 +76,24 @@ export default function ClaudeActivity({ commits }: ClaudeActivityProps) {
                 fontSize: 10,
                 color: 'var(--text-muted)',
                 paddingLeft: 18,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
               }}
             >
-              {shortHash} · {dateStr}
+              <span>{shortHash} · {dateStr}</span>
+              {commit.aiProvider && (
+                <span
+                  style={{
+                    padding: '1px 6px',
+                    borderRadius: 999,
+                    background: 'var(--bg-tertiary)',
+                    color: 'var(--text-secondary)',
+                  }}
+                >
+                  {PROVIDER_LABELS[commit.aiProvider]}
+                </span>
+              )}
             </div>
           </div>
         );

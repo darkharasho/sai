@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { GitFile, GitCommit } from '../../types';
 import ChangedFiles from './ChangedFiles';
 import CommitBox from './CommitBox';
-import ClaudeActivity from './ClaudeActivity';
+import GitActivity from './GitActivity';
 import DiscardChangesModal from './DiscardChangesModal';
 
 interface GitStatusItem {
@@ -243,7 +243,7 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
           onDiscard={setDiscardTarget}
         />
 
-        <ClaudeActivity commits={commits} />
+        <GitActivity commits={commits} />
       </div>
 
       {/* Commit / push / pull controls */}

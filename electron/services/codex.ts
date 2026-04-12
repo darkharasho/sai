@@ -73,6 +73,7 @@ function translateEvent(msg: any, projectPath: string): any[] {
           projectPath,
           message: {
             content: [{
+              id: item.id,
               type: 'tool_use',
               name: 'Bash',
               input: { command: item.command || '' },
@@ -85,6 +86,7 @@ function translateEvent(msg: any, projectPath: string): any[] {
           projectPath,
           message: {
             content: [{
+              id: item.id,
               type: 'tool_use',
               name: 'Edit',
               input: { file_path: item.file_path || item.path || '' },
@@ -103,6 +105,19 @@ function translateEvent(msg: any, projectPath: string): any[] {
           projectPath,
           message: {
             content: [{ type: 'text', text: item.text }],
+          },
+        });
+      } else if (item?.type === 'command_execution' && item?.id) {
+        events.push({
+          type: 'user',
+          projectPath,
+          message: {
+            content: [{
+              type: 'tool_result',
+              tool_use_id: item.id,
+              content: item.aggregated_output || '',
+              is_error: (item.exit_code || 0) !== 0,
+            }],
           },
         });
       } else if (item?.type === 'reasoning' && item?.text) {
@@ -271,12 +286,6 @@ export function registerCodexHandlers(win: BrowserWindow) {
       ws.codex.process = null;
     }
 
-    let prompt = message;
-    if (imagePaths && imagePaths.length > 0) {
-      const imageRefs = imagePaths.map(p => `[Attached image: ${p}]`).join('\n');
-      prompt = `${imageRefs}\n\n${message}`;
-    }
-
     // Use 'exec resume <sessionId> <prompt>' for subsequent turns, 'exec <prompt>' for first turn
     const args: string[] = [];
     if (ws.codex.sessionId) {
@@ -298,8 +307,14 @@ export function registerCodexHandlers(win: BrowserWindow) {
       args.push('--full-auto');
     }
 
+    if (imagePaths && imagePaths.length > 0) {
+      for (const imagePath of imagePaths) {
+        args.push('-i', imagePath);
+      }
+    }
+
     // Prompt goes last
-    args.push(prompt);
+    args.push(message);
 
     const proc = spawn('codex', args, {
       cwd: ws.codex.cwd || projectPath,

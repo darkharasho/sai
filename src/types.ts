@@ -71,7 +71,7 @@ export interface GitCommit {
   author: string;
   date: string;
   files: string[];
-  isClaude: boolean;
+  aiProvider?: 'claude' | 'codex' | 'gemini';
 }
 
 export interface DirEntry {

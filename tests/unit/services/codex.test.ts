@@ -367,6 +367,38 @@ describe('Codex service', () => {
       );
     });
 
+    it('item.completed (command_execution) → emits user tool_result with command output', async () => {
+      sendMessage();
+      const proc = mockIpcMain.getLatestProcess();
+      proc.pushStdout(
+        JSON.stringify({ type: 'item.started', item: { id: 'cmd-1', type: 'command_execution', command: 'ls -la' } }) + '\n',
+      );
+      proc.pushStdout(
+        JSON.stringify({
+          type: 'item.completed',
+          item: { id: 'cmd-1', type: 'command_execution', aggregated_output: 'file-a\nfile-b\n', exit_code: 0 },
+        }) + '\n',
+      );
+      await tick();
+
+      expect(collectSentEvents(mockWin)).toContainEqual(
+        expect.objectContaining({
+          type: 'user',
+          projectPath: PROJECT,
+          message: expect.objectContaining({
+            content: expect.arrayContaining([
+              expect.objectContaining({
+                type: 'tool_result',
+                tool_use_id: 'cmd-1',
+                content: 'file-a\nfile-b\n',
+                is_error: false,
+              }),
+            ]),
+          }),
+        }),
+      );
+    });
+
     it('item.completed (agent_message) with no text → emits no assistant event', async () => {
       sendMessage();
       const proc = mockIpcMain.getLatestProcess();
@@ -588,12 +620,11 @@ describe('Codex service', () => {
       expect(args[args.length - 1]).toBe('my prompt text');
     });
 
-    it('prepends image paths to the prompt when imagePaths are provided', () => {
-      mockIpcMain._emit('codex:send', PROJECT, 'describe this', ['/tmp/img.png'], 'full-access', undefined);
+    it('passes image paths via repeated -i flags when imagePaths are provided', () => {
+      mockIpcMain._emit('codex:send', PROJECT, 'describe this', ['/tmp/img-a.png', '/tmp/img-b.png'], 'full-access', undefined);
       const args = getSpawnArgs();
-      const lastArg = args[args.length - 1];
-      expect(lastArg).toContain('[Attached image: /tmp/img.png]');
-      expect(lastArg).toContain('describe this');
+      expect(args).toEqual(expect.arrayContaining(['-i', '/tmp/img-a.png', '-i', '/tmp/img-b.png']));
+      expect(args[args.length - 1]).toBe('describe this');
     });
 
     it('uses project path as cwd for the spawned process', () => {

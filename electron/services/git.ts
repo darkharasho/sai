@@ -31,6 +31,23 @@ function git(cwd: string) {
   return simpleGit({ baseDir: cwd, binary: 'git' }).env(enrichedEnv());
 }
 
+function detectAiProvider(author: string, message: string): 'claude' | 'codex' | 'gemini' | undefined {
+  const authorLower = author.toLowerCase();
+  const messageLower = message.toLowerCase();
+
+  if (authorLower.includes('claude') || messageLower.includes('co-authored-by: claude')) {
+    return 'claude';
+  }
+  if (authorLower.includes('codex') || messageLower.includes('co-authored-by: codex') || messageLower.includes('co-authored-by: openai')) {
+    return 'codex';
+  }
+  if (authorLower.includes('gemini') || messageLower.includes('co-authored-by: gemini')) {
+    return 'gemini';
+  }
+
+  return undefined;
+}
+
 export function registerGitHandlers() {
   ipcMain.handle('git:status', async (_event, cwd: string) => {
     const status = await git(cwd).status();
@@ -78,7 +95,7 @@ export function registerGitHandlers() {
       author: entry.author_name,
       date: entry.date,
       files: [],
-      isClaude: entry.author_name.includes('Claude') || entry.message.includes('Co-Authored-By: Claude'),
+      aiProvider: detectAiProvider(entry.author_name, entry.message),
     }));
   });
 
