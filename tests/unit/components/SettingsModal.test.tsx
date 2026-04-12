@@ -288,4 +288,72 @@ describe('SettingsModal', () => {
     expect(onOpenWhatsNew).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it('renders "Same as chat provider" toggle and locks commit provider', async () => {
+    const mock = createMockSai();
+    mock.settingsGet = makeSettingsGetMock();
+    installMockSai(mock);
+
+    render(<SettingsModal {...defaultProps} />);
+    fireEvent.click(screen.getByText('Provider'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Same as chat provider')).toBeTruthy();
+    });
+
+    const toggles = document.querySelectorAll('.settings-toggle');
+    // The first toggle on Provider page is "Same as chat provider"
+    // (There is another one for AI conversation titles later)
+    const lockToggle = toggles[0];
+    expect(lockToggle).toBeTruthy();
+
+    // Toggle it ON
+    fireEvent.click(lockToggle);
+    await waitFor(() => {
+      expect(mock.settingsSet).toHaveBeenCalledWith('lockCommitProvider', true);
+    });
+
+    // Check if commit message provider dropdown is disabled
+    const providerBtns = document.querySelectorAll('.provider-select-btn');
+    const commitProviderBtn = providerBtns[1] as HTMLButtonElement;
+    expect(commitProviderBtn.disabled).toBe(true);
+    expect(commitProviderBtn.closest('.provider-select')?.classList.contains('disabled')).toBe(true);
+  });
+
+  it('syncs commit provider when chat provider changes and lock is ON', async () => {
+    const mock = createMockSai();
+    // Start with lock ON
+    mock.settingsGet = vi.fn((key, defaultVal) => {
+      if (key === 'lockCommitProvider') return Promise.resolve(true);
+      if (key === 'aiProvider') return Promise.resolve('claude');
+      return Promise.resolve(defaultVal);
+    });
+    installMockSai(mock);
+
+    render(<SettingsModal {...defaultProps} />);
+    fireEvent.click(screen.getByText('Provider'));
+
+    await waitFor(() => {
+      const providerBtns = document.querySelectorAll('.provider-select-btn');
+      expect(providerBtns.length).toBeGreaterThan(0);
+    });
+
+    // Open chat provider dropdown
+    const providerBtns = document.querySelectorAll('.provider-select-btn');
+    fireEvent.click(providerBtns[0]);
+
+    // Click on Codex option
+    const codexBtn = await waitFor(() => {
+      const btns = Array.from(document.querySelectorAll('.provider-dropdown-item'));
+      return btns.find(btn => btn.textContent?.includes('Codex'));
+    });
+
+    if (codexBtn) {
+      fireEvent.click(codexBtn);
+      await waitFor(() => {
+        expect(mock.settingsSet).toHaveBeenCalledWith('aiProvider', 'codex');
+        expect(mock.settingsSet).toHaveBeenCalledWith('commitMessageProvider', 'codex');
+      });
+    }
+  });
 });

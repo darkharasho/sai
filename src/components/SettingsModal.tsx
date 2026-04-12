@@ -63,6 +63,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [providerOpen, setProviderOpen] = useState(false);
   const providerRef = useRef<HTMLDivElement>(null);
   const [commitMessageProvider, setCommitMessageProvider] = useState<'claude' | 'codex' | 'gemini'>('claude');
+  const [lockCommitProvider, setLockCommitProvider] = useState(false);
   const [commitProviderOpen, setCommitProviderOpen] = useState(false);
   const commitProviderRef = useRef<HTMLDivElement>(null);
   const [geminiLoadingPhrases, setGeminiLoadingPhrases] = useState<'witty' | 'tips' | 'all' | 'off'>('all');
@@ -111,6 +112,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.settingsGet('commitMessageProvider', 'claude').then((v: string) => {
       if (v === 'claude' || v === 'codex' || v === 'gemini') setCommitMessageProvider(v as 'claude' | 'codex' | 'gemini');
     });
+    window.sai.settingsGet('lockCommitProvider', false).then((v: boolean) => setLockCommitProvider(!!v));
     window.sai.githubGetUser().then((u: any) => setIsAuthed(!!u));
 
     const unsubSync = window.sai.githubOnSyncStatus((data: { status: string; lastSynced?: number }) => {
@@ -125,6 +127,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if ('editorMinimap' in remote) setEditorMinimap(remote.editorMinimap);
       if ('aiProvider' in remote && (remote.aiProvider === 'claude' || remote.aiProvider === 'codex' || remote.aiProvider === 'gemini')) setAiProvider(remote.aiProvider);
       if ('commitMessageProvider' in remote && (remote.commitMessageProvider === 'claude' || remote.commitMessageProvider === 'codex' || remote.commitMessageProvider === 'gemini')) setCommitMessageProvider(remote.commitMessageProvider);
+      if ('lockCommitProvider' in remote) setLockCommitProvider(remote.lockCommitProvider);
       if ('systemNotifications' in remote) setSystemNotifications(remote.systemNotifications);
       if ('toolCallsExpanded' in remote) setToolCallsExpanded(remote.toolCallsExpanded);
       if ('focusedChat' in remote) setFocusedChat(remote.focusedChat);
@@ -207,12 +210,32 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     setAiProvider(value);
     window.sai.settingsSet('aiProvider', value);
     onSettingChange?.('aiProvider', value);
+
+    if (lockCommitProvider) {
+      setCommitMessageProvider(value);
+      window.sai.settingsSet('commitMessageProvider', value);
+      onSettingChange?.('commitMessageProvider', value);
+    }
   };
 
   const handleCommitProviderChange = (value: 'claude' | 'codex' | 'gemini') => {
+    if (lockCommitProvider) return;
     setCommitMessageProvider(value);
     window.sai.settingsSet('commitMessageProvider', value);
     onSettingChange?.('commitMessageProvider', value);
+  };
+
+  const handleLockCommitProviderChange = (value: boolean) => {
+    setLockCommitProvider(value);
+    window.sai.settingsSet('lockCommitProvider', value);
+    onSettingChange?.('lockCommitProvider', value);
+
+    if (value) {
+      // Sync commit provider to chat provider when turning on
+      setCommitMessageProvider(aiProvider);
+      window.sai.settingsSet('commitMessageProvider', aiProvider);
+      onSettingChange?.('commitMessageProvider', aiProvider);
+    }
   };
 
   const handleGeminiLoadingPhrasesChange = (value: 'witty' | 'tips' | 'all' | 'off') => {
@@ -559,8 +582,12 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             <div className="settings-row-name">Commit message provider</div>
             <div className="settings-row-desc">Which AI backend generates commit messages</div>
           </div>
-          <div className="provider-select" ref={commitProviderRef}>
-            <button className="provider-select-btn" onClick={() => setCommitProviderOpen(!commitProviderOpen)}>
+          <div className={`provider-select${lockCommitProvider ? ' disabled' : ''}`} ref={commitProviderRef}>
+            <button
+              className="provider-select-btn"
+              onClick={() => !lockCommitProvider && setCommitProviderOpen(!commitProviderOpen)}
+              disabled={lockCommitProvider}
+            >
               <span
                 className="provider-icon"
                 style={{
@@ -572,7 +599,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
               <span>{PROVIDER_OPTIONS.find(p => p.id === commitMessageProvider)!.label}</span>
               <ChevronDown size={11} style={{ opacity: 0.5 }} />
             </button>
-            {commitProviderOpen && (
+            {commitProviderOpen && !lockCommitProvider && (
               <div className="provider-dropdown">
                 {PROVIDER_OPTIONS.map(opt => (
                   <button
@@ -595,6 +622,21 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
               </div>
             )}
           </div>
+        </div>
+
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <div className="settings-row-name">Same as chat provider</div>
+            <div className="settings-row-desc">Keep the commit message provider in sync with the chat provider</div>
+          </div>
+          <button
+            className={`settings-toggle ${lockCommitProvider ? 'on' : 'off'}`}
+            onClick={() => handleLockCommitProviderChange(!lockCommitProvider)}
+            role="switch"
+            aria-checked={lockCommitProvider}
+          >
+            <span className="settings-toggle-thumb" />
+          </button>
         </div>
 
         <div className="settings-row">
@@ -972,6 +1014,8 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             min-width: 140px;
           }
           .provider-select-btn:hover { border-color: var(--accent); }
+          .provider-select.disabled { opacity: 0.5; cursor: not-allowed; }
+          .provider-select.disabled .provider-select-btn { cursor: not-allowed; pointer-events: none; }
           .provider-icon {
             display: inline-block;
             width: 14px;
