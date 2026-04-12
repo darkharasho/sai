@@ -8,7 +8,7 @@ import ToolCallCard from './ToolCallCard';
 import type { ChatMessage as ChatMessageType } from '../../types';
 import { getActiveTerminalId } from '../../terminalBuffer';
 
-const FILE_PATH_RE = /(?<![:/])\b((?:\.{1,2}\/)?(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte)|(?:\/[\w.-]+)+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte))(?::(\d+))?\b/g;
+const FILE_PATH_RE = /(?<![:/])\b((?:\.{1,2}\/)?(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte))(?::(\d+))?\b|(?<![:/.\w])((?:\/[\w.-]+)+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte))(?::(\d+))?\b/g;
 
 const URL_RE = /https?:\/\/[^\s<>)\]]+/g;
 
@@ -34,8 +34,10 @@ function linkifyText(text: string): any[] {
     const end = start + m[0].length;
     const inUrl = urlRanges.some(([us, ue]) => start >= us && end <= ue);
     if (!inUrl) {
-      const lineNum = m[2] ? `:${m[2]}` : '';
-      allMatches.push({ index: m.index, length: m[0].length, value: m[1], line: lineNum, type: 'file' });
+      const filePath = m[1] || m[3];
+      const lineMatch = m[2] || m[4];
+      const lineNum = lineMatch ? `:${lineMatch}` : '';
+      allMatches.push({ index: m.index, length: m[0].length, value: filePath, line: lineNum, type: 'file' });
     }
   }
 
