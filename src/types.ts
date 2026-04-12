@@ -16,7 +16,6 @@ export interface ChatSession {
   aiProvider?: 'claude' | 'codex' | 'gemini';
   claudeSessionId?: string;
   codexSessionId?: string;
-  geminiSessionId?: string;
   pinned?: boolean;
   titleEdited?: boolean;
 }

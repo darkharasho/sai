@@ -40,7 +40,6 @@ export interface WorkspaceCodex {
 
 export interface WorkspaceGemini {
   process: ChildProcess | null;
-  sessionId: string | undefined;
   buffer: string;
   cwd: string;
   busy: boolean;
@@ -106,7 +105,6 @@ export function getOrCreate(projectPath: string): Workspace {
     },
     gemini: {
       process: null,
-      sessionId: undefined,
       buffer: '',
       cwd: projectPath,
       busy: false,

@@ -68,10 +68,7 @@ function translateEvent(msg: any, projectPath: string): any[] {
 
   switch (msg.type) {
     case 'init':
-      // Session metadata — streaming_start is already sent by the IPC handler
-      if (msg.session_id) {
-        events.push({ type: 'session_id', sessionId: msg.session_id, projectPath });
-      }
+      // Session metadata — ignored (stateless one-shot turns, no session continuity)
       break;
 
     case 'message': {
@@ -190,21 +187,11 @@ export function registerGeminiHandlers(win: BrowserWindow) {
     }
   });
 
-  ipcMain.on('gemini:setSessionId', (_event, projectPath: string, sessionId: string | undefined) => {
-    const ws = get(projectPath);
-    if (!ws) return;
-    if (ws.gemini.process) {
-      ws.gemini.process.kill();
-      ws.gemini.process = null;
-      ws.gemini.busy = false;
-    }
-    ws.gemini.sessionId = sessionId;
-  });
-
   ipcMain.on('gemini:send', (_event, projectPath: string, message: string, imagePaths?: string[], approvalMode?: string, conversationMode?: string, model?: string) => {
     const ws = get(projectPath);
     if (!ws) return;
     touchActivity(projectPath);
+    const effectiveScope = 'chat';
 
     // Kill previous gemini process if still running
     if (ws.gemini.process) {
@@ -220,13 +207,8 @@ export function registerGeminiHandlers(win: BrowserWindow) {
 
     const args = ['-p', prompt, '--output-format', 'stream-json'];
 
-    // Resume previous session if we have one
-    if (ws.gemini.sessionId) {
-      args.push('--resume', ws.gemini.sessionId);
-    }
-
-    // Conversation mode: 'fast' overrides model to flash
-    const effectiveModel = conversationMode === 'fast' ? 'flash' : (model || GEMINI_DEFAULT_MODEL);
+    // Conversation mode: 'fast' overrides model to gemini-2.5-flash
+    const effectiveModel = conversationMode === 'fast' ? 'gemini-2.5-flash' : (model || GEMINI_DEFAULT_MODEL);
     args.push('-m', effectiveModel);
 
     // Approval mode — always pass explicitly since stdin is ignored and
@@ -245,7 +227,7 @@ export function registerGeminiHandlers(win: BrowserWindow) {
     ws.gemini.busy = true;
     ws.gemini.buffer = '';
 
-    safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath, turnSeq: ws.gemini.turnSeq });
+    safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: ws.gemini.turnSeq });
 
     proc.stdout?.on('data', (data: Buffer) => {
       if (ws.gemini.process !== proc) return;
@@ -258,12 +240,9 @@ export function registerGeminiHandlers(win: BrowserWindow) {
         if (!line.trim()) continue;
         try {
           const msg = JSON.parse(line);
-          // Capture session ID for conversation continuity
-          if (msg.type === 'init' && msg.session_id && !ws.gemini.sessionId) {
-            ws.gemini.sessionId = msg.session_id;
-          }
           const events = translateEvent(msg, ws.projectPath);
           for (const ev of events) {
+            ev.scope = effectiveScope;
             if (ev.type === 'streaming_start' || ev.type === 'done') ev.turnSeq = ws.gemini.turnSeq;
             safeSend(win, 'claude:message', ev);
           }
@@ -283,9 +262,9 @@ export function registerGeminiHandlers(win: BrowserWindow) {
     proc.stderr?.on('data', (data: Buffer) => {
       if (ws.gemini.process !== proc) return;
       const text = data.toString().trim();
-      // Gemini CLI prints "Loaded cached credentials." to stderr — skip it
-      if (text && !text.startsWith('Loaded cached credentials')) {
-        safeSend(win, 'claude:message', { type: 'error', text, projectPath: ws.projectPath });
+      // Filter out CLI caching noise and 429 retry backoff spam
+      if (text && !text.startsWith('Loaded cached credentials') && !/Attempt \d+ failed|Retrying with backoff|GaxiosError|No capacity available/.test(text)) {
+        safeSend(win, 'claude:message', { type: 'error', text, projectPath: ws.projectPath, scope: effectiveScope });
       }
     });
 
@@ -297,6 +276,7 @@ export function registerGeminiHandlers(win: BrowserWindow) {
           const msg = JSON.parse(ws.gemini.buffer);
           const events = translateEvent(msg, ws.projectPath);
           for (const ev of events) {
+            ev.scope = effectiveScope;
             if (ev.type === 'streaming_start' || ev.type === 'done') ev.turnSeq = ws.gemini.turnSeq;
             safeSend(win, 'claude:message', ev);
           }
@@ -308,7 +288,7 @@ export function registerGeminiHandlers(win: BrowserWindow) {
       ws.gemini.busy = false;
       // Only send done if the turn didn't already complete normally via result event
       if (wasBusy) {
-        safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.gemini.turnSeq });
+        safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: ws.gemini.turnSeq });
       }
     });
 
@@ -317,9 +297,9 @@ export function registerGeminiHandlers(win: BrowserWindow) {
       ws.gemini.process = null;
       ws.gemini.busy = false;
       safeSend(win, 'claude:message', {
-        type: 'error', text: `Gemini process error: ${err.message}`, projectPath: ws.projectPath,
+        type: 'error', text: `Gemini process error: ${err.message}`, projectPath: ws.projectPath, scope: effectiveScope
       });
-      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.gemini.turnSeq });
+      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: ws.gemini.turnSeq });
     });
   });
 }

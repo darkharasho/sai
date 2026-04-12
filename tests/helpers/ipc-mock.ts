@@ -39,7 +39,6 @@ export interface MockSai {
   geminiSend: ReturnType<typeof vi.fn>;
   geminiStop: ReturnType<typeof vi.fn>;
   codexSetSessionId: ReturnType<typeof vi.fn>;
-  geminiSetSessionId: ReturnType<typeof vi.fn>;
 
   // Git
   gitStatus: ReturnType<typeof vi.fn>;
@@ -157,7 +156,6 @@ export function createMockSai(): MockSai {
     geminiSend: vi.fn(),
     geminiStop: vi.fn(),
     codexSetSessionId: vi.fn(),
-    geminiSetSessionId: vi.fn(),
 
     // Git
     gitStatus: vi.fn().mockResolvedValue({ files: [], ahead: 0, behind: 0 }),

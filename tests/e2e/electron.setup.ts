@@ -54,7 +54,6 @@ export const test = base.extend<{ window: Page }>({
         geminiSend: () => {},
         geminiStop: () => {},
         codexSetSessionId: () => {},
-        geminiSetSessionId: () => {},
         geminiOnMessage: (_cb: any) => noop(),
         // Terminal
         terminalCreate: () => Promise.resolve(1),

@@ -195,7 +195,6 @@ describe('gemini service', () => {
     ws.gemini.busy = false;
     ws.gemini.buffer = '';
     ws.gemini.cwd = PROJECT;
-    ws.gemini.sessionId = undefined;
   });
 
   afterEach(() => {
@@ -251,49 +250,25 @@ describe('gemini service', () => {
       );
     }
 
-    it('emits session_id from init event and stores it for resume', async () => {
+    it('does not emit session_id events (stateless one-shot turns)', async () => {
       sendMessage();
       const proc = mockIpcMain.getLatestProcess();
-      // Clear the streaming_start sent by the IPC handler itself
       (mockWin.webContents.send as ReturnType<typeof vi.fn>).mockClear();
 
       proc.pushStdout(JSON.stringify({ type: 'init', session_id: 'abc-123' }) + '\n');
       await tick();
 
       const events = collectSentEvents(mockWin);
-      expect(events).toContainEqual(
-        expect.objectContaining({ type: 'session_id', sessionId: 'abc-123', projectPath: PROJECT }),
+      expect(events).not.toContainEqual(
+        expect.objectContaining({ type: 'session_id' }),
       );
     });
 
-    it('passes --resume on subsequent turns after session_id captured', async () => {
-      // First turn — captures session ID
+    it('does not pass --resume flag (stateless turns)', async () => {
       sendMessage();
       const proc1 = mockIpcMain.getLatestProcess();
-      proc1.pushStdout(JSON.stringify({ type: 'init', session_id: 'sess-456' }) + '\n');
-      await tick();
-      proc1.pushStdout(JSON.stringify({ type: 'result', status: 'success', stats: { input_tokens: 1, output_tokens: 1 } }) + '\n');
-      await tick();
-      proc1.emitExit(0);
-      await tick();
-
-      // Second turn — should include --resume
-      sendMessage({ message: 'follow up' });
-      const proc2 = mockIpcMain.getLatestProcess();
-      const resumeIdx = proc2.spawnArgs.indexOf('--resume');
-      expect(resumeIdx).toBeGreaterThanOrEqual(0);
-      expect(proc2.spawnArgs[resumeIdx + 1]).toBe('sess-456');
-    });
-
-    it('ignores init event without session_id', async () => {
-      sendMessage();
-      const proc = mockIpcMain.getLatestProcess();
-      (mockWin.webContents.send as ReturnType<typeof vi.fn>).mockClear();
-
-      proc.pushStdout(JSON.stringify({ type: 'init' }) + '\n');
-      await tick();
-
-      expect(collectSentEvents(mockWin)).toHaveLength(0);
+      const resumeIdx = proc1.spawnArgs.indexOf('--resume');
+      expect(resumeIdx).toBe(-1);
     });
 
     it('translates assistant message to assistant event with text', async () => {
@@ -475,12 +450,12 @@ describe('gemini service', () => {
       expect(mockSpawnFn.mock.calls[0][0]).toBe('gemini');
     });
 
-    it('uses flash model when conversationMode is fast', () => {
+    it('uses gemini-2.5-flash model when conversationMode is fast', () => {
       mockIpcMain._emit('gemini:send', PROJECT, 'test', undefined, undefined, 'fast', undefined);
       const args = getSpawnArgs();
       const idx = args.indexOf('-m');
       expect(idx).toBeGreaterThan(-1);
-      expect(args[idx + 1]).toBe('flash');
+      expect(args[idx + 1]).toBe('gemini-2.5-flash');
     });
 
     it('uses the specified model in normal mode', () => {

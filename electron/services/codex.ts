@@ -263,6 +263,7 @@ export function registerCodexHandlers(win: BrowserWindow) {
     const ws = get(projectPath);
     if (!ws) return;
     touchActivity(projectPath);
+    const effectiveScope = 'chat';
 
     // Kill previous codex process if still running
     if (ws.codex.process) {
@@ -311,7 +312,7 @@ export function registerCodexHandlers(win: BrowserWindow) {
     ws.codex.busy = true;
     ws.codex.buffer = '';
 
-    safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath, turnSeq: ws.codex.turnSeq });
+    safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: ws.codex.turnSeq });
 
     proc.stdout?.on('data', (data: Buffer) => {
       if (ws.codex.process !== proc) return;
@@ -330,6 +331,7 @@ export function registerCodexHandlers(win: BrowserWindow) {
           }
           const events = translateEvent(msg, ws.projectPath);
           for (const ev of events) {
+            ev.scope = effectiveScope;
             if (ev.type === 'streaming_start' || ev.type === 'done') ev.turnSeq = ws.codex.turnSeq;
             safeSend(win, 'claude:message', ev);
           }
@@ -350,7 +352,7 @@ export function registerCodexHandlers(win: BrowserWindow) {
       if (ws.codex.process !== proc) return;
       const text = data.toString().trim();
       if (text) {
-        safeSend(win, 'claude:message', { type: 'error', text, projectPath: ws.projectPath });
+        safeSend(win, 'claude:message', { type: 'error', text, projectPath: ws.projectPath, scope: effectiveScope });
       }
     });
 
@@ -362,6 +364,7 @@ export function registerCodexHandlers(win: BrowserWindow) {
           const msg = JSON.parse(ws.codex.buffer);
           const events = translateEvent(msg, ws.projectPath);
           for (const ev of events) {
+            ev.scope = effectiveScope;
             if (ev.type === 'streaming_start' || ev.type === 'done') ev.turnSeq = ws.codex.turnSeq;
             safeSend(win, 'claude:message', ev);
           }
@@ -373,7 +376,7 @@ export function registerCodexHandlers(win: BrowserWindow) {
       ws.codex.busy = false;
       // Only send done if the turn didn't already complete normally via turn.completed
       if (wasBusy) {
-        safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.codex.turnSeq });
+        safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: ws.codex.turnSeq });
       }
     });
 
@@ -382,9 +385,9 @@ export function registerCodexHandlers(win: BrowserWindow) {
       ws.codex.process = null;
       ws.codex.busy = false;
       safeSend(win, 'claude:message', {
-        type: 'error', text: `Codex process error: ${err.message}`, projectPath: ws.projectPath,
+        type: 'error', text: `Codex process error: ${err.message}`, projectPath: ws.projectPath, scope: effectiveScope
       });
-      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.codex.turnSeq });
+      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: ws.codex.turnSeq });
     });
   });
 }
