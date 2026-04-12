@@ -631,19 +631,34 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       }
 
       // Capture rate limit info (may receive multiple: daily, weekly, etc.)
+      // CLI events are supplementary — only update utilization when the
+      // authoritative OAuth API data is stale (>60 s) or absent.
       if (msg.type === 'rate_limit_event' && msg.rate_limit_info) {
         const info = msg.rate_limit_info;
         const key = info.rateLimitType || 'unknown';
         setRateLimits(prev => {
           const next = new Map(prev);
-          next.set(key, {
+          const existing = next.get(key);
+          const now = Date.now();
+
+          const entry = {
             rateLimitType: key,
-            resetsAt: info.resetsAt || 0,
-            status: info.status || 'unknown',
-            isUsingOverage: !!info.isUsingOverage,
-            overageResetsAt: info.overageResetsAt || 0,
-            utilization: info.utilization,
-          });
+            resetsAt: info.resetsAt || existing?.resetsAt || 0,
+            status: info.status || existing?.status || 'unknown',
+            isUsingOverage: !!(info.isUsingOverage ?? existing?.isUsingOverage),
+            overageResetsAt: info.overageResetsAt || existing?.overageResetsAt || 0,
+            utilization: existing?.utilization,
+            lastUpdated: existing?.lastUpdated || now,
+          };
+
+          // Only update utilization from CLI if no API data yet or API data is stale
+          const apiDataStale = !existing?.lastUpdated || (now - existing.lastUpdated) > 60_000;
+          if (info.utilization !== undefined && apiDataStale) {
+            entry.utilization = info.utilization;
+            entry.lastUpdated = now;
+          }
+
+          next.set(key, entry);
           return next;
         });
         return;
