@@ -499,23 +499,25 @@ describe('gemini service', () => {
       expect(args[idx + 1]).toBe('auto-gemini-3');
     });
 
-    it('adds --approval-mode flag when approvalMode is not default', () => {
+    it('adds --approval-mode flag with explicit value when provided', () => {
       mockIpcMain._emit('gemini:send', PROJECT, 'test', undefined, 'suggest', undefined, undefined);
       const args = getSpawnArgs();
       expect(args).toContain('--approval-mode');
       expect(args).toContain('suggest');
     });
 
-    it('does not add --approval-mode flag when approvalMode is "default"', () => {
+    it('passes explicit "default" approval mode when set', () => {
       mockIpcMain._emit('gemini:send', PROJECT, 'test', undefined, 'default', undefined, undefined);
       const args = getSpawnArgs();
-      expect(args).not.toContain('--approval-mode');
+      expect(args).toContain('--approval-mode');
+      expect(args).toContain('default');
     });
 
-    it('does not add --approval-mode when approvalMode is undefined', () => {
+    it('defaults to auto_edit approval mode when not specified', () => {
       mockIpcMain._emit('gemini:send', PROJECT, 'test', undefined, undefined, undefined, undefined);
       const args = getSpawnArgs();
-      expect(args).not.toContain('--approval-mode');
+      expect(args).toContain('--approval-mode');
+      expect(args).toContain('auto_edit');
     });
 
     it('passes the prompt with -p flag as first two args', () => {

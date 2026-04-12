@@ -229,10 +229,10 @@ export function registerGeminiHandlers(win: BrowserWindow) {
     const effectiveModel = conversationMode === 'fast' ? 'flash' : (model || GEMINI_DEFAULT_MODEL);
     args.push('-m', effectiveModel);
 
-    // Approval mode
-    if (approvalMode && approvalMode !== 'default') {
-      args.push('--approval-mode', approvalMode);
-    }
+    // Approval mode — always pass explicitly since stdin is ignored and
+    // Gemini CLI's built-in default requires interactive approval.
+    // Default to auto_edit so file-modification tools remain available.
+    args.push('--approval-mode', approvalMode || 'auto_edit');
 
     const proc = spawn('gemini', args, {
       cwd: ws.gemini.cwd || projectPath,
