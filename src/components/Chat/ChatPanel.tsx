@@ -483,7 +483,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const [autoCompactThreshold, setAutoCompactThreshold] = useState(0); // 0 = off
   const [toolCallsExpanded, setToolCallsExpanded] = useState(true);
   const autoCompactCooldownRef = useRef(0); // timestamp — don't re-compact until after this
-  const [rateLimits, setRateLimits] = useState<Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number; utilization?: number }>>(new Map());
+  const [rateLimits, setRateLimits] = useState<Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number; utilization?: number; lastUpdated: number }>>(new Map());
   const [billingMode, setBillingMode] = useState<'subscription' | 'api'>('subscription');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -841,6 +841,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             ...existing,
             utilization: (data.five_hour.utilization ?? 0) / 100, // API returns 0-100, we use 0-1
             ...(data.five_hour.resets_at ? { resetsAt: Math.floor(new Date(data.five_hour.resets_at).getTime() / 1000) } : {}),
+            lastUpdated: Date.now(),
           });
         }
         // seven_day → Weekly (All models)
@@ -856,6 +857,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             ...existing,
             utilization: (data.seven_day.utilization ?? 0) / 100,
             ...(data.seven_day.resets_at ? { resetsAt: Math.floor(new Date(data.seven_day.resets_at).getTime() / 1000) } : {}),
+            lastUpdated: Date.now(),
           });
         }
         return next;
