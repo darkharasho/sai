@@ -22,6 +22,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 const {
   mockIpcMain,
   workspaceState,
+  mockEnsureGeminiTransport,
+  mockEnsureGeminiCommitSession,
+  mockPromptGeminiText,
 } = vi.hoisted(() => {
   // ---- Minimal IPC main mock ----
   type IpcHandler = (...args: unknown[]) => unknown;
@@ -74,6 +77,9 @@ const {
   type Workspace = {
     projectPath: string;
     claudeScopes: Map<string, WorkspaceClaude>;
+    gemini: {
+      cwd: string;
+    };
   };
 
   const map = new Map<string, Workspace>();
@@ -106,7 +112,11 @@ const {
     map,
     getOrCreate(projectPath: string): Workspace {
       if (!map.has(projectPath)) {
-        map.set(projectPath, { projectPath, claudeScopes: new Map([['chat', makeClaude()]]) });
+        map.set(projectPath, {
+          projectPath,
+          claudeScopes: new Map([['chat', makeClaude()]]),
+          gemini: { cwd: projectPath },
+        });
       }
       return map.get(projectPath)!;
     },
@@ -120,7 +130,13 @@ const {
     getClaude,
   };
 
-  return { mockIpcMain, workspaceState };
+  return {
+    mockIpcMain,
+    workspaceState,
+    mockEnsureGeminiTransport: vi.fn().mockResolvedValue(undefined),
+    mockEnsureGeminiCommitSession: vi.fn().mockResolvedValue('gemini-commit-session'),
+    mockPromptGeminiText: vi.fn().mockResolvedValue('gemini commit message'),
+  };
 });
 
 // ---------------------------------------------------------------------------
@@ -144,6 +160,12 @@ vi.mock('@electron/services/workspace', () => ({
 
 vi.mock('@electron/services/notify', () => ({
   notifyCompletion: vi.fn(),
+}));
+
+vi.mock('@electron/services/gemini', () => ({
+  ensureGeminiTransport: mockEnsureGeminiTransport,
+  ensureGeminiCommitSession: mockEnsureGeminiCommitSession,
+  promptGeminiText: mockPromptGeminiText,
 }));
 
 vi.mock('node:fs', () => ({
@@ -234,6 +256,9 @@ beforeEach(() => {
   vi.mocked(spawn).mockImplementation(defaultSpawnImpl as any);
 
   win = createMockBrowserWindow();
+  mockEnsureGeminiTransport.mockResolvedValue(undefined);
+  mockEnsureGeminiCommitSession.mockResolvedValue('gemini-commit-session');
+  mockPromptGeminiText.mockResolvedValue('gemini commit message');
 
   // Reset ipcMain mock state and re-register handlers
   mockIpcMain._handlers.clear();
@@ -1071,21 +1096,39 @@ describe('claude:generateCommitMessage', () => {
     expect(capturedArgs).toContain('codex-mini');
   });
 
-  it('spawns gemini CLI when provider is gemini', async () => {
-    let calledCmd = '';
-    let capturedArgs: string[] = [];
+  it('uses a hidden Gemini ACP session for commit generation', async () => {
+    mockSpawnForCommit({});
+    const result = await mockIpcMain._invoke('claude:generateCommitMessage', '/my/project', 'gemini');
 
-    mockSpawnForCommit({
-      commitOutput: 'gemini commit message\n',
-      captureCmd: (cmd, args) => { calledCmd = cmd; capturedArgs = args; },
-    });
+    expect(result).toBe('gemini commit message');
+    expect(mockEnsureGeminiTransport).toHaveBeenCalled();
+    expect(mockEnsureGeminiCommitSession).toHaveBeenCalled();
+    expect(mockPromptGeminiText).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        scope: 'commit',
+        prompt: expect.stringContaining('Generate a concise commit message for this diff'),
+        model: 'gemini-2.5-flash',
+        approvalMode: 'plan',
+      }),
+    );
+  });
+
+  it('does not reuse the active Gemini chat session for commit generation', async () => {
+    mockSpawnForCommit({});
+    mockEnsureGeminiCommitSession.mockResolvedValueOnce('gemini-hidden-commit');
 
     await mockIpcMain._invoke('claude:generateCommitMessage', '/my/project', 'gemini');
 
-    expect(calledCmd).toBe('gemini');
-    expect(capturedArgs).toContain('--output-format');
-    expect(capturedArgs[capturedArgs.indexOf('--output-format') + 1]).toBe('text');
-    expect(capturedArgs).toContain('flash');
+    expect(mockPromptGeminiText).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        sessionId: 'gemini-hidden-commit',
+        scope: 'commit',
+      }),
+    );
   });
 });
 

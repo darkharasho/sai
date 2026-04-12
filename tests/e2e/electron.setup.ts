@@ -53,6 +53,7 @@ export const test = base.extend<{ window: Page }>({
         geminiStart: () => Promise.resolve({ message: 'ready' }),
         geminiSend: () => {},
         geminiStop: () => {},
+        geminiSetSessionId: () => {},
         codexSetSessionId: () => {},
         geminiOnMessage: (_cb: any) => noop(),
         // Terminal
@@ -88,6 +89,7 @@ export const test = base.extend<{ window: Page }>({
         fsCreateFile: () => Promise.resolve(),
         fsCreateDir: () => Promise.resolve(),
         fsCheckIgnored: () => Promise.resolve([]),
+        fsWalkFiles: () => Promise.resolve([]),
         // Workspace
         workspaceSetActive: () => {},
         workspaceGetAll: () => Promise.resolve([{ projectPath: fixturePath, status: 'active', lastActivity: Date.now() }]),
@@ -107,6 +109,7 @@ export const test = base.extend<{ window: Page }>({
         onUpdateProgress: (_cb: any) => noop(),
         onUpdateDownloaded: (_cb: any) => noop(),
         onUpdateError: (_cb: any) => noop(),
+        setBadgeCount: () => {},
         // GitHub — provide a mock user so Settings is accessible via the user dropdown
         githubGetUser: () => Promise.resolve({ login: 'test-user', avatar_url: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>', name: 'Test User' }),
         githubStartAuth: () => {},

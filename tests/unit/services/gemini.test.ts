@@ -1,86 +1,35 @@
-/**
- * Unit tests for electron/services/gemini.ts
- *
- * Design notes:
- * - vi.mock factories are hoisted before any variable declarations. Variables
- *   they reference must be created with vi.hoisted() so they're available when
- *   the factory runs.
- * - node:child_process is mocked without importOriginal — a direct factory with
- *   mockSpawnFn works reliably; the importOriginal spread approach does not
- *   intercept the spawn binding inside gemini.ts.
- * - @electron/services/workspace is NOT mocked via vi.mock because the alias
- *   path and the relative path used inside gemini.ts are different module IDs
- *   in Vitest's registry. We use the real workspace module and seed it in
- *   beforeEach instead.
- */
-
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-
-// ---------------------------------------------------------------------------
-// vi.hoisted — create stable shared objects before vi.mock factories run
-// ---------------------------------------------------------------------------
+import fs from 'node:fs';
 
 const {
   mockIpcMain,
   mockHandlers,
   mockListeners,
-  mockSpawnFn,
-  spawnProcesses,
+  acpListeners,
+  mockCreateGeminiAcpClient,
+  mockAcpClient,
 } = vi.hoisted(() => {
-  const { EventEmitter } = require('events');
-  const { Readable, Writable } = require('stream');
-
-  // ---- Minimal MockChildProcess ----
-  class MockChildProcess extends EventEmitter {
-    stdout: InstanceType<typeof Readable>;
-    stderr: InstanceType<typeof Readable>;
-    stdin: InstanceType<typeof Writable>;
-    kill: ReturnType<typeof vi.fn>;
-    spawnArgs: string[];
-
-    private _stdout: InstanceType<typeof Readable>;
-    private _stderr: InstanceType<typeof Readable>;
-
-    constructor(args: string[] = []) {
-      super();
-      this.spawnArgs = args;
-      this._stdout = new Readable({ read() {} });
-      this._stderr = new Readable({ read() {} });
-      this.stdout = this._stdout;
-      this.stderr = this._stderr;
-      this.stdin = new Writable({ write(_c: unknown, _e: unknown, cb: () => void) { cb(); } });
-      this.kill = vi.fn((_signal?: string | number) => {
-        process.nextTick(() => this.emit('close', null, _signal ?? 'SIGTERM'));
-        return true;
-      });
-    }
-
-    pushStdout(data: string | Buffer) { this._stdout.push(data); }
-    pushStderr(data: string | Buffer) { this._stderr.push(data); }
-    emitExit(code: number | null = 0) {
-      this._stdout.push(null);
-      this._stderr.push(null);
-      this.emit('exit', code, null);
-      this.emit('close', code, null);
-    }
-  }
-
-  // ---- Spawn mock ----
-  const spawnProcesses: MockChildProcess[] = [];
-  const mockSpawnFn = vi.fn((_cmd: string, _args?: string[], _opts?: object) => {
-    const proc = new MockChildProcess(_args ?? []);
-    spawnProcesses.push(proc);
-    return proc;
-  });
-
-  // ---- ipcMain mock ----
   const mockHandlers = new Map<string, (...args: unknown[]) => unknown>();
   const mockListeners = new Map<string, Array<(...args: unknown[]) => void>>();
+  const acpListeners: Array<(event: unknown) => void> = [];
+
+  const mockAcpClient = {
+    start: vi.fn().mockResolvedValue(undefined),
+    request: vi.fn(),
+    notify: vi.fn(),
+    onEvent: vi.fn((listener: (event: unknown) => void) => {
+      acpListeners.push(listener);
+      return () => {
+        const idx = acpListeners.indexOf(listener);
+        if (idx >= 0) acpListeners.splice(idx, 1);
+      };
+    }),
+    dispose: vi.fn(),
+  };
+
+  const mockCreateGeminiAcpClient = vi.fn(() => mockAcpClient);
 
   const mockIpcMain = {
-    _handlers: mockHandlers,
-    _listeners: mockListeners,
-
     handle: vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => {
       mockHandlers.set(channel, handler);
     }),
@@ -88,89 +37,72 @@ const {
       const existing = mockListeners.get(channel) ?? [];
       mockListeners.set(channel, [...existing, listener]);
     }),
-    removeHandler: vi.fn((channel: string) => {
-      mockHandlers.delete(channel);
-    }),
-
-    async _invoke(channel: string, ...args: unknown[]): Promise<unknown> {
+    async _invoke(channel: string, ...args: unknown[]) {
       const handler = mockHandlers.get(channel);
       if (!handler) throw new Error(`No handler for channel "${channel}"`);
       return handler({ sender: {} }, ...args);
     },
-    _emit(channel: string, ...args: unknown[]): void {
+    _emit(channel: string, ...args: unknown[]) {
       const listeners = mockListeners.get(channel) ?? [];
       for (const listener of listeners) listener({ sender: {} }, ...args);
     },
-
-    getLatestProcess(): MockChildProcess {
-      if (spawnProcesses.length === 0) throw new Error('No processes spawned yet');
-      return spawnProcesses[spawnProcesses.length - 1];
-    },
   };
 
-  return { mockIpcMain, mockHandlers, mockListeners, mockSpawnFn, spawnProcesses };
-});
-
-// ---------------------------------------------------------------------------
-// Module mocks
-// ---------------------------------------------------------------------------
-
-vi.mock('node:child_process', () => {
-  // Provide a minimal ChildProcess class so the named import in gemini.ts resolves
-  const { EventEmitter } = require('events');
-  class ChildProcess extends EventEmitter {}
   return {
-    spawn: mockSpawnFn,
-    ChildProcess,
-    default: { spawn: mockSpawnFn, ChildProcess },
+    mockIpcMain,
+    mockHandlers,
+    mockListeners,
+    acpListeners,
+    mockCreateGeminiAcpClient,
+    mockAcpClient,
   };
 });
 
 vi.mock('electron', () => ({
   ipcMain: mockIpcMain,
   app: {
-    getPath: vi.fn().mockReturnValue('/tmp'),
-    getName: vi.fn().mockReturnValue('sai'),
+    getPath: vi.fn().mockReturnValue('/tmp/sai-test-userdata'),
   },
+  BrowserWindow: vi.fn(),
 }));
 
-// NOTE: We intentionally do NOT mock @electron/services/workspace here.
-// Vitest resolves vi.mock('@electron/services/workspace') via the @electron alias,
-// but gemini.ts imports workspace via the relative path './workspace'. These paths
-// resolve to the same file on disk but are different module IDs in Vitest's registry,
-// so the mock would not intercept the import inside gemini.ts.
-// We use the real workspace module and seed it with getOrCreate() in beforeEach.
+vi.mock('@electron/services/gemini-acp', () => ({
+  createGeminiAcpClient: mockCreateGeminiAcpClient,
+}));
 
 vi.mock('@electron/services/notify', () => ({
   notifyCompletion: vi.fn(),
 }));
 
-// ---------------------------------------------------------------------------
-// Imports after mocks
-// ---------------------------------------------------------------------------
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return {
+    ...actual,
+    spawn: vi.fn(),
+    execFile: vi.fn(),
+  };
+});
 
 import { registerGeminiHandlers } from '@electron/services/gemini';
+import { registerClaudeHandlers } from '@electron/services/claude';
 import { getOrCreate, get } from '@electron/services/workspace';
 import { createMockBrowserWindow } from '../../helpers/electron-mock';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 const PROJECT = '/workspace/myproject';
 
-/** Await one event-loop tick */
-const tick = () => new Promise<void>(r => process.nextTick(r));
+function tick() {
+  return new Promise<void>(resolve => process.nextTick(resolve));
+}
 
 function collectSentEvents(win: ReturnType<typeof createMockBrowserWindow>) {
   return (win.webContents.send as ReturnType<typeof vi.fn>).mock.calls
-    .filter(([ch]: [string]) => ch === 'claude:message')
-    .map(([, ev]: [string, unknown]) => ev);
+    .filter(([channel]: [string]) => channel === 'claude:message')
+    .map(([, event]: [string, unknown]) => event);
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+function emitAcpEvent(event: unknown) {
+  for (const listener of acpListeners) listener(event);
+}
 
 describe('gemini service', () => {
   let mockWin: ReturnType<typeof createMockBrowserWindow>;
@@ -179,400 +111,350 @@ describe('gemini service', () => {
     vi.clearAllMocks();
     mockHandlers.clear();
     mockListeners.clear();
-    spawnProcesses.length = 0;
+    acpListeners.length = 0;
+    mockAcpClient.start.mockResolvedValue(undefined);
+    mockAcpClient.request.mockReset();
+    mockAcpClient.notify.mockReset();
+    mockAcpClient.dispose.mockReset();
 
     mockWin = createMockBrowserWindow();
     registerGeminiHandlers(mockWin as unknown as import('electron').BrowserWindow);
+    registerClaudeHandlers(mockWin as unknown as import('electron').BrowserWindow);
 
-    // Seed the real workspace module with a fresh workspace for PROJECT
-    getOrCreate(PROJECT);
-    const ws = get(PROJECT)!;
-    // Reset any lingering process state from previous tests
-    if (ws.gemini.process) {
-      try { ws.gemini.process.kill(); } catch { /* ignore */ }
-      ws.gemini.process = null;
-    }
-    ws.gemini.busy = false;
-    ws.gemini.buffer = '';
+    const ws = getOrCreate(PROJECT);
     ws.gemini.cwd = PROJECT;
+    ws.gemini.busy = false;
+    ws.gemini.turnSeq = 0;
+    ws.gemini.loadedSessionIds.clear();
+    ws.gemini.bootstrappedSessionIds.clear();
+    ws.gemini.suppressedScopes.clear();
+    ws.gemini.chatSessionId = undefined;
+    ws.gemini.activeRequestId = undefined;
+    ws.gemini.availability = 'available';
+    ws.gemini.lastError = undefined;
+    ws.gemini.transport = null;
+    ws.gemini.pendingApproval = null;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  // -------------------------------------------------------------------------
-  // Models
-  // -------------------------------------------------------------------------
-
   describe('gemini:models handler', () => {
     it('returns the hardcoded model list', async () => {
       const result = await mockIpcMain._invoke('gemini:models') as {
         models: { id: string; name: string }[];
       };
-
-      expect(result.models).toBeInstanceOf(Array);
       expect(result.models.length).toBeGreaterThan(0);
-      const ids = result.models.map(m => m.id);
-      expect(ids).toContain('auto-gemini-3');
-      expect(ids).toContain('gemini-2.5-pro');
-      for (const model of result.models) {
-        expect(typeof model.id).toBe('string');
-        expect(typeof model.name).toBe('string');
+      expect(result.models.map(m => m.id)).toContain('auto-gemini-3');
+    });
+  });
+
+  it('creates the ACP transport on gemini:start and emits ready', async () => {
+    await mockIpcMain._invoke('gemini:start', PROJECT);
+
+    expect(mockCreateGeminiAcpClient).toHaveBeenCalledTimes(1);
+    expect(mockAcpClient.start).toHaveBeenCalledTimes(1);
+    expect(collectSentEvents(mockWin)).toContainEqual(
+      expect.objectContaining({ type: 'ready', projectPath: PROJECT }),
+    );
+  });
+
+  it('creates a new Gemini chat session on first send and emits session_id', async () => {
+    const promptCalls: Array<Record<string, any>> = [];
+    mockAcpClient.request.mockImplementation(async (method: string) => {
+      if (method === 'session/new') return { sessionId: 'gemini-chat-1' };
+      if (method === 'session/prompt') {
+        const params = mockAcpClient.request.mock.calls.at(-1)?.[1] as Record<string, any>;
+        promptCalls.push(params);
+        return {
+          requestId: 'req-1',
+          usage: { input_tokens: 100, output_tokens: 25, cached: 7 },
+        };
       }
+      throw new Error(`Unexpected method ${method}`);
     });
 
-    it('returns auto-gemini-3 as the default model', async () => {
-      const result = await mockIpcMain._invoke('gemini:models') as { defaultModel: string };
-      expect(result.defaultModel).toBe('auto-gemini-3');
+    mockIpcMain._emit('gemini:send', PROJECT, 'Hello', undefined, 'auto_edit', 'planning', 'auto-gemini-3', 'chat');
+    await tick();
+
+    emitAcpEvent({
+      method: 'session/update',
+      params: {
+        sessionId: 'gemini-chat-1',
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'Hello back' },
+        },
+      },
+    });
+    await tick();
+
+    const ws = get(PROJECT)!;
+    expect(ws.gemini.chatSessionId).toBe('gemini-chat-1');
+    expect(mockAcpClient.request).toHaveBeenCalledWith(
+      'session/new',
+      expect.objectContaining({ cwd: PROJECT, scope: 'chat', mcpServers: [] }),
+    );
+    expect(promptCalls).toHaveLength(1);
+    expect(promptCalls[0]).toMatchObject({
+      sessionId: 'gemini-chat-1',
+    });
+    expect((promptCalls[0].prompt as Array<Record<string, any>>)[0].text).toContain('Project bootstrap context for this repository.');
+    expect((promptCalls[0].prompt as Array<Record<string, any>>)[1]).toMatchObject({ type: 'text', text: 'Hello' });
+
+    const events = collectSentEvents(mockWin);
+    expect(events).toContainEqual(expect.objectContaining({ type: 'session_id', sessionId: 'gemini-chat-1' }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: 'Hello back', delta: true }] },
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'result',
+      usage: {
+        input_tokens: 100,
+        cache_read_input_tokens: 7,
+        cache_creation_input_tokens: 0,
+        output_tokens: 25,
+      },
+    }));
+    expect(events).toContainEqual(expect.objectContaining({ type: 'done', projectPath: PROJECT }));
+  });
+
+  it('loads an existing Gemini chat session before prompting', async () => {
+    const promptCalls: Array<Record<string, any>> = [];
+    mockIpcMain._emit('gemini:setSessionId', PROJECT, 'gemini-existing-1', 'chat');
+    mockAcpClient.request.mockImplementation(async (method: string) => {
+      if (method === 'session/load') return { sessionId: 'gemini-existing-1' };
+      if (method === 'session/prompt') {
+        const params = mockAcpClient.request.mock.calls.at(-1)?.[1] as Record<string, any>;
+        promptCalls.push(params);
+        return { requestId: 'req-2', usage: { input_tokens: 20, output_tokens: 4, cached: 0 } };
+      }
+      throw new Error(`Unexpected method ${method}`);
+    });
+
+    mockIpcMain._emit('gemini:send', PROJECT, 'Continue', undefined, 'plan', 'planning', 'auto-gemini-3', 'chat');
+    await tick();
+
+    expect(mockAcpClient.request).toHaveBeenCalledWith(
+      'session/load',
+      expect.objectContaining({ sessionId: 'gemini-existing-1', mcpServers: [] }),
+    );
+    expect(promptCalls).toHaveLength(1);
+    expect((promptCalls[0].prompt as Array<Record<string, any>>)[0].text).toContain('Project bootstrap context for this repository.');
+    expect((promptCalls[0].prompt as Array<Record<string, any>>)[1]).toMatchObject({ type: 'text', text: 'Continue' });
+  });
+
+  it('does not reload an already loaded Gemini session on subsequent sends', async () => {
+    const promptCalls: Array<Record<string, any>> = [];
+    mockIpcMain._emit('gemini:setSessionId', PROJECT, 'gemini-existing-1', 'chat');
+    mockAcpClient.request.mockImplementation(async (method: string) => {
+      if (method === 'session/load') return { sessionId: 'gemini-existing-1' };
+      if (method === 'session/prompt') {
+        const params = mockAcpClient.request.mock.calls.at(-1)?.[1] as Record<string, any>;
+        promptCalls.push(params);
+        return { requestId: 'req-2', usage: { input_tokens: 20, output_tokens: 4, cached: 0 } };
+      }
+      throw new Error(`Unexpected method ${method}`);
+    });
+
+    mockIpcMain._emit('gemini:send', PROJECT, 'Continue', undefined, 'plan', 'planning', 'auto-gemini-3', 'chat');
+    await tick();
+    mockIpcMain._emit('gemini:send', PROJECT, 'Keep going', undefined, 'plan', 'planning', 'auto-gemini-3', 'chat');
+    await tick();
+
+    const loadCalls = mockAcpClient.request.mock.calls.filter(([method]) => method === 'session/load');
+    expect(loadCalls).toHaveLength(1);
+    expect(promptCalls).toHaveLength(2);
+    expect((promptCalls[0].prompt as Array<Record<string, any>>)[0].text).toContain('Project bootstrap context for this repository.');
+    expect((promptCalls[0].prompt as Array<Record<string, any>>)[1]).toMatchObject({ type: 'text', text: 'Continue' });
+    expect(promptCalls[1]).toMatchObject({
+      sessionId: 'gemini-existing-1',
+      prompt: [{ type: 'text', text: 'Keep going' }],
     });
   });
 
-  // -------------------------------------------------------------------------
-  // Event translation (via gemini:send integration)
-  // -------------------------------------------------------------------------
-
-  describe('event translation via gemini:send', () => {
-    function sendMessage(opts: {
-      message?: string;
-      approvalMode?: string;
-      conversationMode?: string;
-      model?: string;
-    } = {}) {
-      mockIpcMain._emit(
-        'gemini:send',
-        PROJECT,
-        opts.message ?? 'Hello',
-        undefined,
-        opts.approvalMode,
-        opts.conversationMode,
-        opts.model,
-      );
-    }
-
-    it('does not emit session_id events (stateless one-shot turns)', async () => {
-      sendMessage();
-      const proc = mockIpcMain.getLatestProcess();
-      (mockWin.webContents.send as ReturnType<typeof vi.fn>).mockClear();
-
-      proc.pushStdout(JSON.stringify({ type: 'init', session_id: 'abc-123' }) + '\n');
-      await tick();
-
-      const events = collectSentEvents(mockWin);
-      expect(events).not.toContainEqual(
-        expect.objectContaining({ type: 'session_id' }),
-      );
+  it('sends attached images as inline ACP image parts', async () => {
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(Buffer.from('image-bytes'));
+    const promptCalls: Array<Record<string, any>> = [];
+    mockAcpClient.request.mockImplementation(async (method: string) => {
+      if (method === 'session/new') return { sessionId: 'gemini-chat-1' };
+      if (method === 'session/prompt') {
+        const params = mockAcpClient.request.mock.calls.at(-1)?.[1] as Record<string, any>;
+        promptCalls.push(params);
+        return { requestId: 'req-1', usage: { input_tokens: 10, output_tokens: 2, cached: 0 } };
+      }
+      throw new Error(`Unexpected method ${method}`);
     });
 
-    it('does not pass --resume flag (stateless turns)', async () => {
-      sendMessage();
-      const proc1 = mockIpcMain.getLatestProcess();
-      const resumeIdx = proc1.spawnArgs.indexOf('--resume');
-      expect(resumeIdx).toBe(-1);
-    });
+    mockIpcMain._emit('gemini:send', PROJECT, 'Describe this image', ['/tmp/photo.png'], 'auto_edit', 'planning', 'auto-gemini-3', 'chat');
+    await tick();
 
-    it('translates assistant message to assistant event with text', async () => {
-      sendMessage();
-      const proc = mockIpcMain.getLatestProcess();
-      proc.pushStdout(
-        JSON.stringify({ type: 'message', role: 'assistant', content: 'Hello world' }) + '\n',
-      );
-      await tick();
-
-      expect(collectSentEvents(mockWin)).toContainEqual(
-        expect.objectContaining({
-          type: 'assistant',
-          projectPath: PROJECT,
-          message: { content: [{ type: 'text', text: 'Hello world' }] },
-        }),
-      );
-    });
-
-    it('skips user message echoes', async () => {
-      sendMessage();
-      const proc = mockIpcMain.getLatestProcess();
-      proc.pushStdout(
-        JSON.stringify({ type: 'message', role: 'user', content: 'User said this' }) + '\n',
-      );
-      await tick();
-
-      expect(collectSentEvents(mockWin)).not.toContainEqual(
-        expect.objectContaining({ type: 'assistant' }),
-      );
-    });
-
-    it('translates tool_use event to assistant with tool_use content', async () => {
-      sendMessage();
-      const proc = mockIpcMain.getLatestProcess();
-      proc.pushStdout(
-        JSON.stringify({ type: 'tool_use', tool_name: 'bash', parameters: { command: 'ls' } }) + '\n',
-      );
-      await tick();
-
-      expect(collectSentEvents(mockWin)).toContainEqual(
-        expect.objectContaining({
-          type: 'assistant',
-          projectPath: PROJECT,
-          message: { content: [{ type: 'tool_use', name: 'bash', input: { command: 'ls' } }] },
-        }),
-      );
-    });
-
-    it('translates tool_use using fallback name fields', async () => {
-      sendMessage();
-      const proc = mockIpcMain.getLatestProcess();
-      proc.pushStdout(
-        JSON.stringify({ type: 'tool_use', name: 'read_file', arguments: { path: '/foo' } }) + '\n',
-      );
-      await tick();
-
-      expect(collectSentEvents(mockWin)).toContainEqual(
-        expect.objectContaining({
-          type: 'assistant',
-          message: expect.objectContaining({
-            content: [expect.objectContaining({ name: 'read_file' })],
-          }),
-        }),
-      );
-    });
-
-    it('translates result event with stats to result + done', async () => {
-      sendMessage();
-      const proc = mockIpcMain.getLatestProcess();
-      proc.pushStdout(
-        JSON.stringify({
-          type: 'result',
-          status: 'success',
-          stats: { input_tokens: 100, output_tokens: 50, cached: 10 },
-        }) + '\n',
-      );
-      await tick();
-
-      const events = collectSentEvents(mockWin);
-      expect(events).toContainEqual(
-        expect.objectContaining({
-          type: 'result',
-          projectPath: PROJECT,
-          usage: {
-            input_tokens: 100,
-            cache_read_input_tokens: 10,
-            cache_creation_input_tokens: 0,
-            output_tokens: 50,
-          },
-        }),
-      );
-      expect(events).toContainEqual(expect.objectContaining({ type: 'done', projectPath: PROJECT }));
-    });
-
-    it('translates result with error status to error + done', async () => {
-      sendMessage();
-      const proc = mockIpcMain.getLatestProcess();
-      proc.pushStdout(
-        JSON.stringify({ type: 'result', status: 'error', error: 'Rate limit exceeded' }) + '\n',
-      );
-      await tick();
-
-      const events = collectSentEvents(mockWin);
-      expect(events).toContainEqual(
-        expect.objectContaining({ type: 'error', projectPath: PROJECT, text: 'Rate limit exceeded' }),
-      );
-      expect(events).toContainEqual(expect.objectContaining({ type: 'done', projectPath: PROJECT }));
-    });
-
-    it('translates error event to error + done', async () => {
-      sendMessage();
-      const proc = mockIpcMain.getLatestProcess();
-      proc.pushStdout(
-        JSON.stringify({ type: 'error', message: 'Something went wrong' }) + '\n',
-      );
-      await tick();
-
-      const events = collectSentEvents(mockWin);
-      expect(events).toContainEqual(
-        expect.objectContaining({ type: 'error', projectPath: PROJECT, text: 'Something went wrong' }),
-      );
-      expect(events).toContainEqual(expect.objectContaining({ type: 'done', projectPath: PROJECT }));
-    });
-
-    it('translates error event using error string field', async () => {
-      sendMessage();
-      const proc = mockIpcMain.getLatestProcess();
-      proc.pushStdout(JSON.stringify({ type: 'error', error: 'Quota exceeded' }) + '\n');
-      await tick();
-
-      expect(collectSentEvents(mockWin)).toContainEqual(
-        expect.objectContaining({ type: 'error', text: 'Quota exceeded' }),
-      );
-    });
-
-    it('falls back to "Gemini error" when error event has no message or error field', async () => {
-      sendMessage();
-      const proc = mockIpcMain.getLatestProcess();
-      proc.pushStdout(JSON.stringify({ type: 'error' }) + '\n');
-      await tick();
-
-      expect(collectSentEvents(mockWin)).toContainEqual(
-        expect.objectContaining({ type: 'error', text: 'Gemini error' }),
-      );
-    });
-
-    it('ignores tool_result event types silently', async () => {
-      sendMessage();
-      const proc = mockIpcMain.getLatestProcess();
-      // Clear streaming_start sent by gemini:send itself
-      (mockWin.webContents.send as ReturnType<typeof vi.fn>).mockClear();
-
-      proc.pushStdout(JSON.stringify({ type: 'tool_result', content: 'ok' }) + '\n');
-      await tick();
-
-      expect(collectSentEvents(mockWin)).toHaveLength(0);
+    expect(promptCalls).toHaveLength(1);
+    expect(promptCalls[0]).toMatchObject({
+      prompt: [
+        expect.objectContaining({ type: 'text' }),
+        { type: 'text', text: 'Describe this image' },
+        { type: 'image', mimeType: 'image/png', data: Buffer.from('image-bytes').toString('base64') },
+      ],
     });
   });
 
-  // -------------------------------------------------------------------------
-  // Spawn args
-  // -------------------------------------------------------------------------
+  it('cancels the active Gemini request on gemini:stop and emits done', async () => {
+    const ws = get(PROJECT)!;
+    ws.gemini.transport = mockAcpClient as any;
+    ws.gemini.chatSessionId = 'gemini-chat-1';
+    ws.gemini.activeRequestId = 'req-3';
+    ws.gemini.busy = true;
+    ws.gemini.turnSeq = 4;
 
-  describe('gemini:send spawn args', () => {
-    function getSpawnArgs(): string[] {
-      return mockSpawnFn.mock.calls[0][1] as string[];
-    }
+    mockIpcMain._emit('gemini:stop', PROJECT, 'chat');
+    await tick();
 
-    it('includes --output-format stream-json in args', () => {
-      mockIpcMain._emit('gemini:send', PROJECT, 'test', undefined, undefined, undefined, undefined);
-      const args = getSpawnArgs();
-      expect(args).toContain('--output-format');
-      expect(args).toContain('stream-json');
-    });
-
-    it('spawns the gemini binary', () => {
-      mockIpcMain._emit('gemini:send', PROJECT, 'test', undefined, undefined, undefined, undefined);
-      expect(mockSpawnFn.mock.calls[0][0]).toBe('gemini');
-    });
-
-    it('uses gemini-2.5-flash model when conversationMode is fast', () => {
-      mockIpcMain._emit('gemini:send', PROJECT, 'test', undefined, undefined, 'fast', undefined);
-      const args = getSpawnArgs();
-      const idx = args.indexOf('-m');
-      expect(idx).toBeGreaterThan(-1);
-      expect(args[idx + 1]).toBe('gemini-2.5-flash');
-    });
-
-    it('uses the specified model in normal mode', () => {
-      mockIpcMain._emit('gemini:send', PROJECT, 'test', undefined, undefined, 'normal', 'gemini-2.5-pro');
-      const args = getSpawnArgs();
-      const idx = args.indexOf('-m');
-      expect(idx).toBeGreaterThan(-1);
-      expect(args[idx + 1]).toBe('gemini-2.5-pro');
-    });
-
-    it('falls back to default model (auto-gemini-3) when no model or mode is specified', () => {
-      mockIpcMain._emit('gemini:send', PROJECT, 'test', undefined, undefined, undefined, undefined);
-      const args = getSpawnArgs();
-      const idx = args.indexOf('-m');
-      expect(idx).toBeGreaterThan(-1);
-      expect(args[idx + 1]).toBe('auto-gemini-3');
-    });
-
-    it('adds --approval-mode flag with explicit value when provided', () => {
-      mockIpcMain._emit('gemini:send', PROJECT, 'test', undefined, 'suggest', undefined, undefined);
-      const args = getSpawnArgs();
-      expect(args).toContain('--approval-mode');
-      expect(args).toContain('suggest');
-    });
-
-    it('passes explicit "default" approval mode when set', () => {
-      mockIpcMain._emit('gemini:send', PROJECT, 'test', undefined, 'default', undefined, undefined);
-      const args = getSpawnArgs();
-      expect(args).toContain('--approval-mode');
-      expect(args).toContain('default');
-    });
-
-    it('defaults to auto_edit approval mode when not specified', () => {
-      mockIpcMain._emit('gemini:send', PROJECT, 'test', undefined, undefined, undefined, undefined);
-      const args = getSpawnArgs();
-      expect(args).toContain('--approval-mode');
-      expect(args).toContain('auto_edit');
-    });
-
-    it('passes the prompt with -p flag as first two args', () => {
-      mockIpcMain._emit('gemini:send', PROJECT, 'my prompt', undefined, undefined, undefined, undefined);
-      const args = getSpawnArgs();
-      expect(args[0]).toBe('-p');
-      expect(args[1]).toBe('my prompt');
-    });
+    expect(mockAcpClient.request).toHaveBeenCalledWith(
+      'session/cancel',
+      expect.objectContaining({ sessionId: 'gemini-chat-1', requestId: 'req-3', scope: 'chat' }),
+    );
+    expect(collectSentEvents(mockWin)).toContainEqual(
+      expect.objectContaining({ type: 'done', projectPath: PROJECT, turnSeq: 4 }),
+    );
+    expect(ws.gemini.busy).toBe(false);
+    expect(ws.gemini.activeRequestId).toBeUndefined();
   });
 
-  // -------------------------------------------------------------------------
-  // Streaming buffer accumulation
-  // -------------------------------------------------------------------------
+  it('disables Gemini and emits error + done when an ACP request fails', async () => {
+    mockAcpClient.request.mockRejectedValue(new Error('handshake failed'));
 
-  describe('streaming buffer accumulation', () => {
-    it('accumulates partial chunks and only parses complete JSON lines', async () => {
-      mockIpcMain._emit('gemini:send', PROJECT, 'test', undefined, undefined, undefined, undefined);
-      const proc = mockIpcMain.getLatestProcess();
+    mockIpcMain._emit('gemini:send', PROJECT, 'Hello', undefined, 'auto_edit', 'planning', 'auto-gemini-3', 'chat');
+    await tick();
+    await tick();
 
-      const fullLine = JSON.stringify({ type: 'message', role: 'assistant', content: 'chunked' });
-      const half = Math.floor(fullLine.length / 2);
+    const ws = get(PROJECT)!;
+    const events = collectSentEvents(mockWin);
+    expect(ws.gemini.availability).toBe('disabled');
+    expect(ws.gemini.lastError).toBe('handshake failed');
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'error', text: 'Gemini unavailable: handshake failed' }),
+    );
+    expect(events).toContainEqual(expect.objectContaining({ type: 'done', projectPath: PROJECT }));
+  });
 
-      // Push first half — no newline so no complete line yet
-      proc.pushStdout(fullLine.slice(0, half));
-      await tick();
+  it('blocks new Gemini sends after disablement until an explicit restart', async () => {
+    mockAcpClient.request.mockRejectedValue(new Error('handshake failed'));
 
-      const partialAssistant = (mockWin.webContents.send as ReturnType<typeof vi.fn>).mock.calls
-        .filter(([, ev]: [string, unknown]) => (ev as { type?: string })?.type === 'assistant');
-      expect(partialAssistant).toHaveLength(0);
+    mockIpcMain._emit('gemini:send', PROJECT, 'Hello', undefined, 'auto_edit', 'planning', 'auto-gemini-3', 'chat');
+    await tick();
+    await tick();
 
-      // Push remainder + newline → line is now complete and should be parsed
-      proc.pushStdout(fullLine.slice(half) + '\n');
-      await tick();
+    mockAcpClient.request.mockClear();
 
-      expect(collectSentEvents(mockWin)).toContainEqual(
-        expect.objectContaining({ type: 'assistant', projectPath: PROJECT }),
-      );
+    mockIpcMain._emit('gemini:send', PROJECT, 'Hello again', undefined, 'auto_edit', 'planning', 'auto-gemini-3', 'chat');
+    await tick();
+
+    expect(mockAcpClient.request).not.toHaveBeenCalled();
+    expect(collectSentEvents(mockWin)).toContainEqual(expect.objectContaining({
+      type: 'error',
+      text: 'Gemini unavailable: handshake failed',
+    }));
+  });
+
+  it('retries Gemini successfully after an explicit gemini:start', async () => {
+    mockAcpClient.request.mockRejectedValueOnce(new Error('boom'));
+
+    mockIpcMain._emit('gemini:send', PROJECT, 'Hello', undefined, 'auto_edit', 'planning', 'auto-gemini-3', 'chat');
+    await tick();
+    await tick();
+
+    mockAcpClient.start.mockResolvedValue(undefined);
+    mockAcpClient.request.mockImplementation(async (method: string) => {
+      if (method === 'session/new') return { sessionId: 'gemini-chat-2' };
+      if (method === 'session/prompt') return { requestId: 'req-2', usage: { input_tokens: 5, output_tokens: 1, cached: 0 } };
+      throw new Error(`Unexpected method ${method}`);
     });
 
-    it('parses multiple JSON lines arriving in a single chunk', async () => {
-      mockIpcMain._emit('gemini:send', PROJECT, 'test', undefined, undefined, undefined, undefined);
-      const proc = mockIpcMain.getLatestProcess();
+    await mockIpcMain._invoke('gemini:start', PROJECT);
+    mockIpcMain._emit('gemini:send', PROJECT, 'Recovered', undefined, 'auto_edit', 'planning', 'auto-gemini-3', 'chat');
+    await tick();
 
-      const twoLines =
-        JSON.stringify({ type: 'message', role: 'assistant', content: 'first' }) + '\n' +
-        JSON.stringify({ type: 'message', role: 'assistant', content: 'second' }) + '\n';
+    const ws = get(PROJECT)!;
+    expect(ws.gemini.availability).toBe('available');
+    expect(mockAcpClient.dispose).toHaveBeenCalled();
+    expect(mockAcpClient.request).toHaveBeenCalledWith(
+      'session/new',
+      expect.objectContaining({ cwd: PROJECT, scope: 'chat', mcpServers: [] }),
+    );
+    expect(collectSentEvents(mockWin)).toContainEqual(expect.objectContaining({
+      type: 'streaming_start',
+      projectPath: PROJECT,
+      scope: 'chat',
+    }));
+  });
 
-      proc.pushStdout(twoLines);
-      await tick();
+  it('emits approval_needed when Gemini ACP requests tool approval', async () => {
+    await mockIpcMain._invoke('gemini:start', PROJECT);
 
-      const assistantEvents = (mockWin.webContents.send as ReturnType<typeof vi.fn>).mock.calls
-        .filter(([ch, ev]: [string, unknown]) =>
-          ch === 'claude:message' && (ev as { type?: string })?.type === 'assistant',
-        );
-      expect(assistantEvents).toHaveLength(2);
+    emitAcpEvent({
+      method: 'tool.approvalRequired',
+      params: {
+        scope: 'chat',
+        id: 'tool-1',
+        name: 'Bash',
+        input: { command: 'rm -rf /tmp/test' },
+        description: 'Run a shell command',
+      },
+    });
+    await tick();
+
+    const ws = get(PROJECT)!;
+    expect(ws.gemini.pendingApproval).toMatchObject({
+      toolUseId: 'tool-1',
+      toolName: 'Bash',
+      input: { command: 'rm -rf /tmp/test' },
+      description: 'Run a shell command',
+      scope: 'chat',
     });
 
-    it('skips empty and blank lines without throwing', async () => {
-      mockIpcMain._emit('gemini:send', PROJECT, 'test', undefined, undefined, undefined, undefined);
-      const proc = mockIpcMain.getLatestProcess();
+    expect(collectSentEvents(mockWin)).toContainEqual(expect.objectContaining({
+      type: 'approval_needed',
+      projectPath: PROJECT,
+      scope: 'chat',
+      toolUseId: 'tool-1',
+      toolName: 'Bash',
+      command: 'rm -rf /tmp/test',
+      description: 'Run a shell command',
+    }));
+  });
 
-      proc.pushStdout('\n\n   \n' + JSON.stringify({ type: 'init' }) + '\n');
-      await tick();
+  it('routes Gemini approvals through claude:approve and clears pending state', async () => {
+    const ws = get(PROJECT)!;
+    ws.gemini.transport = mockAcpClient as any;
+    ws.gemini.chatSessionId = 'gemini-chat-1';
+    ws.gemini.pendingApproval = {
+      toolUseId: 'tool-2',
+      toolName: 'Bash',
+      input: { command: 'ls' },
+      description: 'Run ls',
+      scope: 'chat',
+    };
 
-      expect(collectSentEvents(mockWin)).toContainEqual(
-        expect.objectContaining({ type: 'streaming_start' }),
-      );
-    });
+    mockAcpClient.request.mockResolvedValue({ ok: true });
 
-    it('ignores malformed JSON lines without throwing and continues parsing valid ones', async () => {
-      mockIpcMain._emit('gemini:send', PROJECT, 'test', undefined, undefined, undefined, undefined);
-      const proc = mockIpcMain.getLatestProcess();
+    const result = await mockIpcMain._invoke('claude:approve', PROJECT, 'tool-2', true, 'pwd', 'chat');
 
-      proc.pushStdout('not valid json {\n');
-      proc.pushStdout(JSON.stringify({ type: 'message', role: 'assistant', content: 'ok' }) + '\n');
-      await tick();
-
-      expect(collectSentEvents(mockWin)).toContainEqual(
-        expect.objectContaining({ type: 'assistant' }),
-      );
-    });
+    expect(result).toBe(true);
+    expect(mockAcpClient.request).toHaveBeenCalledWith('tool/approve', expect.objectContaining({
+      sessionId: 'gemini-chat-1',
+      scope: 'chat',
+      toolUseId: 'tool-2',
+      approved: true,
+      modifiedCommand: 'pwd',
+    }));
+    expect(ws.gemini.pendingApproval).toBeNull();
+    expect(collectSentEvents(mockWin)).toContainEqual(expect.objectContaining({
+      type: 'approval_resolved',
+      projectPath: PROJECT,
+      scope: 'chat',
+    }));
   });
 });

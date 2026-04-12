@@ -261,6 +261,7 @@ interface ChatPanelProps {
   onMessagesChange?: (messages: ChatMessageType[]) => void;
   onTurnComplete?: () => void;
   onClaudeSessionId?: (sessionId: string) => void;
+  onGeminiSessionId?: (sessionId: string) => void;
   onCodexSessionId?: (sessionId: string) => void;
   activeFilePath?: string | null;
   onFileOpen?: (path: string, line?: number) => void;
@@ -467,7 +468,7 @@ function CyclingHints() {
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, sessionId, terminalTabs = [], onSlashCommandsUpdate }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, sessionId, terminalTabs = [], onSlashCommandsUpdate }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessageType[]>(initialMessages || []);
   const emptyPrompt = useMemo(() => EMPTY_PROMPTS[Math.floor(Math.random() * EMPTY_PROMPTS.length)], []);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -577,6 +578,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           onCodexSessionId?.(msg.sessionId);
         } else if (aiProvider === 'claude') {
           onClaudeSessionId?.(msg.sessionId);
+        } else if (aiProvider === 'gemini') {
+          onGeminiSessionId?.(msg.sessionId);
         }
         return;
       }
@@ -740,13 +743,13 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           setMessages(prev => {
             const last = prev[prev.length - 1];
             // Update the last assistant message if it's a pure text message (no tool calls).
-            // Claude/Codex with --include-partial-messages send full content snapshots,
-            // so we REPLACE. Gemini sends streaming deltas, so we APPEND.
+            // Append only when the transport marks the block as a delta; otherwise replace.
             // If the last message has tool calls, always create a new message so
             // tool cards stay above the follow-up text response.
             if (last?.role === 'assistant' && text && !tools.length && !last.toolCalls) {
               const updated = [...prev];
-              const newContent = aiProvider === 'gemini' ? last.content + text : text;
+              const shouldAppend = msg.message.content.some((block: any) => block.type === 'text' && block.delta);
+              const newContent = shouldAppend ? last.content + text : text;
               updated[updated.length - 1] = { ...last, content: newContent };
               return updated;
             }
@@ -1040,21 +1043,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
     const prompt = activeFilePath && fileContextEnabled ? `[File: ${activeFilePath}]\n\n${text}` : text;
     if (aiProvider === 'gemini') {
-      // Gemini runs stateless one-shot turns. Prepend recent conversation
-      // history so the model has context without using --resume (which
-      // replays ALL history and causes 429 rate limits).
-      const MAX_CONTEXT_TURNS = 10; // user+assistant pairs
-      const recentMsgs = messages
-        .filter(m => (m.role === 'user' || m.role === 'assistant') && m.content.trim())
-        .slice(-(MAX_CONTEXT_TURNS * 2));
-      let geminiPrompt = prompt;
-      if (recentMsgs.length > 0) {
-        const history = recentMsgs
-          .map(m => `[${m.role === 'user' ? 'User' : 'Assistant'}]: ${m.content}`)
-          .join('\n\n');
-        geminiPrompt = `<conversation_history>\n${history}\n</conversation_history>\n\n[User]: ${prompt}`;
-      }
-      (window.sai as any).geminiSend(projectPath, geminiPrompt, imagePaths, geminiApprovalMode, geminiConversationMode, geminiModel);
+      (window.sai as any).geminiSend(projectPath, prompt, imagePaths, geminiApprovalMode, geminiConversationMode, geminiModel, 'chat');
     } else if (aiProvider === 'codex') {
       window.sai.codexSend(projectPath, prompt, imagePaths, codexPermission, codexModel);
     } else {

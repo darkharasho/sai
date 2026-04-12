@@ -1215,6 +1215,7 @@ export default function App() {
     // Clear backend sessions so next message starts fresh
     window.sai.claudeSetSessionId(activeProjectPath, undefined);
     (window.sai as any).codexSetSessionId(activeProjectPath, undefined);
+    window.sai.geminiSetSessionId?.(activeProjectPath, undefined, 'chat');
     updateWorkspace(activeProjectPath, ws => ({
       ...ws,
       activeSession: createSession(),
@@ -1229,6 +1230,7 @@ export default function App() {
       // Tell backend to switch to the selected session's provider session IDs
       window.sai.claudeSetSessionId(activeProjectPath, selected.claudeSessionId);
       (window.sai as any).codexSetSessionId(activeProjectPath, selected.codexSessionId);
+      window.sai.geminiSetSessionId?.(activeProjectPath, selected.geminiSessionId, 'chat');
       // Load messages on demand from separate storage
       const messages = loadSessionMessages(selected.id);
       updateWorkspace(activeProjectPath, ws => ({
@@ -1437,6 +1439,12 @@ export default function App() {
                     updateWorkspace(wsPath, w => ({
                       ...w,
                       activeSession: { ...w.activeSession, claudeSessionId: sessionId },
+                    }));
+                  }}
+                  onGeminiSessionId={(sessionId: string) => {
+                    updateWorkspace(wsPath, w => ({
+                      ...w,
+                      activeSession: { ...w.activeSession, geminiSessionId: sessionId },
                     }));
                   }}
                   onCodexSessionId={(sessionId: string) => {

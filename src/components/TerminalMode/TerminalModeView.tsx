@@ -523,6 +523,9 @@ export default function TerminalModeView({ projectPath, aiProvider = 'claude', a
 
       if (msg.type === 'session_id' && msg.sessionId) {
         sessionIdRef.current = msg.sessionId;
+        if (aiProvider === 'gemini') {
+          window.sai.geminiSetSessionId?.(projectPath, msg.sessionId, 'terminal');
+        }
       }
 
       if (msg.type === 'streaming_start') {

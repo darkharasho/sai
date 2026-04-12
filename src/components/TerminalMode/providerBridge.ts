@@ -6,8 +6,8 @@ interface TerminalSaiBridge {
   claudeStop: (projectPath: string, scope?: string) => void;
   codexSend: (projectPath: string, message: string, imagePaths?: string[], permMode?: string, model?: string) => void;
   codexStop: (projectPath: string) => void;
-  geminiSend: (projectPath: string, message: string, imagePaths?: string[], approvalMode?: string, conversationMode?: string, model?: string) => void;
-  geminiStop: (projectPath: string) => void;
+  geminiSend: (projectPath: string, message: string, imagePaths?: string[], approvalMode?: string, conversationMode?: string, model?: string, scope?: string) => void;
+  geminiStop: (projectPath: string, scope?: string) => void;
 }
 
 export function getTerminalProviderBridge(sai: TerminalSaiBridge, aiProvider: TerminalProvider) {
@@ -21,9 +21,9 @@ export function getTerminalProviderBridge(sai: TerminalSaiBridge, aiProvider: Te
 
   if (aiProvider === 'gemini') {
     return {
-      send: (projectPath: string, message: string) =>
-        sai.geminiSend(projectPath, message, undefined, 'auto_edit', 'planning', undefined),
-      stop: (projectPath: string) => sai.geminiStop(projectPath),
+      send: (projectPath: string, message: string, _permissionMode: TerminalPermissionMode, scope: string = 'terminal') =>
+        sai.geminiSend(projectPath, message, undefined, 'auto_edit', 'planning', undefined, scope),
+      stop: (projectPath: string, scope: string = 'terminal') => sai.geminiStop(projectPath, scope),
     };
   }
 

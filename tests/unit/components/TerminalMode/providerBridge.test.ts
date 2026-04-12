@@ -32,8 +32,8 @@ describe('getTerminalProviderBridge', () => {
     bridge.send('/repo', 'prompt', 'default');
     bridge.stop('/repo');
 
-    expect(sai.geminiSend).toHaveBeenCalledWith('/repo', 'prompt', undefined, 'auto_edit', 'planning', undefined);
-    expect(sai.geminiStop).toHaveBeenCalledWith('/repo');
+    expect(sai.geminiSend).toHaveBeenCalledWith('/repo', 'prompt', undefined, 'auto_edit', 'planning', undefined, 'terminal');
+    expect(sai.geminiStop).toHaveBeenCalledWith('/repo', 'terminal');
     expect(sai.claudeSend).not.toHaveBeenCalled();
     expect(sai.claudeStop).not.toHaveBeenCalled();
   });
