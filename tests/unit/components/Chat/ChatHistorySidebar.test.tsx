@@ -3,6 +3,13 @@ import { render, fireEvent, act } from '@testing-library/react';
 import ChatHistorySidebar from '../../../../src/components/Chat/ChatHistorySidebar';
 import type { ChatSession } from '../../../../src/types';
 
+vi.mock('../../../../src/chatDb', () => ({
+  dbGetMessages: vi.fn().mockResolvedValue([]),
+  dbDeleteSession: vi.fn().mockResolvedValue(undefined),
+  dbSaveSession: vi.fn().mockResolvedValue(undefined),
+  dbGetSessions: vi.fn().mockResolvedValue([]),
+}));
+
 function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
   const now = Date.now();
   return {
@@ -98,12 +105,6 @@ describe('ChatHistorySidebar', () => {
       makeSession({ id: 's1', title: 'Auth middleware' }),
       makeSession({ id: 's2', title: 'Border fix' }),
     ];
-    localStorage.setItem(`sai-session-msgs-${sessions[0].id}`, JSON.stringify([
-      { id: '1', role: 'user', content: 'Fix the auth middleware', timestamp: Date.now() },
-    ]));
-    localStorage.setItem(`sai-session-msgs-${sessions[1].id}`, JSON.stringify([
-      { id: '2', role: 'user', content: 'The border is broken', timestamp: Date.now() },
-    ]));
 
     const { container, getByText, queryByText } = render(
       <ChatHistorySidebar {...defaultProps} sessions={sessions} />

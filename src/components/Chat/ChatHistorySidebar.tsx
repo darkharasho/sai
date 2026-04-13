@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Search, X, Plus, Pin, Loader2 } from 'lucide-react';
-import { formatSessionDate, formatSessionTime, loadSessionMessages, toggleSessionPin, deleteSession, exportSessionAsMarkdown, saveSessions } from '../../sessions';
+import { formatSessionDate, formatSessionTime, exportSessionAsMarkdown } from '../../sessions';
+import { dbGetMessages, dbDeleteSession, dbSaveSession } from '../../chatDb';
 import ChatHistoryContextMenu from './ChatHistoryContextMenu';
 import type { ChatSession } from '../../types';
 
@@ -84,7 +85,7 @@ export default function ChatHistorySidebar({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const renameRef = useRef<HTMLInputElement>(null);
-  const searchCacheRef = useRef<Map<string, { raw: string; lower: string }>>(new Map());
+  const [searchCache, setSearchCache] = useState<Map<string, { raw: string; lower: string }>>(new Map());
 
   // Debounce search input
   useEffect(() => {
@@ -100,34 +101,37 @@ export default function ChatHistorySidebar({
     }
   }, [renamingId]);
 
-  // Build search cache on first search
-  const getSearchContent = useCallback((sessionId: string): string => {
-    const cached = searchCacheRef.current.get(sessionId);
-    if (cached) return cached.lower;
-    const messages = loadSessionMessages(sessionId);
-    const raw = messages.map(m => m.content).join(' ');
-    searchCacheRef.current.set(sessionId, { raw, lower: raw.toLowerCase() });
-    return raw.toLowerCase();
-  }, []);
-
-  const getRawSearchContent = useCallback((sessionId: string): string => {
-    const cached = searchCacheRef.current.get(sessionId);
-    if (cached) return cached.raw;
-    // Trigger cache population
-    getSearchContent(sessionId);
-    return searchCacheRef.current.get(sessionId)?.raw || '';
-  }, [getSearchContent]);
-
-  // Invalidate cache when sessions change
-  useEffect(() => {
-    searchCacheRef.current.clear();
-  }, [sessions]);
-
   // Filter sessions by provider
   const providerSessions = useMemo(
     () => sessions.filter(s => !s.aiProvider || s.aiProvider === aiProvider),
     [sessions, aiProvider]
   );
+
+  // Build search cache asynchronously
+  useEffect(() => {
+    if (!debouncedQuery) return;
+    let cancelled = false;
+    (async () => {
+      const toLoad = providerSessions.filter(s => !searchCache.has(s.id));
+      if (toLoad.length === 0) return;
+      const newEntries = new Map(searchCache);
+      for (const session of toLoad) {
+        const messages = await dbGetMessages(session.id);
+        const raw = messages.map(m => m.content).join(' ');
+        newEntries.set(session.id, { raw, lower: raw.toLowerCase() });
+      }
+      if (!cancelled) setSearchCache(newEntries);
+    })();
+    return () => { cancelled = true; };
+  }, [debouncedQuery, providerSessions]);
+
+  const getSearchContent = useCallback((sessionId: string): string => {
+    return searchCache.get(sessionId)?.lower || '';
+  }, [searchCache]);
+
+  const getRawSearchContent = useCallback((sessionId: string): string => {
+    return searchCache.get(sessionId)?.raw || '';
+  }, [searchCache]);
 
   // Filter by search query
   const filteredSessions = useMemo(() => {
@@ -180,8 +184,7 @@ export default function ChatHistorySidebar({
 
   const getMessageCount = useCallback((session: ChatSession): number => {
     if (session.messages && session.messages.length > 0) return session.messages.length;
-    const msgs = loadSessionMessages(session.id);
-    return msgs.length;
+    return session.messageCount || 0;
   }, []);
 
   const handleContextMenu = (e: React.MouseEvent, sessionId: string) => {
@@ -201,31 +204,36 @@ export default function ChatHistorySidebar({
         break;
       }
       case 'pin': {
-        const updated = toggleSessionPin(sessions, sessionId);
-        onUpdateSessions(updated);
-        saveSessions(projectPath, updated);
+        const toggled = sessions.map(s =>
+          s.id === sessionId ? { ...s, pinned: !s.pinned } : s
+        );
+        onUpdateSessions(toggled);
+        const session = toggled.find(s => s.id === sessionId);
+        if (session) {
+          dbSaveSession(projectPath, session).catch(() => {});
+        }
         break;
       }
       case 'export': {
         const session = sessions.find(s => s.id === sessionId);
         if (session) {
-          const messages = loadSessionMessages(sessionId);
-          const md = exportSessionAsMarkdown(session.title || 'Untitled', messages);
-          const blob = new Blob([md], { type: 'text/markdown' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          const date = new Date().toISOString().slice(0, 10);
-          a.href = url;
-          a.download = `${(session.title || 'chat').replace(/[^a-zA-Z0-9]/g, '-')}-${date}.md`;
-          a.click();
-          URL.revokeObjectURL(url);
+          dbGetMessages(sessionId).then(messages => {
+            const md = exportSessionAsMarkdown(session.title || 'Untitled', messages);
+            const blob = new Blob([md], { type: 'text/markdown' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${session.title || 'chat'}.md`;
+            a.click();
+            URL.revokeObjectURL(url);
+          });
         }
         break;
       }
       case 'delete': {
-        const updated = deleteSession(sessions, sessionId);
+        const updated = sessions.filter(s => s.id !== sessionId);
         onUpdateSessions(updated);
-        saveSessions(projectPath, updated);
+        dbDeleteSession(sessionId).catch(() => {});
         break;
       }
     }
@@ -238,7 +246,10 @@ export default function ChatHistorySidebar({
         s.id === sessionId ? { ...s, title: renameValue.trim(), titleEdited: true } : s
       );
       onUpdateSessions(updated);
-      saveSessions(projectPath, updated);
+      const session = updated.find(s => s.id === sessionId);
+      if (session) {
+        dbSaveSession(projectPath, session).catch(() => {});
+      }
     }
     setRenamingId(null);
   };
