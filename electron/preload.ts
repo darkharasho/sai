@@ -61,6 +61,8 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.invoke('git:diff', cwd, filepath, staged),
   gitShow: (cwd: string, filepath: string, ref: string) =>
     ipcRenderer.invoke('git:show', cwd, filepath, ref),
+  gitDiffLines: (cwd: string, filepath: string) =>
+    ipcRenderer.invoke('git:diffLines', cwd, filepath),
   gitDiscard: (cwd: string, filepath: string) => ipcRenderer.invoke('git:discard', cwd, filepath),
   fsReadDir: (dirPath: string) => ipcRenderer.invoke('fs:readDir', dirPath),
   fsReadFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath),

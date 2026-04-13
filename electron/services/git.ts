@@ -128,6 +128,36 @@ export function registerGitHandlers() {
     }
   });
 
+  ipcMain.handle('git:diffLines', async (_event, cwd: string, filepath: string) => {
+    const empty = { added: [] as { startLine: number; endLine: number }[], modified: [] as { startLine: number; endLine: number }[], deleted: [] as number[] };
+    try {
+      const raw = await git(cwd).diff(['HEAD', '--', filepath]);
+      if (!raw || !raw.trim()) return empty;
+
+      const result = { added: [] as { startLine: number; endLine: number }[], modified: [] as { startLine: number; endLine: number }[], deleted: [] as number[] };
+      const hunkRe = /@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/g;
+      let match;
+
+      while ((match = hunkRe.exec(raw)) !== null) {
+        const oldCount = match[2] !== undefined ? parseInt(match[2], 10) : 1;
+        const newStart = parseInt(match[3], 10);
+        const newCount = match[4] !== undefined ? parseInt(match[4], 10) : 1;
+
+        if (oldCount === 0 && newCount > 0) {
+          result.added.push({ startLine: newStart, endLine: newStart + newCount - 1 });
+        } else if (newCount === 0 && oldCount > 0) {
+          result.deleted.push(newStart);
+        } else if (oldCount > 0 && newCount > 0) {
+          result.modified.push({ startLine: newStart, endLine: newStart + newCount - 1 });
+        }
+      }
+
+      return result;
+    } catch {
+      return empty;
+    }
+  });
+
   ipcMain.handle('git:discard', async (_event, cwd: string, filepath: string) => {
     const g = git(cwd);
     const status = await g.status();

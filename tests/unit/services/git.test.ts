@@ -523,3 +523,113 @@ describe('git:show', () => {
     expect(result).toBe('');
   });
 });
+
+// ===========================================================================
+// git:diffLines
+// ===========================================================================
+
+describe('git:diffLines', () => {
+  it('classifies pure additions (old count = 0)', async () => {
+    await setup();
+    mockGitInstance.diff.mockResolvedValue(
+      'diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -5,0 +6,3 @@\n+line1\n+line2\n+line3\n'
+    );
+
+    const result = await mockIpcMain._invoke('git:diffLines', '/repo', 'f') as {
+      added: Array<{ startLine: number; endLine: number }>;
+      modified: Array<{ startLine: number; endLine: number }>;
+      deleted: number[];
+    };
+
+    expect(result.added).toEqual([{ startLine: 6, endLine: 8 }]);
+    expect(result.modified).toEqual([]);
+    expect(result.deleted).toEqual([]);
+  });
+
+  it('classifies pure deletions (new count = 0)', async () => {
+    await setup();
+    mockGitInstance.diff.mockResolvedValue(
+      'diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -3,2 +3,0 @@\n-old1\n-old2\n'
+    );
+
+    const result = await mockIpcMain._invoke('git:diffLines', '/repo', 'f') as {
+      added: Array<{ startLine: number; endLine: number }>;
+      modified: Array<{ startLine: number; endLine: number }>;
+      deleted: number[];
+    };
+
+    expect(result.added).toEqual([]);
+    expect(result.modified).toEqual([]);
+    expect(result.deleted).toEqual([3]);
+  });
+
+  it('classifies modifications (both old and new content)', async () => {
+    await setup();
+    mockGitInstance.diff.mockResolvedValue(
+      'diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -10,2 +10,3 @@\n-old1\n-old2\n+new1\n+new2\n+new3\n'
+    );
+
+    const result = await mockIpcMain._invoke('git:diffLines', '/repo', 'f') as {
+      added: Array<{ startLine: number; endLine: number }>;
+      modified: Array<{ startLine: number; endLine: number }>;
+      deleted: number[];
+    };
+
+    expect(result.added).toEqual([]);
+    expect(result.modified).toEqual([{ startLine: 10, endLine: 12 }]);
+    expect(result.deleted).toEqual([]);
+  });
+
+  it('handles multiple hunks', async () => {
+    await setup();
+    mockGitInstance.diff.mockResolvedValue(
+      'diff --git a/f b/f\n--- a/f\n+++ b/f\n' +
+      '@@ -1,0 +1,2 @@\n+a\n+b\n' +
+      '@@ -10,3 +12,0 @@\n-x\n-y\n-z\n'
+    );
+
+    const result = await mockIpcMain._invoke('git:diffLines', '/repo', 'f') as {
+      added: Array<{ startLine: number; endLine: number }>;
+      modified: Array<{ startLine: number; endLine: number }>;
+      deleted: number[];
+    };
+
+    expect(result.added).toEqual([{ startLine: 1, endLine: 2 }]);
+    expect(result.deleted).toEqual([12]);
+  });
+
+  it('returns empty result when no diff', async () => {
+    await setup();
+    mockGitInstance.diff.mockResolvedValue('');
+
+    const result = await mockIpcMain._invoke('git:diffLines', '/repo', 'f') as {
+      added: Array<{ startLine: number; endLine: number }>;
+      modified: Array<{ startLine: number; endLine: number }>;
+      deleted: number[];
+    };
+
+    expect(result).toEqual({ added: [], modified: [], deleted: [] });
+  });
+
+  it('returns empty result on error', async () => {
+    await setup();
+    mockGitInstance.diff.mockRejectedValue(new Error('not a git repo'));
+
+    const result = await mockIpcMain._invoke('git:diffLines', '/repo', 'f') as {
+      added: Array<{ startLine: number; endLine: number }>;
+      modified: Array<{ startLine: number; endLine: number }>;
+      deleted: number[];
+    };
+
+    expect(result).toEqual({ added: [], modified: [], deleted: [] });
+  });
+
+  it('calls git diff with HEAD and filepath', async () => {
+    await setup();
+    mockGitInstance.diff.mockResolvedValue('');
+
+    await mockIpcMain._invoke('git:diffLines', '/repo', 'src/app.ts');
+
+    expect(mockGitInstance.diff).toHaveBeenCalledWith(['HEAD', '--', 'src/app.ts']);
+  });
+});
