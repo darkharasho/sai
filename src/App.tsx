@@ -784,52 +784,49 @@ export default function App() {
     });
   }, [focusedChat]);
 
-  // Drag handling
+  // Drag handling — listeners registered synchronously in onMouseDown to avoid
+  // a race where mouseup fires before useEffect registers the listener.
+  const hasFiles = openFiles.length > 0;
+  const expandedRef = useRef(expanded);
+  expandedRef.current = expanded;
+  const hasFilesRef = useRef(hasFiles);
+  hasFilesRef.current = hasFiles;
+
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     setIsDragging(true);
-  }, []);
-
-  const hasFiles = openFiles.length > 0;
-
-  useEffect(() => {
-    if (!isDragging) return;
 
     const handleMouseMove = (e: MouseEvent) => {
       if (!mainContentRef.current) return;
       const rect = mainContentRef.current.getBoundingClientRect();
-      // Total height minus the accordion bars (32px each * number of panels)
-      const panels: PanelId[] = hasFiles ? ['chat', 'editor', 'terminal'] : ['chat', 'terminal'];
+      const curHasFiles = hasFilesRef.current;
+      const curExpanded = expandedRef.current;
+      const panels: PanelId[] = curHasFiles ? ['chat', 'editor', 'terminal'] : ['chat', 'terminal'];
+      const expandedPanels = panels.filter(p => curExpanded.includes(p));
       const barHeight = panels.length * 32;
       const handleHeight = 6;
       const availableHeight = rect.height - barHeight - handleHeight;
       const mouseY = e.clientY - rect.top;
 
-      // Find the position of the first expanded panel's bar
       let firstBarOffset = 0;
       for (const p of panels) {
         if (p === expandedPanels[0]) break;
-        firstBarOffset += expanded.includes(p) ? 32 : 32; // collapsed panels are just bars
+        firstBarOffset += 32;
       }
-      // Actually, let's compute based on panels above the divider
-      // The divider sits between the two expanded panels. We need to figure out
-      // how much vertical space is above the divider vs below.
-      const relativeY = mouseY - firstBarOffset - 32; // subtract the first expanded panel's bar
+      const relativeY = mouseY - firstBarOffset - 32;
       const ratio = Math.max(0.15, Math.min(0.85, relativeY / availableHeight));
       setSplitRatio(ratio);
     };
 
     const handleMouseUp = () => {
       setIsDragging(false);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
     };
 
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isDragging, expanded, hasFiles]);
+  }, []);
 
   // Determine which panels are visible and which are expanded
   const allPanels: PanelId[] = hasFiles ? ['chat', 'editor', 'terminal'] : ['chat', 'terminal'];

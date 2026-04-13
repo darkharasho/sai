@@ -1,11 +1,28 @@
 import { ipcMain, dialog, BrowserWindow } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+
+function execFileAsync(cmd: string, args: string[], options: Record<string, unknown> = {}): Promise<{ stdout: string; stderr: string; status: number }> {
+  const { input, ...execOpts } = options;
+  return new Promise((resolve) => {
+    const proc = execFile(cmd, args, { ...execOpts, encoding: 'utf-8' } as any, (error, stdout, stderr) => {
+      resolve({
+        stdout: String(stdout || ''),
+        stderr: String(stderr || ''),
+        status: error ? (error as any).code === 'ENOENT' ? 127 : 1 : 0,
+      });
+    });
+    if (input && proc.stdin) {
+      proc.stdin.write(input);
+      proc.stdin.end();
+    }
+  });
+}
 
 export function registerFsHandlers(mainWindow: BrowserWindow) {
   ipcMain.handle('fs:readDir', async (_event, dirPath: string) => {
-    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
     return entries
       .map(entry => ({
         name: entry.name,
@@ -19,7 +36,7 @@ export function registerFsHandlers(mainWindow: BrowserWindow) {
   });
 
   ipcMain.handle('fs:readFile', async (_event, filePath: string) => {
-    return fs.readFileSync(filePath, 'utf-8');
+    return fs.promises.readFile(filePath, 'utf-8');
   });
 
   ipcMain.handle('fs:mtime', async (_event, filePath: string) => {
@@ -28,11 +45,11 @@ export function registerFsHandlers(mainWindow: BrowserWindow) {
   });
 
   ipcMain.handle('fs:writeFile', async (_event, filePath: string, content: string) => {
-    fs.writeFileSync(filePath, content, 'utf-8');
+    await fs.promises.writeFile(filePath, content, 'utf-8');
   });
 
   ipcMain.handle('fs:rename', async (_event, oldPath: string, newPath: string) => {
-    fs.renameSync(oldPath, newPath);
+    await fs.promises.rename(oldPath, newPath);
   });
 
   ipcMain.handle('fs:delete', async (_event, targetPath: string) => {
@@ -45,28 +62,27 @@ export function registerFsHandlers(mainWindow: BrowserWindow) {
       detail: 'This action cannot be undone.',
     });
     if (result.response === 0) {
-      fs.rmSync(targetPath, { recursive: true, force: true });
+      await fs.promises.rm(targetPath, { recursive: true, force: true });
       return true;
     }
     return false;
   });
 
   ipcMain.handle('fs:createFile', async (_event, filePath: string) => {
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, '', 'utf-8');
+    await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.promises.writeFile(filePath, '', 'utf-8');
   });
 
   ipcMain.handle('fs:createDir', async (_event, dirPath: string) => {
-    fs.mkdirSync(dirPath, { recursive: true });
+    await fs.promises.mkdir(dirPath, { recursive: true });
   });
 
   ipcMain.handle('fs:checkIgnored', async (_event, rootPath: string, paths: string[]) => {
     if (!paths.length) return [];
     try {
-      const result = spawnSync('git', ['check-ignore', '--stdin', '-z'], {
+      const result = await execFileAsync('git', ['check-ignore', '--stdin', '-z'], {
         cwd: rootPath,
         input: paths.join('\0') + '\0',
-        encoding: 'utf-8',
       });
       return result.stdout.split('\0').filter(Boolean);
     } catch {
@@ -76,9 +92,8 @@ export function registerFsHandlers(mainWindow: BrowserWindow) {
 
   ipcMain.handle('fs:walkFiles', async (_event, rootPath: string) => {
     try {
-      const result = spawnSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
+      const result = await execFileAsync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
         cwd: rootPath,
-        encoding: 'utf-8',
         maxBuffer: 10 * 1024 * 1024,
       });
       if (result.status === 0 && result.stdout.trim()) {
@@ -90,19 +105,19 @@ export function registerFsHandlers(mainWindow: BrowserWindow) {
 
     const EXCLUDED = new Set(['node_modules', '.git', 'dist', 'build', '.next', '__pycache__', '.venv']);
     const files: string[] = [];
-    const walk = (dir: string, prefix: string) => {
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
+    const walk = async (dir: string, prefix: string) => {
+      const entries = await fs.promises.readdir(dir, { withFileTypes: true });
       for (const entry of entries) {
         if (EXCLUDED.has(entry.name)) continue;
         const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
         if (entry.isDirectory()) {
-          walk(path.join(dir, entry.name), rel);
+          await walk(path.join(dir, entry.name), rel);
         } else {
           files.push(rel);
         }
       }
     };
-    walk(rootPath, '');
+    await walk(rootPath, '');
     return files;
   });
 
@@ -112,7 +127,7 @@ export function registerFsHandlers(mainWindow: BrowserWindow) {
     const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
     try {
-      const rgResult = spawnSync('rg', [
+      const rgResult = await execFileAsync('rg', [
         '--json',
         '--max-count', '3',
         '--max-filesize', '1M',
@@ -120,12 +135,11 @@ export function registerFsHandlers(mainWindow: BrowserWindow) {
         escaped,
       ], {
         cwd: rootPath,
-        encoding: 'utf-8',
         maxBuffer: 5 * 1024 * 1024,
         timeout: 5000,
       });
 
-      if (rgResult.status !== null && rgResult.status <= 1) {
+      if (rgResult.status <= 1) {
         const results: { file: string; line: number; text: string }[] = [];
         const lines = rgResult.stdout.split('\n').filter(Boolean);
         for (const line of lines) {
@@ -151,7 +165,7 @@ export function registerFsHandlers(mainWindow: BrowserWindow) {
     }
 
     try {
-      const grepResult = spawnSync('grep', [
+      const grepResult = await execFileAsync('grep', [
         '-rn', '-i',
         '--include=*.{ts,tsx,js,jsx,py,rs,go,java,c,cpp,h,css,html,json,md,yaml,yml,toml}',
         '-m', '3',
@@ -159,7 +173,6 @@ export function registerFsHandlers(mainWindow: BrowserWindow) {
         '.',
       ], {
         cwd: rootPath,
-        encoding: 'utf-8',
         maxBuffer: 5 * 1024 * 1024,
         timeout: 5000,
       });

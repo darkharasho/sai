@@ -609,6 +609,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           onTurnComplete?.();
         }
         setIsStreaming(false);
+        setPendingApproval(null);
         // Don't return for 'result' — fall through to process usage data below
         if (msg.type === 'done') return;
       }
@@ -616,6 +617,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       if (msg.type === 'process_exit') {
         setReady(false);
         setIsStreaming(false);
+        setPendingApproval(null);
         flushMessagesToParent();
         onTurnComplete?.();
         return;
