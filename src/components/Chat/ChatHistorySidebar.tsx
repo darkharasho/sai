@@ -112,15 +112,22 @@ export default function ChatHistorySidebar({
     if (!debouncedQuery) return;
     let cancelled = false;
     (async () => {
-      const toLoad = providerSessions.filter(s => !searchCache.has(s.id));
-      if (toLoad.length === 0) return;
-      const newEntries = new Map(searchCache);
+      // We'll load all sessions and merge in the setter to avoid stale closure
+      const toLoad = providerSessions;
+      const newEntries = new Map<string, { raw: string; lower: string }>();
       for (const session of toLoad) {
+        if (cancelled) return;
         const messages = await dbGetMessages(session.id);
         const raw = messages.map(m => m.content).join(' ');
         newEntries.set(session.id, { raw, lower: raw.toLowerCase() });
       }
-      if (!cancelled) setSearchCache(newEntries);
+      if (!cancelled) setSearchCache(prev => {
+        const merged = new Map(prev);
+        for (const [id, entry] of newEntries) {
+          merged.set(id, entry);
+        }
+        return merged;
+      });
     })();
     return () => { cancelled = true; };
   }, [debouncedQuery, providerSessions]);

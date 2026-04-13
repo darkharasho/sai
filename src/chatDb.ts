@@ -28,6 +28,10 @@ function openDb(): Promise<IDBDatabase> {
       dbPromise = null;
       reject(request.error);
     };
+    request.onblocked = () => {
+      dbPromise = null;
+      reject(new Error('IndexedDB open blocked by another connection'));
+    };
   });
 
   return dbPromise;

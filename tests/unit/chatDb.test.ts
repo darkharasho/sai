@@ -28,6 +28,7 @@ function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
     id: crypto.randomUUID(),
     title: 'Test session',
     messages: [makeMessage()],
+    messageCount: 1,
     createdAt: now,
     updatedAt: now,
     ...overrides,

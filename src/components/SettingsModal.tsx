@@ -38,6 +38,14 @@ const AUTO_COMPACT_OPTIONS = [
   { label: '80%',  value: 80 },
 ];
 
+const RETENTION_OPTIONS: { label: string; value: number | null }[] = [
+  { label: '1 week', value: 7 },
+  { label: '2 weeks', value: 14 },
+  { label: '1 month', value: 30 },
+  { label: '3 months', value: 90 },
+  { label: 'Unlimited', value: null },
+];
+
 type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error';
 type SettingsPage = 'general' | 'editor' | 'layout' | 'style' | 'storage' | 'provider' | 'claude' | 'codex' | 'gemini';
 
@@ -719,14 +727,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       </div>
     </section>
   );
-
-  const RETENTION_OPTIONS: { label: string; value: number | null }[] = [
-    { label: '1 week', value: 7 },
-    { label: '2 weeks', value: 14 },
-    { label: '1 month', value: 30 },
-    { label: '3 months', value: 90 },
-    { label: 'Unlimited', value: null },
-  ];
 
   const renderStoragePage = () => (
     <div className="settings-section">
