@@ -18,7 +18,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // vi.hoisted — shared objects for mock factories
 // ---------------------------------------------------------------------------
 
-const { mockIpcMain, mockFsModule, mockDialog, mockSpawnSync } = vi.hoisted(() => {
+const { mockIpcMain, mockFsModule, mockDialog, mockExecFile } = vi.hoisted(() => {
   type IpcHandler = (...args: unknown[]) => unknown;
   const handlers = new Map<string, IpcHandler>();
 
@@ -42,24 +42,23 @@ const { mockIpcMain, mockFsModule, mockDialog, mockSpawnSync } = vi.hoisted(() =
     showSaveDialog: vi.fn(),
   };
 
-  const mockSpawnSync = vi.fn();
+  const mockExecFile = vi.fn();
 
-  // fs synchronous mock
   const mockFsModule = {
     default: {
-      readdirSync: vi.fn(),
-      readFileSync: vi.fn(),
-      writeFileSync: vi.fn(),
-      renameSync: vi.fn(),
-      rmSync: vi.fn(),
-      mkdirSync: vi.fn(),
       promises: {
+        readdir: vi.fn(),
+        readFile: vi.fn(),
+        writeFile: vi.fn(),
+        rename: vi.fn(),
+        rm: vi.fn(),
+        mkdir: vi.fn(),
         stat: vi.fn(),
       },
     },
   };
 
-  return { mockIpcMain, mockFsModule, mockDialog, mockSpawnSync };
+  return { mockIpcMain, mockFsModule, mockDialog, mockExecFile };
 });
 
 // ---------------------------------------------------------------------------
@@ -76,7 +75,7 @@ vi.mock('electron', () => ({
 vi.mock('node:fs', () => mockFsModule);
 
 vi.mock('node:child_process', () => ({
-  spawnSync: mockSpawnSync,
+  execFile: mockExecFile,
 }));
 
 // ---------------------------------------------------------------------------
@@ -88,17 +87,17 @@ beforeEach(() => {
   mockIpcMain._handlers.clear();
   mockIpcMain.handle.mockClear();
 
-  const fs = mockFsModule.default;
-  fs.readdirSync.mockReset();
-  fs.readFileSync.mockReset();
-  fs.writeFileSync.mockReset();
-  fs.renameSync.mockReset();
-  fs.rmSync.mockReset();
-  fs.mkdirSync.mockReset();
-  fs.promises.stat.mockReset();
+  const p = mockFsModule.default.promises;
+  p.readdir.mockReset();
+  p.readFile.mockReset();
+  p.writeFile.mockReset();
+  p.rename.mockReset();
+  p.rm.mockReset();
+  p.mkdir.mockReset();
+  p.stat.mockReset();
 
   mockDialog.showMessageBox.mockReset().mockResolvedValue({ response: 0 });
-  mockSpawnSync.mockReset();
+  mockExecFile.mockReset();
 });
 
 afterEach(() => {
@@ -136,6 +135,15 @@ function dirent(name: string, isDir: boolean) {
   };
 }
 
+// Helper to mock execFile with a given stdout/stderr result
+function mockExecFileResult(stdout: string, stderr = '', error: Error | null = null) {
+  mockExecFile.mockImplementation((_cmd: string, _args: string[], _opts: any, cb: Function) => {
+    const proc = { stdin: { write: vi.fn(), end: vi.fn() } };
+    cb(error, stdout, stderr);
+    return proc;
+  });
+}
+
 // ===========================================================================
 // fs:readDir
 // ===========================================================================
@@ -144,7 +152,7 @@ describe('fs:readDir', () => {
   it('returns entries sorted — directories first, then alphabetical within each group', async () => {
     await setup();
 
-    mockFsModule.default.readdirSync.mockReturnValue([
+    mockFsModule.default.promises.readdir.mockResolvedValue([
       dirent('zebra.ts', false),
       dirent('alpha.ts', false),
       dirent('src', true),
@@ -170,7 +178,7 @@ describe('fs:readDir', () => {
 
   it('includes path and type for each entry', async () => {
     await setup();
-    mockFsModule.default.readdirSync.mockReturnValue([
+    mockFsModule.default.promises.readdir.mockResolvedValue([
       dirent('index.ts', false),
     ]);
 
@@ -185,7 +193,7 @@ describe('fs:readDir', () => {
 
   it('returns empty array for empty directory', async () => {
     await setup();
-    mockFsModule.default.readdirSync.mockReturnValue([]);
+    mockFsModule.default.promises.readdir.mockResolvedValue([]);
 
     const result = await mockIpcMain._invoke('fs:readDir', '/empty') as unknown[];
     expect(result).toEqual([]);
@@ -199,12 +207,12 @@ describe('fs:readDir', () => {
 describe('fs:readFile', () => {
   it('returns file content as string', async () => {
     await setup();
-    mockFsModule.default.readFileSync.mockReturnValue('hello world');
+    mockFsModule.default.promises.readFile.mockResolvedValue('hello world');
 
     const result = await mockIpcMain._invoke('fs:readFile', '/path/file.txt');
 
     expect(result).toBe('hello world');
-    expect(mockFsModule.default.readFileSync).toHaveBeenCalledWith('/path/file.txt', 'utf-8');
+    expect(mockFsModule.default.promises.readFile).toHaveBeenCalledWith('/path/file.txt', 'utf-8');
   });
 });
 
@@ -215,11 +223,11 @@ describe('fs:readFile', () => {
 describe('fs:writeFile', () => {
   it('writes content to the specified path', async () => {
     await setup();
-    mockFsModule.default.writeFileSync.mockReturnValue(undefined);
+    mockFsModule.default.promises.writeFile.mockResolvedValue(undefined);
 
     await mockIpcMain._invoke('fs:writeFile', '/path/output.txt', 'new content');
 
-    expect(mockFsModule.default.writeFileSync).toHaveBeenCalledWith(
+    expect(mockFsModule.default.promises.writeFile).toHaveBeenCalledWith(
       '/path/output.txt', 'new content', 'utf-8',
     );
   });
@@ -232,11 +240,11 @@ describe('fs:writeFile', () => {
 describe('fs:rename', () => {
   it('renames file from old path to new path', async () => {
     await setup();
-    mockFsModule.default.renameSync.mockReturnValue(undefined);
+    mockFsModule.default.promises.rename.mockResolvedValue(undefined);
 
     await mockIpcMain._invoke('fs:rename', '/old/path.ts', '/new/path.ts');
 
-    expect(mockFsModule.default.renameSync).toHaveBeenCalledWith('/old/path.ts', '/new/path.ts');
+    expect(mockFsModule.default.promises.rename).toHaveBeenCalledWith('/old/path.ts', '/new/path.ts');
   });
 });
 
@@ -248,11 +256,11 @@ describe('fs:delete', () => {
   it('deletes when user confirms (response 0)', async () => {
     await setup();
     mockDialog.showMessageBox.mockResolvedValue({ response: 0 });
-    mockFsModule.default.rmSync.mockReturnValue(undefined);
+    mockFsModule.default.promises.rm.mockResolvedValue(undefined);
 
     const result = await mockIpcMain._invoke('fs:delete', '/file/to/delete.ts');
 
-    expect(mockFsModule.default.rmSync).toHaveBeenCalledWith(
+    expect(mockFsModule.default.promises.rm).toHaveBeenCalledWith(
       '/file/to/delete.ts',
       { recursive: true, force: true },
     );
@@ -265,7 +273,7 @@ describe('fs:delete', () => {
 
     const result = await mockIpcMain._invoke('fs:delete', '/file/to/keep.ts');
 
-    expect(mockFsModule.default.rmSync).not.toHaveBeenCalled();
+    expect(mockFsModule.default.promises.rm).not.toHaveBeenCalled();
     expect(result).toBe(false);
   });
 
@@ -289,15 +297,15 @@ describe('fs:delete', () => {
 describe('fs:createFile', () => {
   it('creates parent directories and empty file', async () => {
     await setup();
-    mockFsModule.default.mkdirSync.mockReturnValue(undefined);
-    mockFsModule.default.writeFileSync.mockReturnValue(undefined);
+    mockFsModule.default.promises.mkdir.mockResolvedValue(undefined);
+    mockFsModule.default.promises.writeFile.mockResolvedValue(undefined);
 
     await mockIpcMain._invoke('fs:createFile', '/new/dir/file.ts');
 
-    expect(mockFsModule.default.mkdirSync).toHaveBeenCalledWith(
+    expect(mockFsModule.default.promises.mkdir).toHaveBeenCalledWith(
       '/new/dir', { recursive: true },
     );
-    expect(mockFsModule.default.writeFileSync).toHaveBeenCalledWith(
+    expect(mockFsModule.default.promises.writeFile).toHaveBeenCalledWith(
       '/new/dir/file.ts', '', 'utf-8',
     );
   });
@@ -310,11 +318,11 @@ describe('fs:createFile', () => {
 describe('fs:createDir', () => {
   it('creates directory recursively', async () => {
     await setup();
-    mockFsModule.default.mkdirSync.mockReturnValue(undefined);
+    mockFsModule.default.promises.mkdir.mockResolvedValue(undefined);
 
     await mockIpcMain._invoke('fs:createDir', '/new/nested/dir');
 
-    expect(mockFsModule.default.mkdirSync).toHaveBeenCalledWith(
+    expect(mockFsModule.default.promises.mkdir).toHaveBeenCalledWith(
       '/new/nested/dir', { recursive: true },
     );
   });
@@ -327,11 +335,7 @@ describe('fs:createDir', () => {
 describe('fs:checkIgnored', () => {
   it('returns ignored paths from git check-ignore output', async () => {
     await setup();
-    mockSpawnSync.mockReturnValue({
-      stdout: 'node_modules\0dist\0',
-      stderr: '',
-      status: 0,
-    });
+    mockExecFileResult('node_modules\0dist\0');
 
     const result = await mockIpcMain._invoke(
       'fs:checkIgnored', '/project', ['node_modules', 'dist', 'src'],
@@ -342,28 +346,34 @@ describe('fs:checkIgnored', () => {
 
   it('calls git check-ignore with --stdin and -z flags', async () => {
     await setup();
-    mockSpawnSync.mockReturnValue({ stdout: '', stderr: '' });
+    mockExecFileResult('');
 
     await mockIpcMain._invoke('fs:checkIgnored', '/project', ['some/file.ts']);
 
-    expect(mockSpawnSync).toHaveBeenCalledWith(
+    expect(mockExecFile).toHaveBeenCalledWith(
       'git',
       ['check-ignore', '--stdin', '-z'],
       expect.objectContaining({
         cwd: '/project',
         encoding: 'utf-8',
       }),
+      expect.any(Function),
     );
   });
 
-  it('passes paths as null-separated input to git', async () => {
+  it('passes paths as null-separated input via stdin', async () => {
     await setup();
-    mockSpawnSync.mockReturnValue({ stdout: '', stderr: '' });
+    const stdinWrite = vi.fn();
+    const stdinEnd = vi.fn();
+    mockExecFile.mockImplementation((_cmd: string, _args: string[], _opts: any, cb: Function) => {
+      cb(null, '', '');
+      return { stdin: { write: stdinWrite, end: stdinEnd } };
+    });
 
     await mockIpcMain._invoke('fs:checkIgnored', '/project', ['a', 'b', 'c']);
 
-    const callArgs = mockSpawnSync.mock.calls[0][2] as { input: string };
-    expect(callArgs.input).toBe('a\0b\0c\0');
+    expect(stdinWrite).toHaveBeenCalledWith('a\0b\0c\0');
+    expect(stdinEnd).toHaveBeenCalled();
   });
 
   it('returns empty array when paths list is empty', async () => {
@@ -372,12 +382,15 @@ describe('fs:checkIgnored', () => {
     const result = await mockIpcMain._invoke('fs:checkIgnored', '/project', []);
 
     expect(result).toEqual([]);
-    expect(mockSpawnSync).not.toHaveBeenCalled();
+    expect(mockExecFile).not.toHaveBeenCalled();
   });
 
-  it('returns empty array when git is not available (spawnSync throws)', async () => {
+  it('returns empty array when git is not available', async () => {
     await setup();
-    mockSpawnSync.mockImplementation(() => { throw new Error('git not found'); });
+    mockExecFile.mockImplementation((_cmd: string, _args: string[], _opts: any, cb: Function) => {
+      cb(new Error('git not found'), '', '');
+      return { stdin: { write: vi.fn(), end: vi.fn() } };
+    });
 
     const result = await mockIpcMain._invoke('fs:checkIgnored', '/project', ['file.ts']);
 
@@ -386,7 +399,7 @@ describe('fs:checkIgnored', () => {
 
   it('filters out empty strings from git output', async () => {
     await setup();
-    mockSpawnSync.mockReturnValue({ stdout: 'ignored.ts\0\0', stderr: '' });
+    mockExecFileResult('ignored.ts\0\0');
 
     const result = await mockIpcMain._invoke('fs:checkIgnored', '/project', ['ignored.ts', 'other.ts']) as string[];
 
