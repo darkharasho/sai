@@ -19,6 +19,8 @@ export interface ChatSession {
   geminiSessionId?: string;
   pinned?: boolean;
   titleEdited?: boolean;
+  messageCount: number;
+  projectPath?: string;
 }
 
 export interface ToolCall {
