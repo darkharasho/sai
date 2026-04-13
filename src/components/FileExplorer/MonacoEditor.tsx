@@ -74,6 +74,7 @@ interface MonacoEditorProps {
   fontSize?: number;
   minimap?: boolean;
   initialLine?: number;
+  projectPath?: string;
   onSave: (filePath: string, content: string) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
   onContentChange?: (filePath: string, content: string) => void;
@@ -81,10 +82,11 @@ interface MonacoEditorProps {
   onTogglePreview?: () => void;
 }
 
-export default function MonacoEditor({ filePath, content, fontSize = 13, minimap = true, initialLine, onSave, onDirtyChange, onContentChange, onLineRevealed, onTogglePreview }: MonacoEditorProps) {
+export default function MonacoEditor({ filePath, content, fontSize = 13, minimap = true, initialLine, projectPath, onSave, onDirtyChange, onContentChange, onLineRevealed, onTogglePreview }: MonacoEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const onContentChangeRef = useRef(onContentChange);
+  const decorationsRef = useRef<string[]>([]);
   onContentChangeRef.current = onContentChange;
   const [dirty, setDirty] = useState(false);
   const [saveError, setSaveError] = useState(false);
@@ -99,11 +101,59 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
       setDirty(false);
       onDirtyChange?.(false);
       setSaveError(false);
+      applyGitDecorations();
     } catch {
       setSaveError(true);
       setTimeout(() => setSaveError(false), 3000);
     }
   }, [filePath, onSave, onDirtyChange]);
+
+  const applyGitDecorations = useCallback(async () => {
+    if (!editorRef.current || !projectPath) return;
+    try {
+      const info = await window.sai.gitDiffLines(projectPath, filePath);
+      const decorations: monaco.editor.IModelDeltaDecoration[] = [];
+
+      for (const range of info.added) {
+        decorations.push({
+          range: new monaco.Range(range.startLine, 1, range.endLine, 1),
+          options: {
+            isWholeLine: true,
+            linesDecorationsClassName: 'git-gutter-added',
+            minimap: { color: '#2ea04370', position: monaco.editor.MinimapPosition.Gutter },
+          },
+        });
+      }
+
+      for (const range of info.modified) {
+        decorations.push({
+          range: new monaco.Range(range.startLine, 1, range.endLine, 1),
+          options: {
+            isWholeLine: true,
+            linesDecorationsClassName: 'git-gutter-modified',
+            minimap: { color: '#0078d470', position: monaco.editor.MinimapPosition.Gutter },
+          },
+        });
+      }
+
+      for (const lineNum of info.deleted) {
+        decorations.push({
+          range: new monaco.Range(lineNum, 1, lineNum, 1),
+          options: {
+            linesDecorationsClassName: 'git-gutter-deleted',
+            minimap: { color: '#f8514970', position: monaco.editor.MinimapPosition.Gutter },
+          },
+        });
+      }
+
+      decorationsRef.current = editorRef.current.deltaDecorations(
+        decorationsRef.current,
+        decorations,
+      );
+    } catch {
+      // Silently ignore — decorations are non-critical
+    }
+  }, [projectPath, filePath]);
 
   // Create editor on mount
   useEffect(() => {
@@ -163,6 +213,7 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
     }
 
     editor.focus();
+    applyGitDecorations();
 
     return () => {
       if (onContentChangeRef.current) {
@@ -263,6 +314,24 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
         .md-editor-preview-btn:hover {
           background: var(--bg-hover);
           color: var(--text);
+        }
+        .git-gutter-added {
+          border-left: 3px solid #2ea043 !important;
+          margin-left: 3px;
+        }
+        .git-gutter-modified {
+          border-left: 3px solid #1b81e5 !important;
+          margin-left: 3px;
+        }
+        .git-gutter-deleted {
+          margin-left: 3px;
+          width: 0 !important;
+          height: 0 !important;
+          border-left: 5px solid transparent;
+          border-right: 5px solid transparent;
+          border-top: 5px solid #f85149;
+          position: relative;
+          top: -2px;
         }
       `}</style>
     </div>

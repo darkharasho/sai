@@ -330,6 +330,7 @@ export default function CodePanel({
           content={activeFile.content}
           fontSize={editorFontSize}
           minimap={editorMinimap}
+          projectPath={projectPath}
           initialLine={activeFile.pendingLine}
           onSave={onEditorSave}
           onContentChange={onEditorContentChange}
