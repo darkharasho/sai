@@ -25,9 +25,10 @@ interface TitleBarProps {
   approvalWorkspaces?: Set<string>;
   onSettingChange?: (key: string, value: any) => void;
   onOpenWhatsNew?: () => void;
+  onHistoryRetentionChange?: (days: number | null) => void;
 }
 
-export default function TitleBar({ projectPath, onProjectChange, completedWorkspaces, busyWorkspaces, approvalWorkspaces, onSettingChange, onOpenWhatsNew }: TitleBarProps) {
+export default function TitleBar({ projectPath, onProjectChange, completedWorkspaces, busyWorkspaces, approvalWorkspaces, onSettingChange, onOpenWhatsNew, onHistoryRetentionChange }: TitleBarProps) {
   const [open, setOpen] = useState(false);
   const [workspaceList, setWorkspaceList] = useState<WorkspaceInfo[]>([]);
   const [version, setVersion] = useState('');
@@ -304,7 +305,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         )}
       </div>
       {showAuthModal && <GitHubAuthModal onSuccess={handleAuthSuccess} onClose={() => setShowAuthModal(false)} />}
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} onSettingChange={onSettingChange} onOpenWhatsNew={onOpenWhatsNew} />}
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} onSettingChange={onSettingChange} onOpenWhatsNew={onOpenWhatsNew} onHistoryRetentionChange={onHistoryRetentionChange} />}
       {closeTarget && (
         <CloseWorkspaceModal
           projectPath={closeTarget}

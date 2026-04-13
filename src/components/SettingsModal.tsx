@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Check, ChevronDown, Settings as SettingsIcon, Monitor, Type, PanelLeft, Palette } from 'lucide-react';
+import { X, Check, ChevronDown, Settings as SettingsIcon, Monitor, Type, PanelLeft, Palette, HardDrive } from 'lucide-react';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, getActiveHighlightTheme, setActiveHighlightTheme, getShikiHighlighter, type HighlightThemeId } from '../themes';
 
 interface Props {
   onClose: () => void;
   onSettingChange?: (key: string, value: any) => void;
   onOpenWhatsNew?: () => void;
+  onHistoryRetentionChange?: (days: number | null) => void;
 }
 
 const TIMEOUT_OPTIONS = [
@@ -38,7 +39,7 @@ const AUTO_COMPACT_OPTIONS = [
 ];
 
 type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error';
-type SettingsPage = 'general' | 'editor' | 'layout' | 'style' | 'provider' | 'claude' | 'codex' | 'gemini';
+type SettingsPage = 'general' | 'editor' | 'layout' | 'style' | 'storage' | 'provider' | 'claude' | 'codex' | 'gemini';
 
 function formatRelative(ts: number): string {
   const secs = Math.floor((Date.now() - ts) / 1000);
@@ -55,7 +56,7 @@ const PROVIDER_OPTIONS: { id: 'claude' | 'codex' | 'gemini'; label: string; svg:
   { id: 'gemini', label: 'Gemini CLI', svg: 'svg/Google-gemini-icon.svg', color: '#4285f4' },
 ];
 
-export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew }: Props) {
+export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew, onHistoryRetentionChange }: Props) {
   const [suspendTimeout, setSuspendTimeout] = useState<number>(DEFAULT_TIMEOUT);
   const [editorFontSize, setEditorFontSize] = useState(13);
   const [editorMinimap, setEditorMinimap] = useState(true);
@@ -79,6 +80,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [isAuthed, setIsAuthed] = useState(false);
   const [theme, setTheme] = useState<ThemeId>('default');
   const [highlightTheme, setHighlightTheme] = useState<HighlightThemeId>('monokai');
+  const [historyRetention, setHistoryRetention] = useState<number | null>(14);
   const [previewHtml, setPreviewHtml] = useState('');
 
   const [activePage, setActivePage] = useState<SettingsPage>('general');
@@ -113,6 +115,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if (v === 'claude' || v === 'codex' || v === 'gemini') setCommitMessageProvider(v as 'claude' | 'codex' | 'gemini');
     });
     window.sai.settingsGet('lockCommitProvider', false).then((v: boolean) => setLockCommitProvider(!!v));
+    window.sai.settingsGet('historyRetention', 14).then((v: number | null) => setHistoryRetention(v));
     window.sai.githubGetUser().then((u: any) => setIsAuthed(!!u));
 
     const unsubSync = window.sai.githubOnSyncStatus((data: { status: string; lastSynced?: number }) => {
@@ -141,6 +144,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
         setHighlightTheme(remote.highlightTheme);
         setActiveHighlightTheme(remote.highlightTheme);
       }
+      if ('historyRetention' in remote) setHistoryRetention(remote.historyRetention);
     });
 
     return () => { unsubSync(); unsubApplied(); };
@@ -716,12 +720,45 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     </section>
   );
 
+  const RETENTION_OPTIONS: { label: string; value: number | null }[] = [
+    { label: '1 week', value: 7 },
+    { label: '2 weeks', value: 14 },
+    { label: '1 month', value: 30 },
+    { label: '3 months', value: 90 },
+    { label: 'Unlimited', value: null },
+  ];
+
+  const renderStoragePage = () => (
+    <div className="settings-section">
+      <h3>Data & Storage</h3>
+      <label className="settings-label">Chat History Retention</label>
+      <p className="settings-hint">How long to keep chat history before automatically deleting. Pinned chats are never deleted.</p>
+      <select
+        className="settings-select"
+        value={historyRetention === null ? 'null' : String(historyRetention)}
+        onChange={e => {
+          const val = e.target.value === 'null' ? null : Number(e.target.value);
+          setHistoryRetention(val);
+          window.sai.settingsSet('historyRetention', val);
+          onHistoryRetentionChange?.(val);
+        }}
+      >
+        {RETENTION_OPTIONS.map(opt => (
+          <option key={String(opt.value)} value={opt.value === null ? 'null' : String(opt.value)}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+
   const renderActivePage = () => {
     switch (activePage) {
       case 'general': return renderGeneralPage();
       case 'editor': return renderEditorPage();
       case 'layout': return renderLayoutPage();
       case 'style': return renderStylePage();
+      case 'storage': return renderStoragePage();
       case 'provider': return renderProviderPage();
       case 'claude': return renderClaudePage();
       case 'codex': return renderCodexPage();
@@ -780,6 +817,13 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             >
               <Palette size={14} />
               <span>Style</span>
+            </button>
+            <button
+              className={`settings-nav-item${activePage === 'storage' ? ' active' : ''}`}
+              onClick={() => setActivePage('storage')}
+            >
+              <HardDrive size={14} />
+              <span>Data & Storage</span>
             </button>
             <button
               className={`settings-nav-item${activePage === 'provider' ? ' active' : ''}`}

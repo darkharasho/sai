@@ -1627,6 +1627,15 @@ export default function App() {
           if (key === 'sidebarWidth') document.documentElement.style.setProperty('--sidebar-width', `${value}px`);
         }}
         onOpenWhatsNew={openWhatsNew}
+        onHistoryRetentionChange={(days) => {
+          dbPurgeExpired(days).then(count => {
+            if (count > 0 && activeProjectPath) {
+              dbGetSessions(activeProjectPath).then(sessions => {
+                updateWorkspace(activeProjectPath, ws => ({ ...ws, sessions }));
+              });
+            }
+          });
+        }}
       />
       <ApprovalBanner
         approvalWorkspaces={approvalWorkspaces}
