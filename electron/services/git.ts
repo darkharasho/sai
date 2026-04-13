@@ -120,6 +120,14 @@ export function registerGitHandlers() {
     return await git(cwd).diff(args);
   });
 
+  ipcMain.handle('git:show', async (_event, cwd: string, filepath: string, ref: string) => {
+    try {
+      return await git(cwd).show([`${ref}${ref.endsWith(':') ? '' : ':'}${filepath}`]);
+    } catch {
+      return '';
+    }
+  });
+
   ipcMain.handle('git:discard', async (_event, cwd: string, filepath: string) => {
     const g = git(cwd);
     const status = await g.status();

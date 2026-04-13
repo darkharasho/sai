@@ -56,6 +56,7 @@ export interface MockSai {
   gitCheckout: ReturnType<typeof vi.fn>;
   gitCreateBranch: ReturnType<typeof vi.fn>;
   gitDiff: ReturnType<typeof vi.fn>;
+  gitShow: ReturnType<typeof vi.fn>;
   gitDiscard: ReturnType<typeof vi.fn>;
 
   // FS
@@ -176,6 +177,7 @@ export function createMockSai(): MockSai {
     gitCheckout: vi.fn().mockResolvedValue(undefined),
     gitCreateBranch: vi.fn().mockResolvedValue(undefined),
     gitDiff: vi.fn().mockResolvedValue(''),
+    gitShow: vi.fn().mockResolvedValue(''),
     gitDiscard: vi.fn().mockResolvedValue(undefined),
 
     // FS

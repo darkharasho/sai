@@ -50,6 +50,7 @@ const { mockIpcMain, mockSimpleGit, mockGitInstance, mockFsPromises } = vi.hoist
     checkout: vi.fn(),
     checkoutLocalBranch: vi.fn(),
     diff: vi.fn(),
+    show: vi.fn(),
     env: vi.fn(function (this: unknown) { return this; }),
   };
 
@@ -485,5 +486,40 @@ describe('git:discard', () => {
       expect.stringContaining('untracked.ts'),
     );
     expect(mockGitInstance.checkout).not.toHaveBeenCalled();
+  });
+});
+
+// ===========================================================================
+// git:show
+// ===========================================================================
+
+describe('git:show', () => {
+  it('returns file content at HEAD', async () => {
+    await setup();
+    mockGitInstance.show.mockResolvedValue('console.log("hello");');
+
+    const result = await mockIpcMain._invoke('git:show', '/repo', 'src/index.ts', 'HEAD');
+
+    expect(mockGitInstance.show).toHaveBeenCalledWith(['HEAD:src/index.ts']);
+    expect(result).toBe('console.log("hello");');
+  });
+
+  it('returns staged content when ref is colon prefix', async () => {
+    await setup();
+    mockGitInstance.show.mockResolvedValue('staged content');
+
+    const result = await mockIpcMain._invoke('git:show', '/repo', 'src/index.ts', ':');
+
+    expect(mockGitInstance.show).toHaveBeenCalledWith([':src/index.ts']);
+    expect(result).toBe('staged content');
+  });
+
+  it('returns empty string when file does not exist at ref', async () => {
+    await setup();
+    mockGitInstance.show.mockRejectedValue(new Error('fatal: path not found'));
+
+    const result = await mockIpcMain._invoke('git:show', '/repo', 'new-file.ts', 'HEAD');
+
+    expect(result).toBe('');
   });
 });
