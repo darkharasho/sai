@@ -52,9 +52,60 @@ interface InlineInput {
   renamePath?: string;
 }
 
+type GitDirtyStatus = 'added' | 'modified' | 'deleted';
+
+interface GitStatusItem { path: string; status: string }
+interface GitStatusResult {
+  staged: GitStatusItem[];
+  modified: GitStatusItem[];
+  created: GitStatusItem[];
+  deleted: GitStatusItem[];
+  not_added: GitStatusItem[];
+}
+
+function buildDirtyMap(projectPath: string, status: GitStatusResult): Map<string, GitDirtyStatus> {
+  const fileMap = new Map<string, GitDirtyStatus>();
+  const addFile = (relPath: string, s: GitDirtyStatus) => {
+    const absPath = projectPath + '/' + relPath;
+    const existing = fileMap.get(absPath);
+    if (!existing || (existing === 'added' && s === 'modified')) fileMap.set(absPath, s);
+  };
+
+  for (const f of status.modified ?? []) addFile(f.path, 'modified');
+  for (const f of status.created ?? []) addFile(f.path, 'added');
+  for (const f of status.not_added ?? []) addFile(f.path, 'added');
+  for (const f of status.deleted ?? []) addFile(f.path, 'deleted');
+  for (const f of status.staged ?? []) {
+    const absPath = projectPath + '/' + f.path;
+    if (!fileMap.has(absPath)) fileMap.set(absPath, 'modified');
+  }
+
+  const folderMap = new Map<string, GitDirtyStatus>();
+  for (const [filePath, status] of fileMap) {
+    let dir = filePath.substring(0, filePath.lastIndexOf('/'));
+    while (dir.length >= projectPath.length) {
+      const existing = folderMap.get(dir);
+      if (existing === 'modified') break;
+      if (!existing || (existing === 'added' && status === 'modified')) {
+        folderMap.set(dir, status);
+      }
+      dir = dir.substring(0, dir.lastIndexOf('/'));
+    }
+  }
+
+  return new Map([...fileMap, ...folderMap]);
+}
+
+const DIRTY_COLORS: Record<GitDirtyStatus, string> = {
+  added: 'var(--green)',
+  modified: 'var(--accent)',
+  deleted: 'var(--red)',
+};
+
 export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExplorerSidebarProps) {
   const [tree, setTree] = useState<Map<string, TreeState>>(new Map());
   const [ignoredPaths, setIgnoredPaths] = useState<Set<string>>(new Set());
+  const [dirtyMap, setDirtyMap] = useState<Map<string, GitDirtyStatus>>(new Map());
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; entry: DirEntry | null; parentPath: string } | null>(null);
   const [inlineInput, setInlineInput] = useState<InlineInput | null>(null);
   const [dragOverPath, setDragOverPath] = useState<string | null>(null);
@@ -115,6 +166,20 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
     }, 2000);
     return () => clearInterval(interval);
   }, [loadDir]);
+
+  useEffect(() => {
+    if (!projectPath) return;
+    let cancelled = false;
+    const fetchStatus = async () => {
+      try {
+        const status = await window.sai.gitStatus(projectPath) as GitStatusResult;
+        if (!cancelled) setDirtyMap(buildDirtyMap(projectPath, status));
+      } catch {}
+    };
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 3000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [projectPath]);
 
   const toggleDir = (dirPath: string) => {
     const state = tree.get(dirPath);
@@ -274,6 +339,8 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
     const isExpanded = state?.expanded ?? false;
     const isRenaming = inlineInput?.renamePath === entry.path;
     const isIgnored = ignoredPaths.has(entry.path);
+    const dirtyStatus = dirtyMap.get(entry.path);
+    const dirtyColor = dirtyStatus ? DIRTY_COLORS[dirtyStatus] : undefined;
 
     if (isDir) {
       return (
@@ -294,7 +361,7 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
             {isRenaming ? (
               <InlineNameInput initialValue={inlineInput!.initialValue} onSubmit={handleInlineSubmit} onCancel={() => setInlineInput(null)} />
             ) : (
-              <span className="tree-name">{entry.name}</span>
+              <span className="tree-name" style={dirtyColor ? { color: dirtyColor } : undefined}>{entry.name}</span>
             )}
           </div>
           {isExpanded && state && (
@@ -325,7 +392,7 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
         {isRenaming ? (
           <InlineNameInput initialValue={inlineInput!.initialValue} onSubmit={handleInlineSubmit} onCancel={() => setInlineInput(null)} />
         ) : (
-          <span className="tree-name">{entry.name}</span>
+          <span className="tree-name" style={dirtyColor ? { color: dirtyColor } : undefined}>{entry.name}</span>
         )}
       </div>
     );
