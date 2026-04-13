@@ -1,4 +1,4 @@
-import type { ChatSession, ChatMessage } from '@/types';
+import type { ChatSession, ChatMessage } from './types';
 
 const DB_NAME = 'sai-chat';
 const DB_VERSION = 1;

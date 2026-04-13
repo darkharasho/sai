@@ -14,7 +14,8 @@ import CommandPalette from './components/CommandPalette';
 import { useWhatsNew } from './hooks/useWhatsNew';
 import WhatsNewModal from './components/WhatsNewModal';
 import { setActiveWorkspace, updateTerminalName } from './terminalBuffer';
-import { loadSessions, saveSessions, createSession, upsertSession, migrateLegacySessions, loadSessionMessages, generateSmartTitle } from './sessions';
+import { createSession, generateSmartTitle } from './sessions';
+import { dbGetSessions, dbGetMessages, dbSaveSession, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval } from './types';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, setActiveHighlightTheme, type HighlightThemeId } from './themes';
 import ApprovalBanner from './components/ApprovalBanner';
@@ -184,7 +185,7 @@ export default function App() {
     const defaultTab = { id: crypto.randomUUID(), name: 'Tab 1', createdAt: Date.now() };
     return {
       projectPath: path,
-      sessions: loadSessions(path),
+      sessions: [],
       activeSession: createSession(),
       openFiles: [],
       activeFilePath: null,
@@ -208,7 +209,7 @@ export default function App() {
         const defaultTab = { id: crypto.randomUUID(), name: 'Tab 1', createdAt: Date.now() };
         return {
         projectPath: path,
-        sessions: loadSessions(path),
+        sessions: [],
         activeSession: createSession(),
         openFiles: [],
         activeFilePath: null,
@@ -491,13 +492,11 @@ export default function App() {
   useEffect(() => {
     window.sai.getCwd().then((cwd: string) => {
       if (cwd) {
-        migrateLegacySessions(cwd);
-        const sessions = loadSessions(cwd);
         setActiveProjectPath(cwd);
         const defaultTab = { id: crypto.randomUUID(), name: 'Tab 1', createdAt: Date.now() };
         setWorkspaces(new Map([[cwd, {
           projectPath: cwd,
-          sessions,
+          sessions: [],
           activeSession: createSession(),
           openFiles: [],
           activeFilePath: null,
@@ -514,17 +513,32 @@ export default function App() {
     });
   }, []);
 
-  // Persist active sessions to localStorage before the window closes
+  // Migrate localStorage sessions to IndexedDB and load sessions for the active project
+  useEffect(() => {
+    if (!activeProjectPath) return;
+    let cancelled = false;
+    (async () => {
+      await migrateFromLocalStorage();
+      const retentionDays = await window.sai.settingsGet('historyRetention', 14);
+      await dbPurgeExpired(retentionDays);
+      const sessions = await dbGetSessions(activeProjectPath);
+      if (!cancelled) {
+        updateWorkspace(activeProjectPath, ws => ({ ...ws, sessions }));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeProjectPath]);
+
+  // Persist active sessions to IndexedDB before the window closes
   useEffect(() => {
     const handleBeforeUnload = () => {
       workspacesRef.current.forEach((ws, wsPath) => {
         const latestMessages = wsMessagesRef.current.get(wsPath);
         const sessionToSave = (latestMessages && latestMessages.length > 0)
-          ? { ...ws.activeSession, messages: latestMessages, updatedAt: Date.now() }
+          ? { ...ws.activeSession, messages: latestMessages, updatedAt: Date.now(), messageCount: latestMessages.length }
           : ws.activeSession;
         if (sessionToSave.messages.length > 0) {
-          const updatedSessions = upsertSession(ws.sessions, sessionToSave);
-          saveSessions(wsPath, updatedSessions);
+          dbSaveSession(wsPath, sessionToSave).catch(() => {});
         }
       });
     };
@@ -538,13 +552,16 @@ export default function App() {
       workspacesRef.current.forEach((ws, wsPath) => {
         const latestMessages = wsMessagesRef.current.get(wsPath);
         if (latestMessages && latestMessages.length > 0) {
-          const sessionToSave = { ...ws.activeSession, messages: latestMessages, updatedAt: Date.now() };
+          const sessionToSave = { ...ws.activeSession, messages: latestMessages, updatedAt: Date.now(), messageCount: latestMessages.length };
           if (!sessionToSave.title) {
             const firstUserMsg = latestMessages.find(m => m.role === 'user');
             if (firstUserMsg) sessionToSave.title = generateSmartTitle(firstUserMsg.content);
           }
-          const updatedSessions = upsertSession(ws.sessions, sessionToSave);
-          saveSessions(wsPath, updatedSessions);
+          dbSaveSession(wsPath, sessionToSave).then(() => {
+            dbGetSessions(wsPath).then(sessions => {
+              updateWorkspace(wsPath, ws2 => ({ ...ws2, sessions }));
+            });
+          }).catch(() => {});
         }
       });
     }, 30_000);
@@ -1052,15 +1069,13 @@ export default function App() {
       setActiveView('default');
     }
     window.sai.openRecentProject(newPath);
-    migrateLegacySessions(newPath);
-    const sessions = loadSessions(newPath);
     setWorkspaces(prev => {
       const next = new Map(prev);
       if (!next.has(newPath)) {
         const defaultTab = { id: crypto.randomUUID(), name: 'Tab 1', createdAt: Date.now() };
         next.set(newPath, {
           projectPath: newPath,
-          sessions,
+          sessions: [],
           activeSession: createSession(),
           openFiles: [],
           activeFilePath: null,
@@ -1209,24 +1224,24 @@ export default function App() {
   // Flush latest messages from ref into workspace state AND persist to localStorage atomically.
   // Returns the workspace state updater so callers can chain additional updates.
   const flushAndPersist = useCallback((wsPath: string) => {
-    updateWorkspace(wsPath, ws => {
-      const latestMessages = wsMessagesRef.current.get(wsPath);
-      // Merge ref messages into activeSession if available
-      const sessionToSave = (latestMessages && latestMessages.length > 0)
-        ? { ...ws.activeSession, messages: latestMessages, updatedAt: Date.now() }
-        : ws.activeSession;
-      if (!sessionToSave.title && sessionToSave.messages.length > 0) {
-        const firstUserMsg = sessionToSave.messages.find(m => m.role === 'user');
-        if (firstUserMsg) sessionToSave.title = generateSmartTitle(firstUserMsg.content);
-      }
-      // Persist to localStorage
-      if (sessionToSave.messages.length > 0) {
-        const updatedSessions = upsertSession(ws.sessions, sessionToSave);
-        saveSessions(wsPath, updatedSessions);
-        return { ...ws, activeSession: sessionToSave, sessions: updatedSessions };
-      }
-      return ws;
-    });
+    const ws = workspacesRef.current.get(wsPath);
+    if (!ws) return;
+    const latestMessages = wsMessagesRef.current.get(wsPath);
+    const sessionToSave = (latestMessages && latestMessages.length > 0)
+      ? { ...ws.activeSession, messages: latestMessages, updatedAt: Date.now(), messageCount: latestMessages.length }
+      : ws.activeSession;
+    if (!sessionToSave.title && sessionToSave.messages.length > 0) {
+      const firstUserMsg = sessionToSave.messages.find(m => m.role === 'user');
+      if (firstUserMsg) sessionToSave.title = generateSmartTitle(firstUserMsg.content);
+    }
+    if (sessionToSave.messages.length > 0) {
+      updateWorkspace(wsPath, ws2 => ({ ...ws2, activeSession: sessionToSave }));
+      dbSaveSession(wsPath, sessionToSave).then(() => {
+        dbGetSessions(wsPath).then(sessions => {
+          updateWorkspace(wsPath, ws2 => ({ ...ws2, sessions }));
+        });
+      }).catch(() => {});
+    }
   }, [updateWorkspace]);
 
   const handleNewChat = () => {
@@ -1251,12 +1266,13 @@ export default function App() {
       window.sai.claudeSetSessionId(activeProjectPath, selected.claudeSessionId);
       (window.sai as any).codexSetSessionId(activeProjectPath, selected.codexSessionId);
       window.sai.geminiSetSessionId?.(activeProjectPath, selected.geminiSessionId, 'chat');
-      // Load messages on demand from separate storage
-      const messages = loadSessionMessages(selected.id);
-      updateWorkspace(activeProjectPath, ws => ({
-        ...ws,
-        activeSession: { ...selected, messages },
-      }));
+      // Load messages on demand from IndexedDB
+      dbGetMessages(selected.id).then(messages => {
+        updateWorkspace(activeProjectPath, ws => ({
+          ...ws,
+          activeSession: { ...selected, messages },
+        }));
+      });
     }
   };
 
@@ -1479,13 +1495,17 @@ export default function App() {
                     const latestMessages = wsMessagesRef.current.get(wsPath) || [];
                     if (latestMessages.length === 0) return;
                     updateWorkspace(wsPath, w => {
-                      const updated = { ...w.activeSession, messages: latestMessages, updatedAt: Date.now(), aiProvider };
+                      const updated = { ...w.activeSession, messages: latestMessages, updatedAt: Date.now(), aiProvider, messageCount: latestMessages.length };
                       if (!updated.title) {
                         const firstUserMsg = latestMessages.find(m => m.role === 'user');
                         if (firstUserMsg) updated.title = generateSmartTitle(firstUserMsg.content);
                       }
-                      const updatedSessions = upsertSession(w.sessions, updated);
-                      saveSessions(wsPath, updatedSessions);
+
+                      dbSaveSession(wsPath, updated).then(() => {
+                        dbGetSessions(wsPath).then(sessions => {
+                          updateWorkspace(wsPath, ws2 => ({ ...ws2, sessions }));
+                        });
+                      }).catch(() => {});
 
                       // Fire-and-forget AI title generation if enabled
                       if (aiTitleGeneration && !updated.titleEdited) {
@@ -1499,9 +1519,12 @@ export default function App() {
                               updateWorkspace(wsPath, w2 => {
                                 if (w2.activeSession.titleEdited) return w2;
                                 const newSession = { ...w2.activeSession, title };
-                                const newSessions = w2.sessions.map(s => s.id === newSession.id ? { ...s, title } : s);
-                                saveSessions(wsPath, newSessions);
-                                return { ...w2, activeSession: newSession, sessions: newSessions };
+                                dbSaveSession(wsPath, newSession).then(() => {
+                                  dbGetSessions(wsPath).then(sessions => {
+                                    updateWorkspace(wsPath, ws3 => ({ ...ws3, sessions }));
+                                  });
+                                }).catch(() => {});
+                                return { ...w2, activeSession: newSession };
                               });
                             })
                             .catch(() => { /* title generation failed, keep smart title */ })
@@ -1515,7 +1538,7 @@ export default function App() {
                         }
                       }
 
-                      return { ...w, activeSession: updated, sessions: updatedSessions };
+                      return { ...w, activeSession: updated };
                     });
                   }}
                 />
