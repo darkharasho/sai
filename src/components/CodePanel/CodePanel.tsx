@@ -316,6 +316,7 @@ export default function CodePanel({
           filePath={activeFile.file.path}
           staged={activeFile.file.staged}
           mode={activeFile.diffMode ?? 'unified'}
+          minimap={editorMinimap}
         />
       ) : activeFile.viewMode === 'editor' && activeFile.mdPreview && activeFile.content !== undefined ? (
         <MarkdownPreview

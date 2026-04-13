@@ -2,10 +2,33 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { installMockSai, createMockSai } from '../../../helpers/ipc-mock';
 
-// Mock shiki — it requires wasm that jsdom doesn't support
-vi.mock('shiki', () => ({
-  createHighlighter: vi.fn().mockResolvedValue({
-    codeToHtml: vi.fn().mockReturnValue('<pre class="shiki"><code><span class="line"><span>mock</span></span></code></pre>'),
+// Mock monaco-editor — jsdom doesn't support canvas/webgl
+const mockSetModel = vi.fn();
+const mockUpdateOptions = vi.fn();
+const mockDispose = vi.fn();
+const mockDiffEditor = {
+  setModel: mockSetModel,
+  updateOptions: mockUpdateOptions,
+  dispose: mockDispose,
+};
+vi.mock('monaco-editor', () => ({
+  editor: {
+    createDiffEditor: vi.fn(() => mockDiffEditor),
+    createModel: vi.fn((content: string, lang: string) => ({ content, lang, dispose: vi.fn() })),
+    defineTheme: vi.fn(),
+    setTheme: vi.fn(),
+  },
+  KeyMod: { CtrlCmd: 2048 },
+  KeyCode: { KeyS: 49 },
+}));
+
+// Mock theme helpers
+vi.mock('../../../../src/themes', () => ({
+  getActiveHighlightTheme: vi.fn().mockReturnValue('monokai'),
+  buildMonacoThemeData: vi.fn().mockResolvedValue({
+    base: 'vs-dark',
+    rules: [],
+    colors: {},
   }),
 }));
 
@@ -16,93 +39,72 @@ const defaultProps = {
   filePath: 'src/index.ts',
   staged: false,
   mode: 'unified' as const,
+  minimap: true,
 };
 
-describe('DiffViewer', () => {
+describe('DiffViewer (Monaco)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it('shows loading state initially', () => {
     const mock = createMockSai();
-    // Never resolves during this test
-    mock.gitDiff.mockImplementation(() => new Promise(() => {}));
+    mock.gitShow.mockImplementation(() => new Promise(() => {}));
+    mock.fsReadFile.mockImplementation(() => new Promise(() => {}));
     installMockSai(mock);
 
     render(<DiffViewer {...defaultProps} />);
     expect(screen.getByText('Loading diff...')).toBeTruthy();
   });
 
-  it('calls gitDiff with correct arguments', async () => {
+  it('fetches HEAD content and working tree content for unstaged diff', async () => {
     const mock = createMockSai();
-    mock.gitDiff.mockResolvedValue('');
+    mock.gitShow.mockResolvedValue('original content');
+    mock.fsReadFile.mockResolvedValue('modified content');
     installMockSai(mock);
 
     render(<DiffViewer {...defaultProps} />);
     await waitFor(() => {
-      expect(mock.gitDiff).toHaveBeenCalledWith('/home/user/project', 'src/index.ts', false);
+      expect(mock.gitShow).toHaveBeenCalledWith('/home/user/project', 'src/index.ts', 'HEAD');
+      expect(mock.fsReadFile).toHaveBeenCalled();
     });
   });
 
-  it('calls gitDiff with staged=true when staged prop is true', async () => {
+  it('fetches staged content when staged=true', async () => {
     const mock = createMockSai();
-    mock.gitDiff.mockResolvedValue('');
+    mock.gitShow.mockResolvedValue('content');
     installMockSai(mock);
 
     render(<DiffViewer {...defaultProps} staged={true} />);
     await waitFor(() => {
-      expect(mock.gitDiff).toHaveBeenCalledWith('/home/user/project', 'src/index.ts', true);
+      expect(mock.gitShow).toHaveBeenCalledWith('/home/user/project', 'src/index.ts', 'HEAD');
+      expect(mock.gitShow).toHaveBeenCalledWith('/home/user/project', 'src/index.ts', ':');
     });
   });
 
-  it('shows "No changes" when diff is empty', async () => {
+  it('creates a diff editor after content loads', async () => {
     const mock = createMockSai();
-    mock.gitDiff.mockResolvedValue('');
+    mock.gitShow.mockResolvedValue('old');
+    mock.fsReadFile.mockResolvedValue('new');
+    installMockSai(mock);
+
+    const { editor } = await import('monaco-editor');
+
+    render(<DiffViewer {...defaultProps} />);
+    await waitFor(() => {
+      expect(editor.createDiffEditor).toHaveBeenCalled();
+    });
+  });
+
+  it('shows error message when fetch fails', async () => {
+    const mock = createMockSai();
+    mock.gitShow.mockRejectedValue(new Error('fatal error'));
+    mock.fsReadFile.mockRejectedValue(new Error('file not found'));
     installMockSai(mock);
 
     render(<DiffViewer {...defaultProps} />);
     await waitFor(() => {
-      expect(screen.getByText('No changes')).toBeTruthy();
-    });
-  });
-
-  it('renders diff lines when diff data is present', async () => {
-    const mock = createMockSai();
-    mock.gitDiff.mockResolvedValue('--- a/file\n+++ b/file\n@@ -1 +1 @@\n-old\n+new');
-    installMockSai(mock);
-
-    const { container } = render(<DiffViewer {...defaultProps} />);
-    await waitFor(() => {
-      expect(container.querySelector('.diff-viewer')).toBeTruthy();
-      expect(container.querySelector('.diff-line.diff-del')).toBeTruthy();
-      expect(container.querySelector('.diff-line.diff-add')).toBeTruthy();
-    });
-  });
-
-  it('shows error message when gitDiff fails', async () => {
-    const mock = createMockSai();
-    mock.gitDiff.mockRejectedValue(new Error('permission denied'));
-    installMockSai(mock);
-
-    render(<DiffViewer {...defaultProps} />);
-    await waitFor(() => {
-      expect(screen.getByText('permission denied')).toBeTruthy();
-    });
-  });
-
-  it('re-fetches when filePath changes', async () => {
-    const mock = createMockSai();
-    mock.gitDiff.mockResolvedValue('');
-    installMockSai(mock);
-
-    const { rerender } = render(<DiffViewer {...defaultProps} filePath="src/a.ts" />);
-    await waitFor(() => {
-      expect(mock.gitDiff).toHaveBeenCalledWith('/home/user/project', 'src/a.ts', false);
-    });
-
-    rerender(<DiffViewer {...defaultProps} filePath="src/b.ts" />);
-    await waitFor(() => {
-      expect(mock.gitDiff).toHaveBeenCalledWith('/home/user/project', 'src/b.ts', false);
+      expect(screen.getByText(/fatal error|file not found/)).toBeTruthy();
     });
   });
 });
