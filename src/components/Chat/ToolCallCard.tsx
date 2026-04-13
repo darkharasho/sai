@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { FileEdit, Terminal, FileText, Wrench, ChevronRight, ChevronDown, Maximize2, X, Circle, Globe, AlertCircle } from 'lucide-react';
+import { FileEdit, Terminal, FileText, Wrench, ChevronRight, ChevronDown, Circle, Globe, AlertCircle } from 'lucide-react';
 import type { ToolCall } from '../../types';
 import { getShikiHighlighter, getActiveHighlightTheme } from '../../themes';
 
@@ -249,155 +249,6 @@ const iconMap = {
 
 const MAX_PREVIEW_LINES = 20;
 
-// Fullscreen modal
-function FullscreenModal({ code, lang, label, onClose }: { code: string; lang: string; label: string; onClose: () => void }) {
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
-
-  const lineCount = code.split('\n').length;
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <div className="modal-header-left">
-            <span className="modal-title">{label || 'Output'}</span>
-            <span className="modal-meta">{lang !== 'text' ? lang : ''}</span>
-          </div>
-          <div className="modal-header-right">
-            <span className="modal-meta">{lineCount} lines</span>
-            <button className="modal-close" onClick={onClose}><X size={18} /></button>
-          </div>
-        </div>
-        <div className="modal-body">
-          <HighlightedCode code={code} lang={lang} showLineNumbers />
-        </div>
-      </div>
-      <style>{`
-        .modal-overlay {
-          position: fixed;
-          inset: 0;
-          background: rgba(0,0,0,0.7);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          z-index: 1000;
-          backdrop-filter: blur(2px);
-        }
-        .modal-content {
-          background: var(--bg-primary);
-          border: 1px solid var(--border);
-          border-radius: 10px;
-          width: 90vw;
-          height: 85vh;
-          display: flex;
-          flex-direction: column;
-          overflow: hidden;
-          box-shadow: 0 16px 48px rgba(0,0,0,0.5);
-        }
-        .modal-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 8px 16px;
-          border-bottom: 1px solid var(--border);
-          flex-shrink: 0;
-          background: var(--bg-secondary);
-        }
-        .modal-header-left, .modal-header-right {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-        .modal-title {
-          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
-          font-size: 13px;
-          color: var(--text);
-        }
-        .modal-meta {
-          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
-          font-size: 11px;
-          color: var(--text-muted);
-        }
-        .modal-close {
-          background: none;
-          border: none;
-          color: var(--text-muted);
-          cursor: pointer;
-          padding: 4px;
-          border-radius: 4px;
-          display: flex;
-        }
-        .modal-close:hover {
-          color: var(--text);
-          background: var(--bg-hover);
-        }
-        .modal-body {
-          flex: 1;
-          overflow: auto;
-          font-size: 13px;
-          background: var(--bg-primary);
-        }
-        .modal-body .highlighted-code pre,
-        .modal-body .highlighted-code pre code,
-        .modal-body .shiki {
-          background: transparent !important;
-          background-color: transparent !important;
-        }
-        .editor-code {
-          display: flex;
-          min-height: 100%;
-          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
-          font-size: 13px;
-          line-height: 20px;
-        }
-        .editor-gutter {
-          padding: 16px 0;
-          background: var(--bg-secondary);
-          border-right: 1px solid var(--border);
-          text-align: right;
-          user-select: none;
-          flex-shrink: 0;
-          position: sticky;
-          left: 0;
-        }
-        .editor-line-number {
-          padding: 0 12px 0 16px;
-          color: var(--text-muted);
-          font-size: 12px;
-          height: 20px;
-        }
-        .editor-lines {
-          flex: 1;
-          margin: 0;
-          padding: 16px 16px;
-          background: transparent !important;
-          border-radius: 0;
-          overflow: visible;
-          font-size: 13px;
-          line-height: 20px;
-          color: var(--text);
-        }
-        .editor-lines code {
-          font-size: inherit;
-          background: none;
-          padding: 0;
-        }
-        .editor-line {
-          height: 20px;
-          white-space: pre;
-        }
-        .editor-line:hover {
-          background: var(--bg-hover);
-        }
-      `}</style>
-    </div>
-  );
-}
-
 interface Todo {
   id: string;
   content: string;
@@ -448,9 +299,10 @@ function ToolErrorDisplay({ message }: { message: string }) {
   );
 }
 
-function BashInOut({ output, onFullscreen }: {
+function BashInOut({ output, showAll, onToggleShowAll }: {
   output?: string;
-  onFullscreen: (code: string, lang: string, label: string) => void;
+  showAll: boolean;
+  onToggleShowAll: () => void;
 }) {
   if (!output) return null;
   const parsed = parseToolError(output);
@@ -470,23 +322,23 @@ function BashInOut({ output, onFullscreen }: {
 
   const outputLines = output.split('\n').filter(l => l.trim());
   const MAX_OUT = 8;
-  const truncatedLines = outputLines.slice(0, MAX_OUT);
   const isTruncated = outputLines.length > MAX_OUT;
+  const visibleLines = showAll ? outputLines : outputLines.slice(0, MAX_OUT);
 
   return (
     <div className="tool-call-body bash-inout-body">
       <div className="bash-io-row bash-out-row">
         <span className="bash-io-label bash-out-label">OUT</span>
         <div className="bash-out-lines">
-          {truncatedLines.map((line, i) => (
+          {visibleLines.map((line, i) => (
             <div key={i} className="bash-out-line">
               <span className="bash-out-bullet">•</span>
               <span>{line}</span>
             </div>
           ))}
           {isTruncated && (
-            <button className="tool-call-show-more bash-show-more" onClick={() => onFullscreen(output, 'bash', 'Output')}>
-              Show all ({outputLines.length} lines)
+            <button className="tool-call-show-more bash-show-more" onClick={onToggleShowAll}>
+              {showAll ? 'Show less' : `Show all (${outputLines.length} lines)`}
             </button>
           )}
         </div>
@@ -497,7 +349,8 @@ function BashInOut({ output, onFullscreen }: {
 
 export default function ToolCallCard({ toolCall, defaultExpanded = true }: { toolCall: ToolCall; defaultExpanded?: boolean }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
-  const [fullscreenCode, setFullscreenCode] = useState<{ code: string; lang: string; label: string } | null>(null);
+  const [showAllCode, setShowAllCode] = useState(false);
+  const [showAllOutput, setShowAllOutput] = useState(false);
   const Icon = iconMap[toolCall.type] || Wrench;
   const { label, code, langOverride, diff } = formatInput(toolCall);
   const lang = langOverride || detectLang(toolCall);
@@ -517,15 +370,6 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
           <span className="tool-call-name">{toolCall.name}</span>
           {!isBash && !isTodo && label && <span className="tool-call-label">{label}</span>}
           {isBash && code && <span className="tool-call-label">{code}</span>}
-          {!isBash && !isTodo && code && (
-            <button
-              className="tool-call-fullscreen"
-              onClick={(e) => { e.stopPropagation(); setFullscreenCode({ code, lang, label: label || toolCall.name }); }}
-              title="View full"
-            >
-              <Maximize2 size={12} />
-            </button>
-          )}
           {hasBody && (expanded ? <ChevronDown size={14} className="tool-call-chevron" /> : <ChevronRight size={14} className="tool-call-chevron" />)}
         </div>
         {expanded && hasBody && (
@@ -533,7 +377,8 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
             {isBash && (
               <BashInOut
                 output={toolCall.output}
-                onFullscreen={(c, l, lb) => setFullscreenCode({ code: c, lang: l, label: lb })}
+                showAll={showAllOutput}
+                onToggleShowAll={() => setShowAllOutput(prev => !prev)}
               />
             )}
             {isTodo && <TodoListView input={toolCall.input || ''} />}
@@ -542,14 +387,14 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
                 {diff ? (
                   <DiffHighlightedCode oldString={diff.oldString} newString={diff.newString} lang={diff.fileLang} />
                 ) : (
-                  <HighlightedCode code={truncated} lang={lang} />
+                  <HighlightedCode code={showAllCode ? code : truncated} lang={lang} />
                 )}
                 {isTruncated && (
                   <button
                     className="tool-call-show-more"
-                    onClick={() => setFullscreenCode({ code, lang, label: label || toolCall.name })}
+                    onClick={() => setShowAllCode(prev => !prev)}
                   >
-                    Show all ({code.split('\n').length} lines)
+                    {showAllCode ? 'Show less' : `Show all (${code.split('\n').length} lines)`}
                   </button>
                 )}
                 {toolCall.output && (() => {
@@ -561,25 +406,19 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
                       </div>
                     );
                   }
+                  const outputTruncation = truncateCode(toolCall.output, MAX_PREVIEW_LINES);
                   return (
                     <div className="tool-call-output">
                       <div className="tool-call-output-header">
                         <span className="tool-call-output-label">Output</span>
-                        <button
-                          className="tool-call-fullscreen"
-                          onClick={() => setFullscreenCode({ code: toolCall.output!, lang: 'text', label: 'Output' })}
-                          title="View full output"
-                        >
-                          <Maximize2 size={12} />
-                        </button>
                       </div>
-                      <HighlightedCode code={truncateCode(toolCall.output, MAX_PREVIEW_LINES).truncated} lang="text" />
-                      {truncateCode(toolCall.output, MAX_PREVIEW_LINES).isTruncated && (
+                      <HighlightedCode code={showAllOutput ? toolCall.output : outputTruncation.truncated} lang="text" />
+                      {outputTruncation.isTruncated && (
                         <button
                           className="tool-call-show-more"
-                          onClick={() => setFullscreenCode({ code: toolCall.output!, lang: 'text', label: 'Output' })}
+                          onClick={() => setShowAllOutput(prev => !prev)}
                         >
-                          Show all ({toolCall.output.split('\n').length} lines)
+                          {showAllOutput ? 'Show less' : `Show all (${toolCall.output.split('\n').length} lines)`}
                         </button>
                       )}
                     </div>
@@ -841,14 +680,6 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
           .todo-pending .todo-content { color: var(--text-secondary); }
         `}</style>
       </div>
-      {fullscreenCode && (
-        <FullscreenModal
-          code={fullscreenCode.code}
-          lang={fullscreenCode.lang}
-          label={fullscreenCode.label}
-          onClose={() => setFullscreenCode(null)}
-        />
-      )}
     </>
   );
 }

@@ -532,6 +532,25 @@ export default function App() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
 
+  // Periodically persist active sessions as a safety net (every 30s)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      workspacesRef.current.forEach((ws, wsPath) => {
+        const latestMessages = wsMessagesRef.current.get(wsPath);
+        if (latestMessages && latestMessages.length > 0) {
+          const sessionToSave = { ...ws.activeSession, messages: latestMessages, updatedAt: Date.now() };
+          if (!sessionToSave.title) {
+            const firstUserMsg = latestMessages.find(m => m.role === 'user');
+            if (firstUserMsg) sessionToSave.title = generateSmartTitle(firstUserMsg.content);
+          }
+          const updatedSessions = upsertSession(ws.sessions, sessionToSave);
+          saveSessions(wsPath, updatedSessions);
+        }
+      });
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, []);
+
   const [gitChangeCount, setGitChangeCount] = useState(0);
 
   useEffect(() => {
@@ -1181,6 +1200,10 @@ export default function App() {
         return entering ? 'terminal-mode' : 'default';
       });
       return;
+    }
+    // Flush current chat to storage before opening history so it shows up-to-date
+    if (id === 'chats' && activeProjectPath) {
+      flushAndPersist(activeProjectPath);
     }
     // Folder/Git toggles work independently — don't exit terminal mode
     setSidebarOpen(prev => prev === id ? null : id);

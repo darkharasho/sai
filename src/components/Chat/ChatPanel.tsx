@@ -469,7 +469,15 @@ const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
 export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, sessionId, terminalTabs = [], onSlashCommandsUpdate }: ChatPanelProps) {
-  const [messages, setMessages] = useState<ChatMessageType[]>(initialMessages || []);
+  const [messages, setMessagesRaw] = useState<ChatMessageType[]>(initialMessages || []);
+  const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);
+  const setMessages = useCallback((updater: ChatMessageType[] | ((prev: ChatMessageType[]) => ChatMessageType[])) => {
+    setMessagesRaw(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      messagesRef.current = next;
+      return next;
+    });
+  }, []);
   const emptyPrompt = useMemo(() => EMPTY_PROMPTS[Math.floor(Math.random() * EMPTY_PROMPTS.length)], []);
   const [isStreaming, setIsStreaming] = useState(false);
   const turnSeqRef = useRef(0); // tracks the active turn's sequence number
@@ -597,6 +605,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         if (msg.type === 'done' && msg.turnSeq != null && msg.turnSeq !== turnSeqRef.current) return;
         if (msg.type === 'done') {
           turnSeqRef.current = -1;
+          flushMessagesToParent();
           onTurnComplete?.();
         }
         setIsStreaming(false);
@@ -606,8 +615,9 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
       if (msg.type === 'process_exit') {
         setReady(false);
-
         setIsStreaming(false);
+        flushMessagesToParent();
+        onTurnComplete?.();
         return;
       }
 
@@ -999,6 +1009,11 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   useEffect(() => {
     onMessagesChange?.(messages);
   }, [messages]);
+
+  // Flush messages ref to parent synchronously before save — called by onTurnComplete
+  const flushMessagesToParent = useCallback(() => {
+    onMessagesChange?.(messagesRef.current);
+  }, [onMessagesChange]);
 
   const handleApprove = (modifiedCommand?: string) => {
     if (!pendingApproval) return;
