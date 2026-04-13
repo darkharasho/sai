@@ -87,6 +87,8 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const onContentChangeRef = useRef(onContentChange);
   const decorationsRef = useRef<string[]>([]);
+  const headContentRef = useRef<string[] | null>(null);
+  const decorationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   onContentChangeRef.current = onContentChange;
   const [dirty, setDirty] = useState(false);
   const [saveError, setSaveError] = useState(false);
@@ -101,59 +103,168 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
       setDirty(false);
       onDirtyChange?.(false);
       setSaveError(false);
-      applyGitDecorations();
+      fetchHeadContent();
     } catch {
       setSaveError(true);
       setTimeout(() => setSaveError(false), 3000);
     }
   }, [filePath, onSave, onDirtyChange]);
 
-  const applyGitDecorations = useCallback(async () => {
-    if (!editorRef.current || !projectPath) return;
-    try {
-      const info = await window.sai.gitDiffLines(projectPath, filePath);
-      const decorations: monaco.editor.IModelDeltaDecoration[] = [];
+  const computeAndApplyDecorations = useCallback(() => {
+    if (!editorRef.current || !headContentRef.current) return;
+    const headLines = headContentRef.current;
+    const currentLines = editorRef.current.getValue().split('\n');
+    const decorations: monaco.editor.IModelDeltaDecoration[] = [];
 
-      for (const range of info.added) {
-        decorations.push({
-          range: new monaco.Range(range.startLine, 1, range.endLine, 1),
-          options: {
-            isWholeLine: true,
-            linesDecorationsClassName: 'git-gutter-added',
-            minimap: { color: '#2ea04370', position: monaco.editor.MinimapPosition.Gutter },
-          },
-        });
+    const addDeco = (startLine: number, endLine: number, cls: string, color: string, wholeLine = true) => {
+      decorations.push({
+        range: new monaco.Range(startLine, 1, endLine, 1),
+        options: {
+          ...(wholeLine ? { isWholeLine: true } : {}),
+          linesDecorationsClassName: cls,
+          minimap: { color, position: monaco.editor.MinimapPosition.Inline },
+        },
+      });
+    };
+
+    // Line similarity: ratio of common characters (0-1)
+    const similarity = (a: string, b: string): number => {
+      if (a === b) return 1;
+      if (!a.length || !b.length) return 0;
+      const short = a.length < b.length ? a : b;
+      const long = a.length < b.length ? b : a;
+      let matches = 0;
+      const used = new Array(long.length).fill(false);
+      for (let i = 0; i < short.length; i++) {
+        for (let j = 0; j < long.length; j++) {
+          if (!used[j] && short[i] === long[j]) { matches++; used[j] = true; break; }
+        }
+      }
+      return matches / long.length;
+    };
+
+    // Classify lines within a hunk using similarity matching
+    const classifyHunk = (oldStart: number, oldEnd: number, newStart: number, newEnd: number) => {
+      const oldSlice = headLines.slice(oldStart, oldEnd);
+      const newSlice = currentLines.slice(newStart, newEnd);
+      if (oldSlice.length === 0 && newSlice.length > 0) {
+        addDeco(newStart + 1, newEnd, 'git-gutter-added', '#2ea04370');
+        return;
+      }
+      if (newSlice.length === 0 && oldSlice.length > 0) {
+        const delLine = Math.min(currentLines.length, newStart + 1);
+        addDeco(delLine, delLine, 'git-gutter-deleted', '#f8514970', false);
+        return;
       }
 
-      for (const range of info.modified) {
-        decorations.push({
-          range: new monaco.Range(range.startLine, 1, range.endLine, 1),
-          options: {
-            isWholeLine: true,
-            linesDecorationsClassName: 'git-gutter-modified',
-            minimap: { color: '#0078d470', position: monaco.editor.MinimapPosition.Gutter },
-          },
-        });
+      // Match each new line to the best old line by similarity
+      const oldUsed = new Array(oldSlice.length).fill(false);
+      const newType: ('added' | 'modified')[] = new Array(newSlice.length).fill('added');
+
+      for (let n = 0; n < newSlice.length; n++) {
+        let bestSim = 0.4; // minimum threshold to count as modified
+        let bestO = -1;
+        for (let o = 0; o < oldSlice.length; o++) {
+          if (oldUsed[o]) continue;
+          const sim = similarity(oldSlice[o].trim(), newSlice[n].trim());
+          if (sim > bestSim) { bestSim = sim; bestO = o; }
+        }
+        if (bestO >= 0) {
+          oldUsed[bestO] = true;
+          newType[n] = 'modified';
+        }
       }
 
-      for (const lineNum of info.deleted) {
-        decorations.push({
-          range: new monaco.Range(lineNum, 1, lineNum, 1),
-          options: {
-            linesDecorationsClassName: 'git-gutter-deleted',
-            minimap: { color: '#f8514970', position: monaco.editor.MinimapPosition.Gutter },
-          },
-        });
+      // Apply decorations, grouping consecutive same-type lines
+      let i = 0;
+      while (i < newSlice.length) {
+        const type = newType[i];
+        let j = i + 1;
+        while (j < newSlice.length && newType[j] === type) j++;
+        const cls = type === 'added' ? 'git-gutter-added' : 'git-gutter-modified';
+        const color = type === 'added' ? '#2ea04370' : '#0078d470';
+        addDeco(newStart + i + 1, newStart + j, cls, color);
+        i = j;
       }
 
-      decorationsRef.current = editorRef.current.deltaDecorations(
-        decorationsRef.current,
-        decorations,
-      );
-    } catch {
-      // Silently ignore — decorations are non-critical
+      // Unmatched old lines = deletions — show triangle after the last new line in hunk
+      const unmatchedOld = oldUsed.filter(u => !u).length;
+      if (unmatchedOld > 0) {
+        const delLine = Math.min(currentLines.length, newEnd + 1);
+        addDeco(delLine, delLine, 'git-gutter-deleted', '#f8514970', false);
+      }
+    };
+
+    // Find matching (anchor) lines using greedy forward scan
+    const oldLen = headLines.length;
+    const newLen = currentLines.length;
+    let oldIdx = 0;
+    let newIdx = 0;
+
+    while (oldIdx < oldLen || newIdx < newLen) {
+      if (oldIdx < oldLen && newIdx < newLen && headLines[oldIdx] === currentLines[newIdx]) {
+        oldIdx++;
+        newIdx++;
+      } else {
+        // Find next resync point
+        let bestOld = -1;
+        let bestNew = -1;
+        let bestCost = Infinity;
+        const searchLimit = Math.min(50, Math.max(oldLen - oldIdx, newLen - newIdx) + 1);
+        for (let skip = 0; skip < searchLimit; skip++) {
+          if (newIdx + skip <= newLen && oldIdx < oldLen) {
+            for (let j = 0; j <= skip && oldIdx + j <= oldLen; j++) {
+              if (oldIdx + j < oldLen && newIdx + skip < newLen && headLines[oldIdx + j] === currentLines[newIdx + skip]) {
+                if (j + skip < bestCost) { bestCost = j + skip; bestOld = oldIdx + j; bestNew = newIdx + skip; }
+                break;
+              }
+            }
+          }
+          if (newIdx + skip < newLen && oldIdx < oldLen) {
+            for (let j = skip + 1; j < searchLimit && oldIdx + j <= oldLen; j++) {
+              if (oldIdx + j < oldLen && newIdx + skip < newLen && headLines[oldIdx + j] === currentLines[newIdx + skip]) {
+                if (j + skip < bestCost) { bestCost = j + skip; bestOld = oldIdx + j; bestNew = newIdx + skip; }
+                break;
+              }
+            }
+          }
+        }
+
+        const endOld = bestCost === Infinity ? oldLen : bestOld;
+        const endNew = bestCost === Infinity ? newLen : bestNew;
+
+        classifyHunk(oldIdx, endOld, newIdx, endNew);
+
+        oldIdx = endOld;
+        newIdx = endNew;
+        if (bestCost === Infinity) break;
+      }
     }
-  }, [projectPath, filePath]);
+
+    decorationsRef.current = editorRef.current.deltaDecorations(
+      decorationsRef.current,
+      decorations,
+    );
+  }, []);
+
+  const scheduleDecorationUpdate = useCallback(() => {
+    if (decorationTimerRef.current) clearTimeout(decorationTimerRef.current);
+    decorationTimerRef.current = setTimeout(computeAndApplyDecorations, 150);
+  }, [computeAndApplyDecorations]);
+
+  const fetchHeadContent = useCallback(async () => {
+    if (!projectPath) return;
+    try {
+      const relativePath = filePath.startsWith(projectPath)
+        ? filePath.slice(projectPath.length).replace(/^\//, '')
+        : filePath;
+      const headText = await window.sai.gitShow(projectPath, relativePath, 'HEAD');
+      headContentRef.current = headText.split('\n');
+      computeAndApplyDecorations();
+    } catch {
+      headContentRef.current = null;
+    }
+  }, [projectPath, filePath, computeAndApplyDecorations]);
 
   // Create editor on mount
   useEffect(() => {
@@ -196,6 +307,7 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
     editor.onDidChangeModelContent(() => {
       setDirty(true);
       onDirtyChange?.(true);
+      scheduleDecorationUpdate();
     });
 
     editor.onDidChangeCursorPosition(e => {
@@ -213,7 +325,7 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
     }
 
     editor.focus();
-    applyGitDecorations();
+    fetchHeadContent();
 
     return () => {
       if (onContentChangeRef.current) {
@@ -316,22 +428,25 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
           color: var(--text);
         }
         .git-gutter-added {
-          border-left: 3px solid #2ea043 !important;
-          margin-left: 3px;
+          width: 3px !important;
+          margin-left: 2px;
+          background: #2ea043;
         }
         .git-gutter-modified {
-          border-left: 3px solid #1b81e5 !important;
-          margin-left: 3px;
+          width: 3px !important;
+          margin-left: 2px;
+          background: #1b81e5;
         }
         .git-gutter-deleted {
-          margin-left: 3px;
           width: 0 !important;
           height: 0 !important;
-          border-left: 5px solid transparent;
-          border-right: 5px solid transparent;
-          border-top: 5px solid #f85149;
+          margin-left: 2px;
+          border-top: 4px solid transparent;
+          border-bottom: 4px solid transparent;
+          border-left: 4px solid #f85149;
           position: relative;
-          top: -2px;
+          top: 50%;
+          transform: translateY(-50%);
         }
       `}</style>
     </div>
