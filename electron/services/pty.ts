@@ -71,11 +71,14 @@ export function registerTerminalHandlers(win: BrowserWindow) {
     // On Linux with systemd, spawn via systemd-run --user --scope so the shell
     // lives in its own cgroup. This prevents desktop environments (GNOME, KDE)
     // from grouping GUI apps launched from the terminal under SAI's taskbar icon.
+    // Disable ECHOCTL before starting the interactive shell so escape sequences
+    // (arrow keys etc.) aren't echoed as ^[[A notation on the prompt line.
+    const shellInit = `stty -echoctl 2>/dev/null; exec "${shell}" --login`;
     const useScope = canUseSystemdScope();
     const spawnCmd = useScope ? 'systemd-run' : shell;
     const spawnArgs = useScope
-      ? ['--user', '--scope', '--quiet', '--', shell, '--login']
-      : ['--login'];
+      ? ['--user', '--scope', '--quiet', '--', shell, '-c', shellInit]
+      : ['-c', shellInit];
     const term = pty.spawn(spawnCmd, spawnArgs, {
       name: 'xterm-256color',
       cwd: cwd || process.env.HOME || '/',

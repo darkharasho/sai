@@ -374,14 +374,17 @@ describe('terminal:create', () => {
     expect(id1).not.toBe(id2);
   });
 
-  it('spawns with --login args', async () => {
+  it('spawns with stty -echoctl init and --login via exec', async () => {
     await setupWithTerminal('/tmp');
     const ptyModule = await import('node-pty');
     expect(ptyModule.spawn).toHaveBeenCalledWith(
       expect.any(String),
-      ['--login'],
+      ['-c', expect.stringContaining('stty -echoctl')],
       expect.objectContaining({ name: 'xterm-256color' }),
     );
+    const args = (ptyModule.spawn as any).mock.calls[0][1];
+    expect(args[1]).toContain('exec');
+    expect(args[1]).toContain('--login');
   });
 
   it('uses cwd from argument', async () => {
@@ -646,15 +649,19 @@ describe('systemd scope isolation (Linux cgroup ungrouping)', () => {
     expect(args).toContain('--user');
     expect(args).toContain('--scope');
     expect(args).toContain('--quiet');
-    // The actual shell should appear after '--'
+    // The actual shell should appear after '--' with -c and init script
     const dashDashIdx = args.indexOf('--');
     expect(dashDashIdx).toBeGreaterThan(-1);
-    expect(args[dashDashIdx + 2]).toBe('--login');
+    expect(args[dashDashIdx + 2]).toBe('-c');
+    expect(args[dashDashIdx + 3]).toContain('stty -echoctl');
+    expect(args[dashDashIdx + 3]).toContain('--login');
   });
 
   it('falls back to direct shell spawn when canUseSystemdScope returns false', async () => {
     const { cmd, args } = await spawnArgsFor(false);
     expect(cmd).not.toBe('systemd-run');
-    expect(args).toEqual(['--login']);
+    expect(args[0]).toBe('-c');
+    expect(args[1]).toContain('stty -echoctl');
+    expect(args[1]).toContain('--login');
   });
 });
