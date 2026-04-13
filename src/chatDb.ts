@@ -24,7 +24,10 @@ function openDb(): Promise<IDBDatabase> {
     };
 
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onerror = () => {
+      dbPromise = null;
+      reject(request.error);
+    };
   });
 
   return dbPromise;
@@ -99,7 +102,7 @@ export async function dbDeleteSession(sessionId: string): Promise<void> {
 }
 
 export async function dbPurgeExpired(retentionDays: number | null): Promise<number> {
-  if (retentionDays === null) return 0;
+  if (retentionDays === null || retentionDays <= 0) return 0;
 
   const db = await openDb();
   const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
