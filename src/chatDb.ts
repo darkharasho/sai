@@ -132,6 +132,85 @@ export async function dbPurgeExpired(retentionDays: number | null): Promise<numb
   });
 }
 
+let migrated = false;
+
+export function _resetMigrationFlag(): void {
+  migrated = false;
+}
+
+export async function migrateFromLocalStorage(): Promise<void> {
+  if (migrated) return;
+  migrated = true;
+
+  try {
+    const keysToRemove: string[] = [];
+    const saves: Array<{ projectPath: string; session: ChatSession }> = [];
+
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key) continue;
+
+      // Current format: sai-sessions-index-{projectPath}
+      if (key.startsWith('sai-sessions-index-')) {
+        const projectPath = key.slice('sai-sessions-index-'.length);
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const sessions: ChatSession[] = JSON.parse(raw);
+        keysToRemove.push(key);
+
+        for (const session of sessions) {
+          const msgKey = `sai-session-msgs-${session.id}`;
+          const msgRaw = localStorage.getItem(msgKey);
+          const messages: ChatMessage[] = msgRaw ? JSON.parse(msgRaw) : [];
+          keysToRemove.push(msgKey);
+          saves.push({ projectPath, session: { ...session, messages } });
+        }
+        continue;
+      }
+
+      // Legacy single-key format: sai-chat-sessions (exact match)
+      if (key === 'sai-chat-sessions') {
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const sessions: ChatSession[] = JSON.parse(raw);
+        keysToRemove.push(key);
+
+        for (const session of sessions) {
+          saves.push({ projectPath: '', session });
+        }
+        continue;
+      }
+
+      // Old per-path format: sai-chat-sessions-{projectPath}
+      if (key.startsWith('sai-chat-sessions-')) {
+        const projectPath = key.slice('sai-chat-sessions-'.length);
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const sessions: ChatSession[] = JSON.parse(raw);
+        keysToRemove.push(key);
+
+        for (const session of sessions) {
+          saves.push({ projectPath, session });
+        }
+        continue;
+      }
+    }
+
+    // Write all to IndexedDB
+    for (const { projectPath, session } of saves) {
+      await dbSaveSession(projectPath, session);
+    }
+
+    // Remove localStorage keys only after successful writes
+    for (const key of keysToRemove) {
+      localStorage.removeItem(key);
+    }
+  } catch (error) {
+    console.warn('migrateFromLocalStorage failed:', error);
+    migrated = false;
+  }
+}
+
 export async function clearDb(): Promise<void> {
   // Close existing connection so we can delete the DB
   if (dbPromise) {

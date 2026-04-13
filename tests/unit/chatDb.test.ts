@@ -7,6 +7,8 @@ import {
   dbDeleteSession,
   dbPurgeExpired,
   clearDb,
+  migrateFromLocalStorage,
+  _resetMigrationFlag,
 } from '@/chatDb';
 import type { ChatSession, ChatMessage } from '@/types';
 
@@ -218,5 +220,92 @@ describe('dbPurgeExpired', () => {
 
     const messages = await dbGetMessages(old.id);
     expect(messages).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// migrateFromLocalStorage
+// ---------------------------------------------------------------------------
+describe('migrateFromLocalStorage', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    _resetMigrationFlag();
+  });
+
+  it('migrates sessions and messages from current localStorage format', async () => {
+    const msg = makeMessage({ content: 'migrated message' });
+    const session = makeSession({ title: 'Current Format', messages: [] });
+
+    localStorage.setItem(
+      'sai-sessions-index-/project/x',
+      JSON.stringify([session]),
+    );
+    localStorage.setItem(
+      `sai-session-msgs-${session.id}`,
+      JSON.stringify([msg]),
+    );
+
+    await migrateFromLocalStorage();
+
+    const sessions = await dbGetSessions('/project/x');
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].title).toBe('Current Format');
+
+    const messages = await dbGetMessages(session.id);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].content).toBe('migrated message');
+
+    expect(localStorage.getItem('sai-sessions-index-/project/x')).toBeNull();
+    expect(localStorage.getItem(`sai-session-msgs-${session.id}`)).toBeNull();
+  });
+
+  it('migrates legacy single-key format', async () => {
+    const msg = makeMessage({ content: 'inline msg' });
+    const session = makeSession({ title: 'Legacy Single', messages: [msg] });
+
+    localStorage.setItem('sai-chat-sessions', JSON.stringify([session]));
+
+    await migrateFromLocalStorage();
+
+    const sessions = await dbGetSessions('');
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].title).toBe('Legacy Single');
+
+    const messages = await dbGetMessages(session.id);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].content).toBe('inline msg');
+
+    expect(localStorage.getItem('sai-chat-sessions')).toBeNull();
+  });
+
+  it('migrates old per-path format', async () => {
+    const msg = makeMessage({ content: 'per-path msg' });
+    const session = makeSession({ title: 'Old Per-Path', messages: [msg] });
+
+    localStorage.setItem(
+      'sai-chat-sessions-/project/x',
+      JSON.stringify([session]),
+    );
+
+    await migrateFromLocalStorage();
+
+    const sessions = await dbGetSessions('/project/x');
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].title).toBe('Old Per-Path');
+
+    const messages = await dbGetMessages(session.id);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].content).toBe('per-path msg');
+
+    expect(localStorage.getItem('sai-chat-sessions-/project/x')).toBeNull();
+  });
+
+  it('does nothing when no localStorage data exists', async () => {
+    await migrateFromLocalStorage();
+
+    const sessions = await dbGetSessions('');
+    expect(sessions).toEqual([]);
+    const sessions2 = await dbGetSessions('/project/x');
+    expect(sessions2).toEqual([]);
   });
 });
