@@ -1221,8 +1221,7 @@ export default function App() {
     setSidebarOpen(prev => prev === id ? null : id);
   };
 
-  // Flush latest messages from ref into workspace state AND persist to localStorage atomically.
-  // Returns the workspace state updater so callers can chain additional updates.
+  // Flush latest messages from ref into workspace state and persist to IndexedDB.
   const flushAndPersist = useCallback((wsPath: string) => {
     const ws = workspacesRef.current.get(wsPath);
     if (!ws) return;
