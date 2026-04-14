@@ -11,10 +11,77 @@ import { ensureGeminiCommitSession, ensureGeminiTransport, promptGeminiText } fr
 const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
 
 /**
- * Build an enriched PATH so CLI tools installed via nvm, volta, etc. are found
- * even when Electron doesn't inherit the user's interactive shell PATH.
+ * Cached shell environment captured from the user's login shell.
+ * Populated once at module load so MCP servers, npx, uvx, etc. are on PATH.
  */
-function enrichedEnv(): NodeJS.ProcessEnv {
+let cachedShellEnv: NodeJS.ProcessEnv | null = null;
+
+/**
+ * Spawn the user's login shell, run `env`, and parse the full environment.
+ * Falls back gracefully if the shell hangs or fails.
+ */
+function captureShellEnv(): Promise<NodeJS.ProcessEnv> {
+  return new Promise((resolve) => {
+    const fallback = () => resolve(heuristicEnv());
+
+    let proc: ReturnType<typeof spawn>;
+    try {
+      const userShell = process.env.SHELL || '/bin/zsh';
+      proc = spawn(userShell, ['-ilc', 'env'], {
+        stdio: ['ignore', 'pipe', 'ignore'],
+        env: { ...process.env, TERM: 'dumb' },
+        timeout: 5000,
+      });
+      if (!proc || !proc.on) { fallback(); return; }
+    } catch {
+      fallback();
+      return;
+    }
+
+    let output = '';
+    proc.stdout?.on('data', (d: Buffer) => { output += d.toString(); });
+
+    proc.on('error', fallback);
+    proc.on('exit', () => {
+      if (!output.trim()) { fallback(); return; }
+      const env: Record<string, string> = {};
+      let currentKey = '';
+      let currentVal = '';
+      for (const line of output.split('\n')) {
+        const eqIdx = line.indexOf('=');
+        if (eqIdx > 0 && /^[A-Za-z_][A-Za-z0-9_]*$/.test(line.slice(0, eqIdx))) {
+          // Flush previous key
+          if (currentKey) env[currentKey] = currentVal;
+          currentKey = line.slice(0, eqIdx);
+          currentVal = line.slice(eqIdx + 1);
+        } else if (currentKey) {
+          // Continuation of a multi-line value
+          currentVal += '\n' + line;
+        }
+      }
+      if (currentKey) env[currentKey] = currentVal;
+
+      // Remove shell-specific vars that should not be inherited
+      for (const k of ['SHLVL', '_', 'PWD', 'OLDPWD']) delete env[k];
+
+      if (env.PATH) {
+        cachedShellEnv = env;
+        resolve(env);
+      } else {
+        fallback();
+      }
+    });
+
+    // Safety timeout in case the shell hangs
+    setTimeout(() => { try { proc.kill(); } catch {} }, 5000);
+  });
+}
+
+/**
+ * Heuristic fallback: prepend common tool paths to PATH.
+ * Used when shell env capture fails.
+ */
+function heuristicEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   const home = require('node:os').homedir();
   const extraPaths: string[] = [];
@@ -30,6 +97,21 @@ function enrichedEnv(): NodeJS.ProcessEnv {
   );
   env.PATH = [...extraPaths, env.PATH || ''].join(':');
   return env;
+}
+
+// Kick off shell env capture at module load time.
+// By the time a user interacts, this will almost certainly have completed.
+captureShellEnv();
+
+/**
+ * Return the best available environment for spawning CLI processes.
+ * Prefers the captured shell env; falls back to heuristic.
+ */
+function enrichedEnv(): NodeJS.ProcessEnv {
+  if (cachedShellEnv) {
+    return { ...cachedShellEnv };
+  }
+  return heuristicEnv();
 }
 
 function readCachedSlashCommands(): string[] {
@@ -57,6 +139,18 @@ function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
 }
 
 /**
+ * Read a setting from SAI's settings.json.
+ */
+function readSaiSetting(key: string): any {
+  try {
+    const settings = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'), 'utf-8'));
+    return settings[key];
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Build CLI args for the persistent process based on current config.
  */
 function buildArgs(permMode?: string, effort?: string, model?: string): string[] {
@@ -80,6 +174,17 @@ function buildArgs(permMode?: string, effort?: string, model?: string): string[]
 
   if (model) {
     args.push('--model', model);
+  }
+
+  // Pass through MCP config path(s) from SAI settings
+  const mcpConfig = readSaiSetting('mcpConfigPath');
+  if (mcpConfig) {
+    const paths = Array.isArray(mcpConfig) ? mcpConfig : [mcpConfig];
+    for (const p of paths) {
+      if (typeof p === 'string' && p.trim()) {
+        args.push('--mcp-config', p.trim());
+      }
+    }
   }
 
   return args;
@@ -482,6 +587,60 @@ export function registerClaudeHandlers(win: BrowserWindow) {
     const pending = claude.pendingToolUse;
     const cwd = claude.cwd || projectPath;
 
+    // Known tools that SAI can execute locally
+    const localTools = new Set(['Bash', 'bash', 'Write', 'Edit', 'Read']);
+
+    // --- MCP / unknown tools: delegate back to the CLI ---
+    if (!localTools.has(pending.toolName)) {
+      // Add to allow list so the CLI won't deny it again
+      const claudeDir = path.join(projectPath, '.claude');
+      const settingsPath = path.join(claudeDir, 'settings.local.json');
+      let settings: Record<string, any> = {};
+      try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')); } catch {}
+      if (!settings.permissions) settings.permissions = {};
+      if (!Array.isArray(settings.permissions.allow)) settings.permissions.allow = [];
+      if (!settings.permissions.allow.includes(pending.toolName)) {
+        settings.permissions.allow.push(pending.toolName);
+        try { fs.mkdirSync(claudeDir, { recursive: true }); } catch {}
+        fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+      }
+
+      // Flush any buffered messages to the renderer
+      for (const buffered of claude.approvalBuffered) {
+        if (buffered.type === 'result') {
+          claude.busy = false;
+          safeSend(win, 'claude:message', { ...buffered, projectPath: ws.projectPath, scope: effectiveScope });
+          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
+        } else {
+          safeSend(win, 'claude:message', { ...buffered, projectPath: ws.projectPath, scope: effectiveScope });
+        }
+      }
+
+      claude.approvalBuffered = [];
+      claude.awaitingApproval = false;
+      claude.pendingToolUse = null;
+      safeSend(win, 'claude:message', { type: 'approval_resolved', projectPath: ws.projectPath, scope: effectiveScope });
+
+      // Tell the CLI to retry — the permission is now in the allow list
+      const proc = claude.process;
+      if (proc?.stdin && !proc.stdin.destroyed) {
+        claude.turnSeq++;
+        claude.busy = true;
+        safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
+        const retryMsg = JSON.stringify({
+          type: 'user',
+          message: {
+            role: 'user',
+            content: `The user has approved the use of the "${pending.toolName}" tool. Please proceed with the same tool call you just attempted.`,
+          },
+        });
+        proc.stdin.write(retryMsg + '\n');
+      }
+
+      return { result: 'Tool approved — CLI is re-executing via MCP', isError: false };
+    }
+
+    // --- Local tool execution (Bash, Write, Edit, Read) ---
     let result = '';
     let isError = false;
 
@@ -494,7 +653,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
             cwd,
             timeout: 120_000,
             maxBuffer: 10 * 1024 * 1024,
-            env: { ...process.env },
+            env: enrichedEnv(),
           }, (err, stdout, stderr) => {
             if (err && !stdout && !stderr) {
               reject(err);
@@ -540,9 +699,6 @@ export function registerClaudeHandlers(win: BrowserWindow) {
         } else {
           result = fs.readFileSync(filePath, 'utf-8');
         }
-      } else {
-        result = `Tool "${pending.toolName}" was approved but SAI cannot execute it directly.`;
-        isError = true;
       }
     } catch (err: any) {
       result = err.message || 'Command execution failed';

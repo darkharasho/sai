@@ -82,6 +82,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [focusedChat, setFocusedChat] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(300);
   const [autoCompactThreshold, setAutoCompactThreshold] = useState(0);
+  const [mcpConfigPath, setMcpConfigPath] = useState('');
   const [aiTitleGeneration, setAiTitleGeneration] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [lastSynced, setLastSynced] = useState<number | null>(null);
@@ -108,6 +109,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.settingsGet('focusedChat', false).then((v: boolean) => setFocusedChat(v));
     window.sai.settingsGet('sidebarWidth', 300).then((v: number) => setSidebarWidth(v));
     window.sai.settingsGet('autoCompactThreshold', 0).then((v: number) => setAutoCompactThreshold(v));
+    window.sai.settingsGet('mcpConfigPath', '').then((v: string) => setMcpConfigPath(v || ''));
     window.sai.settingsGet('aiTitleGeneration', false).then((v: boolean) => setAiTitleGeneration(!!v));
     window.sai.settingsGet('theme', 'default').then((v: string) => {
       const id = v as ThemeId;
@@ -667,6 +669,12 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     </>
   );
 
+  const handleMcpConfigChange = (value: string) => {
+    setMcpConfigPath(value);
+    window.sai.settingsSet('mcpConfigPath', value || '');
+    onSettingChange?.('mcpConfigPath', value || '');
+  };
+
   const renderClaudePage = () => (
     <section className="settings-section">
       <div className="settings-section-label">Claude</div>
@@ -684,6 +692,20 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             <option key={opt.value} value={opt.value}>{opt.label}</option>
           ))}
         </select>
+      </div>
+      <div className="settings-row">
+        <div className="settings-row-info">
+          <div className="settings-row-name">MCP config path</div>
+          <div className="settings-row-desc">Path to an MCP server config JSON file (passed as --mcp-config to Claude CLI). Restart the session after changing.</div>
+        </div>
+        <input
+          type="text"
+          className="settings-input"
+          placeholder="~/.claude/mcp.json"
+          value={mcpConfigPath}
+          onChange={e => handleMcpConfigChange(e.target.value)}
+          style={{ width: 220, fontSize: 12, padding: '4px 8px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)' }}
+        />
       </div>
     </section>
   );
