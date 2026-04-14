@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, Menu, MenuItem } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, Menu, MenuItem, screen } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { registerTerminalHandlers, destroyAllTerminals } from './services/pty';
@@ -39,9 +39,27 @@ function createWindow() {
     if (s.theme && THEME_TITLEBAR[s.theme]) tb = THEME_TITLEBAR[s.theme];
   } catch { /* use default */ }
 
+  // Restore last window position/size if valid
+  let savedBounds: { x: number; y: number; width: number; height: number } | undefined;
+  try {
+    const s = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'), 'utf-8'));
+    const b = s.windowBounds;
+    if (b && typeof b.x === 'number' && typeof b.y === 'number' &&
+        typeof b.width === 'number' && typeof b.height === 'number') {
+      const isOnScreen = screen.getAllDisplays().some(({ bounds }) =>
+        b.x < bounds.x + bounds.width &&
+        b.x + b.width > bounds.x &&
+        b.y < bounds.y + bounds.height &&
+        b.y + b.height > bounds.y
+      );
+      if (isOnScreen) savedBounds = b;
+    }
+  } catch { /* use defaults */ }
+
   mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
+    width: savedBounds?.width ?? 1400,
+    height: savedBounds?.height ?? 900,
+    ...(savedBounds ? { x: savedBounds.x, y: savedBounds.y } : {}),
     minWidth: 800,
     minHeight: 600,
     titleBarStyle: 'hidden',
