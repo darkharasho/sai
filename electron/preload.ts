@@ -66,6 +66,7 @@ contextBridge.exposeInMainWorld('sai', {
   gitDiscard: (cwd: string, filepath: string) => ipcRenderer.invoke('git:discard', cwd, filepath),
   fsReadDir: (dirPath: string) => ipcRenderer.invoke('fs:readDir', dirPath),
   fsReadFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath),
+  fsReadFileBase64: (filePath: string) => ipcRenderer.invoke('fs:readFileBase64', filePath),
   fsMtime: (filePath: string) => ipcRenderer.invoke('fs:mtime', filePath),
   fsWriteFile: (filePath: string, content: string) => ipcRenderer.invoke('fs:writeFile', filePath, content),
   fsRename: (oldPath: string, newPath: string) => ipcRenderer.invoke('fs:rename', oldPath, newPath),

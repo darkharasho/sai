@@ -39,6 +39,21 @@ export function registerFsHandlers(mainWindow: BrowserWindow) {
     return fs.promises.readFile(filePath, 'utf-8');
   });
 
+  ipcMain.handle('fs:readFileBase64', async (_event, filePath: string) => {
+    const buffer = await fs.promises.readFile(filePath);
+    const ext = filePath.slice(filePath.lastIndexOf('.') + 1).toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      png: 'image/png',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      gif: 'image/gif',
+      webp: 'image/webp',
+      svg: 'image/svg+xml',
+    };
+    const mime = mimeTypes[ext] || 'application/octet-stream';
+    return `data:${mime};base64,${buffer.toString('base64')}`;
+  });
+
   ipcMain.handle('fs:mtime', async (_event, filePath: string) => {
     const stat = await fs.promises.stat(filePath);
     return { mtime: stat.mtimeMs };

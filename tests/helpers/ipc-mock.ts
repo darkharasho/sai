@@ -63,6 +63,7 @@ export interface MockSai {
   // FS
   fsReadDir: ReturnType<typeof vi.fn>;
   fsReadFile: ReturnType<typeof vi.fn>;
+  fsReadFileBase64: ReturnType<typeof vi.fn>;
   fsMtime: ReturnType<typeof vi.fn>;
   fsWriteFile: ReturnType<typeof vi.fn>;
   fsRename: ReturnType<typeof vi.fn>;
@@ -185,6 +186,7 @@ export function createMockSai(): MockSai {
     // FS
     fsReadDir: vi.fn().mockResolvedValue([]),
     fsReadFile: vi.fn().mockResolvedValue(''),
+    fsReadFileBase64: vi.fn().mockResolvedValue('data:image/png;base64,'),
     fsMtime: vi.fn().mockResolvedValue(0),
     fsWriteFile: vi.fn().mockResolvedValue(undefined),
     fsRename: vi.fn().mockResolvedValue(undefined),
