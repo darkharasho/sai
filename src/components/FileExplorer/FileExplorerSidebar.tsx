@@ -1,7 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Folder, FolderOpen, FileText, FileCode2, ChevronRight, ChevronDown, FilePlus, FolderPlus } from 'lucide-react';
+import { Folder, FolderOpen, FileText, FileCode2, Image, ChevronRight, ChevronDown, FilePlus, FolderPlus } from 'lucide-react';
 import type { DirEntry } from '../../types';
 import ContextMenu from './ContextMenu';
+
+const IMAGE_EXTENSIONS = new Set([
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
+]);
 
 const CODE_EXTENSIONS = new Set([
   '.ts', '.tsx', '.js', '.jsx', '.py', '.rs', '.go', '.java',
@@ -24,12 +28,15 @@ const EXT_COLORS: Record<string, string> = {
   '.sh': 'var(--green)', '.bash': 'var(--green)',
   '.vue': 'var(--green)', '.svelte': 'var(--orange)',
   '.c': 'var(--blue)', '.cpp': 'var(--blue)', '.h': 'var(--blue)',
+  '.png': 'var(--purple)', '.jpg': 'var(--purple)', '.jpeg': 'var(--purple)',
+  '.gif': 'var(--purple)', '.webp': 'var(--purple)', '.svg': 'var(--purple)',
 };
 
 function getFileIcon(name: string): { icon: typeof FileCode2; color: string } {
   const ext = '.' + name.split('.').pop()?.toLowerCase();
   const color = EXT_COLORS[ext] || 'var(--text-muted)';
   if (CODE_EXTENSIONS.has(ext)) return { icon: FileCode2, color };
+  if (IMAGE_EXTENSIONS.has(ext)) return { icon: Image, color };
   return { icon: FileText, color };
 }
 
