@@ -114,6 +114,7 @@ function createWindow() {
   });
 
   mainWindow.on('close', () => {
+    if (mainWindow) writeSetting('windowBounds', mainWindow.getBounds());
     stopSuspendTimer();
     destroyAllTerminals();
     destroyAll(mainWindow!);
