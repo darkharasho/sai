@@ -40,6 +40,8 @@ export default function ImageViewer({
 
     window.sai.fsReadFileBase64(filePath).then((url: string) => {
       if (!cancelled) setDataUrl(url);
+    }).catch(() => {
+      if (!cancelled) setDataUrl(null);
     });
 
     return () => { cancelled = true; };
@@ -52,8 +54,12 @@ export default function ImageViewer({
 
   const handleToggleSource = useCallback(async () => {
     if (!svgSourceMode && svgContent === null) {
-      const content = await window.sai.fsReadFile(filePath) as string;
-      setSvgContent(content);
+      try {
+        const content = await window.sai.fsReadFile(filePath) as string;
+        setSvgContent(content);
+      } catch {
+        return;
+      }
     }
     setSvgSourceMode(prev => !prev);
   }, [filePath, svgSourceMode, svgContent]);
