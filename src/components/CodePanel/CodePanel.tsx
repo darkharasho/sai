@@ -4,6 +4,8 @@ import type { OpenFile } from '../../types';
 import DiffViewer from './DiffViewer';
 import MarkdownPreview from './MarkdownPreview';
 import MonacoEditor from '../FileExplorer/MonacoEditor';
+import ImageViewer from './ImageViewer';
+import { isImageFile } from '../../utils/imageFiles';
 
 interface CodePanelProps {
   openFiles: OpenFile[];
@@ -322,6 +324,17 @@ export default function CodePanel({
         <MarkdownPreview
           content={activeFile.content}
           onTogglePreview={() => onToggleMdPreview?.(activeFile.path)}
+        />
+      ) : activeFile.viewMode === 'editor' && isImageFile(activeFile.path) ? (
+        <ImageViewer
+          key={activeFile.path}
+          filePath={activeFile.path}
+          projectPath={projectPath}
+          onEditorSave={onEditorSave}
+          onEditorContentChange={onEditorContentChange}
+          onEditorDirtyChange={onEditorDirtyChange}
+          editorFontSize={editorFontSize}
+          editorMinimap={editorMinimap}
         />
       ) : activeFile.viewMode === 'editor' && activeFile.content !== undefined ? (
         <MonacoEditor
