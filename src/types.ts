@@ -105,6 +105,59 @@ export interface WorkspaceContext {
   lastActivity: number;
 }
 
+export interface Plugin {
+  name: string;
+  description: string;
+  version: string;
+  source: string;
+  enabled: boolean;
+  skills: string[];
+  icon?: string;
+}
+
+export interface RegistryPlugin {
+  name: string;
+  description: string;
+  version: string;
+  source: string;
+  skills: string[];
+  installed: boolean;
+}
+
+export interface McpServer {
+  name: string;
+  description?: string;
+  transport: 'stdio' | 'sse' | 'streamable-http';
+  command?: string;
+  args?: string[];
+  url?: string;
+  env?: Record<string, string>;
+  enabled: boolean;
+}
+
+export interface McpServerConfig {
+  name: string;
+  transport: 'stdio' | 'sse' | 'streamable-http';
+  command?: string;
+  args?: string[];
+  url?: string;
+  env?: Record<string, string>;
+}
+
+export interface McpTool {
+  name: string;
+  description?: string;
+  parameters?: string;
+}
+
+export interface RegistryMcpServer {
+  name: string;
+  description: string;
+  source: string;
+  transport: 'stdio' | 'sse' | 'streamable-http';
+  installed: boolean;
+}
+
 declare global {
   interface SaiBridge extends Record<string, any> {
     geminiSetSessionId?: (projectPath: string, sessionId: string | undefined, scope?: string) => void;
