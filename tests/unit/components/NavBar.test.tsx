@@ -109,30 +109,6 @@ describe('NavBar', () => {
     expect(container.querySelector('.navbar')).toBeTruthy();
   });
 
-  it('renders terminal mode toggle button', () => {
-    const { container } = render(
-      <NavBar activeSidebar={null} onToggle={vi.fn()} />
-    );
-    expect(getNavButton(container, 'Terminal Mode')).toBeTruthy();
-  });
-
-  it('calls onToggle with "terminal-mode" when terminal mode button is clicked', () => {
-    const onToggle = vi.fn();
-    const { container } = render(
-      <NavBar activeSidebar={null} onToggle={onToggle} />
-    );
-    fireEvent.click(getNavButton(container, 'Terminal Mode'));
-    expect(onToggle).toHaveBeenCalledWith('terminal-mode');
-  });
-
-  it('adds active class to terminal mode button when activeTerminal is true', () => {
-    const { container } = render(
-      <NavBar activeSidebar={null} activeTerminal={true} onToggle={vi.fn()} />
-    );
-    const btn = getNavButton(container, 'Terminal Mode');
-    expect(btn.className).toContain('active');
-  });
-
   it('renders chats toggle button', () => {
     const { container } = render(<NavBar activeSidebar={null} onToggle={vi.fn()} />);
     expect(getNavButton(container, 'Chat History')).toBeTruthy();
@@ -151,9 +127,4 @@ describe('NavBar', () => {
     expect(chatsBtn.className).toContain('active');
   });
 
-  it('disables chats button when terminal mode is active', () => {
-    const { container } = render(<NavBar activeSidebar={null} activeTerminal={true} onToggle={vi.fn()} />);
-    const chatsBtn = getNavButton(container, 'Chat History');
-    expect(chatsBtn.className).toContain('disabled');
-  });
 });
