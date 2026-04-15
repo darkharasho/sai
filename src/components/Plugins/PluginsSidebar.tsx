@@ -19,10 +19,12 @@ export default function PluginsSidebar() {
     setError(null);
     try {
       const result = await window.sai.pluginsList();
-      if (result && !('error' in result)) {
+      if (Array.isArray(result)) {
         setInstalled(result);
+      } else if (result?.error) {
+        setError(result.error);
       } else {
-        setError(result?.error || 'Failed to load plugins');
+        setInstalled([]);
       }
     } catch (err: any) {
       setError(err.message || 'Failed to load plugins');
@@ -35,10 +37,12 @@ export default function PluginsSidebar() {
     setError(null);
     try {
       const result = await window.sai.pluginsRegistryList();
-      if (result && !('error' in result)) {
+      if (Array.isArray(result)) {
         setRegistry(result);
+      } else if (result?.error) {
+        setError(result.error);
       } else {
-        setError(result?.error || 'Failed to load registry');
+        setRegistry([]);
       }
     } catch (err: any) {
       setError(err.message || 'Failed to load registry');
@@ -74,14 +78,14 @@ export default function PluginsSidebar() {
 
   const filteredInstalled = useMemo(
     () => installed.filter(p =>
-      p.name.toLowerCase().includes(query) || (p.description || '').toLowerCase().includes(query)
+      (p.name || '').toLowerCase().includes(query) || (p.description || '').toLowerCase().includes(query)
     ),
     [installed, query]
   );
 
   const filteredRegistry = useMemo(
     () => registry.filter(p =>
-      p.name.toLowerCase().includes(query) || (p.description || '').toLowerCase().includes(query)
+      (p.name || '').toLowerCase().includes(query) || (p.description || '').toLowerCase().includes(query)
     ),
     [registry, query]
   );

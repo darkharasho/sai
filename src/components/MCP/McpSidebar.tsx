@@ -22,10 +22,12 @@ export default function McpSidebar() {
     setError(null);
     try {
       const result = await window.sai.mcpList();
-      if (result && !('error' in result)) {
+      if (Array.isArray(result)) {
         setInstalled(result);
+      } else if (result?.error) {
+        setError(result.error);
       } else {
-        setError(result?.error || 'Failed to load servers');
+        setInstalled([]);
       }
     } catch (err: any) {
       setError(err.message || 'Failed to load servers');
@@ -38,10 +40,12 @@ export default function McpSidebar() {
     setError(null);
     try {
       const result = await window.sai.mcpRegistryList();
-      if (result && !('error' in result)) {
+      if (Array.isArray(result)) {
         setRegistry(result);
+      } else if (result?.error) {
+        setError(result.error);
       } else {
-        setError(result?.error || 'Failed to load registry');
+        setRegistry([]);
       }
     } catch (err: any) {
       setError(err.message || 'Failed to load registry');
@@ -83,15 +87,15 @@ export default function McpSidebar() {
 
   const filteredInstalled = useMemo(
     () => installed.filter(s =>
-      s.name.toLowerCase().includes(query) ||
-      (s.description?.toLowerCase().includes(query))
+      (s.name || '').toLowerCase().includes(query) ||
+      (s.description || '').toLowerCase().includes(query)
     ),
     [installed, query]
   );
 
   const filteredRegistry = useMemo(
     () => registry.filter(s =>
-      s.name.toLowerCase().includes(query) || (s.description || '').toLowerCase().includes(query)
+      (s.name || '').toLowerCase().includes(query) || (s.description || '').toLowerCase().includes(query)
     ),
     [registry, query]
   );
