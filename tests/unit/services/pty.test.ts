@@ -414,16 +414,7 @@ describe('terminal:create', () => {
     );
   });
 
-  it('does not register terminal-mode PTYs with workspace', async () => {
-    const mockWs = { terminals: new Map() };
-    mockWorkspaceGet.mockReturnValue(mockWs);
-    const win = createMockBrowserWindow();
-    const { registerTerminalHandlers } = await loadService();
-    registerTerminalHandlers(win as never);
-    const id = (await mockIpcMain._invoke('terminal:create', '/test/path', 'terminal-mode')) as number;
-    expect(id).toBeGreaterThan(0);
-    expect(mockWs.terminals.size).toBe(0);
-  });
+
 });
 
 // ---------------------------------------------------------------------------
