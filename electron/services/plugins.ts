@@ -39,17 +39,32 @@ async function runClaude(args: string[]): Promise<string> {
 }
 
 function readPluginMeta(installPath: string): { description: string; skills: string[] } {
+  let description = '';
+  let skills: string[] = [];
+
   try {
     const pkgPath = path.join(installPath, 'package.json');
     if (fs.existsSync(pkgPath)) {
       const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-      return {
-        description: pkg.description || '',
-        skills: Array.isArray(pkg.skills) ? pkg.skills : [],
-      };
+      description = pkg.description || '';
+    }
+
+    if (!description) {
+      const readme = path.join(installPath, 'README.md');
+      if (fs.existsSync(readme)) {
+        const lines = fs.readFileSync(readme, 'utf-8').split('\n');
+        const descLine = lines.find(l => l.trim() && !l.startsWith('#'));
+        if (descLine) description = descLine.trim().slice(0, 120);
+      }
+    }
+
+    const skillsDir = path.join(installPath, 'skills');
+    if (fs.existsSync(skillsDir)) {
+      skills = fs.readdirSync(skillsDir).filter(f => !f.startsWith('.'));
     }
   } catch { /* ignore */ }
-  return { description: '', skills: [] };
+
+  return { description, skills };
 }
 
 export function registerPluginHandlers() {
