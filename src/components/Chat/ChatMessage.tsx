@@ -1,4 +1,5 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
@@ -162,16 +163,64 @@ function getDotColor(role: string): string {
 }
 
 function ImageModal({ src, onClose }: { src: string; onClose: () => void }) {
-  return (
-    <div className="img-modal-overlay" onClick={onClose}>
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  useEffect(() => {
+    const stop = (e: WheelEvent) => e.preventDefault();
+    window.addEventListener('wheel', stop, { passive: false });
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    const dismissCtx = () => setCtxMenu(null);
+    window.addEventListener('click', dismissCtx);
+    return () => {
+      window.removeEventListener('wheel', stop);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('click', dismissCtx);
+    };
+  }, [onClose]);
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setCtxMenu({ x: e.clientX, y: e.clientY });
+  };
+
+  const handleCopy = async () => {
+    setCtxMenu(null);
+    try {
+      const img = imgRef.current;
+      if (!img) return;
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(img, 0, 0);
+      const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/png'));
+      if (blob) await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    } catch { /* clipboard may not be available */ }
+  };
+
+  return createPortal(
+    <div className="img-modal-overlay" onClick={onClose} onContextMenu={handleContextMenu}>
       <button className="img-modal-close" onClick={onClose}><X size={18} /></button>
       <img
+        ref={imgRef}
         src={src}
         alt="Full size"
         className="img-modal-img"
         onClick={e => e.stopPropagation()}
+        onContextMenu={handleContextMenu}
       />
-    </div>
+      {ctxMenu && (
+        <div className="img-modal-ctx" style={{ top: ctxMenu.y, left: ctxMenu.x }} onClick={e => e.stopPropagation()}>
+          <button onClick={handleCopy}><Copy size={14} /> Copy Image</button>
+          <button onClick={() => { setCtxMenu(null); onClose(); }}><X size={14} /> Close</button>
+        </div>
+      )}
+    </div>,
+    document.body
   );
 }
 
@@ -449,7 +498,7 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
         }
         .img-modal-close {
           position: fixed;
-          top: 16px;
+          top: calc(var(--titlebar-height, 38px) + 8px);
           right: 16px;
           background: rgba(0, 0, 0, 0.5);
           border: 1px solid rgba(255, 255, 255, 0.15);
@@ -463,6 +512,32 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
         }
         .img-modal-close:hover {
           background: rgba(255, 255, 255, 0.15);
+        }
+        .img-modal-ctx {
+          position: fixed;
+          background: var(--bg-primary, #1e1e1e);
+          border: 1px solid var(--border, #333);
+          border-radius: 6px;
+          padding: 4px;
+          z-index: 2001;
+          min-width: 140px;
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+        }
+        .img-modal-ctx button {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          width: 100%;
+          padding: 6px 10px;
+          background: none;
+          border: none;
+          color: var(--text, #ccc);
+          font-size: 13px;
+          cursor: pointer;
+          border-radius: 4px;
+        }
+        .img-modal-ctx button:hover {
+          background: var(--bg-secondary, #2a2a2a);
         }
       `}</style>
     </div>
