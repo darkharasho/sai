@@ -96,22 +96,22 @@ describe('ChatMessage', () => {
     const msg = makeMessage({
       images: ['data:image/png;base64,abc123'],
     });
-    const { container } = render(<ChatMessage message={msg} />);
-    const thumb = container.querySelector('.chat-msg-thumb') as HTMLElement;
+    render(<ChatMessage message={msg} />);
+    const thumb = document.querySelector('.chat-msg-thumb') as HTMLElement;
     fireEvent.click(thumb);
-    expect(container.querySelector('.img-modal-overlay')).toBeTruthy();
+    expect(document.body.querySelector('.img-modal-overlay')).toBeTruthy();
   });
 
   it('closes lightbox when overlay is clicked', () => {
     const msg = makeMessage({
       images: ['data:image/png;base64,abc123'],
     });
-    const { container } = render(<ChatMessage message={msg} />);
-    const thumb = container.querySelector('.chat-msg-thumb') as HTMLElement;
+    render(<ChatMessage message={msg} />);
+    const thumb = document.querySelector('.chat-msg-thumb') as HTMLElement;
     fireEvent.click(thumb);
-    const overlay = container.querySelector('.img-modal-overlay') as HTMLElement;
+    const overlay = document.body.querySelector('.img-modal-overlay') as HTMLElement;
     fireEvent.click(overlay);
-    expect(container.querySelector('.img-modal-overlay')).toBeNull();
+    expect(document.body.querySelector('.img-modal-overlay')).toBeNull();
   });
 
   it('calls openExternal for external links when clicked', () => {
