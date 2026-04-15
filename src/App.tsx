@@ -19,6 +19,8 @@ import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, setActiveHighlightT
 import ApprovalBanner from './components/ApprovalBanner';
 import { MessageSquare, TerminalSquare, Code2, ChevronRight, MessageCirclePlus } from 'lucide-react';
 import ChatHistorySidebar from './components/Chat/ChatHistorySidebar';
+import PluginsSidebar from './components/Plugins/PluginsSidebar';
+import McpSidebar from './components/MCP/McpSidebar';
 import { isImageFile } from './utils/imageFiles';
 
 type PermissionMode = 'default' | 'bypass';
@@ -1520,6 +1522,8 @@ export default function App() {
             titleGeneratingIds={titleGeneratingIds}
           />
         )}
+        {sidebarOpen === 'plugins' && <PluginsSidebar />}
+        {sidebarOpen === 'mcp' && <McpSidebar />}
         <div className="tm-views-wrapper">
           <div className="main-content" ref={mainContentRef}>
             {allPanels.map((panel, i) => (
