@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { RotateCcw, Trash2 } from 'lucide-react';
+import { ArrowLeft, RotateCcw, Server, Trash2 } from 'lucide-react';
 import type { McpServer, McpTool } from '../../types';
 
 interface McpDetailProps {
@@ -32,11 +32,11 @@ export default function McpDetail({ server, onBack, onRemove, onToggleEnabled, o
   return (
     <div className="mcp-detail">
       <button className="detail-back" onClick={onBack}>
-        <span>←</span> Back to servers
+        <ArrowLeft size={12} /> Back to servers
       </button>
 
       <div className="detail-header">
-        <div className="detail-icon">🔌</div>
+        <div className="detail-icon"><Server size={20} /></div>
         <div>
           <div className="detail-name">{server.name}</div>
           <div className={`detail-status ${server.enabled ? 'connected' : 'disconnected'}`}>

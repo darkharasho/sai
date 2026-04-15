@@ -33,7 +33,7 @@ describe('McpSidebar', () => {
   it('renders search input and Add button', () => {
     const { container, getByText } = render(<McpSidebar />);
     expect(container.querySelector('.sidebar-search')).toBeTruthy();
-    expect(getByText('+ Add')).toBeTruthy();
+    expect(getByText('Add')).toBeTruthy();
   });
 
   it('shows installed servers after loading', async () => {
@@ -48,7 +48,7 @@ describe('McpSidebar', () => {
 
   it('shows add server form when Add button is clicked', () => {
     const { getByText } = render(<McpSidebar />);
-    fireEvent.click(getByText('+ Add'));
+    fireEvent.click(getByText('Add'));
     expect(getByText('Add MCP Server')).toBeTruthy();
   });
 });

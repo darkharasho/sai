@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ArrowLeft, Plus, X } from 'lucide-react';
 
 type Transport = 'stdio' | 'sse' | 'streamable-http';
 
@@ -62,7 +63,7 @@ export default function McpAddServer({ onBack, onAdd }: McpAddServerProps) {
   return (
     <div className="mcp-add-server">
       <button className="detail-back" onClick={onBack}>
-        <span>←</span> Back to servers
+        <ArrowLeft size={12} /> Back to servers
       </button>
 
       <div className="add-form">
@@ -143,10 +144,10 @@ export default function McpAddServer({ onBack, onAdd }: McpAddServerProps) {
                 onChange={e => handleEnvChange(i, 'value', e.target.value)}
                 placeholder="value"
               />
-              <button className="env-remove" onClick={() => handleRemoveEnvVar(i)}>×</button>
+              <button className="env-remove" onClick={() => handleRemoveEnvVar(i)}><X size={12} /></button>
             </div>
           ))}
-          <button className="add-env-btn" onClick={handleAddEnvVar}>+ Add variable</button>
+          <button className="add-env-btn" onClick={handleAddEnvVar}><Plus size={10} /> Add variable</button>
         </div>
 
         <button
@@ -238,6 +239,9 @@ export default function McpAddServer({ onBack, onAdd }: McpAddServerProps) {
         }
         .env-remove:hover { color: var(--red); }
         .add-env-btn {
+          display: flex;
+          align-items: center;
+          gap: 3px;
           background: none;
           border: none;
           color: var(--accent);

@@ -121,6 +121,9 @@ export interface RegistryPlugin {
   version: string;
   source: string;
   skills: string[];
+  commands: string[];
+  author: string;
+  repositoryUrl: string;
   installed: boolean;
 }
 
@@ -150,12 +153,32 @@ export interface McpTool {
   parameters?: string;
 }
 
+export interface McpPackage {
+  registryType: string;
+  identifier: string;
+  version?: string;
+  transport?: { type: string };
+  environmentVariables?: { name: string; description: string; required?: boolean }[];
+}
+
+export interface McpRemote {
+  type: string;
+  url: string;
+}
+
 export interface RegistryMcpServer {
   name: string;
+  title: string;
   description: string;
   source: string;
+  repositoryUrl: string;
+  websiteUrl: string;
+  iconUrl: string;
   transport: 'stdio' | 'sse' | 'streamable-http';
+  version: string;
   installed: boolean;
+  packages: McpPackage[];
+  remotes: McpRemote[];
 }
 
 declare global {

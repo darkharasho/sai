@@ -109,23 +109,67 @@ export function registerPluginHandlers() {
 
   ipcMain.handle('plugins:registryList', async () => {
     try {
-      const res = await fetch('https://api.github.com/repos/anthropics/claude-code-plugins/contents');
+      let installedNames = new Set<string>();
+      try {
+        const output = await runClaude(['plugins', 'list', '--json']);
+        const raw = JSON.parse(output) as CliPlugin[];
+        for (const p of raw) {
+          const pluginName = p.id.includes('@') ? p.id.split('@')[0] : p.id;
+          installedNames.add(pluginName);
+        }
+      } catch { /* no installed plugins */ }
+
+      const res = await fetch('https://api.github.com/repos/anthropics/claude-plugins-official/contents/plugins');
       if (!res.ok) throw new Error(`GitHub API error: ${res.status}`);
       const entries = await res.json() as { name: string; type: string }[];
       const dirs = entries.filter(e => e.type === 'dir' && !e.name.startsWith('.'));
 
+      const baseUrl = 'https://api.github.com/repos/anthropics/claude-plugins-official/contents/plugins';
+
       const plugins = await Promise.all(dirs.map(async (dir) => {
         try {
-          const pkgRes = await fetch(`https://raw.githubusercontent.com/anthropics/claude-code-plugins/main/${dir.name}/package.json`);
-          if (!pkgRes.ok) return null;
-          const pkg = await pkgRes.json() as Record<string, any>;
+          const metaRes = await fetch(`https://raw.githubusercontent.com/anthropics/claude-plugins-official/main/plugins/${dir.name}/.claude-plugin/plugin.json`);
+          if (!metaRes.ok) return null;
+          const meta = await metaRes.json() as Record<string, any>;
+          const name = meta.name || dir.name;
+          const author = meta.author?.name || '';
+
+          let skills: string[] = [];
+          let commands: string[] = [];
+          try {
+            const contentsRes = await fetch(`${baseUrl}/${dir.name}`);
+            if (contentsRes.ok) {
+              const contents = await contentsRes.json() as { name: string; type: string }[];
+              const hasSkills = contents.some(e => e.name === 'skills' && e.type === 'dir');
+              const hasCommands = contents.some(e => e.name === 'commands' && e.type === 'dir');
+
+              if (hasSkills) {
+                const skillsRes = await fetch(`${baseUrl}/${dir.name}/skills`);
+                if (skillsRes.ok) {
+                  const skillEntries = await skillsRes.json() as { name: string }[];
+                  skills = skillEntries.map(e => e.name).filter(n => !n.startsWith('.'));
+                }
+              }
+              if (hasCommands) {
+                const cmdsRes = await fetch(`${baseUrl}/${dir.name}/commands`);
+                if (cmdsRes.ok) {
+                  const cmdEntries = await cmdsRes.json() as { name: string }[];
+                  commands = cmdEntries.map(e => e.name.replace(/\.md$/, '')).filter(n => !n.startsWith('.'));
+                }
+              }
+            }
+          } catch { /* skip enrichment */ }
+
           return {
-            name: dir.name,
-            description: pkg.description || '',
-            version: pkg.version || '0.0.0',
-            source: 'anthropics/claude-code-plugins',
-            skills: [],
-            installed: false,
+            name,
+            description: meta.description || '',
+            version: meta.version || '',
+            source: 'anthropics/claude-plugins-official',
+            skills,
+            commands,
+            author,
+            repositoryUrl: `https://github.com/anthropics/claude-plugins-official/tree/main/plugins/${dir.name}`,
+            installed: installedNames.has(name),
           };
         } catch {
           return null;

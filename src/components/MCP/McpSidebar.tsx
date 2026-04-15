@@ -1,11 +1,13 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Search } from 'lucide-react';
+import { ChevronRight, Plus, Search, Server } from 'lucide-react';
 import McpDetail from './McpDetail';
 import McpAddServer from './McpAddServer';
+import McpRegistryDetail from './McpRegistryDetail';
+import McpIcon from './McpIcon';
 import type { McpServer, McpServerConfig, RegistryMcpServer } from '../../types';
 
 type Tab = 'installed' | 'browse';
-type View = 'list' | 'detail' | 'add';
+type View = 'list' | 'detail' | 'add' | 'registry-detail';
 
 export default function McpSidebar() {
   const [tab, setTab] = useState<Tab>('installed');
@@ -16,6 +18,7 @@ export default function McpSidebar() {
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<View>('list');
   const [selectedServer, setSelectedServer] = useState<McpServer | null>(null);
+  const [selectedRegistryServer, setSelectedRegistryServer] = useState<RegistryMcpServer | null>(null);
 
   const loadInstalled = async () => {
     setLoading(true);
@@ -95,10 +98,25 @@ export default function McpSidebar() {
 
   const filteredRegistry = useMemo(
     () => registry.filter(s =>
-      (s.name || '').toLowerCase().includes(query) || (s.description || '').toLowerCase().includes(query)
+      (s.title || '').toLowerCase().includes(query) ||
+      (s.name || '').toLowerCase().includes(query) ||
+      (s.description || '').toLowerCase().includes(query)
     ),
     [registry, query]
   );
+
+  if (view === 'registry-detail' && selectedRegistryServer) {
+    return (
+      <McpRegistryDetail
+        server={selectedRegistryServer}
+        onBack={() => { setView('list'); setSelectedRegistryServer(null); }}
+        onInstall={(config) => {
+          handleAdd(config);
+          setSelectedRegistryServer(null);
+        }}
+      />
+    );
+  }
 
   if (view === 'add') {
     return <McpAddServer onBack={() => setView('list')} onAdd={handleAdd} />;
@@ -143,7 +161,7 @@ export default function McpSidebar() {
             onChange={e => setSearch(e.target.value)}
           />
         </div>
-        <button className="add-btn" onClick={() => setView('add')}>+ Add</button>
+        <button className="add-btn" onClick={() => setView('add')}><Plus size={12} /> Add</button>
       </div>
 
       <div className="sidebar-list">
@@ -161,14 +179,14 @@ export default function McpSidebar() {
             className="sidebar-card"
             onClick={() => { setSelectedServer(server); setView('detail'); }}
           >
-            <div className="card-icon">🔌</div>
+            <div className="card-icon"><Server size={14} /></div>
             <div className="card-info">
               <div className="card-name">{server.name}</div>
               <div className="card-desc">{server.description || server.transport}</div>
             </div>
             <div className="card-right">
               <span className={`status-dot ${server.enabled ? 'active' : 'inactive'}`} />
-              <span className="card-chevron">›</span>
+              <ChevronRight size={12} className="card-chevron" />
             </div>
           </div>
         ))}
@@ -178,20 +196,26 @@ export default function McpSidebar() {
         )}
 
         {!loading && !error && tab === 'browse' && filteredRegistry.map(server => (
-          <div key={server.name} className="sidebar-card">
+          <div
+            key={server.name}
+            className="sidebar-card"
+            onClick={() => { setSelectedRegistryServer(server); setView('registry-detail'); }}
+          >
+            <McpIcon iconUrl={server.iconUrl} />
             <div className="card-info">
-              <div className="card-name">{server.name}</div>
+              <div className="card-name">{server.title || server.name}</div>
               <div className="card-desc">{server.description}</div>
             </div>
             <div className="card-right">
               {server.installed ? (
                 <span className="card-installed">Installed</span>
               ) : (
-                <button className="card-install-btn" onClick={() => handleAdd({
-                  name: server.name,
-                  transport: server.transport,
-                })}>Install</button>
+                <button className="card-install-btn" onClick={(e) => {
+                  e.stopPropagation();
+                  handleAdd({ name: server.name, transport: server.transport });
+                }}>Install</button>
               )}
+              <ChevronRight size={12} className="card-chevron" />
             </div>
           </div>
         ))}
@@ -299,6 +323,13 @@ export default function McpSidebar() {
           align-items: center;
           justify-content: center;
           font-size: 14px;
+          flex-shrink: 0;
+        }
+        .card-icon-img {
+          width: 28px;
+          height: 28px;
+          border-radius: 6px;
+          object-fit: cover;
           flex-shrink: 0;
         }
         .card-info { flex: 1; min-width: 0; }

@@ -1,9 +1,12 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Search } from 'lucide-react';
+import { ChevronRight, Search } from 'lucide-react';
+import PluginIcon from './PluginIcon';
 import PluginDetail from './PluginDetail';
+import PluginRegistryDetail from './PluginRegistryDetail';
 import type { Plugin, RegistryPlugin } from '../../types';
 
 type Tab = 'installed' | 'browse';
+type View = 'list' | 'detail' | 'registry-detail';
 
 export default function PluginsSidebar() {
   const [tab, setTab] = useState<Tab>('installed');
@@ -12,7 +15,9 @@ export default function PluginsSidebar() {
   const [registry, setRegistry] = useState<RegistryPlugin[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<View>('list');
   const [selectedPlugin, setSelectedPlugin] = useState<Plugin | null>(null);
+  const [selectedRegistryPlugin, setSelectedRegistryPlugin] = useState<RegistryPlugin | null>(null);
 
   const loadInstalled = async () => {
     setLoading(true);
@@ -90,11 +95,25 @@ export default function PluginsSidebar() {
     [registry, query]
   );
 
-  if (selectedPlugin) {
+  if (view === 'registry-detail' && selectedRegistryPlugin) {
+    return (
+      <PluginRegistryDetail
+        plugin={selectedRegistryPlugin}
+        onBack={() => { setView('list'); setSelectedRegistryPlugin(null); }}
+        onInstall={(name) => {
+          handleInstall(name);
+          setSelectedRegistryPlugin(null);
+          setView('list');
+        }}
+      />
+    );
+  }
+
+  if (view === 'detail' && selectedPlugin) {
     return (
       <PluginDetail
         plugin={selectedPlugin}
-        onBack={() => setSelectedPlugin(null)}
+        onBack={() => { setView('list'); setSelectedPlugin(null); }}
         onUninstall={handleUninstall}
         onToggleEnabled={handleToggleEnabled}
       />
@@ -141,16 +160,16 @@ export default function PluginsSidebar() {
           <div
             key={plugin.name}
             className="sidebar-card"
-            onClick={() => setSelectedPlugin(plugin)}
+            onClick={() => { setSelectedPlugin(plugin); setView('detail'); }}
           >
-            <div className="card-icon">{plugin.icon || '🧩'}</div>
+            <div className="card-icon"><PluginIcon name={plugin.name} /></div>
             <div className="card-info">
               <div className="card-name">{plugin.name}</div>
               <div className="card-desc">{plugin.description}</div>
             </div>
             <div className="card-right">
               <span className={`status-dot ${plugin.enabled ? 'active' : 'inactive'}`} />
-              <span className="card-chevron">›</span>
+              <ChevronRight size={12} className="card-chevron" />
             </div>
           </div>
         ))}
@@ -160,7 +179,12 @@ export default function PluginsSidebar() {
         )}
 
         {!loading && !error && tab === 'browse' && filteredRegistry.map(plugin => (
-          <div key={plugin.name} className="sidebar-card">
+          <div
+            key={plugin.name}
+            className="sidebar-card"
+            onClick={() => { setSelectedRegistryPlugin(plugin); setView('registry-detail'); }}
+          >
+            <div className="card-icon"><PluginIcon name={plugin.name} /></div>
             <div className="card-info">
               <div className="card-name">{plugin.name}</div>
               <div className="card-desc">{plugin.description}</div>
@@ -169,8 +193,12 @@ export default function PluginsSidebar() {
               {plugin.installed ? (
                 <span className="card-installed">Installed</span>
               ) : (
-                <button className="card-install-btn" onClick={() => handleInstall(plugin.name)}>Install</button>
+                <button className="card-install-btn" onClick={(e) => {
+                  e.stopPropagation();
+                  handleInstall(plugin.name);
+                }}>Install</button>
               )}
+              <ChevronRight size={12} className="card-chevron" />
             </div>
           </div>
         ))}

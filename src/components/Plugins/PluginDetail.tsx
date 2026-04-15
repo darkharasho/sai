@@ -1,4 +1,5 @@
-import { Trash2 } from 'lucide-react';
+import { ArrowLeft, Trash2 } from 'lucide-react';
+import PluginIcon from './PluginIcon';
 import type { Plugin } from '../../types';
 
 interface PluginDetailProps {
@@ -12,11 +13,11 @@ export default function PluginDetail({ plugin, onBack, onUninstall, onToggleEnab
   return (
     <div className="plugin-detail">
       <button className="detail-back" onClick={onBack}>
-        <span>←</span> Back to plugins
+        <ArrowLeft size={12} /> Back to plugins
       </button>
 
       <div className="detail-header">
-        <div className="detail-icon">{plugin.icon || '🧩'}</div>
+        <div className="detail-icon"><PluginIcon name={plugin.name} size={20} /></div>
         <div>
           <div className="detail-name">{plugin.name}</div>
           <div className="detail-source">{plugin.source}</div>
@@ -27,13 +28,10 @@ export default function PluginDetail({ plugin, onBack, onUninstall, onToggleEnab
         <button className="detail-btn danger" onClick={() => onUninstall(plugin.name)}>
           <Trash2 size={12} /> Uninstall
         </button>
-        <button
-          className="detail-btn toggle"
-          onClick={() => onToggleEnabled(plugin.name, !plugin.enabled)}
-        >
+        <span className="detail-status-badge">
           <span className={`status-dot ${plugin.enabled ? 'active' : 'inactive'}`} />
           {plugin.enabled ? 'Enabled' : 'Disabled'}
-        </button>
+        </span>
       </div>
 
       <div className="detail-section">
@@ -117,7 +115,16 @@ export default function PluginDetail({ plugin, onBack, onUninstall, onToggleEnab
         }
         .detail-btn.danger { background: var(--red); color: #fff; }
         .detail-btn.danger:hover { opacity: 0.9; }
-        .detail-btn.toggle { background: var(--bg-hover); color: var(--accent); }
+        .detail-status-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          padding: 4px 10px;
+          font-size: 10px;
+          font-weight: 600;
+          color: var(--text-muted);
+          line-height: 1;
+        }
         .status-dot {
           width: 6px;
           height: 6px;
