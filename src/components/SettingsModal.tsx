@@ -78,7 +78,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [geminiLoadingPhrases, setGeminiLoadingPhrases] = useState<'witty' | 'tips' | 'all' | 'off'>('all');
   const [systemNotifications, setSystemNotifications] = useState(false);
   const [toolCallsExpanded, setToolCallsExpanded] = useState(true);
-  const [defaultView, setDefaultView] = useState<'default' | 'terminal-mode'>('default');
   const [focusedChat, setFocusedChat] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(300);
   const [autoCompactThreshold, setAutoCompactThreshold] = useState(0);
@@ -103,9 +102,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     });
     window.sai.settingsGet('systemNotifications', false).then((v: boolean) => setSystemNotifications(v));
     window.sai.settingsGet('toolCallsExpanded', true).then((v: boolean) => setToolCallsExpanded(v));
-    window.sai.settingsGet('defaultView', 'default').then((v: string) => {
-      if (v === 'default' || v === 'terminal-mode') setDefaultView(v);
-    });
     window.sai.settingsGet('focusedChat', false).then((v: boolean) => setFocusedChat(v));
     window.sai.settingsGet('sidebarWidth', 300).then((v: number) => setSidebarWidth(v));
     window.sai.settingsGet('autoCompactThreshold', 0).then((v: number) => setAutoCompactThreshold(v));
@@ -295,12 +291,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     onSettingChange?.('toolCallsExpanded', value);
   };
 
-  const handleDefaultViewChange = (value: 'default' | 'terminal-mode') => {
-    setDefaultView(value);
-    window.sai.settingsSet('defaultView', value);
-    onSettingChange?.('defaultView', value);
-  };
-
   const handleSyncNow = () => {
     setSyncStatus('syncing');
     window.sai.githubSyncNow();
@@ -442,23 +432,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     <>
       <section className="settings-section">
         <div className="settings-section-label">Workspaces</div>
-
-        <div className="settings-row">
-          <div className="settings-row-info">
-            <div className="settings-row-name">Default view</div>
-            <div className="settings-row-desc">Choose which view to show when the app launches</div>
-          </div>
-          <select
-            className="settings-select"
-            value={defaultView}
-            onChange={e => handleDefaultViewChange(e.target.value as 'default' | 'terminal-mode')}
-          >
-            <option value="default">Workspace</option>
-            <option value="terminal-mode">Terminal</option>
-          </select>
-        </div>
-
-        <div style={{ height: 8 }} />
 
         <div className="settings-row">
           <div className="settings-row-info">
