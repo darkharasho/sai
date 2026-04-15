@@ -103,10 +103,6 @@ export interface WorkspaceContext {
   activeTerminalId: number | null;
   status: WorkspaceStatus;
   lastActivity: number;
-  // Terminal mode (AI terminal) state — per-workspace
-  termModeActivated: boolean;
-  termModeTabs: { id: string; name: string; createdAt: number }[];
-  termModeActiveTabId: string;
 }
 
 declare global {
