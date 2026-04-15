@@ -109,30 +109,6 @@ describe('NavBar', () => {
     expect(container.querySelector('.navbar')).toBeTruthy();
   });
 
-  it('renders terminal mode toggle button', () => {
-    const { container } = render(
-      <NavBar activeSidebar={null} onToggle={vi.fn()} />
-    );
-    expect(getNavButton(container, 'Terminal Mode')).toBeTruthy();
-  });
-
-  it('calls onToggle with "terminal-mode" when terminal mode button is clicked', () => {
-    const onToggle = vi.fn();
-    const { container } = render(
-      <NavBar activeSidebar={null} onToggle={onToggle} />
-    );
-    fireEvent.click(getNavButton(container, 'Terminal Mode'));
-    expect(onToggle).toHaveBeenCalledWith('terminal-mode');
-  });
-
-  it('adds active class to terminal mode button when activeTerminal is true', () => {
-    const { container } = render(
-      <NavBar activeSidebar={null} activeTerminal={true} onToggle={vi.fn()} />
-    );
-    const btn = getNavButton(container, 'Terminal Mode');
-    expect(btn.className).toContain('active');
-  });
-
   it('renders chats toggle button', () => {
     const { container } = render(<NavBar activeSidebar={null} onToggle={vi.fn()} />);
     expect(getNavButton(container, 'Chat History')).toBeTruthy();
@@ -151,9 +127,40 @@ describe('NavBar', () => {
     expect(chatsBtn.className).toContain('active');
   });
 
-  it('disables chats button when terminal mode is active', () => {
-    const { container } = render(<NavBar activeSidebar={null} activeTerminal={true} onToggle={vi.fn()} />);
-    const chatsBtn = getNavButton(container, 'Chat History');
-    expect(chatsBtn.className).toContain('disabled');
+  it('renders plugins toggle button', () => {
+    const { container } = render(<NavBar activeSidebar={null} onToggle={vi.fn()} />);
+    expect(getNavButton(container, 'Plugins')).toBeTruthy();
   });
+
+  it('calls onToggle with "plugins" when plugins button is clicked', () => {
+    const onToggle = vi.fn();
+    const { container } = render(<NavBar activeSidebar={null} onToggle={onToggle} />);
+    fireEvent.click(getNavButton(container, 'Plugins'));
+    expect(onToggle).toHaveBeenCalledWith('plugins');
+  });
+
+  it('adds active class to plugins button when activeSidebar is "plugins"', () => {
+    const { container } = render(<NavBar activeSidebar="plugins" onToggle={vi.fn()} />);
+    const pluginsBtn = getNavButton(container, 'Plugins');
+    expect(pluginsBtn.className).toContain('active');
+  });
+
+  it('renders mcp toggle button', () => {
+    const { container } = render(<NavBar activeSidebar={null} onToggle={vi.fn()} />);
+    expect(getNavButton(container, 'MCP Servers')).toBeTruthy();
+  });
+
+  it('calls onToggle with "mcp" when mcp button is clicked', () => {
+    const onToggle = vi.fn();
+    const { container } = render(<NavBar activeSidebar={null} onToggle={onToggle} />);
+    fireEvent.click(getNavButton(container, 'MCP Servers'));
+    expect(onToggle).toHaveBeenCalledWith('mcp');
+  });
+
+  it('adds active class to mcp button when activeSidebar is "mcp"', () => {
+    const { container } = render(<NavBar activeSidebar="mcp" onToggle={vi.fn()} />);
+    const mcpBtn = getNavButton(container, 'MCP Servers');
+    expect(mcpBtn.className).toContain('active');
+  });
+
 });

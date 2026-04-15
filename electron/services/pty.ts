@@ -87,13 +87,10 @@ export function registerTerminalHandlers(win: BrowserWindow) {
 
     allTerminals.set(id, term);
 
-    // Register with workspace if one exists for this cwd (skip for terminal-mode scope)
-    if (scope !== 'terminal-mode') {
-      const ws = get(cwd);
-      if (ws) {
-        ws.terminals.set(id, term);
-        terminalOwner.set(id, cwd);
-      }
+    const ws = get(cwd);
+    if (ws) {
+      ws.terminals.set(id, term);
+      terminalOwner.set(id, cwd);
     }
 
     term.onData((data) => { safeSend(win, 'terminal:data', id, data); });

@@ -159,4 +159,15 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.on('github:settingsApplied', listener);
     return () => ipcRenderer.removeListener('github:settingsApplied', listener);
   },
+  // Plugins
+  pluginsList: () => ipcRenderer.invoke('plugins:list'),
+  pluginsInstall: (name: string) => ipcRenderer.invoke('plugins:install', name),
+  pluginsUninstall: (name: string) => ipcRenderer.invoke('plugins:uninstall', name),
+  pluginsRegistryList: () => ipcRenderer.invoke('plugins:registryList'),
+  // MCP
+  mcpList: () => ipcRenderer.invoke('mcp:list'),
+  mcpAdd: (config: any) => ipcRenderer.invoke('mcp:add', config),
+  mcpRemove: (name: string) => ipcRenderer.invoke('mcp:remove', name),
+  mcpUpdate: (name: string, updates: any) => ipcRenderer.invoke('mcp:update', name, updates),
+  mcpRegistryList: () => ipcRenderer.invoke('mcp:registryList'),
 });

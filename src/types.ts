@@ -103,10 +103,82 @@ export interface WorkspaceContext {
   activeTerminalId: number | null;
   status: WorkspaceStatus;
   lastActivity: number;
-  // Terminal mode (AI terminal) state — per-workspace
-  termModeActivated: boolean;
-  termModeTabs: { id: string; name: string; createdAt: number }[];
-  termModeActiveTabId: string;
+}
+
+export interface Plugin {
+  name: string;
+  description: string;
+  version: string;
+  source: string;
+  enabled: boolean;
+  skills: string[];
+  icon?: string;
+}
+
+export interface RegistryPlugin {
+  name: string;
+  description: string;
+  version: string;
+  source: string;
+  skills: string[];
+  commands: string[];
+  author: string;
+  repositoryUrl: string;
+  installed: boolean;
+}
+
+export interface McpServer {
+  name: string;
+  description?: string;
+  transport: 'stdio' | 'sse' | 'streamable-http';
+  command?: string;
+  args?: string[];
+  url?: string;
+  env?: Record<string, string>;
+  enabled: boolean;
+}
+
+export interface McpServerConfig {
+  name: string;
+  transport: 'stdio' | 'sse' | 'streamable-http';
+  command?: string;
+  args?: string[];
+  url?: string;
+  env?: Record<string, string>;
+}
+
+export interface McpTool {
+  name: string;
+  description?: string;
+  parameters?: string;
+}
+
+export interface McpPackage {
+  registryType: string;
+  identifier: string;
+  version?: string;
+  transport?: { type: string };
+  environmentVariables?: { name: string; description: string; required?: boolean }[];
+}
+
+export interface McpRemote {
+  type: string;
+  url: string;
+}
+
+export interface RegistryMcpServer {
+  name: string;
+  title: string;
+  description: string;
+  source: string;
+  repositoryUrl: string;
+  websiteUrl: string;
+  iconUrl: string;
+  transport: 'stdio' | 'sse' | 'streamable-http';
+  version: string;
+  installed: boolean;
+  packages: McpPackage[];
+  remotes: McpRemote[];
 }
 
 declare global {
