@@ -1,4 +1,4 @@
-import { FolderClosed, GitBranch, Clock } from 'lucide-react';
+import { FolderClosed, GitBranch, Clock, Puzzle, Server } from 'lucide-react';
 
 interface NavBarProps {
   activeSidebar: string | null;
@@ -35,6 +35,23 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0 }: 
       >
         <Clock size={18} />
         <span className="nav-label">Chats</span>
+      </button>
+      <div className="nav-divider" />
+      <button
+        className={`nav-btn ${activeSidebar === 'plugins' ? 'active' : ''}`}
+        onClick={() => onToggle('plugins')}
+        title="Plugins"
+      >
+        <Puzzle size={18} />
+        <span className="nav-label">Plugins</span>
+      </button>
+      <button
+        className={`nav-btn ${activeSidebar === 'mcp' ? 'active' : ''}`}
+        onClick={() => onToggle('mcp')}
+        title="MCP Servers"
+      >
+        <Server size={18} />
+        <span className="nav-label">MCP</span>
       </button>
       <style>{`
         .navbar {
@@ -96,6 +113,12 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0 }: 
           background: rgba(199, 145, 12, 0.08);
           border-left: 2px solid var(--accent);
           border-radius: 0 8px 8px 0;
+        }
+        .nav-divider {
+          width: 24px;
+          height: 1px;
+          background: var(--border);
+          margin: 4px 0;
         }
       `}</style>
     </div>
