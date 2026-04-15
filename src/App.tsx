@@ -2,8 +2,6 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import NavBar from './components/NavBar';
 import ChatPanel from './components/Chat/ChatPanel';
 import TerminalPanel from './components/Terminal/TerminalPanel';
-import TerminalModeView from './components/TerminalMode/TerminalModeView';
-import TerminalTabBar from './components/TerminalMode/TerminalTabBar';
 import GitSidebar from './components/Git/GitSidebar';
 import FileExplorerSidebar from './components/FileExplorer/FileExplorerSidebar';
 import TitleBar from './components/TitleBar';
@@ -89,7 +87,6 @@ function WelcomeTypewriter() {
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState<string | null>(null);
-  const [activeView, setActiveView] = useState<'default' | 'terminal-mode'>('default');
 
   const [activeProjectPath, setActiveProjectPath] = useState<string>('');
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
@@ -183,7 +180,6 @@ export default function App() {
   const getWorkspace = useCallback((path: string): WorkspaceContext => {
     const existing = workspaces.get(path);
     if (existing) return existing;
-    const defaultTab = { id: crypto.randomUUID(), name: 'Tab 1', createdAt: Date.now() };
     return {
       projectPath: path,
       sessions: [],
@@ -195,9 +191,6 @@ export default function App() {
       activeTerminalId: null,
       status: 'recent',
       lastActivity: Date.now(),
-      termModeActivated: false,
-      termModeTabs: [defaultTab],
-      termModeActiveTabId: defaultTab.id,
     };
   }, [workspaces]);
 
@@ -207,7 +200,6 @@ export default function App() {
     setWorkspaces(prev => {
       const next = new Map(prev);
       const current = next.get(path) || (() => {
-        const defaultTab = { id: crypto.randomUUID(), name: 'Tab 1', createdAt: Date.now() };
         return {
         projectPath: path,
         sessions: [],
@@ -219,46 +211,12 @@ export default function App() {
         activeTerminalId: null,
         status: 'active' as const,
         lastActivity: Date.now(),
-        termModeActivated: false,
-        termModeTabs: [defaultTab],
-        termModeActiveTabId: defaultTab.id,
       };
       })();
       next.set(path, updater(current));
       return next;
     });
   }, []);
-
-  // Derived terminal mode state from active workspace
-  const terminalModeActivated = activeWorkspace?.termModeActivated ?? false;
-  const termTabs = activeWorkspace?.termModeTabs ?? [];
-  const activeTermTabId = activeWorkspace?.termModeActiveTabId ?? '';
-
-  // Workspace-aware setters for terminal mode state
-  const setTerminalModeActivated = useCallback((v: boolean) => {
-    if (!activeProjectPath) return;
-    updateWorkspace(activeProjectPath, ws => ({ ...ws, termModeActivated: v }));
-  }, [activeProjectPath, updateWorkspace]);
-
-  const setTermTabs = useCallback((updater: (prev: { id: string; name: string; createdAt: number }[]) => { id: string; name: string; createdAt: number }[]) => {
-    if (!activeProjectPath) return;
-    updateWorkspace(activeProjectPath, ws => ({ ...ws, termModeTabs: updater(ws.termModeTabs) }));
-  }, [activeProjectPath, updateWorkspace]);
-
-  const setActiveTermTabId = useCallback((id: string) => {
-    if (!activeProjectPath) return;
-    updateWorkspace(activeProjectPath, ws => ({ ...ws, termModeActiveTabId: id }));
-  }, [activeProjectPath, updateWorkspace]);
-
-  // Sync activeTermTabId when tabs change (use primitive deps to avoid infinite loops)
-  const termTabIds = termTabs.map(t => t.id).join(',');
-  useEffect(() => {
-    if (!activeProjectPath || !termTabIds) return;
-    const ids = termTabIds.split(',');
-    if (ids.length > 0 && !ids.includes(activeTermTabId)) {
-      updateWorkspace(activeProjectPath, ws => ({ ...ws, termModeActiveTabId: ws.termModeTabs[0]?.id ?? '' }));
-    }
-  }, [activeProjectPath, termTabIds, activeTermTabId, updateWorkspace]);
 
   // uid is the stable identity for tabs (used for React keys, activeTerminalId).
   // id is the PTY ID assigned when the terminal process is created.
@@ -376,9 +334,6 @@ export default function App() {
 
   // Load persisted settings from main process (file-based, works in dev+prod)
   useEffect(() => {
-    window.sai.settingsGet('defaultView', 'default').then((v: string) => {
-      if (v === 'terminal-mode') { setActiveView('terminal-mode'); setTerminalModeActivated(true); }
-    });
     window.sai.settingsGet('focusedChat', false).then((v: boolean) => setFocusedChat(v));
     window.sai.settingsGet('sidebarWidth', 300).then((v: number) => {
       document.documentElement.style.setProperty('--sidebar-width', `${v}px`);
@@ -494,7 +449,6 @@ export default function App() {
     window.sai.getCwd().then((cwd: string) => {
       if (cwd) {
         setActiveProjectPath(cwd);
-        const defaultTab = { id: crypto.randomUUID(), name: 'Tab 1', createdAt: Date.now() };
         setWorkspaces(new Map([[cwd, {
           projectPath: cwd,
           sessions: [],
@@ -506,9 +460,6 @@ export default function App() {
           activeTerminalId: null,
           status: 'active',
           lastActivity: Date.now(),
-          termModeActivated: false,
-          termModeTabs: [defaultTab],
-          termModeActiveTabId: defaultTab.id,
         }]]));
       }
     });
@@ -636,14 +587,12 @@ export default function App() {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'h' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        if (activeView !== 'terminal-mode') {
-          setSidebarOpen(prev => prev === 'chats' ? null : 'chats');
-        }
+        setSidebarOpen(prev => prev === 'chats' ? null : 'chats');
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [activeView]);
+  }, []);
 
   useEffect(() => {
     const cleanup = window.sai.onWorkspaceSuspended?.((suspendedPath: string) => {
@@ -873,34 +822,6 @@ export default function App() {
     });
   }, [activeProjectPath, updateWorkspace, focusedChat]);
 
-  const createTermTab = useCallback(() => {
-    const num = termTabs.length + 1;
-    const tab = { id: crypto.randomUUID(), name: `Tab ${num}`, createdAt: Date.now() };
-    setTermTabs(prev => [...prev, tab]);
-    setActiveTermTabId(tab.id);
-  }, [termTabs.length, setTermTabs, setActiveTermTabId]);
-
-  const closeTermTab = useCallback((tabId: string) => {
-    setTermTabs(prev => {
-      const idx = prev.findIndex(t => t.id === tabId);
-      const next = prev.filter(t => t.id !== tabId);
-      if (next.length === 0) {
-        const fresh = { id: crypto.randomUUID(), name: 'Tab 1', createdAt: Date.now() };
-        setActiveTermTabId(fresh.id);
-        return [fresh];
-      }
-      if (tabId === activeTermTabId) {
-        const neighbor = next[Math.min(idx, next.length - 1)];
-        setActiveTermTabId(neighbor.id);
-      }
-      return next;
-    });
-  }, [activeTermTabId, setTermTabs, setActiveTermTabId]);
-
-  const renameTermTab = useCallback((tabId: string, name: string) => {
-    setTermTabs(prev => prev.map(t => t.id === tabId ? { ...t, name } : t));
-  }, [setTermTabs]);
-
   const handleFileOpen = useCallback(async (filePath: string, line?: number) => {
     if (!activeProjectPath) return;
     try {
@@ -1021,73 +942,12 @@ export default function App() {
     return () => document.removeEventListener('keydown', handler);
   }, [activeProjectPath, workspaces, handleToggleMdPreview]);
 
-  // Terminal tab hotkeys
-  useEffect(() => {
-    if (activeView !== 'terminal-mode') return;
-
-    const handleTabHotkey = (e: KeyboardEvent) => {
-      const ctrl = e.ctrlKey || e.metaKey;
-      if (!ctrl) return;
-
-      // Ctrl+T — new tab
-      if (e.key === 't' && !e.shiftKey) {
-        e.preventDefault();
-        createTermTab();
-        return;
-      }
-
-      // Ctrl+W — close tab
-      if (e.key === 'w' && !e.shiftKey) {
-        e.preventDefault();
-        closeTermTab(activeTermTabId);
-        return;
-      }
-
-      // Ctrl+Tab / Ctrl+PageDown — next tab
-      if ((e.key === 'Tab' && !e.shiftKey) || e.key === 'PageDown') {
-        e.preventDefault();
-        const idx = termTabs.findIndex(t => t.id === activeTermTabId);
-        const next = termTabs[(idx + 1) % termTabs.length];
-        if (next) setActiveTermTabId(next.id);
-        return;
-      }
-
-      // Ctrl+Shift+Tab / Ctrl+PageUp — previous tab
-      if ((e.key === 'Tab' && e.shiftKey) || e.key === 'PageUp') {
-        e.preventDefault();
-        const idx = termTabs.findIndex(t => t.id === activeTermTabId);
-        const prev = termTabs[(idx - 1 + termTabs.length) % termTabs.length];
-        if (prev) setActiveTermTabId(prev.id);
-        return;
-      }
-
-      // Ctrl+1 through Ctrl+9 — go to tab N
-      if (e.key >= '1' && e.key <= '9') {
-        e.preventDefault();
-        const n = parseInt(e.key) - 1;
-        if (n < termTabs.length) {
-          setActiveTermTabId(termTabs[n].id);
-        }
-        return;
-      }
-    };
-
-    window.addEventListener('keydown', handleTabHotkey, true);
-    return () => window.removeEventListener('keydown', handleTabHotkey, true);
-  }, [activeView, activeTermTabId, termTabs, setActiveTermTabId, createTermTab, closeTermTab]);
-
   const handleProjectSwitch = useCallback((newPath: string) => {
     if (newPath === activeProjectPath) return;
-    const targetWs = workspaces.get(newPath);
-    // Only leave terminal-mode if the target workspace hasn't activated it
-    if (activeView === 'terminal-mode' && !targetWs?.termModeActivated) {
-      setActiveView('default');
-    }
     window.sai.openRecentProject(newPath);
     setWorkspaces(prev => {
       const next = new Map(prev);
       if (!next.has(newPath)) {
-        const defaultTab = { id: crypto.randomUUID(), name: 'Tab 1', createdAt: Date.now() };
         next.set(newPath, {
           projectPath: newPath,
           sessions: [],
@@ -1099,9 +959,6 @@ export default function App() {
           activeTerminalId: null,
           status: 'active',
           lastActivity: Date.now(),
-          termModeActivated: false,
-          termModeTabs: [defaultTab],
-          termModeActiveTabId: defaultTab.id,
         });
       } else {
         const ws = next.get(newPath)!;
@@ -1121,7 +978,7 @@ export default function App() {
       next.delete(newPath);
       return next;
     });
-  }, [activeProjectPath, activeView, workspaces]);
+  }, [activeProjectPath, workspaces]);
 
   const handlePaletteCommand = useCallback((command: string) => {
     if (command === 'clear' && activeProjectPath) {
@@ -1220,19 +1077,10 @@ export default function App() {
   }, [activeProjectPath, updateWorkspace]);
 
   const toggleSidebar = (id: string) => {
-    if (id === 'terminal-mode') {
-      setActiveView(prev => {
-        const entering = prev !== 'terminal-mode';
-        if (entering) { setTerminalModeActivated(true); setSidebarOpen(null); }
-        return entering ? 'terminal-mode' : 'default';
-      });
-      return;
-    }
     // Flush current chat to storage before opening history so it shows up-to-date
     if (id === 'chats' && activeProjectPath) {
       flushAndPersist(activeProjectPath);
     }
-    // Folder/Git toggles work independently — don't exit terminal mode
     setSidebarOpen(prev => prev === id ? null : id);
   };
 
@@ -1657,7 +1505,7 @@ export default function App() {
         onSwitchToWorkspace={handleProjectSwitch}
       />
       <div className="app-body">
-        <NavBar activeSidebar={sidebarOpen} activeTerminal={activeView === 'terminal-mode'} onToggle={toggleSidebar} gitChangeCount={gitChangeCount} />
+        <NavBar activeSidebar={sidebarOpen} onToggle={toggleSidebar} gitChangeCount={gitChangeCount} />
         {sidebarOpen === 'files' && <FileExplorerSidebar projectPath={projectPath} onFileOpen={handleFileOpen} />}
         {sidebarOpen === 'git' && <GitSidebar projectPath={projectPath} onFileClick={handleFileClick} commitMessageProvider={commitMessageProvider} />}
         {sidebarOpen === 'chats' && (
@@ -1673,27 +1521,7 @@ export default function App() {
           />
         )}
         <div className="tm-views-wrapper">
-          {terminalModeActivated && (
-            <div style={{ display: activeView === 'terminal-mode' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, minWidth: 0 }}>
-              <TerminalTabBar
-                tabs={termTabs}
-                activeTabId={activeTermTabId}
-                onSelect={setActiveTermTabId}
-                onClose={closeTermTab}
-                onCreate={createTermTab}
-                onRename={renameTermTab}
-              />
-              {termTabs.map((tab) => (
-                <div
-                  key={tab.id}
-                  style={{ display: tab.id === activeTermTabId ? 'flex' : 'none', flex: 1, minHeight: 0, minWidth: 0 }}
-                >
-                  <TerminalModeView projectPath={projectPath} aiProvider={aiProvider} active={tab.id === activeTermTabId} />
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="main-content" ref={mainContentRef} style={activeView === 'terminal-mode' ? { display: 'none' } : undefined}>
+          <div className="main-content" ref={mainContentRef}>
             {allPanels.map((panel, i) => (
               <div key={panel} style={{ display: 'contents' }}>
                 {renderPanel(panel)}
