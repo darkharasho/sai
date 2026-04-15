@@ -74,14 +74,14 @@ export default function PluginsSidebar() {
 
   const filteredInstalled = useMemo(
     () => installed.filter(p =>
-      p.name.toLowerCase().includes(query) || p.description.toLowerCase().includes(query)
+      p.name.toLowerCase().includes(query) || (p.description || '').toLowerCase().includes(query)
     ),
     [installed, query]
   );
 
   const filteredRegistry = useMemo(
     () => registry.filter(p =>
-      p.name.toLowerCase().includes(query) || p.description.toLowerCase().includes(query)
+      p.name.toLowerCase().includes(query) || (p.description || '').toLowerCase().includes(query)
     ),
     [registry, query]
   );

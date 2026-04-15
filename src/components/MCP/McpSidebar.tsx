@@ -91,7 +91,7 @@ export default function McpSidebar() {
 
   const filteredRegistry = useMemo(
     () => registry.filter(s =>
-      s.name.toLowerCase().includes(query) || s.description.toLowerCase().includes(query)
+      s.name.toLowerCase().includes(query) || (s.description || '').toLowerCase().includes(query)
     ),
     [registry, query]
   );
