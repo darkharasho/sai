@@ -24,14 +24,12 @@ function findClaude(): string {
   return 'claude';
 }
 
-interface PluginInfo {
-  name: string;
-  description: string;
+interface CliPlugin {
+  id: string;
   version: string;
-  source: string;
+  scope: string;
   enabled: boolean;
-  skills: string[];
-  icon?: string;
+  installPath: string;
 }
 
 async function runClaude(args: string[]): Promise<string> {
@@ -40,11 +38,37 @@ async function runClaude(args: string[]): Promise<string> {
   return stdout.trim();
 }
 
+function readPluginMeta(installPath: string): { description: string; skills: string[] } {
+  try {
+    const pkgPath = path.join(installPath, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+      return {
+        description: pkg.description || '',
+        skills: Array.isArray(pkg.skills) ? pkg.skills : [],
+      };
+    }
+  } catch { /* ignore */ }
+  return { description: '', skills: [] };
+}
+
 export function registerPluginHandlers() {
   ipcMain.handle('plugins:list', async () => {
     try {
       const output = await runClaude(['plugins', 'list', '--json']);
-      return JSON.parse(output) as PluginInfo[];
+      const raw = JSON.parse(output) as CliPlugin[];
+      return raw.map(p => {
+        const [pluginName, source] = p.id.includes('@') ? p.id.split('@') : [p.id, ''];
+        const meta = readPluginMeta(p.installPath);
+        return {
+          name: pluginName,
+          description: meta.description,
+          version: p.version,
+          source,
+          enabled: p.enabled,
+          skills: meta.skills,
+        };
+      });
     } catch (err: any) {
       return { error: err.message || 'Failed to list plugins' };
     }
