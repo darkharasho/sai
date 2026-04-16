@@ -242,8 +242,8 @@ interface ChatPanelProps {
   onPermissionChange: (mode: 'default' | 'bypass') => void;
   effortLevel: 'low' | 'medium' | 'high' | 'max';
   onEffortChange: (level: 'low' | 'medium' | 'high' | 'max') => void;
-  modelChoice: 'sonnet' | 'opus' | 'haiku';
-  onModelChange: (model: 'sonnet' | 'opus' | 'haiku') => void;
+  modelChoice: 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan';
+  onModelChange: (model: 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan') => void;
   aiProvider: 'claude' | 'codex' | 'gemini';
   codexModel: string;
   onCodexModelChange: (model: string) => void;

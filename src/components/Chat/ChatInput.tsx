@@ -13,7 +13,7 @@ import {
 } from '../../terminalBuffer';
 
 type EffortLevel = 'low' | 'medium' | 'high' | 'max';
-type ModelChoice = 'sonnet' | 'opus' | 'haiku';
+type ModelChoice = 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan';
 
 interface ChatInputProps {
   onSend: (message: string, images?: string[]) => void;
@@ -99,9 +99,14 @@ const EFFORT_CONFIG: Record<EffortLevel, { icon: typeof ChevronDown; label: stri
 };
 
 const MODEL_OPTIONS: { id: ModelChoice; label: string; description: string; color: string; recommended?: boolean }[] = [
-  { id: 'sonnet',  label: 'Sonnet',  description: 'Claude Sonnet 4.5 · Best for everyday tasks', color: 'var(--accent)', recommended: true },
-  { id: 'opus',    label: 'Opus',    description: 'Claude Opus 4 · Most capable for complex work', color: 'var(--orange)' },
-  { id: 'haiku',   label: 'Haiku',   description: 'Claude Haiku 3.5 · Fastest for quick answers', color: 'var(--green)' },
+  { id: 'default',    label: 'Default',    description: 'Your account\u2019s recommended model',                                 color: 'var(--text-secondary)' },
+  { id: 'sonnet',     label: 'Sonnet',     description: 'Claude Sonnet 4.6 \u00b7 Best for everyday tasks',                      color: 'var(--accent)', recommended: true },
+  { id: 'opus',       label: 'Opus',       description: 'Claude Opus 4.6 \u00b7 Most capable for complex work',                  color: 'var(--orange)' },
+  { id: 'haiku',      label: 'Haiku',      description: 'Claude Haiku \u00b7 Fastest for quick answers',                         color: 'var(--green)' },
+  { id: 'best',       label: 'Best',       description: 'Most capable available (currently Opus)',                               color: 'var(--orange)' },
+  { id: 'opusplan',   label: 'Opus Plan',  description: 'Opus in plan mode, Sonnet for execution',                               color: 'var(--orange)' },
+  { id: 'sonnet[1m]', label: 'Sonnet 1M',  description: 'Sonnet with 1M token context for long sessions',                        color: 'var(--accent)' },
+  { id: 'opus[1m]',   label: 'Opus 1M',    description: 'Opus with 1M token context for long sessions',                          color: 'var(--orange)' },
 ];
 
 

@@ -25,7 +25,9 @@ import { isImageFile } from './utils/imageFiles';
 
 type PermissionMode = 'default' | 'bypass';
 type EffortLevel = 'low' | 'medium' | 'high' | 'max';
-type ModelChoice = 'sonnet' | 'opus' | 'haiku';
+type ModelChoice = 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan';
+const VALID_MODEL_CHOICES: readonly ModelChoice[] = ['default', 'best', 'sonnet', 'opus', 'haiku', 'sonnet[1m]', 'opus[1m]', 'opusplan'];
+const isModelChoice = (v: unknown): v is ModelChoice => typeof v === 'string' && (VALID_MODEL_CHOICES as readonly string[]).includes(v);
 type AIProvider = 'claude' | 'codex' | 'gemini';
 type GeminiApprovalMode = 'default' | 'auto_edit' | 'yolo' | 'plan';
 type GeminiConversationMode = 'planning' | 'fast';
@@ -359,7 +361,7 @@ export default function App() {
     });
     // Load nested provider settings
     window.sai.settingsGet('claude', {}).then((c: any) => {
-      if (c.model === 'sonnet' || c.model === 'opus' || c.model === 'haiku') setModelChoice(c.model);
+      if (isModelChoice(c.model)) setModelChoice(c.model);
       if (c.effort === 'low' || c.effort === 'medium' || c.effort === 'high' || c.effort === 'max') setEffortLevel(c.effort);
       if (c.permission === 'default' || c.permission === 'bypass') setPermissionMode(c.permission);
     });
@@ -412,7 +414,7 @@ export default function App() {
       if ('aiTitleGeneration' in remote) setAiTitleGeneration(!!remote.aiTitleGeneration);
       if ('claude' in remote && typeof remote.claude === 'object') {
         const c = remote.claude;
-        if (c.model === 'sonnet' || c.model === 'opus' || c.model === 'haiku') setModelChoice(c.model);
+        if (isModelChoice(c.model)) setModelChoice(c.model);
         if (c.effort === 'low' || c.effort === 'medium' || c.effort === 'high' || c.effort === 'max') setEffortLevel(c.effort);
         if (c.permission === 'default' || c.permission === 'bypass') setPermissionMode(c.permission);
       }
