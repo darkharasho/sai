@@ -16,29 +16,33 @@ interface TodoProgressProps {
 }
 
 function findLatestTodos(messages: ChatMessage[]): Todo[] | null {
-  // Find the TodoWrite with the most todos — the main task plan always has the
-  // largest list; intermediate or sub-task writes are smaller and should be ignored.
-  // Use most-recent as a tiebreaker (handled by iterating newest-first and only
-  // replacing when strictly larger).
-  let best: Todo[] | null = null;
+  // Find the most recent assistant message that has any TodoWrite calls, then
+  // within that message return the last write with the maximum todo count.
+  // Scoping to the most recent message prevents the bar from getting stuck
+  // showing a stale plan from a previous turn when the current turn writes a
+  // smaller (or updated) list. Within a single message, preferring the largest
+  // write avoids jumping to a transient sub-task write mid-turn.
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m.role !== 'assistant' || !m.toolCalls?.length) continue;
-    for (let j = m.toolCalls.length - 1; j >= 0; j--) {
-      const tc = m.toolCalls[j];
+    let best: Todo[] | null = null;
+    for (const tc of m.toolCalls) {
       if (tc.name !== 'TodoWrite') continue;
       try {
         const parsed = JSON.parse(tc.input);
         if (Array.isArray(parsed.todos) && parsed.todos.length > 0) {
           const todos = parsed.todos as Todo[];
-          if (!best || todos.length > best.length) {
+          // Use >= so we always advance to the last write of the same size,
+          // ensuring the most recent update wins when the plan is rewritten.
+          if (!best || todos.length >= best.length) {
             best = todos;
           }
         }
       } catch { /* ignore malformed input */ }
     }
+    if (best) return best;
   }
-  return best;
+  return null;
 }
 
 export default function TodoProgress({ messages, isStreaming }: TodoProgressProps) {
