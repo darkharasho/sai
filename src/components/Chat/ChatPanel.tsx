@@ -230,6 +230,7 @@ function GeminiThinkingAnimation({ loadingPhrases = 'all' }: { loadingPhrases?: 
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import MessageQueue from './MessageQueue';
+import TodoProgress from './TodoProgress';
 import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, QueuedMessage, TerminalTab } from '../../types';
 import { buildHelpMessage } from './helpText';
 
@@ -1161,6 +1162,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           </button>
         )}
       </div>
+      <TodoProgress messages={messages} isStreaming={isStreaming} />
       <MessageQueue
         queue={messageQueue}
         onRemove={(id) => sessionId && onQueueRemove?.(sessionId, id)}
