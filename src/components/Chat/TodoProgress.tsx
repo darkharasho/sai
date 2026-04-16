@@ -16,6 +16,11 @@ interface TodoProgressProps {
 }
 
 function findLatestTodos(messages: ChatMessage[]): Todo[] | null {
+  // Find the TodoWrite with the most todos — the main task plan always has the
+  // largest list; intermediate or sub-task writes are smaller and should be ignored.
+  // Use most-recent as a tiebreaker (handled by iterating newest-first and only
+  // replacing when strictly larger).
+  let best: Todo[] | null = null;
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m.role !== 'assistant' || !m.toolCalls?.length) continue;
@@ -25,12 +30,15 @@ function findLatestTodos(messages: ChatMessage[]): Todo[] | null {
       try {
         const parsed = JSON.parse(tc.input);
         if (Array.isArray(parsed.todos) && parsed.todos.length > 0) {
-          return parsed.todos as Todo[];
+          const todos = parsed.todos as Todo[];
+          if (!best || todos.length > best.length) {
+            best = todos;
+          }
         }
       } catch { /* ignore malformed input */ }
     }
   }
-  return null;
+  return best;
 }
 
 export default function TodoProgress({ messages, isStreaming }: TodoProgressProps) {
