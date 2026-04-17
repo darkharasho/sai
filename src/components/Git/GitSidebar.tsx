@@ -231,6 +231,7 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
           onFileClick={onFileClick}
           onDiscard={setDiscardTarget}
           staged
+          projectPath={projectPath}
         />
 
         <ChangedFiles
@@ -241,6 +242,7 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
           onFileClick={onFileClick}
           onStageAll={handleStageAll}
           onDiscard={setDiscardTarget}
+          projectPath={projectPath}
         />
 
         <GitActivity commits={commits} />

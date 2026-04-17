@@ -123,6 +123,23 @@ describe('GitSidebar', () => {
     expect(mockSai.gitStatus).not.toHaveBeenCalled();
   });
 
+  it('shows expand arrow on file rows', async () => {
+    const mock = createMockSai();
+    mock.gitStatus.mockResolvedValue({
+      branch: 'main',
+      staged: [],
+      modified: [{ path: 'src/App.tsx', status: 'M' }],
+      created: [], deleted: [], not_added: [], ahead: 0, behind: 0,
+    });
+    mock.gitLog.mockResolvedValue([]);
+    installMockSai(mock);
+
+    render(<GitSidebar {...defaultProps} />);
+    await waitFor(() => screen.getByText('App.tsx'));
+    // The expand arrow (▶) should be present in the file row
+    expect(screen.getAllByText('▶').length).toBeGreaterThan(0);
+  });
+
   it('renders AI activity for Codex commits', async () => {
     const mock = createMockSai();
     mock.gitStatus.mockResolvedValue({

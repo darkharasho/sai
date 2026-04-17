@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Plus, Minus, FileText, FilePlus, FileX, FileSymlink } from 'lucide-react';
 import { GitFile } from '../../types';
+import InlineDiff from './InlineDiff';
 
 const STATUS_CONFIG: Record<GitFile['status'], { icon: typeof FileText; color: string }> = {
   modified: { icon: FileText,     color: 'var(--orange)' },
@@ -24,11 +25,13 @@ interface ChangedFilesProps {
   onStageAll?: () => void;
   onDiscard?: (file: GitFile) => void;
   staged?: boolean;
+  projectPath: string;
 }
 
-export default function ChangedFiles({ title, files, onAction, actionLabel, onFileClick, onStageAll, onDiscard, staged }: ChangedFilesProps) {
+export default function ChangedFiles({ title, files, onAction, actionLabel, onFileClick, onStageAll, onDiscard, staged, projectPath }: ChangedFilesProps) {
   const [hoveredPath, setHoveredPath] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [expandedPath, setExpandedPath] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -121,81 +124,98 @@ export default function ChangedFiles({ title, files, onAction, actionLabel, onFi
           : '';
 
         return (
-          <div
-            key={file.path}
-            onMouseEnter={() => setHoveredPath(file.path)}
-            onMouseLeave={() => setHoveredPath(null)}
-            onClick={() => onFileClick(file)}
-            onContextMenu={e => handleContextMenu(e, file)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              padding: '3px 12px',
-              gap: 6,
-              background: isHovered ? 'var(--bg-hover)' : 'transparent',
-              cursor: 'pointer',
-              minWidth: 0,
-            }}
-          >
-            {/* Status icon */}
-            <cfg.icon size={14} color={cfg.color} style={{ flexShrink: 0 }} />
-
-            {/* File name + directory */}
-            <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+          <div key={file.path}>
+            <div
+              onMouseEnter={() => setHoveredPath(file.path)}
+              onMouseLeave={() => setHoveredPath(null)}
+              onClick={() => onFileClick(file)}
+              onContextMenu={e => handleContextMenu(e, file)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                padding: '3px 12px',
+                gap: 6,
+                background: isHovered ? 'var(--bg-hover)' : 'transparent',
+                cursor: 'pointer',
+                minWidth: 0,
+              }}
+            >
+              {/* Expand toggle */}
               <span
-                style={{
-                  fontSize: 12,
-                  color: 'var(--text)',
-                  whiteSpace: 'nowrap' as const,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  display: 'block',
-                }}
-                title={file.path}
+                onClick={e => { e.stopPropagation(); setExpandedPath(expandedPath === file.path ? null : file.path); }}
+                style={{ color: 'var(--text-muted)', fontSize: 9, flexShrink: 0, width: 10, cursor: 'pointer' }}
               >
-                {fileName}
+                {expandedPath === file.path ? '▼' : '▶'}
               </span>
-              {dirName && (
+
+              {/* Status icon */}
+              <cfg.icon size={14} color={cfg.color} style={{ flexShrink: 0 }} />
+
+              {/* File name + directory */}
+              <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
                 <span
                   style={{
-                    fontSize: 10,
-                    color: 'var(--text-muted)',
+                    fontSize: 12,
+                    color: 'var(--text)',
                     whiteSpace: 'nowrap' as const,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     display: 'block',
                   }}
+                  title={file.path}
                 >
-                  {dirName}
+                  {fileName}
                 </span>
-              )}
-            </div>
+                {dirName && (
+                  <span
+                    style={{
+                      fontSize: 10,
+                      color: 'var(--text-muted)',
+                      whiteSpace: 'nowrap' as const,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      display: 'block',
+                    }}
+                  >
+                    {dirName}
+                  </span>
+                )}
+              </div>
 
-            {/* Action button */}
-            <button
-              onClick={(e) => { e.stopPropagation(); onAction(file); }}
-              title={actionLabel}
-              style={{
-                flexShrink: 0,
-                width: 18,
-                height: 18,
-                border: 'none',
-                borderRadius: 3,
-                background: isHovered ? 'var(--accent)' : 'transparent',
-                color: isHovered ? '#000' : 'transparent',
-                cursor: 'pointer',
-                fontSize: 14,
-                fontWeight: 700,
-                lineHeight: '18px',
-                textAlign: 'center' as const,
-                padding: 0,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              {actionLabel === '+' ? <Plus size={14} /> : <Minus size={14} />}
-            </button>
+              {/* Action button */}
+              <button
+                onClick={(e) => { e.stopPropagation(); onAction(file); }}
+                title={actionLabel}
+                style={{
+                  flexShrink: 0,
+                  width: 18,
+                  height: 18,
+                  border: 'none',
+                  borderRadius: 3,
+                  background: isHovered ? 'var(--accent)' : 'transparent',
+                  color: isHovered ? '#000' : 'transparent',
+                  cursor: 'pointer',
+                  fontSize: 14,
+                  fontWeight: 700,
+                  lineHeight: '18px',
+                  textAlign: 'center' as const,
+                  padding: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                {actionLabel === '+' ? <Plus size={14} /> : <Minus size={14} />}
+              </button>
+            </div>
+            {expandedPath === file.path && (
+              <InlineDiff
+                projectPath={projectPath}
+                filepath={file.path}
+                staged={!!staged}
+                onOpen={() => { onFileClick(file); setExpandedPath(null); }}
+              />
+            )}
           </div>
         );
       })}
