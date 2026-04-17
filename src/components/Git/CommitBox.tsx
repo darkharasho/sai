@@ -62,13 +62,14 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
 
   useEffect(() => {
     if (branchMenuOpen) {
-      onListBranches().then(({ branches: b, remoteBranches: r }: any) => {
+      setFocusedBranchIndex(0);
+      onListBranches().then(({ branches: b, remoteBranches: r }) => {
         setBranches(b ?? []);
         setRemoteBranches(r ?? []);
       });
       setTimeout(() => filterRef.current?.focus(), 50);
     }
-  }, [branchMenuOpen]);
+  }, [branchMenuOpen, onListBranches]);
 
   const filteredLocal = branches.filter(b => fuzzyMatch(b, branchFilter));
   const filteredRemote = remoteBranches.filter(b => fuzzyMatch(b, branchFilter));
@@ -232,7 +233,7 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
                 type="text"
                 placeholder="Filter branches…"
                 value={branchFilter}
-                onChange={e => setBranchFilter(e.target.value)}
+                onChange={e => { setBranchFilter(e.target.value); setFocusedBranchIndex(0); }}
                 style={{
                   width: '100%',
                   background: 'var(--bg-input)',

@@ -4,7 +4,7 @@ interface RebaseButtonProps {
   projectPath: string;
   currentBranch: string;
   onRefresh: () => void;
-  onListBranches: () => Promise<{ current: string; branches: string[] }>;
+  onListBranches: () => Promise<{ current: string; branches: string[]; remoteBranches?: string[] }>;
   disabled?: boolean;
 }
 

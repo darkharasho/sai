@@ -189,7 +189,7 @@ export function createMockSai(): MockSai {
     gitPull: vi.fn().mockResolvedValue(undefined),
     gitFetch: vi.fn().mockResolvedValue(undefined),
     gitLog: vi.fn().mockResolvedValue([]),
-    gitBranches: vi.fn().mockResolvedValue({ current: 'main', all: ['main'] }),
+    gitBranches: vi.fn().mockResolvedValue({ current: 'main', branches: ['main'], remoteBranches: [] }),
     gitCheckout: vi.fn().mockResolvedValue(undefined),
     gitCreateBranch: vi.fn().mockResolvedValue(undefined),
     gitDiff: vi.fn().mockResolvedValue(''),
