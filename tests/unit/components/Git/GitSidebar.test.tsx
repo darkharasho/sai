@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { installMockSai, createMockSai } from '../../../helpers/ipc-mock';
 
 import GitSidebar from '../../../../src/components/Git/GitSidebar';
@@ -170,6 +170,26 @@ describe('GitSidebar', () => {
       expect(screen.getByText('AI Activity')).toBeTruthy();
       expect(screen.getByText('feat: update app shell')).toBeTruthy();
       expect(screen.getByText('Codex')).toBeTruthy();
+    });
+  });
+
+  it('supports Space key to stage a focused file', async () => {
+    const mock = createMockSai();
+    mock.gitStatus.mockResolvedValue({
+      branch: 'main', staged: [],
+      modified: [{ path: 'src/App.tsx', status: 'M' }],
+      created: [], deleted: [], not_added: [], ahead: 0, behind: 0,
+    });
+    mock.gitLog.mockResolvedValue([]);
+    installMockSai(mock);
+
+    render(<GitSidebar {...defaultProps} />);
+    await waitFor(() => screen.getByText('App.tsx'));
+
+    const fileRow = screen.getByText('App.tsx').closest('[data-filepath]') as HTMLElement;
+    fireEvent.keyDown(fileRow, { key: ' ' });
+    await waitFor(() => {
+      expect(mock.gitStage).toHaveBeenCalled();
     });
   });
 });

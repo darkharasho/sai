@@ -130,10 +130,16 @@ export default function ChangedFiles({ title, files, onAction, actionLabel, onFi
         return (
           <div key={file.path}>
             <div
+              data-filepath={file.path}
+              tabIndex={0}
               onMouseEnter={() => setHoveredPath(file.path)}
               onMouseLeave={() => setHoveredPath(null)}
               onClick={() => onFileClick(file)}
               onContextMenu={e => handleContextMenu(e, file)}
+              onKeyDown={e => {
+                if (e.key === ' ') { e.preventDefault(); onAction(file); }
+                if (e.key === 'Enter') { onFileClick(file); }
+              }}
               style={{
                 display: 'flex',
                 alignItems: 'center',
