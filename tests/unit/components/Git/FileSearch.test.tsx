@@ -26,4 +26,11 @@ describe('FileSearch', () => {
     render(<FileSearch value="App" onChange={vi.fn()} matchCount={3} />);
     expect(screen.getByText(/3 match/i)).toBeTruthy();
   });
+
+  it('shows singular "1 match" (not "1 matches") for matchCount=1', () => {
+    render(<FileSearch value="App" onChange={vi.fn()} matchCount={1} />);
+    expect(screen.getByText('1 match')).toBeTruthy();
+    // ensure it doesn't say "1 matches"
+    expect(screen.queryByText('1 matches')).toBeNull();
+  });
 });

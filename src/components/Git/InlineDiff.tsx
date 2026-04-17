@@ -25,6 +25,7 @@ const MAX_LINES = 50;
 export default function InlineDiff({ projectPath, filepath, staged, onOpen }: InlineDiffProps) {
   const [lines, setLines] = useState<{ type: '+' | '-' | ' '; text: string }[]>([]);
   const [truncated, setTruncated] = useState(false);
+  const [truncatedCount, setTruncatedCount] = useState(0);
 
   useEffect(() => {
     window.sai.gitDiff(projectPath, filepath, staged).then((diff: string) => {
@@ -32,9 +33,11 @@ export default function InlineDiff({ projectPath, filepath, staged, onOpen }: In
       if (parsed.length > MAX_LINES) {
         setLines(parsed.slice(0, MAX_LINES));
         setTruncated(true);
+        setTruncatedCount(parsed.length - MAX_LINES);
       } else {
         setLines(parsed);
         setTruncated(false);
+        setTruncatedCount(0);
       }
     });
   }, [projectPath, filepath, staged]);
@@ -68,7 +71,7 @@ export default function InlineDiff({ projectPath, filepath, staged, onOpen }: In
         ))}
         {truncated && (
           <div style={{ padding: '2px 12px', color: 'var(--text-muted)', fontSize: 10 }}>
-            … more lines — open in editor to see all
+            … {truncatedCount} more lines — open in editor to see all
           </div>
         )}
       </div>

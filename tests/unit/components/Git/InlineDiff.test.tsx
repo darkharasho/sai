@@ -51,4 +51,24 @@ describe('InlineDiff', () => {
     screen.getByText(/open in editor/i).click();
     expect(onOpen).toHaveBeenCalled();
   });
+
+  it('shows truncation message with count when diff exceeds 50 lines', async () => {
+    const mock = createMockSai();
+    // Generate a diff with 60 added lines
+    const longDiff = [
+      'diff --git a/big.ts b/big.ts',
+      'index abc..def 100644',
+      '--- a/big.ts',
+      '+++ b/big.ts',
+      '@@ -1,60 +1,60 @@',
+      ...Array.from({ length: 60 }, (_, i) => `+line ${i + 1}`),
+    ].join('\n');
+    mock.gitDiff.mockResolvedValue(longDiff);
+    installMockSai(mock);
+
+    render(<InlineDiff projectPath="/proj" filepath="big.ts" staged={false} />);
+    await waitFor(() => {
+      expect(screen.getByText(/10 more lines/)).toBeTruthy();
+    });
+  });
 });
