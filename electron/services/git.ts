@@ -48,6 +48,64 @@ function detectAiProvider(author: string, message: string): 'claude' | 'codex' |
   return undefined;
 }
 
+interface ConflictHunkRaw {
+  index: number;
+  ours: string[];
+  theirs: string[];
+  oursLabel: string;
+  theirsLabel: string;
+  startLine: number; // line index in file (0-based) of <<<<<<<
+  endLine: number;   // line index of >>>>>>>
+}
+
+function parseConflictHunks(content: string): ConflictHunkRaw[] {
+  const lines = content.split('\n');
+  const hunks: ConflictHunkRaw[] = [];
+  let i = 0;
+  let hunkIndex = 0;
+  while (i < lines.length) {
+    if (lines[i].startsWith('<<<<<<<')) {
+      const oursLabel = lines[i].slice(8).trim();
+      const startLine = i;
+      const ours: string[] = [];
+      const theirs: string[] = [];
+      i++;
+      while (i < lines.length && !lines[i].startsWith('=======')) {
+        ours.push(lines[i]);
+        i++;
+      }
+      i++; // skip =======
+      let theirsLabel = '';
+      while (i < lines.length && !lines[i].startsWith('>>>>>>>')) {
+        theirs.push(lines[i]);
+        i++;
+      }
+      if (i < lines.length) theirsLabel = lines[i].slice(8).trim();
+      const endLine = i;
+      hunks.push({ index: hunkIndex++, ours, theirs, oursLabel, theirsLabel, startLine, endLine });
+    }
+    i++;
+  }
+  return hunks;
+}
+
+function resolveHunks(content: string, resolution: 'ours' | 'theirs' | 'both'): string {
+  const hunks = parseConflictHunks(content);
+  if (hunks.length === 0) return content;
+  const lines = content.split('\n');
+  const result: string[] = [];
+  let i = 0;
+  for (const hunk of hunks) {
+    while (i < hunk.startLine) result.push(lines[i++]);
+    if (resolution === 'ours') result.push(...hunk.ours);
+    else if (resolution === 'theirs') result.push(...hunk.theirs);
+    else { result.push(...hunk.ours); result.push(...hunk.theirs); }
+    i = hunk.endLine + 1;
+  }
+  while (i < lines.length) result.push(lines[i++]);
+  return result.join('\n');
+}
+
 export function registerGitHandlers() {
   ipcMain.handle('git:status', async (_event, cwd: string) => {
     const status = await git(cwd).status();
@@ -248,5 +306,46 @@ export function registerGitHandlers() {
 
   ipcMain.handle('git:rebaseSkip', async (_event, cwd: string) => {
     await git(cwd).rebase(['--skip']);
+  });
+
+  ipcMain.handle('git:conflictFiles', async (_event, cwd: string) => {
+    const status = await git(cwd).status();
+    return status.conflicted;
+  });
+
+  ipcMain.handle('git:conflictHunks', async (_event, cwd: string, filepath: string) => {
+    const fullPath = path.join(cwd, filepath);
+    const content = fs.readFileSync(fullPath, 'utf8');
+    return parseConflictHunks(content).map(({ index, ours, theirs, oursLabel, theirsLabel }) => ({
+      index, ours, theirs, oursLabel, theirsLabel,
+    }));
+  });
+
+  ipcMain.handle('git:resolveConflict', async (
+    _event,
+    cwd: string,
+    filepath: string,
+    resolution: 'ours' | 'theirs' | 'both'
+  ) => {
+    const fullPath = path.join(cwd, filepath);
+    const content = fs.readFileSync(fullPath, 'utf8');
+    const resolved = resolveHunks(content, resolution);
+    fs.writeFileSync(fullPath, resolved, 'utf8');
+    await git(cwd).add(filepath);
+  });
+
+  ipcMain.handle('git:resolveAllConflicts', async (
+    _event,
+    cwd: string,
+    resolution: 'ours' | 'theirs'
+  ) => {
+    const status = await git(cwd).status();
+    for (const filepath of status.conflicted) {
+      const fullPath = path.join(cwd, filepath);
+      const content = fs.readFileSync(fullPath, 'utf8');
+      const resolved = resolveHunks(content, resolution);
+      fs.writeFileSync(fullPath, resolved, 'utf8');
+      await git(cwd).add(filepath);
+    }
   });
 }

@@ -74,6 +74,12 @@ contextBridge.exposeInMainWorld('sai', {
   gitRebaseAbort: (cwd: string) => ipcRenderer.invoke('git:rebaseAbort', cwd),
   gitRebaseContinue: (cwd: string) => ipcRenderer.invoke('git:rebaseContinue', cwd),
   gitRebaseSkip: (cwd: string) => ipcRenderer.invoke('git:rebaseSkip', cwd),
+  gitConflictFiles: (cwd: string) => ipcRenderer.invoke('git:conflictFiles', cwd),
+  gitConflictHunks: (cwd: string, filepath: string) => ipcRenderer.invoke('git:conflictHunks', cwd, filepath),
+  gitResolveConflict: (cwd: string, filepath: string, resolution: 'ours' | 'theirs' | 'both') =>
+    ipcRenderer.invoke('git:resolveConflict', cwd, filepath, resolution),
+  gitResolveAllConflicts: (cwd: string, resolution: 'ours' | 'theirs') =>
+    ipcRenderer.invoke('git:resolveAllConflicts', cwd, resolution),
   fsReadDir: (dirPath: string) => ipcRenderer.invoke('fs:readDir', dirPath),
   fsReadFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath),
   fsReadFileBase64: (filePath: string) => ipcRenderer.invoke('fs:readFileBase64', filePath),
