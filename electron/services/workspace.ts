@@ -23,6 +23,7 @@ export interface WorkspaceClaude {
   } | null;
   busy: boolean;           // true while a turn is in progress
   turnSeq: number;         // monotonic counter — incremented each turn, tags streaming_start/done
+  activeTurnSeq: number;   // turnSeq of the turn the CLI is currently responding to (lags turnSeq when interrupted)
   suppressForward: boolean; // true during commit msg generation — suppresses IPC forwarding
   // Approval flow state
   pendingToolUse: PendingToolUse | null;
@@ -84,6 +85,7 @@ function newClaudeScope(cwd: string): WorkspaceClaude {
     processConfig: null,
     busy: false,
     turnSeq: 0,
+    activeTurnSeq: 0,
     suppressForward: false,
     pendingToolUse: null,
     approvalBuffered: [],

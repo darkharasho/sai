@@ -334,9 +334,15 @@ function ensureProcess(
         // Result signals end of a turn
         if (msg.type === 'result') {
           const wasBusy = claude.busy;
+          // Capture the turn this response belongs to BEFORE updating state.
+          // If the user sent a new message while this response was in flight,
+          // claude.turnSeq already points to the new turn — using activeTurnSeq
+          // ensures the renderer can ignore this stale result/done correctly.
+          const responseTurnSeq = claude.activeTurnSeq;
           claude.busy = false;
-          safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath, scope });
-          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope, turnSeq: claude.turnSeq });
+          claude.activeTurnSeq = claude.turnSeq; // CLI will now respond to the next queued turn
+          safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq });
+          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq });
           if (wasBusy) setTimeout(() => notifyCompletion(win, ws.projectPath, {
             provider: 'Claude',
             duration: msg.duration_ms,
@@ -350,8 +356,10 @@ function ensureProcess(
         safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath, scope });
       } catch {
         if (line.includes('"type":"result"') || line.includes('"type": "result"')) {
+          const responseTurnSeq = claude.activeTurnSeq;
           claude.busy = false;
-          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope, turnSeq: claude.turnSeq });
+          claude.activeTurnSeq = claude.turnSeq;
+          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq });
         }
       }
     }
@@ -481,20 +489,31 @@ export function registerClaudeHandlers(win: BrowserWindow) {
       try {
         const stale = JSON.parse(claude.buffer);
         if (stale.type === 'result') {
+          const responseTurnSeq = claude.activeTurnSeq;
           claude.busy = false;
-          safeSend(win, 'claude:message', { ...stale, projectPath: ws.projectPath, scope: effectiveScope });
-          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
+          claude.activeTurnSeq = claude.turnSeq; // will be updated again below after turnSeq++
+          safeSend(win, 'claude:message', { ...stale, projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
+          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
         }
       } catch { /* partial/malformed — discard */ }
       claude.buffer = '';
     }
 
-    if (claude.busy) {
+    const wasInterrupt = claude.busy; // true if we're interrupting an in-progress response
+    if (wasInterrupt) {
+      // Tell the renderer the old turn is being interrupted. Use the CURRENT turnSeq
+      // so the renderer's stale check can dismiss old done/result from the CLI.
       safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
     }
 
     claude.turnSeq++;
     claude.busy = true;
+    if (!wasInterrupt) {
+      // Normal (non-interrupt) start: the CLI will immediately respond to this new turn.
+      claude.activeTurnSeq = claude.turnSeq;
+    }
+    // Interrupt case: activeTurnSeq stays at the old value until the CLI finishes the
+    // old response and the stdout handler updates it to claude.turnSeq.
     safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
 
     const msg = JSON.stringify({

@@ -602,8 +602,10 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       // End-of-turn: clear streaming immediately for both 'result' and 'done',
       // matching App.tsx's workspace busy indicator pattern.
       if (msg.type === 'result' || msg.type === 'done') {
-        // For 'done', ignore stale messages from a previous turn
-        if (msg.type === 'done' && msg.turnSeq != null && msg.turnSeq !== turnSeqRef.current) return;
+        // Ignore stale messages from a previous turn — e.g. when the user sends a new
+        // message while the CLI is still finishing the old response, the old result/done
+        // arrives tagged with the old turnSeq and should not affect the new turn's state.
+        if (msg.turnSeq != null && msg.turnSeq !== turnSeqRef.current) return;
         if (msg.type === 'done') {
           turnSeqRef.current = -1;
           flushMessagesToParent();
