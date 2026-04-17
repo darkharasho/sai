@@ -17,7 +17,7 @@ export default function StashMenu({ projectPath, onRefresh, disabled }: StashMen
 
   useEffect(() => {
     if (!open) return;
-    (window.sai as any).gitStashList(projectPath).then(setStashes);
+    (window.sai as any).gitStashList(projectPath).then(setStashes).catch(() => setStashes([]));
     const handleClick = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setOpen(false);
@@ -30,9 +30,17 @@ export default function StashMenu({ projectPath, onRefresh, disabled }: StashMen
   }, [open, projectPath]);
 
   const run = async (fn: () => Promise<void>) => {
+    if (busy) return;
     setBusy(true);
-    try { await fn(); onRefresh(); setOpen(false); }
-    finally { setBusy(false); }
+    try {
+      await fn();
+      onRefresh();
+      setOpen(false);
+    } catch (err) {
+      console.error('[StashMenu] operation failed:', err);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -131,6 +139,7 @@ export default function StashMenu({ projectPath, onRefresh, disabled }: StashMen
                   {(['Pop', 'Apply', 'Drop'] as const).map(action => (
                     <button
                       key={action}
+                      aria-label={`${action} stash: ${s.message}`}
                       onClick={() => {
                         if (action === 'Pop') run(() => (window.sai as any).gitStashPop(projectPath, s.index));
                         else if (action === 'Apply') run(() => (window.sai as any).gitStashApply(projectPath, s.index));

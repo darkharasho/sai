@@ -75,4 +75,30 @@ describe('StashMenu', () => {
       expect(mock.gitStashDrop).toHaveBeenCalledWith('/proj', 0);
     });
   });
+
+  it('calls gitStashApply when Apply clicked', async () => {
+    const mock = createMockSai();
+    mock.gitStashList.mockResolvedValue(stashes);
+    installMockSai(mock);
+
+    render(<StashMenu projectPath="/proj" onRefresh={vi.fn()} />);
+    fireEvent.click(screen.getByTitle(/stash/i));
+    await waitFor(() => screen.getAllByText('Apply'));
+    fireEvent.click(screen.getAllByText('Apply')[0]);
+    await waitFor(() => {
+      expect(mock.gitStashApply).toHaveBeenCalledWith('/proj', 0);
+    });
+  });
+
+  it('shows "No stashes" when stash list is empty', async () => {
+    const mock = createMockSai();
+    mock.gitStashList.mockResolvedValue([]);
+    installMockSai(mock);
+
+    render(<StashMenu projectPath="/proj" onRefresh={vi.fn()} />);
+    fireEvent.click(screen.getByTitle(/stash/i));
+    await waitFor(() => {
+      expect(screen.getByText('No stashes')).toBeTruthy();
+    });
+  });
 });
