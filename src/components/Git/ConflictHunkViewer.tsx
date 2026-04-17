@@ -1,4 +1,4 @@
-import { ConflictHunk } from '../../types';
+import type { ConflictHunk } from '../../types';
 
 interface ConflictHunkViewerProps {
   hunks: ConflictHunk[];
@@ -6,9 +6,10 @@ interface ConflictHunkViewerProps {
   onNavigate: (index: number) => void;
   onResolve: (hunkIndex: number, resolution: 'ours' | 'theirs' | 'both') => void;
   onOpenEditor: () => void;
+  disabled?: boolean;
 }
 
-export default function ConflictHunkViewer({ hunks, currentIndex, onNavigate, onResolve, onOpenEditor }: ConflictHunkViewerProps) {
+export default function ConflictHunkViewer({ hunks, currentIndex, onNavigate, onResolve, onOpenEditor, disabled }: ConflictHunkViewerProps) {
   const hunk = hunks[currentIndex];
   if (!hunk) return null;
 
@@ -42,6 +43,7 @@ export default function ConflictHunkViewer({ hunks, currentIndex, onNavigate, on
             key={r}
             onClick={() => onResolve(hunk.index, r)}
             aria-label={`Accept ${r}`}
+            disabled={disabled}
             style={{
               flex: 1,
               background: r === 'ours' ? 'rgba(63,185,80,0.2)' : r === 'theirs' ? 'rgba(121,192,255,0.2)' : 'rgba(249,226,175,0.2)',
@@ -56,6 +58,7 @@ export default function ConflictHunkViewer({ hunks, currentIndex, onNavigate, on
         <button
           onClick={onOpenEditor}
           aria-label="Open in editor"
+          disabled={disabled}
           style={{
             flex: 1, background: 'var(--bg-hover)', color: 'var(--text-muted)',
             border: '1px solid var(--border)', borderRadius: 3, padding: '3px 0',

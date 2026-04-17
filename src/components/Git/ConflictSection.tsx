@@ -18,10 +18,12 @@ export default function ConflictSection({ projectPath, conflictFiles, onRefresh,
   if (conflictFiles.length === 0) return null;
 
   const handleToggleFile = async (filepath: string) => {
+    if (busy) return;
     if (expandedFile === filepath) {
       setExpandedFile(null);
       return;
     }
+    setBusy(true);
     try {
       const result = await (window.sai as any).gitConflictHunks(projectPath, filepath) as ConflictHunk[];
       setHunks(result);
@@ -29,11 +31,11 @@ export default function ConflictSection({ projectPath, conflictFiles, onRefresh,
       setExpandedFile(filepath);
     } catch (err) {
       console.error('[ConflictSection] failed to load hunks:', err);
-    }
+    } finally { setBusy(false); }
   };
 
   const handleResolve = async (_hunkIndex: number, resolution: 'ours' | 'theirs' | 'both') => {
-    if (!expandedFile) return;
+    if (!expandedFile || busy) return;
     setBusy(true);
     try {
       await (window.sai as any).gitResolveConflict(projectPath, expandedFile, resolution);
@@ -104,10 +106,8 @@ export default function ConflictSection({ projectPath, conflictFiles, onRefresh,
                 currentIndex={currentHunkIndex}
                 onNavigate={setCurrentHunkIndex}
                 onResolve={handleResolve}
-                onOpenEditor={() => {
-                  // Build a minimal GitFile for the editor callback
-                  onOpenEditor({ path: filepath, status: 'modified', staged: false } as GitFile);
-                }}
+                onOpenEditor={() => onOpenEditor({ path: filepath, status: 'modified', staged: false } as GitFile)}
+                disabled={busy}
               />
             </div>
           )}

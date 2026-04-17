@@ -46,6 +46,29 @@ describe('ConflictSection', () => {
     });
   });
 
+  it('collapses file when all hunks resolved', async () => {
+    const mock = createMockSai();
+    // First call returns a hunk, second call (after resolve) returns empty
+    mock.gitConflictHunks
+      .mockResolvedValueOnce([hunk])
+      .mockResolvedValueOnce([]);
+    installMockSai(mock);
+
+    render(
+      <ConflictSection projectPath="/proj" conflictFiles={['src/index.ts']} onRefresh={vi.fn()} onOpenEditor={vi.fn()} />
+    );
+    // Expand the file
+    fireEvent.click(screen.getByText('src/index.ts'));
+    await waitFor(() => screen.getByText(/const x = 1/));
+
+    // Click "Accept Ours" to resolve
+    fireEvent.click(screen.getByText(/✓ Ours/i));
+    await waitFor(() => {
+      // Hunk viewer should be gone
+      expect(screen.queryByText(/const x = 1/)).toBeNull();
+    });
+  });
+
   it('calls gitResolveAllConflicts and onRefresh when Accept All Ours clicked', async () => {
     const mock = createMockSai();
     installMockSai(mock);

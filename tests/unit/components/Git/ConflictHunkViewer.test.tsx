@@ -55,4 +55,11 @@ describe('ConflictHunkViewer', () => {
     fireEvent.click(screen.getByText(/next/i));
     expect(onNavigate).toHaveBeenCalledWith(1);
   });
+
+  it('calls onResolve with "both" when Both button clicked', () => {
+    const onResolve = vi.fn();
+    render(<ConflictHunkViewer hunks={[hunk]} currentIndex={0} onNavigate={vi.fn()} onResolve={onResolve} onOpenEditor={vi.fn()} />);
+    fireEvent.click(screen.getByText(/both/i));
+    expect(onResolve).toHaveBeenCalledWith(0, 'both');
+  });
 });
