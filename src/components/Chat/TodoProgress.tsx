@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import type { ChatMessage } from '../../types';
-import { ListChecks } from 'lucide-react';
+import { ListChecks, X } from 'lucide-react';
 
 interface Todo {
   id: string;
@@ -47,8 +47,18 @@ function findLatestTodos(messages: ChatMessage[]): Todo[] | null {
 
 export default function TodoProgress({ messages, isStreaming }: TodoProgressProps) {
   const todos = useMemo(() => findLatestTodos(messages), [messages]);
+  const [dismissed, setDismissed] = useState(false);
 
-  if (!isStreaming || !todos || todos.length === 0) return null;
+  // Reset dismissed state when a new streaming turn begins.
+  const prevStreamingRef = useMemo(() => ({ value: isStreaming }), []);
+  useEffect(() => {
+    if (!prevStreamingRef.value && isStreaming) {
+      setDismissed(false);
+    }
+    prevStreamingRef.value = isStreaming;
+  }, [isStreaming, prevStreamingRef]);
+
+  if (!isStreaming || !todos || todos.length === 0 || dismissed) return null;
 
   const completed = todos.filter((t) => t.status === 'completed').length;
   const inProgress = todos.find((t) => t.status === 'in_progress');
@@ -73,6 +83,13 @@ export default function TodoProgress({ messages, isStreaming }: TodoProgressProp
         />
       </div>
       <span className="todo-progress-active-text" title={activeLabel}>{activeLabel}</span>
+      <button
+        className="todo-progress-dismiss"
+        onClick={() => setDismissed(true)}
+        aria-label="Dismiss todo progress"
+      >
+        <X size={10} />
+      </button>
       <style>{`
         @keyframes todo-progress-slide-in {
           from { opacity: 0; transform: translateY(3px); }
@@ -159,6 +176,27 @@ export default function TodoProgress({ messages, isStreaming }: TodoProgressProp
           opacity: 0.8;
           letter-spacing: 0.01em;
           font-size: 11px;
+        }
+        .todo-progress-dismiss {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+          width: 14px;
+          height: 14px;
+          padding: 0;
+          margin-left: 2px;
+          background: none;
+          border: none;
+          border-radius: 3px;
+          color: var(--text-muted);
+          opacity: 0.4;
+          cursor: pointer;
+          transition: opacity 0.15s, background 0.15s;
+        }
+        .todo-progress-dismiss:hover {
+          opacity: 0.8;
+          background: rgba(255, 255, 255, 0.08);
         }
       `}</style>
     </div>

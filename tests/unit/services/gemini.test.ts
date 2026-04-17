@@ -323,8 +323,26 @@ describe('gemini service', () => {
     expect(ws.gemini.activeRequestId).toBeUndefined();
   });
 
-  it('disables Gemini and emits error + done when an ACP request fails', async () => {
-    mockAcpClient.request.mockRejectedValue(new Error('handshake failed'));
+  it('emits error + done but keeps Gemini available when an API request fails', async () => {
+    mockAcpClient.request.mockRejectedValueOnce(new Error('400 Bad Request: image too large'));
+
+    mockIpcMain._emit('gemini:send', PROJECT, 'Hello', undefined, 'auto_edit', 'planning', 'auto-gemini-3', 'chat');
+    await tick();
+    await tick();
+
+    const ws = get(PROJECT)!;
+    const events = collectSentEvents(mockWin);
+    // Session is cleared so the next request starts fresh, but the transport stays alive.
+    expect(ws.gemini.availability).toBe('available');
+    expect(ws.gemini.chatSessionId).toBeUndefined();
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'error', text: '400 Bad Request: image too large' }),
+    );
+    expect(events).toContainEqual(expect.objectContaining({ type: 'done', projectPath: PROJECT }));
+  });
+
+  it('disables Gemini and emits error + done when the ACP transport fails', async () => {
+    mockAcpClient.request.mockRejectedValue(new Error('Gemini ACP transport exited'));
 
     mockIpcMain._emit('gemini:send', PROJECT, 'Hello', undefined, 'auto_edit', 'planning', 'auto-gemini-3', 'chat');
     await tick();
@@ -333,15 +351,15 @@ describe('gemini service', () => {
     const ws = get(PROJECT)!;
     const events = collectSentEvents(mockWin);
     expect(ws.gemini.availability).toBe('disabled');
-    expect(ws.gemini.lastError).toBe('handshake failed');
+    expect(ws.gemini.lastError).toBe('Gemini ACP transport exited');
     expect(events).toContainEqual(
-      expect.objectContaining({ type: 'error', text: 'Gemini unavailable: handshake failed' }),
+      expect.objectContaining({ type: 'error', text: 'Gemini unavailable: Gemini ACP transport exited' }),
     );
     expect(events).toContainEqual(expect.objectContaining({ type: 'done', projectPath: PROJECT }));
   });
 
-  it('blocks new Gemini sends after disablement until an explicit restart', async () => {
-    mockAcpClient.request.mockRejectedValue(new Error('handshake failed'));
+  it('blocks new Gemini sends after transport disablement until an explicit restart', async () => {
+    mockAcpClient.request.mockRejectedValue(new Error('Gemini ACP transport exited'));
 
     mockIpcMain._emit('gemini:send', PROJECT, 'Hello', undefined, 'auto_edit', 'planning', 'auto-gemini-3', 'chat');
     await tick();
@@ -355,31 +373,30 @@ describe('gemini service', () => {
     expect(mockAcpClient.request).not.toHaveBeenCalled();
     expect(collectSentEvents(mockWin)).toContainEqual(expect.objectContaining({
       type: 'error',
-      text: 'Gemini unavailable: handshake failed',
+      text: 'Gemini unavailable: Gemini ACP transport exited',
     }));
   });
 
-  it('retries Gemini successfully after an explicit gemini:start', async () => {
+  it('recovers automatically on the next send after a request failure', async () => {
     mockAcpClient.request.mockRejectedValueOnce(new Error('boom'));
 
     mockIpcMain._emit('gemini:send', PROJECT, 'Hello', undefined, 'auto_edit', 'planning', 'auto-gemini-3', 'chat');
     await tick();
     await tick();
 
-    mockAcpClient.start.mockResolvedValue(undefined);
+    // Set up success — session was cleared by lighter recovery, so session/new is called.
     mockAcpClient.request.mockImplementation(async (method: string) => {
       if (method === 'session/new') return { sessionId: 'gemini-chat-2' };
       if (method === 'session/prompt') return { requestId: 'req-2', usage: { input_tokens: 5, output_tokens: 1, cached: 0 } };
       throw new Error(`Unexpected method ${method}`);
     });
 
-    await mockIpcMain._invoke('gemini:start', PROJECT);
+    // No gemini:start needed — request errors don't disable Gemini.
     mockIpcMain._emit('gemini:send', PROJECT, 'Recovered', undefined, 'auto_edit', 'planning', 'auto-gemini-3', 'chat');
     await tick();
 
     const ws = get(PROJECT)!;
     expect(ws.gemini.availability).toBe('available');
-    expect(mockAcpClient.dispose).toHaveBeenCalled();
     expect(mockAcpClient.request).toHaveBeenCalledWith(
       'session/new',
       expect.objectContaining({ cwd: PROJECT, scope: 'chat', mcpServers: [] }),
