@@ -384,11 +384,11 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
           justifyContent: 'center',
         }}
         onMouseEnter={(e) => {
-          if (message.trim() && !busy)
+          if (message.trim() && !busy && !rebaseInProgress)
             (e.currentTarget as HTMLButtonElement).style.background = 'var(--accent-hover)';
         }}
         onMouseLeave={(e) => {
-          if (message.trim() && !busy)
+          if (message.trim() && !busy && !rebaseInProgress)
             (e.currentTarget as HTMLButtonElement).style.background = 'var(--accent)';
         }}
       >

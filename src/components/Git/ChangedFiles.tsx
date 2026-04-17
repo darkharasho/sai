@@ -35,6 +35,10 @@ export default function ChangedFiles({ title, files, onAction, actionLabel, onFi
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    setExpandedPath(null);
+  }, [files]);
+
+  useEffect(() => {
     if (!contextMenu) return;
     const handleClick = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setContextMenu(null);
