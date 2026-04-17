@@ -155,12 +155,17 @@ function buildPromptItems(message: string, imagePaths?: string[], prefixText?: s
 
   for (const imagePath of imagePaths || []) {
     const absolutePath = path.isAbsolute(imagePath) ? imagePath : path.resolve(imagePath);
-    const imageData = fs.readFileSync(absolutePath).toString('base64');
-    prompt.push({
-      type: 'image',
-      mimeType: getMimeTypeForPath(absolutePath),
-      data: imageData,
-    });
+    try {
+      const imageData = fs.readFileSync(absolutePath).toString('base64');
+      prompt.push({
+        type: 'image',
+        mimeType: getMimeTypeForPath(absolutePath),
+        data: imageData,
+      });
+    } catch {
+      // Temp file may have been cleaned up — skip rather than crashing the request.
+      prompt.push({ type: 'text', text: `[Image unavailable: ${path.basename(absolutePath)}]` });
+    }
   }
 
   return prompt;
@@ -633,7 +638,36 @@ export function registerGeminiHandlers(win: BrowserWindow) {
 
         notifyCompletion(win, ws.projectPath, { provider: 'Gemini' });
       } catch (error) {
-        disableGemini(win, ws, scope, error instanceof Error ? error.message : 'Gemini request failed');
+        const errorMsg = error instanceof Error ? error.message : 'Gemini request failed';
+        // Transport-level failures (ACP process died or never started) require a full
+        // session teardown. Request-level errors (bad image, 400, etc.) are specific to
+        // this turn — reset the turn state but keep the transport alive so the user can
+        // continue chatting.
+        const isTransportFailure =
+          errorMsg.startsWith('Gemini ACP transport') ||
+          errorMsg.startsWith('Gemini ACP initialize') ||
+          !ws.gemini.transport;
+        if (isTransportFailure) {
+          disableGemini(win, ws, scope, errorMsg);
+        } else {
+          // Clear session for this scope so the next request starts fresh,
+          // avoiding any partial server-side state from the failed turn.
+          setScopeSessionId(ws, scope, undefined);
+          ws.gemini.busy = false;
+          ws.gemini.activeRequestId = undefined;
+          safeSend(win, 'claude:message', {
+            type: 'error',
+            projectPath: ws.projectPath,
+            scope,
+            text: errorMsg,
+          });
+          safeSend(win, 'claude:message', {
+            type: 'done',
+            projectPath: ws.projectPath,
+            scope,
+            turnSeq: ws.gemini.turnSeq,
+          });
+        }
       }
     },
   );
