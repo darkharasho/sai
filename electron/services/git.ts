@@ -170,4 +170,41 @@ export function registerGitHandlers() {
       await g.checkout(['--', filepath]);
     }
   });
+
+  ipcMain.handle('git:stashList', async (_event, cwd: string) => {
+    const g = git(cwd);
+    const list = await g.stashList();
+    return Promise.all(
+      list.all.map(async (entry, index) => {
+        let fileCount = 0;
+        try {
+          const out = await g.raw(['diff-tree', '--no-commit-id', '-r', '--name-only', `stash@{${index}}`]);
+          fileCount = out.trim().split('\n').filter(Boolean).length;
+        } catch {}
+        return {
+          index,
+          message: entry.message.replace(/^(WIP on|On) [^:]+:\s*/, ''),
+          date: entry.date,
+          fileCount,
+        };
+      })
+    );
+  });
+
+  ipcMain.handle('git:stash', async (_event, cwd: string, message?: string) => {
+    const args = message ? ['push', '-m', message] : [];
+    await git(cwd).stash(args);
+  });
+
+  ipcMain.handle('git:stashPop', async (_event, cwd: string, index: number) => {
+    await git(cwd).stash(['pop', `stash@{${index}}`]);
+  });
+
+  ipcMain.handle('git:stashApply', async (_event, cwd: string, index: number) => {
+    await git(cwd).stash(['apply', `stash@{${index}}`]);
+  });
+
+  ipcMain.handle('git:stashDrop', async (_event, cwd: string, index: number) => {
+    await git(cwd).stash(['drop', `stash@{${index}}`]);
+  });
 }

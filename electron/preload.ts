@@ -64,6 +64,11 @@ contextBridge.exposeInMainWorld('sai', {
   gitDiffLines: (cwd: string, filepath: string) =>
     ipcRenderer.invoke('git:diffLines', cwd, filepath),
   gitDiscard: (cwd: string, filepath: string) => ipcRenderer.invoke('git:discard', cwd, filepath),
+  gitStashList: (cwd: string) => ipcRenderer.invoke('git:stashList', cwd),
+  gitStash: (cwd: string, message?: string) => ipcRenderer.invoke('git:stash', cwd, message),
+  gitStashPop: (cwd: string, index: number) => ipcRenderer.invoke('git:stashPop', cwd, index),
+  gitStashApply: (cwd: string, index: number) => ipcRenderer.invoke('git:stashApply', cwd, index),
+  gitStashDrop: (cwd: string, index: number) => ipcRenderer.invoke('git:stashDrop', cwd, index),
   fsReadDir: (dirPath: string) => ipcRenderer.invoke('fs:readDir', dirPath),
   fsReadFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath),
   fsReadFileBase64: (filePath: string) => ipcRenderer.invoke('fs:readFileBase64', filePath),
