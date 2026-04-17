@@ -10,7 +10,8 @@ interface InlineDiffProps {
 function parseDiffLines(diff: string): { type: '+' | '-' | ' '; text: string }[] {
   return diff
     .split('\n')
-    .filter(line => !line.startsWith('diff ') && !line.startsWith('index ') &&
+    .filter(line => line.length > 0 &&
+                    !line.startsWith('diff ') && !line.startsWith('index ') &&
                     !line.startsWith('--- ') && !line.startsWith('+++ ') &&
                     !line.startsWith('@@') && !line.startsWith('\\ '))
     .map(line => {
@@ -28,18 +29,35 @@ export default function InlineDiff({ projectPath, filepath, staged, onOpen }: In
   const [truncatedCount, setTruncatedCount] = useState(0);
 
   useEffect(() => {
-    window.sai.gitDiff(projectPath, filepath, staged).then((diff: string) => {
-      const parsed = parseDiffLines(diff);
-      if (parsed.length > MAX_LINES) {
-        setLines(parsed.slice(0, MAX_LINES));
-        setTruncated(true);
-        setTruncatedCount(parsed.length - MAX_LINES);
-      } else {
-        setLines(parsed);
-        setTruncated(false);
-        setTruncatedCount(0);
-      }
-    });
+    let cancelled = false;
+    window.sai.gitDiff(projectPath, filepath, staged)
+      .then((diff: string) => {
+        if (cancelled) return;
+        if (!diff || diff.trim() === '') {
+          setLines([]);
+          setTruncated(false);
+          setTruncatedCount(0);
+          return;
+        }
+        const parsed = parseDiffLines(diff);
+        if (parsed.length > MAX_LINES) {
+          setLines(parsed.slice(0, MAX_LINES));
+          setTruncated(true);
+          setTruncatedCount(parsed.length - MAX_LINES);
+        } else {
+          setLines(parsed);
+          setTruncated(false);
+          setTruncatedCount(0);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLines([]);
+          setTruncated(false);
+          setTruncatedCount(0);
+        }
+      });
+    return () => { cancelled = true; };
   }, [projectPath, filepath, staged]);
 
   return (

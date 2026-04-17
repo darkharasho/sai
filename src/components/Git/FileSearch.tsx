@@ -18,12 +18,13 @@ export default function FileSearch({ value, onChange, matchCount }: FileSearchPr
           padding: '3px 8px',
         }}
       >
-        <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>🔍</span>
+        <span style={{ color: 'var(--text-muted)', fontSize: 11 }} aria-hidden="true">🔍</span>
         <input
           type="text"
           value={value}
           onChange={e => onChange(e.target.value)}
           placeholder="Filter changed files… (Ctrl+F)"
+          aria-label="Filter changed files"
           style={{
             flex: 1,
             background: 'none',
