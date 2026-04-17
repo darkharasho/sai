@@ -28,7 +28,7 @@ export function RebaseButton({ projectPath, currentBranch, onRefresh, onListBran
     };
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
-  }, [open]);
+  }, [open, currentBranch, onListBranches]);
 
   const filtered = branches.filter(b => b.toLowerCase().includes(filter.toLowerCase()));
 

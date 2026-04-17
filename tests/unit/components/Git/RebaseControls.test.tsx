@@ -61,4 +61,30 @@ describe('RebaseInProgressBanner', () => {
       expect(onRefresh).toHaveBeenCalled();
     });
   });
+
+  it('calls gitRebaseContinue and onRefresh when Continue clicked', async () => {
+    const mock = createMockSai();
+    installMockSai(mock);
+    const onRefresh = vi.fn();
+
+    render(<RebaseInProgressBanner projectPath="/proj" onto="main" onRefresh={onRefresh} />);
+    fireEvent.click(screen.getByText('Continue'));
+    await waitFor(() => {
+      expect(mock.gitRebaseContinue).toHaveBeenCalledWith('/proj');
+      expect(onRefresh).toHaveBeenCalled();
+    });
+  });
+
+  it('calls gitRebaseSkip and onRefresh when Skip clicked', async () => {
+    const mock = createMockSai();
+    installMockSai(mock);
+    const onRefresh = vi.fn();
+
+    render(<RebaseInProgressBanner projectPath="/proj" onto="main" onRefresh={onRefresh} />);
+    fireEvent.click(screen.getByText('Skip'));
+    await waitFor(() => {
+      expect(mock.gitRebaseSkip).toHaveBeenCalledWith('/proj');
+      expect(onRefresh).toHaveBeenCalled();
+    });
+  });
 });
