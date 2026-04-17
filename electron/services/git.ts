@@ -207,4 +207,40 @@ export function registerGitHandlers() {
   ipcMain.handle('git:stashDrop', async (_event, cwd: string, index: number) => {
     await git(cwd).stash(['drop', `stash@{${index}}`]);
   });
+
+  ipcMain.handle('git:rebaseStatus', async (_event, cwd: string) => {
+    const mergePath = path.join(cwd, '.git', 'rebase-merge');
+    const applyPath = path.join(cwd, '.git', 'rebase-apply');
+    const inProgress = fs.existsSync(mergePath) || fs.existsSync(applyPath);
+    if (!inProgress) return { inProgress: false, onto: '' };
+
+    let onto = '';
+    try {
+      const ontoFile = path.join(mergePath, 'onto');
+      if (fs.existsSync(ontoFile)) {
+        const sha = fs.readFileSync(ontoFile, 'utf8').trim();
+        // Try to resolve SHA to a branch name
+        const branches = await git(cwd).branch(['-a', '--format=%(refname:short)', `--points-at=${sha}`]);
+        onto = Object.keys(branches.branches)[0] ?? sha.slice(0, 7);
+      }
+    } catch {}
+
+    return { inProgress: true, onto };
+  });
+
+  ipcMain.handle('git:rebase', async (_event, cwd: string, branch: string) => {
+    await git(cwd).rebase([branch]);
+  });
+
+  ipcMain.handle('git:rebaseAbort', async (_event, cwd: string) => {
+    await git(cwd).rebase(['--abort']);
+  });
+
+  ipcMain.handle('git:rebaseContinue', async (_event, cwd: string) => {
+    await git(cwd).rebase(['--continue']);
+  });
+
+  ipcMain.handle('git:rebaseSkip', async (_event, cwd: string) => {
+    await git(cwd).rebase(['--skip']);
+  });
 }
