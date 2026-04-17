@@ -59,28 +59,30 @@ interface ConflictHunkRaw {
 }
 
 function parseConflictHunks(content: string): ConflictHunkRaw[] {
-  const lines = content.split('\n');
+  const lines = content.split(/\r?\n/);
   const hunks: ConflictHunkRaw[] = [];
   let i = 0;
   let hunkIndex = 0;
   while (i < lines.length) {
     if (lines[i].startsWith('<<<<<<<')) {
-      const oursLabel = lines[i].slice(8).trim();
+      const oursLabel = lines[i].slice('<<<<<<< '.length).trim();
       const startLine = i;
       const ours: string[] = [];
       const theirs: string[] = [];
       i++;
-      while (i < lines.length && !lines[i].startsWith('=======')) {
+      while (i < lines.length && !/^={7}(\s|$)/.test(lines[i])) {
         ours.push(lines[i]);
         i++;
       }
+      if (i >= lines.length) return hunks; // unterminated conflict block, bail
       i++; // skip =======
       let theirsLabel = '';
       while (i < lines.length && !lines[i].startsWith('>>>>>>>')) {
         theirs.push(lines[i]);
         i++;
       }
-      if (i < lines.length) theirsLabel = lines[i].slice(8).trim();
+      if (i >= lines.length) return hunks; // unterminated conflict block, bail
+      if (i < lines.length) theirsLabel = lines[i].slice('>>>>>>> '.length).trim();
       const endLine = i;
       hunks.push({ index: hunkIndex++, ours, theirs, oursLabel, theirsLabel, startLine, endLine });
     }
@@ -90,9 +92,10 @@ function parseConflictHunks(content: string): ConflictHunkRaw[] {
 }
 
 function resolveHunks(content: string, resolution: 'ours' | 'theirs' | 'both'): string {
+  const eol = content.includes('\r\n') ? '\r\n' : '\n';
   const hunks = parseConflictHunks(content);
   if (hunks.length === 0) return content;
-  const lines = content.split('\n');
+  const lines = content.split(/\r?\n/);
   const result: string[] = [];
   let i = 0;
   for (const hunk of hunks) {
@@ -103,7 +106,7 @@ function resolveHunks(content: string, resolution: 'ours' | 'theirs' | 'both'): 
     i = hunk.endLine + 1;
   }
   while (i < lines.length) result.push(lines[i++]);
-  return result.join('\n');
+  return result.join(eol);
 }
 
 export function registerGitHandlers() {
@@ -314,11 +317,19 @@ export function registerGitHandlers() {
   });
 
   ipcMain.handle('git:conflictHunks', async (_event, cwd: string, filepath: string) => {
-    const fullPath = path.join(cwd, filepath);
-    const content = fs.readFileSync(fullPath, 'utf8');
-    return parseConflictHunks(content).map(({ index, ours, theirs, oursLabel, theirsLabel }) => ({
-      index, ours, theirs, oursLabel, theirsLabel,
-    }));
+    try {
+      const resolvedCwd = path.resolve(cwd);
+      const fullPath = path.resolve(cwd, filepath);
+      if (!fullPath.startsWith(resolvedCwd + path.sep)) {
+        throw new Error('Path escape attempt blocked');
+      }
+      const content = await fs.promises.readFile(fullPath, 'utf8');
+      return parseConflictHunks(content).map(({ index, ours, theirs, oursLabel, theirsLabel }) => ({
+        index, ours, theirs, oursLabel, theirsLabel,
+      }));
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
   });
 
   ipcMain.handle('git:resolveConflict', async (
@@ -327,11 +338,19 @@ export function registerGitHandlers() {
     filepath: string,
     resolution: 'ours' | 'theirs' | 'both'
   ) => {
-    const fullPath = path.join(cwd, filepath);
-    const content = fs.readFileSync(fullPath, 'utf8');
-    const resolved = resolveHunks(content, resolution);
-    fs.writeFileSync(fullPath, resolved, 'utf8');
-    await git(cwd).add(filepath);
+    try {
+      const resolvedCwd = path.resolve(cwd);
+      const fullPath = path.resolve(cwd, filepath);
+      if (!fullPath.startsWith(resolvedCwd + path.sep)) {
+        throw new Error('Path escape attempt blocked');
+      }
+      const content = await fs.promises.readFile(fullPath, 'utf8');
+      const resolved = resolveHunks(content, resolution);
+      await fs.promises.writeFile(fullPath, resolved, 'utf8');
+      await git(cwd).add(filepath);
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
   });
 
   ipcMain.handle('git:resolveAllConflicts', async (
@@ -340,12 +359,18 @@ export function registerGitHandlers() {
     resolution: 'ours' | 'theirs'
   ) => {
     const status = await git(cwd).status();
+    const failed: { filepath: string; error: string }[] = [];
     for (const filepath of status.conflicted) {
-      const fullPath = path.join(cwd, filepath);
-      const content = fs.readFileSync(fullPath, 'utf8');
-      const resolved = resolveHunks(content, resolution);
-      fs.writeFileSync(fullPath, resolved, 'utf8');
-      await git(cwd).add(filepath);
+      try {
+        const fullPath = path.join(cwd, filepath);
+        const content = await fs.promises.readFile(fullPath, 'utf8');
+        const resolved = resolveHunks(content, resolution);
+        await fs.promises.writeFile(fullPath, resolved, 'utf8');
+        await git(cwd).add(filepath);
+      } catch (err) {
+        failed.push({ filepath, error: (err as Error).message });
+      }
     }
+    if (failed.length > 0) return { failed };
   });
 }
