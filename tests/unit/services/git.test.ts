@@ -420,13 +420,13 @@ describe('git:branches', () => {
     expect(result.branches).toEqual(['main', 'feature/x', 'fix/y']);
   });
 
-  it('calls git.branch with empty array', async () => {
+  it('calls git.branch with -a flag', async () => {
     await setup();
     mockGitInstance.branch.mockResolvedValue({ current: 'main', branches: {} });
 
     await mockIpcMain._invoke('git:branches', '/repo');
 
-    expect(mockGitInstance.branch).toHaveBeenCalledWith([]);
+    expect(mockGitInstance.branch).toHaveBeenCalledWith(['-a']);
   });
 });
 
