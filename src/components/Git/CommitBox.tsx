@@ -4,6 +4,19 @@ import StashMenu from './StashMenu';
 import { RebaseButton } from './RebaseControls';
 
 
+function fuzzyMatch(str: string, pattern: string): boolean {
+  if (!pattern) return true;
+  const s = str.toLowerCase();
+  const p = pattern.toLowerCase();
+  let si = 0;
+  for (let pi = 0; pi < p.length; pi++) {
+    while (si < s.length && s[si] !== p[pi]) si++;
+    if (si >= s.length) return false;
+    si++;
+  }
+  return true;
+}
+
 interface CommitBoxProps {
   branch: string;
   ahead: number;
@@ -12,7 +25,7 @@ interface CommitBoxProps {
   onPush: () => Promise<void>;
   onPull: () => Promise<void>;
   onGenerateMessage: () => Promise<string>;
-  onListBranches: () => Promise<{ current: string; branches: string[] }>;
+  onListBranches: () => Promise<{ current: string; branches: string[]; remoteBranches?: string[] }>;
   onCheckout: (branch: string) => Promise<void>;
   onCreateBranch: (name: string) => Promise<void>;
   projectPath: string;
@@ -26,6 +39,8 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
   const [generating, setGenerating] = useState(false);
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
   const [branches, setBranches] = useState<string[]>([]);
+  const [remoteBranches, setRemoteBranches] = useState<string[]>([]);
+  const [focusedBranchIndex, setFocusedBranchIndex] = useState(0);
   const [branchFilter, setBranchFilter] = useState('');
   const [creatingBranch, setCreatingBranch] = useState(false);
   const [newBranchName, setNewBranchName] = useState('');
@@ -47,12 +62,16 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
 
   useEffect(() => {
     if (branchMenuOpen) {
-      onListBranches().then(({ branches: b }) => setBranches(b));
+      onListBranches().then(({ branches: b, remoteBranches: r }: any) => {
+        setBranches(b ?? []);
+        setRemoteBranches(r ?? []);
+      });
       setTimeout(() => filterRef.current?.focus(), 50);
     }
   }, [branchMenuOpen]);
 
-  const filteredBranches = branches.filter(b => b.toLowerCase().includes(branchFilter.toLowerCase()));
+  const filteredLocal = branches.filter(b => fuzzyMatch(b, branchFilter));
+  const filteredRemote = remoteBranches.filter(b => fuzzyMatch(b, branchFilter));
 
   const handleSwitch = async (b: string) => {
     setBusy(true);
@@ -151,6 +170,11 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {branch || 'no branch'}
             </span>
+            {(ahead > 0 || behind > 0) && (
+              <span style={{ fontSize: 9, color: 'var(--green)', flexShrink: 0, marginLeft: 2 }}>
+                {ahead > 0 ? `↑${ahead}` : ''}{behind > 0 ? `↓${behind}` : ''}
+              </span>
+            )}
             <ChevronDown size={11} style={{ flexShrink: 0, opacity: 0.5 }} />
           </button>
           <StashMenu projectPath={projectPath} onRefresh={onRefresh} disabled={busy} />
@@ -222,23 +246,74 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
                 }}
                 onKeyDown={e => {
                   if (e.key === 'Escape') { setBranchMenuOpen(false); setBranchFilter(''); }
-                  if (e.key === 'Enter' && filteredBranches.length === 1) handleSwitch(filteredBranches[0]);
+                  if (e.key === 'Enter' && filteredLocal.length + filteredRemote.length === 1) {
+                    handleSwitch([...filteredLocal, ...filteredRemote][0]);
+                  }
                 }}
               />
             </div>
-            <div style={{ maxHeight: 200, overflowY: 'auto' }}>
-              {filteredBranches.map(b => (
-                <button
-                  key={b}
-                  onClick={() => handleSwitch(b)}
-                  className={`branch-item ${b === branch ? 'active' : ''}`}
-                >
-                  <GitBranch size={12} style={{ flexShrink: 0 }} />
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b}</span>
-                  {b === branch && <Check size={12} style={{ flexShrink: 0, marginLeft: 'auto' }} />}
-                </button>
-              ))}
-              {filteredBranches.length === 0 && branchFilter && !creatingBranch && (
+            <div
+              style={{ maxHeight: 200, overflowY: 'auto' }}
+              onKeyDown={e => {
+                const total = filteredLocal.length + filteredRemote.length;
+                if (e.key === 'ArrowDown') { e.preventDefault(); setFocusedBranchIndex(i => Math.min(i + 1, total - 1)); }
+                if (e.key === 'ArrowUp') { e.preventDefault(); setFocusedBranchIndex(i => Math.max(i - 1, 0)); }
+                if (e.key === 'Enter') {
+                  const all = [...filteredLocal, ...filteredRemote];
+                  if (all[focusedBranchIndex]) handleSwitch(all[focusedBranchIndex]);
+                }
+              }}
+            >
+              {filteredLocal.length > 0 && (
+                <>
+                  {(filteredRemote.length > 0 || remoteBranches.length > 0) && (
+                    <div style={{ padding: '4px 10px 2px', fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.5px', textTransform: 'uppercase' }}>
+                      Local
+                    </div>
+                  )}
+                  {filteredLocal.map((b, i) => (
+                    <button
+                      key={b}
+                      onClick={() => handleSwitch(b)}
+                      onMouseEnter={() => setFocusedBranchIndex(i)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        width: '100%', background: focusedBranchIndex === i ? 'var(--bg-hover)' : 'none',
+                        border: 'none', color: 'var(--text)', cursor: 'pointer',
+                        padding: '5px 10px', fontSize: 11, textAlign: 'left', fontFamily: 'inherit',
+                      }}
+                    >
+                      <GitBranch size={12} style={{ flexShrink: 0 }} />
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{b}</span>
+                      {b === branch && <Check size={12} style={{ flexShrink: 0, marginLeft: 'auto' }} />}
+                    </button>
+                  ))}
+                </>
+              )}
+              {filteredRemote.length > 0 && (
+                <>
+                  <div style={{ padding: '4px 10px 2px', fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.5px', textTransform: 'uppercase', borderTop: filteredLocal.length > 0 ? '1px solid var(--border)' : 'none', marginTop: filteredLocal.length > 0 ? 4 : 0 }}>
+                    Remote
+                  </div>
+                  {filteredRemote.map((b, i) => (
+                    <button
+                      key={b}
+                      onClick={() => handleSwitch(b)}
+                      onMouseEnter={() => setFocusedBranchIndex(filteredLocal.length + i)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        width: '100%', background: focusedBranchIndex === filteredLocal.length + i ? 'var(--bg-hover)' : 'none',
+                        border: 'none', color: 'var(--text-muted)', cursor: 'pointer',
+                        padding: '5px 10px', fontSize: 11, textAlign: 'left', fontFamily: 'inherit',
+                      }}
+                    >
+                      <GitBranch size={12} style={{ flexShrink: 0, opacity: 0.6 }} />
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{b}</span>
+                    </button>
+                  ))}
+                </>
+              )}
+              {filteredLocal.length === 0 && filteredRemote.length === 0 && branchFilter && (
                 <div style={{ padding: '8px', textAlign: 'center', fontSize: 11, color: 'var(--text-muted)' }}>
                   No matching branches
                 </div>

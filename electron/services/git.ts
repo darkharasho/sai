@@ -161,10 +161,22 @@ export function registerGitHandlers() {
   });
 
   ipcMain.handle('git:branches', async (_event, cwd: string) => {
-    const summary = await git(cwd).branch([]);
+    const summary = await git(cwd).branch(['-a']);
+    const local: string[] = [];
+    const remote: string[] = [];
+    for (const [name, branch] of Object.entries(summary.branches)) {
+      if (branch.linkedWorkTree) continue;
+      if (name.startsWith('remotes/')) {
+        const remoteName = name.replace(/^remotes\//, '').replace(/^origin\/HEAD.*/, '');
+        if (remoteName && !remoteName.includes('HEAD')) remote.push(remoteName);
+      } else {
+        local.push(name);
+      }
+    }
     return {
       current: summary.current,
-      branches: Object.keys(summary.branches),
+      branches: local,
+      remoteBranches: [...new Set(remote)],
     };
   });
 
