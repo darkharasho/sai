@@ -216,12 +216,18 @@ export function registerGitHandlers() {
 
     let onto = '';
     try {
-      const ontoFile = path.join(mergePath, 'onto');
-      if (fs.existsSync(ontoFile)) {
+      // Try rebase-merge/onto first
+      const mergeOntoFile = path.join(mergePath, 'onto');
+      const applyOntoFile = path.join(applyPath, 'onto');
+      const ontoFile = fs.existsSync(mergeOntoFile) ? mergeOntoFile
+                     : fs.existsSync(applyOntoFile) ? applyOntoFile
+                     : null;
+      if (ontoFile) {
         const sha = fs.readFileSync(ontoFile, 'utf8').trim();
-        // Try to resolve SHA to a branch name
         const branches = await git(cwd).branch(['-a', '--format=%(refname:short)', `--points-at=${sha}`]);
-        onto = Object.keys(branches.branches)[0] ?? sha.slice(0, 7);
+        const allBranches = Object.keys(branches.branches);
+        const local = allBranches.find(b => !b.startsWith('remotes/') && !b.startsWith('origin/'));
+        onto = local ?? allBranches[0] ?? sha.slice(0, 7);
       }
     } catch {}
 
