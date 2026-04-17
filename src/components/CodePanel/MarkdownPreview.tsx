@@ -132,6 +132,18 @@ export default function MarkdownPreview({ content, onTogglePreview }: MarkdownPr
         .md-preview-toggle:hover {
           background: rgba(199,145,12,0.25);
         }
+        .monaco-statusbar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 4px 16px;
+          border-top: 1px solid var(--border);
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
+          font-size: 11px;
+          color: var(--text-muted);
+          flex-shrink: 0;
+          background: var(--bg-secondary);
+        }
       `}</style>
     </div>
   );
