@@ -59,6 +59,20 @@ export interface MockSai {
   gitShow: ReturnType<typeof vi.fn>;
   gitDiffLines: ReturnType<typeof vi.fn>;
   gitDiscard: ReturnType<typeof vi.fn>;
+  gitStashList: ReturnType<typeof vi.fn>;
+  gitStash: ReturnType<typeof vi.fn>;
+  gitStashPop: ReturnType<typeof vi.fn>;
+  gitStashApply: ReturnType<typeof vi.fn>;
+  gitStashDrop: ReturnType<typeof vi.fn>;
+  gitRebaseStatus: ReturnType<typeof vi.fn>;
+  gitRebase: ReturnType<typeof vi.fn>;
+  gitRebaseAbort: ReturnType<typeof vi.fn>;
+  gitRebaseContinue: ReturnType<typeof vi.fn>;
+  gitRebaseSkip: ReturnType<typeof vi.fn>;
+  gitConflictFiles: ReturnType<typeof vi.fn>;
+  gitConflictHunks: ReturnType<typeof vi.fn>;
+  gitResolveConflict: ReturnType<typeof vi.fn>;
+  gitResolveAllConflicts: ReturnType<typeof vi.fn>;
 
   // FS
   fsReadDir: ReturnType<typeof vi.fn>;
@@ -182,6 +196,20 @@ export function createMockSai(): MockSai {
     gitShow: vi.fn().mockResolvedValue(''),
     gitDiffLines: vi.fn().mockResolvedValue({ added: [], modified: [], deleted: [] }),
     gitDiscard: vi.fn().mockResolvedValue(undefined),
+    gitStashList: vi.fn().mockResolvedValue([]),
+    gitStash: vi.fn().mockResolvedValue(undefined),
+    gitStashPop: vi.fn().mockResolvedValue(undefined),
+    gitStashApply: vi.fn().mockResolvedValue(undefined),
+    gitStashDrop: vi.fn().mockResolvedValue(undefined),
+    gitRebaseStatus: vi.fn().mockResolvedValue({ inProgress: false, onto: '' }),
+    gitRebase: vi.fn().mockResolvedValue(undefined),
+    gitRebaseAbort: vi.fn().mockResolvedValue(undefined),
+    gitRebaseContinue: vi.fn().mockResolvedValue(undefined),
+    gitRebaseSkip: vi.fn().mockResolvedValue(undefined),
+    gitConflictFiles: vi.fn().mockResolvedValue([]),
+    gitConflictHunks: vi.fn().mockResolvedValue([]),
+    gitResolveConflict: vi.fn().mockResolvedValue(undefined),
+    gitResolveAllConflicts: vi.fn().mockResolvedValue(undefined),
 
     // FS
     fsReadDir: vi.fn().mockResolvedValue([]),

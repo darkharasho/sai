@@ -181,6 +181,26 @@ export interface RegistryMcpServer {
   remotes: McpRemote[];
 }
 
+export interface ConflictHunk {
+  index: number;
+  ours: string[];
+  theirs: string[];
+  oursLabel: string;
+  theirsLabel: string;
+}
+
+export interface StashEntry {
+  index: number;
+  message: string;
+  date: string;
+  fileCount: number;
+}
+
+export interface RebaseStatus {
+  inProgress: boolean;
+  onto: string;
+}
+
 declare global {
   interface SaiBridge extends Record<string, any> {
     geminiSetSessionId?: (projectPath: string, sessionId: string | undefined, scope?: string) => void;
