@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import type { ChatMessage } from '../../types';
 import { ListChecks, X } from 'lucide-react';
 
@@ -16,13 +16,20 @@ interface TodoProgressProps {
 }
 
 function findLatestTodos(messages: ChatMessage[]): Todo[] | null {
-  // Find the most recent assistant message that has any TodoWrite calls, then
-  // within that message return the last write with the maximum todo count.
-  // Scoping to the most recent message prevents the bar from getting stuck
-  // showing a stale plan from a previous turn when the current turn writes a
-  // smaller (or updated) list. Within a single message, preferring the largest
-  // write avoids jumping to a transient sub-task write mid-turn.
+  // Only search messages belonging to the current turn (after the last user
+  // message). This prevents stale todos from a previous turn from showing up
+  // at the start of a new turn, and ensures status updates in the current turn
+  // are always reflected.
+  let turnStart = -1;
   for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') { turnStart = i; break; }
+  }
+
+  // Find the most recent assistant message in the current turn that has any
+  // TodoWrite calls. Within that message, return the last write with the
+  // maximum todo count — this avoids jumping to a transient sub-task write
+  // that was emitted in the same content block as the main plan write.
+  for (let i = messages.length - 1; i > turnStart; i--) {
     const m = messages[i];
     if (m.role !== 'assistant' || !m.toolCalls?.length) continue;
     let best: Todo[] | null = null;
@@ -50,19 +57,21 @@ export default function TodoProgress({ messages, isStreaming }: TodoProgressProp
   const [dismissed, setDismissed] = useState(false);
 
   // Reset dismissed state when a new streaming turn begins.
-  const prevStreamingRef = useMemo(() => ({ value: isStreaming }), []);
+  const prevStreamingRef = useRef(isStreaming);
   useEffect(() => {
-    if (!prevStreamingRef.value && isStreaming) {
+    if (!prevStreamingRef.current && isStreaming) {
       setDismissed(false);
     }
-    prevStreamingRef.value = isStreaming;
-  }, [isStreaming, prevStreamingRef]);
+    prevStreamingRef.current = isStreaming;
+  }, [isStreaming]);
 
-  if (!isStreaming || !todos || todos.length === 0 || dismissed) return null;
+  const completed = todos ? todos.filter((t) => t.status === 'completed').length : 0;
+  const total = todos ? todos.length : 0;
 
-  const completed = todos.filter((t) => t.status === 'completed').length;
+  // Hide when: not streaming, no todos, dismissed, or all tasks complete.
+  if (!isStreaming || !todos || total === 0 || dismissed || completed === total) return null;
+
   const inProgress = todos.find((t) => t.status === 'in_progress');
-  const total = todos.length;
   const percent = total > 0 ? (completed / total) * 100 : 0;
   const activeLabel = inProgress ? (inProgress.activeForm || inProgress.content) : 'Planning…';
 
