@@ -1,9 +1,13 @@
 import { useEffect, useState, useCallback } from 'react';
 import { GitFile, GitCommit } from '../../types';
+import type { RebaseStatus } from '../../types';
 import ChangedFiles from './ChangedFiles';
 import CommitBox from './CommitBox';
 import GitActivity from './GitActivity';
 import DiscardChangesModal from './DiscardChangesModal';
+import ConflictSection from './ConflictSection';
+import { RebaseInProgressBanner } from './RebaseControls';
+import FileSearch from './FileSearch';
 
 interface GitStatusItem {
   path: string;
@@ -68,13 +72,19 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
   const [commits, setCommits] = useState<GitCommit[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [discardTarget, setDiscardTarget] = useState<GitFile | null>(null);
+  const [conflictFiles, setConflictFiles] = useState<string[]>([]);
+  const [rebaseStatus, setRebaseStatus] = useState<RebaseStatus>({ inProgress: false, onto: '' });
+  const [fileSearch, setFileSearch] = useState('');
+  const [gitNotRepo, setGitNotRepo] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!projectPath) return;
     try {
-      const [status, log] = await Promise.all([
+      const [status, log, conflicts, rebase] = await Promise.all([
         window.sai.gitStatus(projectPath) as Promise<GitStatus>,
         window.sai.gitLog(projectPath, 20) as Promise<GitCommit[]>,
+        (window.sai as any).gitConflictFiles(projectPath) as Promise<string[]>,
+        (window.sai as any).gitRebaseStatus(projectPath) as Promise<RebaseStatus>,
       ]);
       const { staged, unstaged } = parseStatus(status);
       setBranch(status.branch ?? '');
@@ -83,9 +93,19 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
       setStagedFiles(staged);
       setUnstagedFiles(unstaged);
       setCommits(log ?? []);
+      setConflictFiles(conflicts ?? []);
+      setRebaseStatus(rebase ?? { inProgress: false, onto: '' });
       setError(null);
+      setGitNotRepo(false);
     } catch (err: any) {
-      setError(err?.message ?? 'Git error');
+      const msg = err?.message ?? 'Git error';
+      if (msg.toLowerCase().includes('not a git repository')) {
+        setGitNotRepo(true);
+        setError(null);
+      } else {
+        setError(msg);
+        setGitNotRepo(false);
+      }
     }
   }, [projectPath]);
 
@@ -94,6 +114,20 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
     const id = setInterval(refresh, 5000);
     return () => clearInterval(id);
   }, [refresh]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault();
+        setTimeout(() => {
+          const input = document.querySelector<HTMLInputElement>('[aria-label="Filter changed files"]');
+          input?.focus();
+        }, 50);
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
 
   const handleStage = async (file: GitFile) => {
     await window.sai.gitStage(projectPath, file.path);
@@ -194,38 +228,62 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
 
       {/* Scrollable file lists */}
       <div style={{ flex: 1, overflowY: 'auto', paddingTop: 8 }}>
+        {rebaseStatus.inProgress && (
+          <RebaseInProgressBanner
+            projectPath={projectPath}
+            onto={rebaseStatus.onto}
+            onRefresh={refresh}
+          />
+        )}
+
+        <ConflictSection
+          projectPath={projectPath}
+          conflictFiles={conflictFiles}
+          onRefresh={refresh}
+          onOpenEditor={onFileClick}
+        />
+
         {error && (
-          <div
-            style={{
-              margin: '8px 12px',
-              padding: '6px 8px',
-              background: 'var(--bg-input)',
-              borderLeft: '2px solid var(--red)',
-              color: 'var(--red)',
-              fontSize: 11,
-              borderRadius: 3,
-            }}
-          >
-            {error}
+          <div style={{ margin: '8px 12px', padding: '12px', background: 'var(--bg-input)', borderLeft: '2px solid var(--red)', borderRadius: 3, textAlign: 'center' as const }}>
+            <div style={{ fontSize: 18, marginBottom: 4 }}>⚠</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--red)', marginBottom: 4 }}>Git unavailable</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>{error}</div>
+            <button onClick={refresh} style={{ background: 'var(--bg-hover)', border: '1px solid var(--border)', borderRadius: 3, padding: '3px 10px', fontSize: 11, color: 'var(--text-secondary)', cursor: 'pointer' }}>Retry</button>
           </div>
         )}
 
-        {!error && totalChanges === 0 && commits.length === 0 && (
-          <div
-            style={{
-              padding: '24px 12px',
-              textAlign: 'center' as const,
-              color: 'var(--text-muted)',
-              fontSize: 12,
-            }}
-          >
-            No changes
+        {!error && gitNotRepo && (
+          <div style={{ padding: '24px 12px', textAlign: 'center' as const }}>
+            <div style={{ fontSize: 20, marginBottom: 6, color: 'var(--text-muted)' }}>⊘</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>Not a git repo</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Open a folder tracked by git</div>
           </div>
+        )}
+
+        {!error && !gitNotRepo && totalChanges === 0 && commits.length === 0 && (
+          <div style={{ padding: '24px 12px', textAlign: 'center' as const }}>
+            <div style={{ fontSize: 20, marginBottom: 6, color: 'var(--green)' }}>✓</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>No changes</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Working tree is clean</div>
+          </div>
+        )}
+
+        {(totalChanges >= 10 || fileSearch) && (
+          <FileSearch
+            value={fileSearch}
+            onChange={setFileSearch}
+            matchCount={fileSearch ? [
+              ...stagedFiles.filter(f => f.path.split('/').pop()?.toLowerCase().includes(fileSearch.toLowerCase())),
+              ...unstagedFiles.filter(f => f.path.split('/').pop()?.toLowerCase().includes(fileSearch.toLowerCase())),
+            ].length : undefined}
+          />
         )}
 
         <ChangedFiles
           title="Staged"
-          files={stagedFiles}
+          files={fileSearch
+            ? stagedFiles.filter(f => f.path.split('/').pop()?.toLowerCase().includes(fileSearch.toLowerCase()))
+            : stagedFiles}
           onAction={handleUnstage}
           actionLabel="-"
           onFileClick={onFileClick}
@@ -236,7 +294,9 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
 
         <ChangedFiles
           title="Changes"
-          files={unstagedFiles}
+          files={fileSearch
+            ? unstagedFiles.filter(f => f.path.split('/').pop()?.toLowerCase().includes(fileSearch.toLowerCase()))
+            : unstagedFiles}
           onAction={handleStage}
           actionLabel="+"
           onFileClick={onFileClick}
@@ -263,6 +323,7 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
         onCreateBranch={async (name: string) => { await window.sai.gitCreateBranch(projectPath, name); await refresh(); }}
         projectPath={projectPath}
         onRefresh={refresh}
+        rebaseInProgress={rebaseStatus.inProgress}
       />
 
       {discardTarget && (
