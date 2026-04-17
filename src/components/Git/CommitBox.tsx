@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { GitBranch, Check, ArrowUp, ArrowDown, Sparkle, Sparkles, Plus, ChevronDown, X } from 'lucide-react';
+import StashMenu from './StashMenu';
+import { RebaseButton } from './RebaseControls';
 
 
 interface CommitBoxProps {
@@ -13,9 +15,12 @@ interface CommitBoxProps {
   onListBranches: () => Promise<{ current: string; branches: string[] }>;
   onCheckout: (branch: string) => Promise<void>;
   onCreateBranch: (name: string) => Promise<void>;
+  projectPath: string;
+  rebaseInProgress?: boolean;
+  onRefresh: () => void;
 }
 
-export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onPull, onGenerateMessage, onListBranches, onCheckout, onCreateBranch }: CommitBoxProps) {
+export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onPull, onGenerateMessage, onListBranches, onCheckout, onCreateBranch, projectPath, rebaseInProgress, onRefresh }: CommitBoxProps) {
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -148,6 +153,14 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
             </span>
             <ChevronDown size={11} style={{ flexShrink: 0, opacity: 0.5 }} />
           </button>
+          <StashMenu projectPath={projectPath} onRefresh={onRefresh} disabled={busy} />
+          <RebaseButton
+            projectPath={projectPath}
+            currentBranch={branch}
+            onRefresh={onRefresh}
+            onListBranches={onListBranches}
+            disabled={busy || rebaseInProgress}
+          />
           <button
             onClick={async () => {
               setGenerating(true);
@@ -354,14 +367,14 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
       {/* Commit button */}
       <button
         onClick={handleCommit}
-        disabled={!message.trim() || busy}
+        disabled={!message.trim() || busy || rebaseInProgress}
         style={{
           width: '100%',
           padding: '6px 0',
           border: 'none',
           borderRadius: 4,
-          background: message.trim() && !busy ? 'var(--accent)' : 'var(--bg-hover)',
-          color: message.trim() && !busy ? '#000' : 'var(--text-muted)',
+          background: message.trim() && !busy && !rebaseInProgress ? 'var(--accent)' : 'var(--bg-hover)',
+          color: message.trim() && !busy && !rebaseInProgress ? '#000' : 'var(--text-muted)',
           fontSize: 12,
           fontWeight: 600,
           cursor: message.trim() && !busy ? 'pointer' : 'not-allowed',
@@ -387,7 +400,7 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
       <div style={{ display: 'flex', gap: 6 }}>
         <button
           onClick={() => handle(onPush)}
-          disabled={busy}
+          disabled={busy || rebaseInProgress}
           title="Push"
           style={{
             flex: 1,
@@ -395,15 +408,15 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
             border: '1px solid var(--border)',
             borderRadius: 4,
             background: 'var(--bg-input)',
-            color: busy ? 'var(--text-muted)' : 'var(--text-secondary)',
+            color: busy || rebaseInProgress ? 'var(--text-muted)' : 'var(--text-secondary)',
             fontSize: 12,
-            cursor: busy ? 'not-allowed' : 'pointer',
+            cursor: busy || rebaseInProgress ? 'not-allowed' : 'pointer',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
           }}
           onMouseEnter={(e) => {
-            if (!busy) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-hover)';
+            if (!busy && !rebaseInProgress) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-hover)';
           }}
           onMouseLeave={(e) => {
             (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-input)';
@@ -415,7 +428,7 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
 
         <button
           onClick={() => handle(onPull)}
-          disabled={busy}
+          disabled={busy || rebaseInProgress}
           title="Pull"
           style={{
             flex: 1,
@@ -423,15 +436,15 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
             border: '1px solid var(--border)',
             borderRadius: 4,
             background: 'var(--bg-input)',
-            color: busy ? 'var(--text-muted)' : 'var(--text-secondary)',
+            color: busy || rebaseInProgress ? 'var(--text-muted)' : 'var(--text-secondary)',
             fontSize: 12,
-            cursor: busy ? 'not-allowed' : 'pointer',
+            cursor: busy || rebaseInProgress ? 'not-allowed' : 'pointer',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
           }}
           onMouseEnter={(e) => {
-            if (!busy) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-hover)';
+            if (!busy && !rebaseInProgress) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-hover)';
           }}
           onMouseLeave={(e) => {
             (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-input)';

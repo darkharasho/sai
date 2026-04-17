@@ -261,6 +261,8 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
         onListBranches={() => window.sai.gitBranches(projectPath)}
         onCheckout={async (b: string) => { await window.sai.gitCheckout(projectPath, b); await refresh(); }}
         onCreateBranch={async (name: string) => { await window.sai.gitCreateBranch(projectPath, name); await refresh(); }}
+        projectPath={projectPath}
+        onRefresh={refresh}
       />
 
       {discardTarget && (
