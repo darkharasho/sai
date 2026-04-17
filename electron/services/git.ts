@@ -372,9 +372,14 @@ export function registerGitHandlers() {
   ) => {
     const status = await git(cwd).status();
     const failed: { filepath: string; error: string }[] = [];
+    const resolvedCwd = path.resolve(cwd);
     for (const filepath of status.conflicted) {
       try {
-        const fullPath = path.join(cwd, filepath);
+        const fullPath = path.resolve(cwd, filepath);
+        if (!fullPath.startsWith(resolvedCwd + path.sep)) {
+          failed.push({ filepath, error: 'Path escape attempt blocked' });
+          continue;
+        }
         const content = await fs.promises.readFile(fullPath, 'utf8');
         const resolved = resolveHunks(content, resolution);
         await fs.promises.writeFile(fullPath, resolved, 'utf8');

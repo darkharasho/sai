@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { ConflictHunk, GitFile } from '../../types';
 import ConflictHunkViewer from './ConflictHunkViewer';
 
@@ -14,6 +14,14 @@ export default function ConflictSection({ projectPath, conflictFiles, onRefresh,
   const [hunks, setHunks] = useState<ConflictHunk[]>([]);
   const [currentHunkIndex, setCurrentHunkIndex] = useState(0);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (expandedFile && !conflictFiles.includes(expandedFile)) {
+      setExpandedFile(null);
+      setHunks([]);
+      setCurrentHunkIndex(0);
+    }
+  }, [conflictFiles, expandedFile]);
 
   if (conflictFiles.length === 0) return null;
 
@@ -58,7 +66,10 @@ export default function ConflictSection({ projectPath, conflictFiles, onRefresh,
     if (busy) return;
     setBusy(true);
     try {
-      await (window.sai as any).gitResolveAllConflicts(projectPath, resolution);
+      const result = await (window.sai as any).gitResolveAllConflicts(projectPath, resolution) as { failed?: string[] } | undefined;
+      if (result?.failed && result.failed.length > 0) {
+        console.error('[ConflictSection] failed to resolve some files:', result.failed);
+      }
       setExpandedFile(null);
       setHunks([]);
       onRefresh();

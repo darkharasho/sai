@@ -72,6 +72,11 @@ export default function InlineDiff({ projectPath, filepath, staged, onOpen }: In
       }}
     >
       <div style={{ overflowX: 'auto', padding: '4px 0' }}>
+        {lines.length === 0 && !truncated && (
+          <div style={{ padding: '8px 12px', color: 'var(--text-muted)', fontSize: 10, textAlign: 'center' }}>
+            No diff available
+          </div>
+        )}
         {lines.map((line, i) => (
           <div
             key={i}

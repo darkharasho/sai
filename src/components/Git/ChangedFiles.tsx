@@ -35,8 +35,10 @@ export default function ChangedFiles({ title, files, onAction, actionLabel, onFi
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setExpandedPath(null);
-  }, [files]);
+    if (expandedPath && !files.some(f => f.path === expandedPath)) {
+      setExpandedPath(null);
+    }
+  }, [files, expandedPath]);
 
   useEffect(() => {
     if (!contextMenu) return;
