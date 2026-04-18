@@ -31,7 +31,8 @@ describe('RebaseButton', () => {
     fireEvent.click(screen.getByText(/rebase/i));
     await waitFor(() => screen.getByText('main'));
     fireEvent.click(screen.getByText('main'));
-    fireEvent.click(screen.getByRole('button', { name: /^rebase$/i }));
+    const rebaseButtons = screen.getAllByRole('button', { name: /^rebase$/i });
+    fireEvent.click(rebaseButtons[rebaseButtons.length - 1]);
     await waitFor(() => {
       expect(mock.gitRebase).toHaveBeenCalledWith('/proj', 'main');
       expect(onRefresh).toHaveBeenCalled();

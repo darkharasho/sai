@@ -62,7 +62,7 @@ describe('ConflictSection', () => {
     await waitFor(() => screen.getByText(/const x = 1/));
 
     // Click "Accept Ours" to resolve
-    fireEvent.click(screen.getByText(/✓ Ours/i));
+    fireEvent.click(screen.getByRole('button', { name: /accept ours/i }));
     await waitFor(() => {
       // Hunk viewer should be gone
       expect(screen.queryByText(/const x = 1/)).toBeNull();

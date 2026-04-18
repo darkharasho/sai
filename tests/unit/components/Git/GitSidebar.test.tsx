@@ -136,8 +136,8 @@ describe('GitSidebar', () => {
 
     render(<GitSidebar {...defaultProps} />);
     await waitFor(() => screen.getByText('App.tsx'));
-    // The expand arrow (▶) should be present in the file row
-    expect(screen.getAllByText('▶').length).toBeGreaterThan(0);
+    // The expand arrow (ChevronRight icon) should be present in the file row
+    expect(document.querySelectorAll('.lucide-chevron-right').length).toBeGreaterThan(0);
   });
 
   it('renders AI activity for Codex commits', async () => {
