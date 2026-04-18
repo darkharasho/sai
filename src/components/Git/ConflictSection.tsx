@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { AlertTriangle, ChevronDown, ChevronRight, AlertCircle } from 'lucide-react';
 import type { ConflictHunk, GitFile } from '../../types';
 import ConflictHunkViewer from './ConflictHunkViewer';
 
@@ -86,8 +87,8 @@ export default function ConflictSection({ projectPath, conflictFiles, onRefresh,
       borderRadius: '0 4px 4px 0',
       padding: '8px 10px',
     }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--red)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-        ⚠ Merge Conflicts — resolve before committing
+      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--red)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: 4 }}>
+        <AlertTriangle size={10} /> Merge Conflicts — resolve before committing
       </div>
 
       {conflictFiles.map(filepath => (
@@ -101,10 +102,10 @@ export default function ConflictSection({ projectPath, conflictFiles, onRefresh,
               cursor: 'pointer', marginBottom: 3,
             }}
           >
-            <span style={{ color: 'var(--red)', fontSize: 10 }}>
-              {expandedFile === filepath ? '▼' : '▶'}
+            <span style={{ color: 'var(--red)', display: 'flex', alignItems: 'center' }}>
+              {expandedFile === filepath ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
             </span>
-            <span style={{ color: 'var(--red)', fontWeight: 700 }}>!</span>
+            <span style={{ color: 'var(--red)', display: 'flex', alignItems: 'center' }}><AlertCircle size={10} /></span>
             <span style={{ flex: 1, fontSize: 11, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {filepath}
             </span>

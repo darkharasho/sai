@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { RotateCcw } from 'lucide-react';
 
 interface RebaseButtonProps {
   projectPath: string;
@@ -54,9 +55,10 @@ export function RebaseButton({ projectPath, currentBranch, onRefresh, onListBran
           color: open ? '#000' : 'var(--text-muted)',
           border: 'none', borderRadius: 3, padding: '2px 6px',
           fontSize: 10, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
+          display: 'flex', alignItems: 'center', gap: 4,
         }}
       >
-        ⟲ Rebase
+        <RotateCcw size={10} /> Rebase
       </button>
 
       {open && (
@@ -150,8 +152,8 @@ export function RebaseInProgressBanner({ projectPath, onto, onRefresh }: RebaseI
       borderLeft: '3px solid var(--yellow, #f9e2af)',
       borderRadius: '0 4px 4px 0',
     }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--yellow, #f9e2af)', marginBottom: 3 }}>
-        ⟲ REBASE IN PROGRESS{onto ? ` — onto ${onto}` : ''}
+      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--yellow, #f9e2af)', marginBottom: 3, display: 'flex', alignItems: 'center', gap: 4 }}>
+        <RotateCcw size={10} /> REBASE IN PROGRESS{onto ? ` — onto ${onto}` : ''}
       </div>
       <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>
         Resolve conflicts above, then continue

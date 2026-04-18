@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Minus, FileText, FilePlus, FileX, FileSymlink } from 'lucide-react';
+import { Plus, Minus, FileText, FilePlus, FileX, FileSymlink, ChevronDown, ChevronRight } from 'lucide-react';
 import { GitFile } from '../../types';
 import InlineDiff from './InlineDiff';
 
@@ -155,9 +155,9 @@ export default function ChangedFiles({ title, files, onAction, actionLabel, onFi
               {/* Expand toggle */}
               <span
                 onClick={e => { e.stopPropagation(); setExpandedPath(expandedPath === file.path ? null : file.path); }}
-                style={{ color: 'var(--text-muted)', fontSize: 9, flexShrink: 0, width: 10, cursor: 'pointer' }}
+                style={{ color: 'var(--text-muted)', flexShrink: 0, width: 10, cursor: 'pointer', display: 'flex', alignItems: 'center' }}
               >
-                {expandedPath === file.path ? '▼' : '▶'}
+                {expandedPath === file.path ? <ChevronDown size={9} /> : <ChevronRight size={9} />}
               </span>
 
               {/* Status icon */}

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { Menu, ChevronDown, ArrowDown } from 'lucide-react';
 import { StashEntry } from '../../types';
 
 interface StashMenuProps {
@@ -59,9 +60,12 @@ export default function StashMenu({ projectPath, onRefresh, disabled }: StashMen
           cursor: 'pointer',
           fontFamily: 'inherit',
           whiteSpace: 'nowrap',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 3,
         }}
       >
-        ≡ Stash ▾
+        <Menu size={10} /> Stash <ChevronDown size={10} />
       </button>
 
       {open && (
@@ -86,9 +90,9 @@ export default function StashMenu({ projectPath, onRefresh, disabled }: StashMen
             </div>
             <button
               onClick={() => run(() => (window.sai as any).gitStash(projectPath, undefined))}
-              style={{ width: '100%', background: 'none', border: 'none', color: 'var(--text)', cursor: 'pointer', padding: '5px 10px', fontSize: 11, textAlign: 'left', fontFamily: 'inherit' }}
+              style={{ width: '100%', background: 'none', border: 'none', color: 'var(--text)', cursor: 'pointer', padding: '5px 10px', fontSize: 11, textAlign: 'left', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 5 }}
             >
-              ↓ Stash WIP
+              <ArrowDown size={10} /> Stash WIP
             </button>
             {showMessageInput ? (
               <div style={{ padding: '4px 10px', display: 'flex', gap: 4 }}>
@@ -115,9 +119,9 @@ export default function StashMenu({ projectPath, onRefresh, disabled }: StashMen
             ) : (
               <button
                 onClick={() => setShowMessageInput(true)}
-                style={{ width: '100%', background: 'none', border: 'none', color: 'var(--text)', cursor: 'pointer', padding: '5px 10px', fontSize: 11, textAlign: 'left', fontFamily: 'inherit' }}
+                style={{ width: '100%', background: 'none', border: 'none', color: 'var(--text)', cursor: 'pointer', padding: '5px 10px', fontSize: 11, textAlign: 'left', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 5 }}
               >
-                ↓ Stash with message…
+                <ArrowDown size={10} /> Stash with message…
               </button>
             )}
           </div>

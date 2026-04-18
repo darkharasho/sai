@@ -1,3 +1,5 @@
+import { Search } from 'lucide-react';
+
 interface FileSearchProps {
   value: string;
   onChange: (value: string) => void;
@@ -18,7 +20,7 @@ export default function FileSearch({ value, onChange, matchCount }: FileSearchPr
           padding: '3px 8px',
         }}
       >
-        <span style={{ color: 'var(--text-muted)', fontSize: 11 }} aria-hidden="true">🔍</span>
+        <Search size={11} color="var(--text-muted)" aria-hidden="true" />
         <input
           type="text"
           value={value}

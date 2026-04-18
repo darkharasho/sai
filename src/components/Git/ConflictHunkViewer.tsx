@@ -1,3 +1,4 @@
+import { Check, ExternalLink, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { ConflictHunk } from '../../types';
 
 interface ConflictHunkViewerProps {
@@ -52,7 +53,7 @@ export default function ConflictHunkViewer({ hunks, currentIndex, onNavigate, on
               borderRadius: 3, padding: '3px 0', fontSize: 10, cursor: 'pointer', fontWeight: 600,
             }}
           >
-            ✓ {r.charAt(0).toUpperCase() + r.slice(1)}
+            <Check size={10} style={{ marginRight: 3 }} />{r.charAt(0).toUpperCase() + r.slice(1)}
           </button>
         ))}
         <button
@@ -65,7 +66,7 @@ export default function ConflictHunkViewer({ hunks, currentIndex, onNavigate, on
             fontSize: 10, cursor: 'pointer',
           }}
         >
-          ↗ Editor
+          <ExternalLink size={10} style={{ marginRight: 3 }} /> Editor
         </button>
       </div>
 
@@ -77,7 +78,7 @@ export default function ConflictHunkViewer({ hunks, currentIndex, onNavigate, on
             disabled={currentIndex === 0}
             style={{ background: 'none', border: 'none', color: currentIndex > 0 ? 'var(--accent)' : 'var(--text-muted)', cursor: currentIndex > 0 ? 'pointer' : 'default', fontSize: 10, padding: '2px 0' }}
           >
-            ◀ prev
+            <ChevronLeft size={10} /> prev
           </button>
           <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
             hunk {currentIndex + 1} of {hunks.length}
@@ -87,7 +88,7 @@ export default function ConflictHunkViewer({ hunks, currentIndex, onNavigate, on
             disabled={currentIndex === hunks.length - 1}
             style={{ background: 'none', border: 'none', color: currentIndex < hunks.length - 1 ? 'var(--accent)' : 'var(--text-muted)', cursor: currentIndex < hunks.length - 1 ? 'pointer' : 'default', fontSize: 10, padding: '2px 0' }}
           >
-            next ▶
+            next <ChevronRight size={10} />
           </button>
         </div>
       )}

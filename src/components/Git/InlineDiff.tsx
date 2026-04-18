@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { ExternalLink } from 'lucide-react';
 
 interface InlineDiffProps {
   projectPath: string;
@@ -115,9 +116,12 @@ export default function InlineDiff({ projectPath, filepath, staged, onOpen }: In
             fontSize: 10,
             fontFamily: 'inherit',
             padding: 0,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
           }}
         >
-          ↗ Open in editor
+          <ExternalLink size={10} /> Open in editor
         </button>
       </div>
     </div>
