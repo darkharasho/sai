@@ -149,7 +149,13 @@ export function registerGitHandlers() {
   });
 
   ipcMain.handle('git:log', async (_event, cwd: string, count: number) => {
-    const log = await git(cwd).log({ maxCount: count });
+    let log;
+    try {
+      log = await git(cwd).log({ maxCount: count });
+    } catch (err: any) {
+      if (err?.message?.includes('does not have any commits')) return [];
+      throw err;
+    }
     return log.all.map(entry => ({
       hash: entry.hash,
       message: entry.message,
