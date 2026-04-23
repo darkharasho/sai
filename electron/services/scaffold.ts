@@ -111,7 +111,7 @@ export async function scaffoldProject(
   // Step 5 — README.md
   if (options.helpers.readme) {
     try {
-      const desc = options.context ? `\n${options.context}\n` : '';
+      const desc = options.context ? `\n\n${options.context}\n` : '';
       fs.writeFileSync(path.join(options.path, 'README.md'), `# ${folderName}${desc}`, 'utf8');
     } catch (e: any) {
       warnings.push(`README.md: ${e.message}`);
