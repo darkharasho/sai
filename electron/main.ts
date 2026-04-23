@@ -15,6 +15,7 @@ import { registerCodexHandlers } from './services/codex';
 import { registerGeminiHandlers } from './services/gemini';
 import { registerPluginHandlers } from './services/plugins';
 import { registerMcpHandlers } from './services/mcp';
+import { registerScaffoldHandler } from './services/scaffold';
 
 // Allow E2E tests to isolate userData
 if (process.env.SAI_USER_DATA_DIR) {
@@ -223,6 +224,8 @@ function createWindow() {
     const auth = getAuthInfo();
     if (auth) initialSync(auth.token, auth.login, readSettings, writeSetting, mainWindow!);
   });
+
+  registerScaffoldHandler(readSettings);
 
   // Run sync on startup if already authenticated.
   // Delay briefly so the renderer has time to mount and subscribe to IPC events.
