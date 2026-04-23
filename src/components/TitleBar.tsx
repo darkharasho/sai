@@ -3,7 +3,7 @@ import UpdateNotification from './UpdateNotification';
 import CloseWorkspaceModal from './CloseWorkspaceModal';
 import GitHubAuthModal from './GitHubAuthModal';
 import SettingsModal from './SettingsModal';
-import { LogOut, Settings, ChevronDown } from 'lucide-react';
+import { LogOut, Settings, ChevronDown, FolderOpen, FolderPlus } from 'lucide-react';
 
 interface GitHubUser {
   login: string;
@@ -26,9 +26,10 @@ interface TitleBarProps {
   onSettingChange?: (key: string, value: any) => void;
   onOpenWhatsNew?: () => void;
   onHistoryRetentionChange?: (days: number | null) => void;
+  onNewProject?: () => void;
 }
 
-export default function TitleBar({ projectPath, onProjectChange, completedWorkspaces, busyWorkspaces, approvalWorkspaces, onSettingChange, onOpenWhatsNew, onHistoryRetentionChange }: TitleBarProps) {
+export default function TitleBar({ projectPath, onProjectChange, completedWorkspaces, busyWorkspaces, approvalWorkspaces, onSettingChange, onOpenWhatsNew, onHistoryRetentionChange, onNewProject }: TitleBarProps) {
   const [open, setOpen] = useState(false);
   const [workspaceList, setWorkspaceList] = useState<WorkspaceInfo[]>([]);
   const [version, setVersion] = useState('');
@@ -244,9 +245,35 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                     </>
                   )}
                   <div className="dropdown-divider" />
-                  <button className="dropdown-item open-new" onClick={handleOpenNew}>
-                    + Open New Project...
-                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <button
+                      className="dropdown-item"
+                      onClick={handleOpenNew}
+                      style={{
+                        flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        gap: 5, color: 'var(--accent)', fontSize: 13, borderRadius: '4px 0 0 4px',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent-hover)'; e.currentTarget.style.background = 'var(--bg-elevated)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <FolderOpen size={13} />
+                      Open Project
+                    </button>
+                    <div style={{ width: 1, height: 16, background: 'var(--border)', flexShrink: 0 }} />
+                    <button
+                      className="dropdown-item"
+                      onClick={() => { setOpen(false); onNewProject?.(); }}
+                      style={{
+                        flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        gap: 5, color: 'var(--accent)', fontSize: 13, borderRadius: '0 4px 4px 0',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent-hover)'; e.currentTarget.style.background = 'var(--bg-elevated)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <FolderPlus size={13} />
+                      New Project
+                    </button>
+                  </div>
                 </>
               );
             })()}

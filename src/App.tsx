@@ -11,6 +11,7 @@ import WorkspaceToast from './components/WorkspaceToast';
 import CommandPalette from './components/CommandPalette';
 import { useWhatsNew } from './hooks/useWhatsNew';
 import WhatsNewModal from './components/WhatsNewModal';
+import NewProjectModal from './components/NewProjectModal';
 import { setActiveWorkspace, updateTerminalName } from './terminalBuffer';
 import { createSession, generateSmartTitle } from './sessions';
 import { dbGetSessions, dbGetMessages, dbSaveSession, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
@@ -126,6 +127,7 @@ export default function App() {
   const [fileIndex, setFileIndex] = useState<string[]>([]);
   const [toast, setToast] = useState<{ message: string; key: number } | null>(null);
   const { isOpen: whatsNewOpen, version: whatsNewVersion, releases, fetchStatus, openWhatsNew, closeWhatsNew } = useWhatsNew();
+  const [showNewProject, setShowNewProject] = useState(false);
   const slashCommandsRef = useRef<string[]>([]);
   const workspacesRef = useRef(workspaces);
   const activeProjectPathRef = useRef(activeProjectPath);
@@ -1493,6 +1495,7 @@ export default function App() {
           if (key === 'sidebarWidth') document.documentElement.style.setProperty('--sidebar-width', `${value}px`);
         }}
         onOpenWhatsNew={openWhatsNew}
+        onNewProject={() => setShowNewProject(true)}
         onHistoryRetentionChange={(days) => {
           dbPurgeExpired(days).then(count => {
             if (count > 0 && activeProjectPath) {
@@ -1567,6 +1570,16 @@ export default function App() {
           />
         );
       })()}
+
+      {showNewProject && (
+        <NewProjectModal
+          onClose={() => setShowNewProject(false)}
+          onCreated={(path) => {
+            setShowNewProject(false);
+            handleProjectSwitch(path);
+          }}
+        />
+      )}
 
       {whatsNewOpen && (
         <WhatsNewModal
