@@ -30,6 +30,7 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
   const [error, setError] = useState('');
   const [warnings, setWarnings] = useState<string[]>([]);
   const [createdPath, setCreatedPath] = useState('');
+  const [repoNameEdited, setRepoNameEdited] = useState(false);
 
   useEffect(() => {
     window.sai.githubGetUser().then((u: GitHubUser | null) => setGithubUser(u));
@@ -41,10 +42,9 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
     return unsub;
   }, []);
 
-  // Sync repo name with folder name
   useEffect(() => {
-    if (dir) setRepoName(dir.split('/').pop() || '');
-  }, [dir]);
+    if (!repoNameEdited && dir) setRepoName(dir.split('/').pop() || '');
+  }, [dir, repoNameEdited]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -61,22 +61,29 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
     await window.sai.githubStartAuth();
   }, []);
 
-  const toggleHelper = (key: keyof typeof DEFAULT_HELPERS) => {
+  const toggleHelper = useCallback((key: keyof typeof DEFAULT_HELPERS) => {
     setHelpers(prev => ({ ...prev, [key]: !prev[key] }));
-  };
+  }, []);
 
-  const handleCreate = async () => {
+  const handleCreate = useCallback(async () => {
     if (!dir) return;
     setCreating(true);
     setError('');
     setWarnings([]);
 
-    const result = await window.sai.scaffoldProject({
-      path: dir,
-      context,
-      helpers,
-      github: helpers.githubRepo ? { repoName, visibility } : undefined,
-    });
+    let result: any;
+    try {
+      result = await window.sai.scaffoldProject({
+        path: dir,
+        context,
+        helpers,
+        github: helpers.githubRepo ? { repoName, visibility } : undefined,
+      });
+    } catch (e: any) {
+      setCreating(false);
+      setError(e?.message ?? 'Unexpected error — please try again');
+      return;
+    }
 
     setCreating(false);
 
@@ -92,7 +99,7 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
       return;
     }
     onCreated(dir);
-  };
+  }, [dir, context, helpers, repoName, visibility, onCreated]);
 
   const inputStyle: React.CSSProperties = {
     background: 'var(--bg-secondary)',
@@ -112,7 +119,7 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
     description: string,
     extra?: React.ReactNode,
   ) => (
-    <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--bg-elevated)' }}>
         <div
           onClick={() => {
@@ -165,7 +172,7 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
         <span style={{ fontSize: 11, color: 'var(--text-muted)', width: 60, flexShrink: 0 }}>Name</span>
         <input
           value={repoName}
-          onChange={e => setRepoName(e.target.value)}
+          onChange={e => { setRepoName(e.target.value); setRepoNameEdited(true); }}
           style={{ ...inputStyle, fontFamily: "'JetBrains Mono', monospace", padding: '5px 8px', fontSize: 12 }}
         />
       </div>
@@ -227,7 +234,7 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
         {/* Context */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-            Context <span style={{ textTransform: 'none', letterSpacing: 0, color: 'var(--bg-elevated)', opacity: 0.6 }}>— optional</span>
+            Context <span style={{ textTransform: 'none', letterSpacing: 0, color: 'var(--text-muted)' }}>— optional</span>
           </span>
           <textarea
             value={context}
