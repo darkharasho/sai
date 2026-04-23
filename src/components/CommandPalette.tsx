@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Search, File, ChevronRight, FileCode2, MessageSquare, Loader2 } from 'lucide-react';
 import { fuzzyMatch } from '../utils/fuzzyMatch';
+import { basename } from '../utils/pathUtils';
 
 type PaletteMode = 'files' | 'commands' | 'grep' | 'sessions';
 
@@ -189,7 +190,7 @@ export default function CommandPalette({
     const lq = query.toLowerCase();
     if (!lq) return workspaces;
     return workspaces.filter(w => {
-      const name = w.projectPath.split('/').pop() || w.projectPath;
+      const name = basename(w.projectPath);
       return name.toLowerCase().includes(lq) || w.projectPath.toLowerCase().includes(lq);
     });
   }, [mode, query, workspaces]);
@@ -297,8 +298,9 @@ export default function CommandPalette({
 
         <div className="cp-results" ref={resultsRef}>
           {mode === 'files' && results.map((r, i) => {
-            const filename = r.path.split('/').pop() || r.path;
-            const dir = r.path.includes('/') ? r.path.slice(0, r.path.lastIndexOf('/') + 1) : './';
+            const filename = basename(r.path);
+            const sepIdx = Math.max(r.path.lastIndexOf('/'), r.path.lastIndexOf('\\'));
+            const dir = sepIdx >= 0 ? r.path.slice(0, sepIdx + 1) : './';
             const ext = getExtInfo(filename);
             return (
               <div
@@ -332,7 +334,7 @@ export default function CommandPalette({
           ))}
 
           {mode === 'grep' && !grepLoading && grepResults.map((r, i) => {
-            const filename = r.file.split('/').pop() || r.file;
+            const filename = basename(r.file);
             const ext = getExtInfo(filename);
             return (
               <div
@@ -359,7 +361,7 @@ export default function CommandPalette({
           )}
 
           {mode === 'sessions' && sessionResults.map((w, i) => {
-            const name = w.projectPath.split('/').pop() || w.projectPath;
+            const name = basename(w.projectPath);
             const isActive = w.status === 'active' || w.status === undefined;
             return (
               <div

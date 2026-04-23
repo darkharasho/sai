@@ -104,6 +104,7 @@ export function createGeminiAcpClient(options: GeminiAcpClientOptions): GeminiAc
         cwd: options.cwd,
         env: options.env,
         stdio: ['pipe', 'pipe', 'pipe'],
+        shell: process.platform === 'win32',
       });
       processHandle = proc;
 

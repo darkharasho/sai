@@ -1,5 +1,6 @@
 import { useState, useRef, KeyboardEvent, useEffect } from 'react';
 import type { PendingApproval, TerminalTab } from '../../types';
+import { basename } from '../../utils/pathUtils';
 import ApprovalPanel from './ApprovalPanel';
 import {
   SquarePlus, Slash, SquareSlash, AtSign, FileText, GitBranch, Terminal as TerminalIcon, Settings,
@@ -693,7 +694,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
     const filePath = await (window.sai as any).selectFile();
     if (filePath) {
       setContextItems(prev => [...prev, {
-        label: filePath.split('/').pop() || filePath,
+        label: basename(filePath),
         type: 'file',
         data: filePath,
       }]);
@@ -823,7 +824,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
               style={{ cursor: 'pointer' }}
             >
               {fileContextEnabled ? <FileText size={11} /> : <EyeOff size={11} />}
-              {activeFilePath.split('/').pop()}
+              {basename(activeFilePath)}
             </span>
           )}
         </div>

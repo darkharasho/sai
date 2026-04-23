@@ -1,3 +1,5 @@
+import { basename } from './pathUtils';
+
 export interface FuzzyResult {
   path: string;
   score: number;
@@ -11,7 +13,7 @@ export function fuzzyMatch(query: string, candidates: string[], maxResults = 50)
   const results: FuzzyResult[] = [];
 
   for (const candidate of candidates) {
-    const filename = candidate.split('/').pop() || candidate;
+    const filename = basename(candidate);
     const lowerFilename = filename.toLowerCase();
     const lowerCandidate = candidate.toLowerCase();
 

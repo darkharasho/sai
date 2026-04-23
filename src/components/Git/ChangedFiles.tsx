@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Plus, Minus, FileText, FilePlus, FileX, FileSymlink, ChevronDown, ChevronRight } from 'lucide-react';
 import { GitFile } from '../../types';
 import InlineDiff from './InlineDiff';
+import { basename } from '../../utils/pathUtils';
 
 const STATUS_CONFIG: Record<GitFile['status'], { icon: typeof FileText; color: string }> = {
   modified: { icon: FileText,     color: 'var(--orange)' },
@@ -124,7 +125,7 @@ export default function ChangedFiles({ title, files, onAction, actionLabel, onFi
       {files.map((file) => {
         const cfg = STATUS_CONFIG[file.status];
         const isHovered = hoveredPath === file.path;
-        const fileName = file.path.split('/').pop() ?? file.path;
+        const fileName = basename(file.path);
         const dirName = file.path.includes('/')
           ? file.path.substring(0, file.path.lastIndexOf('/'))
           : '';

@@ -10,6 +10,11 @@ import { ensureGeminiCommitSession, ensureGeminiTransport, promptGeminiText } fr
 
 const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
 
+// On Windows, CLI tools like `claude`, `codex`, `gemini`, and even `git` are
+// typically shipped as `.cmd`/`.ps1` shims. Node's spawn won't resolve those
+// without shell: true, so requests fail with ENOENT.
+const IS_WIN = process.platform === 'win32';
+
 /**
  * Cached shell environment captured from the user's login shell.
  * Populated once at module load so MCP servers, npx, uvx, etc. are on PATH.
@@ -83,6 +88,11 @@ function captureShellEnv(): Promise<NodeJS.ProcessEnv> {
  */
 function heuristicEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
+  if (process.platform === 'win32') {
+    // Windows PATH is managed via the installer/registry and uses ';' as
+    // the separator. Unix-style prefixes like /usr/local/bin would corrupt it.
+    return env;
+  }
   const home = require('node:os').homedir();
   const extraPaths: string[] = [];
   const nvmDir = path.join(home, '.nvm', 'versions', 'node');
@@ -95,13 +105,13 @@ function heuristicEnv(): NodeJS.ProcessEnv {
     '/usr/local/bin',
     '/opt/homebrew/bin',
   );
-  env.PATH = [...extraPaths, env.PATH || ''].join(':');
+  env.PATH = [...extraPaths, env.PATH || ''].join(path.delimiter);
   return env;
 }
 
-// Kick off shell env capture at module load time.
-// By the time a user interacts, this will almost certainly have completed.
-captureShellEnv();
+// Kick off shell env capture at module load time (POSIX only — on Windows
+// there's no login-shell `env` equivalent and process.env is already correct).
+if (process.platform !== 'win32') captureShellEnv();
 
 /**
  * Return the best available environment for spawning CLI processes.
@@ -231,6 +241,7 @@ function ensureProcess(
     cwd: claude.cwd || projectPath,
     env: enrichedEnv(),
     stdio: ['pipe', 'pipe', 'pipe'],
+    shell: IS_WIN,
   });
 
   claude.process = proc;
@@ -668,11 +679,14 @@ export function registerClaudeHandlers(win: BrowserWindow) {
         // Use modified command if user edited it, otherwise use original
         const command = modifiedCommand || pending.input.command || '';
         const execResult = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-          execFile('bash', ['-c', command], {
+          const shellBin = IS_WIN ? (process.env.ComSpec || 'cmd.exe') : 'bash';
+          const shellArgs = IS_WIN ? ['/d', '/s', '/c', command] : ['-c', command];
+          execFile(shellBin, shellArgs, {
             cwd,
             timeout: 120_000,
             maxBuffer: 10 * 1024 * 1024,
             env: enrichedEnv(),
+            windowsVerbatimArguments: IS_WIN,
           }, (err, stdout, stderr) => {
             if (err && !stdout && !stderr) {
               reject(err);
@@ -787,13 +801,14 @@ export function registerClaudeHandlers(win: BrowserWindow) {
   // Uses each AI provider's fast/cheap model for generation.
   ipcMain.handle('claude:generateCommitMessage', async (_event, cwd: string, aiProvider?: string) => {
     const ws = get(cwd);
-    const effectiveCwd = cwd || ws?.claude.cwd || process.env.HOME || '/';
+    const effectiveCwd = cwd || (ws && getClaude(ws).cwd) || process.env.HOME || '/';
 
     // Get the diff
     const getDiff = (args: string[]) => new Promise<string>((resolve) => {
       const diffProc = spawn('git', ['diff', ...args], {
         cwd: effectiveCwd,
         stdio: ['ignore', 'pipe', 'pipe'],
+        shell: IS_WIN,
       });
       let out = '';
       diffProc.stdout?.on('data', (d: Buffer) => { out += d.toString(); });
@@ -849,6 +864,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
         cwd: effectiveCwd,
         env,
         stdio: ['pipe', 'pipe', 'pipe'],
+        shell: IS_WIN,
       });
       proc.stdin?.end();
 
@@ -867,7 +883,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
   // Always uses the cheapest/fastest model per provider.
   ipcMain.handle('claude:generateTitle', async (_event, cwd: string, userMessage: string, aiProvider?: string) => {
     const ws = get(cwd);
-    const effectiveCwd = cwd || ws?.claude.cwd || process.env.HOME || '/';
+    const effectiveCwd = cwd || (ws && getClaude(ws).cwd) || process.env.HOME || '/';
 
     const titlePrompt = `Summarize this conversation in 3-5 words as a title. Respond with only the title, no quotes or punctuation. User said: ${userMessage.slice(0, 500)}`;
 
@@ -891,6 +907,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
         cwd: effectiveCwd,
         env,
         stdio: ['pipe', 'pipe', 'pipe'],
+        shell: IS_WIN,
       });
       proc.stdin?.end();
 

@@ -13,6 +13,7 @@ import { useWhatsNew } from './hooks/useWhatsNew';
 import WhatsNewModal from './components/WhatsNewModal';
 import NewProjectModal from './components/NewProjectModal';
 import { setActiveWorkspace, updateTerminalName } from './terminalBuffer';
+import { basename } from './utils/pathUtils';
 import { createSession, generateSmartTitle } from './sessions';
 import { dbGetSessions, dbGetMessages, dbSaveSession, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval } from './types';
@@ -693,7 +694,7 @@ export default function App() {
             const next = new Set(prev);
             next.delete(msg.projectPath);
             if (msg.projectPath !== activeProjectPathRef.current) {
-              const wsName = msg.projectPath.split('/').pop() || msg.projectPath;
+              const wsName = basename(msg.projectPath);
               setTimeout(() => {
                 setCompletedWorkspaces(p => new Set(p).add(msg.projectPath));
                 setNotificationCounts(p => {
@@ -1261,7 +1262,7 @@ export default function App() {
           <span>{label}</span>
           {panel === 'editor' && !isOpen && activeFilePath && (
             <span className="accordion-bar-detail">
-              {activeFilePath.split('/').pop()}
+              {basename(activeFilePath)}
             </span>
           )}
           {panel === 'chat' && (
@@ -1551,7 +1552,7 @@ export default function App() {
       {pendingClose && (() => {
         const ws = activeProjectPath ? workspaces.get(activeProjectPath) : null;
         const file = ws?.openFiles.find(f => f.path === pendingClose);
-        const fileName = pendingClose.split('/').pop() ?? pendingClose;
+        const fileName = basename(pendingClose);
         return (
           <UnsavedChangesModal
             fileName={fileName}

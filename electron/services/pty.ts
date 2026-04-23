@@ -50,38 +50,56 @@ let nextId = 1;
 
 export function registerTerminalHandlers(win: BrowserWindow) {
   ipcMain.handle('terminal:create', (_event, cwd: string, scope?: string) => {
-    const shell = process.env.SHELL || '/bin/bash';
     const id = nextId++;
     const env = { ...process.env } as Record<string, string>;
-    // Prevent child processes from grouping under SAI in the taskbar
-    delete env.GIO_LAUNCHED_DESKTOP_FILE;
-    delete env.GIO_LAUNCHED_DESKTOP_FILE_PID;
-    delete env.BAMF_DESKTOP_FILE_HINT;
-    // KDE Plasma / Wayland: clear startup notification tokens so spawned
-    // GUI apps (e.g. electron dev servers, browsers) get their own taskbar entry
-    delete env.XDG_ACTIVATION_TOKEN;
-    delete env.DESKTOP_STARTUP_ID;
-    // Chromium/Electron sets CHROME_DESKTOP to the .desktop filename (e.g.
-    // "sai.desktop").  Child Electron apps inherit this and use it for their
-    // WM_CLASS / app_id, causing the DE to group them under SAI's taskbar icon.
-    delete env.CHROME_DESKTOP;
-    // INVOCATION_ID ties the process to SAI's systemd service unit; clear it so
-    // child processes aren't associated with this unit's lifecycle.
-    delete env.INVOCATION_ID;
-    // On Linux with systemd, spawn via systemd-run --user --scope so the shell
-    // lives in its own cgroup. This prevents desktop environments (GNOME, KDE)
-    // from grouping GUI apps launched from the terminal under SAI's taskbar icon.
-    // Disable ECHOCTL before starting the interactive shell so escape sequences
-    // (arrow keys etc.) aren't echoed as ^[[A notation on the prompt line.
-    const shellInit = `stty -echoctl 2>/dev/null; exec "${shell}" --login`;
-    const useScope = canUseSystemdScope();
-    const spawnCmd = useScope ? 'systemd-run' : shell;
-    const spawnArgs = useScope
-      ? ['--user', '--scope', '--quiet', '--', shell, '-c', shellInit]
-      : ['-c', shellInit];
+
+    let spawnCmd: string;
+    let spawnArgs: string[];
+    let ptyName: string;
+    let fallbackCwd: string;
+
+    if (process.platform === 'win32') {
+      // Windows: use the user's ComSpec (cmd.exe) or PowerShell. None of the
+      // Linux desktop/systemd env scrubbing below applies here.
+      spawnCmd = process.env.ComSpec || 'cmd.exe';
+      spawnArgs = [];
+      ptyName = 'xterm-256color';
+      fallbackCwd = process.env.USERPROFILE || process.env.HOMEDRIVE || 'C:\\';
+    } else {
+      const shell = process.env.SHELL || '/bin/bash';
+      // Prevent child processes from grouping under SAI in the taskbar
+      delete env.GIO_LAUNCHED_DESKTOP_FILE;
+      delete env.GIO_LAUNCHED_DESKTOP_FILE_PID;
+      delete env.BAMF_DESKTOP_FILE_HINT;
+      // KDE Plasma / Wayland: clear startup notification tokens so spawned
+      // GUI apps (e.g. electron dev servers, browsers) get their own taskbar entry
+      delete env.XDG_ACTIVATION_TOKEN;
+      delete env.DESKTOP_STARTUP_ID;
+      // Chromium/Electron sets CHROME_DESKTOP to the .desktop filename (e.g.
+      // "sai.desktop").  Child Electron apps inherit this and use it for their
+      // WM_CLASS / app_id, causing the DE to group them under SAI's taskbar icon.
+      delete env.CHROME_DESKTOP;
+      // INVOCATION_ID ties the process to SAI's systemd service unit; clear it so
+      // child processes aren't associated with this unit's lifecycle.
+      delete env.INVOCATION_ID;
+      // On Linux with systemd, spawn via systemd-run --user --scope so the shell
+      // lives in its own cgroup. This prevents desktop environments (GNOME, KDE)
+      // from grouping GUI apps launched from the terminal under SAI's taskbar icon.
+      // Disable ECHOCTL before starting the interactive shell so escape sequences
+      // (arrow keys etc.) aren't echoed as ^[[A notation on the prompt line.
+      const shellInit = `stty -echoctl 2>/dev/null; exec "${shell}" --login`;
+      const useScope = canUseSystemdScope();
+      spawnCmd = useScope ? 'systemd-run' : shell;
+      spawnArgs = useScope
+        ? ['--user', '--scope', '--quiet', '--', shell, '-c', shellInit]
+        : ['-c', shellInit];
+      ptyName = 'xterm-256color';
+      fallbackCwd = process.env.HOME || '/';
+    }
+
     const term = pty.spawn(spawnCmd, spawnArgs, {
-      name: 'xterm-256color',
-      cwd: cwd || process.env.HOME || '/',
+      name: ptyName,
+      cwd: cwd || fallbackCwd,
       env,
     });
 
@@ -166,6 +184,10 @@ export function registerTerminalHandlers(win: BrowserWindow) {
   });
 
   ipcMain.handle('terminal:tabComplete', async (_event, text: string, cwd: string) => {
+    // Tab completion uses bash's `compgen`; cmd.exe has no equivalent, so
+    // on Windows we defer to the shell's own built-in completion (Tab key
+    // inside cmd.exe / PowerShell handles it natively).
+    if (process.platform === 'win32') return [];
     const lastWord = text.split(/\s+/).pop() || '';
     const { execFile } = require('child_process') as typeof import('child_process');
     const fs = require('fs') as typeof import('fs');

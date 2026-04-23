@@ -10,8 +10,13 @@ import { notifyCompletion } from './notify';
  * Build an enriched PATH that includes common locations for nvm/fnm/volta-installed binaries.
  * Electron apps launched from desktop entries don't inherit the user's shell PATH.
  */
-function getEnrichedEnv(): Record<string, string> {
+function getEnrichedEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
+  if (process.platform === 'win32') {
+    // Windows PATH is managed via the installer/registry; Unix-style prefixes
+    // would corrupt it (different separator, non-existent directories).
+    return env;
+  }
   const home = os.homedir();
   const extraPaths: string[] = [];
 
@@ -33,10 +38,10 @@ function getEnrichedEnv(): Record<string, string> {
   );
 
   const currentPath = env.PATH || '';
-  const pathSet = new Set(currentPath.split(':'));
+  const pathSet = new Set(currentPath.split(path.delimiter));
   const additions = extraPaths.filter(p => !pathSet.has(p));
   if (additions.length > 0) {
-    env.PATH = currentPath + ':' + additions.join(':');
+    env.PATH = currentPath + path.delimiter + additions.join(path.delimiter);
   }
   return env;
 }
@@ -183,6 +188,7 @@ function fetchCodexModels(): Promise<{ models: { id: string; name: string }[]; d
     const proc = spawn('codex', ['app-server'], {
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
+      shell: process.platform === 'win32',
     });
 
     let buf = '';
@@ -320,6 +326,7 @@ export function registerCodexHandlers(win: BrowserWindow) {
       cwd: ws.codex.cwd || projectPath,
       env: getEnrichedEnv(),
       stdio: ['ignore', 'pipe', 'pipe'],
+      shell: process.platform === 'win32',
     });
 
     ws.codex.process = proc;

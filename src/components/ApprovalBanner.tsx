@@ -1,4 +1,5 @@
 import { PendingApproval } from '../types';
+import { basename } from '../utils/pathUtils';
 
 interface ApprovalBannerProps {
   approvalWorkspaces: Map<string, PendingApproval>;
@@ -11,7 +12,7 @@ export default function ApprovalBanner({ approvalWorkspaces, currentProjectPath,
 
   const entries = [...approvalWorkspaces.entries()];
   const [projectPath, approval] = entries[0];
-  const wsName = projectPath.split('/').pop() || projectPath;
+  const wsName = basename(projectPath);
   const isCurrent = projectPath === currentProjectPath;
   const extraCount = entries.length - 1;
 

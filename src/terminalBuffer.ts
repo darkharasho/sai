@@ -1,4 +1,5 @@
 import type { Terminal } from '@xterm/xterm';
+import { basename } from './utils/pathUtils';
 
 // Simple registry so ChatInput can read terminal buffer content
 // without prop-drilling through the component tree.
@@ -201,7 +202,7 @@ export function getLastCommandName(): string | null {
       if (!afterPrompt) continue;
       const cmd = afterPrompt.split(/\s/)[0];
       // Strip path prefixes and common wrappers like sudo, env, etc.
-      const base = cmd.split('/').pop() || cmd;
+      const base = basename(cmd);
       return base || null;
     }
   }

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Folder, FolderOpen, FileText, FileCode2, Image, ChevronRight, ChevronDown, FilePlus, FolderPlus } from 'lucide-react';
 import type { DirEntry } from '../../types';
 import ContextMenu from './ContextMenu';
+import { basename } from '../../utils/pathUtils';
 
 const IMAGE_EXTENSIONS = new Set([
   '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
@@ -237,7 +238,7 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
     if (!drag) return;
     dragEntryRef.current = null;
 
-    const sourceName = drag.path.split('/').pop()!;
+    const sourceName = basename(drag.path);
     const newPath = targetDirPath + '/' + sourceName;
     if (newPath === drag.path || drag.path === targetDirPath) return;
     // Don't drop a folder into itself
@@ -406,7 +407,7 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
   };
 
   const rootState = tree.get(projectPath);
-  const projectName = projectPath.split('/').pop() ?? projectPath;
+  const projectName = basename(projectPath);
 
   return (
     <div

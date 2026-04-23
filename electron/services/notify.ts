@@ -61,7 +61,7 @@ export function notifyCompletion(win: BrowserWindow, projectPath: string, info?:
   win.flashFrame(true);
 
   if (Notification.isSupported()) {
-    const wsName = projectPath.split('/').pop() || projectPath;
+    const wsName = path.basename(projectPath);
 
     const parts: string[] = [];
     if (info?.provider) parts.push(info.provider);

@@ -4,6 +4,7 @@ import CloseWorkspaceModal from './CloseWorkspaceModal';
 import GitHubAuthModal from './GitHubAuthModal';
 import SettingsModal from './SettingsModal';
 import { LogOut, Settings, ChevronDown, FolderOpen, FolderPlus } from 'lucide-react';
+import { basename } from '../utils/pathUtils';
 
 interface GitHubUser {
   login: string;
@@ -52,9 +53,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
     return () => unsubSync();
   }, []);
 
-  const projectName = projectPath
-    ? projectPath.split('/').pop() || projectPath
-    : 'No Project';
+  const projectName = projectPath ? basename(projectPath) : 'No Project';
 
   useEffect(() => {
     if (open) {
@@ -180,7 +179,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                               : busyWorkspaces?.has(w.projectPath)
                                 ? <span className="workspace-spinner" title="Working..." />
                                 : <span className="workspace-status-dot workspace-dot-active" />}
-                            <span className="dropdown-item-name">{w.projectPath.split('/').pop()}</span>
+                            <span className="dropdown-item-name">{basename(w.projectPath)}</span>
                             {approvalWorkspaces?.has(w.projectPath)
                               ? <span className="workspace-approval-label">Approval needed</span>
                               : completedWorkspaces?.has(w.projectPath) && <span className="workspace-completed-icon" title="Response complete">!</span>}
@@ -223,7 +222,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                           onClick={() => { onProjectChange(w.projectPath); setOpen(false); }}
                         >
                           <span className="workspace-status-dot workspace-dot-suspended" />
-                          <span className="dropdown-item-name">{w.projectPath.split('/').pop()}</span>
+                          <span className="dropdown-item-name">{basename(w.projectPath)}</span>
                           <span className="dropdown-item-path">{w.projectPath}</span>
                         </button>
                       ))}
@@ -239,7 +238,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                           className={`dropdown-item workspace-item ${w.projectPath === projectPath ? 'active' : ''}`}
                           onClick={() => { onProjectChange(w.projectPath); setOpen(false); }}
                         >
-                          <span className="dropdown-item-name">{w.projectPath.split('/').pop()}</span>
+                          <span className="dropdown-item-name">{basename(w.projectPath)}</span>
                           <span className="dropdown-item-path">{w.projectPath}</span>
                         </button>
                       ))}

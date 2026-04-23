@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { X } from 'lucide-react';
 import type { OpenFile } from '../../types';
+import { basename } from '../../utils/pathUtils';
 import DiffViewer from './DiffViewer';
 import MarkdownPreview from './MarkdownPreview';
 import MonacoEditor from '../FileExplorer/MonacoEditor';
@@ -86,7 +87,7 @@ export default function CodePanel({
         }}>
           {openFiles.map((f) => {
             const isActive = f.path === activeFilePath;
-            const fileName = f.path.split('/').pop() ?? f.path;
+            const fileName = basename(f.path);
             const isDirty = f.viewMode === 'editor' && !!f.isDirty;
             return (
               <div

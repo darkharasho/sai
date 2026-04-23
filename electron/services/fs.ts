@@ -6,7 +6,7 @@ import { execFile } from 'node:child_process';
 function execFileAsync(cmd: string, args: string[], options: Record<string, unknown> = {}): Promise<{ stdout: string; stderr: string; status: number }> {
   const { input, ...execOpts } = options;
   return new Promise((resolve) => {
-    const proc = execFile(cmd, args, { ...execOpts, encoding: 'utf-8' } as any, (error, stdout, stderr) => {
+    const proc = execFile(cmd, args, { ...execOpts, encoding: 'utf-8', shell: process.platform === 'win32' } as any, (error, stdout, stderr) => {
       resolve({
         stdout: String(stdout || ''),
         stderr: String(stderr || ''),

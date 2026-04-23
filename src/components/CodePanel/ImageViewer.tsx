@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ZoomIn, ZoomOut } from 'lucide-react';
 import { isSvgFile, getImageType } from '../../utils/imageFiles';
+import { basename } from '../../utils/pathUtils';
 import MonacoEditor from '../FileExplorer/MonacoEditor';
 
 const ZOOM_STEP = 0.25;
@@ -182,7 +183,7 @@ export default function ImageViewer({
           {dataUrl ? (
             <img
               src={dataUrl + (cacheKey > 0 ? `#${cacheKey}` : '')}
-              alt={filePath.split('/').pop() ?? ''}
+              alt={basename(filePath)}
               onLoad={handleImageLoad}
               draggable={false}
               style={{

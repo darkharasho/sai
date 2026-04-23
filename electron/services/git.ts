@@ -11,6 +11,12 @@ import * as os from 'node:os';
  */
 function enrichedEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
+  if (process.platform === 'win32') {
+    // Windows: PATH is already populated via the installer/registry, and uses
+    // ';' as the separator. Prepending Unix-style paths joined with ':' would
+    // corrupt it, causing spawn('git') to fail with ENOENT.
+    return env;
+  }
   const home = os.homedir();
   const extraPaths: string[] = [];
   const nvmDir = path.join(home, '.nvm', 'versions', 'node');
@@ -23,7 +29,7 @@ function enrichedEnv(): NodeJS.ProcessEnv {
     '/usr/local/bin',
     '/opt/homebrew/bin',
   );
-  env.PATH = [...extraPaths, env.PATH || ''].join(':');
+  env.PATH = [...extraPaths, env.PATH || ''].join(path.delimiter);
   return env;
 }
 

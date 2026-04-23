@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { basename } from '../utils/pathUtils';
 
 interface CloseWorkspaceModalProps {
   projectPath: string;
@@ -7,7 +8,7 @@ interface CloseWorkspaceModalProps {
 }
 
 export default function CloseWorkspaceModal({ projectPath, onConfirm, onCancel }: CloseWorkspaceModalProps) {
-  const projectName = projectPath.split('/').pop() || projectPath;
+  const projectName = basename(projectPath);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

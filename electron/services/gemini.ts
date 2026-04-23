@@ -7,8 +7,9 @@ import type { Workspace } from './workspace';
 import { notifyCompletion } from './notify';
 import { createGeminiAcpClient } from './gemini-acp';
 
-function getEnrichedEnv(): Record<string, string> {
+function getEnrichedEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
+  if (process.platform === 'win32') return env;
   const home = os.homedir();
   const extraPaths: string[] = [];
   const nvmDir = path.join(home, '.nvm', 'versions', 'node');
@@ -25,7 +26,7 @@ function getEnrichedEnv(): Record<string, string> {
   }
 
   extraPaths.push(path.join(home, '.local', 'bin'), '/usr/local/bin');
-  env.PATH = [...new Set([...(env.PATH || '').split(':'), ...extraPaths].filter(Boolean))].join(':');
+  env.PATH = [...new Set([...(env.PATH || '').split(path.delimiter), ...extraPaths].filter(Boolean))].join(path.delimiter);
   return env;
 }
 
