@@ -266,10 +266,11 @@ function createWindow() {
     return filepath;
   });
 
-  ipcMain.handle('project:selectFolder', async () => {
+  ipcMain.handle('project:selectFolder', async (_event, defaultPath?: string) => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       properties: ['openDirectory'],
       title: 'Select Project Folder',
+      ...(defaultPath ? { defaultPath } : {}),
     });
     const folder = result.filePaths[0] || null;
     if (folder) addRecentProject(folder);

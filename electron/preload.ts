@@ -135,7 +135,7 @@ contextBridge.exposeInMainWorld('sai', {
   settingsSet: (key: string, value: any) => ipcRenderer.invoke('settings:set', key, value),
   setTitleBarOverlay: (color: string, symbolColor: string) => ipcRenderer.invoke('titlebar:setOverlay', color, symbolColor),
   getCwd: () => ipcRenderer.invoke('project:getCwd'),
-  selectFolder: () => ipcRenderer.invoke('project:selectFolder'),
+  selectFolder: (defaultPath?: string) => ipcRenderer.invoke('project:selectFolder', defaultPath),
   selectFile: () => ipcRenderer.invoke('project:selectFile'),
   getRecentProjects: () => ipcRenderer.invoke('project:getRecent'),
   openRecentProject: (path: string) => ipcRenderer.invoke('project:openRecent', path),
