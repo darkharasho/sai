@@ -82,6 +82,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [sidebarWidth, setSidebarWidth] = useState(300);
   const [autoCompactThreshold, setAutoCompactThreshold] = useState(0);
   const [mcpConfigPath, setMcpConfigPath] = useState('');
+  const [defaultProjectDir, setDefaultProjectDir] = useState('');
   const [aiTitleGeneration, setAiTitleGeneration] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [lastSynced, setLastSynced] = useState<number | null>(null);
@@ -106,6 +107,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.settingsGet('sidebarWidth', 300).then((v: number) => setSidebarWidth(v));
     window.sai.settingsGet('autoCompactThreshold', 0).then((v: number) => setAutoCompactThreshold(v));
     window.sai.settingsGet('mcpConfigPath', '').then((v: string) => setMcpConfigPath(v || ''));
+    window.sai.settingsGet('defaultProjectDir', '').then((v: string) => setDefaultProjectDir(v || ''));
     window.sai.settingsGet('aiTitleGeneration', false).then((v: boolean) => setAiTitleGeneration(!!v));
     window.sai.settingsGet('theme', 'default').then((v: string) => {
       const id = v as ThemeId;
@@ -648,8 +650,56 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     onSettingChange?.('mcpConfigPath', value || '');
   };
 
+  const handleDefaultProjectDirChange = (v: string) => {
+    setDefaultProjectDir(v);
+    window.sai.settingsSet('defaultProjectDir', v);
+  };
+
   const renderClaudePage = () => (
     <section className="settings-section">
+      <div className="settings-section-label">General</div>
+      <div className="settings-row">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Default project directory</div>
+          <div className="settings-row-desc">New projects are created here. Also used as the starting folder when browsing.</div>
+        </div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <input
+            type="text"
+            className="settings-input"
+            placeholder="~/projects"
+            value={defaultProjectDir}
+            onChange={e => handleDefaultProjectDirChange(e.target.value)}
+            style={{ width: 180, fontSize: 12, padding: '4px 8px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)' }}
+          />
+          <button
+            onClick={async () => {
+              const folder = await window.sai.selectFolder(defaultProjectDir || undefined);
+              if (folder) handleDefaultProjectDirChange(folder);
+            }}
+            style={{ fontSize: 11, padding: '4px 8px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 5, color: 'var(--text-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+          >
+            Browse
+          </button>
+        </div>
+      </div>
+      <div className="settings-row">
+        <div className="settings-row-info">
+          <div className="settings-row-name">MCP config path</div>
+          <div className="settings-row-desc">Path to an MCP server config JSON file (passed as --mcp-config to Claude CLI). Restart the session after changing.</div>
+        </div>
+        <input
+          type="text"
+          className="settings-input"
+          placeholder="~/.claude/mcp.json"
+          value={mcpConfigPath}
+          onChange={e => handleMcpConfigChange(e.target.value)}
+          style={{ width: 220, fontSize: 12, padding: '4px 8px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)' }}
+        />
+      </div>
+
+      <div className="settings-divider" />
+
       <div className="settings-section-label">Claude</div>
       <div className="settings-row">
         <div className="settings-row-info">
@@ -665,20 +715,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             <option key={opt.value} value={opt.value}>{opt.label}</option>
           ))}
         </select>
-      </div>
-      <div className="settings-row">
-        <div className="settings-row-info">
-          <div className="settings-row-name">MCP config path</div>
-          <div className="settings-row-desc">Path to an MCP server config JSON file (passed as --mcp-config to Claude CLI). Restart the session after changing.</div>
-        </div>
-        <input
-          type="text"
-          className="settings-input"
-          placeholder="~/.claude/mcp.json"
-          value={mcpConfigPath}
-          onChange={e => handleMcpConfigChange(e.target.value)}
-          style={{ width: 220, fontSize: 12, padding: '4px 8px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)' }}
-        />
       </div>
     </section>
   );
