@@ -250,7 +250,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                       className="dropdown-item"
                       onClick={handleOpenNew}
                       style={{
-                        flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        flex: 1, display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
                         gap: 5, color: 'var(--accent)', fontSize: 13, borderRadius: '4px 0 0 4px',
                       }}
                       onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent-hover)'; e.currentTarget.style.background = 'var(--bg-elevated)'; }}
@@ -264,7 +264,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                       className="dropdown-item"
                       onClick={() => { setOpen(false); onNewProject?.(); }}
                       style={{
-                        flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        flex: 1, display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
                         gap: 5, color: 'var(--accent)', fontSize: 13, borderRadius: '0 4px 4px 0',
                       }}
                       onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent-hover)'; e.currentTarget.style.background = 'var(--bg-elevated)'; }}
