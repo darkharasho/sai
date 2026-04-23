@@ -693,11 +693,6 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           background: var(--border);
           margin: 4px 0;
         }
-        .open-new {
-          color: var(--accent);
-          font-weight: 500;
-          padding: 8px 12px;
-        }
         .workspace-item {
           flex-direction: row !important;
           align-items: center;
