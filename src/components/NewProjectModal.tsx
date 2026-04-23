@@ -20,7 +20,8 @@ const DEFAULT_HELPERS = {
 };
 
 export default function NewProjectModal({ onClose, onCreated }: NewProjectModalProps) {
-  const [dir, setDir] = useState('');
+  const [parentDir, setParentDir] = useState('');
+  const [projectName, setProjectName] = useState('');
   const [context, setContext] = useState('');
   const [helpers, setHelpers] = useState(DEFAULT_HELPERS);
   const [githubUser, setGithubUser] = useState<GitHubUser | null>(null);
@@ -42,9 +43,16 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
     return unsub;
   }, []);
 
+  // Load default project directory on mount
   useEffect(() => {
-    if (!repoNameEdited && dir) setRepoName(dir.split('/').pop() || '');
-  }, [dir, repoNameEdited]);
+    window.sai.settingsGet('defaultProjectDir', '').then((v: string) => {
+      if (v) setParentDir(v);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!repoNameEdited) setRepoName(projectName);
+  }, [projectName, repoNameEdited]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -52,10 +60,10 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
     return () => document.removeEventListener('keydown', handler);
   }, [onClose]);
 
-  const handleBrowse = useCallback(async () => {
-    const folder = await window.sai.selectFolder();
-    if (folder) setDir(folder);
-  }, []);
+  const handleBrowseParent = useCallback(async () => {
+    const folder = await window.sai.selectFolder(parentDir || undefined);
+    if (folder) setParentDir(folder);
+  }, [parentDir]);
 
   const handleConnectGitHub = useCallback(async () => {
     await window.sai.githubStartAuth();
@@ -66,7 +74,10 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
   }, []);
 
   const handleCreate = useCallback(async () => {
-    if (!dir) return;
+    const computedPath = parentDir && projectName
+      ? parentDir.replace(/\/+$/, '') + '/' + projectName.trim()
+      : '';
+    if (!computedPath) return;
     setCreating(true);
     setError('');
     setWarnings([]);
@@ -74,7 +85,7 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
     let result: any;
     try {
       result = await window.sai.scaffoldProject({
-        path: dir,
+        path: computedPath,
         context,
         helpers,
         github: helpers.githubRepo ? { repoName, visibility } : undefined,
@@ -95,11 +106,11 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
     if (result.warnings?.length) {
       // Keep modal open so user can read warnings; "Continue" button calls onCreated
       setWarnings(result.warnings);
-      setCreatedPath(dir);
+      setCreatedPath(computedPath);
       return;
     }
-    onCreated(dir);
-  }, [dir, context, helpers, repoName, visibility, onCreated]);
+    onCreated(computedPath);
+  }, [parentDir, projectName, context, helpers, repoName, visibility, onCreated]);
 
   const inputStyle: React.CSSProperties = {
     background: 'var(--bg-secondary)',
@@ -212,23 +223,40 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
           <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>New Project</span>
         </div>
 
-        {/* Directory */}
+        {/* Parent directory */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Directory</span>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Parent directory</span>
           <div style={{ display: 'flex', gap: 8 }}>
             <input
-              value={dir}
-              onChange={e => setDir(e.target.value)}
-              placeholder="/home/user/projects/my-app"
+              value={parentDir}
+              onChange={e => setParentDir(e.target.value)}
+              placeholder="/home/user/projects"
               style={{ ...inputStyle, flex: 1 }}
             />
             <button
-              onClick={handleBrowse}
+              onClick={handleBrowseParent}
               style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 5, padding: '7px 12px', fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
             >
               Browse
             </button>
           </div>
+        </div>
+
+        {/* Project name */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Project name</span>
+          <input
+            value={projectName}
+            onChange={e => setProjectName(e.target.value)}
+            placeholder="my-app"
+            style={inputStyle}
+            autoFocus
+          />
+          {parentDir && projectName && (
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'JetBrains Mono', monospace" }}>
+              → {parentDir.replace(/\/+$/, '')}/{projectName.trim()}
+            </span>
+          )}
         </div>
 
         {/* Context */}
@@ -290,11 +318,11 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
           ) : (
             <button
               onClick={handleCreate}
-              disabled={!dir || creating}
+              disabled={!parentDir || !projectName.trim() || creating}
               style={{
-                background: 'none', border: `1px solid ${dir && !creating ? 'var(--accent)' : 'var(--border)'}`,
-                color: dir && !creating ? 'var(--accent)' : 'var(--text-muted)',
-                borderRadius: 5, padding: '7px 16px', fontSize: 13, cursor: dir && !creating ? 'pointer' : 'not-allowed',
+                background: 'none', border: `1px solid ${parentDir && projectName.trim() && !creating ? 'var(--accent)' : 'var(--border)'}`,
+                color: parentDir && projectName.trim() && !creating ? 'var(--accent)' : 'var(--text-muted)',
+                borderRadius: 5, padding: '7px 16px', fontSize: 13, cursor: parentDir && projectName.trim() && !creating ? 'pointer' : 'not-allowed',
                 display: 'flex', alignItems: 'center', gap: 6,
               }}
             >
