@@ -167,6 +167,24 @@ export async function scaffoldProject(
           } catch (e: any) {
             warnings.push(`git remote add origin: ${e.message}`);
           }
+          // Ensure README exists before initial push
+          const readmePath = path.join(resolved, 'README.md');
+          if (!fs.existsSync(readmePath)) {
+            try {
+              const desc = options.context ? `\n\n${options.context}\n` : '';
+              fs.writeFileSync(readmePath, `# ${folderName}${desc}`, 'utf8');
+            } catch (e: any) {
+              warnings.push(`README.md: ${e.message}`);
+            }
+          }
+          // Initial commit and push
+          try {
+            execFileSync('git', ['add', '.'], { cwd: resolved });
+            execFileSync('git', ['commit', '-m', 'Initial commit'], { cwd: resolved });
+            execFileSync('git', ['push', '-u', 'origin', 'HEAD'], { cwd: resolved });
+          } catch (e: any) {
+            warnings.push(`Initial push: ${e.message}`);
+          }
         } else {
           warnings.push(`GitHub repo: ${repo.message || 'unknown error'}`);
         }
