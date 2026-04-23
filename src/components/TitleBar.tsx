@@ -98,7 +98,8 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
   };
 
   const handleOpenNew = async () => {
-    const folder = await window.sai.selectFolder();
+    const defaultDir = await window.sai.settingsGet('defaultProjectDir', '');
+    const folder = await window.sai.selectFolder(defaultDir || undefined);
     if (folder) {
       onProjectChange(folder);
     }
