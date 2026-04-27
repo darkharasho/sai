@@ -261,3 +261,37 @@ describe('mergeBufferResults', () => {
     expect(merged.files.find(f => f.path === 'src/b.ts')).toBeTruthy();
   });
 });
+
+import { applyEditsToContent } from '../../../electron/services/search';
+
+describe('applyEditsToContent', () => {
+  it('applies a single edit', () => {
+    const out = applyEditsToContent('hello foo world\n', [
+      { line: 1, column: 7, length: 3, replacement: 'bar' },
+    ]);
+    expect(out).toBe('hello bar world\n');
+  });
+
+  it('applies multiple edits on one line in descending column order', () => {
+    const out = applyEditsToContent('foo and foo\n', [
+      { line: 1, column: 9, length: 3, replacement: 'baz' },
+      { line: 1, column: 1, length: 3, replacement: 'baz' },
+    ]);
+    expect(out).toBe('baz and baz\n');
+  });
+
+  it('applies edits across multiple lines', () => {
+    const out = applyEditsToContent('foo\nbar\nfoo\n', [
+      { line: 3, column: 1, length: 3, replacement: 'XXX' },
+      { line: 1, column: 1, length: 3, replacement: 'YYY' },
+    ]);
+    expect(out).toBe('YYY\nbar\nXXX\n');
+  });
+
+  it('preserves trailing newline absence', () => {
+    const out = applyEditsToContent('foo', [
+      { line: 1, column: 1, length: 3, replacement: 'bar' },
+    ]);
+    expect(out).toBe('bar');
+  });
+});

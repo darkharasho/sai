@@ -1,5 +1,11 @@
 import path from 'node:path';
+import { ipcMain } from 'electron';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import fs from 'node:fs';
 import type { FileMatches, SearchMatch, SearchResults, SearchQuery } from '../../src/types';
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Build ripgrep argv for a SearchQuery. Pure function so unit tests can
@@ -166,4 +172,92 @@ export function mergeBufferResults(rgResults: SearchResults, bufferResults: File
     truncated: rgResults.truncated,
     durationMs: rgResults.durationMs,
   };
+}
+
+export interface ReplaceEdit {
+  line: number;
+  column: number;
+  length: number;
+  replacement: string;
+}
+
+/**
+ * Apply edits to file content. Edits MUST be sorted descending by (line, column)
+ * so applying them in array order does not invalidate later positions.
+ */
+export function applyEditsToContent(content: string, edits: ReplaceEdit[]): string {
+  // Defensive: sort descending so callers don't have to.
+  const sorted = [...edits].sort((a, b) => {
+    if (a.line !== b.line) return b.line - a.line;
+    return b.column - a.column;
+  });
+  const lines = content.split('\n');
+  for (const edit of sorted) {
+    const idx = edit.line - 1;
+    if (idx < 0 || idx >= lines.length) continue;
+    const line = lines[idx];
+    const before = line.slice(0, edit.column - 1);
+    const after = line.slice(edit.column - 1 + edit.length);
+    lines[idx] = before + edit.replacement + after;
+  }
+  return lines.join('\n');
+}
+
+export interface SearchRunArgs {
+  rootPath: string;
+  query: SearchQuery;
+  openBuffers: { path: string; content: string }[];  // path is absolute
+}
+
+export interface SearchReplaceFileArgs {
+  filePath: string;
+  edits: ReplaceEdit[];
+}
+
+export function registerSearchHandlers(): void {
+  ipcMain.handle('search:run', async (_event, args: SearchRunArgs): Promise<SearchResults> => {
+    const start = Date.now();
+    const openBufferRelPaths = args.openBuffers.map(b =>
+      path.relative(args.rootPath, b.path).split(path.sep).join('/')
+    );
+    const argv = buildRgArgs(args.query, openBufferRelPaths);
+
+    let rgResults: SearchResults = { files: [], truncated: false, durationMs: 0 };
+    try {
+      const { stdout } = await execFileAsync('rg', argv, {
+        cwd: args.rootPath,
+        maxBuffer: 50 * 1024 * 1024,
+        timeout: 30_000,
+      });
+      rgResults = parseRgOutput(stdout, args.rootPath, { maxMatches: 5000, maxFiles: 200 });
+    } catch (err: any) {
+      // rg exits 1 when no matches; still parse stdout if present
+      if (err && typeof err.stdout === 'string') {
+        rgResults = parseRgOutput(err.stdout, args.rootPath, { maxMatches: 5000, maxFiles: 200 });
+      } else if (err && err.code === 'ENOENT') {
+        // rg not installed — return empty so the renderer can show the fallback message
+        return { files: [], truncated: false, durationMs: Date.now() - start };
+      }
+      // Other errors (timeout, etc.) — fall through with whatever we got
+      if (err && err.killed) rgResults.truncated = true;
+    }
+
+    const bufferFileMatches: FileMatches[] = [];
+    for (const buf of args.openBuffers) {
+      const matches = scanBuffer(buf.content, args.query);
+      if (matches.length > 0) {
+        const rel = path.relative(args.rootPath, buf.path).split(path.sep).join('/');
+        bufferFileMatches.push({ path: rel, matches });
+      }
+    }
+
+    const merged = mergeBufferResults(rgResults, bufferFileMatches);
+    return { ...merged, durationMs: Date.now() - start };
+  });
+
+  ipcMain.handle('search:replaceFile', async (_event, args: SearchReplaceFileArgs): Promise<void> => {
+    const content = await fs.promises.readFile(args.filePath, 'utf8');
+    const next = applyEditsToContent(content, args.edits);
+    await fs.promises.writeFile(args.filePath, next, 'utf8');
+  });
 }
