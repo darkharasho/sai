@@ -11,6 +11,7 @@ import UnsavedChangesModal from './components/UnsavedChangesModal';
 import WorkspaceToast from './components/WorkspaceToast';
 import CommandPalette from './components/CommandPalette';
 import { useWhatsNew } from './hooks/useWhatsNew';
+import { useKeybinding } from './hooks/useKeybinding';
 import WhatsNewModal from './components/WhatsNewModal';
 import NewProjectModal from './components/NewProjectModal';
 import { setActiveWorkspace, updateTerminalName } from './terminalBuffer';
@@ -167,16 +168,10 @@ export default function App() {
   }, [activeProjectPath]);
 
   // Global Ctrl+K / Cmd+K handler for command palette
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        setCommandPaletteOpen(prev => !prev);
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
+  useKeybinding('palette.open', useCallback((e) => {
+    e.preventDefault();
+    setCommandPaletteOpen(prev => !prev);
+  }, []));
 
   // Build file index for command palette
   useEffect(() => {
@@ -639,29 +634,16 @@ export default function App() {
   }, [projectPath, updateWorkspace]);
 
   // Global Ctrl+H handler for chat history sidebar
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'h' && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        setSidebarOpen(prev => prev === 'chats' ? null : 'chats');
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
+  useKeybinding('chatHistory.toggle', useCallback((e) => {
+    e.preventDefault();
+    setSidebarOpen(prev => prev === 'chats' ? null : 'chats');
+  }, []));
 
   // Global Ctrl+Shift+F / Cmd+Shift+F handler for search sidebar
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const isCmdOrCtrl = e.ctrlKey || e.metaKey;
-      if (isCmdOrCtrl && e.shiftKey && e.key.toLowerCase() === 'f') {
-        e.preventDefault();
-        setSidebarOpen(prev => prev === 'search' ? null : 'search');
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
+  useKeybinding('search.toggle', useCallback((e) => {
+    e.preventDefault();
+    setSidebarOpen(prev => prev === 'search' ? null : 'search');
+  }, []));
 
   useEffect(() => {
     const cleanup = window.sai.onWorkspaceSuspended?.((suspendedPath: string) => {
@@ -995,21 +977,15 @@ export default function App() {
     }));
   }, [activeProjectPath, updateWorkspace]);
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && e.key === 'M') {
-        e.preventDefault();
-        if (!activeProjectPath) return;
-        const ws = workspaces.get(activeProjectPath);
-        const activePath = ws?.activeFilePath;
-        if (activePath && activePath.endsWith('.md')) {
-          handleToggleMdPreview(activePath);
-        }
-      }
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [activeProjectPath, workspaces, handleToggleMdPreview]);
+  useKeybinding('markdownPreview.toggle', useCallback((e) => {
+    e.preventDefault();
+    if (!activeProjectPath) return;
+    const ws = workspaces.get(activeProjectPath);
+    const activePath = ws?.activeFilePath;
+    if (activePath && activePath.endsWith('.md')) {
+      handleToggleMdPreview(activePath);
+    }
+  }, [activeProjectPath, workspaces, handleToggleMdPreview]));
 
   const handleProjectSwitch = useCallback((newPath: string) => {
     if (newPath === activeProjectPath) return;
