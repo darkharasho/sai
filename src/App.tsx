@@ -4,6 +4,7 @@ import ChatPanel from './components/Chat/ChatPanel';
 import TerminalPanel from './components/Terminal/TerminalPanel';
 import GitSidebar from './components/Git/GitSidebar';
 import FileExplorerSidebar from './components/FileExplorer/FileExplorerSidebar';
+import SearchPanel from './components/SearchPanel/SearchPanel';
 import TitleBar from './components/TitleBar';
 import CodePanel from './components/CodePanel/CodePanel';
 import UnsavedChangesModal from './components/UnsavedChangesModal';
@@ -24,6 +25,18 @@ import ChatHistorySidebar from './components/Chat/ChatHistorySidebar';
 import PluginsSidebar from './components/Plugins/PluginsSidebar';
 import McpSidebar from './components/MCP/McpSidebar';
 import { isImageFile } from './utils/imageFiles';
+
+function applyEditsClientSide(content: string, edits: { line: number; column: number; length: number; replacement: string }[]): string {
+  const sorted = [...edits].sort((a, b) => b.line - a.line || b.column - a.column);
+  const lines = content.split('\n');
+  for (const e of sorted) {
+    const idx = e.line - 1;
+    if (idx < 0 || idx >= lines.length) continue;
+    const line = lines[idx];
+    lines[idx] = line.slice(0, e.column - 1) + e.replacement + line.slice(e.column - 1 + e.length);
+  }
+  return lines.join('\n');
+}
 
 type PermissionMode = 'default' | 'bypass';
 type EffortLevel = 'low' | 'medium' | 'high' | 'max';
@@ -224,6 +237,33 @@ export default function App() {
       return next;
     });
   }, []);
+
+  // Apply replace edits to an open file's Monaco model as a single undo group.
+  // Falls back to rewriting the OpenFile content directly if the model isn't mounted.
+  const applySearchEditsToMonaco = useCallback((filePath: string, edits: { line: number; column: number; length: number; replacement: string }[]) => {
+    const monacoLib = (window as any).monaco;
+    const models: any[] = monacoLib?.editor?.getModels?.() ?? [];
+    const model = models.find((m: any) => m.uri?.path === filePath || m.uri?.fsPath === filePath);
+    if (model) {
+      const ops = edits.map((e: any) => ({
+        range: new monacoLib.Range(e.line, e.column, e.line, e.column + e.length),
+        text: e.replacement,
+        forceMoveMarkers: true,
+      }));
+      model.pushEditOperations([], ops, () => null);
+      return;
+    }
+    // Fallback: rewrite OpenFile.content in workspace state and mark dirty.
+    if (!activeProjectPath) return;
+    updateWorkspace(activeProjectPath, ws => ({
+      ...ws,
+      openFiles: ws.openFiles.map(f => {
+        if (f.path !== filePath || typeof f.content !== 'string') return f;
+        const next = applyEditsClientSide(f.content, edits);
+        return { ...f, content: next, isDirty: true };
+      }),
+    }));
+  }, [activeProjectPath, updateWorkspace]);
 
   // uid is the stable identity for tabs (used for React keys, activeTerminalId).
   // id is the PTY ID assigned when the terminal process is created.
@@ -595,6 +635,19 @@ export default function App() {
       if (e.key === 'h' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         setSidebarOpen(prev => prev === 'chats' ? null : 'chats');
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  // Global Ctrl+Shift+F / Cmd+Shift+F handler for search sidebar
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const isCmdOrCtrl = e.ctrlKey || e.metaKey;
+      if (isCmdOrCtrl && e.shiftKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        setSidebarOpen(prev => prev === 'search' ? null : 'search');
       }
     };
     window.addEventListener('keydown', handler);
@@ -1516,6 +1569,15 @@ export default function App() {
         <NavBar activeSidebar={sidebarOpen} onToggle={toggleSidebar} gitChangeCount={gitChangeCount} />
         {sidebarOpen === 'files' && <FileExplorerSidebar projectPath={projectPath} onFileOpen={handleFileOpen} />}
         {sidebarOpen === 'git' && <GitSidebar projectPath={projectPath} onFileClick={handleFileClick} commitMessageProvider={commitMessageProvider} />}
+        {sidebarOpen === 'search' && (
+          <SearchPanel
+            projectPath={projectPath}
+            getOpenBuffers={() => openFiles
+              .filter(f => f.isDirty && typeof f.content === 'string')
+              .map(f => ({ path: f.path, content: f.content as string }))}
+            applyMonacoEdits={(p, edits) => applySearchEditsToMonaco(p, edits)}
+          />
+        )}
         {sidebarOpen === 'chats' && (
           <ChatHistorySidebar
             sessions={sessions}
