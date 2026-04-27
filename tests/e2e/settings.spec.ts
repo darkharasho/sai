@@ -10,29 +10,16 @@ import { test, expect } from './electron.setup';
  * The mock provides a fake GitHub user so the user dropdown is available.
  */
 test.describe('Settings Modal', () => {
-  /**
-   * Open settings via the GitHub user dropdown.
-   */
-  async function openSettings(window: any): Promise<boolean> {
+  async function openSettings(window: any): Promise<void> {
     const ghUserBtn = window.locator('.gh-user-btn');
-    await ghUserBtn.waitFor({ state: 'visible', timeout: 10000 }).catch(() => null);
-    const ghUserExists = await ghUserBtn.count() > 0;
-
-    if (!ghUserExists) return false;
-
+    await ghUserBtn.waitFor({ state: 'visible', timeout: 15000 });
     await ghUserBtn.click();
-    await window.waitForTimeout(300);
 
-    // Look for "Settings" in the dropdown
     const settingsItem = window.locator('.gh-dropdown-item').filter({ hasText: 'Settings' });
-    const settingsExists = await settingsItem.count() > 0;
+    await settingsItem.waitFor({ state: 'visible', timeout: 5000 });
+    await settingsItem.click();
 
-    if (settingsExists) {
-      await settingsItem.click();
-      await window.waitForTimeout(500);
-      return true;
-    }
-    return false;
+    await window.locator('.settings-modal').waitFor({ state: 'visible', timeout: 5000 });
   }
 
   test('settings modal is not open by default', async ({ window }) => {
@@ -42,19 +29,14 @@ test.describe('Settings Modal', () => {
   });
 
   test('settings modal can be opened via GitHub user menu', async ({ window }) => {
-    const opened = await openSettings(window);
-    expect(opened).toBe(true);
-
+    await openSettings(window);
     const modal = window.locator('.settings-modal');
     await expect(modal).toBeVisible({ timeout: 5000 });
-
-    // Close the modal
     await window.keyboard.press('Escape');
   });
 
   test('settings modal shows Settings title when open', async ({ window }) => {
-    const opened = await openSettings(window);
-    if (!opened) { test.skip(); return; }
+    await openSettings(window);
 
     const title = window.locator('.settings-title');
     await expect(title).toBeVisible({ timeout: 5000 });
@@ -65,8 +47,7 @@ test.describe('Settings Modal', () => {
   });
 
   test('settings modal closes on overlay click', async ({ window }) => {
-    const opened = await openSettings(window);
-    if (!opened) { test.skip(); return; }
+    await openSettings(window);
 
     const modal = window.locator('.settings-modal');
     await modal.waitFor({ state: 'visible', timeout: 5000 });
@@ -81,8 +62,7 @@ test.describe('Settings Modal', () => {
   });
 
   test('settings modal contains AI provider options', async ({ window }) => {
-    const opened = await openSettings(window);
-    if (!opened) { test.skip(); return; }
+    await openSettings(window);
 
     const modal = window.locator('.settings-modal');
     await modal.waitFor({ state: 'visible', timeout: 5000 });
@@ -93,31 +73,34 @@ test.describe('Settings Modal', () => {
     await providerNav.click();
     await window.waitForTimeout(300);
 
-    // Provider page should show the provider select button
-    const providerSelectBtn = modal.locator('.provider-select-btn');
-    const providerExists = await providerSelectBtn.isVisible().catch(() => false);
-    expect(providerExists).toBe(true);
+    // Provider page should show the provider select button (use first() since there are
+    // multiple .provider-select-btn elements on the page: chat + commit message providers)
+    const providerSelectBtn = modal.locator('.provider-select-btn').first();
+    await expect(providerSelectBtn).toBeVisible({ timeout: 5000 });
 
     await window.keyboard.press('Escape');
   });
 
   test('settings modal contains font size controls', async ({ window }) => {
-    const opened = await openSettings(window);
-    if (!opened) { test.skip(); return; }
+    await openSettings(window);
 
     const modal = window.locator('.settings-modal');
     await modal.waitFor({ state: 'visible', timeout: 5000 });
 
-    const fontSizeControls = modal.locator('text=Font Size');
-    const exists = await fontSizeControls.count() > 0;
-    expect(exists).toBe(true);
+    // Font size is on the Editor page — navigate there first
+    const sidebar = modal.locator('.settings-sidebar');
+    const editorNav = sidebar.locator('.settings-nav-item', { hasText: 'Editor' });
+    await editorNav.click();
+    await window.waitForTimeout(300);
+
+    const fontSizeControls = modal.locator('.settings-row-name', { hasText: 'Font size' });
+    await expect(fontSizeControls).toBeVisible({ timeout: 5000 });
 
     await window.keyboard.press('Escape');
   });
 
   test('settings modal sidebar navigation works', async ({ window }) => {
-    const opened = await openSettings(window);
-    if (!opened) { test.skip(); return; }
+    await openSettings(window);
 
     const modal = window.locator('.settings-modal');
     await modal.waitFor({ state: 'visible', timeout: 5000 });
@@ -131,28 +114,83 @@ test.describe('Settings Modal', () => {
     await providerNav.click();
     await window.waitForTimeout(300);
 
-    // Provider page should show chat provider
-    const chatProvider = modal.locator('text=Chat provider');
+    // Provider page should show chat provider section label
+    const chatProvider = modal.locator('.settings-section-label', { hasText: 'AI Provider' });
     await expect(chatProvider).toBeVisible({ timeout: 3000 });
 
-    // Click back to General
-    const generalNav = sidebar.locator('.settings-nav-item', { hasText: 'General' });
-    await generalNav.click();
+    // Click to Editor page to check Font size
+    const editorNav = sidebar.locator('.settings-nav-item', { hasText: 'Editor' });
+    await editorNav.click();
     await window.waitForTimeout(300);
 
-    // Font size should be visible again
-    const fontSize = modal.locator('text=Font size');
+    // Font size should be visible on the Editor page
+    const fontSize = modal.locator('.settings-row-name', { hasText: 'Font size' });
     await expect(fontSize).toBeVisible({ timeout: 3000 });
 
     await window.keyboard.press('Escape');
   });
 
-  test.skip('switching AI provider to Codex updates UI (requires settings modal open)', async ({ window }) => {
-    // Placeholder
+  test('switching AI provider to Codex updates the provider button label', async ({ window }) => {
+    await openSettings(window);
+    const modal = window.locator('.settings-modal');
+    const sidebar = modal.locator('.settings-sidebar');
+    const providerNav = sidebar.locator('.settings-nav-item', { hasText: 'Provider' });
+    await providerNav.click();
+    await window.waitForTimeout(200);
+
+    // Open the chat provider dropdown (first .provider-select-btn on the page)
+    const providerBtn = modal.locator('.provider-select-btn').first();
+    await providerBtn.click();
+    await window.waitForTimeout(200);
+
+    // The dropdown renders .provider-dropdown-item buttons; pick the Codex CLI entry
+    const codexOption = modal.locator('.provider-dropdown-item', { hasText: /codex/i }).first();
+    await codexOption.waitFor({ state: 'visible', timeout: 5000 });
+    await codexOption.click();
+    await window.waitForTimeout(200);
+
+    // The button label should now contain "Codex"
+    const labelText = await providerBtn.textContent();
+    expect((labelText ?? '').toLowerCase()).toContain('codex');
+
+    await window.keyboard.press('Escape');
   });
 
-  test.skip('toggle minimap in settings persists to editor (requires settings modal + Monaco)', async ({ window }) => {
-    // Placeholder
+  test('toggle minimap in settings calls settingsSet with minimap key', async ({ window }) => {
+    // Capture settingsSet calls from the renderer
+    await window.evaluate(() => {
+      (window as any).__settingsSetCalls = [];
+      const orig = (window as any).sai.settingsSet;
+      (window as any).sai.settingsSet = (key: string, value: any) => {
+        (window as any).__settingsSetCalls.push({ key, value });
+        return orig(key, value);
+      };
+    });
+
+    await openSettings(window);
+    const modal = window.locator('.settings-modal');
+
+    // Minimap is on the Editor page — navigate there
+    const sidebar = modal.locator('.settings-sidebar');
+    const editorNav = sidebar.locator('.settings-nav-item', { hasText: 'Editor' });
+    await editorNav.click();
+    await window.waitForTimeout(300);
+
+    // The minimap row on the Editor page has a .settings-row-name "Minimap" and a
+    // button[role="switch"] sibling. Playwright's :has-text() pseudo-class matches the
+    // .settings-row whose subtree contains "Minimap", then we grab the switch inside it.
+    const minimapToggle = window.locator(
+      '.settings-modal .settings-row:has-text("Minimap") button[role="switch"]',
+    );
+    await minimapToggle.waitFor({ state: 'visible', timeout: 5000 });
+    await minimapToggle.click();
+    await window.waitForTimeout(200);
+
+    const calls = await window.evaluate(() => (window as any).__settingsSetCalls);
+    const minimapCall = (calls as any[]).find((c) => /minimap/i.test(c.key));
+    expect(minimapCall).toBeTruthy();
+
+    await window.keyboard.press('Escape');
   });
 
   test('app titlebar is visible and has correct structure', async ({ window }) => {

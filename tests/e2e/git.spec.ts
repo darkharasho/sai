@@ -57,67 +57,90 @@ test.describe('Git Sidebar', () => {
     await expect(navbar).toBeVisible({ timeout: 5000 });
   });
 
-  test.skip('git sidebar shows staged and unstaged file sections (requires dirty repo)', async ({ window }) => {
-    await openGitSidebar(window);
-    await window.waitForTimeout(1500);
+  test.describe('with dirty repo', () => {
+    test.use({
+      saiMock: {
+        gitStatus: () => Promise.resolve({
+          branch: 'main',
+          staged: [{ path: 'src/staged.ts', index: 'M', working_dir: ' ' }],
+          modified: [{ path: 'src/modified.ts', index: ' ', working_dir: 'M' }],
+          created: [],
+          deleted: [],
+          not_added: [],
+          ahead: 0,
+          behind: 0,
+        }),
+        gitDiff: () => Promise.resolve('--- a/src/modified.ts\n+++ b/src/modified.ts\n@@ -1 +1 @@\n-old\n+new\n'),
+        gitShow: () => Promise.resolve('// mock content'),
+        gitStage: () => Promise.resolve(),
+        gitCommit: () => Promise.resolve(),
+        gitConflictFiles: () => Promise.resolve([]),
+        gitRebaseStatus: () => Promise.resolve({ inProgress: false, onto: '' }),
+      },
+    });
 
-    const staged = window.locator('text=Staged').first();
-    const changes = window.locator('text=Changes').first();
+    async function openGitSidebarLocal(window: any) {
+      const gitBtn = window.locator('.nav-btn[title="Source Control"]');
+      await gitBtn.waitFor({ state: 'visible', timeout: 15000 });
+      const isActive = await gitBtn.evaluate((el: Element) => el.classList.contains('active'));
+      if (!isActive) {
+        await gitBtn.click();
+        await window.waitForTimeout(500);
+      }
+    }
 
-    const stagedVisible = await staged.isVisible().catch(() => false);
-    const changesVisible = await changes.isVisible().catch(() => false);
+    test('git sidebar shows staged and unstaged file sections', async ({ window }) => {
+      await openGitSidebarLocal(window);
+      await window.waitForTimeout(1500);
+      const staged = window.locator('text=Staged').first();
+      const changes = window.locator('text=Changes').first();
+      const stagedVisible = await staged.isVisible().catch(() => false);
+      const changesVisible = await changes.isVisible().catch(() => false);
+      expect(stagedVisible || changesVisible).toBe(true);
+    });
 
-    expect(stagedVisible || changesVisible).toBe(true);
-  });
+    test('clicking unstaged file opens diff viewer', async ({ window }) => {
+      await openGitSidebarLocal(window);
+      await window.waitForTimeout(1500);
+      // File rows use data-filepath attribute (no .tree-row class in this codebase)
+      const fileRow = window.locator('[data-filepath]').first();
+      await fileRow.waitFor({ state: 'visible', timeout: 5000 });
+      await fileRow.click();
+      // Clicking a file row calls onFileClick which opens a diff tab in the editor pane.
+      // Assert the tab was opened (CodePanel renders tabs with class "tab-item").
+      const openTab = window.locator('.tab-item').first();
+      await expect(openTab).toBeVisible({ timeout: 5000 });
+    });
 
-  test.skip('clicking unstaged file opens diff viewer (requires dirty repo)', async ({ window }) => {
-    await openGitSidebar(window);
-    await window.waitForTimeout(1500);
+    test('stage all button stages all unstaged files', async ({ window }) => {
+      await openGitSidebarLocal(window);
+      await window.waitForTimeout(1500);
+      const stageAllBtn = window.locator('text=Stage All').first();
+      await stageAllBtn.click();
+      const staged = window.locator('text=Staged').first();
+      await expect(staged).toBeVisible({ timeout: 3000 });
+    });
 
-    const fileRow = window.locator('.tree-row').first();
-    await fileRow.click();
+    test('commit staged changes via commit box', async ({ window }) => {
+      await openGitSidebarLocal(window);
+      await window.waitForTimeout(1500);
+      // Placeholder is "Commit message…" — match case-insensitively on "commit"
+      const commitMsgInput = window.locator('textarea[placeholder*="commit" i]').first();
+      await commitMsgInput.fill('test: E2E test commit');
+      const commitBtn = window.locator('button:has-text("Commit")').first();
+      await commitBtn.click();
+      // Verify the commit input was cleared (commit succeeded path)
+      await window.waitForTimeout(500);
+      const value = await commitMsgInput.inputValue();
+      expect(value).toBe('');
+    });
 
-    const diffEditor = window.locator('.monaco-diff-editor');
-    await expect(diffEditor).toBeVisible({ timeout: 5000 });
-  });
-
-  test.skip('stage all button stages all unstaged files (requires dirty repo)', async ({ window }) => {
-    await openGitSidebar(window);
-    await window.waitForTimeout(1500);
-
-    const stageAllBtn = window.locator('text=Stage All').first();
-    await stageAllBtn.click();
-
-    const staged = window.locator('text=Staged').first();
-    await expect(staged).toBeVisible({ timeout: 3000 });
-  });
-
-  test.skip('commit staged changes via commit box (requires dirty repo + staged files)', async ({ window }) => {
-    await openGitSidebar(window);
-    await window.waitForTimeout(1500);
-
-    const commitMsgInput = window.locator('textarea[placeholder*="commit"]').first();
-    await commitMsgInput.fill('test: E2E test commit');
-
-    const commitBtn = window.locator('button:has-text("Commit")').first();
-    await commitBtn.click();
-
-    await window.waitForTimeout(2000);
-    const stagedFiles = window.locator('.git-staged-file');
-    const count = await stagedFiles.count();
-    expect(count).toBe(0);
-  });
-
-  test.skip('branch name is displayed in git sidebar (requires open project)', async ({ window }) => {
-    await openGitSidebar(window);
-    await window.waitForTimeout(1500);
-
-    const branchLabel = window.locator('text=main').first();
-    const altBranch = window.locator('text=master').first();
-
-    const mainVisible = await branchLabel.isVisible().catch(() => false);
-    const masterVisible = await altBranch.isVisible().catch(() => false);
-    expect(mainVisible || masterVisible).toBe(true);
+    test('branch name is displayed in git sidebar', async ({ window }) => {
+      await openGitSidebarLocal(window);
+      await window.waitForTimeout(1500);
+      const branchLabel = window.locator('text=main').first();
+      await expect(branchLabel).toBeVisible({ timeout: 3000 });
+    });
   });
 
   test('toggling git sidebar does not affect terminal panel', async ({ window }) => {
