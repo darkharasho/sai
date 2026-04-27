@@ -9,9 +9,10 @@ export interface SearchPanelProps {
   projectPath: string;
   getOpenBuffers: () => { path: string; content: string }[];
   applyMonacoEdits?: (path: string, edits: { line: number; column: number; length: number; replacement: string }[]) => void;
+  onOpenFile?: (filePath: string, line?: number) => void;
 }
 
-export default function SearchPanel({ projectPath, getOpenBuffers, applyMonacoEdits }: SearchPanelProps) {
+export default function SearchPanel({ projectPath, getOpenBuffers, applyMonacoEdits, onOpenFile }: SearchPanelProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [pattern, setPattern] = useState('');
   const [replacement, setReplacement] = useState('');
@@ -203,6 +204,7 @@ export default function SearchPanel({ projectPath, getOpenBuffers, applyMonacoEd
                 replacement={replacement}
                 onReplaceMatch={(idx) => search.replaceMatch(file.path, idx, replacement)}
                 onReplaceFile={() => search.replaceFile(file.path, replacement)}
+                onMatchClick={onOpenFile ? (line) => onOpenFile(`${projectPath}/${file.path}`, line) : undefined}
               />
             ))}
             {search.results.files.length === 0 && (

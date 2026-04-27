@@ -1585,6 +1585,7 @@ export default function App() {
               .filter(f => f.isDirty && typeof f.content === 'string')
               .map(f => ({ path: f.path, content: f.content as string }))}
             applyMonacoEdits={(p, edits) => applySearchEditsToMonaco(p, edits)}
+            onOpenFile={handleFileOpen}
           />
         )}
         {sidebarOpen === 'chats' && (

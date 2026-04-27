@@ -7,9 +7,10 @@ export interface SearchResultProps {
   replacement: string;
   onReplaceMatch: (matchIndex: number) => void;
   onReplaceFile: () => void;
+  onMatchClick?: (line: number) => void;
 }
 
-export default function SearchResult({ file, replacement, onReplaceMatch, onReplaceFile }: SearchResultProps) {
+export default function SearchResult({ file, replacement, onReplaceMatch, onReplaceFile, onMatchClick }: SearchResultProps) {
   const [expanded, setExpanded] = useState(true);
   const showReplace = replacement.length > 0;
 
@@ -35,7 +36,12 @@ export default function SearchResult({ file, replacement, onReplaceMatch, onRepl
         )}
       </div>
       {expanded && file.matches.map((m, i) => (
-        <div key={`${m.line}:${m.column}:${i}`} className="search-match-row">
+        <div
+          key={`${m.line}:${m.column}:${i}`}
+          className="search-match-row"
+          onClick={() => onMatchClick?.(m.line)}
+          style={onMatchClick ? { cursor: 'pointer' } : undefined}
+        >
           <span className="search-match-line">{m.line}</span>
           <span className="search-match-preview">
             {m.preview.slice(0, m.matchStart)}
@@ -53,7 +59,7 @@ export default function SearchResult({ file, replacement, onReplaceMatch, onRepl
             <button
               className="search-match-replace"
               title="Replace this match"
-              onClick={() => onReplaceMatch(i)}
+              onClick={(e) => { e.stopPropagation(); onReplaceMatch(i); }}
             >
               <Replace size={11} />
             </button>
