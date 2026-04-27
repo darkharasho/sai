@@ -1,3 +1,17 @@
+/**
+ * E2E test setup — runs against the Vite dev server in a regular browser.
+ *
+ * NOTE: Playwright's Electron launch support is broken with Electron 33
+ * (require('electron').app is undefined in the -r preload context).
+ * Instead, we test the renderer via a regular Chromium browser pointing
+ * at the Vite dev server. This covers all UI interactions. Electron-specific
+ * features (native menus, file dialogs) are tested via unit/integration tests.
+ *
+ * Since window.sai (the Electron preload bridge) doesn't exist in a browser,
+ * we inject a mock before the page loads. Per-test overrides are supported
+ * via the `saiMock` fixture option (see SaiMockOverrides below).
+ */
+
 import { test as base, expect, Page } from '@playwright/test';
 import path from 'path';
 
@@ -111,6 +125,10 @@ export const test = base.extend<{ window: Page; saiMock: SaiMockOverrides }>({
     await page.addInitScript(
       ({ fixturePath, overrides }: { fixturePath: string; overrides: Record<string, string> }) => {
         const noop = () => () => {};
+        // NOTE: This object is a deliberate duplicate of buildDefaultSaiMock() above.
+        // The structured-clone boundary prevents passing live functions across addInitScript,
+        // so the default mock must be inlined here. If you add or remove a key in
+        // buildDefaultSaiMock(), you MUST make the same change here.
         const base: Record<string, any> = {
           platform: 'linux',
           getCwd: () => Promise.resolve(fixturePath),
