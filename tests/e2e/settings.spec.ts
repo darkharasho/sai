@@ -55,7 +55,7 @@ test.describe('Settings Modal', () => {
     // Click the overlay background to close
     const overlay = window.locator('.settings-overlay');
     await overlay.click({ position: { x: 10, y: 10 } });
-    await window.waitForTimeout(300);
+    await modal.waitFor({ state: 'hidden', timeout: 5000 });
 
     const isVisible = await modal.isVisible().catch(() => false);
     expect(isVisible).toBe(false);
@@ -71,7 +71,6 @@ test.describe('Settings Modal', () => {
     const sidebar = modal.locator('.settings-sidebar');
     const providerNav = sidebar.locator('.settings-nav-item', { hasText: 'Provider' });
     await providerNav.click();
-    await window.waitForTimeout(300);
 
     // Provider page should show the provider select button (use first() since there are
     // multiple .provider-select-btn elements on the page: chat + commit message providers)
@@ -91,7 +90,6 @@ test.describe('Settings Modal', () => {
     const sidebar = modal.locator('.settings-sidebar');
     const editorNav = sidebar.locator('.settings-nav-item', { hasText: 'Editor' });
     await editorNav.click();
-    await window.waitForTimeout(300);
 
     const fontSizeControls = modal.locator('.settings-row-name', { hasText: 'Font size' });
     await expect(fontSizeControls).toBeVisible({ timeout: 5000 });
@@ -112,7 +110,6 @@ test.describe('Settings Modal', () => {
     // Click Provider nav
     const providerNav = sidebar.locator('.settings-nav-item', { hasText: 'Provider' });
     await providerNav.click();
-    await window.waitForTimeout(300);
 
     // Provider page should show chat provider section label
     const chatProvider = modal.locator('.settings-section-label', { hasText: 'AI Provider' });
@@ -121,7 +118,6 @@ test.describe('Settings Modal', () => {
     // Click to Editor page to check Font size
     const editorNav = sidebar.locator('.settings-nav-item', { hasText: 'Editor' });
     await editorNav.click();
-    await window.waitForTimeout(300);
 
     // Font size should be visible on the Editor page
     const fontSize = modal.locator('.settings-row-name', { hasText: 'Font size' });
@@ -136,20 +132,21 @@ test.describe('Settings Modal', () => {
     const sidebar = modal.locator('.settings-sidebar');
     const providerNav = sidebar.locator('.settings-nav-item', { hasText: 'Provider' });
     await providerNav.click();
-    await window.waitForTimeout(200);
 
     // Open the chat provider dropdown (first .provider-select-btn on the page)
     const providerBtn = modal.locator('.provider-select-btn').first();
+    await providerBtn.waitFor({ state: 'visible', timeout: 5000 });
     await providerBtn.click();
-    await window.waitForTimeout(200);
 
     // The dropdown renders .provider-dropdown-item buttons; pick the Codex CLI entry
     const codexOption = modal.locator('.provider-dropdown-item', { hasText: /codex/i }).first();
     await codexOption.waitFor({ state: 'visible', timeout: 5000 });
     await codexOption.click();
-    await window.waitForTimeout(200);
+    // Wait for dropdown to close (codex option disappears) and label to update
+    await codexOption.waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
 
     // The button label should now contain "Codex"
+    await expect(providerBtn).toContainText(/codex/i, { timeout: 3000 });
     const labelText = await providerBtn.textContent();
     expect((labelText ?? '').toLowerCase()).toContain('codex');
 
@@ -174,7 +171,6 @@ test.describe('Settings Modal', () => {
     const sidebar = modal.locator('.settings-sidebar');
     const editorNav = sidebar.locator('.settings-nav-item', { hasText: 'Editor' });
     await editorNav.click();
-    await window.waitForTimeout(300);
 
     // The minimap row on the Editor page has a .settings-row-name "Minimap" and a
     // button[role="switch"] sibling. Playwright's :has-text() pseudo-class matches the
@@ -184,7 +180,11 @@ test.describe('Settings Modal', () => {
     );
     await minimapToggle.waitFor({ state: 'visible', timeout: 5000 });
     await minimapToggle.click();
-    await window.waitForTimeout(200);
+    // Wait for settingsSet to be called (poll until the calls array is non-empty or minimap call appears)
+    await window.waitForFunction(
+      () => ((window as any).__settingsSetCalls ?? []).some((c: any) => /minimap/i.test(c.key)),
+      { timeout: 3000 },
+    );
 
     const calls = await window.evaluate(() => (window as any).__settingsSetCalls);
     const minimapCall = (calls as any[]).find((c) => /minimap/i.test(c.key));

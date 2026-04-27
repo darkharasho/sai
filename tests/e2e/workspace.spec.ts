@@ -39,7 +39,7 @@ test.describe('Workspace', () => {
 
     // Close
     await window.mouse.click(5, 5);
-    await window.waitForTimeout(300);
+    await dropdown.waitFor({ state: 'hidden', timeout: 5000 });
   });
 
   test('workspace dropdown contains "Open Project" option', async ({ window }) => {
@@ -52,7 +52,7 @@ test.describe('Workspace', () => {
     expect(text).toContain('Open Project');
 
     await window.mouse.click(5, 5);
-    await window.waitForTimeout(300);
+    await window.locator('.project-dropdown').waitFor({ state: 'hidden', timeout: 5000 });
   });
 
   test('workspace dropdown closes on outside click', async ({ window }) => {
@@ -63,7 +63,7 @@ test.describe('Workspace', () => {
 
     // Click outside the dropdown
     await window.mouse.click(5, 5);
-    await window.waitForTimeout(300);
+    await dropdown.waitFor({ state: 'hidden', timeout: 5000 });
 
     const isVisible = await dropdown.isVisible().catch(() => false);
     expect(isVisible).toBe(false);
@@ -80,7 +80,7 @@ test.describe('Workspace', () => {
     expect(activeExists).toBe(true);
 
     await window.keyboard.press('Escape');
-    await window.waitForTimeout(200);
+    await window.locator('.project-dropdown').waitFor({ state: 'hidden', timeout: 5000 });
   });
 
   test('active workspace item shows status dot', async ({ window }) => {
@@ -94,7 +94,7 @@ test.describe('Workspace', () => {
     }
 
     await window.keyboard.press('Escape');
-    await window.waitForTimeout(200);
+    await window.locator('.project-dropdown').waitFor({ state: 'hidden', timeout: 5000 });
   });
 
   test('workspace overflow button appears on hover over non-current workspace', async ({ window }) => {
@@ -107,15 +107,16 @@ test.describe('Workspace', () => {
 
     if (count > 0) {
       await workspaceRows.first().hover();
-      await window.waitForTimeout(200);
-
+      // The overflow button appears via CSS hover — give it a moment to render
       const overflowBtn = window.locator('.workspace-overflow-btn').first();
+      await overflowBtn.waitFor({ state: 'visible', timeout: 2000 }).catch(() => {});
+
       const isVisible = await overflowBtn.isVisible().catch(() => false);
       expect(typeof isVisible).toBe('boolean');
     }
 
     await window.keyboard.press('Escape');
-    await window.waitForTimeout(200);
+    await window.locator('.project-dropdown').waitFor({ state: 'hidden', timeout: 5000 });
   });
 
   test.describe('with folder dialog', () => {
@@ -134,8 +135,8 @@ test.describe('Workspace', () => {
       const openNew = window.locator('.project-dropdown button').filter({ hasText: 'Open Project' }).first();
       await openNew.click();
       // The dropdown closes after the dialog resolves
-      await window.waitForTimeout(500);
       const dropdown = window.locator('.project-dropdown');
+      await dropdown.waitFor({ state: 'hidden', timeout: 5000 });
       const stillVisible = await dropdown.isVisible().catch(() => false);
       expect(stillVisible).toBe(false);
     });
@@ -166,9 +167,9 @@ test.describe('Workspace', () => {
       expect(count).toBeGreaterThanOrEqual(2);
       // Click the second row (the non-current one)
       await rows.nth(1).click();
-      await window.waitForTimeout(500);
       // Dropdown should close after switching
       const dropdown = window.locator('.project-dropdown');
+      await dropdown.waitFor({ state: 'hidden', timeout: 5000 });
       const stillVisible = await dropdown.isVisible().catch(() => false);
       expect(stillVisible).toBe(false);
     });
@@ -181,7 +182,6 @@ test.describe('Workspace', () => {
       // Both workspaces are active; the second is non-current so it shows an overflow button on hover
       const rows = window.locator('.workspace-row-wrapper');
       await rows.nth(1).hover();
-      await window.waitForTimeout(200);
       const overflowBtn = window.locator('.workspace-overflow-btn').first();
       await overflowBtn.waitFor({ state: 'visible', timeout: 3000 });
       await overflowBtn.click();

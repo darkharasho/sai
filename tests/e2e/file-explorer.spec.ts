@@ -16,7 +16,7 @@ test.describe('File Explorer', () => {
     const isActive = await explorerBtn.evaluate((el: Element) => el.classList.contains('active'));
     if (!isActive) {
       await explorerBtn.click();
-      await window.waitForTimeout(500);
+      await window.locator('.nav-btn[title="Explorer"].active').waitFor({ state: 'visible', timeout: 5000 });
     }
   }
 
@@ -46,8 +46,8 @@ test.describe('File Explorer', () => {
 
   test('tree-row elements have correct CSS classes', async ({ window }) => {
     await openExplorer(window);
-    await window.waitForTimeout(500);
     const rows = window.locator('.tree-row');
+    await rows.first().waitFor({ state: 'visible', timeout: 5000 });
     const count = await rows.count();
     expect(count).toBeGreaterThanOrEqual(1);
   });
@@ -69,7 +69,7 @@ test.describe('File Explorer', () => {
 
     // Close the dropdown
     await window.keyboard.press('Escape');
-    await window.waitForTimeout(300);
+    await window.locator('.project-dropdown').waitFor({ state: 'hidden', timeout: 5000 });
   });
 
   test('clicking explorer nav button toggles sidebar', async ({ window }) => {
@@ -78,15 +78,15 @@ test.describe('File Explorer', () => {
 
     // Open sidebar
     await explorerBtn.click();
-    await window.waitForTimeout(300);
+    await window.locator('.nav-btn[title="Explorer"].active').waitFor({ state: 'visible', timeout: 5000 });
 
     // Close sidebar
     await explorerBtn.click();
-    await window.waitForTimeout(300);
+    await window.locator('.nav-btn[title="Explorer"]:not(.active)').waitFor({ state: 'visible', timeout: 5000 });
 
     // Reopen
     await explorerBtn.click();
-    await window.waitForTimeout(300);
+    await window.locator('.nav-btn[title="Explorer"].active').waitFor({ state: 'visible', timeout: 5000 });
 
     // After reopening, explorer header should be visible
     const explorerLabel = window.locator('text=Explorer').first();
@@ -109,7 +109,8 @@ test.describe('File Explorer', () => {
 
     // Right-click to open context menu
     await rows.first().click({ button: 'right' });
-    await window.waitForTimeout(300);
+    // Wait briefly for the context menu to appear (CSS transition)
+    await window.locator('text=New File').first().waitFor({ state: 'visible', timeout: 2000 }).catch(() => {});
 
     // Context menu should appear — check for common actions
     const menuItem = window.locator('text=New File').first();
@@ -124,7 +125,7 @@ test.describe('File Explorer', () => {
   test('tree-name elements are rendered inside tree rows', async ({ window }) => {
     await openExplorer(window);
     const treeNames = window.locator('.tree-name');
-    await window.waitForTimeout(500);
+    await treeNames.first().waitFor({ state: 'visible', timeout: 5000 });
     const count = await treeNames.count();
     // There should be at least the project root name
     expect(count).toBeGreaterThanOrEqual(1);

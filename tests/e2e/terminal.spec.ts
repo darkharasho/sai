@@ -44,11 +44,10 @@ test.describe('Terminal', () => {
     const content = window.locator('.terminal-content');
     await content.waitFor({ state: 'visible', timeout: 20000 });
 
-    // Allow time for xterm to initialize
-    await window.waitForTimeout(2000);
-
-    // xterm adds .xterm class to its root element
+    // Wait for xterm to initialize — it adds .xterm to its root element
     const xtermRoot = window.locator('.xterm');
+    // xterm may not mount in CI without a real PTY; give it up to 5 s then continue
+    await xtermRoot.waitFor({ state: 'attached', timeout: 5000 }).catch(() => {});
     const isPresent = await xtermRoot.count() > 0;
 
     // It's acceptable if xterm hasn't fully mounted yet in CI without a PTY
@@ -75,7 +74,8 @@ test.describe('Terminal', () => {
     const content = window.locator('.terminal-content');
     await content.waitFor({ state: 'visible', timeout: 20000 });
 
-    await window.waitForTimeout(2000);
+    // Wait for xterm to initialize before pasting
+    await window.locator('.xterm').waitFor({ state: 'attached', timeout: 5000 }).catch(() => {});
 
     // Simulate a paste event into the terminal area
     await content.click();
@@ -93,9 +93,9 @@ test.describe('Terminal', () => {
     const explorerBtn = window.locator('.nav-btn[title="Explorer"]');
     await explorerBtn.waitFor({ state: 'visible', timeout: 10000 });
     await explorerBtn.click();
-    await window.waitForTimeout(300);
+    await window.locator('.nav-btn[title="Explorer"].active').waitFor({ state: 'visible', timeout: 5000 });
     await explorerBtn.click();
-    await window.waitForTimeout(300);
+    await window.locator('.nav-btn[title="Explorer"]:not(.active)').waitFor({ state: 'visible', timeout: 5000 });
 
     await expect(panel).toBeVisible({ timeout: 5000 });
   });

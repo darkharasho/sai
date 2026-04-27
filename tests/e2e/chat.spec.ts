@@ -63,9 +63,8 @@ test.describe('Chat', () => {
   test('slash command autocomplete appears on / prefix', async ({ window }) => {
     const chatInput = await focusChatInput(window);
     await chatInput.fill('/');
-    await window.waitForTimeout(500);
 
-    // Verify input is still functional
+    // Verify input is still functional (autocomplete dropdown may or may not appear)
     await expect(chatInput).toBeVisible({ timeout: 3000 });
     await chatInput.fill('');
   });
@@ -73,7 +72,6 @@ test.describe('Chat', () => {
   test('@ mention autocomplete appears on @ prefix', async ({ window }) => {
     const chatInput = await focusChatInput(window);
     await chatInput.fill('@');
-    await window.waitForTimeout(500);
 
     await expect(chatInput).toBeVisible({ timeout: 3000 });
     await chatInput.fill('');
@@ -176,7 +174,6 @@ test.describe('Chat', () => {
     await window.evaluate(() => {
       window.dispatchEvent(new Event('resize'));
     });
-    await window.waitForTimeout(500);
 
     await expect(chatInput).toBeVisible({ timeout: 5000 });
   });

@@ -250,7 +250,6 @@ export const test = base.extend<{ window: Page; saiMock: SaiMockOverrides }>({
     await page.goto('http://localhost:5173');
     await page.waitForLoadState('domcontentloaded');
     await page.waitForSelector('.project-selector', { timeout: 15000 });
-    await page.waitForTimeout(1000);
     await use(page);
   },
 });
