@@ -130,12 +130,67 @@ test.describe('Settings Modal', () => {
     await window.keyboard.press('Escape');
   });
 
-  test.skip('switching AI provider to Codex updates UI (requires settings modal open)', async ({ window }) => {
-    // Placeholder
+  test('switching AI provider to Codex updates the provider button label', async ({ window }) => {
+    await openSettings(window);
+    const modal = window.locator('.settings-modal');
+    const sidebar = modal.locator('.settings-sidebar');
+    const providerNav = sidebar.locator('.settings-nav-item', { hasText: 'Provider' });
+    await providerNav.click();
+    await window.waitForTimeout(200);
+
+    // Open the chat provider dropdown (first .provider-select-btn on the page)
+    const providerBtn = modal.locator('.provider-select-btn').first();
+    await providerBtn.click();
+    await window.waitForTimeout(200);
+
+    // The dropdown renders .provider-dropdown-item buttons; pick the Codex CLI entry
+    const codexOption = modal.locator('.provider-dropdown-item', { hasText: /codex/i }).first();
+    await codexOption.waitFor({ state: 'visible', timeout: 5000 });
+    await codexOption.click();
+    await window.waitForTimeout(200);
+
+    // The button label should now contain "Codex"
+    const labelText = await providerBtn.textContent();
+    expect((labelText ?? '').toLowerCase()).toContain('codex');
+
+    await window.keyboard.press('Escape');
   });
 
-  test.skip('toggle minimap in settings persists to editor (requires settings modal + Monaco)', async ({ window }) => {
-    // Placeholder
+  test('toggle minimap in settings calls settingsSet with minimap key', async ({ window }) => {
+    // Capture settingsSet calls from the renderer
+    await window.evaluate(() => {
+      (window as any).__settingsSetCalls = [];
+      const orig = (window as any).sai.settingsSet;
+      (window as any).sai.settingsSet = (key: string, value: any) => {
+        (window as any).__settingsSetCalls.push({ key, value });
+        return orig(key, value);
+      };
+    });
+
+    await openSettings(window);
+    const modal = window.locator('.settings-modal');
+
+    // Minimap is on the Editor page — navigate there
+    const sidebar = modal.locator('.settings-sidebar');
+    const editorNav = sidebar.locator('.settings-nav-item', { hasText: 'Editor' });
+    await editorNav.click();
+    await window.waitForTimeout(300);
+
+    // The minimap row on the Editor page has a .settings-row-name "Minimap" and a
+    // button[role="switch"] sibling. Playwright's :has-text() pseudo-class matches the
+    // .settings-row whose subtree contains "Minimap", then we grab the switch inside it.
+    const minimapToggle = window.locator(
+      '.settings-modal .settings-row:has-text("Minimap") button[role="switch"]',
+    );
+    await minimapToggle.waitFor({ state: 'visible', timeout: 5000 });
+    await minimapToggle.click();
+    await window.waitForTimeout(200);
+
+    const calls = await window.evaluate(() => (window as any).__settingsSetCalls);
+    const minimapCall = (calls as any[]).find((c) => /minimap/i.test(c.key));
+    expect(minimapCall).toBeTruthy();
+
+    await window.keyboard.press('Escape');
   });
 
   test('app titlebar is visible and has correct structure', async ({ window }) => {
