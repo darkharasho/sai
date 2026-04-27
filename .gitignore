@@ -8,3 +8,5 @@ electron-dist
 .env
 .worktrees/
 coverage/playwright-report/
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
