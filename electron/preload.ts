@@ -54,6 +54,7 @@ contextBridge.exposeInMainWorld('sai', {
   gitPull: (cwd: string) => ipcRenderer.invoke('git:pull', cwd),
   gitFetch: (cwd: string) => ipcRenderer.invoke('git:fetch', cwd),
   gitLog: (cwd: string, count: number) => ipcRenderer.invoke('git:log', cwd, count),
+  gitCommitDetails: (cwd: string, hash: string) => ipcRenderer.invoke('git:commitDetails', cwd, hash),
   gitBranches: (cwd: string) => ipcRenderer.invoke('git:branches', cwd),
   gitCheckout: (cwd: string, branchName: string) => ipcRenderer.invoke('git:checkout', cwd, branchName),
   gitCreateBranch: (cwd: string, branchName: string) => ipcRenderer.invoke('git:createBranch', cwd, branchName),

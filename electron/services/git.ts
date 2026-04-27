@@ -172,6 +172,30 @@ export function registerGitHandlers() {
     }));
   });
 
+  ipcMain.handle('git:commitDetails', async (_event, cwd: string, hash: string) => {
+    const raw = await git(cwd).raw(['show', '--numstat', '--format=%H%n%an%n%ae%n%aI%n%P%n%B%x00', hash]);
+    const [headerPart, restPart = ''] = raw.split('\x00');
+    const headerLines = headerPart.split('\n');
+    const fullHash = headerLines[0] ?? hash;
+    const author = headerLines[1] ?? '';
+    const email = headerLines[2] ?? '';
+    const date = headerLines[3] ?? '';
+    const parents = (headerLines[4] ?? '').split(' ').filter(Boolean);
+    const body = headerLines.slice(5).join('\n').trimEnd();
+
+    const files: { path: string; additions: number; deletions: number }[] = [];
+    for (const line of restPart.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const parts = trimmed.split('\t');
+      if (parts.length < 3) continue;
+      const additions = parts[0] === '-' ? 0 : parseInt(parts[0], 10) || 0;
+      const deletions = parts[1] === '-' ? 0 : parseInt(parts[1], 10) || 0;
+      files.push({ path: parts[2], additions, deletions });
+    }
+    return { hash: fullHash, author, email, date, parents, message: body, files };
+  });
+
   ipcMain.handle('git:branches', async (_event, cwd: string) => {
     const summary = await git(cwd).branch(['-a']);
     const local: string[] = [];

@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
-import { AlertTriangle, Ban, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, Ban, CheckCircle2, History, GitBranch } from 'lucide-react';
 import { GitFile, GitCommit } from '../../types';
 import type { RebaseStatus } from '../../types';
 import ChangedFiles from './ChangedFiles';
 import CommitBox from './CommitBox';
 import GitActivity from './GitActivity';
+import GitHistory from './GitHistory';
 import DiscardChangesModal from './DiscardChangesModal';
 import ConflictSection from './ConflictSection';
 import { RebaseInProgressBanner } from './RebaseControls';
@@ -77,6 +78,7 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
   const [rebaseStatus, setRebaseStatus] = useState<RebaseStatus>({ inProgress: false, onto: '' });
   const [fileSearch, setFileSearch] = useState('');
   const [gitNotRepo, setGitNotRepo] = useState(false);
+  const [view, setView] = useState<'changes' | 'history'>('changes');
 
   const refresh = useCallback(async () => {
     if (!projectPath) return;
@@ -208,8 +210,8 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
           flexShrink: 0,
         }}
       >
-        Source Control
-        {totalChanges > 0 && (
+        {view === 'history' ? 'History' : 'Source Control'}
+        {view === 'changes' && totalChanges > 0 && (
           <span
             style={{
               marginLeft: 6,
@@ -225,10 +227,38 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
             {totalChanges}
           </span>
         )}
+        <div style={{ flex: 1 }} />
+        <button
+          onClick={() => setView(view === 'history' ? 'changes' : 'history')}
+          title={view === 'history' ? 'Show changes' : 'Show history'}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            padding: 4,
+            cursor: 'pointer',
+            color: view === 'history' ? 'var(--accent)' : 'var(--text-muted)',
+            display: 'flex',
+            alignItems: 'center',
+            borderRadius: 3,
+          }}
+        >
+          {view === 'history' ? <GitBranch size={14} /> : <History size={14} />}
+        </button>
       </div>
 
-      {/* Scrollable file lists */}
-      <div style={{ flex: 1, overflowY: 'auto', paddingTop: 8 }}>
+      {/* Scrollable content */}
+      <div style={{ flex: 1, overflowY: 'auto', paddingTop: view === 'history' ? 0 : 8 }}>
+        {view === 'history' && !gitNotRepo && !error && (
+          <GitHistory projectPath={projectPath} />
+        )}
+        {view === 'history' && gitNotRepo && (
+          <div style={{ padding: '24px 12px', textAlign: 'center' as const }}>
+            <div style={{ marginBottom: 6, display: 'flex', justifyContent: 'center' }}><Ban size={20} color="var(--text-muted)" /></div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Not a git repo</div>
+          </div>
+        )}
+        {view === 'changes' && (
+        <>
         {rebaseStatus.inProgress && (
           <RebaseInProgressBanner
             projectPath={projectPath}
@@ -307,6 +337,8 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
         />
 
         <GitActivity commits={commits} />
+        </>
+        )}
       </div>
 
       {/* Commit / push / pull controls */}
