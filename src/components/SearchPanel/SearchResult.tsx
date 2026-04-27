@@ -15,24 +15,27 @@ export default function SearchResult({ file, replacement, onReplaceMatch, onRepl
 
   return (
     <div className="search-result">
-      <div className="search-file-header">
-        <button className="search-file-toggle" onClick={() => setExpanded(e => !e)}>
-          {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-          <span className="search-file-path">{file.path}</span>
-          <span className="search-file-count">({file.matches.length})</span>
-        </button>
+      <div
+        className="search-file-header"
+        onClick={() => setExpanded(e => !e)}
+      >
+        <span className="search-file-chevron">
+          {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+        </span>
+        <span className="search-file-path">{file.path}</span>
+        <span className="search-file-count">({file.matches.length})</span>
         {showReplace && (
           <button
             className="search-file-replace"
             title="Replace all in file"
-            onClick={onReplaceFile}
+            onClick={(e) => { e.stopPropagation(); onReplaceFile(); }}
           >
-            <Replace size={12} />
+            <Replace size={11} />
           </button>
         )}
       </div>
       {expanded && file.matches.map((m, i) => (
-        <div key={`${m.line}:${m.column}`} className="search-match-row">
+        <div key={`${m.line}:${m.column}:${i}`} className="search-match-row">
           <span className="search-match-line">{m.line}</span>
           <span className="search-match-preview">
             {m.preview.slice(0, m.matchStart)}

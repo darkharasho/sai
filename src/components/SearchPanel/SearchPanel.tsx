@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Search, CaseSensitive, WholeWord, Regex, ChevronRight, ChevronDown } from 'lucide-react';
+import { Search, CaseSensitive, WholeWord, Regex, ChevronRight, ChevronDown, Replace, RotateCw, X } from 'lucide-react';
 import { useSearch } from '../../hooks/useSearch';
 import type { SearchQuery } from '../../types';
 import SearchResult from './SearchResult';
@@ -30,19 +30,20 @@ export default function SearchPanel({ projectPath, getOpenBuffers, applyMonacoEd
     inputRef.current?.focus();
   }, []);
 
+  const buildQuery = (): SearchQuery => ({
+    pattern,
+    caseSensitive,
+    wholeWord,
+    regex,
+    includeGlobs: includeGlob.split(',').map(s => s.trim()).filter(Boolean),
+    excludeGlobs: excludeGlob.split(',').map(s => s.trim()).filter(Boolean),
+    useGitignore,
+  });
+
   // Debounced re-run when any search-affecting state changes
   useEffect(() => {
     const t = setTimeout(() => {
-      const q: SearchQuery = {
-        pattern,
-        caseSensitive,
-        wholeWord,
-        regex,
-        includeGlobs: includeGlob.split(',').map(s => s.trim()).filter(Boolean),
-        excludeGlobs: excludeGlob.split(',').map(s => s.trim()).filter(Boolean),
-        useGitignore,
-      };
-      search.runSearch(q);
+      search.runSearch(buildQuery());
     }, 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -61,69 +62,99 @@ export default function SearchPanel({ projectPath, getOpenBuffers, applyMonacoEd
     await search.replaceAll(replacement);
   };
 
+  const handleClear = () => {
+    setPattern('');
+    setReplacement('');
+    setIncludeGlob('');
+    setExcludeGlob('');
+    inputRef.current?.focus();
+  };
+
   return (
     <aside className="search-panel">
-      <div className="search-input-row">
-        <Search size={14} className="search-input-icon" />
-        <input
-          ref={inputRef}
-          type="text"
-          className="search-input"
-          placeholder="Search"
-          value={pattern}
-          onChange={e => setPattern(e.target.value)}
-        />
+      <div className="search-header">
+        <span className="search-header-icon"><Search size={14} /></span>
+        <span className="search-header-title">Search</span>
         <button
-          className={`search-toggle ${caseSensitive ? 'active' : ''}`}
-          title="Case sensitive (Aa)"
-          onClick={() => setCaseSensitive(v => !v)}
-        ><CaseSensitive size={12} /></button>
+          className="search-header-action"
+          title="Refresh"
+          onClick={() => search.runSearch(buildQuery())}
+        ><RotateCw size={12} /></button>
         <button
-          className={`search-toggle ${wholeWord ? 'active' : ''}`}
-          title="Whole word (\\b)"
-          onClick={() => setWholeWord(v => !v)}
-        ><WholeWord size={12} /></button>
-        <button
-          className={`search-toggle ${regex ? 'active' : ''}`}
-          title="Regex (.*)"
-          onClick={() => setRegex(v => !v)}
-        ><Regex size={12} /></button>
+          className="search-header-action"
+          title="Clear"
+          onClick={handleClear}
+        ><X size={12} /></button>
       </div>
 
-      <div className="replace-input-row">
-        <input
-          type="text"
-          className="search-input"
-          placeholder="Replace"
-          value={replacement}
-          onChange={e => setReplacement(e.target.value)}
-        />
+      <div className="search-group">
+        <div className="search-line">
+          <span className="search-line-icon"><Search size={11} /></span>
+          <input
+            ref={inputRef}
+            type="text"
+            className="search-input"
+            placeholder="Search"
+            value={pattern}
+            onChange={e => setPattern(e.target.value)}
+          />
+          <button
+            className={`search-toggle ${caseSensitive ? 'active' : ''}`}
+            title="Case sensitive (Aa)"
+            onClick={() => setCaseSensitive(v => !v)}
+          ><CaseSensitive size={12} /></button>
+          <button
+            className={`search-toggle ${wholeWord ? 'active' : ''}`}
+            title="Whole word"
+            onClick={() => setWholeWord(v => !v)}
+          ><WholeWord size={12} /></button>
+          <button
+            className={`search-toggle ${regex ? 'active' : ''}`}
+            title="Regex (.*)"
+            onClick={() => setRegex(v => !v)}
+          ><Regex size={12} /></button>
+        </div>
+        <div className="search-divider" />
+        <div className="search-line">
+          <span className="search-line-icon"><Replace size={11} /></span>
+          <input
+            type="text"
+            className="search-input"
+            placeholder="Replace"
+            value={replacement}
+            onChange={e => setReplacement(e.target.value)}
+          />
+        </div>
       </div>
 
       <button
         className="search-details-toggle"
         onClick={() => setShowDetails(v => !v)}
       >
-        {showDetails ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        {showDetails ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
         <span>Toggle search details</span>
       </button>
 
       {showDetails && (
         <div className="search-details">
-          <input
-            type="text"
-            className="search-input"
-            placeholder="files to include"
-            value={includeGlob}
-            onChange={e => setIncludeGlob(e.target.value)}
-          />
-          <input
-            type="text"
-            className="search-input"
-            placeholder="files to exclude"
-            value={excludeGlob}
-            onChange={e => setExcludeGlob(e.target.value)}
-          />
+          <div className="search-input-wrap">
+            <input
+              type="text"
+              className="search-input"
+              placeholder="files to include"
+              value={includeGlob}
+              onChange={e => setIncludeGlob(e.target.value)}
+            />
+          </div>
+          <div className="search-input-wrap">
+            <input
+              type="text"
+              className="search-input"
+              placeholder="files to exclude"
+              value={excludeGlob}
+              onChange={e => setExcludeGlob(e.target.value)}
+            />
+          </div>
           <label className="search-checkbox">
             <input
               type="checkbox"
@@ -132,6 +163,13 @@ export default function SearchPanel({ projectPath, getOpenBuffers, applyMonacoEd
             />
             Use .gitignore
           </label>
+        </div>
+      )}
+
+      {search.results && search.results.files.length > 0 && (
+        <div className="search-section-label">
+          <span>Results</span>
+          <span className="search-section-count">{totalMatches}</span>
         </div>
       )}
 
