@@ -1,0 +1,141 @@
+.search-panel {
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  height: 100%;
+  background: var(--sidebar-bg, #1e1e1e);
+  color: var(--sidebar-fg, #d4d4d4);
+  font-size: 13px;
+  border-right: 1px solid var(--border, #333);
+}
+
+.search-input-row,
+.replace-input-row {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  gap: 4px;
+}
+
+.search-input-icon { opacity: 0.6; }
+
+.search-input {
+  flex: 1;
+  background: var(--input-bg, #2a2a2a);
+  color: inherit;
+  border: 1px solid transparent;
+  padding: 4px 6px;
+  font-size: 13px;
+  outline: none;
+}
+.search-input:focus { border-color: var(--accent, #007acc); }
+
+.search-toggle {
+  background: transparent;
+  border: 1px solid transparent;
+  color: inherit;
+  padding: 2px 4px;
+  cursor: pointer;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+}
+.search-toggle:hover { background: rgba(255,255,255,0.08); }
+.search-toggle.active { background: var(--accent-soft, rgba(0,122,204,0.3)); }
+
+.search-details-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  color: inherit;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.search-details-toggle:hover { opacity: 1; }
+
+.search-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 8px 8px 8px;
+}
+
+.search-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.search-results-pane {
+  flex: 1;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.search-empty,
+.search-error {
+  padding: 8px 12px;
+  font-size: 12px;
+  opacity: 0.6;
+}
+.search-error { color: var(--danger, #f48771); opacity: 1; }
+
+.search-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border, #333);
+  font-size: 12px;
+}
+
+.search-replace-all {
+  background: var(--accent, #007acc);
+  color: white;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.search-replace-all:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.search-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.search-confirm-dialog {
+  background: var(--bg, #252526);
+  padding: 16px;
+  border-radius: 4px;
+  min-width: 320px;
+}
+.search-confirm-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.search-confirm-buttons button {
+  padding: 4px 10px;
+  background: transparent;
+  color: inherit;
+  border: 1px solid var(--border, #444);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.search-confirm-buttons button.primary {
+  background: var(--accent, #007acc);
+  color: white;
+  border-color: var(--accent, #007acc);
+}

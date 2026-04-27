@@ -1,0 +1,42 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
+import SearchPanel from '../../../src/components/SearchPanel/SearchPanel';
+
+beforeEach(() => {
+  (window as any).sai = {
+    searchRun: vi.fn().mockResolvedValue({ files: [], truncated: false, durationMs: 0 }),
+    searchReplaceFile: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
+describe('SearchPanel', () => {
+  it('renders the search input with placeholder', () => {
+    render(<SearchPanel projectPath="/proj" getOpenBuffers={() => []} />);
+    expect(screen.getByPlaceholderText(/search/i)).toBeInTheDocument();
+  });
+
+  it('renders three toggle buttons (case, word, regex)', () => {
+    render(<SearchPanel projectPath="/proj" getOpenBuffers={() => []} />);
+    expect(screen.getByTitle(/case sensitive/i)).toBeInTheDocument();
+    expect(screen.getByTitle(/whole word/i)).toBeInTheDocument();
+    expect(screen.getByTitle(/regex/i)).toBeInTheDocument();
+  });
+
+  it('renders the replace input', () => {
+    render(<SearchPanel projectPath="/proj" getOpenBuffers={() => []} />);
+    expect(screen.getByPlaceholderText(/replace/i)).toBeInTheDocument();
+  });
+
+  it('toggles include/exclude details on click', () => {
+    render(<SearchPanel projectPath="/proj" getOpenBuffers={() => []} />);
+    expect(screen.queryByPlaceholderText(/files to include/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText(/toggle search details/i));
+    expect(screen.getByPlaceholderText(/files to include/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/files to exclude/i)).toBeInTheDocument();
+  });
+
+  it('shows empty-state hint when no query', () => {
+    render(<SearchPanel projectPath="/proj" getOpenBuffers={() => []} />);
+    expect(screen.getByText(/type to search/i)).toBeInTheDocument();
+  });
+});
