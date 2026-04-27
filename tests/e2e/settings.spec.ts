@@ -10,29 +10,24 @@ import { test, expect } from './electron.setup';
  * The mock provides a fake GitHub user so the user dropdown is available.
  */
 test.describe('Settings Modal', () => {
-  /**
-   * Open settings via the GitHub user dropdown.
-   */
-  async function openSettings(window: any): Promise<boolean> {
-    const ghUserBtn = window.locator('.gh-user-btn');
-    await ghUserBtn.waitFor({ state: 'visible', timeout: 10000 }).catch(() => null);
-    const ghUserExists = await ghUserBtn.count() > 0;
-
-    if (!ghUserExists) return false;
-
-    await ghUserBtn.click();
-    await window.waitForTimeout(300);
-
-    // Look for "Settings" in the dropdown
-    const settingsItem = window.locator('.gh-dropdown-item').filter({ hasText: 'Settings' });
-    const settingsExists = await settingsItem.count() > 0;
-
-    if (settingsExists) {
-      await settingsItem.click();
-      await window.waitForTimeout(500);
-      return true;
+  async function openSettings(window: any): Promise<void> {
+    // Dismiss the "What's New" modal if it is blocking pointer events.
+    const backdrop = window.locator('[data-testid="whats-new-backdrop"]');
+    const gotItBtn = window.locator('button', { hasText: 'Got it' });
+    if (await backdrop.isVisible().catch(() => false)) {
+      await gotItBtn.click();
+      await backdrop.waitFor({ state: 'hidden', timeout: 5000 });
     }
-    return false;
+
+    const ghUserBtn = window.locator('.gh-user-btn');
+    await ghUserBtn.waitFor({ state: 'visible', timeout: 15000 });
+    await ghUserBtn.click();
+
+    const settingsItem = window.locator('.gh-dropdown-item').filter({ hasText: 'Settings' });
+    await settingsItem.waitFor({ state: 'visible', timeout: 5000 });
+    await settingsItem.click();
+
+    await window.locator('.settings-modal').waitFor({ state: 'visible', timeout: 5000 });
   }
 
   test('settings modal is not open by default', async ({ window }) => {
@@ -42,19 +37,14 @@ test.describe('Settings Modal', () => {
   });
 
   test('settings modal can be opened via GitHub user menu', async ({ window }) => {
-    const opened = await openSettings(window);
-    expect(opened).toBe(true);
-
+    await openSettings(window);
     const modal = window.locator('.settings-modal');
     await expect(modal).toBeVisible({ timeout: 5000 });
-
-    // Close the modal
     await window.keyboard.press('Escape');
   });
 
   test('settings modal shows Settings title when open', async ({ window }) => {
-    const opened = await openSettings(window);
-    if (!opened) { test.skip(); return; }
+    await openSettings(window);
 
     const title = window.locator('.settings-title');
     await expect(title).toBeVisible({ timeout: 5000 });
@@ -65,8 +55,7 @@ test.describe('Settings Modal', () => {
   });
 
   test('settings modal closes on overlay click', async ({ window }) => {
-    const opened = await openSettings(window);
-    if (!opened) { test.skip(); return; }
+    await openSettings(window);
 
     const modal = window.locator('.settings-modal');
     await modal.waitFor({ state: 'visible', timeout: 5000 });
@@ -81,8 +70,7 @@ test.describe('Settings Modal', () => {
   });
 
   test('settings modal contains AI provider options', async ({ window }) => {
-    const opened = await openSettings(window);
-    if (!opened) { test.skip(); return; }
+    await openSettings(window);
 
     const modal = window.locator('.settings-modal');
     await modal.waitFor({ state: 'visible', timeout: 5000 });
@@ -93,31 +81,34 @@ test.describe('Settings Modal', () => {
     await providerNav.click();
     await window.waitForTimeout(300);
 
-    // Provider page should show the provider select button
-    const providerSelectBtn = modal.locator('.provider-select-btn');
-    const providerExists = await providerSelectBtn.isVisible().catch(() => false);
-    expect(providerExists).toBe(true);
+    // Provider page should show the provider select button (use first() since there are
+    // multiple .provider-select-btn elements on the page: chat + commit message providers)
+    const providerSelectBtn = modal.locator('.provider-select-btn').first();
+    await expect(providerSelectBtn).toBeVisible({ timeout: 5000 });
 
     await window.keyboard.press('Escape');
   });
 
   test('settings modal contains font size controls', async ({ window }) => {
-    const opened = await openSettings(window);
-    if (!opened) { test.skip(); return; }
+    await openSettings(window);
 
     const modal = window.locator('.settings-modal');
     await modal.waitFor({ state: 'visible', timeout: 5000 });
 
-    const fontSizeControls = modal.locator('text=Font Size');
-    const exists = await fontSizeControls.count() > 0;
-    expect(exists).toBe(true);
+    // Font size is on the Editor page — navigate there first
+    const sidebar = modal.locator('.settings-sidebar');
+    const editorNav = sidebar.locator('.settings-nav-item', { hasText: 'Editor' });
+    await editorNav.click();
+    await window.waitForTimeout(300);
+
+    const fontSizeControls = modal.locator('.settings-row-name', { hasText: 'Font size' });
+    await expect(fontSizeControls).toBeVisible({ timeout: 5000 });
 
     await window.keyboard.press('Escape');
   });
 
   test('settings modal sidebar navigation works', async ({ window }) => {
-    const opened = await openSettings(window);
-    if (!opened) { test.skip(); return; }
+    await openSettings(window);
 
     const modal = window.locator('.settings-modal');
     await modal.waitFor({ state: 'visible', timeout: 5000 });
@@ -131,17 +122,17 @@ test.describe('Settings Modal', () => {
     await providerNav.click();
     await window.waitForTimeout(300);
 
-    // Provider page should show chat provider
-    const chatProvider = modal.locator('text=Chat provider');
+    // Provider page should show chat provider section label
+    const chatProvider = modal.locator('.settings-section-label', { hasText: 'AI Provider' });
     await expect(chatProvider).toBeVisible({ timeout: 3000 });
 
-    // Click back to General
-    const generalNav = sidebar.locator('.settings-nav-item', { hasText: 'General' });
-    await generalNav.click();
+    // Click to Editor page to check Font size
+    const editorNav = sidebar.locator('.settings-nav-item', { hasText: 'Editor' });
+    await editorNav.click();
     await window.waitForTimeout(300);
 
-    // Font size should be visible again
-    const fontSize = modal.locator('text=Font size');
+    // Font size should be visible on the Editor page
+    const fontSize = modal.locator('.settings-row-name', { hasText: 'Font size' });
     await expect(fontSize).toBeVisible({ timeout: 3000 });
 
     await window.keyboard.press('Escape');
