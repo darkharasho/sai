@@ -34,7 +34,7 @@ export function buildDefaultSaiMock(fixturePath: string): Record<string, any> {
       // Suppress the What's New modal in tests by pretending the user has already
       // seen the current version. Tests that need to assert What's New behavior
       // can override settingsGet via the saiMock fixture.
-      if (key === 'lastSeenVersion') return Promise.resolve('0.8.34');
+      if (key === 'lastSeenVersion') return Promise.resolve('0.8.36');
       return Promise.resolve(defaultVal ?? null);
     },
     settingsSet: () => Promise.resolve(),
@@ -89,6 +89,8 @@ export function buildDefaultSaiMock(fixturePath: string): Record<string, any> {
     fsCreateDir: () => Promise.resolve(),
     fsCheckIgnored: () => Promise.resolve([]),
     fsWalkFiles: () => Promise.resolve([]),
+    searchRun: () => Promise.resolve({ files: [], truncated: false, durationMs: 0 }),
+    searchReplaceFile: () => Promise.resolve(),
     workspaceSetActive: () => {},
     workspaceGetAll: () => Promise.resolve([{ projectPath: fixturePath, status: 'active', lastActivity: Date.now() }]),
     workspaceClose: () => Promise.resolve(),
@@ -146,7 +148,7 @@ export const test = base.extend<{ window: Page; saiMock: SaiMockOverrides }>({
             // Suppress the What's New modal in tests by pretending the user has already
             // seen the current version. Tests that need to assert What's New behavior
             // can override settingsGet via the saiMock fixture.
-            if (key === 'lastSeenVersion') return Promise.resolve('0.8.34');
+            if (key === 'lastSeenVersion') return Promise.resolve('0.8.36');
             return Promise.resolve(defaultVal ?? null);
           },
           settingsSet: () => Promise.resolve(),
@@ -201,6 +203,8 @@ export const test = base.extend<{ window: Page; saiMock: SaiMockOverrides }>({
           fsCreateDir: () => Promise.resolve(),
           fsCheckIgnored: () => Promise.resolve([]),
           fsWalkFiles: () => Promise.resolve([]),
+          searchRun: () => Promise.resolve({ files: [], truncated: false, durationMs: 0 }),
+          searchReplaceFile: () => Promise.resolve(),
           workspaceSetActive: () => {},
           workspaceGetAll: () => Promise.resolve([{ projectPath: fixturePath, status: 'active', lastActivity: Date.now() }]),
           workspaceClose: () => Promise.resolve(),
