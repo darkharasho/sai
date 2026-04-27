@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import KeybindingsPage from '../../../src/components/Settings/KeybindingsPage';
 
 let savedOverrides: Record<string, string> = {};
@@ -77,8 +77,12 @@ describe('KeybindingsPage', () => {
     const row = screen.getByText('Toggle chat history sidebar').closest('.keybinding-row')!;
     fireEvent.click(row.querySelector('.keybinding-edit')!);
     fireEvent.keyDown(window, { key: 'k', ctrlKey: true });   // collides with palette.open
-    expect(screen.getByText(/currently bound to/i)).toBeInTheDocument();
-    expect(screen.getByText(/open command palette/i)).toBeInTheDocument();
+
+    const modal = await screen.findByText(/currently bound to/i);
+    const modalContainer = modal.closest('.keybindings-modal') as HTMLElement;
+    expect(modalContainer).toBeInTheDocument();
+    // Within the modal, the conflicted-with binding label appears.
+    expect(within(modalContainer).getByText(/open command palette/i)).toBeInTheDocument();
   });
 
   it('Reset all button restores all defaults', async () => {

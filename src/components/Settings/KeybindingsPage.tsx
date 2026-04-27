@@ -106,9 +106,8 @@ export default function KeybindingsPage() {
         onChange={e => setFilter(e.target.value)}
       />
 
-      {!conflict && (
-        <div className="keybindings-list">
-          {rows.map(def => {
+      <div className="keybindings-list">
+        {rows.map(def => {
             const current = merged[def.id];
             const isEditing = editingId === def.id;
             const isDefault = !overrides[def.id] || overrides[def.id] === def.defaultCombo;
@@ -142,9 +141,8 @@ export default function KeybindingsPage() {
                 ><RotateCcw size={12} /></button>
               </div>
             );
-          })}
-        </div>
-      )}
+        })}
+      </div>
 
       <div className="keybindings-footer">
         <button
@@ -157,12 +155,9 @@ export default function KeybindingsPage() {
         <div className="keybindings-modal-overlay" onClick={() => setConflict(null)}>
           <div className="keybindings-modal" onClick={e => e.stopPropagation()}>
             <p>
-              <strong>{formatCombo(conflict.combo, platform)}</strong>
-              {' is currently bound to '}
-              {KEYBINDINGS.find(k => k.id === conflict.conflictWith)?.label}
-              {'. Reassign it to '}
-              {KEYBINDINGS.find(k => k.id === conflict.id)?.label}
-              {'?'}
+              <strong>{formatCombo(conflict.combo, platform)}</strong> is currently bound to{' '}
+              <strong>{KEYBINDINGS.find(k => k.id === conflict.conflictWith)?.label}</strong>.
+              Reassign it to <strong>{KEYBINDINGS.find(k => k.id === conflict.id)?.label}</strong>?
             </p>
             <div className="keybindings-modal-buttons">
               <button onClick={() => setConflict(null)}>Cancel</button>
