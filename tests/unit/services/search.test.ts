@@ -167,3 +167,97 @@ describe('parseRgOutput', () => {
     expect(result.files[0].matches).toHaveLength(1);
   });
 });
+
+import { scanBuffer, buildMatcher } from '../../../electron/services/search';
+
+describe('buildMatcher', () => {
+  it('returns a literal substring matcher when regex off', () => {
+    const m = buildMatcher({
+      pattern: 'foo', caseSensitive: false, wholeWord: false, regex: false,
+      includeGlobs: [], excludeGlobs: [], useGitignore: true,
+    });
+    expect(m.test('Hello FOO')).toBe(true);
+    expect(m.test('hello bar')).toBe(false);
+  });
+
+  it('respects caseSensitive for literal', () => {
+    const m = buildMatcher({
+      pattern: 'foo', caseSensitive: true, wholeWord: false, regex: false,
+      includeGlobs: [], excludeGlobs: [], useGitignore: true,
+    });
+    expect(m.test('Hello foo')).toBe(true);
+    expect(m.test('Hello FOO')).toBe(false);
+  });
+
+  it('treats pattern as regex when regex on', () => {
+    const m = buildMatcher({
+      pattern: 'fo+', caseSensitive: false, wholeWord: false, regex: true,
+      includeGlobs: [], excludeGlobs: [], useGitignore: true,
+    });
+    expect(m.test('foo')).toBe(true);
+    expect(m.test('fooo')).toBe(true);
+    expect(m.test('bar')).toBe(false);
+  });
+
+  it('wholeWord wraps pattern in \\b', () => {
+    const m = buildMatcher({
+      pattern: 'foo', caseSensitive: false, wholeWord: true, regex: false,
+      includeGlobs: [], excludeGlobs: [], useGitignore: true,
+    });
+    expect(m.test('foo bar')).toBe(true);
+    expect(m.test('foobar')).toBe(false);
+  });
+});
+
+describe('scanBuffer', () => {
+  const literalQuery = {
+    pattern: 'foo', caseSensitive: false, wholeWord: false, regex: false,
+    includeGlobs: [], excludeGlobs: [], useGitignore: true,
+  };
+
+  it('returns one SearchMatch per occurrence with correct line/col', () => {
+    const content = 'first foo line\nsecond line\nthird foo here\n';
+    const matches = scanBuffer(content, literalQuery);
+    expect(matches).toHaveLength(2);
+    expect(matches[0]).toEqual({
+      line: 1, column: 7, length: 3,
+      preview: 'first foo line',
+      matchStart: 6, matchEnd: 9,
+    });
+    expect(matches[1].line).toBe(3);
+  });
+
+  it('finds multiple matches per line', () => {
+    const matches = scanBuffer('foo and foo\n', literalQuery);
+    expect(matches).toHaveLength(2);
+    expect(matches[0].column).toBe(1);
+    expect(matches[1].column).toBe(9);
+  });
+
+  it('caps preview length at 500 chars', () => {
+    const longLine = 'x'.repeat(600) + 'foo';
+    const matches = scanBuffer(longLine, literalQuery);
+    expect(matches[0].preview.length).toBeLessThanOrEqual(500);
+  });
+
+  it('returns empty array when no matches', () => {
+    expect(scanBuffer('nothing here\n', literalQuery)).toEqual([]);
+  });
+});
+
+describe('mergeBufferResults', () => {
+  it('merges buffer-derived FileMatches into rg results', async () => {
+    const { mergeBufferResults } = await import('../../../electron/services/search');
+    const rgResults = {
+      files: [{ path: 'src/a.ts', matches: [{ line: 1, column: 1, length: 1, preview: 'a', matchStart: 0, matchEnd: 1 }] }],
+      truncated: false,
+      durationMs: 0,
+    };
+    const bufferResults = [
+      { path: 'src/b.ts', matches: [{ line: 5, column: 1, length: 1, preview: 'b', matchStart: 0, matchEnd: 1 }] },
+    ];
+    const merged = mergeBufferResults(rgResults, bufferResults);
+    expect(merged.files).toHaveLength(2);
+    expect(merged.files.find(f => f.path === 'src/b.ts')).toBeTruthy();
+  });
+});

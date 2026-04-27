@@ -95,3 +95,75 @@ export function parseRgOutput(stdout: string, rootPath: string, limits: ParseLim
 
   return { files, truncated, durationMs: 0 };
 }
+
+export interface Matcher {
+  test(line: string): boolean;
+  /** Returns array of [start, end] index pairs for matches in `line`. */
+  exec(line: string): Array<[number, number]>;
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function buildMatcher(query: SearchQuery): Matcher {
+  let source = query.regex ? query.pattern : escapeRegex(query.pattern);
+  if (query.wholeWord) source = `\\b${source}\\b`;
+  const flags = query.caseSensitive ? 'g' : 'gi';
+  // We construct a fresh regex per call to exec/test to keep lastIndex isolated.
+  return {
+    test(line: string): boolean {
+      return new RegExp(source, flags).test(line);
+    },
+    exec(line: string): Array<[number, number]> {
+      const re = new RegExp(source, flags);
+      const out: Array<[number, number]> = [];
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(line)) !== null) {
+        if (m[0].length === 0) {
+          re.lastIndex += 1;
+          continue;
+        }
+        out.push([m.index, m.index + m[0].length]);
+      }
+      return out;
+    },
+  };
+}
+
+export function scanBuffer(content: string, query: SearchQuery): SearchMatch[] {
+  const matcher = buildMatcher(query);
+  const results: SearchMatch[] = [];
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const ranges = matcher.exec(line);
+    if (ranges.length === 0) continue;
+    const preview = line.slice(0, 500);
+    for (const [start, end] of ranges) {
+      results.push({
+        line: i + 1,
+        column: start + 1,
+        length: end - start,
+        preview,
+        matchStart: start,
+        matchEnd: end,
+      });
+    }
+  }
+  return results;
+}
+
+export function mergeBufferResults(rgResults: SearchResults, bufferResults: FileMatches[]): SearchResults {
+  const byPath = new Map<string, FileMatches>();
+  for (const f of rgResults.files) byPath.set(f.path, f);
+  for (const f of bufferResults) {
+    if (f.matches.length === 0) continue;
+    byPath.set(f.path, f);  // buffer wins; rg was told to skip these paths anyway
+  }
+  return {
+    files: Array.from(byPath.values()),
+    truncated: rgResults.truncated,
+    durationMs: rgResults.durationMs,
+  };
+}
