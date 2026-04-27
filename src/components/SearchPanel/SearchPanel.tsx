@@ -15,6 +15,7 @@ export default function SearchPanel({ projectPath, getOpenBuffers, applyMonacoEd
   const inputRef = useRef<HTMLInputElement>(null);
   const [pattern, setPattern] = useState('');
   const [replacement, setReplacement] = useState('');
+  const [replaceVisible, setReplaceVisible] = useState(false);
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [wholeWord, setWholeWord] = useState(false);
   const [regex, setRegex] = useState(false);
@@ -89,6 +90,11 @@ export default function SearchPanel({ projectPath, getOpenBuffers, applyMonacoEd
 
       <div className="search-group">
         <div className="search-line">
+          <button
+            className="search-collapse-toggle"
+            title={replaceVisible ? 'Hide Replace' : 'Toggle Replace'}
+            onClick={() => setReplaceVisible(v => !v)}
+          >{replaceVisible ? <ChevronDown size={11} /> : <ChevronRight size={11} />}</button>
           <span className="search-line-icon"><Search size={11} /></span>
           <input
             ref={inputRef}
@@ -114,17 +120,22 @@ export default function SearchPanel({ projectPath, getOpenBuffers, applyMonacoEd
             onClick={() => setRegex(v => !v)}
           ><Regex size={12} /></button>
         </div>
-        <div className="search-divider" />
-        <div className="search-line">
-          <span className="search-line-icon"><Replace size={11} /></span>
-          <input
-            type="text"
-            className="search-input"
-            placeholder="Replace"
-            value={replacement}
-            onChange={e => setReplacement(e.target.value)}
-          />
-        </div>
+        {replaceVisible && (
+          <>
+            <div className="search-divider" />
+            <div className="search-line">
+              <span className="search-collapse-toggle-spacer" />
+              <span className="search-line-icon"><Replace size={11} /></span>
+              <input
+                type="text"
+                className="search-input"
+                placeholder="Replace"
+                value={replacement}
+                onChange={e => setReplacement(e.target.value)}
+              />
+            </div>
+          </>
+        )}
       </div>
 
       <button
@@ -207,13 +218,15 @@ export default function SearchPanel({ projectPath, getOpenBuffers, applyMonacoEd
             ? `${totalMatches} result${totalMatches === 1 ? '' : 's'} in ${totalFiles} file${totalFiles === 1 ? '' : 's'}${search.results.truncated ? ' (truncated)' : ''}`
             : ''}
         </span>
-        <button
-          className="search-replace-all"
-          disabled={totalMatches === 0 || search.state === 'replacing'}
-          onClick={handleReplaceAllClick}
-        >
-          Replace All
-        </button>
+        {replaceVisible && (
+          <button
+            className={`search-replace-all ${replacement.length === 0 ? 'muted' : ''}`}
+            disabled={totalMatches === 0 || search.state === 'replacing'}
+            onClick={handleReplaceAllClick}
+          >
+            Replace All
+          </button>
+        )}
       </div>
 
       {confirmOpen && (

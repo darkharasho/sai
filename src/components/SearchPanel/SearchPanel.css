@@ -74,6 +74,30 @@
   background: var(--border);
 }
 
+/* VS Code-style chevron at the very left of the search row that toggles the Replace input. */
+.search-collapse-toggle {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  padding: 2px;
+  margin-left: -2px;
+  border-radius: 3px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.search-collapse-toggle:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+/* Spacer keeps the Replace icon aligned with the Search icon below the chevron */
+.search-collapse-toggle-spacer {
+  display: inline-block;
+  width: 15px;
+  flex-shrink: 0;
+}
+
 .search-input {
   flex: 1;
   background: transparent;
@@ -319,7 +343,7 @@
 .search-replace-all {
   background: var(--accent);
   color: #1a1110;
-  border: none;
+  border: 1px solid var(--accent);
   font-weight: 600;
   padding: 4px 12px;
   border-radius: 3px;
@@ -327,10 +351,25 @@
   font-family: inherit;
   cursor: pointer;
 }
-.search-replace-all:hover { background: var(--accent-hover); }
+.search-replace-all:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
 .search-replace-all:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+/* Muted variant — used when the Replace input is empty (no text to replace with). */
+.search-replace-all.muted {
+  background: transparent;
+  color: var(--text-secondary);
+  border-color: var(--border);
+  font-weight: 500;
+}
+.search-replace-all.muted:hover {
+  background: var(--bg-hover);
+  border-color: var(--text-muted);
+  color: var(--text);
 }
 
 /* ---- Confirm dialog ---- */

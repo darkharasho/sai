@@ -54,6 +54,8 @@ test.describe('Search Sidebar', () => {
       await window.keyboard.press('Control+Shift+F');
       await window.locator('.search-panel').waitFor({ state: 'visible' });
       await window.locator('.search-panel .search-input').first().fill('foo');
+      // Replace input is collapsed by default — expand it via the chevron toggle.
+      await window.locator('.search-collapse-toggle').click();
       await window.locator('input[placeholder="Replace"]').fill('bar');
       await window.waitForTimeout(500);
       await window.locator('.search-replace-all').click();

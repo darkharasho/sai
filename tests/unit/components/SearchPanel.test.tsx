@@ -22,9 +22,27 @@ describe('SearchPanel', () => {
     expect(screen.getByTitle(/regex/i)).toBeInTheDocument();
   });
 
-  it('renders the replace input', () => {
+  it('replace input is hidden by default and toggled by the chevron', () => {
     render(<SearchPanel projectPath="/proj" getOpenBuffers={() => []} />);
+    expect(screen.queryByPlaceholderText(/replace/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTitle(/toggle replace/i));
     expect(screen.getByPlaceholderText(/replace/i)).toBeInTheDocument();
+  });
+
+  it('Replace All button only shows when replace is expanded', () => {
+    render(<SearchPanel projectPath="/proj" getOpenBuffers={() => []} />);
+    expect(screen.queryByText(/replace all/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTitle(/toggle replace/i));
+    expect(screen.getByText(/replace all/i)).toBeInTheDocument();
+  });
+
+  it('Replace All button is muted when replace input is empty', () => {
+    const { container } = render(<SearchPanel projectPath="/proj" getOpenBuffers={() => []} />);
+    fireEvent.click(screen.getByTitle(/toggle replace/i));
+    const btn = container.querySelector('.search-replace-all');
+    expect(btn?.classList.contains('muted')).toBe(true);
+    fireEvent.change(screen.getByPlaceholderText(/replace/i), { target: { value: 'bar' } });
+    expect(btn?.classList.contains('muted')).toBe(false);
   });
 
   it('toggles include/exclude details on click', () => {
