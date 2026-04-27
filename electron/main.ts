@@ -135,7 +135,7 @@ function createWindow() {
   registerGeminiHandlers(mainWindow);
   registerGitHandlers();
   registerFsHandlers(mainWindow!);
-  registerPluginHandlers();
+  registerPluginHandlers(readSettings);
   registerMcpHandlers();
   registerUpdater(mainWindow!);
   registerUsageHandlers(mainWindow!);
