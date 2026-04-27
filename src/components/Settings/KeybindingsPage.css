@@ -1,0 +1,137 @@
+.keybindings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.keybindings-search {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 6px 10px;
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.keybindings-search:focus { border-color: var(--accent); }
+
+.keybindings-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.keybinding-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.keybinding-row:last-child { border-bottom: none; }
+.keybinding-row:hover { background: var(--bg-hover); }
+
+.keybinding-label { flex: 1; color: var(--text); }
+.keybinding-combo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'Geist Mono', monospace;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  padding: 2px 8px;
+  border-radius: 3px;
+  min-width: 90px;
+  justify-content: center;
+}
+.keybinding-combo em {
+  font-style: italic;
+  color: var(--accent);
+}
+.keybinding-warn { color: var(--orange); display: inline-flex; }
+
+.keybinding-edit,
+.keybinding-reset {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  padding: 3px;
+  border-radius: 3px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+.keybinding-edit:hover:not(:disabled),
+.keybinding-reset:hover:not(:disabled) {
+  color: var(--accent);
+  background: var(--bg-elevated);
+}
+.keybinding-edit:disabled,
+.keybinding-reset:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.keybindings-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+.keybindings-reset-all {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 4px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+}
+.keybindings-reset-all:hover { border-color: var(--text-muted); color: var(--text); }
+
+.keybindings-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+}
+.keybindings-modal {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  padding: 16px;
+  border-radius: 6px;
+  max-width: 420px;
+  font-size: 12px;
+  color: var(--text);
+}
+.keybindings-modal-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.keybindings-modal-buttons button {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 4px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+}
+.keybindings-modal-buttons button.primary {
+  background: var(--accent);
+  color: #1a1110;
+  border-color: var(--accent);
+  font-weight: 600;
+}
