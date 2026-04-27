@@ -223,8 +223,11 @@ export function registerSearchHandlers(): void {
     const argv = buildRgArgs(args.query, openBufferRelPaths);
 
     let rgResults: SearchResults = { files: [], truncated: false, durationMs: 0 };
+    // Pass rootPath explicitly so rg emits absolute paths in --json output,
+    // which parseRgOutput then relativizes via path.relative(rootPath, abs).
+    const argvWithPath = [...argv, args.rootPath];
     try {
-      const { stdout } = await execFileAsync('rg', argv, {
+      const { stdout } = await execFileAsync('rg', argvWithPath, {
         cwd: args.rootPath,
         maxBuffer: 50 * 1024 * 1024,
         timeout: 30_000,
