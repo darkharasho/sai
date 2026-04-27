@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Check, ChevronDown, Settings as SettingsIcon, Monitor, Type, PanelLeft, Palette, HardDrive } from 'lucide-react';
+import { X, Check, ChevronDown, Settings as SettingsIcon, Monitor, Type, PanelLeft, Palette, HardDrive, Keyboard } from 'lucide-react';
+import KeybindingsPage from './Settings/KeybindingsPage';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, getActiveHighlightTheme, setActiveHighlightTheme, getShikiHighlighter, type HighlightThemeId } from '../themes';
 
 interface Props {
@@ -47,7 +48,7 @@ const RETENTION_OPTIONS: { label: string; value: number | null }[] = [
 ];
 
 type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error';
-type SettingsPage = 'general' | 'editor' | 'layout' | 'style' | 'storage' | 'provider' | 'claude' | 'codex' | 'gemini';
+type SettingsPage = 'general' | 'editor' | 'layout' | 'style' | 'storage' | 'provider' | 'claude' | 'codex' | 'gemini' | 'keybindings';
 
 function formatRelative(ts: number): string {
   const secs = Math.floor((Date.now() - ts) / 1000);
@@ -794,6 +795,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       case 'claude': return renderClaudePage();
       case 'codex': return renderCodexPage();
       case 'gemini': return renderGeminiPage();
+      case 'keybindings': return <KeybindingsPage />;
     }
   };
 
@@ -834,6 +836,13 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             >
               <Type size={14} />
               <span>Editor</span>
+            </button>
+            <button
+              className={`settings-nav-item${activePage === 'keybindings' ? ' active' : ''}`}
+              onClick={() => setActivePage('keybindings')}
+            >
+              <Keyboard size={14} />
+              <span>Keybindings</span>
             </button>
             <button
               className={`settings-nav-item${activePage === 'layout' ? ' active' : ''}`}
