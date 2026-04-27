@@ -30,7 +30,13 @@ export function buildDefaultSaiMock(fixturePath: string): Record<string, any> {
     selectFolder: () => Promise.resolve(null),
     selectFile: () => Promise.resolve(null),
     openRecentProject: () => {},
-    settingsGet: (_key: string, defaultVal?: any) => Promise.resolve(defaultVal ?? null),
+    settingsGet: (key: string, defaultVal?: any) => {
+      // Suppress the What's New modal in tests by pretending the user has already
+      // seen the current version. Tests that need to assert What's New behavior
+      // can override settingsGet via the saiMock fixture.
+      if (key === 'lastSeenVersion') return Promise.resolve('0.8.34');
+      return Promise.resolve(defaultVal ?? null);
+    },
     settingsSet: () => Promise.resolve(),
     claudeStart: () => Promise.resolve({ slashCommands: ['/help', '/clear', '/compact'] }),
     claudeSend: () => {},
@@ -136,7 +142,13 @@ export const test = base.extend<{ window: Page; saiMock: SaiMockOverrides }>({
           selectFolder: () => Promise.resolve(null),
           selectFile: () => Promise.resolve(null),
           openRecentProject: () => {},
-          settingsGet: (_key: string, defaultVal?: any) => Promise.resolve(defaultVal ?? null),
+          settingsGet: (key: string, defaultVal?: any) => {
+            // Suppress the What's New modal in tests by pretending the user has already
+            // seen the current version. Tests that need to assert What's New behavior
+            // can override settingsGet via the saiMock fixture.
+            if (key === 'lastSeenVersion') return Promise.resolve('0.8.34');
+            return Promise.resolve(defaultVal ?? null);
+          },
           settingsSet: () => Promise.resolve(),
           claudeStart: () => Promise.resolve({ slashCommands: ['/help', '/clear', '/compact'] }),
           claudeSend: () => {},

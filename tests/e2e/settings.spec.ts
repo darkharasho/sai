@@ -11,14 +11,6 @@ import { test, expect } from './electron.setup';
  */
 test.describe('Settings Modal', () => {
   async function openSettings(window: any): Promise<void> {
-    // Dismiss the "What's New" modal if it is blocking pointer events.
-    const backdrop = window.locator('[data-testid="whats-new-backdrop"]');
-    const gotItBtn = window.locator('button', { hasText: 'Got it' });
-    if (await backdrop.isVisible().catch(() => false)) {
-      await gotItBtn.click();
-      await backdrop.waitFor({ state: 'hidden', timeout: 5000 });
-    }
-
     const ghUserBtn = window.locator('.gh-user-btn');
     await ghUserBtn.waitFor({ state: 'visible', timeout: 15000 });
     await ghUserBtn.click();
