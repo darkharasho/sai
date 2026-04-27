@@ -1,4 +1,4 @@
-import { FolderClosed, GitBranch, Clock, Puzzle, Server } from 'lucide-react';
+import { FolderClosed, GitBranch, Clock, Puzzle, Server, Search } from 'lucide-react';
 
 interface NavBarProps {
   activeSidebar: string | null;
@@ -27,6 +27,14 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0 }: 
         <GitBranch size={18} />
         <span className="nav-label">Git</span>
         {gitChangeCount > 0 && <span className="git-badge">{badgeLabel}</span>}
+      </button>
+      <button
+        className={`nav-btn ${activeSidebar === 'search' ? 'active' : ''}`}
+        onClick={() => onToggle('search')}
+        title="Search"
+      >
+        <Search size={18} />
+        <span className="nav-label">Search</span>
       </button>
       <button
         className={`nav-btn ${activeSidebar === 'chats' ? 'active' : ''}`}

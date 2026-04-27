@@ -16,6 +16,7 @@ import { registerGeminiHandlers } from './services/gemini';
 import { registerPluginHandlers } from './services/plugins';
 import { registerMcpHandlers } from './services/mcp';
 import { registerScaffoldHandler } from './services/scaffold';
+import { registerSearchHandlers } from './services/search';
 
 // Allow E2E tests to isolate userData
 if (process.env.SAI_USER_DATA_DIR) {
@@ -136,6 +137,7 @@ function createWindow() {
   registerGitHandlers();
   registerFsHandlers(mainWindow!);
   registerPluginHandlers(readSettings);
+  registerSearchHandlers();
   registerMcpHandlers();
   registerUpdater(mainWindow!);
   registerUsageHandlers(mainWindow!);

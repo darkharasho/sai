@@ -93,6 +93,13 @@ contextBridge.exposeInMainWorld('sai', {
   fsCheckIgnored: (rootPath: string, paths: string[]) => ipcRenderer.invoke('fs:checkIgnored', rootPath, paths),
   fsWalkFiles: (rootPath: string) => ipcRenderer.invoke('fs:walkFiles', rootPath),
   fsGrep: (rootPath: string, query: string, maxResults?: number) => ipcRenderer.invoke('fs:grep', rootPath, query, maxResults),
+  searchRun: (args: {
+    rootPath: string;
+    query: import('../src/types').SearchQuery;
+    openBuffers: { path: string; content: string }[];
+  }) => ipcRenderer.invoke('search:run', args),
+  searchReplaceFile: (args: { filePath: string; edits: { line: number; column: number; length: number; replacement: string }[] }) =>
+    ipcRenderer.invoke('search:replaceFile', args),
   // Auto-updater
   updateCheck: () => ipcRenderer.send('update:check'),
   updateInstall: () => ipcRenderer.send('update:install'),
