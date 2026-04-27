@@ -25,6 +25,8 @@ import ChatHistorySidebar from './components/Chat/ChatHistorySidebar';
 import PluginsSidebar from './components/Plugins/PluginsSidebar';
 import McpSidebar from './components/MCP/McpSidebar';
 import { isImageFile } from './utils/imageFiles';
+import { getMonacoEditorFor } from './utils/monacoEditorRegistry';
+import * as monaco from 'monaco-editor';
 
 function applyEditsClientSide(content: string, edits: { line: number; column: number; length: number; replacement: string }[]): string {
   const sorted = [...edits].sort((a, b) => b.line - a.line || b.column - a.column);
@@ -238,22 +240,29 @@ export default function App() {
     });
   }, []);
 
-  // Apply replace edits to an open file's Monaco model as a single undo group.
-  // Falls back to rewriting the OpenFile content directly if the model isn't mounted.
+  // Apply replace edits to an open file's Monaco editor as a single undo group.
+  // Looks up the live editor instance via the registry populated by MonacoEditor.
+  // Falls back to rewriting OpenFile.content if no editor is mounted for this path
+  // (e.g. the file is "open" in a tab but not the active tab — Monaco editors are
+  // mounted per active tab in SAI's CodePanel).
   const applySearchEditsToMonaco = useCallback((filePath: string, edits: { line: number; column: number; length: number; replacement: string }[]) => {
-    const monacoLib = (window as any).monaco;
-    const models: any[] = monacoLib?.editor?.getModels?.() ?? [];
-    const model = models.find((m: any) => m.uri?.path === filePath || m.uri?.fsPath === filePath);
-    if (model) {
-      const ops = edits.map((e: any) => ({
-        range: new monacoLib.Range(e.line, e.column, e.line, e.column + e.length),
-        text: e.replacement,
-        forceMoveMarkers: true,
-      }));
-      model.pushEditOperations([], ops, () => null);
-      return;
+    const editor = getMonacoEditorFor(filePath);
+    if (editor) {
+      const model = editor.getModel();
+      if (model) {
+        const ops = edits.map(e => ({
+          range: new monaco.Range(e.line, e.column, e.line, e.column + e.length),
+          text: e.replacement,
+          forceMoveMarkers: true,
+        }));
+        // pushEditOperations groups all ops into a single undo unit.
+        model.pushEditOperations([], ops, () => null);
+        return;
+      }
     }
     // Fallback: rewrite OpenFile.content in workspace state and mark dirty.
+    // The next time the file's tab is shown, MonacoEditor will mount with the
+    // updated content as its initial value.
     if (!activeProjectPath) return;
     updateWorkspace(activeProjectPath, ws => ({
       ...ws,

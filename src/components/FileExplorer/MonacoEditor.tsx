@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as monaco from 'monaco-editor';
 import { getActiveHighlightTheme, buildMonacoThemeData } from '../../themes';
+import { registerMonacoEditor, unregisterMonacoEditor } from '../../utils/monacoEditorRegistry';
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
 import cssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker';
@@ -289,6 +290,7 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
     });
 
     editorRef.current = editor;
+    registerMonacoEditor(filePath, editor);
 
     // Apply saved highlight theme
     const hlTheme = getActiveHighlightTheme();
@@ -331,6 +333,7 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
       if (onContentChangeRef.current) {
         onContentChangeRef.current(filePath, editor.getValue());
       }
+      unregisterMonacoEditor(filePath, editor);
       editor.dispose();
     };
   }, []);
