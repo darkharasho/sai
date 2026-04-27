@@ -201,9 +201,16 @@ export interface RebaseStatus {
   onto: string;
 }
 
+export interface SaiSearchApi {
+  searchRun(args: { rootPath: string; query: SearchQuery; openBuffers: { path: string; content: string }[] }): Promise<SearchResults>;
+  searchReplaceFile(args: { filePath: string; edits: { line: number; column: number; length: number; replacement: string }[] }): Promise<void>;
+}
+
 declare global {
   interface SaiBridge extends Record<string, any> {
     geminiSetSessionId?: (projectPath: string, sessionId: string | undefined, scope?: string) => void;
+    searchRun?: SaiSearchApi['searchRun'];
+    searchReplaceFile?: SaiSearchApi['searchReplaceFile'];
   }
 
   interface Window {
