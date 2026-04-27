@@ -67,7 +67,12 @@ function readPluginMeta(installPath: string): { description: string; skills: str
   return { description, skills };
 }
 
-export function registerPluginHandlers() {
+export function registerPluginHandlers(readSettings?: () => Record<string, any>) {
+  function ghHeaders(): HeadersInit {
+    const token = readSettings?.()?.github_auth?.token;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
   ipcMain.handle('plugins:list', async () => {
     try {
       const output = await runClaude(['plugins', 'list', '--json']);
@@ -119,7 +124,7 @@ export function registerPluginHandlers() {
         }
       } catch { /* no installed plugins */ }
 
-      const res = await fetch('https://api.github.com/repos/anthropics/claude-plugins-official/contents/plugins');
+      const res = await fetch('https://api.github.com/repos/anthropics/claude-plugins-official/contents/plugins', { headers: ghHeaders() });
       if (!res.ok) throw new Error(`GitHub API error: ${res.status}`);
       const entries = await res.json() as { name: string; type: string }[];
       const dirs = entries.filter(e => e.type === 'dir' && !e.name.startsWith('.'));
@@ -137,21 +142,21 @@ export function registerPluginHandlers() {
           let skills: string[] = [];
           let commands: string[] = [];
           try {
-            const contentsRes = await fetch(`${baseUrl}/${dir.name}`);
+            const contentsRes = await fetch(`${baseUrl}/${dir.name}`, { headers: ghHeaders() });
             if (contentsRes.ok) {
               const contents = await contentsRes.json() as { name: string; type: string }[];
               const hasSkills = contents.some(e => e.name === 'skills' && e.type === 'dir');
               const hasCommands = contents.some(e => e.name === 'commands' && e.type === 'dir');
 
               if (hasSkills) {
-                const skillsRes = await fetch(`${baseUrl}/${dir.name}/skills`);
+                const skillsRes = await fetch(`${baseUrl}/${dir.name}/skills`, { headers: ghHeaders() });
                 if (skillsRes.ok) {
                   const skillEntries = await skillsRes.json() as { name: string }[];
                   skills = skillEntries.map(e => e.name).filter(n => !n.startsWith('.'));
                 }
               }
               if (hasCommands) {
-                const cmdsRes = await fetch(`${baseUrl}/${dir.name}/commands`);
+                const cmdsRes = await fetch(`${baseUrl}/${dir.name}/commands`, { headers: ghHeaders() });
                 if (cmdsRes.ok) {
                   const cmdEntries = await cmdsRes.json() as { name: string }[];
                   commands = cmdEntries.map(e => e.name.replace(/\.md$/, '')).filter(n => !n.startsWith('.'));
