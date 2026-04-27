@@ -79,16 +79,88 @@ test.describe('Chat', () => {
     await chatInput.fill('');
   });
 
-  test.skip('sending a message shows it in chat history (requires API key)', async ({ window }) => {
-    // Requires a real Claude/Codex/Gemini API key
+  test.describe('with scripted assistant', () => {
+    test.use({
+      saiMock: {
+        // Capture the renderer's callback so the test can fire fake messages.
+        claudeOnMessage: (cb: any) => {
+          (window as any).__saiTriggers = (window as any).__saiTriggers || {};
+          (window as any).__saiTriggers.claude = cb;
+          return () => {};
+        },
+        claudeSend: () => {
+          // Simulate the assistant echoing back asynchronously.
+          // ChatPanel handles: { type: 'assistant', message: { content: [{ type: 'text', text }] } }
+          setTimeout(() => {
+            const cb = (window as any).__saiTriggers?.claude;
+            if (cb) {
+              cb({ type: 'assistant', message: { content: [{ type: 'text', text: 'mock assistant reply' }] } });
+            }
+          }, 50);
+        },
+      },
+    });
+
+    test('sending a message shows it in chat history', async ({ window }) => {
+      const chatInput = window.locator('textarea').first();
+      await chatInput.waitFor({ state: 'visible', timeout: 20000 });
+      await chatInput.click({ force: true });
+      await chatInput.fill('hello from test');
+      await window.keyboard.press('Enter');
+      // The user's message should appear in the chat history
+      const userMsg = window.locator('text=hello from test').first();
+      await expect(userMsg).toBeVisible({ timeout: 3000 });
+    });
+
+    test('AI response appears in chat after send', async ({ window }) => {
+      const chatInput = window.locator('textarea').first();
+      await chatInput.waitFor({ state: 'visible', timeout: 20000 });
+      await chatInput.click({ force: true });
+      await chatInput.fill('trigger reply');
+      await window.keyboard.press('Enter');
+      const reply = window.locator('text=mock assistant reply').first();
+      await expect(reply).toBeVisible({ timeout: 5000 });
+    });
   });
 
-  test.skip('AI response appears in chat after send (requires API key)', async ({ window }) => {
-    // Requires a real AI API key
-  });
+  test.describe('with tool-call approval', () => {
+    test.use({
+      saiMock: {
+        claudeOnMessage: (cb: any) => {
+          (window as any).__saiTriggers = (window as any).__saiTriggers || {};
+          (window as any).__saiTriggers.claude = cb;
+          return () => {};
+        },
+        claudeSend: () => {
+          // Simulate a tool_use that requires approval.
+          // ChatPanel handles: { type: 'approval_needed', toolName, toolUseId, command, description, input }
+          setTimeout(() => {
+            const cb = (window as any).__saiTriggers?.claude;
+            if (cb) {
+              cb({
+                type: 'approval_needed',
+                toolName: 'Bash',
+                toolUseId: 'tool_1',
+                command: 'ls',
+                description: 'List files',
+                input: { command: 'ls' },
+              });
+            }
+          }, 50);
+        },
+      },
+    });
 
-  test.skip('approval panel appears for tool calls (requires API key)', async ({ window }) => {
-    // Requires an AI API key and a real project
+    test('approval panel appears for tool calls', async ({ window }) => {
+      const chatInput = window.locator('textarea').first();
+      await chatInput.waitFor({ state: 'visible', timeout: 20000 });
+      await chatInput.click({ force: true });
+      await chatInput.fill('do a thing');
+      await window.keyboard.press('Enter');
+      // Approval UI: look for an Allow / Approve button (cover both verbs).
+      const approveBtn = window.locator('button').filter({ hasText: /allow|approve/i }).first();
+      await expect(approveBtn).toBeVisible({ timeout: 5000 });
+    });
   });
 
   test('chat accordion bar is rendered', async ({ window }) => {
