@@ -210,3 +210,33 @@ declare global {
     sai: SaiBridge;
   }
 }
+
+export interface SearchQuery {
+  pattern: string;
+  caseSensitive: boolean;
+  wholeWord: boolean;
+  regex: boolean;
+  includeGlobs: string[];
+  excludeGlobs: string[];
+  useGitignore: boolean;
+}
+
+export interface SearchMatch {
+  line: number;
+  column: number;
+  length: number;
+  preview: string;
+  matchStart: number;
+  matchEnd: number;
+}
+
+export interface FileMatches {
+  path: string;
+  matches: SearchMatch[];
+}
+
+export interface SearchResults {
+  files: FileMatches[];
+  truncated: boolean;
+  durationMs: number;
+}
