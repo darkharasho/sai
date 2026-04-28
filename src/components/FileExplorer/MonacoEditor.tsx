@@ -56,16 +56,80 @@ monaco.editor.defineTheme('sai-dark', {
 });
 
 const EXT_TO_LANG: Record<string, string> = {
-  '.ts': 'typescript', '.tsx': 'typescript', '.js': 'javascript', '.jsx': 'javascript',
-  '.json': 'json', '.html': 'html', '.css': 'css', '.scss': 'scss', '.less': 'less',
-  '.md': 'markdown', '.py': 'python', '.rs': 'rust', '.go': 'go', '.java': 'java',
-  '.c': 'c', '.cpp': 'cpp', '.h': 'c', '.yaml': 'yaml', '.yml': 'yaml',
-  '.toml': 'ini', '.sh': 'shell', '.bash': 'shell', '.xml': 'xml', '.sql': 'sql',
-  '.vue': 'html', '.svelte': 'html', '.graphql': 'graphql', '.gql': 'graphql',
+  '.ts': 'typescript', '.tsx': 'typescript', '.mts': 'typescript', '.cts': 'typescript',
+  '.js': 'javascript', '.jsx': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript',
+  '.json': 'json', '.jsonc': 'json', '.json5': 'json',
+  '.html': 'html', '.htm': 'html', '.xhtml': 'html',
+  '.css': 'css', '.scss': 'scss', '.sass': 'scss', '.less': 'less',
+  '.md': 'markdown', '.markdown': 'markdown', '.mdx': 'mdx',
+  '.py': 'python', '.pyi': 'python', '.pyw': 'python',
+  '.rs': 'rust', '.go': 'go',
+  '.java': 'java', '.kt': 'kotlin', '.kts': 'kotlin', '.scala': 'scala', '.sc': 'scala',
+  '.rb': 'ruby', '.rake': 'ruby', '.gemspec': 'ruby',
+  '.c': 'c', '.h': 'c',
+  '.cpp': 'cpp', '.cc': 'cpp', '.cxx': 'cpp', '.hpp': 'cpp', '.hh': 'cpp', '.hxx': 'cpp',
+  '.cs': 'csharp', '.csx': 'csharp',
+  '.fs': 'fsharp', '.fsi': 'fsharp', '.fsx': 'fsharp',
+  '.vb': 'vb',
+  '.swift': 'swift', '.m': 'objective-c', '.mm': 'objective-c',
+  '.dart': 'dart', '.lua': 'lua', '.r': 'r',
+  '.pl': 'perl', '.pm': 'perl',
+  '.php': 'php', '.phtml': 'php',
+  '.clj': 'clojure', '.cljs': 'clojure', '.cljc': 'clojure', '.edn': 'clojure',
+  '.ex': 'elixir', '.exs': 'elixir',
+  '.jl': 'julia', '.pas': 'pascal', '.pp': 'pascal',
+  '.tcl': 'tcl', '.coffee': 'coffeescript',
+  '.sol': 'solidity', '.sv': 'systemverilog', '.svh': 'systemverilog',
+  '.wgsl': 'wgsl', '.proto': 'protobuf',
+  '.tf': 'hcl', '.tfvars': 'hcl', '.hcl': 'hcl',
+  '.bicep': 'bicep', '.abap': 'abap', '.apex': 'apex',
+  '.cls': 'apex', '.trigger': 'apex',
+  '.azcli': 'azcli',
+  '.yaml': 'yaml', '.yml': 'yaml',
+  '.toml': 'ini', '.ini': 'ini', '.cfg': 'ini', '.conf': 'ini', '.properties': 'ini',
+  '.sh': 'shell', '.bash': 'shell', '.zsh': 'shell', '.ksh': 'shell',
+  '.ps1': 'powershell', '.psm1': 'powershell', '.psd1': 'powershell',
+  '.bat': 'bat', '.cmd': 'bat',
+  '.xml': 'xml', '.xsd': 'xml', '.xsl': 'xml', '.xslt': 'xml', '.svg': 'xml', '.plist': 'xml',
+  '.sql': 'sql', '.mysql': 'mysql', '.pgsql': 'pgsql',
+  '.vue': 'html', '.svelte': 'html', '.hbs': 'handlebars', '.handlebars': 'handlebars',
+  '.pug': 'pug', '.jade': 'pug', '.twig': 'twig', '.liquid': 'liquid',
+  '.razor': 'razor', '.cshtml': 'razor',
+  '.graphql': 'graphql', '.gql': 'graphql',
+  '.rst': 'restructuredtext',
+  '.scm': 'scheme', '.ss': 'scheme', '.rkt': 'scheme',
+  '.st': 'st', '.q': 'qsharp', '.qs': 'qsharp',
+  '.dockerfile': 'dockerfile',
+  '.cypher': 'cypher', '.cyp': 'cypher',
+  '.sparql': 'sparql', '.rq': 'sparql',
+  '.redis': 'redis',
+};
+
+const FILENAME_TO_LANG: Record<string, string> = {
+  'dockerfile': 'dockerfile',
+  'containerfile': 'dockerfile',
+  'makefile': 'shell',
+  'gnumakefile': 'shell',
+  'gemfile': 'ruby',
+  'rakefile': 'ruby',
+  'guardfile': 'ruby',
+  'capfile': 'ruby',
+  'podfile': 'ruby',
+  'vagrantfile': 'ruby',
+  '.gitignore': 'ini',
+  '.gitattributes': 'ini',
+  '.editorconfig': 'ini',
+  '.npmrc': 'ini',
+  '.env': 'shell',
 };
 
 export function detectLanguage(filePath: string): string {
-  const ext = '.' + filePath.split('.').pop()?.toLowerCase();
+  const name = filePath.split(/[\\/]/).pop()?.toLowerCase() ?? '';
+  const byName = FILENAME_TO_LANG[name];
+  if (byName) return byName;
+  const dot = name.lastIndexOf('.');
+  if (dot < 0) return 'plaintext';
+  const ext = name.slice(dot);
   return EXT_TO_LANG[ext] ?? 'plaintext';
 }
 
