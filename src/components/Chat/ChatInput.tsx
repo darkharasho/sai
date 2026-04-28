@@ -102,7 +102,7 @@ const EFFORT_CONFIG: Record<EffortLevel, { icon: typeof ChevronDown; label: stri
 const MODEL_OPTIONS: { id: ModelChoice; label: string; description: string; color: string; recommended?: boolean }[] = [
   { id: 'default',    label: 'Default',    description: 'Your account\u2019s recommended model',                                 color: 'var(--text-secondary)' },
   { id: 'sonnet',     label: 'Sonnet',     description: 'Claude Sonnet 4.6 \u00b7 Best for everyday tasks',                      color: 'var(--accent)', recommended: true },
-  { id: 'opus',       label: 'Opus',       description: 'Claude Opus 4.6 \u00b7 Most capable for complex work',                  color: 'var(--orange)' },
+  { id: 'opus',       label: 'Opus',       description: 'Claude Opus 4.7 \u00b7 Most capable for complex work',                  color: 'var(--orange)' },
   { id: 'haiku',      label: 'Haiku',      description: 'Claude Haiku \u00b7 Fastest for quick answers',                         color: 'var(--green)' },
   { id: 'best',       label: 'Best',       description: 'Most capable available (currently Opus)',                               color: 'var(--orange)' },
   { id: 'opusplan',   label: 'Opus Plan',  description: 'Opus in plan mode, Sonnet for execution',                               color: 'var(--orange)' },
