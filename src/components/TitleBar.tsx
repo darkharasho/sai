@@ -42,6 +42,8 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
+  const [framelessRounded, setFramelessRounded] = useState(false);
+  const [maximized, setMaximized] = useState(false);
   const ghDropRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -50,7 +52,16 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
     const unsubSync = window.sai.githubOnSyncStatus((data: { status: string }) => {
       setSyncStatus(data.status as any);
     });
-    return () => unsubSync();
+    window.sai.windowIsFramelessRounded?.().then((v: boolean) => setFramelessRounded(!!v));
+    window.sai.windowIsMaximized?.().then((v: boolean) => {
+      setMaximized(!!v);
+      document.documentElement.classList.toggle('window-maximized', !!v);
+    });
+    const unsubMax = window.sai.windowOnMaximizedChange?.((m: boolean) => {
+      setMaximized(m);
+      document.documentElement.classList.toggle('window-maximized', m);
+    });
+    return () => { unsubSync(); unsubMax?.(); };
   }, []);
 
   const projectName = projectPath ? basename(projectPath) : 'No Project';
@@ -127,7 +138,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
   };
 
   return (
-    <div className={`titlebar${window.sai.platform === 'darwin' ? ' titlebar-mac' : ''}`}>
+    <div className={`titlebar${window.sai.platform === 'darwin' ? ' titlebar-mac' : ''}${framelessRounded ? ' titlebar-frameless' : ''}`}>
       {window.sai.platform !== 'darwin' && (
         <div className="titlebar-brand">
           <img src="svg/sai.svg" alt="SAI" width="18" height="18" />
@@ -330,6 +341,32 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
             <img src="svg/sai.svg" alt="SAI" width="18" height="18" />
           </div>
         )}
+        {framelessRounded && (
+          <div className="titlebar-window-controls">
+            <button className="window-ctrl" onClick={() => window.sai.windowMinimize()} aria-label="Minimize">
+              <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="2.2">
+                <path d="M1 9 H9" />
+              </svg>
+            </button>
+            <button className="window-ctrl" onClick={() => window.sai.windowMaximizeToggle()} aria-label={maximized ? 'Restore' : 'Maximize'}>
+              {maximized ? (
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="2.2">
+                  <path d="M1 3 H7 V9 H1 Z" />
+                  <path d="M3 3 V1 H9 V7 H7" />
+                </svg>
+              ) : (
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="2.2">
+                  <path d="M1 1 H9 V9 H1 Z" />
+                </svg>
+              )}
+            </button>
+            <button className="window-ctrl window-ctrl-close" onClick={() => window.sai.windowClose()} aria-label="Close">
+              <svg width="11" height="11" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="2.2">
+                <path d="M1 1 L9 9 M9 1 L1 9" />
+              </svg>
+            </button>
+          </div>
+        )}
       </div>
       {showAuthModal && <GitHubAuthModal onSuccess={handleAuthSuccess} onClose={() => setShowAuthModal(false)} />}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} onSettingChange={onSettingChange} onOpenWhatsNew={onOpenWhatsNew} onHistoryRetentionChange={onHistoryRetentionChange} />}
@@ -385,6 +422,36 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         }
         .titlebar-mac .titlebar-right {
           margin-right: 12px;
+        }
+        .titlebar-frameless .titlebar-right {
+          margin-right: 0;
+        }
+        .titlebar-window-controls {
+          display: flex;
+          align-items: stretch;
+          margin-left: 0;
+          height: var(--titlebar-height);
+          -webkit-app-region: no-drag;
+        }
+        .window-ctrl {
+          width: 32px;
+          height: var(--titlebar-height);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: transparent;
+          border: none;
+          color: var(--text-secondary);
+          cursor: pointer;
+          transition: background-color 120ms ease, color 120ms ease;
+        }
+        .window-ctrl:hover {
+          background: var(--bg-hover);
+          color: var(--text);
+        }
+        .window-ctrl-close:hover {
+          background: #c4202b;
+          color: #fff;
         }
         .titlebar-version {
           color: var(--text-secondary);

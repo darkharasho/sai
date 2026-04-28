@@ -38,6 +38,41 @@ html, body, #root {
   overflow: hidden;
 }
 
+html.rounded-corners,
+html.rounded-corners body {
+  background: transparent;
+}
+
+html.rounded-corners #root {
+  border-radius: 10px;
+  background: var(--bg-primary);
+}
+
+html.rounded-corners.window-maximized #root {
+  border-radius: 0;
+}
+
+html.rounded-corners .settings-overlay,
+html.rounded-corners .gh-modal-overlay,
+html.rounded-corners .keybindings-modal-overlay,
+html.rounded-corners .search-confirm-overlay,
+html.rounded-corners .cp-backdrop,
+html.rounded-corners .img-modal-overlay,
+html.rounded-corners .drag-overlay {
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+html.rounded-corners.window-maximized .settings-overlay,
+html.rounded-corners.window-maximized .gh-modal-overlay,
+html.rounded-corners.window-maximized .keybindings-modal-overlay,
+html.rounded-corners.window-maximized .search-confirm-overlay,
+html.rounded-corners.window-maximized .cp-backdrop,
+html.rounded-corners.window-maximized .img-modal-overlay,
+html.rounded-corners.window-maximized .drag-overlay {
+  border-radius: 0;
+}
+
 .app {
   height: 100%;
   display: flex;

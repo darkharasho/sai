@@ -394,6 +394,9 @@ export default function App() {
     window.sai.settingsGet('theme', 'default').then((v: string) => {
       if (v !== 'default' && THEMES.some(t => t.id === v)) applyTheme(v as ThemeId);
     });
+    window.sai.settingsGet('roundedCorners', false).then((v: boolean) => {
+      document.documentElement.classList.toggle('rounded-corners', !!v);
+    });
     window.sai.settingsGet('highlightTheme', 'monokai').then((v: string) => {
       if (v !== 'monokai' && HIGHLIGHT_THEMES.some(t => t.id === v)) setActiveHighlightTheme(v as HighlightThemeId);
     });
@@ -455,6 +458,7 @@ export default function App() {
       if ('editorMinimap' in remote) setEditorMinimap(remote.editorMinimap);
       if ('sidebarWidth' in remote) document.documentElement.style.setProperty('--sidebar-width', `${remote.sidebarWidth}px`);
       if ('theme' in remote && THEMES.some(t => t.id === remote.theme)) applyTheme(remote.theme as ThemeId);
+      if ('roundedCorners' in remote) document.documentElement.classList.toggle('rounded-corners', !!remote.roundedCorners);
       if ('highlightTheme' in remote && HIGHLIGHT_THEMES.some(t => t.id === remote.highlightTheme)) setActiveHighlightTheme(remote.highlightTheme as HighlightThemeId);
       if ('aiProvider' in remote && (remote.aiProvider === 'claude' || remote.aiProvider === 'codex' || remote.aiProvider === 'gemini')) setAiProvider(remote.aiProvider);
       if ('commitMessageProvider' in remote && (remote.commitMessageProvider === 'claude' || remote.commitMessageProvider === 'codex' || remote.commitMessageProvider === 'gemini')) setCommitMessageProvider(remote.commitMessageProvider);

@@ -36,12 +36,19 @@ const THEME_TITLEBAR: Record<string, { color: string; symbolColor: string; bg: s
   steel:    { color: '#2c2d33', symbolColor: '#d5d5dc', bg: '#36373e' },
 };
 
+const isMac = process.platform === 'darwin';
+let useFramelessRounded = false;
+
 function createWindow() {
   let tb = THEME_TITLEBAR.default;
+  let rounded = false;
   try {
     const s = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'), 'utf-8'));
     if (s.theme && THEME_TITLEBAR[s.theme]) tb = THEME_TITLEBAR[s.theme];
+    rounded = !!s.roundedCorners;
   } catch { /* use default */ }
+  // Frameless transparent mode is only used off macOS — macOS keeps its native traffic lights.
+  useFramelessRounded = rounded && !isMac;
 
   // Restore last window position/size if valid
   let savedBounds: { x: number; y: number; width: number; height: number } | undefined;
@@ -66,13 +73,17 @@ function createWindow() {
     ...(savedBounds ? { x: savedBounds.x, y: savedBounds.y } : {}),
     minWidth: 800,
     minHeight: 600,
-    titleBarStyle: 'hidden',
-    titleBarOverlay: {
-      color: tb.color,
-      symbolColor: tb.symbolColor,
-      height: 38,
-    },
-    backgroundColor: tb.bg,
+    ...(useFramelessRounded
+      ? { frame: false, transparent: true, backgroundColor: '#00000000' }
+      : {
+          titleBarStyle: 'hidden' as const,
+          ...(isMac
+            ? {}
+            : { titleBarOverlay: { color: tb.color, symbolColor: tb.symbolColor, height: 38 } }
+          ),
+          backgroundColor: tb.bg,
+        }
+    ),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -80,6 +91,9 @@ function createWindow() {
       spellcheck: true,
     },
   });
+
+  mainWindow.on('maximize', () => mainWindow?.webContents.send('window:maximizedChange', true));
+  mainWindow.on('unmaximize', () => mainWindow?.webContents.send('window:maximizedChange', false));
 
   initFocusTracking(mainWindow);
   mainWindow.on('focus', () => {
@@ -210,10 +224,20 @@ function createWindow() {
   });
 
   ipcMain.handle('titlebar:setOverlay', (_event, color: string, symbolColor: string) => {
-    if (mainWindow) {
-      mainWindow.setTitleBarOverlay({ color, symbolColor, height: 38 });
+    if (mainWindow && !useFramelessRounded && !isMac) {
+      try { mainWindow.setTitleBarOverlay({ color, symbolColor, height: 38 }); } catch { /* no overlay */ }
     }
   });
+
+  ipcMain.handle('window:isFramelessRounded', () => useFramelessRounded);
+  ipcMain.handle('window:isMaximized', () => !!mainWindow?.isMaximized());
+  ipcMain.on('window:minimize', () => mainWindow?.minimize());
+  ipcMain.on('window:maximizeToggle', () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    else mainWindow.maximize();
+  });
+  ipcMain.on('window:close', () => mainWindow?.close());
 
   ipcMain.handle('github:syncNow', async () => {
     const auth = getAuthInfo();

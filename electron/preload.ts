@@ -142,6 +142,16 @@ contextBridge.exposeInMainWorld('sai', {
   settingsGet: (key: string, defaultValue?: any) => ipcRenderer.invoke('settings:get', key, defaultValue),
   settingsSet: (key: string, value: any) => ipcRenderer.invoke('settings:set', key, value),
   setTitleBarOverlay: (color: string, symbolColor: string) => ipcRenderer.invoke('titlebar:setOverlay', color, symbolColor),
+  windowIsFramelessRounded: () => ipcRenderer.invoke('window:isFramelessRounded'),
+  windowIsMaximized: () => ipcRenderer.invoke('window:isMaximized'),
+  windowMinimize: () => ipcRenderer.send('window:minimize'),
+  windowMaximizeToggle: () => ipcRenderer.send('window:maximizeToggle'),
+  windowClose: () => ipcRenderer.send('window:close'),
+  windowOnMaximizedChange: (callback: (maximized: boolean) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, maximized: boolean) => callback(maximized);
+    ipcRenderer.on('window:maximizedChange', listener);
+    return () => ipcRenderer.removeListener('window:maximizedChange', listener);
+  },
   getCwd: () => ipcRenderer.invoke('project:getCwd'),
   selectFolder: (defaultPath?: string) => ipcRenderer.invoke('project:selectFolder', defaultPath),
   selectFile: () => ipcRenderer.invoke('project:selectFile'),

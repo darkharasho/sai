@@ -90,6 +90,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [isAuthed, setIsAuthed] = useState(false);
   const [theme, setTheme] = useState<ThemeId>('default');
   const [highlightTheme, setHighlightTheme] = useState<HighlightThemeId>('monokai');
+  const [roundedCorners, setRoundedCorners] = useState(false);
   const [historyRetention, setHistoryRetention] = useState<number | null>(14);
   const [previewHtml, setPreviewHtml] = useState('');
 
@@ -117,6 +118,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.settingsGet('highlightTheme', 'monokai').then((v: string) => {
       if (HIGHLIGHT_THEMES.some(t => t.id === v)) setHighlightTheme(v as HighlightThemeId);
     });
+    window.sai.settingsGet('roundedCorners', false).then((v: boolean) => setRoundedCorners(!!v));
     window.sai.settingsGet('aiProvider', 'claude').then((v: string) => {
       if (v === 'claude' || v === 'codex' || v === 'gemini') setAiProvider(v as 'claude' | 'codex' | 'gemini');
     });
@@ -152,6 +154,10 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if ('highlightTheme' in remote && HIGHLIGHT_THEMES.some(t => t.id === remote.highlightTheme)) {
         setHighlightTheme(remote.highlightTheme);
         setActiveHighlightTheme(remote.highlightTheme);
+      }
+      if ('roundedCorners' in remote) {
+        setRoundedCorners(!!remote.roundedCorners);
+        document.documentElement.classList.toggle('rounded-corners', !!remote.roundedCorners);
       }
       if ('historyRetention' in remote) setHistoryRetention(remote.historyRetention);
     });
@@ -193,6 +199,13 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     applyTheme(id);
     window.sai.settingsSet('theme', id);
     onSettingChange?.('theme', id);
+  };
+
+  const handleRoundedCornersChange = (value: boolean) => {
+    setRoundedCorners(value);
+    document.documentElement.classList.toggle('rounded-corners', value);
+    window.sai.settingsSet('roundedCorners', value);
+    onSettingChange?.('roundedCorners', value);
   };
 
   const handleHighlightThemeChange = (id: HighlightThemeId) => {
@@ -402,6 +415,26 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
               {theme === t.id && <Check size={12} className="theme-check" />}
             </button>
           ))}
+        </div>
+      </section>
+
+      <div className="settings-divider" />
+
+      <section className="settings-section">
+        <div className="settings-section-label">Window</div>
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <div className="settings-row-name">Rounded corners</div>
+            <div className="settings-row-desc">Round the corners of the app window. Restart required (Linux/Windows switch to a custom titlebar; macOS keeps native controls).</div>
+          </div>
+          <button
+            className={`settings-toggle${roundedCorners ? ' on' : ''}`}
+            onClick={() => handleRoundedCornersChange(!roundedCorners)}
+            role="switch"
+            aria-checked={roundedCorners}
+          >
+            <span className="settings-toggle-thumb" />
+          </button>
         </div>
       </section>
 
