@@ -99,7 +99,7 @@ export async function scaffoldProject(
   // Step 3 — git init
   if (options.helpers.gitInit) {
     try {
-      execSync('git init', { cwd: resolved, stdio: 'ignore' });
+      execSync('git init -b main', { cwd: resolved, stdio: 'ignore' });
     } catch (e: any) {
       warnings.push(`git init: ${e.message}`);
     }
