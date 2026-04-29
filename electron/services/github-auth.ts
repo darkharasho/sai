@@ -1,5 +1,8 @@
 import { ipcMain, BrowserWindow, shell } from 'electron';
 import https from 'node:https';
+import { execFile } from 'node:child_process';
+import path from 'node:path';
+import fs from 'node:fs';
 
 const CLIENT_ID = process.env.GH_CLIENT_ID || 'Ov23lix7TYcz9hm8M874';
 
@@ -33,7 +36,7 @@ function get(url: string, token: string): Promise<any> {
     const u = new URL(url);
     const req = https.request({
       hostname: u.hostname,
-      path: u.pathname,
+      path: u.pathname + u.search,
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -135,5 +138,64 @@ export function registerGithubAuthHandlers(
   ipcMain.handle('github:logout', () => {
     stopPolling();
     writeSetting('github_auth', null);
+  });
+
+  ipcMain.handle('github:listRepos', async (_event, page: number = 1, search?: string) => {
+    const token = readSettings().github_auth?.token;
+    if (!token) throw new Error('Not authenticated');
+
+    const PER_PAGE = 50;
+    const mapRepo = (r: any) => ({
+      name: r.name,
+      full_name: r.full_name,
+      clone_url: r.clone_url,
+      private: r.private,
+      description: r.description,
+      updated_at: r.updated_at,
+      language: r.language,
+    });
+
+    if (search) {
+      // Search all repos the user can access (owned, org, collaborator)
+      const q = encodeURIComponent(`${search} in:name fork:true`);
+      const result = await get(`https://api.github.com/search/repositories?q=${q}&per_page=${PER_PAGE}&page=${page}`, token);
+      return {
+        items: (result.items || []).map(mapRepo),
+        hasMore: (result.total_count || 0) > page * PER_PAGE,
+      };
+    }
+
+    const repos = await get(`https://api.github.com/user/repos?sort=updated&per_page=${PER_PAGE}&page=${page}&affiliation=owner,collaborator,organization_member`, token);
+    if (!Array.isArray(repos)) throw new Error('Failed to fetch repos');
+    return { items: repos.map(mapRepo), hasMore: repos.length === PER_PAGE };
+  });
+
+  ipcMain.handle('github:clone', async (_event, cloneUrl: string, targetDir: string) => {
+    const token = readSettings().github_auth?.token;
+    if (!token) throw new Error('Not authenticated');
+
+    // Inject token into clone URL for auth: https://<token>@github.com/...
+    const authedUrl = cloneUrl.replace('https://github.com/', `https://${token}@github.com/`);
+
+    // Ensure parent dir exists
+    fs.mkdirSync(targetDir, { recursive: true });
+
+    // Extract repo name for the clone target
+    const repoName = path.basename(cloneUrl, '.git');
+    const clonePath = path.join(targetDir, repoName);
+
+    if (fs.existsSync(clonePath)) {
+      throw new Error(`Directory already exists: ${clonePath}`);
+    }
+
+    return new Promise<string>((resolve, reject) => {
+      execFile('git', ['clone', authedUrl, clonePath], { timeout: 120000 }, (err) => {
+        if (err) {
+          reject(new Error(err.message));
+        } else {
+          resolve(clonePath);
+        }
+      });
+    });
   });
 }

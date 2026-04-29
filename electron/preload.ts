@@ -183,6 +183,8 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.on('github:authError', listener);
     return () => ipcRenderer.removeListener('github:authError', listener);
   },
+  githubListRepos: (page?: number, search?: string) => ipcRenderer.invoke('github:listRepos', page, search),
+  githubClone: (cloneUrl: string, targetDir: string) => ipcRenderer.invoke('github:clone', cloneUrl, targetDir),
   githubSyncNow: () => ipcRenderer.invoke('github:syncNow'),
   githubOnSyncStatus: (callback: (status: { status: string; lastSynced?: number }) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, data: any) => callback(data);
