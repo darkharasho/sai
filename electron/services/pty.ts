@@ -249,6 +249,13 @@ export function registerTerminalHandlers(win: BrowserWindow) {
     if (owner) touchActivity(owner);
   });
 
+  ipcMain.on('terminal:signal', (_event, id: number, signal: string) => {
+    const term = allTerminals.get(id);
+    if (term) {
+      try { process.kill(-term.pid, signal); } catch { /* process already exited */ }
+    }
+  });
+
   ipcMain.on('terminal:resize', (_event, id: number, cols: number, rows: number) => {
     allTerminals.get(id)?.resize(cols, rows);
   });

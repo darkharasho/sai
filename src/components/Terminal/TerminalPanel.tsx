@@ -66,9 +66,12 @@ function TerminalInstance({ tabUid, projectPath, visible, onTerminalReady }: Ter
     xtermRef.current = xterm;
     fitRef.current = fit;
 
-    // Handle Ctrl+Shift+C (copy) and Ctrl+Shift+V (paste)
+    // Handle Ctrl+Shift+C (copy), Ctrl+Shift+V (paste), and Ctrl+C (SIGINT).
+    // On macOS, Chromium's Cocoa text input layer can swallow Ctrl+key events
+    // before xterm.js processes them, so we must send \x03 explicitly.
     xterm.attachCustomKeyEventHandler((e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && e.type === 'keydown') {
+      if (e.type !== 'keydown') return true;
+      if (e.ctrlKey && e.shiftKey) {
         if (e.key === 'C' || e.code === 'KeyC') {
           e.preventDefault();
           const sel = xterm.getSelection();
@@ -82,6 +85,15 @@ function TerminalInstance({ tabUid, projectPath, visible, onTerminalReady }: Ter
           });
           return false;
         }
+      }
+      // Ctrl+C without shift — send SIGINT directly to the PTY and process group
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && (e.key === 'c' || e.code === 'KeyC')) {
+        const id = termIdRef.current;
+        if (id !== null) {
+          window.sai.terminalWrite(id, '\x03');
+          window.sai.terminalSignal(id, 'SIGINT');
+        }
+        return false;
       }
       return true;
     });
