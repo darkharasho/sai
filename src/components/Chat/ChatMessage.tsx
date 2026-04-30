@@ -542,6 +542,10 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
         .chat-msg-body { color: var(--text); line-height: 1.6; flex: 1; min-width: 0; }
         .chat-msg-body p { margin: 0 0 8px 0; }
         .chat-msg-body p:last-child { margin-bottom: 0; }
+        .chat-msg-body ol, .chat-msg-body ul { padding-left: 24px; margin: 0 0 8px 0; }
+        .chat-msg-body ol:last-child, .chat-msg-body ul:last-child { margin-bottom: 0; }
+        .chat-msg-body li { margin: 2px 0; }
+        .chat-msg-body li > p { margin: 0; }
         .chat-msg-body code {
           background: var(--bg-hover);
           padding: 2px 6px;
