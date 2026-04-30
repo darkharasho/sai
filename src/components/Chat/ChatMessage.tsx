@@ -4,7 +4,7 @@ import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 import 'highlight.js/styles/monokai.css';
-import { Check, Circle, Copy, Terminal, TerminalSquare, X } from 'lucide-react';
+import { AlertTriangle, Check, ChevronRight, Circle, Copy, RotateCw, Terminal, TerminalSquare, X } from 'lucide-react';
 import ToolCallCard from './ToolCallCard';
 import type { ChatMessage as ChatMessageType } from '../../types';
 import { getActiveTerminalId } from '../../terminalBuffer';
@@ -224,9 +224,190 @@ function ImageModal({ src, onClose }: { src: string; onClose: () => void }) {
   );
 }
 
-export default function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', toolCallsExpanded = true }: { message: ChatMessageType; projectPath?: string; onFileOpen?: (path: string, line?: number) => void; aiProvider?: 'claude' | 'codex' | 'gemini'; toolCallsExpanded?: boolean }) {
+export default function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', toolCallsExpanded = true, onRetry }: { message: ChatMessageType; projectPath?: string; onFileOpen?: (path: string, line?: number) => void; aiProvider?: 'claude' | 'codex' | 'gemini'; toolCallsExpanded?: boolean; onRetry?: () => void }) {
   const dotColor = getDotColor(message.role);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [errorDetailsOpen, setErrorDetailsOpen] = useState(false);
+  const [errorDetailsCopied, setErrorDetailsCopied] = useState(false);
+
+  if (message.error) {
+    const { title, status, message: errMsg, requestId, details } = message.error;
+    const handleCopyDetails = () => {
+      if (!details) return;
+      navigator.clipboard.writeText(details);
+      setErrorDetailsCopied(true);
+      setTimeout(() => setErrorDetailsCopied(false), 1500);
+    };
+    return (
+      <div className="chat-msg chat-msg-error-wrap">
+        <div className="chat-msg-error">
+          <div className="chat-msg-error-header">
+            <AlertTriangle size={16} className="chat-msg-error-icon" />
+            <div className="chat-msg-error-title">
+              {title}
+              {status != null && <span className="chat-msg-error-status">HTTP {status}</span>}
+            </div>
+          </div>
+          <div className="chat-msg-error-body">{errMsg}</div>
+          {requestId && (
+            <div className="chat-msg-error-meta">
+              request_id <code>{requestId}</code>
+            </div>
+          )}
+          {details && (
+            <div className="chat-msg-error-details">
+              <button
+                type="button"
+                className="chat-msg-error-toggle"
+                onClick={() => setErrorDetailsOpen(o => !o)}
+              >
+                <ChevronRight size={12} className={`chat-msg-error-chev ${errorDetailsOpen ? 'open' : ''}`} />
+                {errorDetailsOpen ? 'Hide details' : 'Show details'}
+              </button>
+              {errorDetailsOpen && (
+                <div className="chat-msg-error-details-body">
+                  <button
+                    type="button"
+                    className="chat-msg-error-copy"
+                    onClick={handleCopyDetails}
+                    title="Copy raw error"
+                  >
+                    {errorDetailsCopied ? <Check size={12} /> : <Copy size={12} />}
+                  </button>
+                  <pre>{details}</pre>
+                </div>
+              )}
+            </div>
+          )}
+          {onRetry && (
+            <div className="chat-msg-error-actions">
+              <button type="button" className="chat-msg-error-retry" onClick={onRetry}>
+                <RotateCw size={12} /> Retry
+              </button>
+            </div>
+          )}
+        </div>
+        <style>{`
+          .chat-msg-error-wrap { margin-bottom: 16px; animation: msg-enter 0.25s ease-out both; }
+          @keyframes msg-enter {
+            from { opacity: 0; transform: translateY(6px); }
+            to   { opacity: 1; transform: translateY(0); }
+          }
+          .chat-msg-error {
+            border: 1px solid color-mix(in srgb, var(--red) 40%, var(--border));
+            background: color-mix(in srgb, var(--red) 8%, var(--bg-input));
+            border-left: 3px solid var(--red);
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: var(--text);
+            font-size: 13px;
+            line-height: 1.5;
+          }
+          .chat-msg-error-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 4px;
+          }
+          .chat-msg-error-icon { color: var(--red); flex-shrink: 0; }
+          .chat-msg-error-title {
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+          }
+          .chat-msg-error-status {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-muted);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+          }
+          .chat-msg-error-body { color: var(--text); white-space: pre-wrap; word-break: break-word; }
+          .chat-msg-error-actions {
+            margin-top: 8px;
+            display: flex;
+            gap: 8px;
+          }
+          .chat-msg-error-retry {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            color: var(--text);
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s;
+          }
+          .chat-msg-error-retry:hover {
+            background: var(--bg-hover);
+            border-color: color-mix(in srgb, var(--red) 50%, var(--border));
+          }
+          .chat-msg-error-meta {
+            margin-top: 6px;
+            font-size: 11px;
+            color: var(--text-muted);
+          }
+          .chat-msg-error-meta code {
+            font-family: monospace;
+            background: var(--bg-secondary);
+            padding: 1px 5px;
+            border-radius: 3px;
+            border: 1px solid var(--border);
+          }
+          .chat-msg-error-details { margin-top: 8px; }
+          .chat-msg-error-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 11px;
+            cursor: pointer;
+            padding: 2px 0;
+          }
+          .chat-msg-error-toggle:hover { color: var(--text); }
+          .chat-msg-error-chev { transition: transform 0.15s; }
+          .chat-msg-error-chev.open { transform: rotate(90deg); }
+          .chat-msg-error-details-body {
+            position: relative;
+            margin-top: 6px;
+          }
+          .chat-msg-error-details-body pre {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 8px 10px;
+            margin: 0;
+            overflow-x: auto;
+            font-size: 11px;
+            color: var(--text-secondary);
+            max-height: 200px;
+          }
+          .chat-msg-error-copy {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            opacity: 0.5;
+            cursor: pointer;
+            display: flex;
+            padding: 2px;
+          }
+          .chat-msg-error-copy:hover { opacity: 1; color: var(--text); }
+        `}</style>
+      </div>
+    );
+  }
 
   return (
     <div className={`chat-msg chat-msg-${message.role}`}>

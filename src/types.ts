@@ -5,6 +5,13 @@ export interface ChatMessage {
   timestamp: number;
   toolCalls?: ToolCall[];
   images?: string[];
+  error?: {
+    title: string;
+    status?: number;
+    message: string;
+    requestId?: string;
+    details?: string;
+  };
 }
 
 export interface ChatSession {

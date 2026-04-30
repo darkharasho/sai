@@ -233,6 +233,7 @@ import MessageQueue from './MessageQueue';
 import TodoProgress from './TodoProgress';
 import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, QueuedMessage, TerminalTab } from '../../types';
 import { buildHelpMessage } from './helpText';
+import { parseAiError } from './parseAiError';
 
 type CodexPermission = 'auto' | 'read-only' | 'full-access';
 
@@ -627,11 +628,13 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       }
 
       if (msg.type === 'error') {
+        const error = parseAiError(msg.text || 'Unknown error');
         setMessages(prev => [...prev, {
           id: Date.now().toString(),
           role: 'system',
-          content: msg.text || 'Unknown error',
+          content: error.message,
           timestamp: Date.now(),
+          error,
         }]);
         // Don't set isStreaming=false here — errors can be non-fatal stderr warnings.
         // The authoritative end-of-turn signal is 'done' or 'process_exit'.
@@ -1088,6 +1091,19 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     }
   };
 
+  const handleRetry = useCallback((errorMessageId: string) => {
+    if (isStreaming) return;
+    const all = messagesRef.current;
+    const idx = all.findIndex(m => m.id === errorMessageId);
+    if (idx < 0) return;
+    let lastUser: ChatMessageType | undefined;
+    for (let i = idx - 1; i >= 0; i--) {
+      if (all[i].role === 'user') { lastUser = all[i]; break; }
+    }
+    if (!lastUser) return;
+    handleSend(lastUser.content, lastUser.images);
+  }, [isStreaming]);
+
   const handleQueue = (text: string, fullText: string, images?: string[], attachments?: { images: number; files: number; terminal: boolean }) => {
     if (sessionId && onQueueAdd) {
       onQueueAdd(sessionId, text, fullText, images, attachments);
@@ -1144,7 +1160,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             )}
             {visibleMessages.map(msg => msg.role === 'user'
               ? <div key={msg.id} ref={el => { if (el) userMsgRefs.current.set(msg.id, el); else userMsgRefs.current.delete(msg.id); }}><ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} /></div>
-              : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} />
+              : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} />
             )}
           </>
         )}
