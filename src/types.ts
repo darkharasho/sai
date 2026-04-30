@@ -143,6 +143,7 @@ export interface McpServer {
   url?: string;
   env?: Record<string, string>;
   enabled: boolean;
+  source?: 'user' | 'plugin';
 }
 
 export interface McpServerConfig {

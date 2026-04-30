@@ -55,9 +55,11 @@ export default function McpDetail({ server, onBack, onRemove, onToggleEnabled, o
         >
           {server.enabled ? 'Disable' : 'Enable'}
         </button>
-        <button className="detail-btn danger" onClick={() => onRemove(server.name)}>
-          <Trash2 size={12} /> Remove
-        </button>
+        {server.source !== 'plugin' && (
+          <button className="detail-btn danger" onClick={() => onRemove(server.name)}>
+            <Trash2 size={12} /> Remove
+          </button>
+        )}
       </div>
 
       {tools.length > 0 && (
