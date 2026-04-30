@@ -68,25 +68,61 @@ export async function dbGetMessages(sessionId: string): Promise<ChatMessage[]> {
   });
 }
 
-export async function dbSaveSession(projectPath: string, session: ChatSession): Promise<void> {
+export async function dbGetMessagesTail(
+  sessionId: string,
+  count: number,
+): Promise<{ messages: ChatMessage[]; totalCount: number }> {
+  const all = await dbGetMessages(sessionId);
+  const start = Math.max(0, all.length - count);
+  return { messages: all.slice(start), totalCount: all.length };
+}
+
+export async function dbGetMessagesRange(
+  sessionId: string,
+  fromIdx: number,
+  count: number,
+): Promise<ChatMessage[]> {
+  const all = await dbGetMessages(sessionId);
+  const start = Math.max(0, fromIdx);
+  return all.slice(start, start + count);
+}
+
+// When `fromIdx` is provided, replace messages [fromIdx, end) with `session.messages`
+// and keep the existing prefix [0, fromIdx) intact. Used to save a paginated tail
+// without clobbering the older messages still in the DB.
+export async function dbSaveSession(
+  projectPath: string,
+  session: ChatSession,
+  fromIdx?: number,
+): Promise<void> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(['sessions', 'messages'], 'readwrite');
+    const sessionsStore = tx.objectStore('sessions');
+    const messagesStore = tx.objectStore('messages');
 
-    // Store session metadata without messages
-    const sessionData = {
-      ...session,
-      messages: [],
-      messageCount: session.messages.length,
-      projectPath,
+    const writeMerged = (merged: ChatMessage[]) => {
+      const sessionData = {
+        ...session,
+        messages: [],
+        messageCount: merged.length,
+        projectPath,
+      };
+      sessionsStore.put(sessionData);
+      messagesStore.put({ sessionId: session.id, messages: merged });
     };
-    tx.objectStore('sessions').put(sessionData);
 
-    // Store messages separately
-    tx.objectStore('messages').put({
-      sessionId: session.id,
-      messages: session.messages,
-    });
+    if (fromIdx != null && fromIdx > 0) {
+      const getReq = messagesStore.get(session.id);
+      getReq.onsuccess = () => {
+        const existing: ChatMessage[] = getReq.result?.messages ?? [];
+        const prefix = existing.slice(0, Math.min(fromIdx, existing.length));
+        writeMerged([...prefix, ...session.messages]);
+      };
+      getReq.onerror = () => reject(getReq.error);
+    } else {
+      writeMerged(session.messages);
+    }
 
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);

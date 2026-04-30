@@ -4,6 +4,8 @@ import {
   dbGetSessions,
   dbSaveSession,
   dbGetMessages,
+  dbGetMessagesTail,
+  dbGetMessagesRange,
   dbDeleteSession,
   dbPurgeExpired,
   clearDb,
@@ -129,6 +131,160 @@ describe('dbGetMessages', () => {
   it('returns empty array for unknown session id', async () => {
     const messages = await dbGetMessages('nonexistent-id');
     expect(messages).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dbGetMessagesTail
+// ---------------------------------------------------------------------------
+describe('dbGetMessagesTail', () => {
+  it('returns the last N messages and the total count', async () => {
+    const msgs = Array.from({ length: 10 }, (_, i) =>
+      makeMessage({ content: `m${i}` })
+    );
+    const session = makeSession({ messages: msgs });
+    await dbSaveSession('/p', session);
+
+    const { messages, totalCount } = await dbGetMessagesTail(session.id, 3);
+    expect(totalCount).toBe(10);
+    expect(messages).toHaveLength(3);
+    expect(messages.map(m => m.content)).toEqual(['m7', 'm8', 'm9']);
+  });
+
+  it('returns the full session when count >= total', async () => {
+    const msgs = [makeMessage({ content: 'a' }), makeMessage({ content: 'b' })];
+    const session = makeSession({ messages: msgs });
+    await dbSaveSession('/p', session);
+
+    const { messages, totalCount } = await dbGetMessagesTail(session.id, 100);
+    expect(totalCount).toBe(2);
+    expect(messages).toHaveLength(2);
+    expect(messages.map(m => m.content)).toEqual(['a', 'b']);
+  });
+
+  it('returns empty array and zero count for unknown session', async () => {
+    const { messages, totalCount } = await dbGetMessagesTail('missing', 10);
+    expect(messages).toEqual([]);
+    expect(totalCount).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dbGetMessagesRange
+// ---------------------------------------------------------------------------
+describe('dbGetMessagesRange', () => {
+  it('returns the slice [fromIdx, fromIdx+count)', async () => {
+    const msgs = Array.from({ length: 10 }, (_, i) =>
+      makeMessage({ content: `m${i}` })
+    );
+    const session = makeSession({ messages: msgs });
+    await dbSaveSession('/p', session);
+
+    const slice = await dbGetMessagesRange(session.id, 3, 4);
+    expect(slice.map(m => m.content)).toEqual(['m3', 'm4', 'm5', 'm6']);
+  });
+
+  it('clamps a negative fromIdx to 0', async () => {
+    const msgs = [makeMessage({ content: 'a' }), makeMessage({ content: 'b' })];
+    const session = makeSession({ messages: msgs });
+    await dbSaveSession('/p', session);
+
+    const slice = await dbGetMessagesRange(session.id, -5, 1);
+    expect(slice.map(m => m.content)).toEqual(['a']);
+  });
+
+  it('returns empty array when fromIdx is past the end', async () => {
+    const msgs = [makeMessage({ content: 'a' })];
+    const session = makeSession({ messages: msgs });
+    await dbSaveSession('/p', session);
+
+    const slice = await dbGetMessagesRange(session.id, 10, 5);
+    expect(slice).toEqual([]);
+  });
+
+  it('returns empty for an unknown session', async () => {
+    const slice = await dbGetMessagesRange('missing', 0, 10);
+    expect(slice).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dbSaveSession with fromIdx (splice mode)
+// ---------------------------------------------------------------------------
+describe('dbSaveSession with fromIdx (splice)', () => {
+  it('preserves the prefix [0, fromIdx) and replaces the rest', async () => {
+    // Initial: 10 messages a-j in DB
+    const initial = Array.from({ length: 10 }, (_, i) =>
+      makeMessage({ content: String.fromCharCode(97 + i) }) // a..j
+    );
+    const session = makeSession({ messages: initial });
+    await dbSaveSession('/p', session);
+
+    // Simulate paginated state: app holds the last 3 (h, i, j) plus an
+    // appended new message; firstLoadedIdx = 7. Save splices at idx 7.
+    const tail = [
+      ...initial.slice(7), // h, i, j
+      makeMessage({ content: 'k' }),
+    ];
+    const tailSession = { ...session, messages: tail };
+    await dbSaveSession('/p', tailSession, 7);
+
+    const all = await dbGetMessages(session.id);
+    expect(all.map(m => m.content)).toEqual(
+      ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k']
+    );
+  });
+
+  it('handles fromIdx larger than existing array by appending', async () => {
+    const initial = [makeMessage({ content: 'a' }), makeMessage({ content: 'b' })];
+    const session = makeSession({ messages: initial });
+    await dbSaveSession('/p', session);
+
+    // fromIdx = 5 but only 2 exist — prefix is the whole existing array.
+    const newMessages = [makeMessage({ content: 'x' })];
+    await dbSaveSession('/p', { ...session, messages: newMessages }, 5);
+
+    const all = await dbGetMessages(session.id);
+    expect(all.map(m => m.content)).toEqual(['a', 'b', 'x']);
+  });
+
+  it('full-replace path is used when fromIdx is 0', async () => {
+    const session = makeSession({
+      messages: [makeMessage({ content: 'old1' }), makeMessage({ content: 'old2' })],
+    });
+    await dbSaveSession('/p', session);
+
+    await dbSaveSession('/p', { ...session, messages: [makeMessage({ content: 'new' })] }, 0);
+
+    const all = await dbGetMessages(session.id);
+    expect(all.map(m => m.content)).toEqual(['new']);
+  });
+
+  it('full-replace path is used when fromIdx is omitted (legacy callers)', async () => {
+    const session = makeSession({
+      messages: [makeMessage({ content: 'old' })],
+    });
+    await dbSaveSession('/p', session);
+
+    await dbSaveSession('/p', { ...session, messages: [makeMessage({ content: 'replaced' })] });
+
+    const all = await dbGetMessages(session.id);
+    expect(all.map(m => m.content)).toEqual(['replaced']);
+  });
+
+  it('messageCount metadata reflects the merged total after splice', async () => {
+    const initial = Array.from({ length: 5 }, (_, i) =>
+      makeMessage({ content: `m${i}` })
+    );
+    const session = makeSession({ messages: initial });
+    await dbSaveSession('/p', session);
+
+    // Prefix [0,3) = 3 items, tail = 4 items → merged length = 7
+    const tail = [...initial.slice(3), makeMessage(), makeMessage()];
+    await dbSaveSession('/p', { ...session, messages: tail }, 3);
+
+    const sessions = await dbGetSessions('/p');
+    expect(sessions[0].messageCount).toBe(7);
   });
 });
 

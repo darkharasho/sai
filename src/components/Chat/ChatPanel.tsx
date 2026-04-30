@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ChevronDown, CornerLeftUp } from 'lucide-react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import ThinkingAnimation from '../ThinkingAnimation';
+import { dbGetMessagesRange } from '../../chatDb';
 
 function ContextMeter({ used, total }: { used: number; total: number }) {
   const pct = Math.min((used / total) * 100, 100);
@@ -229,6 +230,9 @@ interface ChatPanelProps {
   onGeminiConversationModeChange: (mode: 'planning' | 'fast') => void;
   geminiLoadingPhrases?: 'witty' | 'tips' | 'all' | 'off';
   initialMessages?: ChatMessageType[];
+  initialFirstLoadedIdx?: number;
+  pageSize?: number;
+  onFirstLoadedIdxChange?: (idx: number) => void;
   onMessagesChange?: (messages: ChatMessageType[]) => void;
   onTurnComplete?: () => void;
   onClaudeSessionId?: (sessionId: string) => void;
@@ -437,7 +441,7 @@ function CyclingHints() {
 }
 
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, sessionId, terminalTabs = [], onSlashCommandsUpdate }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, initialFirstLoadedIdx = 0, pageSize = 100, onFirstLoadedIdxChange, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, sessionId, terminalTabs = [], onSlashCommandsUpdate }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(initialMessages || []);
   const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);
   const setMessages = useCallback((updater: ChatMessageType[] | ((prev: ChatMessageType[]) => ChatMessageType[])) => {
@@ -490,6 +494,32 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const [pinnedUserMessage, setPinnedUserMessage] = useState<ChatMessageType | null>(null);
   const [showNewMessages, setShowNewMessages] = useState(false);
   const [visibleStartIdx, setVisibleStartIdx] = useState(0);
+  // Pagination: messages[0] corresponds to absolute index `firstLoadedIdx` in
+  // the full session. When 0, the entire session is loaded.
+  const [firstLoadedIdx, setFirstLoadedIdx] = useState(initialFirstLoadedIdx);
+  const loadingOlderRef = useRef(false);
+  const handleLoadOlder = useCallback(() => {
+    if (loadingOlderRef.current) return;
+    if (firstLoadedIdx <= 0) return;
+    if (!sessionId) return;
+    loadingOlderRef.current = true;
+    const wantStart = Math.max(0, firstLoadedIdx - pageSize);
+    const wantCount = firstLoadedIdx - wantStart;
+    dbGetMessagesRange(sessionId, wantStart, wantCount)
+      .then(older => {
+        if (older.length === 0) {
+          setFirstLoadedIdx(0);
+          onFirstLoadedIdxChange?.(0);
+          return;
+        }
+        setMessages(prev => [...older, ...prev]);
+        const nextIdx = Math.max(0, firstLoadedIdx - older.length);
+        setFirstLoadedIdx(nextIdx);
+        onFirstLoadedIdxChange?.(nextIdx);
+      })
+      .catch(() => {})
+      .finally(() => { loadingOlderRef.current = false; });
+  }, [firstLoadedIdx, pageSize, sessionId, onFirstLoadedIdxChange]);
 
   // Load auto-compact threshold setting
   useEffect(() => {
@@ -954,6 +984,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     // Handle built-in commands locally
     if (text === '/clear') {
       setMessages([]);
+      setFirstLoadedIdx(0);
+      onFirstLoadedIdxChange?.(0);
       return;
     }
     if (text === '/compact' && aiProvider === 'claude') {
@@ -1038,7 +1070,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             onClick={() => {
               isAtBottomRef.current = false;
               const idx = messages.lastIndexOf(pinnedUserMessage);
-              if (idx >= 0) virtuosoRef.current?.scrollToIndex({ index: idx, align: 'center', behavior: 'smooth' });
+              if (idx >= 0) virtuosoRef.current?.scrollToIndex({ index: firstLoadedIdx + idx, align: 'center', behavior: 'smooth' });
             }}
             title="Jump to message"
           >
@@ -1064,6 +1096,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           className="chat-messages"
           data={messages}
           computeItemKey={(_index, msg) => msg.id}
+          firstItemIndex={firstLoadedIdx}
+          startReached={handleLoadOlder}
           followOutput="auto"
           atBottomThreshold={60}
           increaseViewportBy={{ top: 600, bottom: 600 }}
@@ -1074,7 +1108,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
               setShowNewMessages(true);
             }
           }}
-          rangeChanged={({ startIndex }) => setVisibleStartIdx(startIndex)}
+          rangeChanged={({ startIndex }) => setVisibleStartIdx(startIndex - firstLoadedIdx)}
           itemContent={(_index, msg) => msg.role === 'user'
             ? <ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} />
             : <ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} />

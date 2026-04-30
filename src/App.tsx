@@ -17,7 +17,8 @@ import NewProjectModal from './components/NewProjectModal';
 import { setActiveWorkspace, updateTerminalName } from './terminalBuffer';
 import { basename } from './utils/pathUtils';
 import { createSession, generateSmartTitle } from './sessions';
-import { dbGetSessions, dbGetMessages, dbSaveSession, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
+import { computeUnmountFlushes } from './workspaceFlush';
+import { dbGetSessions, dbGetMessages, dbGetMessagesTail, dbSaveSession, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval } from './types';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, setActiveHighlightTheme, type HighlightThemeId } from './themes';
 import ApprovalBanner from './components/ApprovalBanner';
@@ -46,6 +47,11 @@ type EffortLevel = 'low' | 'medium' | 'high' | 'max';
 type ModelChoice = 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan';
 const VALID_MODEL_CHOICES: readonly ModelChoice[] = ['default', 'best', 'sonnet', 'opus', 'haiku', 'sonnet[1m]', 'opus[1m]', 'opusplan'];
 const isModelChoice = (v: unknown): v is ModelChoice => typeof v === 'string' && (VALID_MODEL_CHOICES as readonly string[]).includes(v);
+
+// Cap the in-memory active-session message window. Older messages stay in
+// IndexedDB and are paginated in via ChatPanel's startReached callback.
+const MESSAGE_TAIL_LIMIT = 200;
+const MESSAGE_PAGE_SIZE = 100;
 type AIProvider = 'claude' | 'codex' | 'gemini';
 type GeminiApprovalMode = 'default' | 'auto_edit' | 'yolo' | 'plan';
 type GeminiConversationMode = 'planning' | 'fast';
@@ -133,6 +139,10 @@ export default function App() {
   const [pendingClose, setPendingClose] = useState<string | null>(null);
   // Ref to hold latest messages per workspace without triggering re-renders during streaming
   const wsMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
+  // Absolute index in the full session of messages[0] for the workspace's
+  // currently-loaded message window. 0 means the full session is loaded.
+  // Saves use this so paginated tails don't clobber older DB messages.
+  const wsFirstLoadedIdxRef = useRef<Map<string, number>>(new Map());
   const [externallyModified, setExternallyModified] = useState<Set<string>>(new Set());
   const [completedWorkspaces, setCompletedWorkspaces] = useState<Set<string>>(new Set());
   const [busyWorkspaces, setBusyWorkspaces] = useState<Set<string>>(new Set());
@@ -162,6 +172,43 @@ export default function App() {
     setActiveWorkspace(activeProjectPath);
     window.sai.workspaceSetActive(activeProjectPath);
   }, [activeProjectPath]);
+
+  // Track which workspaces are currently mounted in the chat panel render.
+  // When a workspace transitions out of the mounted set (no longer active
+  // and no longer busy), persist its in-flight messages into session state
+  // so the next remount restores them via initialMessages, then drop the
+  // ref entry to free memory.
+  const mountedChatRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const next = new Set<string>();
+    workspaces.forEach((_, wsPath) => {
+      if (wsPath === activeProjectPath || busyWorkspaces.has(wsPath)) next.add(wsPath);
+    });
+    const flushes = computeUnmountFlushes({
+      prevMounted: mountedChatRef.current,
+      nextMounted: next,
+      workspaces: workspacesRef.current,
+      wsMessages: wsMessagesRef.current,
+      wsFirstLoadedIdx: wsFirstLoadedIdxRef.current,
+    });
+    for (const { wsPath, session, fromIdx } of flushes) {
+      setWorkspaces(p => {
+        const cur = p.get(wsPath);
+        if (!cur || cur.activeSession.messages === session.messages) return p;
+        const updated = new Map(p);
+        updated.set(wsPath, { ...cur, activeSession: session });
+        return updated;
+      });
+      dbSaveSession(wsPath, session, fromIdx).catch(() => {});
+    }
+    for (const wsPath of mountedChatRef.current) {
+      if (!next.has(wsPath)) {
+        wsMessagesRef.current.delete(wsPath);
+        wsFirstLoadedIdxRef.current.delete(wsPath);
+      }
+    }
+    mountedChatRef.current = next;
+  }, [activeProjectPath, busyWorkspaces, workspaces]);
 
   useEffect(() => {
     setExternallyModified(new Set());
@@ -545,7 +592,7 @@ export default function App() {
           ? { ...ws.activeSession, messages: latestMessages, updatedAt: Date.now(), messageCount: latestMessages.length }
           : ws.activeSession;
         if (sessionToSave.messages.length > 0) {
-          dbSaveSession(wsPath, sessionToSave).catch(() => {});
+          dbSaveSession(wsPath, sessionToSave, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).catch(() => {});
         }
       });
     };
@@ -564,7 +611,7 @@ export default function App() {
             const firstUserMsg = latestMessages.find(m => m.role === 'user');
             if (firstUserMsg) sessionToSave.title = generateSmartTitle(firstUserMsg.content);
           }
-          dbSaveSession(wsPath, sessionToSave).then(() => {
+          dbSaveSession(wsPath, sessionToSave, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).then(() => {
             dbGetSessions(wsPath).then(sessions => {
               updateWorkspace(wsPath, ws2 => ({ ...ws2, sessions }));
             });
@@ -1147,7 +1194,7 @@ export default function App() {
     }
     if (sessionToSave.messages.length > 0) {
       updateWorkspace(wsPath, ws2 => ({ ...ws2, activeSession: sessionToSave }));
-      dbSaveSession(wsPath, sessionToSave).then(() => {
+      dbSaveSession(wsPath, sessionToSave, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).then(() => {
         dbGetSessions(wsPath).then(sessions => {
           updateWorkspace(wsPath, ws2 => ({ ...ws2, sessions }));
         });
@@ -1177,8 +1224,10 @@ export default function App() {
       window.sai.claudeSetSessionId(activeProjectPath, selected.claudeSessionId);
       (window.sai as any).codexSetSessionId(activeProjectPath, selected.codexSessionId);
       window.sai.geminiSetSessionId?.(activeProjectPath, selected.geminiSessionId, 'chat');
-      // Load messages on demand from IndexedDB
-      dbGetMessages(selected.id).then(messages => {
+      // Load only the tail (last N) on demand; older messages are paginated
+      // in by ChatPanel via Virtuoso's startReached.
+      dbGetMessagesTail(selected.id, MESSAGE_TAIL_LIMIT).then(({ messages, totalCount }) => {
+        wsFirstLoadedIdxRef.current.set(activeProjectPath, totalCount - messages.length);
         updateWorkspace(activeProjectPath, ws => ({
           ...ws,
           activeSession: { ...selected, messages },
@@ -1336,7 +1385,9 @@ export default function App() {
                 </button>
               </div>
             )}
-            {panel === 'chat' && Array.from(workspaces.entries()).map(([wsPath, ws]) => (
+            {panel === 'chat' && Array.from(workspaces.entries())
+              .filter(([wsPath]) => wsPath === activeProjectPath || busyWorkspaces.has(wsPath))
+              .map(([wsPath, ws]) => (
               <div
                 key={`chat-${wsPath}`}
                 style={{
@@ -1371,6 +1422,11 @@ export default function App() {
                   onGeminiConversationModeChange={handleGeminiConversationModeChange}
                   geminiLoadingPhrases={geminiLoadingPhrases}
                   initialMessages={ws.activeSession.messages}
+                  initialFirstLoadedIdx={wsFirstLoadedIdxRef.current.get(wsPath) ?? 0}
+                  pageSize={MESSAGE_PAGE_SIZE}
+                  onFirstLoadedIdxChange={(idx: number) => {
+                    wsFirstLoadedIdxRef.current.set(wsPath, idx);
+                  }}
                   activeFilePath={ws.activeFilePath}
                   onFileOpen={handleFileOpen}
                   isActive={wsPath === activeProjectPath}
@@ -1412,7 +1468,7 @@ export default function App() {
                         if (firstUserMsg) updated.title = generateSmartTitle(firstUserMsg.content);
                       }
 
-                      dbSaveSession(wsPath, updated).then(() => {
+                      dbSaveSession(wsPath, updated, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).then(() => {
                         dbGetSessions(wsPath).then(sessions => {
                           updateWorkspace(wsPath, ws2 => ({ ...ws2, sessions }));
                         });
@@ -1430,7 +1486,7 @@ export default function App() {
                               updateWorkspace(wsPath, w2 => {
                                 if (w2.activeSession.titleEdited) return w2;
                                 const newSession = { ...w2.activeSession, title };
-                                dbSaveSession(wsPath, newSession).then(() => {
+                                dbSaveSession(wsPath, newSession, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).then(() => {
                                   dbGetSessions(wsPath).then(sessions => {
                                     updateWorkspace(wsPath, ws3 => ({ ...ws3, sessions }));
                                   });
