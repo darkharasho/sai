@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { memo, useState, useRef, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
@@ -224,7 +224,7 @@ function ImageModal({ src, onClose }: { src: string; onClose: () => void }) {
   );
 }
 
-export default function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', toolCallsExpanded = true, onRetry }: { message: ChatMessageType; projectPath?: string; onFileOpen?: (path: string, line?: number) => void; aiProvider?: 'claude' | 'codex' | 'gemini'; toolCallsExpanded?: boolean; onRetry?: () => void }) {
+function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', toolCallsExpanded = true, onRetry }: { message: ChatMessageType; projectPath?: string; onFileOpen?: (path: string, line?: number) => void; aiProvider?: 'claude' | 'codex' | 'gemini'; toolCallsExpanded?: boolean; onRetry?: () => void }) {
   const dotColor = getDotColor(message.role);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [errorDetailsOpen, setErrorDetailsOpen] = useState(false);
@@ -472,6 +472,7 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
       <style>{`
         .chat-msg {
           margin-bottom: 16px;
+          padding: 0 16px;
           animation: msg-enter 0.25s ease-out both;
         }
         @keyframes msg-enter {
@@ -483,13 +484,11 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
           border: 1px solid var(--border);
           border-radius: 10px;
           padding: 10px 14px;
-          margin-left: -10px;
-          margin-right: -10px;
+          margin-left: 14px;
+          margin-right: 14px;
         }
         .chat-msg-assistant {
           padding: 4px 14px;
-          margin-left: -10px;
-          margin-right: -10px;
         }
         .chat-msg-content {
           display: flex;
@@ -728,3 +727,11 @@ export default function ChatMessage({ message, projectPath, onFileOpen, aiProvid
     </div>
   );
 }
+
+export default memo(ChatMessage, (prev, next) =>
+  prev.message === next.message &&
+  prev.projectPath === next.projectPath &&
+  prev.aiProvider === next.aiProvider &&
+  prev.toolCallsExpanded === next.toolCallsExpanded &&
+  Boolean(prev.onRetry) === Boolean(next.onRetry)
+);
