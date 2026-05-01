@@ -535,6 +535,11 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   // flight. Suppresses the native scroll listener and the streaming
   // ResizeObserver so they don't drag the user back to the bottom mid-jump.
   const programmaticScrollRef = useRef(false);
+  // Last observed scrollTop, sampled inside the rAF-coalesced scroll handler.
+  // Used to distinguish a real user scroll-up (scrollTop decreased) from a
+  // gap that grew because content was appended between the scroll event and
+  // the rAF — the latter must NOT disengage follow.
+  const lastScrollTopRef = useRef(0);
   // While the user is following, any growth of the scroll content (streaming
   // text, tool-call expansions, image loads) should immediately re-anchor to
   // the bottom. ResizeObserver fires on every layout change, which is finer-
@@ -605,8 +610,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       requestAnimationFrame(() => {
         scrollRafScheduled = false;
         if (programmaticScrollRef.current) return;
-        const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+        const curTop = el.scrollTop;
+        const prevTop = lastScrollTopRef.current;
+        lastScrollTopRef.current = curTop;
+        const gap = el.scrollHeight - curTop - el.clientHeight;
         const atBottom = gap < 8;
+        const scrolledUp = curTop < prevTop - 1;
         const msgs = messagesRef.current;
         if (atBottom) {
           if (!isAtBottomRef.current) isAtBottomRef.current = true;
@@ -617,11 +626,11 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           setShowNewMessages(false);
         } else {
           if (isAtBottomRef.current) isAtBottomRef.current = false;
-          // Backstop: if we've drifted away from the bottom, the user
-          // unambiguously scrolled up (programmatic snaps land at gap=0,
-          // and content growth alone doesn't fire scroll events). Disengage
-          // follow so the streaming RO stops fighting the gesture.
-          if (followingRef.current) {
+          // Backstop: only disengage if scrollTop actually decreased. A growing
+          // gap with unchanged scrollTop means content was appended between
+          // the scroll event and this rAF — not a user gesture — and the
+          // wheel/touch handlers already cover real scroll-up intent.
+          if (scrolledUp && followingRef.current) {
             followingRef.current = false;
             setFollowing(false);
           }
