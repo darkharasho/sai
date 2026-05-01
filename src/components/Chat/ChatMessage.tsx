@@ -279,7 +279,18 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
   }, []);
   const tickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSeenContentLenRef = useRef(0);
-  useEffect(() => () => { if (tickTimerRef.current) clearTimeout(tickTimerRef.current); }, []);
+  // Null the ref alongside clearing — otherwise the typewriter effect's
+  // `if (tickTimerRef.current) return` early-out treats the canceled timer ID
+  // as a still-pending timer and never schedules a replacement, freezing the
+  // typewriter at displayLen=0. (Surfaces in StrictMode dev: cleanup-between-
+  // effect-runs cancels the just-scheduled timer; without nulling, the second
+  // run bails and no tick ever fires.)
+  useEffect(() => () => {
+    if (tickTimerRef.current) {
+      clearTimeout(tickTimerRef.current);
+      tickTimerRef.current = null;
+    }
+  }, []);
   // Typewriter stays active even after `isStreaming` flips false — short
   // replies often finalize before the typewriter has time to drip, so we
   // keep dripping until the visible text catches up to the buffer. A live
@@ -518,9 +529,10 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
   }
 
   const isAssistantStreaming = isStreaming && message.role === 'assistant';
+  const isTyping = typewriterActive && displayLen < rawAssistantContent.length;
 
   return (
-    <motion.div className={`chat-msg chat-msg-${message.role}${isAssistantStreaming ? ' chat-msg-streaming' : ''}`} {...entryProps}>
+    <motion.div className={`chat-msg chat-msg-${message.role}${isAssistantStreaming ? ' chat-msg-streaming' : ''}${isTyping ? ' chat-msg-typing' : ''}`} {...entryProps}>
       {message.content && (
         <div className="chat-msg-content">
           {message.role === 'user'
@@ -566,14 +578,6 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
               if (typewriterActive && displayLen < rawAssistantContent.length) return raw.slice(0, snapToWordBoundary(raw, displayLen));
               return raw;
             })()}</ReactMarkdown>
-            {typewriterActive && displayLen < rawAssistantContent.length && (
-              <motion.span
-                className="chat-msg-cursor"
-                aria-hidden
-                animate={{ opacity: [0.25, 1, 0.25] }}
-                transition={{ duration: 1.1, repeat: Infinity, ease: 'easeInOut' }}
-              />
-            )}
             {message.images && message.images.length > 0 && (
               <div className="chat-msg-images">
                 {message.images.map((src, i) => (
@@ -593,7 +597,11 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
           margin-bottom: 16px;
           padding: 0 16px;
         }
-        .chat-msg-cursor {
+        /* Typing cursor — pseudo-element on the last block of the rendered
+           markdown so it sits inline at the end of the streaming text instead
+           of dropping to a new line below the last paragraph. */
+        .chat-msg-typing .chat-msg-body > *:last-child::after {
+          content: '';
           display: inline-block;
           width: 7px;
           height: 1em;
@@ -602,6 +610,11 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
           background: var(--accent);
           border-radius: 1px;
           box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
+          animation: chat-cursor-blink 1.1s ease-in-out infinite;
+        }
+        @keyframes chat-cursor-blink {
+          0%, 100% { opacity: 0.25; }
+          50%      { opacity: 1; }
         }
         .chat-msg-streaming .chat-msg-claude,
         .chat-msg-streaming .chat-msg-openai,
