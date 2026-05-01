@@ -1,6 +1,5 @@
-import { useState, useEffect, useRef, useCallback, useMemo, type MutableRefObject } from 'react';
+import { useState, useEffect, useRef, useCallback, useLayoutEffect, useMemo, type MutableRefObject } from 'react';
 import { ChevronDown, CornerLeftUp, ArrowDownToLine } from 'lucide-react';
-import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import ThinkingAnimation from '../ThinkingAnimation';
 import { dbGetMessagesRange } from '../../chatDb';
 
@@ -501,8 +500,20 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     });
   }, []);
 
-  const virtuosoRef = useRef<VirtuosoHandle>(null);
   const scrollerRef = useRef<HTMLElement | Window | null>(null);
+  // Ref to the inner content wrapper so the streaming ResizeObserver can watch
+  // content-size growth (the scroller itself only reports its own box size).
+  const messagesInnerRef = useRef<HTMLDivElement | null>(null);
+  // Per-message DOM refs keyed by message id, used for jump-to-message scrollIntoView
+  // and for cheap visibleStartIdx computation on scroll.
+  const messageElsRef = useRef<Map<string, HTMLDivElement>>(new Map());
+  const setMessageEl = useCallback((id: string, el: HTMLDivElement | null) => {
+    if (el) messageElsRef.current.set(id, el);
+    else messageElsRef.current.delete(id);
+  }, []);
+  // Sentinel at the top of the message list. IntersectionObserver triggers
+  // pagination when it scrolls into view.
+  const topSentinelRef = useRef<HTMLDivElement | null>(null);
   const isAtBottomRef = useRef(true);
   // followingRef is the user's *intent* to follow output. It only flips false
   // from a user-initiated scroll up (wheel/touch), and flips true when the
@@ -549,8 +560,10 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         scroller.scrollTop = scroller.scrollHeight;
       });
     });
-    // Virtuoso renders its sized content as the scroller's first child.
-    const target = scroller.firstElementChild as HTMLElement | null;
+    // Observe the messages-inner wrapper (or fall back to the first child if
+    // the ref isn't set yet) — its height tracks total content height, which
+    // is what drives bottom-pinning during streaming.
+    const target = messagesInnerRef.current ?? (scroller.firstElementChild as HTMLElement | null);
     if (target) ro.observe(target);
     resizeObserverRef.current = ro;
   }, []);
@@ -580,21 +593,42 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       }
       touchYRef.current = y;
     }, { passive: true });
-    // Safety net: Virtuoso's atBottomStateChange can lag behind reality (scroll
-    // animations, item-height springs, programmatic snaps). If the actual
-    // scroll position is at the bottom, the "new messages" indicator must
-    // never be visible. Reconcile on every native scroll event.
+    // Native scroll is the source of truth for at-bottom + visibleStartIdx.
+    // rAF-coalesce so a flurry of scroll events doesn't spam layout reads.
+    let scrollRafScheduled = false;
     el.addEventListener('scroll', () => {
-      if (programmaticScrollRef.current) return;
-      const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
-      if (gap < 8) {
-        if (!isAtBottomRef.current) isAtBottomRef.current = true;
-        if (!followingRef.current) {
-          followingRef.current = true;
-          setFollowing(true);
+      if (scrollRafScheduled) return;
+      scrollRafScheduled = true;
+      requestAnimationFrame(() => {
+        scrollRafScheduled = false;
+        if (programmaticScrollRef.current) return;
+        const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+        const atBottom = gap < 8;
+        const msgs = messagesRef.current;
+        if (atBottom) {
+          if (!isAtBottomRef.current) isAtBottomRef.current = true;
+          if (!followingRef.current) {
+            followingRef.current = true;
+            setFollowing(true);
+          }
+          setShowNewMessages(false);
+        } else {
+          if (isAtBottomRef.current) isAtBottomRef.current = false;
+          if (msgs[msgs.length - 1]?.role === 'assistant') setShowNewMessages(true);
         }
-        setShowNewMessages(false);
-      }
+        // Compute the topmost visible message index for the pinned-prompt bar.
+        const scTop = el.getBoundingClientRect().top;
+        const items = messageElsRef.current;
+        for (let i = 0; i < msgs.length; i++) {
+          const itemEl = items.get(msgs[i].id);
+          if (!itemEl) continue;
+          const r = itemEl.getBoundingClientRect();
+          if (r.bottom >= scTop) {
+            setVisibleStartIdx(i);
+            return;
+          }
+        }
+      });
     }, { passive: true });
   }, []);
 
@@ -659,6 +693,11 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   // the full session. When 0, the entire session is loaded.
   const [firstLoadedIdx, setFirstLoadedIdx] = useState(initialFirstLoadedIdx);
   const loadingOlderRef = useRef(false);
+  // When older messages prepend, scrollHeight jumps; useLayoutEffect picks
+  // up this snapshot and offsets scrollTop by the delta so the user's anchor
+  // message stays put visually instead of being yanked down with the new
+  // history above it.
+  const prependPreserveRef = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
   const handleLoadOlder = useCallback(() => {
     if (loadingOlderRef.current) return;
     if (firstLoadedIdx <= 0) return;
@@ -673,6 +712,10 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           onFirstLoadedIdxChange?.(0);
           return;
         }
+        const sc = scrollerRef.current as HTMLElement | null;
+        if (sc) {
+          prependPreserveRef.current = { scrollTop: sc.scrollTop, scrollHeight: sc.scrollHeight };
+        }
         setMessages(prev => [...older, ...prev]);
         const nextIdx = Math.max(0, firstLoadedIdx - older.length);
         setFirstLoadedIdx(nextIdx);
@@ -681,6 +724,30 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       .catch(() => {})
       .finally(() => { loadingOlderRef.current = false; });
   }, [firstLoadedIdx, pageSize, sessionId, onFirstLoadedIdxChange]);
+  useLayoutEffect(() => {
+    const snap = prependPreserveRef.current;
+    if (!snap) return;
+    prependPreserveRef.current = null;
+    const sc = scrollerRef.current as HTMLElement | null;
+    if (!sc) return;
+    sc.scrollTop = snap.scrollTop + (sc.scrollHeight - snap.scrollHeight);
+  }, [messages]);
+
+  // IntersectionObserver on the top sentinel triggers pagination when the user
+  // scrolls within ~600px of the top of the loaded window.
+  useEffect(() => {
+    const sentinel = topSentinelRef.current;
+    const sc = scrollerRef.current;
+    if (!sentinel || !(sc instanceof HTMLElement)) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some(e => e.isIntersecting)) handleLoadOlder();
+      },
+      { root: sc, rootMargin: '600px 0px 0px 0px', threshold: 0 }
+    );
+    io.observe(sentinel);
+    return () => io.disconnect();
+  }, [handleLoadOlder, firstLoadedIdx]);
 
   // Load auto-compact threshold setting
   useEffect(() => {
@@ -1135,7 +1202,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   );
 
   // Pin the most-recent user message that has scrolled above the viewport.
-  // Driven by Virtuoso's rangeChanged → visibleStartIdx.
+  // Driven by the rAF-throttled scroll handler → visibleStartIdx.
   useEffect(() => {
     if (userMessages.length === 0) { setPinnedUserMessage(null); return; }
     const lastUser = userMessages[userMessages.length - 1];
@@ -1321,8 +1388,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
               setFollowing(false);
               programmaticScrollRef.current = true;
               setTimeout(() => { programmaticScrollRef.current = false; }, 900);
-              const idx = messages.lastIndexOf(pinnedUserMessage);
-              if (idx >= 0) virtuosoRef.current?.scrollToIndex({ index: firstLoadedIdx + idx, align: 'center', behavior: 'smooth' });
+              const target = messageElsRef.current.get(pinnedUserMessage.id);
+              target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }}
             title="Jump to message"
           >
@@ -1343,51 +1410,39 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           </div>
         </div>
       ) : (
-        <Virtuoso
-          ref={virtuosoRef}
+        <div
           className="chat-messages"
-          data={messages}
-          computeItemKey={(_index, msg) => msg.id}
-          firstItemIndex={firstLoadedIdx}
-          initialTopMostItemIndex={Math.max(0, messages.length - 1)}
-          startReached={handleLoadOlder}
-          atBottomThreshold={4}
-          increaseViewportBy={{ top: 600, bottom: 600 }}
-          scrollerRef={(ref) => {
-            scrollerRef.current = ref;
-            if (ref instanceof HTMLElement) {
-              attachUserScrollListeners(ref);
-              attachContentResizeObserver(ref);
+          ref={(el) => {
+            scrollerRef.current = el;
+            if (el) {
+              attachUserScrollListeners(el);
+              attachContentResizeObserver(el);
             }
           }}
-          atBottomStateChange={(atBottom) => {
-            // Virtuoso can fire atBottom=false during streaming when scrollHeight
-            // grows faster than its internal measurement catches up — even though
-            // the actual scroll position is still pinned to the bottom. Verify
-            // against the live scroll position before trusting the signal.
-            const sc = scrollerRef.current instanceof HTMLElement ? scrollerRef.current : null;
-            const realGap = sc ? sc.scrollHeight - sc.scrollTop - sc.clientHeight : 0;
-            const reallyAtBottom = atBottom || realGap < 8;
-            isAtBottomRef.current = reallyAtBottom;
-            if (reallyAtBottom) {
-              followingRef.current = true;
-              setFollowing(true);
-              setShowNewMessages(false);
-            } else if (messagesRef.current[messagesRef.current.length - 1]?.role === 'assistant') {
-              setShowNewMessages(true);
-            }
-          }}
-          rangeChanged={({ startIndex }) => setVisibleStartIdx(startIndex - firstLoadedIdx)}
-          itemContent={(_index, msg) => {
-            const lastMsg = messages[messages.length - 1];
-            const isLastAssistantStreaming = isStreaming && msg.role === 'assistant' && lastMsg?.id === msg.id;
-            return msg.role === 'user'
-              ? <ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} />
-              : <ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} isStreaming={isLastAssistantStreaming} />;
-          }}
-          components={{
-            Header: () => <div style={{ height: 16 }} />,
-            Footer: () => isStreaming ? (
+        >
+          <div ref={messagesInnerRef} className="chat-messages-inner">
+            <div style={{ height: 16 }} />
+            {firstLoadedIdx > 0 && (
+              <div ref={topSentinelRef} className="chat-load-sentinel">
+                <span className="chat-load-sentinel-text">Loading older messages…</span>
+              </div>
+            )}
+            {messages.map((msg, i) => {
+              const lastMsg = messages[messages.length - 1];
+              const isLastAssistantStreaming = isStreaming && msg.role === 'assistant' && lastMsg?.id === msg.id;
+              return (
+                <div
+                  key={msg.id}
+                  ref={(el) => setMessageEl(msg.id, el)}
+                  data-msg-idx={i}
+                >
+                  {msg.role === 'user'
+                    ? <ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} />
+                    : <ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} isStreaming={isLastAssistantStreaming} />}
+                </div>
+              );
+            })}
+            {isStreaming && (
               <motion.div
                 style={{ padding: '0 16px' }}
                 initial={{ opacity: 0, y: 4 }}
@@ -1400,9 +1455,9 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
                   ? <CodexThinkingAnimation />
                   : <ThinkingAnimation />}
               </motion.div>
-            ) : null,
-          }}
-        />
+            )}
+          </div>
+        </div>
       )}
       <div className="new-messages-anchor">
         <AnimatePresence>
