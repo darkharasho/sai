@@ -389,7 +389,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              transition={{ height: { type: 'spring', stiffness: 280, damping: 32, mass: 0.7 }, opacity: { duration: 0.18 } }}
+              transition={{ height: { duration: 0.26, ease: [0.22, 1, 0.36, 1] }, opacity: { duration: 0.18 } }}
               style={{ overflow: 'hidden' }}
             >
             {isBash && (
