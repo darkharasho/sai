@@ -1225,7 +1225,7 @@ export default function App() {
       (window.sai as any).codexSetSessionId(activeProjectPath, selected.codexSessionId);
       window.sai.geminiSetSessionId?.(activeProjectPath, selected.geminiSessionId, 'chat');
       // Load only the tail (last N) on demand; older messages are paginated
-      // in by ChatPanel via Virtuoso's startReached.
+      // in by ChatPanel via the top-of-list IntersectionObserver.
       dbGetMessagesTail(selected.id, MESSAGE_TAIL_LIMIT).then(({ messages, totalCount }) => {
         wsFirstLoadedIdxRef.current.set(activeProjectPath, totalCount - messages.length);
         updateWorkspace(activeProjectPath, ws => ({

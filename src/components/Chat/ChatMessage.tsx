@@ -10,13 +10,14 @@ import ToolCallCard from './ToolCallCard';
 import type { ChatMessage as ChatMessageType } from '../../types';
 import { getActiveTerminalId } from '../../terminalBuffer';
 
-// Message IDs that have already played their entry animation. Prevents
-// react-virtuoso item recycling from re-triggering the animation when the
-// user scrolls a message off-screen and back.
+// Message IDs that have already played their entry animation. Prevents the
+// animation from replaying if a message remounts (e.g. workspace swap, list
+// re-keying), so existing history doesn't shimmer in on every render.
 const SEEN_MESSAGES = new Set<string>();
 const ENTER_TRANSITION = { duration: 0.36, ease: [0.22, 1, 0.36, 1] as const };
-// Per-message typewriter progress. Survives virtuoso item recycling so a
-// streaming message that scrolls off-screen and back doesn't replay from 0.
+// Per-message typewriter progress, kept outside component state so a streaming
+// message survives unmount/remount (workspace swap, list re-keying) without
+// replaying the typewriter from zero.
 const TYPEWRITER_PROGRESS = new Map<string, number>();
 
 // Live preference cached at module scope so every mounted ChatMessage shares
@@ -309,7 +310,7 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
     }
     if (displayLen >= rawAssistantContent.length) {
       // Caught up — clear the marker so a future re-mount of this message
-      // (Virtuoso recycle, workspace swap) renders the full content instantly
+      // (workspace swap, list re-keying) renders the full content instantly
       // instead of replaying the typewriter.
       TYPEWRITER_PROGRESS.delete(message.id);
       lastSeenContentLenRef.current = rawAssistantContent.length;

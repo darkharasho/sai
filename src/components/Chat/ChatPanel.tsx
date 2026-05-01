@@ -532,7 +532,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const wheelHandlersAttachedRef = useRef<HTMLElement | null>(null);
   const touchYRef = useRef(0);
   // Set true while a programmatic scroll-away (e.g. Jump-to-message) is in
-  // flight. Suppresses the safety-net scroll listener and the streaming
+  // flight. Suppresses the native scroll listener and the streaming
   // ResizeObserver so they don't drag the user back to the bottom mid-jump.
   const programmaticScrollRef = useRef(false);
   // While the user is following, any growth of the scroll content (streaming
@@ -573,9 +573,9 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     if (wheelHandlersAttachedRef.current === el) return;
     wheelHandlersAttachedRef.current = el;
     // Threshold filters trackpad bounce/jitter (~0.5–1.5px) while still
-    // registering any deliberate flick as scroll-up intent. The safety-net
-    // scroll listener below restores follow as soon as the user lands back
-    // at the bottom, so we don't need an at-bottom guard here.
+    // registering any deliberate flick as scroll-up intent. The native scroll
+    // listener below restores follow as soon as the user lands back at the
+    // bottom, so we don't need an at-bottom guard here.
     el.addEventListener('wheel', (e: WheelEvent) => {
       if (e.deltaY < -3) {
         followingRef.current = false;
@@ -1193,8 +1193,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     } else if (followingRef.current || isAtBottomRef.current) {
       // If we're at the bottom, treat it as still following — wheel/touch can
       // flip followingRef false without ever leaving the bottom (e.g. trackpad
-      // jitter, or a scroll-up while already pinned), and atBottomStateChange
-      // won't re-fire to clear it.
+      // jitter, or a scroll-up while already pinned), and the native scroll
+      // listener won't re-fire if the position never actually changed.
       followingRef.current = true;
       setFollowing(true);
       setShowNewMessages(false);
@@ -1390,9 +1390,10 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           <button
             className="pinned-prompt-jump"
             onClick={() => {
-              // Disengage follow and suppress the safety-net + ResizeObserver
-              // for the duration of the smooth scroll, otherwise the gap-< 8
-              // check at the start re-engages follow and snaps us back.
+              // Disengage follow and suppress the native scroll listener +
+              // ResizeObserver for the duration of the smooth scroll —
+              // otherwise the gap-< 8 check at the start re-engages follow
+              // and snaps us back.
               isAtBottomRef.current = false;
               followingRef.current = false;
               setFollowing(false);
