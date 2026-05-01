@@ -33,7 +33,12 @@
     "linux": {
       "target": "AppImage",
       "category": "Development",
-      "icon": "public/img/sai.png"
+      "icon": "public/img/sai.png",
+      "desktop": {
+        "entry": {
+          "StartupWMClass": "sai"
+        }
+      }
     },
     "win": {
       "target": "nsis",
