@@ -496,7 +496,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     if (wheelHandlersAttachedRef.current === el) return;
     wheelHandlersAttachedRef.current = el;
     el.addEventListener('wheel', (e: WheelEvent) => {
-      if (e.deltaY < 0) {
+      if (e.deltaY < 0 && !isAtBottomRef.current) {
         followingRef.current = false;
         setFollowing(false);
       }
@@ -506,7 +506,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     }, { passive: true });
     el.addEventListener('touchmove', (e: TouchEvent) => {
       const y = e.touches[0]?.clientY ?? 0;
-      if (y - touchYRef.current > 0) {
+      if (y - touchYRef.current > 0 && !isAtBottomRef.current) {
         followingRef.current = false;
         setFollowing(false);
       }
@@ -1014,7 +1014,14 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       requestAnimationFrame(() => {
         requestAnimationFrame(snapToBottom);
       });
-    } else if (followingRef.current) {
+    } else if (followingRef.current || isAtBottomRef.current) {
+      // If we're at the bottom, treat it as still following — wheel/touch can
+      // flip followingRef false without ever leaving the bottom (e.g. trackpad
+      // jitter, or a scroll-up while already pinned), and atBottomStateChange
+      // won't re-fire to clear it.
+      followingRef.current = true;
+      setFollowing(true);
+      setShowNewMessages(false);
       requestAnimationFrame(() => {
         requestAnimationFrame(snapToBottom);
       });
