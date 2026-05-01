@@ -643,12 +643,22 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     buf.pending = '';
     setMessages(prev => {
       const last = prev[prev.length - 1];
+      // Plain assistant message — append text in place.
       if (last?.role === 'assistant' && !last.toolCalls) {
         const updated = [...prev];
         updated[updated.length - 1] = { ...last, content: last.content + text };
         return updated;
       }
-      return prev;
+      // Last message is a tool-call holder (or a user message). The model is
+      // now streaming its post-tool text response, which belongs in a fresh
+      // assistant message — appending here would either drop the text on
+      // the floor (the previous behavior) or overwrite tool-call metadata.
+      return [...prev, {
+        id: `stream-${Date.now()}`,
+        role: 'assistant',
+        content: text,
+        timestamp: Date.now(),
+      }];
     });
     // followOutput only fires on count changes; streaming grows the last
     // item in place, so re-anchor manually while the user is at the bottom.
