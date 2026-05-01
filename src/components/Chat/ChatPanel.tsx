@@ -572,12 +572,15 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const attachUserScrollListeners = useCallback((el: HTMLElement) => {
     if (wheelHandlersAttachedRef.current === el) return;
     wheelHandlersAttachedRef.current = el;
-    // Threshold filters trackpad bounce/jitter (~0.5–1.5px) while still
-    // registering any deliberate flick as scroll-up intent. The native scroll
-    // listener below restores follow as soon as the user lands back at the
-    // bottom, so we don't need an at-bottom guard here.
+    // Disengage follow on the slightest scroll-up gesture. Earlier versions
+    // used a -3px threshold to filter trackpad bounce, but bounce only happens
+    // at scroll boundaries when overscrolling — at the bottom that's downward
+    // overscroll, not upward — so any negative delta here is intentional.
+    // Reacting on the first wheel/touch event (rather than waiting for the
+    // user to build momentum) prevents the streaming ResizeObserver from
+    // snapping the user back to bottom mid-gesture.
     el.addEventListener('wheel', (e: WheelEvent) => {
-      if (e.deltaY < -3) {
+      if (e.deltaY < 0 && followingRef.current) {
         followingRef.current = false;
         setFollowing(false);
       }
@@ -587,7 +590,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     }, { passive: true });
     el.addEventListener('touchmove', (e: TouchEvent) => {
       const y = e.touches[0]?.clientY ?? 0;
-      if (y - touchYRef.current > 3) {
+      if (y > touchYRef.current && followingRef.current) {
         followingRef.current = false;
         setFollowing(false);
       }
@@ -614,6 +617,14 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           setShowNewMessages(false);
         } else {
           if (isAtBottomRef.current) isAtBottomRef.current = false;
+          // Backstop: if we've drifted away from the bottom, the user
+          // unambiguously scrolled up (programmatic snaps land at gap=0,
+          // and content growth alone doesn't fire scroll events). Disengage
+          // follow so the streaming RO stops fighting the gesture.
+          if (followingRef.current) {
+            followingRef.current = false;
+            setFollowing(false);
+          }
           if (msgs[msgs.length - 1]?.role === 'assistant') setShowNewMessages(true);
         }
         // Compute the topmost visible message index for the pinned-prompt bar.
