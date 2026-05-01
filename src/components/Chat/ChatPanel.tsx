@@ -1442,7 +1442,18 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             }
           }}
         >
-          <div ref={messagesInnerRef} className="chat-messages-inner">
+          <motion.div
+            ref={messagesInnerRef}
+            className="chat-messages-inner"
+            // Re-keying on session forces a fresh mount of this subtree on
+            // workspace swap, which plays the rise-in transition. The custom
+            // ease (decelerate quint) gives the conversation a sense of
+            // "arriving" rather than just appearing.
+            key={sessionId ?? 'no-session'}
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.36, ease: [0.16, 1, 0.3, 1] }}
+          >
             <div style={{ height: 16 }} />
             {firstLoadedIdx > 0 && (
               <div ref={topSentinelRef} className="chat-load-sentinel">
@@ -1478,7 +1489,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
                   : <ThinkingAnimation />}
               </motion.div>
             )}
-          </div>
+          </motion.div>
         </div>
       )}
       <div className="new-messages-anchor">
@@ -1594,7 +1605,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         }
         .follow-indicator {
           position: absolute;
-          bottom: 8px;
+          bottom: -10px;
           right: 12px;
           z-index: 10;
           display: flex;
@@ -1608,16 +1619,21 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           color: var(--text-muted);
           opacity: 0.55;
           cursor: pointer;
-          transition: color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+          transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, opacity 0.15s ease;
         }
         .follow-indicator:hover {
           opacity: 1;
           color: var(--text);
         }
+        /* Active state: drop the chip styling and show only the accent icon. */
         .follow-indicator.is-following {
           color: var(--accent);
-          border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+          background: transparent;
+          border-color: transparent;
           opacity: 1;
+        }
+        .follow-indicator.is-following:hover {
+          color: var(--accent);
         }
         @keyframes pinned-slide-in {
           from { opacity: 0; transform: translateY(-100%); }
