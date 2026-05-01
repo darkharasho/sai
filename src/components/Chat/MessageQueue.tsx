@@ -1,5 +1,6 @@
 import type { QueuedMessage } from '../../types';
 import { X, Image, FileText, Terminal } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 
 interface MessageQueueProps {
   queue: QueuedMessage[];
@@ -11,46 +12,47 @@ export default function MessageQueue({ queue, onRemove }: MessageQueueProps) {
 
   return (
     <div className="message-queue">
-      {queue.map((msg, i) => (
-        <div
-          key={msg.id}
-          className="message-queue-card"
-          style={{ animationDelay: `${i * 40}ms` }}
-        >
-          <span className="message-queue-accent" />
-          <span className="message-queue-index">{i + 1}</span>
-          {msg.attachments && (
-            <span className="message-queue-attachments">
-              {msg.attachments.terminal && <Terminal size={11} />}
-              {msg.attachments.files > 0 && <FileText size={11} />}
-              {msg.attachments.images > 0 && <><Image size={11} />{msg.attachments.images > 1 && <span className="message-queue-attach-count">{msg.attachments.images}</span>}</>}
-            </span>
-          )}
-          <span className="message-queue-text">{msg.text}</span>
-          <button
-            className="message-queue-remove"
-            title="Remove from queue"
-            onClick={() => onRemove(msg.id)}
+      <AnimatePresence initial={false}>
+        {queue.map((msg, i) => (
+          <motion.div
+            key={msg.id}
+            className="message-queue-card"
+            layout
+            initial={{ opacity: 0, y: 8, height: 0, marginTop: 0 }}
+            animate={{ opacity: 1, y: 0, height: 28, marginTop: i === 0 ? 0 : 3 }}
+            exit={{ opacity: 0, y: -4, height: 0, marginTop: 0 }}
+            transition={{
+              opacity: { duration: 0.2 },
+              y: { type: 'spring', stiffness: 420, damping: 32 },
+              height: { type: 'spring', stiffness: 360, damping: 34, mass: 0.6 },
+              marginTop: { duration: 0.2 },
+              layout: { type: 'spring', stiffness: 340, damping: 32 },
+            }}
           >
-            <X size={12} />
-          </button>
-        </div>
-      ))}
+            <span className="message-queue-accent" />
+            <span className="message-queue-index">{i + 1}</span>
+            {msg.attachments && (
+              <span className="message-queue-attachments">
+                {msg.attachments.terminal && <Terminal size={11} />}
+                {msg.attachments.files > 0 && <FileText size={11} />}
+                {msg.attachments.images > 0 && <><Image size={11} />{msg.attachments.images > 1 && <span className="message-queue-attach-count">{msg.attachments.images}</span>}</>}
+              </span>
+            )}
+            <span className="message-queue-text">{msg.text}</span>
+            <button
+              className="message-queue-remove"
+              title="Remove from queue"
+              onClick={() => onRemove(msg.id)}
+            >
+              <X size={12} />
+            </button>
+          </motion.div>
+        ))}
+      </AnimatePresence>
       <style>{`
-        @keyframes queue-slide-in {
-          from {
-            opacity: 0;
-            transform: translateY(6px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
         .message-queue {
           display: flex;
           flex-direction: column;
-          gap: 3px;
           padding: 0 15% 6px;
           flex-shrink: 0;
         }
@@ -62,10 +64,8 @@ export default function MessageQueue({ queue, onRemove }: MessageQueueProps) {
           border-radius: 8px;
           padding: 0 10px 0 0;
           font-size: 12px;
-          height: 28px;
           color: var(--text-muted);
           overflow: hidden;
-          animation: queue-slide-in 0.25s ease-out both;
           transition: background 0.15s ease, border-color 0.15s ease;
         }
         .message-queue-card:hover {

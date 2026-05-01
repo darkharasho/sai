@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { FileEdit, Terminal, FileText, Wrench, ChevronRight, ChevronDown, Circle, Globe, AlertCircle } from 'lucide-react';
+import { FileEdit, Terminal, FileText, Wrench, ChevronRight, Circle, Globe, AlertCircle } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import type { ToolCall } from '../../types';
 import { getShikiHighlighter, getActiveHighlightTheme } from '../../themes';
 
@@ -370,10 +371,27 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
           <span className="tool-call-name">{toolCall.name}</span>
           {!isBash && !isTodo && label && <span className="tool-call-label">{label}</span>}
           {isBash && code && <span className="tool-call-label">{code}</span>}
-          {hasBody && (expanded ? <ChevronDown size={14} className="tool-call-chevron" /> : <ChevronRight size={14} className="tool-call-chevron" />)}
+          {hasBody && (
+            <motion.span
+              className="tool-call-chevron-wrap"
+              animate={{ rotate: expanded ? 90 : 0 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 28 }}
+            >
+              <ChevronRight size={14} className="tool-call-chevron" />
+            </motion.span>
+          )}
         </div>
-        {expanded && hasBody && (
-          <>
+        <AnimatePresence initial={false}>
+          {expanded && hasBody && (
+            <motion.div
+              key="tool-call-expand"
+              className="tool-call-expand"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ height: { type: 'spring', stiffness: 280, damping: 32, mass: 0.7 }, opacity: { duration: 0.18 } }}
+              style={{ overflow: 'hidden' }}
+            >
             {isBash && (
               <BashInOut
                 output={toolCall.output}
@@ -426,9 +444,15 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
                 })()}
               </div>
             )}
-          </>
-        )}
+            </motion.div>
+          )}
+        </AnimatePresence>
         <style>{`
+          .tool-call-chevron-wrap {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+          }
           .tool-call-card {
             margin: 2px 0;
             background: var(--bg-secondary);

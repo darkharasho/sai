@@ -1,11 +1,11 @@
 // tests/unit/components/Chat/MessageQueue.integration.test.tsx
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import MessageQueue from '../../../../src/components/Chat/MessageQueue';
 import type { QueuedMessage } from '../../../../src/types';
 
 describe('MessageQueue integration', () => {
-  it('renumbers cards after removal', () => {
+  it('renumbers cards after removal', async () => {
     const queue: QueuedMessage[] = [
       { id: '1', text: 'First' },
       { id: '2', text: 'Second' },
@@ -22,9 +22,13 @@ describe('MessageQueue integration', () => {
     const updated = queue.filter(m => m.id !== '2');
     rerender(<MessageQueue queue={updated} onRemove={onRemove} />);
 
-    // Should renumber to 1, 2
-    expect(screen.getByText('1')).toBeTruthy();
-    expect(screen.getByText('2')).toBeTruthy();
+    // AnimatePresence may keep the exiting card in the DOM briefly — wait for it
+    // to leave, then assert the renumbered indices.
+    await waitFor(() => {
+      expect(screen.queryAllByText('Second')).toHaveLength(0);
+    });
+    expect(screen.getByText('First')).toBeTruthy();
+    expect(screen.getByText('Third')).toBeTruthy();
     expect(screen.queryByText('3')).toBeNull();
   });
 

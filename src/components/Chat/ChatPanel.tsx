@@ -1,8 +1,56 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, type MutableRefObject } from 'react';
 import { ChevronDown, CornerLeftUp, ArrowDownToLine } from 'lucide-react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import ThinkingAnimation from '../ThinkingAnimation';
 import { dbGetMessagesRange } from '../../chatDb';
+
+function ChatScrollDebugHud({
+  scrollerRef,
+  followingRef,
+  isAtBottomRef,
+  showNewMessages,
+  isStreaming,
+  messageCount,
+}: {
+  scrollerRef: MutableRefObject<HTMLElement | Window | null>;
+  followingRef: MutableRefObject<boolean>;
+  isAtBottomRef: MutableRefObject<boolean>;
+  showNewMessages: boolean;
+  isStreaming: boolean;
+  messageCount: number;
+}) {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    let raf = 0;
+    const loop = () => { setTick(t => (t + 1) % 1_000_000); raf = requestAnimationFrame(loop); };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  const el = scrollerRef.current instanceof HTMLElement ? scrollerRef.current : null;
+  const gap = el ? el.scrollHeight - el.scrollTop - el.clientHeight : 0;
+  const stuck = showNewMessages && gap < 8;
+  return (
+    <div
+      data-tick={tick}
+      style={{
+        position: 'absolute',
+        bottom: 4,
+        right: 8,
+        zIndex: 50,
+        font: '10px/1.35 ui-monospace, SFMono-Regular, monospace',
+        background: stuck ? 'rgba(180, 60, 40, 0.92)' : 'rgba(0, 0, 0, 0.62)',
+        color: '#fff',
+        padding: '4px 7px',
+        borderRadius: 4,
+        pointerEvents: 'none',
+        whiteSpace: 'pre',
+      }}
+    >
+      {`follow=${followingRef.current ? 'Y' : 'N'}  atBot=${isAtBottomRef.current ? 'Y' : 'N'}  newMsg=${showNewMessages ? 'Y' : 'N'}\n`}
+      {`gap=${gap}px  msgs=${messageCount}  stream=${isStreaming ? 'Y' : 'N'}${stuck ? '  ⚠ STUCK' : ''}`}
+    </div>
+  );
+}
 
 function ContextMeter({ used, total }: { used: number; total: number }) {
   const pct = Math.min((used / total) * 100, 100);
@@ -201,6 +249,7 @@ import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import MessageQueue from './MessageQueue';
 import TodoProgress from './TodoProgress';
+import { motion, AnimatePresence } from 'motion/react';
 import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, QueuedMessage, TerminalTab } from '../../types';
 import { buildHelpMessage } from './helpText';
 import { parseAiError } from './parseAiError';
@@ -471,6 +520,10 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   // the scrollTop animation we drive ourselves during streaming).
   const wheelHandlersAttachedRef = useRef<HTMLElement | null>(null);
   const touchYRef = useRef(0);
+  // Set true while a programmatic scroll-away (e.g. Jump-to-message) is in
+  // flight. Suppresses the safety-net scroll listener and the streaming
+  // ResizeObserver so they don't drag the user back to the bottom mid-jump.
+  const programmaticScrollRef = useRef(false);
   // While the user is following, any growth of the scroll content (streaming
   // text, tool-call expansions, image loads) should immediately re-anchor to
   // the bottom. ResizeObserver fires on every layout change, which is finer-
@@ -480,10 +533,21 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const attachContentResizeObserver = useCallback((scroller: HTMLElement) => {
     if (typeof ResizeObserver === 'undefined') return;
     resizeObserverRef.current?.disconnect();
+    // Coalesce multiple layout changes within a single frame into one scroll
+    // snap. During heavy bursts (markdown re-tokenization, highlight.js,
+    // typewriter ticks) the observer can fire 5-10× per frame, and snapping
+    // every time forces synchronous layout reads that stall the next paint.
+    let rafScheduled = false;
     const ro = new ResizeObserver(() => {
-      if (followingRef.current) {
+      if (programmaticScrollRef.current) return;
+      if (!followingRef.current) return;
+      if (rafScheduled) return;
+      rafScheduled = true;
+      requestAnimationFrame(() => {
+        rafScheduled = false;
+        if (programmaticScrollRef.current || !followingRef.current) return;
         scroller.scrollTop = scroller.scrollHeight;
-      }
+      });
     });
     // Virtuoso renders its sized content as the scroller's first child.
     const target = scroller.firstElementChild as HTMLElement | null;
@@ -495,8 +559,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const attachUserScrollListeners = useCallback((el: HTMLElement) => {
     if (wheelHandlersAttachedRef.current === el) return;
     wheelHandlersAttachedRef.current = el;
+    // Threshold filters trackpad bounce/jitter (~0.5–1.5px) while still
+    // registering any deliberate flick as scroll-up intent. The safety-net
+    // scroll listener below restores follow as soon as the user lands back
+    // at the bottom, so we don't need an at-bottom guard here.
     el.addEventListener('wheel', (e: WheelEvent) => {
-      if (e.deltaY < 0 && !isAtBottomRef.current) {
+      if (e.deltaY < -3) {
         followingRef.current = false;
         setFollowing(false);
       }
@@ -506,11 +574,27 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     }, { passive: true });
     el.addEventListener('touchmove', (e: TouchEvent) => {
       const y = e.touches[0]?.clientY ?? 0;
-      if (y - touchYRef.current > 0 && !isAtBottomRef.current) {
+      if (y - touchYRef.current > 3) {
         followingRef.current = false;
         setFollowing(false);
       }
       touchYRef.current = y;
+    }, { passive: true });
+    // Safety net: Virtuoso's atBottomStateChange can lag behind reality (scroll
+    // animations, item-height springs, programmatic snaps). If the actual
+    // scroll position is at the bottom, the "new messages" indicator must
+    // never be visible. Reconcile on every native scroll event.
+    el.addEventListener('scroll', () => {
+      if (programmaticScrollRef.current) return;
+      const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (gap < 8) {
+        if (!isAtBottomRef.current) isAtBottomRef.current = true;
+        if (!followingRef.current) {
+          followingRef.current = true;
+          setFollowing(true);
+        }
+        setShowNewMessages(false);
+      }
     }, { passive: true });
   }, []);
 
@@ -1211,6 +1295,16 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
   return (
     <div className="chat-panel">
+      {import.meta.env.DEV && (
+        <ChatScrollDebugHud
+          scrollerRef={scrollerRef}
+          followingRef={followingRef}
+          isAtBottomRef={isAtBottomRef}
+          showNewMessages={showNewMessages}
+          isStreaming={isStreaming}
+          messageCount={messages.length}
+        />
+      )}
       {pinnedUserMessage && (
         <div className="pinned-prompt-bar" key={pinnedUserMessage.id}>
           <div className="pinned-prompt-accent" />
@@ -1219,7 +1313,14 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           <button
             className="pinned-prompt-jump"
             onClick={() => {
+              // Disengage follow and suppress the safety-net + ResizeObserver
+              // for the duration of the smooth scroll, otherwise the gap-< 8
+              // check at the start re-engages follow and snaps us back.
               isAtBottomRef.current = false;
+              followingRef.current = false;
+              setFollowing(false);
+              programmaticScrollRef.current = true;
+              setTimeout(() => { programmaticScrollRef.current = false; }, 900);
               const idx = messages.lastIndexOf(pinnedUserMessage);
               if (idx >= 0) virtuosoRef.current?.scrollToIndex({ index: firstLoadedIdx + idx, align: 'center', behavior: 'smooth' });
             }}
@@ -1248,6 +1349,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           data={messages}
           computeItemKey={(_index, msg) => msg.id}
           firstItemIndex={firstLoadedIdx}
+          initialTopMostItemIndex={Math.max(0, messages.length - 1)}
           startReached={handleLoadOlder}
           atBottomThreshold={4}
           increaseViewportBy={{ top: 600, bottom: 600 }}
@@ -1259,8 +1361,15 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             }
           }}
           atBottomStateChange={(atBottom) => {
-            isAtBottomRef.current = atBottom;
-            if (atBottom) {
+            // Virtuoso can fire atBottom=false during streaming when scrollHeight
+            // grows faster than its internal measurement catches up — even though
+            // the actual scroll position is still pinned to the bottom. Verify
+            // against the live scroll position before trusting the signal.
+            const sc = scrollerRef.current instanceof HTMLElement ? scrollerRef.current : null;
+            const realGap = sc ? sc.scrollHeight - sc.scrollTop - sc.clientHeight : 0;
+            const reallyAtBottom = atBottom || realGap < 8;
+            isAtBottomRef.current = reallyAtBottom;
+            if (reallyAtBottom) {
               followingRef.current = true;
               setFollowing(true);
               setShowNewMessages(false);
@@ -1269,31 +1378,49 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             }
           }}
           rangeChanged={({ startIndex }) => setVisibleStartIdx(startIndex - firstLoadedIdx)}
-          itemContent={(_index, msg) => msg.role === 'user'
-            ? <ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} />
-            : <ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} />
-          }
+          itemContent={(_index, msg) => {
+            const lastMsg = messages[messages.length - 1];
+            const isLastAssistantStreaming = isStreaming && msg.role === 'assistant' && lastMsg?.id === msg.id;
+            return msg.role === 'user'
+              ? <ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} />
+              : <ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} isStreaming={isLastAssistantStreaming} />;
+          }}
           components={{
             Header: () => <div style={{ height: 16 }} />,
             Footer: () => isStreaming ? (
-              <div style={{ padding: '0 16px' }}>
+              <motion.div
+                style={{ padding: '0 16px' }}
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+              >
                 {aiProvider === 'gemini'
                   ? <GeminiThinkingAnimation loadingPhrases={geminiLoadingPhrases} />
                   : aiProvider === 'codex'
                   ? <CodexThinkingAnimation />
                   : <ThinkingAnimation />}
-              </div>
+              </motion.div>
             ) : null,
           }}
         />
       )}
       <div className="new-messages-anchor">
-        {showNewMessages && (
-          <button className="new-messages-btn" onClick={scrollToBottom}>
-            <ChevronDown size={12} />
-            new messages
-          </button>
-        )}
+        <AnimatePresence>
+          {showNewMessages && (
+            <motion.button
+              key="new-messages-btn"
+              className="new-messages-btn"
+              onClick={scrollToBottom}
+              initial={{ opacity: 0, y: 6, scale: 0.94 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 6, scale: 0.94 }}
+              transition={{ type: 'spring', stiffness: 460, damping: 32 }}
+            >
+              <ChevronDown size={12} />
+              new messages
+            </motion.button>
+          )}
+        </AnimatePresence>
         <button
           className={`follow-indicator ${following ? 'is-following' : ''}`}
           onClick={scrollToBottom}
@@ -1356,6 +1483,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           flex-direction: column;
           min-height: 0;
           overflow: hidden;
+          position: relative;
         }
         .new-messages-anchor {
           position: relative;

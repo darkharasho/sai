@@ -5,9 +5,41 @@ import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 import 'highlight.js/styles/monokai.css';
 import { AlertTriangle, Check, ChevronRight, Circle, Copy, RotateCw, Terminal, TerminalSquare, X } from 'lucide-react';
+import { motion } from 'motion/react';
 import ToolCallCard from './ToolCallCard';
 import type { ChatMessage as ChatMessageType } from '../../types';
 import { getActiveTerminalId } from '../../terminalBuffer';
+
+// Message IDs that have already played their entry animation. Prevents
+// react-virtuoso item recycling from re-triggering the animation when the
+// user scrolls a message off-screen and back.
+const SEEN_MESSAGES = new Set<string>();
+const ENTER_TRANSITION = { duration: 0.36, ease: [0.22, 1, 0.36, 1] as const };
+// Per-message typewriter progress. Survives virtuoso item recycling so a
+// streaming message that scrolls off-screen and back doesn't replay from 0.
+const TYPEWRITER_PROGRESS = new Map<string, number>();
+
+// Live preference cached at module scope so every mounted ChatMessage shares
+// one value without each one doing an IPC roundtrip. Hydrated once on first
+// import; SettingsModal broadcasts updates via the `sai-pref-typewriter`
+// window event so toggling the setting takes effect without remounting.
+let typewriterPref = true;
+if (typeof window !== 'undefined' && (window as any).sai?.settingsGet) {
+  (window as any).sai.settingsGet('typewriterEnabled', true).then((v: boolean) => { typewriterPref = v !== false; });
+}
+
+// Walk back to the nearest whitespace at-or-before `len` so the visible text
+// only advances on word boundaries. Prevents mid-word twitching and stops
+// react-markdown / highlight.js from re-tokenizing half-finished tokens.
+function snapToWordBoundary(text: string, len: number): number {
+  if (len >= text.length) return text.length;
+  if (len <= 0) return 0;
+  for (let i = len; i > 0; i--) {
+    const c = text.charCodeAt(i);
+    if (c === 32 /* space */ || c === 10 /* \n */ || c === 9 /* \t */) return i;
+  }
+  return 0;
+}
 
 const FILE_PATH_RE = /(?<![:/])\b((?:\.{1,2}\/)?(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte))(?::(\d+))?\b|(?<![:/.\w])((?:\/[\w.-]+)+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte))(?::(\d+))?\b/g;
 
@@ -224,11 +256,85 @@ function ImageModal({ src, onClose }: { src: string; onClose: () => void }) {
   );
 }
 
-function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', toolCallsExpanded = true, onRetry }: { message: ChatMessageType; projectPath?: string; onFileOpen?: (path: string, line?: number) => void; aiProvider?: 'claude' | 'codex' | 'gemini'; toolCallsExpanded?: boolean; onRetry?: () => void }) {
+function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', toolCallsExpanded = true, onRetry, isStreaming = false }: { message: ChatMessageType; projectPath?: string; onFileOpen?: (path: string, line?: number) => void; aiProvider?: 'claude' | 'codex' | 'gemini'; toolCallsExpanded?: boolean; onRetry?: () => void; isStreaming?: boolean }) {
   const dotColor = getDotColor(message.role);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [errorDetailsOpen, setErrorDetailsOpen] = useState(false);
   const [errorDetailsCopied, setErrorDetailsCopied] = useState(false);
+  const [shouldAnimateEntry] = useState(() => !SEEN_MESSAGES.has(message.id));
+  useEffect(() => { SEEN_MESSAGES.add(message.id); }, [message.id]);
+  const entryProps = shouldAnimateEntry
+    ? { initial: { opacity: 0, y: 8 }, animate: { opacity: 1, y: 0 }, transition: ENTER_TRANSITION }
+    : { initial: false as const, animate: { opacity: 1, y: 0 } };
+
+  const rawAssistantContent = (message.role === 'assistant' && typeof message.content === 'string')
+    ? message.content
+    : '';
+  const isAssistantStreamingFlag = isStreaming && message.role === 'assistant';
+  const [typewriterEnabled, setTypewriterEnabled] = useState(typewriterPref);
+  useEffect(() => {
+    const onPref = (e: Event) => setTypewriterEnabled(!!(e as CustomEvent).detail);
+    window.addEventListener('sai-pref-typewriter', onPref);
+    return () => window.removeEventListener('sai-pref-typewriter', onPref);
+  }, []);
+  const tickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (tickTimerRef.current) clearTimeout(tickTimerRef.current); }, []);
+  // Typewriter stays active even after `isStreaming` flips false — short
+  // replies often finalize before the typewriter has time to drip, so we
+  // keep dripping until the visible text catches up to the buffer. A live
+  // entry in TYPEWRITER_PROGRESS marks "this message has been typing."
+  const typewriterActive = typewriterEnabled && message.role === 'assistant' && (isAssistantStreamingFlag || TYPEWRITER_PROGRESS.has(message.id));
+  const [displayLen, setDisplayLen] = useState(() => {
+    if (!typewriterActive) return rawAssistantContent.length;
+    return TYPEWRITER_PROGRESS.get(message.id) ?? 0;
+  });
+  useEffect(() => {
+    if (!typewriterActive) {
+      if (tickTimerRef.current) { clearTimeout(tickTimerRef.current); tickTimerRef.current = null; }
+      if (displayLen !== rawAssistantContent.length) setDisplayLen(rawAssistantContent.length);
+      return;
+    }
+    if (displayLen >= rawAssistantContent.length) {
+      // Caught up — clear the marker so a future re-mount of this message
+      // (Virtuoso recycle, workspace swap) renders the full content instantly
+      // instead of replaying the typewriter.
+      TYPEWRITER_PROGRESS.delete(message.id);
+      return;
+    }
+    // First tick after a streaming start — make sure the marker is set so
+    // the post-stream finalization path keeps the typewriter alive.
+    if (!TYPEWRITER_PROGRESS.has(message.id)) TYPEWRITER_PROGRESS.set(message.id, displayLen);
+    const remaining = rawAssistantContent.length - displayLen;
+    // Short-circuit on big bursts. A backlog over ~400 chars almost always
+    // means a code block or large paragraph just landed in one IPC chunk —
+    // dripping it through markdown + highlight.js re-renders stalls the main
+    // thread and the auto-scroll falls behind. Snap straight to full; the
+    // next small delta will drip normally.
+    if (remaining > 400) {
+      if (tickTimerRef.current) { clearTimeout(tickTimerRef.current); tickTimerRef.current = null; }
+      setDisplayLen(rawAssistantContent.length);
+      TYPEWRITER_PROGRESS.set(message.id, rawAssistantContent.length);
+      return;
+    }
+    // Don't reschedule if a tick is already pending — letting it fire is
+    // what guarantees forward progress when content updates arrive on the
+    // same cadence as the tick (the stream-buffer flush is also ~33ms, so
+    // restarting the timer on every flush would starve the typewriter).
+    if (tickTimerRef.current) return;
+    // Drain to zero in at most ~15 ticks (~480ms at 32ms cadence). A larger
+    // ratio on big bursts cuts the number of markdown/highlight.js re-renders
+    // in half versus a slow drain, which is what makes auto-scroll feel
+    // jittery during long replies. Floor keeps short replies readable.
+    const step = Math.max(18, Math.ceil(remaining / 15));
+    tickTimerRef.current = setTimeout(() => {
+      tickTimerRef.current = null;
+      setDisplayLen(d => {
+        const next = Math.min(d + step, rawAssistantContent.length);
+        TYPEWRITER_PROGRESS.set(message.id, next);
+        return next;
+      });
+    }, 32);
+  }, [typewriterActive, rawAssistantContent.length, displayLen, message.id]);
 
   if (message.error) {
     const { title, status, message: errMsg, requestId, details } = message.error;
@@ -239,7 +345,7 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
       setTimeout(() => setErrorDetailsCopied(false), 1500);
     };
     return (
-      <div className="chat-msg chat-msg-error-wrap">
+      <motion.div className="chat-msg chat-msg-error-wrap" {...entryProps}>
         <div className="chat-msg-error">
           <div className="chat-msg-error-header">
             <AlertTriangle size={16} className="chat-msg-error-icon" />
@@ -288,11 +394,7 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
           )}
         </div>
         <style>{`
-          .chat-msg-error-wrap { margin-bottom: 16px; animation: msg-enter 0.25s ease-out both; }
-          @keyframes msg-enter {
-            from { opacity: 0; transform: translateY(6px); }
-            to   { opacity: 1; transform: translateY(0); }
-          }
+          .chat-msg-error-wrap { margin-bottom: 16px; }
           .chat-msg-error {
             border: 1px solid color-mix(in srgb, var(--red) 40%, var(--border));
             background: color-mix(in srgb, var(--red) 8%, var(--bg-input));
@@ -405,12 +507,14 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
           }
           .chat-msg-error-copy:hover { opacity: 1; color: var(--text); }
         `}</style>
-      </div>
+      </motion.div>
     );
   }
 
+  const isAssistantStreaming = isStreaming && message.role === 'assistant';
+
   return (
-    <div className={`chat-msg chat-msg-${message.role}`}>
+    <motion.div className={`chat-msg chat-msg-${message.role}${isAssistantStreaming ? ' chat-msg-streaming' : ''}`} {...entryProps}>
       {message.content && (
         <div className="chat-msg-content">
           {message.role === 'user'
@@ -453,8 +557,17 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
               // Preserve user newlines as hard line breaks (trailing double-space)
               // so Shift+Enter in the chat input renders visually.
               if (message.role === 'user') return raw.replace(/\n/g, '  \n');
+              if (typewriterActive && displayLen < rawAssistantContent.length) return raw.slice(0, snapToWordBoundary(raw, displayLen));
               return raw;
             })()}</ReactMarkdown>
+            {typewriterActive && displayLen < rawAssistantContent.length && (
+              <motion.span
+                className="chat-msg-cursor"
+                aria-hidden
+                animate={{ opacity: [0.25, 1, 0.25] }}
+                transition={{ duration: 1.1, repeat: Infinity, ease: 'easeInOut' }}
+              />
+            )}
             {message.images && message.images.length > 0 && (
               <div className="chat-msg-images">
                 {message.images.map((src, i) => (
@@ -473,11 +586,25 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
         .chat-msg {
           margin-bottom: 16px;
           padding: 0 16px;
-          animation: msg-enter 0.25s ease-out both;
         }
-        @keyframes msg-enter {
-          from { opacity: 0; transform: translateY(6px); }
-          to   { opacity: 1; transform: translateY(0); }
+        .chat-msg-cursor {
+          display: inline-block;
+          width: 7px;
+          height: 1em;
+          margin-left: 3px;
+          vertical-align: -2px;
+          background: var(--accent);
+          border-radius: 1px;
+          box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
+        }
+        .chat-msg-streaming .chat-msg-claude,
+        .chat-msg-streaming .chat-msg-openai,
+        .chat-msg-streaming .chat-msg-gemini {
+          animation: chat-dot-breathe 1.6s ease-in-out infinite;
+        }
+        @keyframes chat-dot-breathe {
+          0%, 100% { transform: scale(1); filter: drop-shadow(0 0 0 transparent); opacity: 0.85; }
+          50%      { transform: scale(1.18); filter: drop-shadow(0 0 6px var(--accent)); opacity: 1; }
         }
         .chat-msg-user {
           background: var(--bg-input);
@@ -724,7 +851,7 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
           background: var(--bg-secondary, #2a2a2a);
         }
       `}</style>
-    </div>
+    </motion.div>
   );
 }
 
@@ -733,5 +860,6 @@ export default memo(ChatMessage, (prev, next) =>
   prev.projectPath === next.projectPath &&
   prev.aiProvider === next.aiProvider &&
   prev.toolCallsExpanded === next.toolCallsExpanded &&
+  prev.isStreaming === next.isStreaming &&
   Boolean(prev.onRetry) === Boolean(next.onRetry)
 );
