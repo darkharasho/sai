@@ -1153,15 +1153,23 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     }
   };
 
-  const prevStreamingRef = useRef(false);
+  // Drain the queue whenever we're idle and have something to send. Depending on
+  // both isStreaming and the queue length covers the case where a queue update
+  // races the streaming-flag flip (e.g., a `result`/`done` event lands before
+  // the new queue prop propagates from App), and the case where streaming never
+  // started at all (immediate error). drainingRef prevents back-to-back drains
+  // for multi-item queues — it resets when isStreaming flips true again.
+  const drainingRef = useRef(false);
   useEffect(() => {
-    if (prevStreamingRef.current && !isStreaming && messageQueue.length > 0 && onQueueShift && sessionId) {
-      const next = messageQueue[0];
-      onQueueShift(sessionId);
-      setTimeout(() => handleSend(next.fullText, next.images), 300);
-    }
-    prevStreamingRef.current = isStreaming;
-  }, [isStreaming]);
+    if (isStreaming) { drainingRef.current = false; return; }
+    if (drainingRef.current) return;
+    if (messageQueue.length === 0) return;
+    if (!onQueueShift || !sessionId) return;
+    drainingRef.current = true;
+    const next = messageQueue[0];
+    onQueueShift(sessionId);
+    setTimeout(() => handleSend(next.fullText, next.images), 300);
+  }, [isStreaming, messageQueue.length, sessionId]);
 
   return (
     <div className="chat-panel">
