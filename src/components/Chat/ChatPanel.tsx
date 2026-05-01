@@ -544,6 +544,17 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const emptyPrompt = useMemo(() => EMPTY_PROMPTS[Math.floor(Math.random() * EMPTY_PROMPTS.length)], []);
   const [isStreaming, setIsStreaming] = useState(false);
   const turnSeqRef = useRef(0); // tracks the active turn's sequence number
+  // Watchdog for sends that vanish into the void (CLI in approval-wait, dying
+  // process whose stdin write succeeds silently, etc.). Cleared when the
+  // backend acknowledges with streaming_start or terminates the turn.
+  const sendWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearSendWatchdog = useCallback(() => {
+    if (sendWatchdogRef.current) {
+      clearTimeout(sendWatchdogRef.current);
+      sendWatchdogRef.current = null;
+    }
+  }, []);
+  useEffect(() => () => clearSendWatchdog(), [clearSendWatchdog]);
   const [ready, setReady] = useState(false);
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
@@ -645,6 +656,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
       if (msg.type === 'streaming_start') {
         if (msg.turnSeq != null) turnSeqRef.current = msg.turnSeq;
+        clearSendWatchdog();
         setIsStreaming(true);
         return;
       }
@@ -656,6 +668,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         // message while the CLI is still finishing the old response, the old result/done
         // arrives tagged with the old turnSeq and should not affect the new turn's state.
         if (msg.turnSeq != null && msg.turnSeq !== turnSeqRef.current) return;
+        clearSendWatchdog();
         flushStreamBuffer();
         if (msg.type === 'done') {
           turnSeqRef.current = -1;
@@ -669,6 +682,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       }
 
       if (msg.type === 'process_exit') {
+        clearSendWatchdog();
         flushStreamBuffer();
         setReady(false);
         setIsStreaming(false);
@@ -679,6 +693,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       }
 
       if (msg.type === 'error') {
+        clearSendWatchdog();
         flushStreamBuffer();
         const error = parseAiError(msg.text || 'Unknown error');
         setMessages(prev => [...prev, {
@@ -1115,6 +1130,29 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       timestamp: Date.now(),
       images: images?.length ? images : undefined,
     }]);
+
+    // Optimistically show the thinking indicator so the user gets immediate
+    // feedback that the send was received, even before the backend's
+    // streaming_start IPC arrives. The backend will keep this in sync —
+    // streaming_start re-confirms it, and done/result/error/process_exit
+    // turn it off.
+    setIsStreaming(true);
+
+    // Watchdog: if we don't hear back from the backend within a generous
+    // window, surface an error instead of leaving the user staring at a
+    // permanent thinking spinner. CLI startup can be slow on cold spawns,
+    // so keep this generous.
+    clearSendWatchdog();
+    sendWatchdogRef.current = setTimeout(() => {
+      sendWatchdogRef.current = null;
+      setIsStreaming(false);
+      setMessages(prev => [...prev, {
+        id: `watchdog-${Date.now()}`,
+        role: 'system',
+        content: 'No response from the CLI. The message may not have been received — try sending again, or restart the workspace if this keeps happening.',
+        timestamp: Date.now(),
+      }]);
+    }, 15000);
 
     // Save images to temp files and get paths
     let imagePaths: string[] | undefined;
