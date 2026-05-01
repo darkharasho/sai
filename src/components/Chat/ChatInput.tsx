@@ -1204,7 +1204,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
 
       <style>{`
         .input-wrapper {
-          padding: 0 15% 12px;
+          padding: 16px 15% 12px;
           position: relative;
         }
         .autocomplete-dropdown {

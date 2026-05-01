@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { ChevronDown, CornerLeftUp } from 'lucide-react';
+import { ChevronDown, CornerLeftUp, ArrowDownToLine } from 'lucide-react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import ThinkingAnimation from '../ThinkingAnimation';
 import { dbGetMessagesRange } from '../../chatDb';
@@ -452,6 +452,67 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     });
   }, []);
 
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const scrollerRef = useRef<HTMLElement | Window | null>(null);
+  const isAtBottomRef = useRef(true);
+  // followingRef is the user's *intent* to follow output. It only flips false
+  // from a user-initiated scroll up (wheel/touch), and flips true when the
+  // user reaches the bottom or clicks the indicator. Programmatic scrolls
+  // never toggle it, so streaming auto-scroll won't accidentally pause itself.
+  const followingRef = useRef(true);
+  const snapToBottom = useCallback(() => {
+    const el = scrollerRef.current as HTMLElement | null;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, []);
+
+  // Wheel/touch events are never fired by programmatic scrolls, so they're a
+  // clean signal of user intent to scroll up (whereas atBottom flips during
+  // the scrollTop animation we drive ourselves during streaming).
+  const wheelHandlersAttachedRef = useRef<HTMLElement | null>(null);
+  const touchYRef = useRef(0);
+  // While the user is following, any growth of the scroll content (streaming
+  // text, tool-call expansions, image loads) should immediately re-anchor to
+  // the bottom. ResizeObserver fires on every layout change, which is finer-
+  // grained than streaming flushes — fixes the "hangs behind during render"
+  // case where content grows between flushes.
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const attachContentResizeObserver = useCallback((scroller: HTMLElement) => {
+    resizeObserverRef.current?.disconnect();
+    const ro = new ResizeObserver(() => {
+      if (followingRef.current) {
+        scroller.scrollTop = scroller.scrollHeight;
+      }
+    });
+    // Virtuoso renders its sized content as the scroller's first child.
+    const target = scroller.firstElementChild as HTMLElement | null;
+    if (target) ro.observe(target);
+    resizeObserverRef.current = ro;
+  }, []);
+  useEffect(() => () => resizeObserverRef.current?.disconnect(), []);
+
+  const attachUserScrollListeners = useCallback((el: HTMLElement) => {
+    if (wheelHandlersAttachedRef.current === el) return;
+    wheelHandlersAttachedRef.current = el;
+    el.addEventListener('wheel', (e: WheelEvent) => {
+      if (e.deltaY < 0) {
+        followingRef.current = false;
+        setFollowing(false);
+      }
+    }, { passive: true });
+    el.addEventListener('touchstart', (e: TouchEvent) => {
+      touchYRef.current = e.touches[0]?.clientY ?? 0;
+    }, { passive: true });
+    el.addEventListener('touchmove', (e: TouchEvent) => {
+      const y = e.touches[0]?.clientY ?? 0;
+      if (y - touchYRef.current > 0) {
+        followingRef.current = false;
+        setFollowing(false);
+      }
+      touchYRef.current = y;
+    }, { passive: true });
+  }, []);
+
   // Coalesce streaming text deltas: highlight.js re-tokenizes the entire
   // message body on each chunk, so flushing every IPC event is wasteful.
   const streamBufferRef = useRef<{ pending: string; timer: ReturnType<typeof setTimeout> | null }>({ pending: '', timer: null });
@@ -472,10 +533,10 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     });
     // followOutput only fires on count changes; streaming grows the last
     // item in place, so re-anchor manually while the user is at the bottom.
-    if (isAtBottomRef.current) {
-      virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior: 'auto' });
+    if (followingRef.current) {
+      requestAnimationFrame(snapToBottom);
     }
-  }, [setMessages]);
+  }, [setMessages, snapToBottom]);
   useEffect(() => () => {
     if (streamBufferRef.current.timer) clearTimeout(streamBufferRef.current.timer);
   }, []);
@@ -494,8 +555,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const autoCompactCooldownRef = useRef(0); // timestamp — don't re-compact until after this
   const [rateLimits, setRateLimits] = useState<Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number; utilization?: number; lastUpdated: number }>>(new Map());
   const [billingMode, setBillingMode] = useState<'subscription' | 'api'>('subscription');
-  const virtuosoRef = useRef<VirtuosoHandle>(null);
-  const isAtBottomRef = useRef(true);
+  const [following, setFollowing] = useState(true);
   const [pinnedUserMessage, setPinnedUserMessage] = useState<ChatMessageType | null>(null);
   const [showNewMessages, setShowNewMessages] = useState(false);
   const [visibleStartIdx, setVisibleStartIdx] = useState(0);
@@ -917,18 +977,50 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   useEffect(() => {
     if (isActive) {
       isAtBottomRef.current = true;
+      followingRef.current = true;
+      setFollowing(true);
       setShowNewMessages(false);
       requestAnimationFrame(() => {
-        virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior: 'auto' });
+        requestAnimationFrame(snapToBottom);
       });
     }
-  }, [isActive]);
+  }, [isActive, snapToBottom]);
+
 
   const scrollToBottom = () => {
     isAtBottomRef.current = true;
+    followingRef.current = true;
+    setFollowing(true);
     setShowNewMessages(false);
-    virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior: 'smooth' });
+    requestAnimationFrame(() => {
+      requestAnimationFrame(snapToBottom);
+    });
   };
+
+  // Scroll on a newly-appended last message. Distinguishes append (user send,
+  // assistant turn) from prepend (pagination loading older history) by tracking
+  // the last message id rather than messages.length.
+  const lastIdRef = useRef<string | undefined>(messages[messages.length - 1]?.id);
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (!last || last.id === lastIdRef.current) return;
+    lastIdRef.current = last.id;
+    if (last.role === 'user') {
+      isAtBottomRef.current = true;
+      followingRef.current = true;
+      setFollowing(true);
+      setShowNewMessages(false);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(snapToBottom);
+      });
+    } else if (followingRef.current) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(snapToBottom);
+      });
+    } else if (last.role === 'assistant') {
+      setShowNewMessages(true);
+    }
+  }, [messages]);
 
   const userMessages = useMemo(
     () => messages.filter(m => m.role === 'user'),
@@ -1103,13 +1195,22 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           computeItemKey={(_index, msg) => msg.id}
           firstItemIndex={firstLoadedIdx}
           startReached={handleLoadOlder}
-          followOutput="auto"
-          atBottomThreshold={60}
+          atBottomThreshold={4}
           increaseViewportBy={{ top: 600, bottom: 600 }}
+          scrollerRef={(ref) => {
+            scrollerRef.current = ref;
+            if (ref instanceof HTMLElement) {
+              attachUserScrollListeners(ref);
+              attachContentResizeObserver(ref);
+            }
+          }}
           atBottomStateChange={(atBottom) => {
             isAtBottomRef.current = atBottom;
-            if (atBottom) setShowNewMessages(false);
-            else if (messagesRef.current[messagesRef.current.length - 1]?.role === 'assistant') {
+            if (atBottom) {
+              followingRef.current = true;
+              setFollowing(true);
+              setShowNewMessages(false);
+            } else if (messagesRef.current[messagesRef.current.length - 1]?.role === 'assistant') {
               setShowNewMessages(true);
             }
           }}
@@ -1139,6 +1240,14 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             new messages
           </button>
         )}
+        <button
+          className={`follow-indicator ${following ? 'is-following' : ''}`}
+          onClick={scrollToBottom}
+          title={following ? 'Following output' : 'Click to resume following'}
+          aria-label={following ? 'Following output' : 'Resume following output'}
+        >
+          <ArrowDownToLine size={12} />
+        </button>
       </div>
       <TodoProgress messages={messages} isStreaming={isStreaming} />
       <MessageQueue
@@ -1223,6 +1332,33 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         }
         .new-messages-btn:hover {
           color: var(--text);
+        }
+        .follow-indicator {
+          position: absolute;
+          bottom: 8px;
+          right: 12px;
+          z-index: 10;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 22px;
+          height: 22px;
+          background: var(--bg-secondary);
+          border: 1px solid var(--border);
+          border-radius: 50%;
+          color: var(--text-muted);
+          opacity: 0.55;
+          cursor: pointer;
+          transition: color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+        }
+        .follow-indicator:hover {
+          opacity: 1;
+          color: var(--text);
+        }
+        .follow-indicator.is-following {
+          color: var(--accent);
+          border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+          opacity: 1;
         }
         @keyframes pinned-slide-in {
           from { opacity: 0; transform: translateY(-100%); }
