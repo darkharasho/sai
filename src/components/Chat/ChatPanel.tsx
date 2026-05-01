@@ -478,6 +478,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   // case where content grows between flushes.
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const attachContentResizeObserver = useCallback((scroller: HTMLElement) => {
+    if (typeof ResizeObserver === 'undefined') return;
     resizeObserverRef.current?.disconnect();
     const ro = new ResizeObserver(() => {
       if (followingRef.current) {
