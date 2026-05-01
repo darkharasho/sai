@@ -470,6 +470,11 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       }
       return prev;
     });
+    // followOutput only fires on count changes; streaming grows the last
+    // item in place, so re-anchor manually while the user is at the bottom.
+    if (isAtBottomRef.current) {
+      virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior: 'auto' });
+    }
   }, [setMessages]);
   useEffect(() => () => {
     if (streamBufferRef.current.timer) clearTimeout(streamBufferRef.current.timer);
