@@ -278,6 +278,7 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
     return () => window.removeEventListener('sai-pref-typewriter', onPref);
   }, []);
   const tickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSeenContentLenRef = useRef(0);
   useEffect(() => () => { if (tickTimerRef.current) clearTimeout(tickTimerRef.current); }, []);
   // Typewriter stays active even after `isStreaming` flips false — short
   // replies often finalize before the typewriter has time to drip, so we
@@ -292,6 +293,7 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
     if (!typewriterActive) {
       if (tickTimerRef.current) { clearTimeout(tickTimerRef.current); tickTimerRef.current = null; }
       if (displayLen !== rawAssistantContent.length) setDisplayLen(rawAssistantContent.length);
+      lastSeenContentLenRef.current = rawAssistantContent.length;
       return;
     }
     if (displayLen >= rawAssistantContent.length) {
@@ -299,23 +301,27 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
       // (Virtuoso recycle, workspace swap) renders the full content instantly
       // instead of replaying the typewriter.
       TYPEWRITER_PROGRESS.delete(message.id);
+      lastSeenContentLenRef.current = rawAssistantContent.length;
       return;
     }
     // First tick after a streaming start — make sure the marker is set so
     // the post-stream finalization path keeps the typewriter alive.
     if (!TYPEWRITER_PROGRESS.has(message.id)) TYPEWRITER_PROGRESS.set(message.id, displayLen);
-    const remaining = rawAssistantContent.length - displayLen;
-    // Short-circuit on big bursts. A backlog over ~400 chars almost always
-    // means a code block or large paragraph just landed in one IPC chunk —
-    // dripping it through markdown + highlight.js re-renders stalls the main
-    // thread and the auto-scroll falls behind. Snap straight to full; the
-    // next small delta will drip normally.
-    if (remaining > 400) {
+    // Detect a single large IPC chunk (code block / big paragraph dump) by
+    // measuring the *delta since last evaluation*, not total backlog. Backlog
+    // naturally grows whenever the model streams faster than ~560 chars/sec,
+    // so a backlog threshold trips on every fast stream and stops dripping
+    // entirely. A per-flush delta only trips when the model hands us a true
+    // burst in one go.
+    const burstDelta = rawAssistantContent.length - lastSeenContentLenRef.current;
+    lastSeenContentLenRef.current = rawAssistantContent.length;
+    if (burstDelta > 1200) {
       if (tickTimerRef.current) { clearTimeout(tickTimerRef.current); tickTimerRef.current = null; }
       setDisplayLen(rawAssistantContent.length);
       TYPEWRITER_PROGRESS.set(message.id, rawAssistantContent.length);
       return;
     }
+    const remaining = rawAssistantContent.length - displayLen;
     // Don't reschedule if a tick is already pending — letting it fire is
     // what guarantees forward progress when content updates arrive on the
     // same cadence as the tick (the stream-buffer flush is also ~33ms, so
