@@ -182,4 +182,18 @@ describe('ChatMessage', () => {
     );
     expect(container.querySelector('.chat-msg-error-pulse')).toBeTruthy();
   });
+
+  it('marks streaming text with chat-streaming-tail class', () => {
+    const { container } = render(
+      <ChatMessage isStreaming message={{ id: 's-1', role: 'assistant', content: 'partial', timestamp: 0 }} />
+    );
+    expect(container.querySelector('.chat-streaming-tail')).toBeTruthy();
+  });
+
+  it('does not mark non-streaming text with chat-streaming-tail', () => {
+    const { container } = render(
+      <ChatMessage message={{ id: 's-2', role: 'assistant', content: 'done', timestamp: 0 }} />
+    );
+    expect(container.querySelector('.chat-streaming-tail')).toBeFalsy();
+  });
 });

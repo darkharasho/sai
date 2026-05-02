@@ -610,7 +610,7 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
             : message.role === 'assistant'
             ? <span className={`chat-msg-dot ${aiProvider === 'gemini' ? 'chat-msg-gemini' : aiProvider === 'codex' ? 'chat-msg-openai' : 'chat-msg-claude'}`} />
             : <Circle size={8} fill={dotColor} stroke={dotColor} className="chat-msg-dot" />}
-          <div className="chat-msg-body">
+          <div className={`chat-msg-body${isAssistantStreaming ? ' chat-streaming-tail' : ''}`}>
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               rehypePlugins={[rehypeHighlight, rehypeFilePaths]}
@@ -755,6 +755,27 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
           mask-repeat: no-repeat;
         }
         .chat-msg-body { color: var(--text); line-height: 1.6; flex: 1; min-width: 0; }
+        @keyframes chat-streaming-tail-sweep {
+          from { background-position: -120% 0; }
+          to   { background-position:  120% 0; }
+        }
+        @media (prefers-reduced-motion: no-preference) {
+          .chat-streaming-tail {
+            background-image: linear-gradient(
+              90deg,
+              transparent 0%,
+              transparent 70%,
+              color-mix(in srgb, var(--accent) 35%, transparent) 85%,
+              transparent 100%
+            );
+            background-size: 200% 100%;
+            background-repeat: no-repeat;
+            background-position: 100% 0;
+            animation: chat-streaming-tail-sweep 1.6s ease-in-out infinite;
+            -webkit-background-clip: text;
+                    background-clip: text;
+          }
+        }
         .chat-msg-body p { margin: 0 0 8px 0; }
         .chat-msg-body p:last-child { margin-bottom: 0; }
         .chat-msg-body ol, .chat-msg-body ul { padding-left: 24px; margin: 0 0 8px 0; }
