@@ -307,14 +307,11 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
     if (!fromRect) return;
 
     const toRect = node.getBoundingClientRect();
-    const x = (fromRect.left + fromRect.width / 2) - (toRect.left + toRect.width / 2);
     const y = fromRect.top - toRect.top;
 
-    flipControls.set({ x, y, scale: 0.92, opacity: 0.7 });
+    flipControls.set({ y, opacity: 0.6 });
     flipControls.start({
-      x: 0,
       y: 0,
-      scale: 1,
       opacity: 1,
       transition: { duration: 0.3, ease: [0.16, 1, 0.3, 1] },
     });
