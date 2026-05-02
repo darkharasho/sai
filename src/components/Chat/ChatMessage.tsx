@@ -5,7 +5,7 @@ import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 import 'highlight.js/styles/monokai.css';
 import { AlertTriangle, Check, ChevronRight, Circle, Copy, RotateCw, Terminal, TerminalSquare, X } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion, useAnimationControls } from 'motion/react';
 import ToolCallCard from './ToolCallCard';
 import { consumeFlipRect, hasFlipRect } from './flipRegistry';
 import type { ChatMessage as ChatMessageType } from '../../types';
@@ -290,8 +290,13 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
     return hasFlipRect(message.id);
   });
 
+  // Drive the FLIP through framer's animation pipeline (instead of writing
+  // inline transform ourselves) so framer doesn't clobber our values. Using
+  // imperative controls.set() + controls.start() lets us snap to the source
+  // rect synchronously then animate to identity.
+  const flipControls = useAnimationControls();
   const effectiveEntryProps = flipActive
-    ? { initial: false as const, animate: { opacity: 1, y: 0 } }
+    ? { initial: false as const, animate: flipControls }
     : entryProps;
 
   useLayoutEffect(() => {
@@ -302,47 +307,18 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
     if (!fromRect) return;
 
     const toRect = node.getBoundingClientRect();
-    const dx = (fromRect.left + fromRect.width / 2) - (toRect.left + toRect.width / 2);
-    const dy = fromRect.top - toRect.top;
-    const startScale = 0.92;
+    const x = (fromRect.left + fromRect.width / 2) - (toRect.left + toRect.width / 2);
+    const y = fromRect.top - toRect.top;
 
-    const prevTransition = node.style.transition;
-    const prevTransform = node.style.transform;
-    const prevOpacity = node.style.opacity;
-    const prevOrigin = node.style.transformOrigin;
-
-    node.style.transition = 'none';
-    node.style.transformOrigin = 'bottom right';
-    node.style.transform = `translate(${dx}px, ${dy}px) scale(${startScale})`;
-    node.style.opacity = '0.7';
-
-    // Force a layout flush so the start state is committed before we set the
-    // end state — otherwise the browser collapses both writes into one and
-    // skips the transition entirely.
-    void node.getBoundingClientRect();
-
-    const raf = requestAnimationFrame(() => {
-      node.style.transition = 'transform 300ms cubic-bezier(0.16, 1, 0.3, 1), opacity 300ms cubic-bezier(0.16, 1, 0.3, 1)';
-      node.style.transform = '';
-      node.style.opacity = '';
+    flipControls.set({ x, y, scale: 0.92, opacity: 0.7 });
+    flipControls.start({
+      x: 0,
+      y: 0,
+      scale: 1,
+      opacity: 1,
+      transition: { duration: 0.3, ease: [0.16, 1, 0.3, 1] },
     });
-
-    const cleanup = (e?: TransitionEvent) => {
-      // Only react to our own transform transition, not nested children's.
-      if (e && e.target !== node) return;
-      node.style.transition = prevTransition;
-      node.style.transform = prevTransform;
-      node.style.opacity = prevOpacity;
-      node.style.transformOrigin = prevOrigin;
-      node.removeEventListener('transitionend', cleanup as EventListener);
-    };
-    node.addEventListener('transitionend', cleanup as EventListener);
-
-    return () => {
-      cancelAnimationFrame(raf);
-      node.removeEventListener('transitionend', cleanup as EventListener);
-    };
-  }, [flipActive]);
+  }, [flipActive, flipControls]);
 
   const rawAssistantContent = (message.role === 'assistant' && typeof message.content === 'string')
     ? message.content
