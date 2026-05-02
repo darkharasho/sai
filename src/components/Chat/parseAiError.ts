@@ -96,3 +96,11 @@ export function parseAiError(text: string): ParsedError {
 
   return { title, status, message, requestId, details };
 }
+
+export function looksLikeApiError(text: string): boolean {
+  if (!text) return false;
+  const t = text.trim();
+  if (/^API Error\b/i.test(t)) return true;
+  if (/"type"\s*:\s*"error"/.test(t) && /"message"\s*:/.test(t)) return true;
+  return false;
+}
