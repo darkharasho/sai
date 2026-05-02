@@ -1,24 +1,23 @@
-// Pending source rects for user-message FLIP animations, keyed by message id.
+// Pending source rect for the most recent user-message FLIP animation.
 // Module-level so ChatPanel (writer) and ChatMessage (reader) don't have to
 // thread a ref through props. Mirrors the SEEN_MESSAGES / TYPEWRITER_PROGRESS
 // pattern already used in ChatMessage.tsx.
+//
+// Reads are non-destructive — React 18 StrictMode mounts components twice in
+// dev, and a destructive consume would silently disable the animation in dev
+// (first mount consumes, second mount finds nothing). The Map is bounded by
+// clearing on every `setFlipRect`, so only the latest send's rect is retained.
 const FLIP_RECTS = new Map<string, DOMRect>();
 
 export function setFlipRect(messageId: string, rect: DOMRect): void {
+  FLIP_RECTS.clear();
   FLIP_RECTS.set(messageId, rect);
 }
 
-export function consumeFlipRect(messageId: string): DOMRect | undefined {
-  const rect = FLIP_RECTS.get(messageId);
-  if (rect) FLIP_RECTS.delete(messageId);
-  return rect;
+export function readFlipRect(messageId: string): DOMRect | undefined {
+  return FLIP_RECTS.get(messageId);
 }
 
-// Non-destructive check, used at render time to decide whether a message
-// "owns" a pending FLIP. Consume happens later in a layout effect — a
-// useState initializer can't consume safely because React 18 StrictMode
-// double-invokes initializers in dev, which would lose the rect on the
-// throwaway first render.
 export function hasFlipRect(messageId: string): boolean {
   return FLIP_RECTS.has(messageId);
 }

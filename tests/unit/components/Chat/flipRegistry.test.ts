@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { setFlipRect, consumeFlipRect, hasFlipRect, _resetFlipRegistry } from '../../../../src/components/Chat/flipRegistry';
+import { setFlipRect, readFlipRect, hasFlipRect, _resetFlipRegistry } from '../../../../src/components/Chat/flipRegistry';
 
 const fakeRect = (x = 0, y = 0, w = 100, h = 40): DOMRect => ({
   x, y, width: w, height: h,
@@ -11,31 +11,23 @@ describe('flipRegistry', () => {
   beforeEach(() => { _resetFlipRegistry(); });
 
   it('returns undefined when no rect is registered for an id', () => {
-    expect(consumeFlipRect('missing')).toBeUndefined();
+    expect(readFlipRect('missing')).toBeUndefined();
     expect(hasFlipRect('missing')).toBe(false);
   });
 
-  it('hasFlipRect is true after set and false after consume', () => {
-    setFlipRect('msg-h', fakeRect());
-    expect(hasFlipRect('msg-h')).toBe(true);
-    consumeFlipRect('msg-h');
-    expect(hasFlipRect('msg-h')).toBe(false);
-  });
-
-  it('returns a registered rect once and then deletes it', () => {
+  it('reads are non-destructive — same rect returned across calls', () => {
     const rect = fakeRect(10, 20, 300, 80);
     setFlipRect('msg-1', rect);
-    expect(consumeFlipRect('msg-1')).toBe(rect);
-    expect(consumeFlipRect('msg-1')).toBeUndefined();
+    expect(readFlipRect('msg-1')).toBe(rect);
+    expect(readFlipRect('msg-1')).toBe(rect);
+    expect(hasFlipRect('msg-1')).toBe(true);
   });
 
-  it('keeps rects for different ids independent', () => {
-    const a = fakeRect(1, 1);
-    const b = fakeRect(2, 2);
-    setFlipRect('a', a);
-    setFlipRect('b', b);
-    expect(consumeFlipRect('b')).toBe(b);
-    expect(consumeFlipRect('a')).toBe(a);
+  it('setFlipRect clears any prior entry — only the latest rect is retained', () => {
+    setFlipRect('old', fakeRect(1, 1));
+    setFlipRect('new', fakeRect(2, 2));
+    expect(readFlipRect('old')).toBeUndefined();
+    expect(readFlipRect('new')).toBeDefined();
   });
 
   it('overwrites an existing rect when set twice for the same id', () => {
@@ -43,6 +35,6 @@ describe('flipRegistry', () => {
     const b = fakeRect(2, 2);
     setFlipRect('x', a);
     setFlipRect('x', b);
-    expect(consumeFlipRect('x')).toBe(b);
+    expect(readFlipRect('x')).toBe(b);
   });
 });

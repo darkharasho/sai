@@ -7,7 +7,7 @@ import 'highlight.js/styles/monokai.css';
 import { AlertTriangle, Check, ChevronRight, Circle, Copy, RotateCw, Terminal, TerminalSquare, X } from 'lucide-react';
 import { motion } from 'motion/react';
 import ToolCallCard from './ToolCallCard';
-import { consumeFlipRect, hasFlipRect } from './flipRegistry';
+import { readFlipRect, hasFlipRect } from './flipRegistry';
 import type { ChatMessage as ChatMessageType } from '../../types';
 import { getActiveTerminalId } from '../../terminalBuffer';
 
@@ -271,15 +271,8 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
     : { initial: false as const, animate: { opacity: 1, y: 0 } };
 
   // Stable for the lifetime of the component — the registry is only
-  // checked once at mount time. `hasFlipRect` is non-destructive so the
-  // StrictMode double-init concern noted below for `consumeFlipRect`
-  // does NOT apply here.
-  //
-  // Note: `consumeFlipRect` (called in the layout effect below) CANNOT go
-  // in a useState initializer because React 18 StrictMode double-invokes
-  // initializers in dev mode, which would drop the rect before the effect
-  // runs. That concern applies only to the destructive consume — not to
-  // the non-destructive peek here.
+  // checked once at mount time. `hasFlipRect` is non-destructive so it's
+  // safe inside the `useState` initializer (StrictMode invokes it twice).
   const [flipActive] = useState(() => {
     if (typeof window === 'undefined') return false;
     if (message.role !== 'user') return false;
@@ -304,7 +297,7 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
   const measureFlip = useCallback((node: HTMLDivElement | null) => {
     flipNodeRef.current = node;
     if (!node || !flipActive || flipPhase !== 'measuring') return;
-    const fromRect = consumeFlipRect(message.id);
+    const fromRect = readFlipRect(message.id);
     if (!fromRect) { setFlipPhase('done'); return; }
     const toRect = node.getBoundingClientRect();
     flipOffsetRef.current = fromRect.top - toRect.top;

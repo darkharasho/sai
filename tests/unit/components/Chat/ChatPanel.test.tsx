@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, render, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { installMockSai } from '../../../helpers/ipc-mock';
-import { consumeFlipRect, _resetFlipRegistry } from '../../../../src/components/Chat/flipRegistry';
+import { readFlipRect, _resetFlipRegistry } from '../../../../src/components/Chat/flipRegistry';
 
 vi.mock('../../../../src/components/Chat/ChatMessage', () => ({
   default: () => <div data-testid="chat-message" />,
@@ -251,7 +251,7 @@ describe('ChatPanel', () => {
       await latestChatInputProps.onSend('hi there');
     });
 
-    const rect = consumeFlipRect(String(fakeNow));
+    const rect = readFlipRect(String(fakeNow));
     expect(rect).toBeDefined();
     expect(typeof rect!.left).toBe('number');
 
