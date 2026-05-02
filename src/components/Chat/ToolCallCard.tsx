@@ -358,9 +358,14 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
   const lang = langOverride || detectLang(toolCall);
   const { truncated, isTruncated } = truncateCode(code, MAX_PREVIEW_LINES);
   const entryTransition = useReducedMotionTransition(SPRING.pop);
+  const badgeTransition = useReducedMotionTransition(SPRING.flick);
 
   const isBash = toolCall.type === 'terminal_command';
   const isTodo = toolCall.name === 'TodoWrite';
+
+  const status: 'running' | 'done' | 'error' =
+    toolCall.output && parseToolError(toolCall.output).isToolError ? 'error' :
+    toolCall.output ? 'done' : 'running';
 
   const hasBody = isBash ? !!toolCall.output : isTodo ? true : !!code;
 
@@ -388,6 +393,22 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
           <span className={`tool-call-name${sigClass ? ` ${sigClass}` : ''}`}>{toolCall.name}</span>
           {!isBash && !isTodo && label && <span className="tool-call-label">{label}</span>}
           {isBash && code && <span className="tool-call-label">{code}</span>}
+          <AnimatePresence mode="popLayout" initial={false}>
+            <motion.span
+              key={status}
+              data-testid="tool-status-badge"
+              data-status-transition={JSON.stringify(badgeTransition)}
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+              transition={badgeTransition}
+              className={`tool-status tool-status-${status}`}
+            >
+              {status === 'running' && <Circle size={6} fill="var(--accent)" stroke="none" />}
+              {status === 'done' && <Circle size={6} fill="var(--text-muted)" stroke="none" />}
+              {status === 'error' && <AlertCircle size={10} />}
+            </motion.span>
+          </AnimatePresence>
           {hasBody && (
             <motion.span
               className="tool-call-chevron-wrap"
@@ -719,6 +740,16 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
           .todo-in_progress .todo-content { color: var(--text); }
           .todo-pending .todo-icon { color: var(--text-muted); }
           .todo-pending .todo-content { color: var(--text-secondary); }
+          /* Status badge */
+          .tool-status {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+          }
+          .tool-status-running { color: var(--accent); }
+          .tool-status-done { color: var(--text-muted); }
+          .tool-status-error { color: var(--red, #f85149); }
           /* Per-type tool-card entry signatures */
           @media (prefers-reduced-motion: no-preference) {
             @keyframes tool-sig-wipe {

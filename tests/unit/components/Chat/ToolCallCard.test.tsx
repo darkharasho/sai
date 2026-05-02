@@ -28,6 +28,14 @@ describe('ToolCallCard', () => {
     expect(card?.getAttribute('data-entry-y')).toBe(String(10));
   });
 
+  it('uses flick spring for status badge transitions', () => {
+    const { container } = render(
+      <ToolCallCard toolCall={{ id: 't', type: 'other', name: 'X', input: '', output: 'done' }} />
+    );
+    const badge = container.querySelector('[data-testid="tool-status-badge"]');
+    expect(badge?.getAttribute('data-status-transition')).toBe(JSON.stringify(SPRING.flick));
+  });
+
   it.each([
     ['file_edit', 'tool-sig-wipe'],
     ['terminal_command', 'tool-sig-typed'],
