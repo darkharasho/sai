@@ -525,6 +525,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const [turnStartIndex, setTurnStartIndex] = useState<number | null>(null);
   const thinkingTransition = useReducedMotionTransition(SPRING.pop);
   const dockTransition = useReducedMotionTransition(SPRING.dock);
+  const btnTransition = useReducedMotionTransition(SPRING.flick);
   const turnSeqRef = useRef(0); // tracks the active turn's sequence number
   const [ready, setReady] = useState(false);
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
@@ -544,11 +545,13 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const isAtBottomRef = useRef(true);
   const [pinnedUserMessage, setPinnedUserMessage] = useState<ChatMessageType | null>(null);
   const [showNewMessages, setShowNewMessages] = useState(false);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
 
   // Windowed rendering: only render messages from renderStart onward
   const [renderStart, setRenderStart] = useState(0);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const pendingComposerRectRef = useRef<DOMRect | null>(null);
+  const prevLenRef = useRef(messages.length);
 
   // Keep render window pinned to the tail when user is at bottom
   useEffect(() => {
@@ -1072,6 +1075,16 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     onMessagesChange?.(messages);
   }, [messages]);
 
+  // Pulse the new-messages button when more messages arrive while it's already visible
+  useEffect(() => {
+    if (showNewMessages && messages.length > prevLenRef.current && btnRef.current) {
+      btnRef.current.classList.remove('new-messages-pulse');
+      void btnRef.current.offsetWidth; // restart animation
+      btnRef.current.classList.add('new-messages-pulse');
+    }
+    prevLenRef.current = messages.length;
+  }, [messages.length, showNewMessages]);
+
   // Flush messages ref to parent synchronously before save — called by onTurnComplete
   const flushMessagesToParent = useCallback(() => {
     onMessagesChange?.(messagesRef.current);
@@ -1220,7 +1233,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       <div className="chat-messages" ref={chatContainerRef} onScroll={handleScroll}>
         {messages.length === 0 ? (
           <div className="chat-empty">
-            <img src="svg/sai.svg" alt="SAI" className="chat-empty-logo" />
+            <img src="svg/sai.svg" alt="SAI" className="chat-empty-logo chat-empty-logo-float" />
             <div className="chat-empty-title">SAI</div>
             <div className="chat-empty-subtitle">
               {projectPath ? emptyPrompt : 'Select a project to get started'}
@@ -1279,12 +1292,23 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         <div ref={messagesEndRef} />
       </div>
       <div className="new-messages-anchor">
-        {showNewMessages && (
-          <button className="new-messages-btn" onClick={scrollToBottom}>
-            <ChevronDown size={12} />
-            new messages
-          </button>
-        )}
+        <AnimatePresence>
+          {showNewMessages && (
+            <motion.button
+              ref={btnRef}
+              data-testid="new-messages-btn"
+              className="new-messages-btn"
+              initial={{ opacity: 0, y: 6, scale: 0.92 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 6, scale: 0.92 }}
+              transition={btnTransition}
+              onClick={scrollToBottom}
+            >
+              <ChevronDown size={12} />
+              new messages
+            </motion.button>
+          )}
+        </AnimatePresence>
       </div>
       <LayoutGroup>
         <div data-testid="chat-bottom-strip" className="chat-bottom-strip">
@@ -1378,6 +1402,15 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         }
         .new-messages-btn:hover {
           color: var(--text);
+        }
+        @media (prefers-reduced-motion: no-preference) {
+          @keyframes new-messages-pulse {
+            0%, 100% { transform: translateX(-50%) scale(1); }
+            50%      { transform: translateX(-50%) scale(1.04); }
+          }
+          .new-messages-pulse {
+            animation: new-messages-pulse 220ms ease-out 1;
+          }
         }
         .pinned-prompt-bar {
           flex-shrink: 0;
@@ -1487,6 +1520,15 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           height: 48px;
           opacity: 0.25;
           margin-bottom: 4px;
+        }
+        @media (prefers-reduced-motion: no-preference) {
+          @keyframes chat-empty-logo-float {
+            0%, 100% { transform: translateY(0); }
+            50%      { transform: translateY(-2px); }
+          }
+          .chat-empty-logo-float {
+            animation: chat-empty-logo-float 4s ease-in-out infinite;
+          }
         }
         .chat-empty-title {
           font-size: 32px;

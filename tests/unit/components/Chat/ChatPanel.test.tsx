@@ -514,4 +514,11 @@ describe('ChatPanel', () => {
     const { container } = render(<ChatPanel {...props} />);
     expect(container.querySelector('.chat-messages-list')).toBeTruthy();
   });
+
+  it('empty-state logo has float class', () => {
+    // Build full props with initialMessages: [] (no messages -> empty state).
+    const props = { ...baseProps(), initialMessages: [] };
+    const { container } = render(<ChatPanel {...props} />);
+    expect(container.querySelector('.chat-empty-logo-float')).toBeTruthy();
+  });
 });
