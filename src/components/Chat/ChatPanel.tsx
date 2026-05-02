@@ -1249,8 +1249,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
                 <span className="chat-load-sentinel-text">Loading earlier messages...</span>
               </div>
             )}
-            <motion.div layout="position" className="chat-messages-list">
-              {visibleMessages.map(msg => msg.role === 'user'
+            {visibleMessages.map(msg => msg.role === 'user'
                 ? (
                   <div
                     key={msg.id}
@@ -1270,11 +1269,10 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
                 )
                 : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} />
               )}
-            </motion.div>
           </>
         )}
         <MotionPresence>
-          {isStreaming && (
+          {isStreaming && !firstAssistantOfTurnId && (
             <motion.div
               key="thinking"
               layoutId="active-response-anchor"

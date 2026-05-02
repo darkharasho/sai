@@ -506,15 +506,6 @@ describe('ChatPanel', () => {
     expect(smoothCalls).toHaveLength(0);
   });
 
-  it('messages list wrapper has chat-messages-list class for layout tracking', () => {
-    const initialMessages = [
-      { id: 'u1', role: 'user' as const, content: 'Hello', timestamp: Date.now() },
-    ];
-    const props = { ...baseProps(), initialMessages };
-    const { container } = render(<ChatPanel {...props} />);
-    expect(container.querySelector('.chat-messages-list')).toBeTruthy();
-  });
-
   it('empty-state logo has float class', () => {
     // Build full props with initialMessages: [] (no messages -> empty state).
     const props = { ...baseProps(), initialMessages: [] };
