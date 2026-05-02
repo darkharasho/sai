@@ -1,4 +1,4 @@
-import { memo, useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
+import { memo, useState, useRef, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
@@ -290,39 +290,38 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
     return hasFlipRect(message.id);
   });
 
-  // Suppress framer's normal entry animation when a FLIP is pending; the FLIP
-  // is driven via the Web Animations API on the underlying DOM node so it
-  // doesn't compete with framer's transform writes. WAAPI with fill: 'none'
-  // returns the element to its CSS state (transform: none) when the animation
-  // ends, regardless of whether framer is also touching transform.
-  const effectiveEntryProps = flipActive
-    ? { initial: false as const, animate: { opacity: 1 } }
-    : entryProps;
-
-  useLayoutEffect(() => {
-    if (!flipActive) return;
-    const node = flipNodeRef.current;
-    if (!node) return;
+  // Two-phase FLIP using framer's own initial/animate props:
+  // Phase 1 ("measuring"): mount the bubble at its natural slot, but invisible,
+  // and use a callback ref to measure the destination as soon as the DOM
+  // attaches. Then transition to phase 2.
+  // Phase 2 ("flipping"): remount the bubble (key change) with framer's
+  // `initial` set to the composer-relative offset, so framer drives the
+  // slide-up + fade-in via its normal animation pipeline.
+  const [flipPhase, setFlipPhase] = useState<'measuring' | 'flipping' | 'done'>(
+    flipActive ? 'measuring' : 'done'
+  );
+  const flipOffsetRef = useRef(0);
+  const measureFlip = useCallback((node: HTMLDivElement | null) => {
+    flipNodeRef.current = node;
+    if (!node || !flipActive || flipPhase !== 'measuring') return;
     const fromRect = consumeFlipRect(message.id);
-    if (!fromRect) return;
-
+    if (!fromRect) { setFlipPhase('done'); return; }
     const toRect = node.getBoundingClientRect();
-    const y = fromRect.top - toRect.top;
-    if (Math.abs(y) < 1) return;
+    flipOffsetRef.current = fromRect.top - toRect.top;
+    setFlipPhase('flipping');
+  }, [flipActive, flipPhase, message.id]);
 
-    const animation = node.animate(
-      [
-        { transform: `translateY(${y}px)`, opacity: 0.6 },
-        { transform: 'translateY(0)', opacity: 1 },
-      ],
-      {
-        duration: 300,
-        easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
-        fill: 'none',
-      },
-    );
-    return () => { animation.cancel(); };
-  }, [flipActive]);
+  const flipInitial = flipPhase === 'flipping'
+    ? { y: flipOffsetRef.current, opacity: 0.6 }
+    : false as const;
+  const flipTransition = { duration: 0.3, ease: [0.16, 1, 0.3, 1] as const };
+  const effectiveEntryProps = flipActive
+    ? {
+        initial: flipInitial,
+        animate: { y: 0, opacity: 1 },
+        transition: flipPhase === 'flipping' ? flipTransition : { duration: 0 },
+      }
+    : entryProps;
 
   const rawAssistantContent = (message.role === 'assistant' && typeof message.content === 'string')
     ? message.content
@@ -589,7 +588,13 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
   const isTyping = typewriterActive && displayLen < rawAssistantContent.length;
 
   return (
-    <motion.div ref={flipNodeRef} className={`chat-msg chat-msg-${message.role}${isAssistantStreaming ? ' chat-msg-streaming' : ''}${isTyping ? ' chat-msg-typing' : ''}`} {...effectiveEntryProps}>
+    <motion.div
+      key={flipActive ? flipPhase : undefined}
+      ref={flipActive ? measureFlip : flipNodeRef}
+      className={`chat-msg chat-msg-${message.role}${isAssistantStreaming ? ' chat-msg-streaming' : ''}${isTyping ? ' chat-msg-typing' : ''}`}
+      style={flipPhase === 'measuring' ? { visibility: 'hidden' } : undefined}
+      {...effectiveEntryProps}
+    >
       {message.content && (
         <div className="chat-msg-content">
           {message.role === 'user'
