@@ -1,4 +1,4 @@
-import { memo, useState, useRef, useCallback, useEffect } from 'react';
+import { memo, useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
@@ -7,6 +7,7 @@ import 'highlight.js/styles/monokai.css';
 import { AlertTriangle, Check, ChevronRight, Circle, Copy, RotateCw, Terminal, TerminalSquare, X } from 'lucide-react';
 import { motion } from 'motion/react';
 import ToolCallCard from './ToolCallCard';
+import { consumeFlipRect, hasFlipRect } from './flipRegistry';
 import type { ChatMessage as ChatMessageType } from '../../types';
 import { getActiveTerminalId } from '../../terminalBuffer';
 
@@ -264,9 +265,76 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
   const [errorDetailsCopied, setErrorDetailsCopied] = useState(false);
   const [shouldAnimateEntry] = useState(() => !SEEN_MESSAGES.has(message.id));
   useEffect(() => { SEEN_MESSAGES.add(message.id); }, [message.id]);
+  const flipNodeRef = useRef<HTMLDivElement | null>(null);
   const entryProps = shouldAnimateEntry
     ? { initial: { opacity: 0, y: 8 }, animate: { opacity: 1, y: 0 }, transition: ENTER_TRANSITION }
     : { initial: false as const, animate: { opacity: 1, y: 0 } };
+
+  // User-message FLIP: peek (non-destructive) at the registry during render to
+  // decide whether to suppress the default framer entry animation. The actual
+  // consume happens inside the layout effect, exactly once per real mount —
+  // doing it in a useState initializer would be wrong because React 18
+  // StrictMode double-invokes initializers in dev and would drop the rect.
+  const reducedMotion = typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const flipActive = message.role === 'user'
+    && !reducedMotion
+    && hasFlipRect(message.id);
+
+  const effectiveEntryProps = flipActive
+    ? { initial: false as const, animate: { opacity: 1, y: 0 } }
+    : entryProps;
+
+  useLayoutEffect(() => {
+    if (!flipActive) return;
+    const node = flipNodeRef.current;
+    if (!node) return;
+    const fromRect = consumeFlipRect(message.id);
+    if (!fromRect) return;
+
+    const toRect = node.getBoundingClientRect();
+    const dx = (fromRect.left + fromRect.width / 2) - (toRect.left + toRect.width / 2);
+    const dy = fromRect.top - toRect.top;
+    const startScale = 0.92;
+
+    const prevTransition = node.style.transition;
+    const prevTransform = node.style.transform;
+    const prevOpacity = node.style.opacity;
+    const prevOrigin = node.style.transformOrigin;
+
+    node.style.transition = 'none';
+    node.style.transformOrigin = 'bottom right';
+    node.style.transform = `translate(${dx}px, ${dy}px) scale(${startScale})`;
+    node.style.opacity = '0.7';
+
+    // Force a layout flush so the start state is committed before we set the
+    // end state — otherwise the browser collapses both writes into one and
+    // skips the transition entirely.
+    void node.getBoundingClientRect();
+
+    const raf = requestAnimationFrame(() => {
+      node.style.transition = 'transform 300ms cubic-bezier(0.16, 1, 0.3, 1), opacity 300ms cubic-bezier(0.16, 1, 0.3, 1)';
+      node.style.transform = '';
+      node.style.opacity = '';
+    });
+
+    const cleanup = (e?: TransitionEvent) => {
+      // Only react to our own transform transition, not nested children's.
+      if (e && e.target !== node) return;
+      node.style.transition = prevTransition;
+      node.style.transform = prevTransform;
+      node.style.opacity = prevOpacity;
+      node.style.transformOrigin = prevOrigin;
+      node.removeEventListener('transitionend', cleanup as EventListener);
+    };
+    node.addEventListener('transitionend', cleanup as EventListener);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      node.removeEventListener('transitionend', cleanup as EventListener);
+    };
+  }, [flipActive]);
 
   const rawAssistantContent = (message.role === 'assistant' && typeof message.content === 'string')
     ? message.content
@@ -533,7 +601,7 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
   const isTyping = typewriterActive && displayLen < rawAssistantContent.length;
 
   return (
-    <motion.div className={`chat-msg chat-msg-${message.role}${isAssistantStreaming ? ' chat-msg-streaming' : ''}${isTyping ? ' chat-msg-typing' : ''}`} {...entryProps}>
+    <motion.div ref={flipNodeRef} className={`chat-msg chat-msg-${message.role}${isAssistantStreaming ? ' chat-msg-streaming' : ''}${isTyping ? ' chat-msg-typing' : ''}`} {...effectiveEntryProps}>
       {message.content && (
         <div className="chat-msg-content">
           {message.role === 'user'
