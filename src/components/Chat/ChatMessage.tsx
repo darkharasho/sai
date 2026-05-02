@@ -608,27 +608,8 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
   const isAssistantStreaming = isStreaming && message.role === 'assistant';
   const isTyping = typewriterActive && displayLen < rawAssistantContent.length;
 
-  const wrapperClassName = `chat-msg chat-msg-${message.role}${isAssistantStreaming ? ' chat-msg-streaming' : ''}${isTyping ? ' chat-msg-typing' : ''}`;
-
-  // When a FLIP is active, render a plain div instead of motion.div — framer
-  // writes inline `transform` for its `y`/`opacity` props, which clobbers the
-  // vanilla CSS transform the FLIP layout effect sets on the same element.
-  if (flipActive) {
-    return (
-      <div ref={flipNodeRef} className={wrapperClassName}>
-        {renderMessageBody()}
-      </div>
-    );
-  }
-
   return (
-    <motion.div ref={flipNodeRef} className={wrapperClassName} {...effectiveEntryProps}>
-      {renderMessageBody()}
-    </motion.div>
-  );
-
-  function renderMessageBody() { return (
-    <>
+    <motion.div ref={flipNodeRef} className={`chat-msg chat-msg-${message.role}${isAssistantStreaming ? ' chat-msg-streaming' : ''}${isTyping ? ' chat-msg-typing' : ''}`} {...effectiveEntryProps}>
       {message.content && (
         <div className="chat-msg-content">
           {message.role === 'user'
@@ -966,8 +947,8 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
           background: var(--bg-secondary, #2a2a2a);
         }
       `}</style>
-    </>
-  ); }
+    </motion.div>
+  );
 }
 
 export default memo(ChatMessage, (prev, next) =>
