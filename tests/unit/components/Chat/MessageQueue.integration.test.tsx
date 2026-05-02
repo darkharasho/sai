@@ -62,4 +62,34 @@ describe('MessageQueue integration', () => {
     const stagger = container.querySelector('[data-testid="queue-stagger"]');
     expect(stagger?.getAttribute('data-cadence-ms')).toBe(String(STAGGER.tight));
   });
+
+  it('passes duration:0 transitions to all motion children when reduced motion is preferred', () => {
+    const original = window.matchMedia;
+    // @ts-expect-error - test stub
+    window.matchMedia = (q: string) => ({
+      matches: q.includes('reduce'),
+      media: q,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    });
+
+    const queue: QueuedMessage[] = [
+      { id: '1', text: 'First', fullText: 'First' },
+      { id: '2', text: 'Second', fullText: 'Second' },
+    ];
+    const { container } = render(<MessageQueue queue={queue} onRemove={() => {}} />);
+
+    const all = container.querySelectorAll('[data-transition]');
+    expect(all.length).toBeGreaterThan(0);
+    for (const el of all) {
+      const t = el.getAttribute('data-transition');
+      expect(t).toBe(JSON.stringify({ duration: 0 }));
+    }
+
+    window.matchMedia = original;
+  });
 });

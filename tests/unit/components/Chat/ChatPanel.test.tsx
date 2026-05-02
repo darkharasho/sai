@@ -521,4 +521,35 @@ describe('ChatPanel', () => {
     const { container } = render(<ChatPanel {...props} />);
     expect(container.querySelector('.chat-empty-logo-float')).toBeTruthy();
   });
+
+  it('renders without error under reduced-motion preference', () => {
+    // Stub matchMedia to report prefers-reduced-motion: reduce.
+    const original = window.matchMedia;
+    // @ts-expect-error - test stub
+    window.matchMedia = (q: string) => ({
+      matches: q.includes('reduce'),
+      media: q,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    });
+
+    // Render with a mix of messages so motion children are exercised.
+    const props = {
+      ...baseProps(),
+      initialMessages: [
+        { id: 'u1', role: 'user' as const, content: 'Hello', timestamp: Date.now() },
+        { id: 'a1', role: 'assistant' as const, content: 'Hi there', timestamp: Date.now() },
+      ],
+    };
+
+    // Should not throw; all useReducedMotionTransition calls resolve { duration: 0 }.
+    const { container } = render(<ChatPanel {...props} />);
+    expect(container.querySelector('.chat-panel')).toBeTruthy();
+
+    window.matchMedia = original;
+  });
 });
