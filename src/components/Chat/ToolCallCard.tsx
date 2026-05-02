@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { FileEdit, Terminal, FileText, Wrench, ChevronRight, Circle, Globe, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import type { ToolCall } from '../../types';
+import { SPRING, useReducedMotionTransition } from './motion';
 import { getShikiHighlighter, getActiveHighlightTheme } from '../../themes';
 
 function detectLang(toolCall: ToolCall): string {
@@ -356,6 +357,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
   const { label, code, langOverride, diff } = formatInput(toolCall);
   const lang = langOverride || detectLang(toolCall);
   const { truncated, isTruncated } = truncateCode(code, MAX_PREVIEW_LINES);
+  const entryTransition = useReducedMotionTransition(SPRING.pop);
 
   const isBash = toolCall.type === 'terminal_command';
   const isTodo = toolCall.name === 'TodoWrite';
@@ -364,7 +366,17 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
 
   return (
     <>
-      <div className="tool-call-card">
+      <motion.div
+        data-testid="tool-card"
+        data-entry-transition={JSON.stringify(entryTransition)}
+        data-entry-y={String(10)}
+        layout
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={entryTransition}
+        variants={{ hidden: { opacity: 0, y: 10 }, visible: { opacity: 1, y: 0 } }}
+        className="tool-call-card"
+      >
         <div className={`tool-call-header${hasBody ? ' tool-call-header-expandable' : ''}`} onClick={() => hasBody && setExpanded(!expanded)}>
           <Circle size={8} fill="var(--text-muted)" stroke="var(--text-muted)" className="tool-call-dot" />
           <Icon size={14} className="tool-call-icon" />
@@ -703,7 +715,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
           .todo-pending .todo-icon { color: var(--text-muted); }
           .todo-pending .todo-content { color: var(--text-secondary); }
         `}</style>
-      </div>
+      </motion.div>
     </>
   );
 }

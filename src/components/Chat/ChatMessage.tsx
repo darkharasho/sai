@@ -7,6 +7,7 @@ import 'highlight.js/styles/monokai.css';
 import { AlertTriangle, Check, ChevronRight, Circle, Copy, RotateCw, Terminal, TerminalSquare, X } from 'lucide-react';
 import { motion } from 'motion/react';
 import ToolCallCard from './ToolCallCard';
+import Stagger from './Stagger';
 import { readFlipRect, hasFlipRect } from './flipRegistry';
 import { SPRING, DISTANCE, useReducedMotionTransition } from './motion';
 import type { ChatMessage as ChatMessageType } from '../../types';
@@ -658,9 +659,13 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
           </div>
         </div>
       )}
-      {message.toolCalls?.map((tc, i) => (
-        <ToolCallCard key={i} toolCall={tc} defaultExpanded={toolCallsExpanded} />
-      ))}
+      {message.toolCalls && message.toolCalls.length > 0 && (
+        <Stagger cadence="default">
+          {message.toolCalls.map((tc, i) => (
+            <ToolCallCard key={i} toolCall={tc} defaultExpanded={toolCallsExpanded} />
+          ))}
+        </Stagger>
+      )}
       {lightboxSrc && <ImageModal src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
       <style>{`
         .chat-msg {
