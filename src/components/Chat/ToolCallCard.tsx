@@ -364,6 +364,11 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
 
   const hasBody = isBash ? !!toolCall.output : isTodo ? true : !!code;
 
+  const sigClass =
+    toolCall.type === 'file_edit'        ? 'tool-sig-wipe' :
+    toolCall.type === 'terminal_command' ? 'tool-sig-typed' :
+    toolCall.type === 'web_fetch'        ? 'tool-sig-shimmer' : '';
+
   return (
     <>
       <motion.div
@@ -380,7 +385,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
         <div className={`tool-call-header${hasBody ? ' tool-call-header-expandable' : ''}`} onClick={() => hasBody && setExpanded(!expanded)}>
           <Circle size={8} fill="var(--text-muted)" stroke="var(--text-muted)" className="tool-call-dot" />
           <Icon size={14} className="tool-call-icon" />
-          <span className="tool-call-name">{toolCall.name}</span>
+          <span className={`tool-call-name${sigClass ? ` ${sigClass}` : ''}`}>{toolCall.name}</span>
           {!isBash && !isTodo && label && <span className="tool-call-label">{label}</span>}
           {isBash && code && <span className="tool-call-label">{code}</span>}
           {hasBody && (
@@ -714,6 +719,43 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
           .todo-in_progress .todo-content { color: var(--text); }
           .todo-pending .todo-icon { color: var(--text-muted); }
           .todo-pending .todo-content { color: var(--text-secondary); }
+          /* Per-type tool-card entry signatures */
+          @media (prefers-reduced-motion: no-preference) {
+            @keyframes tool-sig-wipe {
+              from { clip-path: inset(0 100% 0 0); }
+              to   { clip-path: inset(0 0 0 0); }
+            }
+            .tool-sig-wipe {
+              animation: tool-sig-wipe 380ms cubic-bezier(0.22, 1, 0.36, 1) 1;
+            }
+
+            @keyframes tool-sig-typed {
+              from { max-width: 0; }
+              to   { max-width: 100%; }
+            }
+            .tool-sig-typed {
+              display: inline-block;
+              overflow: hidden;
+              white-space: nowrap;
+              animation: tool-sig-typed 400ms steps(20, end) 1;
+            }
+
+            @keyframes tool-sig-shimmer {
+              0%   { background-position: -120% 0; }
+              100% { background-position:  220% 0; }
+            }
+            .tool-sig-shimmer {
+              background-image: linear-gradient(
+                90deg,
+                transparent 0%,
+                color-mix(in srgb, var(--accent) 25%, transparent) 50%,
+                transparent 100%
+              );
+              background-size: 60% 100%;
+              background-repeat: no-repeat;
+              animation: tool-sig-shimmer 700ms ease-out 1;
+            }
+          }
         `}</style>
       </motion.div>
     </>

@@ -27,4 +27,21 @@ describe('ToolCallCard', () => {
     expect(card?.getAttribute('data-entry-transition')).toBe(JSON.stringify(SPRING.pop));
     expect(card?.getAttribute('data-entry-y')).toBe(String(10));
   });
+
+  it.each([
+    ['file_edit', 'tool-sig-wipe'],
+    ['terminal_command', 'tool-sig-typed'],
+    ['web_fetch', 'tool-sig-shimmer'],
+    ['file_read', null],
+    ['other', null],
+  ] as const)('applies signature class for %s', (type, expectedClass) => {
+    const { container } = render(
+      <ToolCallCard toolCall={{ id: 't', type, name: 'X', input: '' }} />
+    );
+    if (expectedClass) {
+      expect(container.querySelector(`.${expectedClass}`)).toBeTruthy();
+    } else {
+      expect(container.querySelector('.tool-sig-wipe, .tool-sig-typed, .tool-sig-shimmer')).toBeFalsy();
+    }
+  });
 });
