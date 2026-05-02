@@ -274,7 +274,7 @@ import MessageQueue from './MessageQueue';
 import TodoProgress from './TodoProgress';
 import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, QueuedMessage, TerminalTab } from '../../types';
 import { buildHelpMessage } from './helpText';
-import { parseAiError } from './parseAiError';
+import { parseAiError, looksLikeApiError } from './parseAiError';
 
 type CodexPermission = 'auto' | 'read-only' | 'full-access';
 
@@ -820,6 +820,26 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         }
 
         const text = textParts.join('');
+
+        if (text && tools.length === 0 && looksLikeApiError(text)) {
+          const error = parseAiError(text);
+          setMessages(prev => {
+            const next = [...prev];
+            const last = next[next.length - 1];
+            if (last?.role === 'assistant' && !last.toolCalls) {
+              next.pop();
+            }
+            next.push({
+              id: `${Date.now()}-${Math.random()}`,
+              role: 'system',
+              content: error.message,
+              timestamp: Date.now(),
+              error,
+            });
+            return next;
+          });
+          return;
+        }
 
         if (text || tools.length > 0) {
           setMessages(prev => {

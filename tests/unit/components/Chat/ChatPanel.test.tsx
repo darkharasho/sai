@@ -615,4 +615,37 @@ describe('ChatPanel', () => {
     await waitFor(() => expect(container.querySelector('[data-testid="follow-btn"]')).toBeNull());
     expect(container.querySelector('[data-testid="follow-btn-unread"]')).toBeNull();
   });
+
+  it('routes API-Error assistant text through the error path', async () => {
+    const onMessagesChange = vi.fn();
+    const props: ChatPanelProps = { ...baseProps(), onMessagesChange };
+
+    render(<ChatPanel {...props} />);
+
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+    const apiErrorText = 'API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"Output blocked by content filtering policy"},"request_id":"req_011CaeanuZcbSgzbnKUNX8hP"}';
+
+    await act(async () => {
+      for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+        (handler as (msg: any) => void)({
+          type: 'assistant',
+          projectPath: '/project',
+          scope: 'chat',
+          message: { content: [{ type: 'text', text: apiErrorText }] },
+        });
+      }
+    });
+
+    const lastCall = onMessagesChange.mock.calls[onMessagesChange.mock.calls.length - 1];
+    const messages = lastCall[0];
+    const last = messages[messages.length - 1];
+
+    expect(last.role).toBe('system');
+    expect(last.error).toBeTruthy();
+    expect(last.error.title).toBe('Invalid request');
+    expect(last.error.status).toBe(400);
+    expect(last.error.message).toBe('Output blocked by content filtering policy');
+    expect(last.error.requestId).toBe('req_011CaeanuZcbSgzbnKUNX8hP');
+  });
 });
