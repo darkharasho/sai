@@ -18,6 +18,7 @@ type ModelChoice = 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m
 
 interface ChatInputProps {
   onSend: (message: string, images?: string[]) => void;
+  onBeforeSend?: (composerRect: DOMRect) => void;
   disabled?: boolean;
   slashCommands?: string[];
   isStreaming?: boolean;
@@ -219,7 +220,7 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ onSend, disabled, slashCommands = [], isStreaming, onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, sessionCost, rateLimits, billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, terminalTabs = [] }: ChatInputProps) {
+export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommands = [], isStreaming, onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, sessionCost, rateLimits, billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, terminalTabs = [] }: ChatInputProps) {
   const [value, setValue] = useState('');
   const [suggestions, setSuggestions] = useState<AutocompleteItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -234,6 +235,12 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
   const sendingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const fireBeforeSend = () => {
+    if (!onBeforeSend) return;
+    const node = wrapperRef.current;
+    if (!node) return;
+    onBeforeSend(node.getBoundingClientRect());
+  };
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const [cursorPos, setCursorPos] = useState(0);
   // Use a ref to hold the latest terminalTabs to avoid re-render loops when the
@@ -644,6 +651,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
         setHistoryIndex(-1);
         draftRef.current = '';
         const images = contextItems.filter(c => c.type === 'image' && c.data).map(c => c.data!);
+        fireBeforeSend();
         onSend(buildMessage(sendValue.trim()), images.length > 0 ? images : undefined);
         setValue('');
         setContextItems([]);
@@ -1187,6 +1195,7 @@ export default function ChatInput({ onSend, disabled, slashCommands = [], isStre
                   setHistoryIndex(-1);
                   draftRef.current = '';
                   const images = contextItems.filter(c => c.type === 'image' && c.data).map(c => c.data!);
+                  fireBeforeSend();
                   onSend(buildMessage(value.trim()), images.length > 0 ? images : undefined);
                   setValue('');
                   setContextItems([]);

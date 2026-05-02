@@ -273,4 +273,30 @@ describe('ChatInput', () => {
       expect(await screen.findByText('@terminal:1:last')).toBeTruthy();
     });
   });
+
+  it('calls onBeforeSend with a DOMRect immediately before onSend on Enter', () => {
+    const order: string[] = [];
+    const onSend = vi.fn(() => { order.push('send'); });
+    const onBeforeSend = vi.fn((rect: DOMRect) => {
+      order.push('before');
+      expect(rect).toBeDefined();
+      expect(typeof rect.left).toBe('number');
+    });
+
+    render(
+      <ChatInput
+        {...defaultProps}
+        onSend={onSend}
+        onBeforeSend={onBeforeSend}
+      />
+    );
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'hello' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+
+    expect(onBeforeSend).toHaveBeenCalledTimes(1);
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(['before', 'send']);
+  });
 });
