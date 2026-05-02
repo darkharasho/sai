@@ -506,6 +506,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   // Windowed rendering: only render messages from renderStart onward
   const [renderStart, setRenderStart] = useState(0);
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const pendingComposerRectRef = useRef<DOMRect | null>(null);
 
   // Keep render window pinned to the tail when user is at bottom
   useEffect(() => {
@@ -1124,7 +1125,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     }
   };
 
-  const pendingComposerRectRef = useRef<DOMRect | null>(null);
   const prevStreamingRef = useRef(false);
   useEffect(() => {
     if (prevStreamingRef.current && !isStreaming && messageQueue.length > 0 && onQueueShift && sessionId) {

@@ -270,17 +270,25 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
     ? { initial: { opacity: 0, y: 8 }, animate: { opacity: 1, y: 0 }, transition: ENTER_TRANSITION }
     : { initial: false as const, animate: { opacity: 1, y: 0 } };
 
-  // User-message FLIP: peek (non-destructive) at the registry during render to
-  // decide whether to suppress the default framer entry animation. The actual
-  // consume happens inside the layout effect, exactly once per real mount —
-  // doing it in a useState initializer would be wrong because React 18
-  // StrictMode double-invokes initializers in dev and would drop the rect.
-  const reducedMotion = typeof window !== 'undefined'
-    && typeof window.matchMedia === 'function'
-    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const flipActive = message.role === 'user'
-    && !reducedMotion
-    && hasFlipRect(message.id);
+  // Stable for the lifetime of the component — the registry is only
+  // checked once at mount time. `hasFlipRect` is non-destructive so the
+  // StrictMode double-init concern noted below for `consumeFlipRect`
+  // does NOT apply here.
+  //
+  // Note: `consumeFlipRect` (called in the layout effect below) CANNOT go
+  // in a useState initializer because React 18 StrictMode double-invokes
+  // initializers in dev mode, which would drop the rect before the effect
+  // runs. That concern applies only to the destructive consume — not to
+  // the non-destructive peek here.
+  const [flipActive] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    if (message.role !== 'user') return false;
+    if (typeof window.matchMedia === 'function'
+        && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return false;
+    }
+    return hasFlipRect(message.id);
+  });
 
   const effectiveEntryProps = flipActive
     ? { initial: false as const, animate: { opacity: 1, y: 0 } }
