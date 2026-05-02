@@ -5,7 +5,7 @@ import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 import 'highlight.js/styles/monokai.css';
 import { AlertTriangle, Check, ChevronRight, Circle, Copy, RotateCw, Terminal, TerminalSquare, X } from 'lucide-react';
-import { motion, useAnimationControls } from 'motion/react';
+import { motion } from 'motion/react';
 import ToolCallCard from './ToolCallCard';
 import { consumeFlipRect, hasFlipRect } from './flipRegistry';
 import type { ChatMessage as ChatMessageType } from '../../types';
@@ -290,13 +290,13 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
     return hasFlipRect(message.id);
   });
 
-  // Drive the FLIP through framer's animation pipeline (instead of writing
-  // inline transform ourselves) so framer doesn't clobber our values. Using
-  // imperative controls.set() + controls.start() lets us snap to the source
-  // rect synchronously then animate to identity.
-  const flipControls = useAnimationControls();
+  // Suppress framer's normal entry animation when a FLIP is pending; the FLIP
+  // is driven via the Web Animations API on the underlying DOM node so it
+  // doesn't compete with framer's transform writes. WAAPI with fill: 'none'
+  // returns the element to its CSS state (transform: none) when the animation
+  // ends, regardless of whether framer is also touching transform.
   const effectiveEntryProps = flipActive
-    ? { initial: false as const, animate: flipControls }
+    ? { initial: false as const, animate: { opacity: 1 } }
     : entryProps;
 
   useLayoutEffect(() => {
@@ -308,14 +308,21 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
 
     const toRect = node.getBoundingClientRect();
     const y = fromRect.top - toRect.top;
+    if (Math.abs(y) < 1) return;
 
-    flipControls.set({ y, opacity: 0.6 });
-    flipControls.start({
-      y: 0,
-      opacity: 1,
-      transition: { duration: 0.3, ease: [0.16, 1, 0.3, 1] },
-    });
-  }, [flipActive, flipControls]);
+    const animation = node.animate(
+      [
+        { transform: `translateY(${y}px)`, opacity: 0.6 },
+        { transform: 'translateY(0)', opacity: 1 },
+      ],
+      {
+        duration: 300,
+        easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
+        fill: 'none',
+      },
+    );
+    return () => { animation.cancel(); };
+  }, [flipActive]);
 
   const rawAssistantContent = (message.role === 'assistant' && typeof message.content === 'string')
     ? message.content
