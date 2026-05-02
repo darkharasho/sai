@@ -7,7 +7,7 @@ describe('motion vocabulary', () => {
     expect(SPRING.gentle).toEqual({ type: 'spring', stiffness: 220, damping: 28, mass: 0.9 });
     expect(SPRING.pop).toEqual({ type: 'spring', stiffness: 380, damping: 26, mass: 0.7 });
     expect(SPRING.flick).toEqual({ type: 'spring', stiffness: 520, damping: 32 });
-    expect(SPRING.dock).toEqual({ type: 'spring', stiffness: 300, damping: 30, mass: 1.0 });
+    expect(SPRING.dock).toEqual({ type: 'spring', stiffness: 180, damping: 24, mass: 1.3 });
   });
 
   it('exports easing tokens', () => {

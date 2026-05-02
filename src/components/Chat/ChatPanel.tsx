@@ -991,6 +991,25 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     }
   }, [isActive]);
 
+  // When the chat container shrinks (e.g. TodoProgress / approval panel /
+  // queue chips appear and push it up), keep the bottom in view if the user
+  // was already at the bottom. Without this the latest messages get hidden
+  // behind the now-taller bottom strip.
+  useEffect(() => {
+    const el = chatContainerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    let lastHeight = el.clientHeight;
+    const ro = new ResizeObserver(() => {
+      const h = el.clientHeight;
+      if (h < lastHeight && isAtBottomRef.current) {
+        el.scrollTop = el.scrollHeight;
+      }
+      lastHeight = h;
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   useEffect(() => {
     if (isAtBottomRef.current) {
       setShowNewMessages(false);

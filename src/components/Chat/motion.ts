@@ -5,7 +5,7 @@ export const SPRING = {
   gentle: { type: 'spring', stiffness: 220, damping: 28, mass: 0.9 },
   pop:    { type: 'spring', stiffness: 380, damping: 26, mass: 0.7 },
   flick:  { type: 'spring', stiffness: 520, damping: 32 },
-  dock:   { type: 'spring', stiffness: 300, damping: 30, mass: 1.0 },
+  dock:   { type: 'spring', stiffness: 180, damping: 24, mass: 1.3 },
 } as const satisfies Record<string, Transition>;
 
 export const EASING = {
