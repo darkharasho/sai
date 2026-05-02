@@ -22,7 +22,7 @@ SAI is a desktop code editor built from the ground up around AI. No plugins. No 
 
 Open a project, pick your provider, ask it to build a feature, and watch it happen in real time. Review diffs, stage changes, commit — done. That's SAI.
 
-<img width="1400" height="900" alt="image" src="https://github.com/user-attachments/assets/f493ea77-d87c-499a-93b0-40cb2ad1cf81" />
+<img width="1400" height="900" alt="image" src="https://github.com/user-attachments/assets/d92d5d2e-a51e-4145-8237-560e18dbadb7" />
 
 ---
 
