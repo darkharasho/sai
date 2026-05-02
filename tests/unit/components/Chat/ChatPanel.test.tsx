@@ -193,6 +193,51 @@ describe('ChatPanel', () => {
     );
   });
 
+  it('renders a leading flex spacer so messages stack from the bottom', () => {
+    const props: ChatPanelProps = {
+      projectPath: '/project',
+      permissionMode: 'default',
+      onPermissionChange: vi.fn(),
+      effortLevel: 'high',
+      onEffortChange: vi.fn(),
+      modelChoice: 'sonnet',
+      onModelChange: vi.fn(),
+      aiProvider: 'gemini',
+      codexModel: '',
+      onCodexModelChange: vi.fn(),
+      codexModels: [],
+      codexPermission: 'auto',
+      onCodexPermissionChange: vi.fn(),
+      geminiModel: 'auto-gemini-3',
+      onGeminiModelChange: vi.fn(),
+      geminiModels: [],
+      geminiApprovalMode: 'default',
+      onGeminiApprovalModeChange: vi.fn(),
+      geminiConversationMode: 'planning',
+      onGeminiConversationModeChange: vi.fn(),
+      initialMessages: [{ id: '1', role: 'user', content: 'hi', timestamp: 0 }],
+      onMessagesChange: vi.fn(),
+      onTurnComplete: vi.fn(),
+      onClaudeSessionId: vi.fn(),
+      onGeminiSessionId: vi.fn(),
+      onCodexSessionId: vi.fn(),
+      activeFilePath: null,
+      onFileOpen: vi.fn(),
+      isActive: true,
+      messageQueue: [],
+      onQueueAdd: vi.fn(),
+      onQueueRemove: vi.fn(),
+      onQueueShift: vi.fn(),
+      sessionId: 'session-1',
+      terminalTabs: [],
+      onSlashCommandsUpdate: vi.fn(),
+    };
+
+    const { container } = render(<ChatPanel {...props} />);
+    const spacer = container.querySelector('.chat-messages-spacer');
+    expect(spacer).toBeTruthy();
+  });
+
   it('registers a flip rect for the new user message id when the composer fires onBeforeSend', async () => {
     _resetFlipRegistry();
 

@@ -1168,6 +1168,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           </div>
         ) : (
           <>
+            <div className="chat-messages-spacer" aria-hidden="true" />
             {hasHiddenMessages && (
               <div ref={sentinelRef} className="chat-load-sentinel">
                 <span className="chat-load-sentinel-text">Loading earlier messages...</span>
@@ -1357,6 +1358,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           flex: 1;
           overflow-y: auto;
           padding: 16px;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+        }
+        .chat-messages-spacer {
+          flex: 1 1 auto;
           min-height: 0;
         }
         .chat-load-sentinel {
