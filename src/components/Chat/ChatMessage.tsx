@@ -8,6 +8,7 @@ import { AlertTriangle, Check, ChevronRight, Circle, Copy, RotateCw, Terminal, T
 import { motion } from 'motion/react';
 import ToolCallCard from './ToolCallCard';
 import { readFlipRect, hasFlipRect } from './flipRegistry';
+import { SPRING, useReducedMotionTransition } from './motion';
 import type { ChatMessage as ChatMessageType } from '../../types';
 import { getActiveTerminalId } from '../../terminalBuffer';
 
@@ -307,7 +308,7 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
   const flipInitial = flipPhase === 'flipping'
     ? { y: flipOffsetRef.current, opacity: 0.6 }
     : false as const;
-  const flipTransition = { duration: 0.3, ease: [0.16, 1, 0.3, 1] as const };
+  const flipTransition = useReducedMotionTransition(SPRING.dock);
   const effectiveEntryProps = flipActive
     ? {
         initial: flipInitial,
@@ -584,6 +585,8 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
     <motion.div
       key={flipActive ? flipPhase : undefined}
       ref={flipActive ? measureFlip : flipNodeRef}
+      data-testid="chat-msg"
+      data-flip-transition={flipActive ? JSON.stringify(flipTransition) : undefined}
       className={`chat-msg chat-msg-${message.role}${isAssistantStreaming ? ' chat-msg-streaming' : ''}${isTyping ? ' chat-msg-typing' : ''}`}
       style={flipPhase === 'measuring' ? { visibility: 'hidden' } : undefined}
       {...effectiveEntryProps}

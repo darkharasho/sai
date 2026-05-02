@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { installMockSai } from '../../../helpers/ipc-mock';
 
@@ -23,6 +23,8 @@ vi.mock('shiki', () => ({
 
 import ChatMessage from '../../../../src/components/Chat/ChatMessage';
 import type { ChatMessage as ChatMessageType } from '../../../../src/types';
+import { setFlipRect, _resetFlipRegistry } from '../../../../src/components/Chat/flipRegistry';
+import { SPRING } from '../../../../src/components/Chat/motion';
 
 function makeMessage(overrides: Partial<ChatMessageType> = {}): ChatMessageType {
   return {
@@ -33,6 +35,8 @@ function makeMessage(overrides: Partial<ChatMessageType> = {}): ChatMessageType 
     ...overrides,
   };
 }
+
+afterEach(() => _resetFlipRegistry());
 
 describe('ChatMessage', () => {
   beforeEach(() => {
@@ -140,5 +144,14 @@ describe('ChatMessage', () => {
     const msg = makeMessage({ role: 'assistant' });
     const { container } = render(<ChatMessage message={msg} aiProvider="codex" />);
     expect(container.querySelector('.chat-msg-openai')).toBeTruthy();
+  });
+
+  it('uses dock spring transition for FLIPped user messages', () => {
+    setFlipRect('msg-1', new DOMRect(0, 600, 200, 40));
+    const { container } = render(
+      <ChatMessage message={{ id: 'msg-1', role: 'user', content: 'hi', timestamp: 0 }} />
+    );
+    const node = container.querySelector('[data-testid="chat-msg"]');
+    expect(node?.getAttribute('data-flip-transition')).toBe(JSON.stringify(SPRING.dock));
   });
 });
