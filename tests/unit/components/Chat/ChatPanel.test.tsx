@@ -238,6 +238,60 @@ describe('ChatPanel', () => {
     expect(spacer).toBeTruthy();
   });
 
+  it('renders thinking indicator with morph layoutId', async () => {
+    const props: ChatPanelProps = {
+      projectPath: '/project',
+      permissionMode: 'default',
+      onPermissionChange: vi.fn(),
+      effortLevel: 'high',
+      onEffortChange: vi.fn(),
+      modelChoice: 'sonnet',
+      onModelChange: vi.fn(),
+      aiProvider: 'claude',
+      codexModel: '',
+      onCodexModelChange: vi.fn(),
+      codexModels: [],
+      codexPermission: 'auto',
+      onCodexPermissionChange: vi.fn(),
+      geminiModel: 'auto-gemini-3',
+      onGeminiModelChange: vi.fn(),
+      geminiModels: [],
+      geminiApprovalMode: 'default',
+      onGeminiApprovalModeChange: vi.fn(),
+      geminiConversationMode: 'planning',
+      onGeminiConversationModeChange: vi.fn(),
+      initialMessages: [],
+      onMessagesChange: vi.fn(),
+      onTurnComplete: vi.fn(),
+      onClaudeSessionId: vi.fn(),
+      onGeminiSessionId: vi.fn(),
+      onCodexSessionId: vi.fn(),
+      activeFilePath: null,
+      onFileOpen: vi.fn(),
+      isActive: true,
+      messageQueue: [],
+      onQueueAdd: vi.fn(),
+      onQueueRemove: vi.fn(),
+      onQueueShift: vi.fn(),
+      sessionId: 'session-1',
+      terminalTabs: [],
+      onSlashCommandsUpdate: vi.fn(),
+    };
+
+    const { container } = render(<ChatPanel {...props} />);
+
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+    await act(async () => {
+      for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+        (handler as (msg: any) => void)({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+      }
+    });
+
+    const anchor = container.querySelector('[data-layout-id="active-response-anchor"]');
+    expect(anchor).toBeTruthy();
+  });
+
   it('registers a flip rect for the new user message id when the composer fires onBeforeSend', async () => {
     _resetFlipRegistry();
 

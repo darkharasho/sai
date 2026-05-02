@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ChevronDown, CornerLeftUp } from 'lucide-react';
+import { motion } from 'motion/react';
 import { setFlipRect } from './flipRegistry';
 import ThinkingAnimation from '../ThinkingAnimation';
+import MotionPresence from './MotionPresence';
+import { SPRING, DISTANCE, useReducedMotionTransition } from './motion';
 
 function ContextMeter({ used, total }: { used: number; total: number }) {
   const pct = Math.min((used / total) * 100, 100);
@@ -483,6 +486,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   }, []);
   const emptyPrompt = useMemo(() => EMPTY_PROMPTS[Math.floor(Math.random() * EMPTY_PROMPTS.length)], []);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [turnStartIndex, setTurnStartIndex] = useState<number | null>(null);
+  const thinkingTransition = useReducedMotionTransition(SPRING.pop);
   const turnSeqRef = useRef(0); // tracks the active turn's sequence number
   const [ready, setReady] = useState(false);
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
@@ -598,6 +603,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
       if (msg.type === 'streaming_start') {
         if (msg.turnSeq != null) turnSeqRef.current = msg.turnSeq;
+        setTurnStartIndex(messagesRef.current.length);
         setIsStreaming(true);
         return;
       }
@@ -611,6 +617,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         if (msg.turnSeq != null && msg.turnSeq !== turnSeqRef.current) return;
         if (msg.type === 'done') {
           turnSeqRef.current = -1;
+          setTurnStartIndex(null);
           flushMessagesToParent();
           onTurnComplete?.();
         }
@@ -1014,6 +1021,14 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     () => messages.slice(renderStart),
     [messages, renderStart]
   );
+
+  const firstAssistantOfTurnId = useMemo(() => {
+    if (turnStartIndex == null) return null;
+    for (let i = turnStartIndex; i < messages.length; i++) {
+      if (messages[i].role === 'assistant') return messages[i].id;
+    }
+    return null;
+  }, [messages, turnStartIndex]);
   const hasHiddenMessages = renderStart > 0;
 
   useEffect(() => {
@@ -1175,17 +1190,28 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
               </div>
             )}
             {visibleMessages.map(msg => msg.role === 'user'
-              ? <div key={msg.id} ref={el => { if (el) userMsgRefs.current.set(msg.id, el); else userMsgRefs.current.delete(msg.id); }}><ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} /></div>
-              : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} />
+              ? <div key={msg.id} ref={el => { if (el) userMsgRefs.current.set(msg.id, el); else userMsgRefs.current.delete(msg.id); }}><ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} /></div>
+              : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} />
             )}
           </>
         )}
-        {isStreaming && (aiProvider === 'gemini'
-          ? <GeminiThinkingAnimation loadingPhrases={geminiLoadingPhrases} />
-          : aiProvider === 'codex'
-          ? <CodexThinkingAnimation />
-          : <ThinkingAnimation />
-        )}
+        <MotionPresence>
+          {isStreaming && (
+            <motion.div
+              key="thinking"
+              layoutId="active-response-anchor"
+              data-layout-id="active-response-anchor"
+              initial={{ opacity: 0, y: DISTANCE.lift }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={thinkingTransition}
+            >
+              {aiProvider === 'gemini' ? <GeminiThinkingAnimation loadingPhrases={geminiLoadingPhrases} />
+                : aiProvider === 'codex' ? <CodexThinkingAnimation />
+                : <ThinkingAnimation />}
+            </motion.div>
+          )}
+        </MotionPresence>
         <div ref={messagesEndRef} />
       </div>
       <div className="new-messages-anchor">

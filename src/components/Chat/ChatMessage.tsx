@@ -259,7 +259,7 @@ function ImageModal({ src, onClose }: { src: string; onClose: () => void }) {
   );
 }
 
-function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', toolCallsExpanded = true, onRetry, isStreaming = false }: { message: ChatMessageType; projectPath?: string; onFileOpen?: (path: string, line?: number) => void; aiProvider?: 'claude' | 'codex' | 'gemini'; toolCallsExpanded?: boolean; onRetry?: () => void; isStreaming?: boolean }) {
+function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', toolCallsExpanded = true, onRetry, isStreaming = false, isFirstAssistantOfTurn = false }: { message: ChatMessageType; projectPath?: string; onFileOpen?: (path: string, line?: number) => void; aiProvider?: 'claude' | 'codex' | 'gemini'; toolCallsExpanded?: boolean; onRetry?: () => void; isStreaming?: boolean; isFirstAssistantOfTurn?: boolean }) {
   const dotColor = getDotColor(message.role);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [errorDetailsOpen, setErrorDetailsOpen] = useState(false);
@@ -602,6 +602,7 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
       data-entry-y={String(entryDistance)}
       className={`chat-msg chat-msg-${message.role}${isAssistantStreaming ? ' chat-msg-streaming' : ''}${isTyping ? ' chat-msg-typing' : ''}`}
       style={flipPhase === 'measuring' ? { visibility: 'hidden' } : undefined}
+      layoutId={isFirstAssistantOfTurn ? 'active-response-anchor' : undefined}
       {...effectiveEntryProps}
     >
       {message.content && (
@@ -976,5 +977,6 @@ export default memo(ChatMessage, (prev, next) =>
   prev.aiProvider === next.aiProvider &&
   prev.toolCallsExpanded === next.toolCallsExpanded &&
   prev.isStreaming === next.isStreaming &&
+  prev.isFirstAssistantOfTurn === next.isFirstAssistantOfTurn &&
   Boolean(prev.onRetry) === Boolean(next.onRetry)
 );
