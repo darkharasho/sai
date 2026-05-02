@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ChevronDown, CornerLeftUp } from 'lucide-react';
+import { setFlipRect } from './flipRegistry';
 import ThinkingAnimation from '../ThinkingAnimation';
 
 function ContextMeter({ used, total }: { used: number; total: number }) {
@@ -1048,15 +1049,24 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     if (text === '/clear') {
       setMessages([]);
       setRenderStart(0);
+      pendingComposerRectRef.current = null;
       return;
     }
     if (text === '/compact' && aiProvider === 'claude') {
       window.sai.claudeCompact(projectPath, permissionMode, effortLevel, modelChoice);
+      pendingComposerRectRef.current = null;
       return;
     }
+
+    const newMessageId = Date.now().toString();
+
     if (text === '/help') {
+      if (pendingComposerRectRef.current) {
+        setFlipRect(newMessageId, pendingComposerRectRef.current);
+        pendingComposerRectRef.current = null;
+      }
       setMessages(prev => [...prev,
-        { id: Date.now().toString(), role: 'user', content: text, timestamp: Date.now() },
+        { id: newMessageId, role: 'user', content: text, timestamp: Date.now() },
         { id: `help-${Date.now()}`, role: 'system', content:
           buildHelpMessage(aiProvider, slashCommands),
           timestamp: Date.now() },
@@ -1065,8 +1075,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     }
 
     isAtBottomRef.current = true;
+    if (pendingComposerRectRef.current) {
+      setFlipRect(newMessageId, pendingComposerRectRef.current);
+      pendingComposerRectRef.current = null;
+    }
     setMessages(prev => [...prev, {
-      id: Date.now().toString(),
+      id: newMessageId,
       role: 'user',
       content: text,
       timestamp: Date.now(),
@@ -1110,6 +1124,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     }
   };
 
+  const pendingComposerRectRef = useRef<DOMRect | null>(null);
   const prevStreamingRef = useRef(false);
   useEffect(() => {
     if (prevStreamingRef.current && !isStreaming && messageQueue.length > 0 && onQueueShift && sessionId) {
@@ -1187,6 +1202,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       />
       <ChatInput
         onSend={handleSend}
+        onBeforeSend={(rect) => { pendingComposerRectRef.current = rect; }}
         disabled={!ready}
         slashCommands={slashCommands}
         onQueue={handleQueue}
