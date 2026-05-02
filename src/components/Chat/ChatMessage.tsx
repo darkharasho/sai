@@ -413,7 +413,7 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
       setTimeout(() => setErrorDetailsCopied(false), 1500);
     };
     return (
-      <motion.div className="chat-msg chat-msg-error-wrap" {...entryProps}>
+      <motion.div className={`chat-msg chat-msg-error-wrap${message.error ? ' chat-msg-error-pulse' : ''}`} {...entryProps}>
         <div className="chat-msg-error">
           <div className="chat-msg-error-header">
             <AlertTriangle size={16} className="chat-msg-error-icon" />
@@ -462,6 +462,15 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
           )}
         </div>
         <style>{`
+          @keyframes chat-msg-error-pulse {
+            0%   { box-shadow: 0 0 0 1px var(--accent); }
+            100% { box-shadow: 0 0 0 1px transparent; }
+          }
+          @media (prefers-reduced-motion: no-preference) {
+            .chat-msg-error-pulse {
+              animation: chat-msg-error-pulse 200ms ease-out 1;
+            }
+          }
           .chat-msg-error-wrap { margin-bottom: 16px; }
           .chat-msg-error {
             border: 1px solid color-mix(in srgb, var(--red) 40%, var(--border));

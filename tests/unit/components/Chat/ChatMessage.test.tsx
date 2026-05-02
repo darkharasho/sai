@@ -175,4 +175,11 @@ describe('ChatMessage', () => {
     const node = container.querySelector('[data-testid="chat-msg"]');
     expect(node?.getAttribute('data-flip-transition')).toBe(JSON.stringify(SPRING.dock));
   });
+
+  it('applies error-pulse class to messages with an error', () => {
+    const { container } = render(
+      <ChatMessage message={{ id: 'e-1', role: 'system', content: 'oops', timestamp: 0, error: { message: 'oops', kind: 'unknown' } as any }} />
+    );
+    expect(container.querySelector('.chat-msg-error-pulse')).toBeTruthy();
+  });
 });
