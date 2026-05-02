@@ -1,56 +1,6 @@
-import { useState, useEffect, useRef, useCallback, useMemo, type MutableRefObject } from 'react';
-import { ChevronDown, CornerLeftUp, ArrowDownToLine } from 'lucide-react';
-import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { ChevronDown, CornerLeftUp } from 'lucide-react';
 import ThinkingAnimation from '../ThinkingAnimation';
-import { dbGetMessagesRange } from '../../chatDb';
-
-function ChatScrollDebugHud({
-  scrollerRef,
-  followingRef,
-  isAtBottomRef,
-  showNewMessages,
-  isStreaming,
-  messageCount,
-}: {
-  scrollerRef: MutableRefObject<HTMLElement | Window | null>;
-  followingRef: MutableRefObject<boolean>;
-  isAtBottomRef: MutableRefObject<boolean>;
-  showNewMessages: boolean;
-  isStreaming: boolean;
-  messageCount: number;
-}) {
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    let raf = 0;
-    const loop = () => { setTick(t => (t + 1) % 1_000_000); raf = requestAnimationFrame(loop); };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
-  }, []);
-  const el = scrollerRef.current instanceof HTMLElement ? scrollerRef.current : null;
-  const gap = el ? el.scrollHeight - el.scrollTop - el.clientHeight : 0;
-  const stuck = showNewMessages && gap < 8;
-  return (
-    <div
-      data-tick={tick}
-      style={{
-        position: 'absolute',
-        bottom: 4,
-        right: 8,
-        zIndex: 50,
-        font: '10px/1.35 ui-monospace, SFMono-Regular, monospace',
-        background: stuck ? 'rgba(180, 60, 40, 0.92)' : 'rgba(0, 0, 0, 0.62)',
-        color: '#fff',
-        padding: '4px 7px',
-        borderRadius: 4,
-        pointerEvents: 'none',
-        whiteSpace: 'pre',
-      }}
-    >
-      {`follow=${followingRef.current ? 'Y' : 'N'}  atBot=${isAtBottomRef.current ? 'Y' : 'N'}  newMsg=${showNewMessages ? 'Y' : 'N'}\n`}
-      {`gap=${gap}px  msgs=${messageCount}  stream=${isStreaming ? 'Y' : 'N'}${stuck ? '  ⚠ STUCK' : ''}`}
-    </div>
-  );
-}
 
 function ContextMeter({ used, total }: { used: number; total: number }) {
   const pct = Math.min((used / total) * 100, 100);
@@ -89,7 +39,19 @@ function CodexThinkingAnimation() {
   );
 }
 
+const GEMINI_COLORS = ['#D7AFFF', '#87AFFF', '#87D7D7', '#D7FFD7', '#FFFFAF', '#FF87AF'];
+const COLOR_CYCLE_MS = 4000;
 const BRAILLE_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+function lerpColor(a: string, b: string, t: number): string {
+  const parse = (hex: string) => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+  const [r1, g1, b1] = parse(a);
+  const [r2, g2, b2] = parse(b);
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const bl = Math.round(b1 + (b2 - b1) * t);
+  return `rgb(${r},${g},${bl})`;
+}
 
 // Witty loading phrases (from Gemini CLI, Apache 2.0)
 const GEMINI_WITTY = [
@@ -216,12 +178,32 @@ function getGeminiHints(mode: 'witty' | 'tips' | 'all' | 'off'): string[] {
 function GeminiThinkingAnimation({ loadingPhrases = 'all' }: { loadingPhrases?: 'witty' | 'tips' | 'all' | 'off' }) {
   const hints = useMemo(() => getGeminiHints(loadingPhrases), [loadingPhrases]);
   const [frame, setFrame] = useState(0);
+  const [color, setColor] = useState(GEMINI_COLORS[0]);
   const [hintIndex, setHintIndex] = useState(() => hints.length > 0 ? Math.floor(Math.random() * hints.length) : 0);
 
   // Braille spinner at 80ms
   useEffect(() => {
     const interval = setInterval(() => setFrame(f => (f + 1) % BRAILLE_FRAMES.length), 80);
     return () => clearInterval(interval);
+  }, []);
+
+  // Smooth rainbow color cycle over 4s
+  useEffect(() => {
+    let raf: number;
+    const start = Date.now();
+    const tick = () => {
+      const elapsed = (Date.now() - start) % COLOR_CYCLE_MS;
+      const progress = elapsed / COLOR_CYCLE_MS;
+      const pos = progress * GEMINI_COLORS.length;
+      const idx = Math.floor(pos);
+      const t = pos - idx;
+      const c1 = GEMINI_COLORS[idx % GEMINI_COLORS.length];
+      const c2 = GEMINI_COLORS[(idx + 1) % GEMINI_COLORS.length];
+      setColor(lerpColor(c1, c2, t));
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
   }, []);
 
   // Cycle hints every 5 seconds
@@ -239,7 +221,7 @@ function GeminiThinkingAnimation({ loadingPhrases = 'all' }: { loadingPhrases?: 
 
   return (
     <div className="gemini-thinking">
-      <span className="gemini-spinner">{BRAILLE_FRAMES[frame]}</span>
+      <span className="gemini-spinner" style={{ color }}>{BRAILLE_FRAMES[frame]}</span>
       <span className="gemini-hint">{hints.length > 0 ? hints[hintIndex] : 'Thinking...'}</span>
     </div>
   );
@@ -249,7 +231,6 @@ import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import MessageQueue from './MessageQueue';
 import TodoProgress from './TodoProgress';
-import { motion, AnimatePresence } from 'motion/react';
 import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, QueuedMessage, TerminalTab } from '../../types';
 import { buildHelpMessage } from './helpText';
 import { parseAiError } from './parseAiError';
@@ -279,9 +260,6 @@ interface ChatPanelProps {
   onGeminiConversationModeChange: (mode: 'planning' | 'fast') => void;
   geminiLoadingPhrases?: 'witty' | 'tips' | 'all' | 'off';
   initialMessages?: ChatMessageType[];
-  initialFirstLoadedIdx?: number;
-  pageSize?: number;
-  onFirstLoadedIdxChange?: (idx: number) => void;
   onMessagesChange?: (messages: ChatMessageType[]) => void;
   onTurnComplete?: () => void;
   onClaudeSessionId?: (sessionId: string) => void;
@@ -489,8 +467,10 @@ function CyclingHints() {
   );
 }
 
+const RENDER_CHUNK = 50; // messages to show per window
+const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, initialFirstLoadedIdx = 0, pageSize = 100, onFirstLoadedIdxChange, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, sessionId, terminalTabs = [], onSlashCommandsUpdate }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, sessionId, terminalTabs = [], onSlashCommandsUpdate }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(initialMessages || []);
   const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);
   const setMessages = useCallback((updater: ChatMessageType[] | ((prev: ChatMessageType[]) => ChatMessageType[])) => {
@@ -500,155 +480,9 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       return next;
     });
   }, []);
-
-  const virtuosoRef = useRef<VirtuosoHandle>(null);
-  const scrollerRef = useRef<HTMLElement | Window | null>(null);
-  const isAtBottomRef = useRef(true);
-  // followingRef is the user's *intent* to follow output. It only flips false
-  // from a user-initiated scroll up (wheel/touch), and flips true when the
-  // user reaches the bottom or clicks the indicator. Programmatic scrolls
-  // never toggle it, so streaming auto-scroll won't accidentally pause itself.
-  const followingRef = useRef(true);
-  const snapToBottom = useCallback(() => {
-    const el = scrollerRef.current as HTMLElement | null;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, []);
-
-  // Wheel/touch events are never fired by programmatic scrolls, so they're a
-  // clean signal of user intent to scroll up (whereas atBottom flips during
-  // the scrollTop animation we drive ourselves during streaming).
-  const wheelHandlersAttachedRef = useRef<HTMLElement | null>(null);
-  const touchYRef = useRef(0);
-  // Set true while a programmatic scroll-away (e.g. Jump-to-message) is in
-  // flight. Suppresses the safety-net scroll listener and the streaming
-  // ResizeObserver so they don't drag the user back to the bottom mid-jump.
-  const programmaticScrollRef = useRef(false);
-  // While the user is following, any growth of the scroll content (streaming
-  // text, tool-call expansions, image loads) should immediately re-anchor to
-  // the bottom. ResizeObserver fires on every layout change, which is finer-
-  // grained than streaming flushes — fixes the "hangs behind during render"
-  // case where content grows between flushes.
-  const resizeObserverRef = useRef<ResizeObserver | null>(null);
-  const attachContentResizeObserver = useCallback((scroller: HTMLElement) => {
-    if (typeof ResizeObserver === 'undefined') return;
-    resizeObserverRef.current?.disconnect();
-    // Coalesce multiple layout changes within a single frame into one scroll
-    // snap. During heavy bursts (markdown re-tokenization, highlight.js,
-    // typewriter ticks) the observer can fire 5-10× per frame, and snapping
-    // every time forces synchronous layout reads that stall the next paint.
-    let rafScheduled = false;
-    const ro = new ResizeObserver(() => {
-      if (programmaticScrollRef.current) return;
-      if (!followingRef.current) return;
-      if (rafScheduled) return;
-      rafScheduled = true;
-      requestAnimationFrame(() => {
-        rafScheduled = false;
-        if (programmaticScrollRef.current || !followingRef.current) return;
-        scroller.scrollTop = scroller.scrollHeight;
-      });
-    });
-    // Virtuoso renders its sized content as the scroller's first child.
-    const target = scroller.firstElementChild as HTMLElement | null;
-    if (target) ro.observe(target);
-    resizeObserverRef.current = ro;
-  }, []);
-  useEffect(() => () => resizeObserverRef.current?.disconnect(), []);
-
-  const attachUserScrollListeners = useCallback((el: HTMLElement) => {
-    if (wheelHandlersAttachedRef.current === el) return;
-    wheelHandlersAttachedRef.current = el;
-    // Threshold filters trackpad bounce/jitter (~0.5–1.5px) while still
-    // registering any deliberate flick as scroll-up intent. The safety-net
-    // scroll listener below restores follow as soon as the user lands back
-    // at the bottom, so we don't need an at-bottom guard here.
-    el.addEventListener('wheel', (e: WheelEvent) => {
-      if (e.deltaY < -3) {
-        followingRef.current = false;
-        setFollowing(false);
-      }
-    }, { passive: true });
-    el.addEventListener('touchstart', (e: TouchEvent) => {
-      touchYRef.current = e.touches[0]?.clientY ?? 0;
-    }, { passive: true });
-    el.addEventListener('touchmove', (e: TouchEvent) => {
-      const y = e.touches[0]?.clientY ?? 0;
-      if (y - touchYRef.current > 3) {
-        followingRef.current = false;
-        setFollowing(false);
-      }
-      touchYRef.current = y;
-    }, { passive: true });
-    // Safety net: Virtuoso's atBottomStateChange can lag behind reality (scroll
-    // animations, item-height springs, programmatic snaps). If the actual
-    // scroll position is at the bottom, the "new messages" indicator must
-    // never be visible. Reconcile on every native scroll event.
-    el.addEventListener('scroll', () => {
-      if (programmaticScrollRef.current) return;
-      const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
-      if (gap < 8) {
-        if (!isAtBottomRef.current) isAtBottomRef.current = true;
-        if (!followingRef.current) {
-          followingRef.current = true;
-          setFollowing(true);
-        }
-        setShowNewMessages(false);
-      }
-    }, { passive: true });
-  }, []);
-
-  // Coalesce streaming text deltas: highlight.js re-tokenizes the entire
-  // message body on each chunk, so flushing every IPC event is wasteful.
-  const streamBufferRef = useRef<{ pending: string; timer: ReturnType<typeof setTimeout> | null }>({ pending: '', timer: null });
-  const flushStreamBuffer = useCallback(() => {
-    const buf = streamBufferRef.current;
-    if (buf.timer) { clearTimeout(buf.timer); buf.timer = null; }
-    if (!buf.pending) return;
-    const text = buf.pending;
-    buf.pending = '';
-    setMessages(prev => {
-      const last = prev[prev.length - 1];
-      // Plain assistant message — append text in place.
-      if (last?.role === 'assistant' && !last.toolCalls) {
-        const updated = [...prev];
-        updated[updated.length - 1] = { ...last, content: last.content + text };
-        return updated;
-      }
-      // Last message is a tool-call holder (or a user message). The model is
-      // now streaming its post-tool text response, which belongs in a fresh
-      // assistant message — appending here would either drop the text on
-      // the floor (the previous behavior) or overwrite tool-call metadata.
-      return [...prev, {
-        id: `stream-${Date.now()}`,
-        role: 'assistant',
-        content: text,
-        timestamp: Date.now(),
-      }];
-    });
-    // followOutput only fires on count changes; streaming grows the last
-    // item in place, so re-anchor manually while the user is at the bottom.
-    if (followingRef.current) {
-      requestAnimationFrame(snapToBottom);
-    }
-  }, [setMessages, snapToBottom]);
-  useEffect(() => () => {
-    if (streamBufferRef.current.timer) clearTimeout(streamBufferRef.current.timer);
-  }, []);
   const emptyPrompt = useMemo(() => EMPTY_PROMPTS[Math.floor(Math.random() * EMPTY_PROMPTS.length)], []);
   const [isStreaming, setIsStreaming] = useState(false);
   const turnSeqRef = useRef(0); // tracks the active turn's sequence number
-  // Watchdog for sends that vanish into the void (CLI in approval-wait, dying
-  // process whose stdin write succeeds silently, etc.). Cleared when the
-  // backend acknowledges with streaming_start or terminates the turn.
-  const sendWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clearSendWatchdog = useCallback(() => {
-    if (sendWatchdogRef.current) {
-      clearTimeout(sendWatchdogRef.current);
-      sendWatchdogRef.current = null;
-    }
-  }, []);
-  useEffect(() => () => clearSendWatchdog(), [clearSendWatchdog]);
   const [ready, setReady] = useState(false);
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
@@ -661,36 +495,48 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const autoCompactCooldownRef = useRef(0); // timestamp — don't re-compact until after this
   const [rateLimits, setRateLimits] = useState<Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number; utilization?: number; lastUpdated: number }>>(new Map());
   const [billingMode, setBillingMode] = useState<'subscription' | 'api'>('subscription');
-  const [following, setFollowing] = useState(true);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const userMsgRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const isAtBottomRef = useRef(true);
   const [pinnedUserMessage, setPinnedUserMessage] = useState<ChatMessageType | null>(null);
   const [showNewMessages, setShowNewMessages] = useState(false);
-  const [visibleStartIdx, setVisibleStartIdx] = useState(0);
-  // Pagination: messages[0] corresponds to absolute index `firstLoadedIdx` in
-  // the full session. When 0, the entire session is loaded.
-  const [firstLoadedIdx, setFirstLoadedIdx] = useState(initialFirstLoadedIdx);
-  const loadingOlderRef = useRef(false);
-  const handleLoadOlder = useCallback(() => {
-    if (loadingOlderRef.current) return;
-    if (firstLoadedIdx <= 0) return;
-    if (!sessionId) return;
-    loadingOlderRef.current = true;
-    const wantStart = Math.max(0, firstLoadedIdx - pageSize);
-    const wantCount = firstLoadedIdx - wantStart;
-    dbGetMessagesRange(sessionId, wantStart, wantCount)
-      .then(older => {
-        if (older.length === 0) {
-          setFirstLoadedIdx(0);
-          onFirstLoadedIdxChange?.(0);
-          return;
+
+  // Windowed rendering: only render messages from renderStart onward
+  const [renderStart, setRenderStart] = useState(0);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  // Keep render window pinned to the tail when user is at bottom
+  useEffect(() => {
+    if (isAtBottomRef.current && messages.length > RENDER_CHUNK) {
+      setRenderStart(messages.length - RENDER_CHUNK);
+    } else if (messages.length <= RENDER_CHUNK) {
+      setRenderStart(0);
+    }
+  }, [messages.length]);
+
+  // Auto-load older messages when sentinel scrolls into view
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    const container = chatContainerRef.current;
+    if (!sentinel || !container) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && renderStart > 0) {
+          const prevScrollHeight = container.scrollHeight;
+          setRenderStart(prev => Math.max(0, prev - LOAD_MORE_CHUNK));
+          // Preserve scroll position after loading older messages
+          requestAnimationFrame(() => {
+            const newScrollHeight = container.scrollHeight;
+            container.scrollTop += newScrollHeight - prevScrollHeight;
+          });
         }
-        setMessages(prev => [...older, ...prev]);
-        const nextIdx = Math.max(0, firstLoadedIdx - older.length);
-        setFirstLoadedIdx(nextIdx);
-        onFirstLoadedIdxChange?.(nextIdx);
-      })
-      .catch(() => {})
-      .finally(() => { loadingOlderRef.current = false; });
-  }, [firstLoadedIdx, pageSize, sessionId, onFirstLoadedIdxChange]);
+      },
+      { root: container, threshold: 0 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [renderStart]);
 
   // Load auto-compact threshold setting
   useEffect(() => {
@@ -750,7 +596,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
       if (msg.type === 'streaming_start') {
         if (msg.turnSeq != null) turnSeqRef.current = msg.turnSeq;
-        clearSendWatchdog();
         setIsStreaming(true);
         return;
       }
@@ -762,8 +607,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         // message while the CLI is still finishing the old response, the old result/done
         // arrives tagged with the old turnSeq and should not affect the new turn's state.
         if (msg.turnSeq != null && msg.turnSeq !== turnSeqRef.current) return;
-        clearSendWatchdog();
-        flushStreamBuffer();
         if (msg.type === 'done') {
           turnSeqRef.current = -1;
           flushMessagesToParent();
@@ -776,8 +619,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       }
 
       if (msg.type === 'process_exit') {
-        clearSendWatchdog();
-        flushStreamBuffer();
         setReady(false);
         setIsStreaming(false);
         setPendingApproval(null);
@@ -787,8 +628,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       }
 
       if (msg.type === 'error') {
-        clearSendWatchdog();
-        flushStreamBuffer();
         const error = parseAiError(msg.text || 'Unknown error');
         setMessages(prev => [...prev, {
           id: Date.now().toString(),
@@ -845,7 +684,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
       // Surface context compaction notifications and update context meter
       if (msg.type === 'system' && (msg.subtype === 'context_compacted' || msg.subtype === 'auto_compact' || msg.subtype === 'compact')) {
-        flushStreamBuffer();
         const summary = msg.summary ? ` Summary: ${msg.summary.slice(0, 100)}` : '';
         setMessages(prev => [...prev, {
           id: `compact-${Date.now()}`,
@@ -886,7 +724,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           }
         }
         if (results.length > 0) {
-          flushStreamBuffer();
           setPendingApproval(null);
           setMessages(prev => {
             const next = [...prev];
@@ -936,36 +773,28 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         const text = textParts.join('');
 
         if (text || tools.length > 0) {
-          const shouldAppend = !!text && !tools.length && msg.message.content.some((block: any) => block.type === 'text' && block.delta);
-          const last = messagesRef.current[messagesRef.current.length - 1];
-          const canAppendToLast = last?.role === 'assistant' && !last.toolCalls;
-
-          if (shouldAppend && canAppendToLast) {
-            // Hot path: buffer the delta, flush at most every ~33ms.
-            streamBufferRef.current.pending += text;
-            if (!streamBufferRef.current.timer) {
-              streamBufferRef.current.timer = setTimeout(flushStreamBuffer, 33);
+          setMessages(prev => {
+            const last = prev[prev.length - 1];
+            // Update the last assistant message if it's a pure text message (no tool calls).
+            // Append only when the transport marks the block as a delta; otherwise replace.
+            // If the last message has tool calls, always create a new message so
+            // tool cards stay above the follow-up text response.
+            if (last?.role === 'assistant' && text && !tools.length && !last.toolCalls) {
+              const updated = [...prev];
+              const shouldAppend = msg.message.content.some((block: any) => block.type === 'text' && block.delta);
+              const newContent = shouldAppend ? last.content + text : text;
+              updated[updated.length - 1] = { ...last, content: newContent };
+              return updated;
             }
-          } else {
-            // Anything else (tool calls, replace, new message) needs ordering with
-            // any in-flight buffered text.
-            flushStreamBuffer();
-            setMessages(prev => {
-              const last = prev[prev.length - 1];
-              if (last?.role === 'assistant' && text && !tools.length && !last.toolCalls) {
-                const updated = [...prev];
-                updated[updated.length - 1] = { ...last, content: text };
-                return updated;
-              }
-              return [...prev, {
-                id: `${Date.now()}-${Math.random()}`,
-                role: 'assistant',
-                content: text,
-                timestamp: Date.now(),
-                toolCalls: tools.length > 0 ? tools : undefined,
-              }];
-            });
-          }
+            return [...prev, {
+              id: `${Date.now()}-${Math.random()}`,
+              role: 'assistant',
+              content: text,
+              timestamp: Date.now(),
+              toolCalls: tools.length > 0 ? tools : undefined,
+            }];
+          });
+
         }
       }
 
@@ -1004,7 +833,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       if (msg.type === 'result' && msg.result) {
         const text = typeof msg.result === 'string' ? msg.result : '';
         if (text) {
-          flushStreamBuffer();
           // Replace the last assistant message with the final clean result
           setMessages(prev => {
             const last = prev[prev.length - 1];
@@ -1083,87 +911,108 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     });
   }, []);
 
+  // Wheel events are never fired by programmatic scrolls — use them to detect user scrolling up
+  useEffect(() => {
+    const el = chatContainerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) isAtBottomRef.current = false;
+    };
+    el.addEventListener('wheel', onWheel, { passive: true });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  // Scroll to bottom on mount (session switch remounts via key change)
+  // Use rAF to ensure DOM has laid out messages before scrolling
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+    });
+  }, []);
+
   // Scroll to bottom when this workspace becomes the active/visible one
   useEffect(() => {
     if (isActive) {
       isAtBottomRef.current = true;
-      followingRef.current = true;
-      setFollowing(true);
       setShowNewMessages(false);
       requestAnimationFrame(() => {
-        requestAnimationFrame(snapToBottom);
+        messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
       });
     }
-  }, [isActive, snapToBottom]);
+  }, [isActive]);
 
+  useEffect(() => {
+    if (isAtBottomRef.current) {
+      setShowNewMessages(false);
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    } else if (messages[messages.length - 1]?.role === 'assistant') {
+      setShowNewMessages(true);
+    }
+  }, [messages, isStreaming, projectPath]);
 
   const scrollToBottom = () => {
     isAtBottomRef.current = true;
-    followingRef.current = true;
-    setFollowing(true);
     setShowNewMessages(false);
-    requestAnimationFrame(() => {
-      requestAnimationFrame(snapToBottom);
-    });
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
-
-  // Scroll on a newly-appended last message. Distinguishes append (user send,
-  // assistant turn) from prepend (pagination loading older history) by tracking
-  // the last message id rather than messages.length.
-  const lastIdRef = useRef<string | undefined>(messages[messages.length - 1]?.id);
-  useEffect(() => {
-    const last = messages[messages.length - 1];
-    if (!last || last.id === lastIdRef.current) return;
-    lastIdRef.current = last.id;
-    if (last.role === 'user') {
-      isAtBottomRef.current = true;
-      followingRef.current = true;
-      setFollowing(true);
-      setShowNewMessages(false);
-      requestAnimationFrame(() => {
-        requestAnimationFrame(snapToBottom);
-      });
-    } else if (followingRef.current || isAtBottomRef.current) {
-      // If we're at the bottom, treat it as still following — wheel/touch can
-      // flip followingRef false without ever leaving the bottom (e.g. trackpad
-      // jitter, or a scroll-up while already pinned), and atBottomStateChange
-      // won't re-fire to clear it.
-      followingRef.current = true;
-      setFollowing(true);
-      setShowNewMessages(false);
-      requestAnimationFrame(() => {
-        requestAnimationFrame(snapToBottom);
-      });
-    } else if (last.role === 'assistant') {
-      setShowNewMessages(true);
-    }
-  }, [messages]);
 
   const userMessages = useMemo(
     () => messages.filter(m => m.role === 'user'),
     [messages]
   );
 
-  // Pin the most-recent user message that has scrolled above the viewport.
-  // Driven by Virtuoso's rangeChanged → visibleStartIdx.
+  // Track whether the last user message is out of view (reliable via IntersectionObserver)
+  const lastUserOutOfView = useRef(false);
   useEffect(() => {
-    if (userMessages.length === 0) { setPinnedUserMessage(null); return; }
-    const lastUser = userMessages[userMessages.length - 1];
-    const lastUserIdx = messages.lastIndexOf(lastUser);
-    if (lastUserIdx < 0 || lastUserIdx >= visibleStartIdx) {
-      setPinnedUserMessage(null);
-      return;
+    const last = userMessages[userMessages.length - 1];
+    const el = last ? userMsgRefs.current.get(last.id) : null;
+    const container = chatContainerRef.current;
+    if (!el || !container) { lastUserOutOfView.current = false; setPinnedUserMessage(null); return; }
+    lastUserOutOfView.current = false;
+    setPinnedUserMessage(null);
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        lastUserOutOfView.current = !entry.isIntersecting;
+        if (entry.isIntersecting) {
+          setPinnedUserMessage(null);
+        } else {
+          // Initial trigger — pin the last user message; handleScroll refines from here
+          setPinnedUserMessage(last);
+        }
+      },
+      { root: container, threshold: 0 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [userMessages[userMessages.length - 1]?.id]);
+
+  const handleScroll = () => {
+    const el = chatContainerRef.current;
+    if (!el) return;
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 60;
+    if (atBottom) {
+      isAtBottomRef.current = true;
+      setShowNewMessages(false);
     }
-    // Find the rightmost user message at or above the visible range start
+    // Update which user message is pinned as user scrolls through conversation
+    if (!lastUserOutOfView.current) return;
+    const containerTop = el.getBoundingClientRect().top;
+    let pinTarget: ChatMessageType | null = null;
     for (let i = userMessages.length - 1; i >= 0; i--) {
-      const idx = messages.lastIndexOf(userMessages[i]);
-      if (idx >= 0 && idx <= visibleStartIdx) {
-        setPinnedUserMessage(userMessages[i]);
-        return;
+      const dom = userMsgRefs.current.get(userMessages[i].id);
+      if (dom && dom.getBoundingClientRect().bottom < containerTop) {
+        pinTarget = userMessages[i];
+        break;
       }
     }
-    setPinnedUserMessage(null);
-  }, [visibleStartIdx, userMessages, messages]);
+    if (pinTarget) setPinnedUserMessage(pinTarget);
+  };
+
+  const visibleMessages = useMemo(
+    () => messages.slice(renderStart),
+    [messages, renderStart]
+  );
+  const hasHiddenMessages = renderStart > 0;
 
   useEffect(() => {
     onMessagesChange?.(messages);
@@ -1198,8 +1047,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     // Handle built-in commands locally
     if (text === '/clear') {
       setMessages([]);
-      setFirstLoadedIdx(0);
-      onFirstLoadedIdxChange?.(0);
+      setRenderStart(0);
       return;
     }
     if (text === '/compact' && aiProvider === 'claude') {
@@ -1224,29 +1072,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       timestamp: Date.now(),
       images: images?.length ? images : undefined,
     }]);
-
-    // Optimistically show the thinking indicator so the user gets immediate
-    // feedback that the send was received, even before the backend's
-    // streaming_start IPC arrives. The backend will keep this in sync —
-    // streaming_start re-confirms it, and done/result/error/process_exit
-    // turn it off.
-    setIsStreaming(true);
-
-    // Watchdog: if we don't hear back from the backend within a generous
-    // window, surface an error instead of leaving the user staring at a
-    // permanent thinking spinner. CLI startup can be slow on cold spawns,
-    // so keep this generous.
-    clearSendWatchdog();
-    sendWatchdogRef.current = setTimeout(() => {
-      sendWatchdogRef.current = null;
-      setIsStreaming(false);
-      setMessages(prev => [...prev, {
-        id: `watchdog-${Date.now()}`,
-        role: 'system',
-        content: 'No response from the CLI. The message may not have been received — try sending again, or restart the workspace if this keeps happening.',
-        timestamp: Date.now(),
-      }]);
-    }, 15000);
 
     // Save images to temp files and get paths
     let imagePaths: string[] | undefined;
@@ -1285,36 +1110,18 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     }
   };
 
-  // Drain the queue whenever we're idle and have something to send. Depending on
-  // both isStreaming and the queue length covers the case where a queue update
-  // races the streaming-flag flip (e.g., a `result`/`done` event lands before
-  // the new queue prop propagates from App), and the case where streaming never
-  // started at all (immediate error). drainingRef prevents back-to-back drains
-  // for multi-item queues — it resets when isStreaming flips true again.
-  const drainingRef = useRef(false);
+  const prevStreamingRef = useRef(false);
   useEffect(() => {
-    if (isStreaming) { drainingRef.current = false; return; }
-    if (drainingRef.current) return;
-    if (messageQueue.length === 0) return;
-    if (!onQueueShift || !sessionId) return;
-    drainingRef.current = true;
-    const next = messageQueue[0];
-    onQueueShift(sessionId);
-    setTimeout(() => handleSend(next.fullText, next.images), 300);
-  }, [isStreaming, messageQueue.length, sessionId]);
+    if (prevStreamingRef.current && !isStreaming && messageQueue.length > 0 && onQueueShift && sessionId) {
+      const next = messageQueue[0];
+      onQueueShift(sessionId);
+      setTimeout(() => handleSend(next.fullText, next.images), 300);
+    }
+    prevStreamingRef.current = isStreaming;
+  }, [isStreaming]);
 
   return (
     <div className="chat-panel">
-      {import.meta.env.DEV && (
-        <ChatScrollDebugHud
-          scrollerRef={scrollerRef}
-          followingRef={followingRef}
-          isAtBottomRef={isAtBottomRef}
-          showNewMessages={showNewMessages}
-          isStreaming={isStreaming}
-          messageCount={messages.length}
-        />
-      )}
       {pinnedUserMessage && (
         <div className="pinned-prompt-bar" key={pinnedUserMessage.id}>
           <div className="pinned-prompt-accent" />
@@ -1323,16 +1130,9 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           <button
             className="pinned-prompt-jump"
             onClick={() => {
-              // Disengage follow and suppress the safety-net + ResizeObserver
-              // for the duration of the smooth scroll, otherwise the gap-< 8
-              // check at the start re-engages follow and snaps us back.
               isAtBottomRef.current = false;
-              followingRef.current = false;
-              setFollowing(false);
-              programmaticScrollRef.current = true;
-              setTimeout(() => { programmaticScrollRef.current = false; }, 900);
-              const idx = messages.lastIndexOf(pinnedUserMessage);
-              if (idx >= 0) virtuosoRef.current?.scrollToIndex({ index: firstLoadedIdx + idx, align: 'center', behavior: 'smooth' });
+              const el = userMsgRefs.current.get(pinnedUserMessage.id);
+              el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }}
             title="Jump to message"
           >
@@ -1341,8 +1141,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           </button>
         </div>
       )}
-      {messages.length === 0 ? (
-        <div className="chat-messages">
+      <div className="chat-messages" ref={chatContainerRef} onScroll={handleScroll}>
+        {messages.length === 0 ? (
           <div className="chat-empty">
             <img src="svg/sai.svg" alt="SAI" className="chat-empty-logo" />
             <div className="chat-empty-title">SAI</div>
@@ -1351,94 +1151,34 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             </div>
             {projectPath && <CyclingHints />}
           </div>
-        </div>
-      ) : (
-        <Virtuoso
-          ref={virtuosoRef}
-          className="chat-messages"
-          data={messages}
-          computeItemKey={(_index, msg) => msg.id}
-          firstItemIndex={firstLoadedIdx}
-          initialTopMostItemIndex={Math.max(0, messages.length - 1)}
-          startReached={handleLoadOlder}
-          atBottomThreshold={4}
-          increaseViewportBy={{ top: 600, bottom: 600 }}
-          scrollerRef={(ref) => {
-            scrollerRef.current = ref;
-            if (ref instanceof HTMLElement) {
-              attachUserScrollListeners(ref);
-              attachContentResizeObserver(ref);
-            }
-          }}
-          atBottomStateChange={(atBottom) => {
-            // Virtuoso can fire atBottom=false during streaming when scrollHeight
-            // grows faster than its internal measurement catches up — even though
-            // the actual scroll position is still pinned to the bottom. Verify
-            // against the live scroll position before trusting the signal.
-            const sc = scrollerRef.current instanceof HTMLElement ? scrollerRef.current : null;
-            const realGap = sc ? sc.scrollHeight - sc.scrollTop - sc.clientHeight : 0;
-            const reallyAtBottom = atBottom || realGap < 8;
-            isAtBottomRef.current = reallyAtBottom;
-            if (reallyAtBottom) {
-              followingRef.current = true;
-              setFollowing(true);
-              setShowNewMessages(false);
-            } else if (messagesRef.current[messagesRef.current.length - 1]?.role === 'assistant') {
-              setShowNewMessages(true);
-            }
-          }}
-          rangeChanged={({ startIndex }) => setVisibleStartIdx(startIndex - firstLoadedIdx)}
-          itemContent={(_index, msg) => {
-            const lastMsg = messages[messages.length - 1];
-            const isLastAssistantStreaming = isStreaming && msg.role === 'assistant' && lastMsg?.id === msg.id;
-            return msg.role === 'user'
-              ? <ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} />
-              : <ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} isStreaming={isLastAssistantStreaming} />;
-          }}
-          components={{
-            Header: () => <div style={{ height: 16 }} />,
-            Footer: () => isStreaming ? (
-              <motion.div
-                style={{ padding: '0 16px' }}
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-              >
-                {aiProvider === 'gemini'
-                  ? <GeminiThinkingAnimation loadingPhrases={geminiLoadingPhrases} />
-                  : aiProvider === 'codex'
-                  ? <CodexThinkingAnimation />
-                  : <ThinkingAnimation />}
-              </motion.div>
-            ) : null,
-          }}
-        />
-      )}
+        ) : (
+          <>
+            {hasHiddenMessages && (
+              <div ref={sentinelRef} className="chat-load-sentinel">
+                <span className="chat-load-sentinel-text">Loading earlier messages...</span>
+              </div>
+            )}
+            {visibleMessages.map(msg => msg.role === 'user'
+              ? <div key={msg.id} ref={el => { if (el) userMsgRefs.current.set(msg.id, el); else userMsgRefs.current.delete(msg.id); }}><ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} /></div>
+              : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} />
+            )}
+          </>
+        )}
+        {isStreaming && (aiProvider === 'gemini'
+          ? <GeminiThinkingAnimation loadingPhrases={geminiLoadingPhrases} />
+          : aiProvider === 'codex'
+          ? <CodexThinkingAnimation />
+          : <ThinkingAnimation />
+        )}
+        <div ref={messagesEndRef} />
+      </div>
       <div className="new-messages-anchor">
-        <AnimatePresence>
-          {showNewMessages && (
-            <motion.button
-              key="new-messages-btn"
-              className="new-messages-btn"
-              onClick={scrollToBottom}
-              initial={{ opacity: 0, y: 6, scale: 0.94 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 6, scale: 0.94 }}
-              transition={{ type: 'spring', stiffness: 460, damping: 32 }}
-            >
-              <ChevronDown size={12} />
-              new messages
-            </motion.button>
-          )}
-        </AnimatePresence>
-        <button
-          className={`follow-indicator ${following ? 'is-following' : ''}`}
-          onClick={scrollToBottom}
-          title={following ? 'Following output' : 'Click to resume following'}
-          aria-label={following ? 'Following output' : 'Resume following output'}
-        >
-          <ArrowDownToLine size={12} />
-        </button>
+        {showNewMessages && (
+          <button className="new-messages-btn" onClick={scrollToBottom}>
+            <ChevronDown size={12} />
+            new messages
+          </button>
+        )}
       </div>
       <TodoProgress messages={messages} isStreaming={isStreaming} />
       <MessageQueue
@@ -1493,7 +1233,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           flex-direction: column;
           min-height: 0;
           overflow: hidden;
-          position: relative;
         }
         .new-messages-anchor {
           position: relative;
@@ -1524,37 +1263,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         }
         .new-messages-btn:hover {
           color: var(--text);
-        }
-        .follow-indicator {
-          position: absolute;
-          bottom: -10px;
-          right: 12px;
-          z-index: 10;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          width: 22px;
-          height: 22px;
-          background: var(--bg-secondary);
-          border: 1px solid var(--border);
-          border-radius: 50%;
-          color: var(--text-muted);
-          opacity: 0.55;
-          cursor: pointer;
-          transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, opacity 0.15s ease;
-        }
-        .follow-indicator:hover {
-          opacity: 1;
-          color: var(--text);
-        }
-        .follow-indicator.is-following {
-          color: var(--accent);
-          background: transparent;
-          border-color: transparent;
-          opacity: 1;
-        }
-        .follow-indicator.is-following:hover {
-          color: var(--accent);
         }
         @keyframes pinned-slide-in {
           from { opacity: 0; transform: translateY(-100%); }
@@ -1632,7 +1340,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         .chat-messages {
           flex: 1;
           overflow-y: auto;
-          overflow-x: hidden;
+          padding: 16px;
           min-height: 0;
         }
         .chat-load-sentinel {
@@ -1772,18 +1480,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           font-size: 18px;
           line-height: 1;
           flex-shrink: 0;
-          color: #D7AFFF;
-          animation: gemini-color-cycle 4s linear infinite;
-          will-change: color;
-        }
-        @keyframes gemini-color-cycle {
-          0%   { color: #D7AFFF; }
-          17%  { color: #87AFFF; }
-          33%  { color: #87D7D7; }
-          50%  { color: #D7FFD7; }
-          67%  { color: #FFFFAF; }
-          83%  { color: #FF87AF; }
-          100% { color: #D7AFFF; }
         }
         .gemini-hint {
           font-size: 13px;

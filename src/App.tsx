@@ -1422,11 +1422,6 @@ export default function App() {
                   onGeminiConversationModeChange={handleGeminiConversationModeChange}
                   geminiLoadingPhrases={geminiLoadingPhrases}
                   initialMessages={ws.activeSession.messages}
-                  initialFirstLoadedIdx={wsFirstLoadedIdxRef.current.get(wsPath) ?? 0}
-                  pageSize={MESSAGE_PAGE_SIZE}
-                  onFirstLoadedIdxChange={(idx: number) => {
-                    wsFirstLoadedIdxRef.current.set(wsPath, idx);
-                  }}
                   activeFilePath={ws.activeFilePath}
                   onFileOpen={handleFileOpen}
                   isActive={wsPath === activeProjectPath}
