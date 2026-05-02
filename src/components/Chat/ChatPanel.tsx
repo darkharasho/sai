@@ -209,6 +209,7 @@ function GeminiThinkingAnimation({ loadingPhrases = 'all' }: { loadingPhrases?: 
   const [frame, setFrame] = useState(0);
   const [color, setColor] = useState(GEMINI_COLORS[0]);
   const [hintIndex, setHintIndex] = useState(() => hints.length > 0 ? Math.floor(Math.random() * hints.length) : 0);
+  const hintTransition = useReducedMotionTransition({ duration: 0.18, ease: EASING.out });
 
   // Braille spinner at 80ms
   useEffect(() => {
@@ -258,7 +259,7 @@ function GeminiThinkingAnimation({ loadingPhrases = 'all' }: { loadingPhrases?: 
           initial={{ opacity: 0, y: 4 }}
           animate={{ opacity: 0.85, y: 0 }}
           exit={{ opacity: 0, y: -4 }}
-          transition={{ duration: 0.18, ease: EASING.out }}
+          transition={hintTransition}
         >
           {hints.length > 0 ? hints[hintIndex] : 'Thinking...'}
         </motion.span>

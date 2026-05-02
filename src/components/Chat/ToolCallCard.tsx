@@ -359,6 +359,8 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
   const { truncated, isTruncated } = truncateCode(code, MAX_PREVIEW_LINES);
   const entryTransition = useReducedMotionTransition(SPRING.pop);
   const badgeTransition = useReducedMotionTransition(SPRING.flick);
+  const chevronTransition = useReducedMotionTransition(SPRING.flick);
+  const expandTransition = useReducedMotionTransition({ height: { duration: 0.26, ease: [0.22, 1, 0.36, 1] as const }, opacity: { duration: 0.18 } });
 
   const isBash = toolCall.type === 'terminal_command';
   const isTodo = toolCall.name === 'TodoWrite';
@@ -413,7 +415,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
             <motion.span
               className="tool-call-chevron-wrap"
               animate={{ rotate: expanded ? 90 : 0 }}
-              transition={{ type: 'spring', stiffness: 380, damping: 28 }}
+              transition={chevronTransition}
             >
               <ChevronRight size={14} className="tool-call-chevron" />
             </motion.span>
@@ -427,7 +429,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              transition={{ height: { duration: 0.26, ease: [0.22, 1, 0.36, 1] }, opacity: { duration: 0.18 } }}
+              transition={expandTransition}
               style={{ overflow: 'hidden' }}
             >
             {isBash && (

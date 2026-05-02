@@ -463,11 +463,11 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
           )}
         </div>
         <style>{`
-          @keyframes chat-msg-error-pulse {
-            0%   { box-shadow: 0 0 0 1px var(--accent); }
-            100% { box-shadow: 0 0 0 1px transparent; }
-          }
           @media (prefers-reduced-motion: no-preference) {
+            @keyframes chat-msg-error-pulse {
+              0%   { box-shadow: 0 0 0 1px var(--accent); }
+              100% { box-shadow: 0 0 0 1px transparent; }
+            }
             .chat-msg-error-pulse {
               animation: chat-msg-error-pulse 200ms ease-out 1;
             }
@@ -761,11 +761,11 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
           mask-repeat: no-repeat;
         }
         .chat-msg-body { color: var(--text); line-height: 1.6; flex: 1; min-width: 0; }
-        @keyframes chat-streaming-tail-sweep {
-          from { background-position: -120% 0; }
-          to   { background-position:  120% 0; }
-        }
         @media (prefers-reduced-motion: no-preference) {
+          @keyframes chat-streaming-tail-sweep {
+            from { background-position: -120% 0; }
+            to   { background-position:  120% 0; }
+          }
           .chat-streaming-tail {
             background-image: linear-gradient(
               90deg,
