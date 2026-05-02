@@ -26,7 +26,11 @@ vi.mock('../../../../src/components/Chat/MessageQueue', () => ({
 }));
 
 vi.mock('../../../../src/components/ThinkingAnimation', () => ({
-  default: () => <div data-testid="thinking-animation" />,
+  default: () => (
+    <div data-testid="thinking-animation">
+      <span className="thinking-cursor thinking-cursor-breathing">|</span>
+    </div>
+  ),
 }));
 
 import ChatPanel from '../../../../src/components/Chat/ChatPanel';
@@ -355,5 +359,89 @@ describe('ChatPanel', () => {
     expect(typeof rect!.left).toBe('number');
 
     vi.restoreAllMocks();
+  });
+
+  const baseProps = (): ChatPanelProps => ({
+    projectPath: '/project',
+    permissionMode: 'default',
+    onPermissionChange: vi.fn(),
+    effortLevel: 'high',
+    onEffortChange: vi.fn(),
+    modelChoice: 'sonnet',
+    onModelChange: vi.fn(),
+    aiProvider: 'claude',
+    codexModel: '',
+    onCodexModelChange: vi.fn(),
+    codexModels: [],
+    codexPermission: 'auto',
+    onCodexPermissionChange: vi.fn(),
+    geminiModel: 'auto-gemini-3',
+    onGeminiModelChange: vi.fn(),
+    geminiModels: [],
+    geminiApprovalMode: 'default',
+    onGeminiApprovalModeChange: vi.fn(),
+    geminiConversationMode: 'planning',
+    onGeminiConversationModeChange: vi.fn(),
+    initialMessages: [],
+    onMessagesChange: vi.fn(),
+    onTurnComplete: vi.fn(),
+    onClaudeSessionId: vi.fn(),
+    onGeminiSessionId: vi.fn(),
+    onCodexSessionId: vi.fn(),
+    activeFilePath: null,
+    onFileOpen: vi.fn(),
+    isActive: true,
+    messageQueue: [],
+    onQueueAdd: vi.fn(),
+    onQueueRemove: vi.fn(),
+    onQueueShift: vi.fn(),
+    sessionId: 'session-1',
+    terminalTabs: [],
+    onSlashCommandsUpdate: vi.fn(),
+  });
+
+  it('Claude thinking has breathing-cursor class when streaming', async () => {
+    const props = { ...baseProps(), aiProvider: 'claude' as const };
+    const { container } = render(<ChatPanel {...props} />);
+
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+    await act(async () => {
+      for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+        (handler as (msg: any) => void)({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+      }
+    });
+
+    expect(container.querySelector('.thinking-cursor.thinking-cursor-breathing')).toBeTruthy();
+  });
+
+  it('Codex thinking applies wave to Working text when streaming', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const };
+    const { container } = render(<ChatPanel {...props} />);
+
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+    await act(async () => {
+      for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+        (handler as (msg: any) => void)({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+      }
+    });
+
+    expect(container.querySelector('.codex-working-wave')).toBeTruthy();
+  });
+
+  it('Gemini thinking hint has cross-slide class when streaming', async () => {
+    const props = { ...baseProps(), aiProvider: 'gemini' as const };
+    const { container } = render(<ChatPanel {...props} />);
+
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+    await act(async () => {
+      for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+        (handler as (msg: any) => void)({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+      }
+    });
+
+    expect(container.querySelector('.gemini-hint-slide')).toBeTruthy();
   });
 });

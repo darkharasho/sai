@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ChevronDown, CornerLeftUp } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { setFlipRect } from './flipRegistry';
 import ThinkingAnimation from '../ThinkingAnimation';
 import MotionPresence from './MotionPresence';
-import { SPRING, DISTANCE, useReducedMotionTransition } from './motion';
+import { SPRING, DISTANCE, EASING, useReducedMotionTransition } from './motion';
 
 function ContextMeter({ used, total }: { used: number; total: number }) {
   const pct = Math.min((used / total) * 100, 100);
@@ -38,7 +38,11 @@ function CodexThinkingAnimation() {
   return (
     <div className="codex-thinking">
       <span className="codex-thinking-dot">•</span>
-      <span className="codex-working">Working</span>
+      <span className="codex-working codex-working-wave">
+        {'Working'.split('').map((c, i) => (
+          <span key={i} style={{ animationDelay: `${i * 50}ms` }}>{c}</span>
+        ))}
+      </span>
     </div>
   );
 }
@@ -226,7 +230,18 @@ function GeminiThinkingAnimation({ loadingPhrases = 'all' }: { loadingPhrases?: 
   return (
     <div className="gemini-thinking">
       <span className="gemini-spinner" style={{ color }}>{BRAILLE_FRAMES[frame]}</span>
-      <span className="gemini-hint">{hints.length > 0 ? hints[hintIndex] : 'Thinking...'}</span>
+      <AnimatePresence mode="popLayout" initial={false}>
+        <motion.span
+          key={hintIndex}
+          className="gemini-hint gemini-hint-slide"
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 0.85, y: 0 }}
+          exit={{ opacity: 0, y: -4 }}
+          transition={{ duration: 0.18, ease: EASING.out }}
+        >
+          {hints.length > 0 ? hints[hintIndex] : 'Thinking...'}
+        </motion.span>
+      </AnimatePresence>
     </div>
   );
 }
@@ -1485,6 +1500,17 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           0%, 100% { opacity: 1; }
           50% { opacity: 0; }
         }
+        @media (prefers-reduced-motion: no-preference) {
+          @keyframes thinking-cursor-breathe {
+            0%, 100% { transform: scaleY(1.0); }
+            50%      { transform: scaleY(1.08); }
+          }
+          .thinking-cursor-breathing {
+            display: inline-block;
+            transform-origin: bottom;
+            animation: thinking-cursor-breathe 1.6s ease-in-out infinite;
+          }
+        }
         .codex-thinking {
           display: flex;
           align-items: center;
@@ -1518,6 +1544,16 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           from { background-position: 200% 0; }
           to { background-position: -200% 0; }
         }
+        @media (prefers-reduced-motion: no-preference) {
+          @keyframes codex-working-wave {
+            0%, 100% { transform: translateY(0); }
+            50%      { transform: translateY(-0.5px); }
+          }
+          .codex-working-wave > span {
+            display: inline-block;
+            animation: codex-working-wave 1.4s ease-in-out infinite;
+          }
+        }
         .gemini-thinking {
           display: flex;
           align-items: center;
@@ -1534,14 +1570,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           font-size: 13px;
           font-style: italic;
           color: var(--text);
-          opacity: 0.85;
-          animation: gemini-hint-fade 5s ease-in-out infinite;
-        }
-        @keyframes gemini-hint-fade {
-          0% { opacity: 0; }
-          8% { opacity: 0.85; }
-          88% { opacity: 0.85; }
-          100% { opacity: 0; }
         }
       `}</style>
     </div>
