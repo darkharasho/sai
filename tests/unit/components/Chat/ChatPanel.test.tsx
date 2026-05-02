@@ -468,4 +468,10 @@ describe('ChatPanel', () => {
 
     expect(container.querySelector('.gemini-hint-slide')).toBeTruthy();
   });
+
+  it('wraps the bottom strip in a LayoutGroup', () => {
+    const props = baseProps();
+    const { container } = render(<ChatPanel {...props} />);
+    expect(container.querySelector('[data-testid="chat-bottom-strip"]')).toBeTruthy();
+  });
 });

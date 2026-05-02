@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ChevronDown, CornerLeftUp } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, LayoutGroup } from 'motion/react';
 import { setFlipRect } from './flipRegistry';
 import ThinkingAnimation from '../ThinkingAnimation';
 import MotionPresence from './MotionPresence';
@@ -1263,53 +1263,57 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           </button>
         )}
       </div>
-      <TodoProgress messages={messages} isStreaming={isStreaming} />
-      <MessageQueue
-        queue={messageQueue}
-        onRemove={(id) => sessionId && onQueueRemove?.(sessionId, id)}
-      />
-      <ChatInput
-        onSend={handleSend}
-        onBeforeSend={(rect) => { pendingComposerRectRef.current = rect; }}
-        disabled={!ready}
-        slashCommands={slashCommands}
-        onQueue={handleQueue}
-        queueCount={messageQueue.length}
-        pendingApproval={pendingApproval}
-        onApprove={handleApprove}
-        onDeny={handleDeny}
-        onAlwaysAllow={handleAlwaysAllow}
-        isStreaming={isStreaming}
-        onStop={() => aiProvider === 'gemini' ? (window.sai as any).geminiStop(projectPath) : aiProvider === 'codex' ? window.sai.codexStop(projectPath) : window.sai.claudeStop?.(projectPath)}
-        permissionMode={permissionMode}
-        onPermissionChange={onPermissionChange}
-        effortLevel={effortLevel}
-        onEffortChange={onEffortChange}
-        modelChoice={modelChoice}
-        onModelChange={onModelChange}
-        contextUsage={contextUsage}
-        sessionUsage={sessionUsage}
-        sessionCost={sessionCost}
-        rateLimits={rateLimits}
-        billingMode={billingMode}
-        activeFilePath={activeFilePath}
-        fileContextEnabled={fileContextEnabled}
-        onFileContextToggle={() => setFileContextEnabled(prev => !prev)}
-        aiProvider={aiProvider}
-        codexModel={codexModel}
-        codexModels={codexModels}
-        onCodexModelChange={onCodexModelChange}
-        codexPermission={codexPermission}
-        onCodexPermissionChange={onCodexPermissionChange}
-        geminiModel={geminiModel}
-        geminiModels={geminiModels}
-        onGeminiModelChange={onGeminiModelChange}
-        geminiApprovalMode={geminiApprovalMode}
-        onGeminiApprovalModeChange={onGeminiApprovalModeChange}
-        geminiConversationMode={geminiConversationMode}
-        onGeminiConversationModeChange={onGeminiConversationModeChange}
-        terminalTabs={terminalTabs}
-      />
+      <LayoutGroup>
+        <div data-testid="chat-bottom-strip" className="chat-bottom-strip">
+          <TodoProgress messages={messages} isStreaming={isStreaming} />
+          <MessageQueue
+            queue={messageQueue}
+            onRemove={(id) => sessionId && onQueueRemove?.(sessionId, id)}
+          />
+          <ChatInput
+            onSend={handleSend}
+            onBeforeSend={(rect) => { pendingComposerRectRef.current = rect; }}
+            disabled={!ready}
+            slashCommands={slashCommands}
+            onQueue={handleQueue}
+            queueCount={messageQueue.length}
+            pendingApproval={pendingApproval}
+            onApprove={handleApprove}
+            onDeny={handleDeny}
+            onAlwaysAllow={handleAlwaysAllow}
+            isStreaming={isStreaming}
+            onStop={() => aiProvider === 'gemini' ? (window.sai as any).geminiStop(projectPath) : aiProvider === 'codex' ? window.sai.codexStop(projectPath) : window.sai.claudeStop?.(projectPath)}
+            permissionMode={permissionMode}
+            onPermissionChange={onPermissionChange}
+            effortLevel={effortLevel}
+            onEffortChange={onEffortChange}
+            modelChoice={modelChoice}
+            onModelChange={onModelChange}
+            contextUsage={contextUsage}
+            sessionUsage={sessionUsage}
+            sessionCost={sessionCost}
+            rateLimits={rateLimits}
+            billingMode={billingMode}
+            activeFilePath={activeFilePath}
+            fileContextEnabled={fileContextEnabled}
+            onFileContextToggle={() => setFileContextEnabled(prev => !prev)}
+            aiProvider={aiProvider}
+            codexModel={codexModel}
+            codexModels={codexModels}
+            onCodexModelChange={onCodexModelChange}
+            codexPermission={codexPermission}
+            onCodexPermissionChange={onCodexPermissionChange}
+            geminiModel={geminiModel}
+            geminiModels={geminiModels}
+            onGeminiModelChange={onGeminiModelChange}
+            geminiApprovalMode={geminiApprovalMode}
+            onGeminiApprovalModeChange={onGeminiApprovalModeChange}
+            geminiConversationMode={geminiConversationMode}
+            onGeminiConversationModeChange={onGeminiConversationModeChange}
+            terminalTabs={terminalTabs}
+          />
+        </div>
+      </LayoutGroup>
       <style>{`
         .chat-panel {
           flex: 1;
@@ -1317,6 +1321,10 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           flex-direction: column;
           min-height: 0;
           overflow: hidden;
+        }
+        .chat-bottom-strip {
+          display: flex;
+          flex-direction: column;
         }
         .new-messages-anchor {
           position: relative;
