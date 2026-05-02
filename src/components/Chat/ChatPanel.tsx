@@ -526,7 +526,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const [turnStartIndex, setTurnStartIndex] = useState<number | null>(null);
   const thinkingTransition = useReducedMotionTransition(SPRING.pop);
   const dockTransition = useReducedMotionTransition(SPRING.dock);
-  const btnTransition = useReducedMotionTransition(SPRING.flick);
   const followBtnTransition = useReducedMotionTransition(SPRING.flick);
   const turnSeqRef = useRef(0); // tracks the active turn's sequence number
   const [ready, setReady] = useState(false);
