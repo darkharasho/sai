@@ -242,7 +242,7 @@ describe('ChatPanel', () => {
     expect(spacer).toBeTruthy();
   });
 
-  it('renders thinking indicator with morph layoutId', async () => {
+  it('renders thinking indicator while streaming with no first-assistant message yet', async () => {
     const props: ChatPanelProps = {
       projectPath: '/project',
       permissionMode: 'default',
@@ -292,8 +292,7 @@ describe('ChatPanel', () => {
       }
     });
 
-    const anchor = container.querySelector('[data-layout-id="active-response-anchor"]');
-    expect(anchor).toBeTruthy();
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
   });
 
   it('registers a flip rect for the new user message id when the composer fires onBeforeSend', async () => {

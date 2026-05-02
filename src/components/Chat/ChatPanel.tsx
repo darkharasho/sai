@@ -1294,8 +1294,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           {isStreaming && !firstAssistantOfTurnId && (
             <motion.div
               key="thinking"
-              layoutId="active-response-anchor"
-              data-layout-id="active-response-anchor"
               initial={{ opacity: 0, y: DISTANCE.lift }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}

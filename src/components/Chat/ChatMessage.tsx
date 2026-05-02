@@ -602,7 +602,7 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
       data-entry-y={String(entryDistance)}
       className={`chat-msg chat-msg-${message.role}${isAssistantStreaming ? ' chat-msg-streaming' : ''}${isTyping ? ' chat-msg-typing' : ''}`}
       style={flipPhase === 'measuring' ? { visibility: 'hidden' } : undefined}
-      layoutId={isFirstAssistantOfTurn ? 'active-response-anchor' : (flipActive ? undefined : pinnedLayoutId)}
+      layoutId={flipActive ? undefined : pinnedLayoutId}
       {...effectiveEntryProps}
     >
       {message.content && (
