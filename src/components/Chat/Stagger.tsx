@@ -4,7 +4,13 @@ import type { ReactNode } from 'react';
 
 type Cadence = keyof typeof STAGGER;
 
-export default function Stagger({ children, cadence = 'default', delay = 0 }: { children: ReactNode; cadence?: Cadence; delay?: number }) {
+interface StaggerProps {
+  children: ReactNode;
+  cadence?: Cadence;
+  delay?: number;
+}
+
+export default function Stagger({ children, cadence = 'default', delay = 0 }: StaggerProps) {
   const ms = STAGGER[cadence];
   return (
     <motion.div
