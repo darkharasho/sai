@@ -616,6 +616,67 @@ describe('ChatPanel', () => {
     expect(container.querySelector('[data-testid="follow-btn-unread"]')).toBeNull();
   });
 
+  it('/fake-error appends a default API-error system message in dev mode', async () => {
+    const onMessagesChange = vi.fn();
+    const props: ChatPanelProps = { ...baseProps(), onMessagesChange };
+    render(<ChatPanel {...props} />);
+
+    await waitFor(() => expect(latestChatInputProps).toBeTruthy());
+
+    await act(async () => {
+      await latestChatInputProps.onSend('/fake-error');
+    });
+
+    const lastCall = onMessagesChange.mock.calls[onMessagesChange.mock.calls.length - 1];
+    const messages = lastCall[0];
+    const last = messages[messages.length - 1];
+
+    expect(last.role).toBe('system');
+    expect(last.error).toBeTruthy();
+    expect(last.error.status).toBe(400);
+    expect(last.error.title).toBe('Invalid request');
+    expect(last.error.message).toBe('Output blocked by content filtering policy');
+    expect(last.error.requestId).toMatch(/^req_fake_/);
+  });
+
+  it('/fake-error rate-limit produces a 429 envelope', async () => {
+    const onMessagesChange = vi.fn();
+    const props: ChatPanelProps = { ...baseProps(), onMessagesChange };
+    render(<ChatPanel {...props} />);
+
+    await waitFor(() => expect(latestChatInputProps).toBeTruthy());
+
+    await act(async () => {
+      await latestChatInputProps.onSend('/fake-error rate-limit');
+    });
+
+    const lastCall = onMessagesChange.mock.calls[onMessagesChange.mock.calls.length - 1];
+    const last = lastCall[0][lastCall[0].length - 1];
+
+    expect(last.role).toBe('system');
+    expect(last.error.status).toBe(429);
+    expect(last.error.title).toBe('Rate limit exceeded');
+  });
+
+  it('/fake-error with unknown variant falls back to the default envelope', async () => {
+    const onMessagesChange = vi.fn();
+    const props: ChatPanelProps = { ...baseProps(), onMessagesChange };
+    render(<ChatPanel {...props} />);
+
+    await waitFor(() => expect(latestChatInputProps).toBeTruthy());
+
+    await act(async () => {
+      await latestChatInputProps.onSend('/fake-error nonsense');
+    });
+
+    const lastCall = onMessagesChange.mock.calls[onMessagesChange.mock.calls.length - 1];
+    const last = lastCall[0][lastCall[0].length - 1];
+
+    expect(last.role).toBe('system');
+    expect(last.error.status).toBe(400);
+    expect(last.error.title).toBe('Invalid request');
+  });
+
   it('routes API-Error assistant text through the error path', async () => {
     const onMessagesChange = vi.fn();
     const props: ChatPanelProps = { ...baseProps(), onMessagesChange };

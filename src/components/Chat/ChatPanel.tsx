@@ -508,6 +508,16 @@ function CyclingHints() {
   );
 }
 
+const FAKE_ERROR_VARIANTS = {
+  '': { status: 400, type: 'invalid_request_error', message: 'Output blocked by content filtering policy' },
+  'rate-limit': { status: 429, type: 'rate_limit_error', message: 'Number of request tokens has exceeded your per-minute rate limit' },
+  'auth':       { status: 401, type: 'authentication_error', message: 'Invalid bearer token' },
+  'permission': { status: 403, type: 'permission_error', message: 'OAuth token has been revoked' },
+  'overloaded': { status: 529, type: 'overloaded_error', message: 'The Anthropic API is temporarily overloaded' },
+  'server':     { status: 500, type: 'api_error', message: 'Internal server error' },
+  'timeout':    { status: 504, type: 'api_error', message: 'Request timed out upstream' },
+} as const;
+
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
@@ -1146,8 +1156,31 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     setPendingApproval(null);
   };
 
+  const handleFakeError = useCallback((text: string) => {
+    const arg = text.replace(/^\/fake-error\s*/, '').trim() as keyof typeof FAKE_ERROR_VARIANTS;
+    const variant = FAKE_ERROR_VARIANTS[arg] ?? FAKE_ERROR_VARIANTS[''];
+    const requestId = `req_fake_${Math.random().toString(16).slice(2, 14)}`;
+    const envelope = `API Error: ${variant.status} ${JSON.stringify({
+      type: 'error',
+      error: { type: variant.type, message: variant.message },
+      request_id: requestId,
+    })}`;
+    const error = parseAiError(envelope);
+    setMessages(prev => [...prev, {
+      id: `${Date.now()}-${Math.random()}`,
+      role: 'system',
+      content: error.message,
+      timestamp: Date.now(),
+      error,
+    }]);
+  }, [setMessages]);
+
   const handleSend = async (text: string, images?: string[]) => {
     // Handle built-in commands locally
+    if (import.meta.env.DEV && text.startsWith('/fake-error')) {
+      handleFakeError(text);
+      return;
+    }
     if (text === '/clear') {
       setMessages([]);
       setRenderStart(0);
