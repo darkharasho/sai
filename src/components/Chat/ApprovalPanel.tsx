@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, KeyboardEvent } from 'react';
 import { ShieldAlert, Check, X, ShieldCheck } from 'lucide-react';
 import type { PendingApproval } from '../../types';
+import { motion } from 'motion/react';
+import { SPRING, DISTANCE, useReducedMotionTransition } from './motion';
 
 interface ApprovalPanelProps {
   approval: PendingApproval;
@@ -13,6 +15,8 @@ export default function ApprovalPanel({ approval, onApprove, onDeny, onAlwaysAll
   const [command, setCommand] = useState(approval.command);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isBash = approval.toolName === 'Bash';
+  const entryTransition = useReducedMotionTransition(SPRING.pop);
+  const exitTransition = useReducedMotionTransition(SPRING.gentle);
 
   useEffect(() => {
     setCommand(approval.command);
@@ -43,15 +47,24 @@ export default function ApprovalPanel({ approval, onApprove, onDeny, onAlwaysAll
     : `wants to use ${approval.toolName}`;
 
   return (
-    <div style={{
-      background: 'var(--bg-elevated)',
-      border: '1px solid var(--border)',
-      borderRadius: 10,
-      marginBottom: 8,
-      overflow: 'hidden',
-      boxShadow: '0 -4px 24px rgba(0,0,0,0.4)',
-      animation: 'approvalSlideUp 0.2s ease-out',
-    }} onKeyDown={!isBash ? handleKeyDown : undefined} tabIndex={!isBash ? 0 : undefined}>
+    <motion.div
+      data-testid="approval-panel"
+      data-transition={JSON.stringify(entryTransition)}
+      layout
+      initial={{ opacity: 0, y: DISTANCE.slide }}
+      animate={{ opacity: 1, y: 0, transition: entryTransition }}
+      exit={{ opacity: 0, y: -DISTANCE.nudge, transition: exitTransition }}
+      style={{
+        background: 'var(--bg-elevated)',
+        border: '1px solid var(--border)',
+        borderRadius: 10,
+        marginBottom: 8,
+        overflow: 'hidden',
+        boxShadow: '0 -4px 24px rgba(0,0,0,0.4)',
+      }}
+      onKeyDown={!isBash ? handleKeyDown : undefined}
+      tabIndex={!isBash ? 0 : undefined}
+    >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px 0' }}>
         <ShieldAlert size={16} style={{ color: 'var(--accent)' }} />
         <span style={{
@@ -163,12 +176,6 @@ export default function ApprovalPanel({ approval, onApprove, onDeny, onAlwaysAll
         </span>
       </div>
 
-      <style>{`
-        @keyframes approvalSlideUp {
-          from { transform: translateY(20px); opacity: 0; }
-          to { transform: translateY(0); opacity: 1; }
-        }
-      `}</style>
-    </div>
+    </motion.div>
   );
 }

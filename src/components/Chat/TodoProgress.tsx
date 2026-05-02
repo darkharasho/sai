@@ -1,6 +1,8 @@
 import { useMemo, useState, useEffect, useRef } from 'react';
 import type { ChatMessage } from '../../types';
 import { ListChecks, X } from 'lucide-react';
+import { motion } from 'motion/react';
+import { SPRING, useReducedMotionTransition } from './motion';
 
 interface Todo {
   id: string;
@@ -55,6 +57,7 @@ function findLatestTodos(messages: ChatMessage[]): Todo[] | null {
 export default function TodoProgress({ messages, isStreaming }: TodoProgressProps) {
   const todos = useMemo(() => findLatestTodos(messages), [messages]);
   const [dismissed, setDismissed] = useState(false);
+  const fillTransition = useReducedMotionTransition(SPRING.gentle);
 
   // Reset dismissed state when a new streaming turn begins.
   const prevStreamingRef = useRef(isStreaming);
@@ -86,9 +89,12 @@ export default function TodoProgress({ messages, isStreaming }: TodoProgressProp
         <span className="todo-progress-count-total">{total}</span>
       </span>
       <div className="todo-progress-track">
-        <div
+        <motion.div
+          data-testid="todo-progress-fill"
+          data-transition={JSON.stringify(fillTransition)}
           className={`todo-progress-fill${inProgress ? ' todo-progress-fill--active' : ''}`}
-          style={{ width: `${percent}%` }}
+          animate={{ width: `${percent}%` }}
+          transition={fillTransition}
         />
       </div>
       <span className="todo-progress-active-text" title={activeLabel}>{activeLabel}</span>
@@ -162,7 +168,6 @@ export default function TodoProgress({ messages, isStreaming }: TodoProgressProp
           height: 100%;
           background: linear-gradient(90deg, var(--accent) 0%, var(--accent-hover, var(--accent)) 100%);
           border-radius: 2px;
-          transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
           box-shadow: 0 0 4px rgba(199, 145, 12, 0.3);
         }
         .todo-progress-fill--active::after {

@@ -1,6 +1,7 @@
 import type { QueuedMessage } from '../../types';
 import { X, Image, FileText, Terminal } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { SPRING, STAGGER, useReducedMotionTransition } from './motion';
 
 interface MessageQueueProps {
   queue: QueuedMessage[];
@@ -8,26 +9,24 @@ interface MessageQueueProps {
 }
 
 export default function MessageQueue({ queue, onRemove }: MessageQueueProps) {
+  const chipTransition = useReducedMotionTransition(SPRING.gentle);
+
   if (queue.length === 0) return null;
 
   return (
-    <div className="message-queue">
+    <div data-testid="queue-stagger" data-cadence-ms={String(STAGGER.tight)} className="message-queue">
       <AnimatePresence initial={false}>
         {queue.map((msg, i) => (
           <motion.div
             key={msg.id}
+            data-testid="queue-chip"
+            data-transition={JSON.stringify(chipTransition)}
             className="message-queue-card"
             layout
-            initial={{ opacity: 0, y: 8, height: 0, marginTop: 0 }}
-            animate={{ opacity: 1, y: 0, height: 28, marginTop: i === 0 ? 0 : 3 }}
-            exit={{ opacity: 0, y: -4, height: 0, marginTop: 0 }}
-            transition={{
-              opacity: { duration: 0.2 },
-              y: { type: 'spring', stiffness: 420, damping: 32 },
-              height: { type: 'spring', stiffness: 360, damping: 34, mass: 0.6 },
-              marginTop: { duration: 0.2 },
-              layout: { type: 'spring', stiffness: 340, damping: 32 },
-            }}
+            initial={{ opacity: 0, x: -6, height: 0, marginTop: 0 }}
+            animate={{ opacity: 1, x: 0, height: 28, marginTop: i === 0 ? 0 : 3 }}
+            exit={{ opacity: 0, x: -6, height: 0, marginTop: 0 }}
+            transition={{ ...chipTransition, delay: (i * STAGGER.tight) / 1000 }}
           >
             <span className="message-queue-accent" />
             <span className="message-queue-index">{i + 1}</span>

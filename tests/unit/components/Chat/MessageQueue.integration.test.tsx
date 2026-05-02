@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import MessageQueue from '../../../../src/components/Chat/MessageQueue';
 import type { QueuedMessage } from '../../../../src/types';
+import { SPRING, STAGGER } from '../../../../src/components/Chat/motion';
 
 describe('MessageQueue integration', () => {
   it('renumbers cards after removal', async () => {
@@ -44,8 +45,21 @@ describe('MessageQueue integration', () => {
 
   it('truncates long message text via CSS (card structure is correct)', () => {
     const longText = 'A'.repeat(200);
-    render(<MessageQueue queue={[{ id: '1', text: longText }]} onRemove={vi.fn()} />);
+    render(<MessageQueue queue={[{ id: '1', text: longText, fullText: longText }]} onRemove={vi.fn()} />);
     const textEl = screen.getByText(longText);
     expect(textEl.className).toContain('message-queue-text');
+  });
+
+  it('queue chips use gentle spring with tight stagger', () => {
+    const { container } = render(
+      <MessageQueue queue={[
+        { id: '1', text: 'a', fullText: 'a' },
+        { id: '2', text: 'b', fullText: 'b' },
+      ]} onRemove={() => {}} />
+    );
+    const chip = container.querySelector('[data-testid="queue-chip"]');
+    expect(chip?.getAttribute('data-transition')).toBe(JSON.stringify(SPRING.gentle));
+    const stagger = container.querySelector('[data-testid="queue-stagger"]');
+    expect(stagger?.getAttribute('data-cadence-ms')).toBe(String(STAGGER.tight));
   });
 });
