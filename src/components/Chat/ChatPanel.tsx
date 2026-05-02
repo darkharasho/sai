@@ -1355,6 +1355,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           )}
         </MotionPresence>
         <div ref={messagesEndRef} />
+      </div>
+      <div className="follow-btn-anchor">
         <AnimatePresence>
           {!followOn && (
             <motion.button
@@ -1437,6 +1439,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         .chat-bottom-strip {
           display: flex;
           flex-direction: column;
+        }
+        .follow-btn-anchor {
+          position: relative;
+          flex-shrink: 0;
+          height: 0;
+          z-index: 10;
         }
         .follow-btn {
           position: absolute;
@@ -1549,7 +1557,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           border-color: color-mix(in srgb, var(--accent) 25%, transparent);
         }
         .chat-messages {
-          position: relative;
           flex: 1;
           overflow-y: auto;
           padding: 16px;
