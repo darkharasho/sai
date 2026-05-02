@@ -400,6 +400,30 @@ describe('ChatPanel', () => {
     onSlashCommandsUpdate: vi.fn(),
   });
 
+  it('pinned bar is always mounted (zero-height when no pinned message)', async () => {
+    const props = baseProps();
+    const { container } = render(<ChatPanel {...props} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    // The pinned bar should be present in the DOM even with no pinned message
+    const bar = container.querySelector('.pinned-prompt-bar');
+    expect(bar).toBeTruthy();
+    // No data-layout-id when there is no pinned message
+    expect(bar?.getAttribute('data-layout-id')).toBeNull();
+  });
+
+  it('user-message wrapper carries data-layout-id for shared layoutId', async () => {
+    const initialMessages = [
+      { id: 'u1', role: 'user' as const, content: 'Hello', timestamp: Date.now() },
+      { id: 'a1', role: 'assistant' as const, content: 'Hi there', timestamp: Date.now() },
+    ];
+    const props = { ...baseProps(), initialMessages };
+    const { container } = render(<ChatPanel {...props} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    // The user-message wrapper div should carry data-layout-id matching the pinned-bar convention
+    const wrapper = container.querySelector('[data-layout-id="pinned-u1"]');
+    expect(wrapper).toBeTruthy();
+  });
+
   it('Claude thinking has breathing-cursor class when streaming', async () => {
     const props = { ...baseProps(), aiProvider: 'claude' as const };
     const { container } = render(<ChatPanel {...props} />);

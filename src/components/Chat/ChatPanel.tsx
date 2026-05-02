@@ -503,6 +503,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const [isStreaming, setIsStreaming] = useState(false);
   const [turnStartIndex, setTurnStartIndex] = useState<number | null>(null);
   const thinkingTransition = useReducedMotionTransition(SPRING.pop);
+  const dockTransition = useReducedMotionTransition(SPRING.dock);
   const turnSeqRef = useRef(0); // tracks the active turn's sequence number
   const [ready, setReady] = useState(false);
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
@@ -1167,25 +1168,34 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
   return (
     <div className="chat-panel">
-      {pinnedUserMessage && (
-        <div className="pinned-prompt-bar" key={pinnedUserMessage.id}>
-          <div className="pinned-prompt-accent" />
-          <span className="pinned-prompt-label">You</span>
-          <span className="pinned-prompt-text">{pinnedUserMessage.content}</span>
-          <button
-            className="pinned-prompt-jump"
-            onClick={() => {
-              isAtBottomRef.current = false;
-              const el = userMsgRefs.current.get(pinnedUserMessage.id);
-              el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }}
-            title="Jump to message"
-          >
-            <CornerLeftUp size={11} strokeWidth={2.5} />
-            <span>Jump</span>
-          </button>
-        </div>
-      )}
+      <motion.div
+        className="pinned-prompt-bar"
+        layoutId={pinnedUserMessage ? `pinned-${pinnedUserMessage.id}` : undefined}
+        data-layout-id={pinnedUserMessage ? `pinned-${pinnedUserMessage.id}` : undefined}
+        animate={{ height: pinnedUserMessage ? 32 : 0, opacity: pinnedUserMessage ? 1 : 0 }}
+        transition={dockTransition}
+        style={{ overflow: 'hidden' }}
+      >
+        {pinnedUserMessage && (
+          <>
+            <div className="pinned-prompt-accent" />
+            <span className="pinned-prompt-label">You</span>
+            <span className="pinned-prompt-text">{pinnedUserMessage.content}</span>
+            <button
+              className="pinned-prompt-jump"
+              onClick={() => {
+                isAtBottomRef.current = false;
+                const el = userMsgRefs.current.get(pinnedUserMessage.id);
+                el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }}
+              title="Jump to message"
+            >
+              <CornerLeftUp size={11} strokeWidth={2.5} />
+              <span>Jump</span>
+            </button>
+          </>
+        )}
+      </motion.div>
       <div className="chat-messages" ref={chatContainerRef} onScroll={handleScroll}>
         {messages.length === 0 ? (
           <div className="chat-empty">
@@ -1205,7 +1215,23 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
               </div>
             )}
             {visibleMessages.map(msg => msg.role === 'user'
-              ? <div key={msg.id} ref={el => { if (el) userMsgRefs.current.set(msg.id, el); else userMsgRefs.current.delete(msg.id); }}><ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} /></div>
+              ? (
+                <div
+                  key={msg.id}
+                  ref={el => { if (el) userMsgRefs.current.set(msg.id, el); else userMsgRefs.current.delete(msg.id); }}
+                  data-layout-id={`pinned-${msg.id}`}
+                >
+                  <ChatMessage
+                    message={msg}
+                    projectPath={projectPath}
+                    onFileOpen={onFileOpen}
+                    aiProvider={aiProvider}
+                    toolCallsExpanded={toolCallsExpanded}
+                    pinnedLayoutId={`pinned-${msg.id}`}
+                    isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId}
+                  />
+                </div>
+              )
               : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} />
             )}
           </>
@@ -1322,10 +1348,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         .new-messages-btn:hover {
           color: var(--text);
         }
-        @keyframes pinned-slide-in {
-          from { opacity: 0; transform: translateY(-100%); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
         .pinned-prompt-bar {
           flex-shrink: 0;
           padding: 0 16px 0 0;
@@ -1337,8 +1359,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           align-items: baseline;
           gap: 8px;
           min-width: 0;
-          height: 32px;
-          animation: pinned-slide-in 0.2s ease-out;
         }
         .pinned-prompt-accent {
           width: 3px;
