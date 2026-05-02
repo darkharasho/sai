@@ -8,7 +8,7 @@ import { AlertTriangle, Check, ChevronRight, Circle, Copy, RotateCw, Terminal, T
 import { motion } from 'motion/react';
 import ToolCallCard from './ToolCallCard';
 import { readFlipRect, hasFlipRect } from './flipRegistry';
-import { SPRING, useReducedMotionTransition } from './motion';
+import { SPRING, DISTANCE, useReducedMotionTransition } from './motion';
 import type { ChatMessage as ChatMessageType } from '../../types';
 import { getActiveTerminalId } from '../../terminalBuffer';
 
@@ -16,7 +16,6 @@ import { getActiveTerminalId } from '../../terminalBuffer';
 // animation from replaying if a message remounts (e.g. workspace swap, list
 // re-keying), so existing history doesn't shimmer in on every render.
 const SEEN_MESSAGES = new Set<string>();
-const ENTER_TRANSITION = { duration: 0.36, ease: [0.22, 1, 0.36, 1] as const };
 // Per-message typewriter progress, kept outside component state so a streaming
 // message survives unmount/remount (workspace swap, list re-keying) without
 // replaying the typewriter from zero.
@@ -267,8 +266,10 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
   const [shouldAnimateEntry] = useState(() => !SEEN_MESSAGES.has(message.id));
   useEffect(() => { SEEN_MESSAGES.add(message.id); }, [message.id]);
   const flipNodeRef = useRef<HTMLDivElement | null>(null);
+  const entryTransition = useReducedMotionTransition(SPRING.pop);
+  const entryDistance = DISTANCE.slide;
   const entryProps = shouldAnimateEntry
-    ? { initial: { opacity: 0, y: 8 }, animate: { opacity: 1, y: 0 }, transition: ENTER_TRANSITION }
+    ? { initial: { opacity: 0, y: entryDistance }, animate: { opacity: 1, y: 0 }, transition: entryTransition }
     : { initial: false as const, animate: { opacity: 1, y: 0 } };
 
   // Stable for the lifetime of the component — the registry is only
@@ -587,6 +588,8 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
       ref={flipActive ? measureFlip : flipNodeRef}
       data-testid="chat-msg"
       data-flip-transition={flipActive ? JSON.stringify(flipTransition) : undefined}
+      data-entry-transition={JSON.stringify(entryTransition)}
+      data-entry-y={String(entryDistance)}
       className={`chat-msg chat-msg-${message.role}${isAssistantStreaming ? ' chat-msg-streaming' : ''}${isTyping ? ' chat-msg-typing' : ''}`}
       style={flipPhase === 'measuring' ? { visibility: 'hidden' } : undefined}
       {...effectiveEntryProps}

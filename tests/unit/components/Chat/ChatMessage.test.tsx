@@ -24,7 +24,7 @@ vi.mock('shiki', () => ({
 import ChatMessage from '../../../../src/components/Chat/ChatMessage';
 import type { ChatMessage as ChatMessageType } from '../../../../src/types';
 import { setFlipRect, _resetFlipRegistry } from '../../../../src/components/Chat/flipRegistry';
-import { SPRING } from '../../../../src/components/Chat/motion';
+import { SPRING, DISTANCE } from '../../../../src/components/Chat/motion';
 
 function makeMessage(overrides: Partial<ChatMessageType> = {}): ChatMessageType {
   return {
@@ -144,6 +144,27 @@ describe('ChatMessage', () => {
     const msg = makeMessage({ role: 'assistant' });
     const { container } = render(<ChatMessage message={msg} aiProvider="codex" />);
     expect(container.querySelector('.chat-msg-openai')).toBeTruthy();
+  });
+
+  it('uses pop spring with slide distance for assistant message entry', () => {
+    const { container } = render(
+      <ChatMessage message={{ id: 'a-1', role: 'assistant', content: 'hello', timestamp: 0 }} />
+    );
+    const node = container.querySelector('[data-testid="chat-msg"]');
+    expect(node?.getAttribute('data-entry-transition')).toBe(JSON.stringify(SPRING.pop));
+    expect(node?.getAttribute('data-entry-y')).toBe(String(DISTANCE.slide));
+  });
+
+  it('strips entry transition under reduced motion', () => {
+    const original = window.matchMedia;
+    // @ts-expect-error - test stub
+    window.matchMedia = (q: string) => ({ matches: q.includes('reduce'), media: q, addEventListener: () => {}, removeEventListener: () => {}, onchange: null, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false });
+    const { container } = render(
+      <ChatMessage message={{ id: 'a-2', role: 'assistant', content: 'hello', timestamp: 0 }} />
+    );
+    const node = container.querySelector('[data-testid="chat-msg"]');
+    expect(node?.getAttribute('data-entry-transition')).toBe(JSON.stringify({ duration: 0 }));
+    window.matchMedia = original;
   });
 
   it('uses dock spring transition for FLIPped user messages', () => {
