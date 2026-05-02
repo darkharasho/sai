@@ -6,6 +6,27 @@ import ThinkingAnimation from '../ThinkingAnimation';
 import MotionPresence from './MotionPresence';
 import { SPRING, DISTANCE, EASING, useReducedMotionTransition } from './motion';
 
+function tweenScrollToBottom(container: HTMLElement, durationMs = 280) {
+  if (typeof window === 'undefined') return;
+  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+    container.scrollTop = container.scrollHeight;
+    return;
+  }
+  const start = container.scrollTop;
+  const target = container.scrollHeight - container.clientHeight;
+  if (target <= start) return;
+  const t0 = performance.now();
+  // Approximate ease-out cubic-bezier with a power curve: 1 - (1-t)^p
+  const p = 1 / (EASING.out[3] || 1);
+  const ease = (t: number) => 1 - Math.pow(1 - t, p);
+  const step = (t: number) => {
+    const k = Math.min(1, (t - t0) / durationMs);
+    container.scrollTop = start + (target - start) * ease(k);
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 function ContextMeter({ used, total }: { used: number; total: number }) {
   const pct = Math.min((used / total) * 100, 100);
   const radius = 8;
@@ -969,7 +990,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   useEffect(() => {
     if (isAtBottomRef.current) {
       setShowNewMessages(false);
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      if (chatContainerRef.current) tweenScrollToBottom(chatContainerRef.current);
     } else if (messages[messages.length - 1]?.role === 'assistant') {
       setShowNewMessages(true);
     }
@@ -978,7 +999,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const scrollToBottom = () => {
     isAtBottomRef.current = true;
     setShowNewMessages(false);
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (chatContainerRef.current) tweenScrollToBottom(chatContainerRef.current);
   };
 
   const userMessages = useMemo(
@@ -1214,26 +1235,28 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
                 <span className="chat-load-sentinel-text">Loading earlier messages...</span>
               </div>
             )}
-            {visibleMessages.map(msg => msg.role === 'user'
-              ? (
-                <div
-                  key={msg.id}
-                  ref={el => { if (el) userMsgRefs.current.set(msg.id, el); else userMsgRefs.current.delete(msg.id); }}
-                  data-layout-id={`pinned-${msg.id}`}
-                >
-                  <ChatMessage
-                    message={msg}
-                    projectPath={projectPath}
-                    onFileOpen={onFileOpen}
-                    aiProvider={aiProvider}
-                    toolCallsExpanded={toolCallsExpanded}
-                    pinnedLayoutId={`pinned-${msg.id}`}
-                    isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId}
-                  />
-                </div>
-              )
-              : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} />
-            )}
+            <motion.div layout="position" className="chat-messages-list">
+              {visibleMessages.map(msg => msg.role === 'user'
+                ? (
+                  <div
+                    key={msg.id}
+                    ref={el => { if (el) userMsgRefs.current.set(msg.id, el); else userMsgRefs.current.delete(msg.id); }}
+                    data-layout-id={`pinned-${msg.id}`}
+                  >
+                    <ChatMessage
+                      message={msg}
+                      projectPath={projectPath}
+                      onFileOpen={onFileOpen}
+                      aiProvider={aiProvider}
+                      toolCallsExpanded={toolCallsExpanded}
+                      pinnedLayoutId={`pinned-${msg.id}`}
+                      isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId}
+                    />
+                  </div>
+                )
+                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} />
+              )}
+            </motion.div>
           </>
         )}
         <MotionPresence>

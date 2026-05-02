@@ -474,4 +474,44 @@ describe('ChatPanel', () => {
     const { container } = render(<ChatPanel {...props} />);
     expect(container.querySelector('[data-testid="chat-bottom-strip"]')).toBeTruthy();
   });
+
+  it('uses requestAnimationFrame for auto-scroll instead of smooth scrollIntoView', async () => {
+    const scrollIntoViewSpy = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      writable: true,
+      value: scrollIntoViewSpy,
+    });
+
+    const props = { ...baseProps(), aiProvider: 'claude' as const };
+    render(<ChatPanel {...props} />);
+
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+    // Simulate a new assistant message arriving (triggers the messages effect)
+    await act(async () => {
+      for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+        (handler as (msg: any) => void)({
+          type: 'text',
+          text: 'Hello from assistant',
+          projectPath: '/project',
+          scope: 'chat',
+        });
+      }
+    });
+
+    // Any scrollIntoView call triggered by auto-scroll should NOT use behavior:'smooth'
+    const smoothCalls = scrollIntoViewSpy.mock.calls.filter(
+      (args: any[]) => args[0]?.behavior === 'smooth'
+    );
+    expect(smoothCalls).toHaveLength(0);
+  });
+
+  it('messages list wrapper has chat-messages-list class for layout tracking', () => {
+    const initialMessages = [
+      { id: 'u1', role: 'user' as const, content: 'Hello', timestamp: Date.now() },
+    ];
+    const props = { ...baseProps(), initialMessages };
+    const { container } = render(<ChatPanel {...props} />);
+    expect(container.querySelector('.chat-messages-list')).toBeTruthy();
+  });
 });
