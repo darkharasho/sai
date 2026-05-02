@@ -542,4 +542,77 @@ describe('ChatPanel', () => {
 
     window.matchMedia = original;
   });
+
+  it('does not render the follow button when at-bottom', () => {
+    const props = baseProps();
+    const { container } = render(<ChatPanel {...props} />);
+    expect(container.querySelector('[data-testid="follow-btn"]')).toBeNull();
+  });
+
+  it('renders the follow button when the user has scrolled away from the bottom', async () => {
+    const props = baseProps();
+    const { container } = render(<ChatPanel {...props} />);
+
+    const list = container.querySelector('.chat-messages') as HTMLElement;
+    expect(list).toBeTruthy();
+    await act(async () => {
+      list.dispatchEvent(new WheelEvent('wheel', { deltaY: -50, bubbles: true }));
+    });
+
+    expect(container.querySelector('[data-testid="follow-btn"]')).toBeTruthy();
+  });
+
+  it('shows the unread dot when an assistant message arrives while follow is off', async () => {
+    const props = baseProps();
+    const { container } = render(<ChatPanel {...props} />);
+
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+    const list = container.querySelector('.chat-messages') as HTMLElement;
+    await act(async () => {
+      list.dispatchEvent(new WheelEvent('wheel', { deltaY: -50, bubbles: true }));
+    });
+
+    await act(async () => {
+      for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+        (handler as (msg: any) => void)({
+          type: 'assistant',
+          projectPath: '/project',
+          scope: 'chat',
+          message: { content: [{ type: 'text', text: 'hello' }] },
+        });
+      }
+    });
+
+    expect(container.querySelector('[data-testid="follow-btn-unread"]')).toBeTruthy();
+  });
+
+  it('click on the follow button clears unread and re-engages follow', async () => {
+    const props = baseProps();
+    const { container } = render(<ChatPanel {...props} />);
+
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+    const list = container.querySelector('.chat-messages') as HTMLElement;
+    await act(async () => {
+      list.dispatchEvent(new WheelEvent('wheel', { deltaY: -50, bubbles: true }));
+    });
+    await act(async () => {
+      for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+        (handler as (msg: any) => void)({
+          type: 'assistant',
+          projectPath: '/project',
+          scope: 'chat',
+          message: { content: [{ type: 'text', text: 'hi' }] },
+        });
+      }
+    });
+
+    const btn = container.querySelector('[data-testid="follow-btn"]') as HTMLButtonElement;
+    expect(btn).toBeTruthy();
+    await act(async () => { btn.click(); });
+
+    await waitFor(() => expect(container.querySelector('[data-testid="follow-btn"]')).toBeNull());
+    expect(container.querySelector('[data-testid="follow-btn-unread"]')).toBeNull();
+  });
 });

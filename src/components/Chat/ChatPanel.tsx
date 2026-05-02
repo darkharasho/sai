@@ -527,6 +527,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const thinkingTransition = useReducedMotionTransition(SPRING.pop);
   const dockTransition = useReducedMotionTransition(SPRING.dock);
   const btnTransition = useReducedMotionTransition(SPRING.flick);
+  const followBtnTransition = useReducedMotionTransition(SPRING.flick);
   const turnSeqRef = useRef(0); // tracks the active turn's sequence number
   const [ready, setReady] = useState(false);
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
@@ -545,14 +546,13 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const userMsgRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const isAtBottomRef = useRef(true);
   const [pinnedUserMessage, setPinnedUserMessage] = useState<ChatMessageType | null>(null);
-  const [showNewMessages, setShowNewMessages] = useState(false);
-  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const [followOn, setFollowOn] = useState(true);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   // Windowed rendering: only render messages from renderStart onward
   const [renderStart, setRenderStart] = useState(0);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const pendingComposerRectRef = useRef<DOMRect | null>(null);
-  const prevLenRef = useRef(messages.length);
 
   // Keep render window pinned to the tail when user is at bottom
   useEffect(() => {
@@ -966,7 +966,10 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     const el = chatContainerRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
-      if (e.deltaY < 0) isAtBottomRef.current = false;
+      if (e.deltaY < 0) {
+        isAtBottomRef.current = false;
+        setFollowOn(false);
+      }
     };
     el.addEventListener('wheel', onWheel, { passive: true });
     return () => el.removeEventListener('wheel', onWheel);
@@ -984,7 +987,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   useEffect(() => {
     if (isActive) {
       isAtBottomRef.current = true;
-      setShowNewMessages(false);
+      setFollowOn(true);
+      setUnreadCount(0);
       requestAnimationFrame(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
       });
@@ -1012,16 +1016,18 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
   useEffect(() => {
     if (isAtBottomRef.current) {
-      setShowNewMessages(false);
+      setFollowOn(true);
+      setUnreadCount(0);
       if (chatContainerRef.current) tweenScrollToBottom(chatContainerRef.current);
     } else if (messages[messages.length - 1]?.role === 'assistant') {
-      setShowNewMessages(true);
+      setUnreadCount(c => c + 1);
     }
   }, [messages, isStreaming, projectPath]);
 
   const scrollToBottom = () => {
     isAtBottomRef.current = true;
-    setShowNewMessages(false);
+    setFollowOn(true);
+    setUnreadCount(0);
     if (chatContainerRef.current) tweenScrollToBottom(chatContainerRef.current);
   };
 
@@ -1061,7 +1067,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 60;
     if (atBottom) {
       isAtBottomRef.current = true;
-      setShowNewMessages(false);
+      setFollowOn(true);
+      setUnreadCount(0);
     }
     // Update which user message is pinned as user scrolls through conversation
     if (!lastUserOutOfView.current) return;
@@ -1094,16 +1101,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   useEffect(() => {
     onMessagesChange?.(messages);
   }, [messages]);
-
-  // Pulse the new-messages button when more messages arrive while it's already visible
-  useEffect(() => {
-    if (showNewMessages && messages.length > prevLenRef.current && btnRef.current) {
-      btnRef.current.classList.remove('new-messages-pulse');
-      void btnRef.current.offsetWidth; // restart animation
-      btnRef.current.classList.add('new-messages-pulse');
-    }
-    prevLenRef.current = messages.length;
-  }, [messages.length, showNewMessages]);
 
   // Flush messages ref to parent synchronously before save — called by onTurnComplete
   const flushMessagesToParent = useCallback(() => {
@@ -1306,22 +1303,22 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           )}
         </MotionPresence>
         <div ref={messagesEndRef} />
-      </div>
-      <div className="new-messages-anchor">
         <AnimatePresence>
-          {showNewMessages && (
+          {!followOn && (
             <motion.button
-              ref={btnRef}
-              data-testid="new-messages-btn"
-              className="new-messages-btn"
-              initial={{ opacity: 0, y: 6, scale: 0.92 }}
+              data-testid="follow-btn"
+              className="follow-btn"
+              initial={{ opacity: 0, y: 6, scale: 0.85 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 6, scale: 0.92 }}
-              transition={btnTransition}
+              exit={{ opacity: 0, y: 6, scale: 0.85 }}
+              transition={followBtnTransition}
               onClick={scrollToBottom}
+              title="Jump to latest"
             >
-              <ChevronDown size={12} />
-              new messages
+              <ChevronDown size={16} />
+              {unreadCount > 0 && (
+                <span data-testid="follow-btn-unread" className="follow-btn-unread" aria-label={`${unreadCount} new`} />
+              )}
             </motion.button>
           )}
         </AnimatePresence>
@@ -1389,43 +1386,47 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           display: flex;
           flex-direction: column;
         }
-        .new-messages-anchor {
-          position: relative;
-          flex-shrink: 0;
-          height: 0;
-          z-index: 10;
-        }
-        .new-messages-btn {
+        .follow-btn {
           position: absolute;
-          bottom: 8px;
-          left: 50%;
-          transform: translateX(-50%);
+          right: 12px;
+          bottom: 12px;
           z-index: 10;
           display: flex;
           align-items: center;
-          gap: 5px;
+          justify-content: center;
+          width: 32px;
+          height: 32px;
+          padding: 0;
+          border-radius: 50%;
+          border: 1px solid var(--border);
           background: var(--bg-secondary);
-          border: 1px solid var(--accent);
-          border-radius: 12px;
-          color: var(--text-muted);
-          font-size: 11px;
-          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
-          padding: 4px 12px;
+          color: var(--accent);
           cursor: pointer;
-          box-shadow: 0 2px 12px rgba(0,0,0,0.3);
-          white-space: nowrap;
-          transition: color 0.15s;
+          box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+          transition: background 0.15s, border-color 0.15s;
         }
-        .new-messages-btn:hover {
-          color: var(--text);
+        .follow-btn:hover {
+          background: color-mix(in srgb, var(--bg-secondary) 70%, var(--accent) 10%);
+          border-color: color-mix(in srgb, var(--border) 60%, var(--accent) 40%);
+        }
+        .follow-btn-unread {
+          position: absolute;
+          top: 4px;
+          right: 4px;
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: var(--accent);
+          box-shadow: 0 0 0 2px var(--bg-secondary);
         }
         @media (prefers-reduced-motion: no-preference) {
-          @keyframes new-messages-pulse {
-            0%, 100% { transform: translateX(-50%) scale(1); }
-            50%      { transform: translateX(-50%) scale(1.04); }
+          @keyframes follow-btn-unread-pulse {
+            0%   { transform: scale(1); opacity: 1; }
+            50%  { transform: scale(1.4); opacity: 0.7; }
+            100% { transform: scale(1); opacity: 1; }
           }
-          .new-messages-pulse {
-            animation: new-messages-pulse 220ms ease-out 1;
+          .follow-btn-unread {
+            animation: follow-btn-unread-pulse 1.4s ease-in-out infinite;
           }
         }
         .pinned-prompt-bar {
@@ -1496,6 +1497,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           border-color: color-mix(in srgb, var(--accent) 25%, transparent);
         }
         .chat-messages {
+          position: relative;
           flex: 1;
           overflow-y: auto;
           padding: 16px;
