@@ -216,11 +216,13 @@
   color: var(--text-muted);
   text-align: center;
 }
-.search-empty-loading {
+.search-empty-loading,
+.search-empty-fallen {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
+  padding: 32px 12px;
 }
 .search-error { color: var(--red); }
 

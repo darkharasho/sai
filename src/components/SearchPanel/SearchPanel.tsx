@@ -212,7 +212,10 @@ export default function SearchPanel({ projectPath, getOpenBuffers, applyMonacoEd
               />
             ))}
             {search.results.files.length === 0 && (
-              <div className="search-empty">No results</div>
+              <div className="search-empty search-empty-fallen">
+                <SaiLogo mode="static" size={44} className="sai-fallen" ariaLabel="" />
+                <span>No results</span>
+              </div>
             )}
           </>
         )}

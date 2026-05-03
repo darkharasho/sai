@@ -126,13 +126,15 @@ export default function PluginDetail({ plugin, onBack, onUninstall, onToggleEnab
           line-height: 1;
         }
         .status-dot {
-          width: 6px;
-          height: 6px;
-          border-radius: 50%;
           display: inline-block;
+          width: 8px;
+          height: 8px;
+          background: currentColor;
+          -webkit-mask: url('/svg/dot.svg') center / contain no-repeat;
+          mask: url('/svg/dot.svg') center / contain no-repeat;
         }
-        .status-dot.active { background: var(--green); }
-        .status-dot.inactive { background: var(--red); }
+        .status-dot.active { color: var(--green); }
+        .status-dot.inactive { color: var(--red); }
         .detail-section { padding: 12px; }
         .detail-label {
           font-size: 9px;

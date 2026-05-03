@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search, File, ChevronRight, FileCode2, MessageSquare, Loader2 } from 'lucide-react';
+import { Search, File, ChevronRight, FileCode2, MessageSquare } from 'lucide-react';
 import { fuzzyMatch } from '../utils/fuzzyMatch';
 import { basename } from '../utils/pathUtils';
+import SaiLogo from './SaiLogo';
 
 type PaletteMode = 'files' | 'commands' | 'grep' | 'sessions';
 
@@ -276,7 +277,7 @@ export default function CommandPalette({
             autoComplete="off"
           />
           {mode === 'grep' && grepLoading && (
-            <Loader2 size={14} style={{ color: 'var(--text-muted)', animation: 'cp-spin 1s linear infinite' }} />
+            <SaiLogo mode="scanner" size={14} ariaLabel="Searching" />
           )}
         </div>
 
@@ -353,11 +354,17 @@ export default function CommandPalette({
           })}
 
           {mode === 'grep' && grepLoading && (
-            <div className="cp-empty">Searching...</div>
+            <div className="cp-empty cp-empty-loading">
+              <SaiLogo mode="scanner" size={16} ariaLabel="Searching" />
+              <span>Searching...</span>
+            </div>
           )}
 
           {mode === 'grep' && !grepLoading && query.length >= 2 && grepResults.length === 0 && (
-            <div className="cp-empty">No results</div>
+            <div className="cp-empty cp-empty-fallen">
+              <SaiLogo mode="static" size={48} className="sai-fallen" ariaLabel="" />
+              <span>No results</span>
+            </div>
           )}
 
           {mode === 'sessions' && sessionResults.map((w, i) => {
@@ -380,7 +387,10 @@ export default function CommandPalette({
           })}
 
           {totalResults === 0 && mode !== 'grep' && (
-            <div className="cp-empty">No results</div>
+            <div className="cp-empty cp-empty-fallen">
+              <SaiLogo mode="static" size={48} className="sai-fallen" ariaLabel="" />
+              <span>No results</span>
+            </div>
           )}
         </div>
 
@@ -490,10 +500,12 @@ export default function CommandPalette({
           font-family: 'Geist Mono', monospace;
         }
         .cp-status-dot {
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
+          display: inline-block;
+          width: 9px;
+          height: 9px;
           flex-shrink: 0;
+          -webkit-mask: url('/svg/dot.svg') center / contain no-repeat;
+          mask: url('/svg/dot.svg') center / contain no-repeat;
         }
         .cp-result-info {
           flex: 1;
@@ -530,6 +542,19 @@ export default function CommandPalette({
           color: var(--text-muted);
           font-size: 13px;
         }
+        .cp-empty-loading {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+        }
+        .cp-empty-fallen {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 14px;
+          padding: 36px 16px;
+        }
         .cp-footer {
           padding: 8px 16px;
           border-top: 1px solid var(--border);
@@ -554,9 +579,6 @@ export default function CommandPalette({
         @keyframes cp-drop-in {
           from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
           to { opacity: 1; transform: translateX(-50%) translateY(0); }
-        }
-        @keyframes cp-spin {
-          to { transform: rotate(360deg); }
         }
       `}</style>
     </>

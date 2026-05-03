@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search, X, Plus, Pin, Loader2 } from 'lucide-react';
+import { Search, X, Plus, Pin } from 'lucide-react';
+import SaiLogo from '../SaiLogo';
 import { formatSessionDate, formatSessionTime, exportSessionAsMarkdown } from '../../sessions';
 import { dbGetMessages, dbDeleteSession, dbSaveSession } from '../../chatDb';
 import ChatHistoryContextMenu from './ChatHistoryContextMenu';
@@ -292,7 +293,8 @@ export default function ChatHistorySidebar({
       <div className="chat-history-list">
         {filteredSessions.length === 0 ? (
           <div className="chat-history-empty">
-            {debouncedQuery ? 'No matching conversations' : 'No conversations yet'}
+            <SaiLogo mode="static" size={44} className="sai-fallen" ariaLabel="" />
+            <span>{debouncedQuery ? 'No matching conversations' : 'No conversations yet'}</span>
           </div>
         ) : (
           groupedSessions.map((group) => (
@@ -330,7 +332,7 @@ export default function ChatHistorySidebar({
                         />
                         <span className="chat-history-card-title">{session.title || 'Untitled'}</span>
                         {titleGeneratingIds?.has(session.id) && (
-                          <Loader2 size={11} className="chat-history-title-spinner" />
+                          <SaiLogo mode="scanner" size={12} className="chat-history-title-spinner" ariaLabel="Generating title" />
                         )}
                         {session.id === activeSessionId && (
                           <span className="chat-history-active-badge">ACTIVE</span>
@@ -447,10 +449,14 @@ export default function ChatHistorySidebar({
           padding: 4px 0;
         }
         .chat-history-empty {
-          padding: 24px 16px;
+          padding: 32px 16px;
           text-align: center;
           color: var(--text-muted);
           font-size: 12px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 14px;
         }
         .chat-history-group-label {
           padding: 8px 12px 4px;
@@ -545,12 +551,6 @@ export default function ChatHistorySidebar({
         }
         .chat-history-title-spinner {
           flex-shrink: 0;
-          color: var(--text-muted);
-          animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
         }
         .chat-history-match {
           background: rgba(199, 145, 12, 0.3);

@@ -778,10 +778,12 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           flex-shrink: 1;
         }
         .workspace-status-dot {
-          width: 6px;
-          height: 6px;
-          border-radius: 50%;
+          display: inline-block;
+          width: 9px;
+          height: 9px;
           flex-shrink: 0;
+          -webkit-mask: url('/svg/dot.svg') center / contain no-repeat;
+          mask: url('/svg/dot.svg') center / contain no-repeat;
         }
         .workspace-dot-active {
           background: #4ade80;

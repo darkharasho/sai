@@ -360,12 +360,15 @@ export default function McpSidebar() {
           flex-shrink: 0;
         }
         .status-dot {
-          width: 6px;
-          height: 6px;
-          border-radius: 50%;
+          display: inline-block;
+          width: 8px;
+          height: 8px;
+          background: currentColor;
+          -webkit-mask: url('/svg/dot.svg') center / contain no-repeat;
+          mask: url('/svg/dot.svg') center / contain no-repeat;
         }
-        .status-dot.active { background: var(--green); }
-        .status-dot.inactive { background: var(--red); }
+        .status-dot.active { color: var(--green); }
+        .status-dot.inactive { color: var(--red); }
         .card-chevron { color: var(--text-muted); font-size: 10px; }
         .card-install-btn {
           padding: 2px 8px;

@@ -132,10 +132,12 @@ export default function McpDetail({ server, onBack, onRemove, onToggleEnabled, o
         .detail-status.connected { color: var(--green); }
         .detail-status.disconnected { color: var(--red); }
         .status-dot-lg {
-          width: 6px;
-          height: 6px;
-          border-radius: 50%;
+          display: inline-block;
+          width: 9px;
+          height: 9px;
           background: currentColor;
+          -webkit-mask: url('/svg/dot.svg') center / contain no-repeat;
+          mask: url('/svg/dot.svg') center / contain no-repeat;
         }
         .detail-actions {
           display: flex;

@@ -45,6 +45,31 @@
   will-change: transform, opacity;
 }
 
+.sai-dot {
+  display: inline-block;
+  background: currentColor;
+  -webkit-mask: url('/svg/dot.svg') center / contain no-repeat;
+  mask: url('/svg/dot.svg') center / contain no-repeat;
+  flex-shrink: 0;
+}
+
+.sai-fallen {
+  transform-origin: 50% 50%;
+  transform: rotate(78deg);
+  opacity: 0.45;
+  filter: grayscale(0.65) saturate(0.6);
+  animation: sai-fallen-sway 5.5s ease-in-out infinite;
+}
+
+@keyframes sai-fallen-sway {
+  0%, 100% { transform: rotate(78deg); }
+  50%      { transform: rotate(82deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sai-fallen { animation: none; }
+}
+
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 

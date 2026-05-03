@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { FileEdit, Terminal, FileText, Wrench, ChevronRight, Circle, Globe, AlertCircle } from 'lucide-react';
+import { FileEdit, Terminal, FileText, Wrench, ChevronRight, Globe, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import type { ToolCall } from '../../types';
 import { SPRING, useReducedMotionTransition } from './motion';
@@ -410,7 +410,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
               className={`tool-status tool-status-${status}`}
             >
               {status === 'running' && <span className="tool-status-pulse" aria-hidden />}
-              {status === 'done' && <Circle size={8} fill="var(--green)" stroke="none" />}
+              {status === 'done' && <span className="tool-status-dot tool-status-dot-done" aria-hidden />}
               {status === 'error' && <AlertCircle size={12} />}
             </motion.span>
           </AnimatePresence>
@@ -771,13 +771,17 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
           .tool-status-running { color: var(--accent); }
           .tool-status-done { color: var(--green); }
           .tool-status-error { color: var(--red, #f85149); }
+          .tool-status-dot,
           .tool-status-pulse {
             display: inline-block;
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: var(--accent);
+            width: 9px;
+            height: 9px;
+            background: currentColor;
+            -webkit-mask: url('/svg/dot.svg') center / contain no-repeat;
+            mask: url('/svg/dot.svg') center / contain no-repeat;
           }
+          .tool-status-pulse { background: var(--accent); }
+          .tool-status-dot-done { background: var(--green); }
           @media (prefers-reduced-motion: no-preference) {
             @keyframes tool-status-hum {
               0%, 100% { background: color-mix(in srgb, var(--accent) 40%, var(--bg-secondary)); }
