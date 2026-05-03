@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, fireEvent, render } from '@testing-library/react';
+import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import TodoProgress from '../../../../src/components/Chat/TodoProgress';
 
 const buildTodosMsg = (todos: Array<{ content: string; status: 'pending' | 'in_progress' | 'completed' }>) => ({
@@ -61,13 +61,15 @@ describe('TodoProgress (ring + popover)', () => {
     expect(popover?.textContent).toContain('final task');
   });
 
-  it('click outside closes the popover', () => {
+  it('click outside closes the popover', async () => {
     const messages = [buildTodosMsg([{ content: 'a', status: 'in_progress' }])];
     const { container } = render(<TodoProgress messages={messages as any} isStreaming={true} />);
     fireEvent.click(container.querySelector('[data-testid="todo-ring"]') as HTMLElement);
     expect(container.querySelector('[data-testid="todo-ring-popover"]')).toBeTruthy();
     fireEvent.mouseDown(document.body);
-    expect(container.querySelector('[data-testid="todo-ring-popover"]')).toBeNull();
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="todo-ring-popover"]')).toBeNull();
+    });
   });
 
   it('dismiss button hides the indicator entirely', () => {

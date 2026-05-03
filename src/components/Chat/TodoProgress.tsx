@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import type { ChatMessage } from '../../types';
 import { Check, X } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { SPRING, useReducedMotionTransition } from './motion';
 
 interface Todo {
@@ -124,12 +124,14 @@ export default function TodoProgress({ messages, isStreaming }: TodoProgressProp
       </svg>
       <span className="todo-ring-count">{completed}/{total}</span>
 
-      {open && (
+      <AnimatePresence>
+        {open && (
           <motion.div
             data-testid="todo-ring-popover"
             className="todo-ring-popover"
             initial={{ opacity: 0, y: 4, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 4, scale: 0.96 }}
             transition={popoverTransition}
             onClick={(e) => e.stopPropagation()}
           >
@@ -166,6 +168,7 @@ export default function TodoProgress({ messages, isStreaming }: TodoProgressProp
             </ul>
           </motion.div>
         )}
+      </AnimatePresence>
 
       <style>{`
         .todo-ring-wrap {
