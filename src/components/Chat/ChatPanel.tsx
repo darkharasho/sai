@@ -660,6 +660,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         if (turnStartedAtRef.current === null) {
           turnStartedAtRef.current = performance.now();
         }
+        nextSegmentStartRef.current = Date.now();
         setIsStreaming(true);
         return;
       }
@@ -811,6 +812,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             }
             return next;
           });
+          nextSegmentStartRef.current = Date.now();
         }
         return;
       }
@@ -883,15 +885,18 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             for (let i = stamped.length - 1; i >= 0; i--) {
               const m = stamped[i];
               if (m.role === 'assistant' && m.content && m.content.length > 0 && typeof m.durationMs !== 'number') {
-                stamped[i] = { ...m, durationMs: Date.now() - m.timestamp };
+                stamped[i] = { ...m, durationMs: Date.now() - (m.startedAt ?? m.timestamp) };
                 break;
               }
             }
+            const startedAt = nextSegmentStartRef.current ?? Date.now();
+            nextSegmentStartRef.current = null;
             return [...stamped, {
               id: `${Date.now()}-${Math.random()}`,
               role: 'assistant',
               content: text,
               timestamp: Date.now(),
+              startedAt,
               toolCalls: tools.length > 0 ? tools : undefined,
             }];
           });
@@ -1338,11 +1343,11 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const prevStreamingRef = useRef(false);
   const suppressNextDrainRef = useRef(false);
   const turnStartedAtRef = useRef<number | null>(null);
+  const nextSegmentStartRef = useRef<number | null>(null);
   useEffect(() => {
     if (prevStreamingRef.current && !isStreaming) {
       // Stamp durationMs on every unstamped assistant text bubble in the current turn.
-      // Each bubble's timestamp is set when the bubble is first created, so
-      // durationMs = Date.now() - message.timestamp gives per-bubble timing.
+      // Use startedAt (set when the bubble was first pushed) for accurate per-segment timing.
       setMessages(prev => {
         const startIdx = turnStartIndex ?? 0;
         const now = Date.now();
@@ -1355,7 +1360,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             typeof m.durationMs !== 'number'
           ) {
             changed = true;
-            return { ...m, durationMs: now - m.timestamp };
+            return { ...m, durationMs: now - (m.startedAt ?? m.timestamp) };
           }
           return m;
         });

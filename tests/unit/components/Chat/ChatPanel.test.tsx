@@ -822,4 +822,47 @@ describe('ChatPanel', () => {
       expect(onQueueShift).not.toHaveBeenCalled();
     });
   });
+
+  it('durationMs reflects the gap between streaming_start and stream end, not ~0', async () => {
+    const onMessagesChange = vi.fn();
+    const props: ChatPanelProps = { ...baseProps(), onMessagesChange };
+    render(<ChatPanel {...props} />);
+
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    // Simulate streaming_start at t=1000
+    vi.spyOn(Date, 'now').mockReturnValue(1000);
+    await act(async () => {
+      handler({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+    });
+
+    // Simulate assistant text arriving at t=1000 (same tick, no duration yet)
+    await act(async () => {
+      handler({
+        type: 'assistant',
+        projectPath: '/project',
+        scope: 'chat',
+        message: { content: [{ type: 'text', text: 'hello world' }] },
+      });
+    });
+
+    // Simulate done arriving at t=3500 (2500ms later)
+    vi.spyOn(Date, 'now').mockReturnValue(3500);
+    await act(async () => {
+      handler({ type: 'done', projectPath: '/project', scope: 'chat' });
+    });
+
+    vi.restoreAllMocks();
+
+    // Find the assistant message in the last onMessagesChange call
+    const lastCall = onMessagesChange.mock.calls[onMessagesChange.mock.calls.length - 1];
+    const messages: any[] = lastCall[0];
+    const assistantMsg = messages.find((m: any) => m.role === 'assistant' && m.content === 'hello world');
+
+    expect(assistantMsg).toBeDefined();
+    // durationMs should be 3500 - 1000 = 2500, not ~0
+    expect(assistantMsg.durationMs).toBe(2500);
+    expect(assistantMsg.startedAt).toBe(1000);
+  });
 });
