@@ -15,6 +15,17 @@ const THINKING_WORDS = [
   'PARSING SIGNAL', 'SYNTHESIZING',
 ];
 
+const FALLBACK_WORDS = [
+  'Thinking', 'Pondering', 'Ruminating', 'Cogitating', 'Deliberating',
+  'Musing', 'Contemplating', 'Considering', 'Reflecting', 'Computing',
+  'Evaluating', 'Reasoning', 'Noodling', 'Percolating', 'Mulling',
+  'Scheming', 'Plotting', 'Hatching', 'Crafting', 'Concocting',
+  'Formulating', 'Devising', 'Imagining', 'Envisioning', 'Ideating',
+  'Fathoming', 'Deciphering', 'Unraveling', 'Exploring', 'Parsing',
+  'Dissecting', 'Elucidating', 'Illuminating', 'Flibbertigibbeting',
+  'Calculating', 'Solving',
+];
+
 const SPINNER_ICONS = [Dot, Minus, Plus, Asterisk, SunDim, SunMedium, Sun];
 
 // Live preference cached at module scope; SettingsModal broadcasts updates
@@ -39,6 +50,7 @@ export default function ThinkingAnimation({ color }: ThinkingAnimationProps = {}
   const [clockText, setClockText] = useState('00:00.0');
 
   useEffect(() => {
+    if (!saiAnimationEnabled) return;
     const id = setInterval(() => {
       const ms = performance.now() - mountedAtRef.current;
       const totalSec = Math.floor(ms / 1000);
@@ -48,9 +60,10 @@ export default function ThinkingAnimation({ color }: ThinkingAnimationProps = {}
       setClockText(`${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${d}`);
     }, 100);
     return () => clearInterval(id);
-  }, []);
+  }, [saiAnimationEnabled]);
 
-  const word = THINKING_WORDS[wordIndex];
+  const wordPool = saiAnimationEnabled ? THINKING_WORDS : FALLBACK_WORDS;
+  const word = wordPool[wordIndex % wordPool.length];
   const Icon = SPINNER_ICONS[iconIndex % SPINNER_ICONS.length];
 
   // Cycle icons (only used when SAI animation is disabled)
@@ -81,13 +94,13 @@ export default function ThinkingAnimation({ color }: ThinkingAnimationProps = {}
       if (charIndex > 0) {
         timeout = setTimeout(() => setCharIndex(c => c - 1), 20);
       } else {
-        setWordIndex(i => (i + 1 + Math.floor(Math.random() * 3)) % THINKING_WORDS.length);
+        setWordIndex(i => (i + 1 + Math.floor(Math.random() * 3)) % wordPool.length);
         setPhase('typing');
       }
     }
 
     return () => clearTimeout(timeout);
-  }, [charIndex, phase, word.length]);
+  }, [charIndex, phase, word.length, wordPool.length]);
 
   const displayText = word.slice(0, charIndex);
 
