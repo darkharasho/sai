@@ -38,6 +38,8 @@ export interface ToolCall {
   name: string;
   input: string;
   output?: string;
+  startedAt?: number;
+  durationMs?: number;
 }
 
 export interface PendingApproval {

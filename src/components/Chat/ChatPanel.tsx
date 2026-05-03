@@ -796,9 +796,14 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
               const msg = next[i];
               if (msg.role === 'assistant' && msg.toolCalls) {
                 let updated = false;
+                const now = Date.now();
                 const newToolCalls = msg.toolCalls.map(tc => {
                   const result = results.find(r => r.tool_use_id === tc.id);
-                  if (result) { updated = true; return { ...tc, output: result.output }; }
+                  if (result) {
+                    updated = true;
+                    const durationMs = typeof tc.startedAt === 'number' ? now - tc.startedAt : undefined;
+                    return { ...tc, output: result.output, ...(durationMs != null ? { durationMs } : {}) };
+                  }
                   return tc;
                 });
                 if (updated) { next[i] = { ...msg, toolCalls: newToolCalls }; }
@@ -831,6 +836,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
               name: block.name || 'tool',
               input: typeof block.input === 'string' ? block.input :
                      typeof block.input === 'object' ? JSON.stringify(block.input, null, 2) : '',
+              startedAt: Date.now(),
             });
           }
         }

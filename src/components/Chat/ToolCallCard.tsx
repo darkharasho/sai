@@ -5,6 +5,14 @@ import type { ToolCall } from '../../types';
 import { SPRING, useReducedMotionTransition } from './motion';
 import { getShikiHighlighter, getActiveHighlightTheme } from '../../themes';
 
+function formatMs(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  const d = Math.floor((ms % 1000) / 100);
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${d}`;
+}
+
 function detectLang(toolCall: ToolCall): string {
   if (toolCall.type === 'terminal_command') return 'bash';
   const name = toolCall.name.toLowerCase();
@@ -410,6 +418,11 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
           <span className={`tool-call-name${sigClass ? ` ${sigClass}` : ''}`}>{toolCall.name}</span>
           {!isBash && !isTodo && label && <span className="tool-call-label">{label}</span>}
           {isBash && code && <span className="tool-call-label">{code}</span>}
+          {typeof toolCall.durationMs === 'number' && (
+            <span className="tool-call-duration" data-testid="tool-call-duration">
+              [{formatMs(toolCall.durationMs)}]
+            </span>
+          )}
           {hasBody && (
             <motion.span
               className="tool-call-chevron-wrap"
@@ -531,6 +544,16 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+          }
+          .tool-call-duration {
+            font-family: 'Geist Mono', 'JetBrains Mono', monospace;
+            font-variant-numeric: tabular-nums;
+            font-size: 11px;
+            color: var(--text-tertiary, #6b6253);
+            letter-spacing: 0.04em;
+            margin-left: auto;
+            padding-left: 8px;
+            flex-shrink: 0;
           }
           .tool-call-fullscreen {
             background: none;

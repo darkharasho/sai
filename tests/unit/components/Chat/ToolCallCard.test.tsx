@@ -36,6 +36,24 @@ describe('ToolCallCard', () => {
     expect(badge?.getAttribute('data-status-transition')).toBe(JSON.stringify(SPRING.flick));
   });
 
+  it('shows duration when durationMs is set', () => {
+    const { getByTestId } = render(
+      <ToolCallCard toolCall={{ id: 't1', type: 'other', name: 'Foo', input: '', output: 'done', durationMs: 3750 }} />
+    );
+    const el = getByTestId('tool-call-duration');
+    expect(el).toBeTruthy();
+    expect(el.textContent).toMatch(/^\[\d{2}:\d{2}\.\d\]$/);
+    // 3750ms = 3.7s → [00:03.7]
+    expect(el.textContent).toBe('[00:03.7]');
+  });
+
+  it('does not render duration when durationMs is undefined', () => {
+    const { container } = render(
+      <ToolCallCard toolCall={{ id: 't1', type: 'other', name: 'Foo', input: '', output: 'done' }} />
+    );
+    expect(container.querySelector('[data-testid="tool-call-duration"]')).toBeNull();
+  });
+
   it.each([
     ['file_edit', 'tool-sig-wipe'],
     ['terminal_command', 'tool-sig-typed'],
