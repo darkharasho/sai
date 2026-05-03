@@ -28,7 +28,8 @@ vi.mock('../../../../src/components/Chat/MessageQueue', () => ({
 vi.mock('../../../../src/components/ThinkingAnimation', () => ({
   default: () => (
     <div data-testid="thinking-animation">
-      <span className="thinking-cursor thinking-cursor-breathing">|</span>
+      <span className="thinking-clock">[00:00.0]</span>
+      <span className="thinking-cursor thinking-cursor-block" />
     </div>
   ),
 }));
@@ -435,7 +436,8 @@ describe('ChatPanel', () => {
       }
     });
 
-    expect(container.querySelector('.thinking-cursor.thinking-cursor-breathing')).toBeTruthy();
+    expect(container.querySelector('.thinking-cursor.thinking-cursor-block')).toBeTruthy();
+    expect(container.querySelector('.thinking-clock')?.textContent).toMatch(/^\[\d{2}:\d{2}\.\d\]$/);
   });
 
   it('Codex thinking applies wave to Working text when streaming', async () => {
