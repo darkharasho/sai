@@ -13,14 +13,17 @@ function tweenScrollToBottom(container: HTMLElement, durationMs = 280) {
     return;
   }
   const start = container.scrollTop;
-  const target = container.scrollHeight - container.clientHeight;
-  if (target <= start) return;
+  const initialTarget = container.scrollHeight - container.clientHeight;
+  if (initialTarget <= start) return;
   const t0 = performance.now();
   // Approximate ease-out cubic-bezier with a power curve: 1 - (1-t)^p
   const p = 1 / (EASING.out[3] || 1);
   const ease = (t: number) => 1 - Math.pow(1 - t, p);
   const step = (t: number) => {
     const k = Math.min(1, (t - t0) / durationMs);
+    // Recompute target each frame so we follow content that grows mid-tween
+    // (e.g. tool output cards expanding via a height animation).
+    const target = container.scrollHeight - container.clientHeight;
     container.scrollTop = start + (target - start) * ease(k);
     if (k < 1) requestAnimationFrame(step);
   };
@@ -1027,29 +1030,55 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   // queue chips appear and push it up), keep the bottom in view if the user
   // was already at the bottom. Without this the latest messages get hidden
   // behind the now-taller bottom strip.
+  //
+  // Also follow content that grows asynchronously after a render — e.g. tool
+  // output cards animating their height open. The tween fires once when the
+  // message updates and would otherwise stop short of the new bottom.
   useEffect(() => {
     const el = chatContainerRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
-    let lastHeight = el.clientHeight;
+    let lastClient = el.clientHeight;
+    let lastScroll = el.scrollHeight;
     const ro = new ResizeObserver(() => {
-      const h = el.clientHeight;
-      if (h < lastHeight && isAtBottomRef.current) {
+      const client = el.clientHeight;
+      const scroll = el.scrollHeight;
+      if (isAtBottomRef.current && (client < lastClient || scroll > lastScroll)) {
         el.scrollTop = el.scrollHeight;
       }
-      lastHeight = h;
+      lastClient = client;
+      lastScroll = scroll;
     });
     ro.observe(el);
-    return () => ro.disconnect();
+    // Observe direct children too — RO on the container alone won't fire when
+    // overflow content grows past clientHeight.
+    const mo = new MutationObserver(() => {
+      for (const child of Array.from(el.children)) ro.observe(child);
+    });
+    for (const child of Array.from(el.children)) ro.observe(child);
+    mo.observe(el, { childList: true });
+    return () => { ro.disconnect(); mo.disconnect(); };
   }, []);
 
+  // Tween on incremental updates within the same project; snap instantly
+  // when the project changes (otherwise the recompute-each-frame tween
+  // visibly chases the still-laying-out content on workspace switch).
+  const lastTweenProjectRef = useRef<string | null | undefined>(undefined);
   useEffect(() => {
     if (isAtBottomRef.current) {
       setFollowOn(true);
       setUnreadCount(0);
-      if (chatContainerRef.current) tweenScrollToBottom(chatContainerRef.current);
+      const el = chatContainerRef.current;
+      if (el) {
+        if (lastTweenProjectRef.current !== projectPath) {
+          el.scrollTop = el.scrollHeight;
+        } else {
+          tweenScrollToBottom(el);
+        }
+      }
     } else if (messages[messages.length - 1]?.role === 'assistant') {
       setUnreadCount(c => c + 1);
     }
+    lastTweenProjectRef.current = projectPath;
   }, [messages, isStreaming, projectPath]);
 
   const scrollToBottom = () => {
