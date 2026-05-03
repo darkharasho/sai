@@ -1153,6 +1153,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     }
     return null;
   }, [messages, turnStartIndex]);
+  const showThinking = useMemo(() => {
+    if (!isStreaming) return false;
+    if (!firstAssistantOfTurnId) return true;
+    const last = messages[messages.length - 1];
+    return last?.role === 'assistant' && !!last.toolCalls?.length;
+  }, [isStreaming, firstAssistantOfTurnId, messages]);
   const hasHiddenMessages = renderStart > 0;
 
   useEffect(() => {
@@ -1393,7 +1399,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           </>
         )}
         <MotionPresence>
-          {isStreaming && !firstAssistantOfTurnId && (
+          {showThinking && (
             <motion.div
               key="thinking"
               initial={{ opacity: 0, y: DISTANCE.lift }}
