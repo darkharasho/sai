@@ -3,14 +3,16 @@ import { Dot, Minus, Plus, Asterisk, SunDim, SunMedium, Sun } from 'lucide-react
 import SaiLogo from './SaiLogo';
 
 const THINKING_WORDS = [
-  'Thinking', 'Pondering', 'Ruminating', 'Cogitating', 'Deliberating',
-  'Musing', 'Contemplating', 'Considering', 'Reflecting', 'Computing',
-  'Evaluating', 'Reasoning', 'Noodling', 'Percolating', 'Mulling',
-  'Scheming', 'Plotting', 'Hatching', 'Crafting', 'Concocting',
-  'Formulating', 'Devising', 'Imagining', 'Envisioning', 'Ideating',
-  'Fathoming', 'Deciphering', 'Unraveling', 'Exploring', 'Parsing',
-  'Dissecting', 'Elucidating', 'Illuminating', 'Flibbertigibbeting',
-  'Calculating', 'Solving',
+  // mission-control / NASA
+  'ESTABLISHING UPLINK', 'TRIANGULATING', 'CALIBRATING', 'TRACING SIGNAL',
+  'ALIGNING VECTORS', 'MAPPING TOPOLOGY', 'LOCKING TELEMETRY', 'SYNCHRONIZING CLOCKS',
+  // cyberpunk / netrunner
+  'JACKING IN', 'DECRYPTING TOKENS', 'SCRAPING CACHE', 'BREACHING ICE',
+  'SPOOFING HANDSHAKE', 'ROUTING THROUGH PROXY', 'BURNING CYCLES', 'OVERCLOCKING CORE',
+  // starship-computer / TNG
+  'ACCESSING DATABANK', 'CROSS-REFERENCING', 'EXTRAPOLATING', 'COMPUTING VECTORS',
+  'RESOLVING INTENT', 'INDEXING MEMORY', 'COMPILING THOUGHT', 'CONSULTING ARCHIVES',
+  'PARSING SIGNAL', 'SYNTHESIZING',
 ];
 
 const SPINNER_ICONS = [Dot, Minus, Plus, Asterisk, SunDim, SunMedium, Sun];
