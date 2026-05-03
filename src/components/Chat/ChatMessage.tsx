@@ -12,6 +12,7 @@ import { readFlipRect, hasFlipRect } from './flipRegistry';
 import { SPRING, DISTANCE, useReducedMotionTransition } from './motion';
 import type { ChatMessage as ChatMessageType } from '../../types';
 import { getActiveTerminalId } from '../../terminalBuffer';
+import SaiLogo from '../SaiLogo';
 
 // Message IDs that have already played their entry animation. Prevents the
 // animation from replaying if a message remounts (e.g. workspace swap, list
@@ -27,8 +28,10 @@ const TYPEWRITER_PROGRESS = new Map<string, number>();
 // import; SettingsModal broadcasts updates via the `sai-pref-typewriter`
 // window event so toggling the setting takes effect without remounting.
 let typewriterPref = true;
+let saiAnimationPref = true;
 if (typeof window !== 'undefined' && (window as any).sai?.settingsGet) {
   (window as any).sai.settingsGet('typewriterEnabled', true).then((v: boolean) => { typewriterPref = v !== false; });
+  (window as any).sai.settingsGet('saiAnimationEnabled', true).then((v: boolean) => { saiAnimationPref = v !== false; });
 }
 
 // Walk back to the nearest whitespace at-or-before `len` so the visible text
@@ -393,6 +396,12 @@ function ChatMessage({
     const onPref = (e: Event) => setTypewriterEnabled(!!(e as CustomEvent).detail);
     window.addEventListener('sai-pref-typewriter', onPref);
     return () => window.removeEventListener('sai-pref-typewriter', onPref);
+  }, []);
+  const [saiAnimationEnabled, setSaiAnimationEnabled] = useState(saiAnimationPref);
+  useEffect(() => {
+    const onPref = (e: Event) => setSaiAnimationEnabled(!!(e as CustomEvent).detail);
+    window.addEventListener('sai-pref-sai-animation', onPref);
+    return () => window.removeEventListener('sai-pref-sai-animation', onPref);
   }, []);
   const tickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSeenContentLenRef = useRef(0);
@@ -788,7 +797,9 @@ function ChatMessage({
           {message.role === 'user'
             ? <Terminal size={14} color="var(--green)" strokeWidth={2.5} className="chat-msg-dot chat-msg-chevron" />
             : message.role === 'assistant'
-            ? <span className={`chat-msg-dot ${aiProvider === 'gemini' ? 'chat-msg-gemini' : aiProvider === 'codex' ? 'chat-msg-openai' : 'chat-msg-claude'}`} />
+            ? (saiAnimationEnabled
+                ? <SaiLogo mode={isAssistantStreaming ? 'drift' : 'static'} size={16} className="chat-msg-dot chat-msg-sai" />
+                : <span className={`chat-msg-dot ${aiProvider === 'gemini' ? 'chat-msg-gemini' : aiProvider === 'codex' ? 'chat-msg-openai' : 'chat-msg-claude'}`} />)
             : <Circle size={8} fill={dotColor} stroke={dotColor} className="chat-msg-dot" />}
           <div className={`chat-msg-body${isAssistantStreaming ? ' chat-streaming-tail' : ''}`}>
             <ReactMarkdown
@@ -901,6 +912,9 @@ function ChatMessage({
         }
         .chat-msg-chevron {
           margin-top: 3px;
+        }
+        .chat-msg-sai {
+          margin-top: 1px;
         }
         .chat-msg-claude {
           width: 14px;

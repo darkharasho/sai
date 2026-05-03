@@ -3,6 +3,7 @@ import { ChevronDown, CornerLeftUp } from 'lucide-react';
 import { motion, AnimatePresence, LayoutGroup } from 'motion/react';
 import { setFlipRect } from './flipRegistry';
 import ThinkingAnimation from '../ThinkingAnimation';
+import SaiLogo from '../SaiLogo';
 import MotionPresence from './MotionPresence';
 import { SPRING, DISTANCE, EASING, useReducedMotionTransition } from './motion';
 
@@ -1153,6 +1154,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     }
     return null;
   }, [messages, turnStartIndex]);
+  const lastAssistantId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'assistant') return messages[i].id;
+    }
+    return null;
+  }, [messages]);
   const showThinking = useMemo(() => {
     if (!isStreaming) return false;
     if (!firstAssistantOfTurnId) return true;
@@ -1361,7 +1368,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       <div className="chat-messages" ref={chatContainerRef} onScroll={handleScroll}>
         {messages.length === 0 ? (
           <div className="chat-empty">
-            <img src="svg/sai.svg" alt="SAI" className="chat-empty-logo chat-empty-logo-float" />
+            <SaiLogo mode="idle" size={64} className="chat-empty-logo" ariaLabel="SAI" />
             <div className="chat-empty-title">SAI</div>
             <div className="chat-empty-subtitle">
               {projectPath ? emptyPrompt : 'Select a project to get started'}
@@ -1394,7 +1401,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
                     />
                   </div>
                 )
-                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} />
+                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId} />
               )}
           </>
         )}
@@ -1651,19 +1658,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           to   { opacity: 1; transform: scale(1); }
         }
         .chat-empty-logo {
-          width: 48px;
-          height: 48px;
-          opacity: 0.25;
-          margin-bottom: 4px;
-        }
-        @media (prefers-reduced-motion: no-preference) {
-          @keyframes chat-empty-logo-float {
-            0%, 100% { transform: translateY(0); }
-            50%      { transform: translateY(-2px); }
-          }
-          .chat-empty-logo-float {
-            animation: chat-empty-logo-float 4s ease-in-out infinite;
-          }
+          margin-bottom: 8px;
         }
         .chat-empty-title {
           font-size: 32px;

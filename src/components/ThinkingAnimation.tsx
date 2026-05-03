@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Dot, Minus, Plus, Asterisk, SunDim, SunMedium, Sun } from 'lucide-react';
+import SaiLogo from './SaiLogo';
 
 const THINKING_WORDS = [
   'Thinking', 'Pondering', 'Ruminating', 'Cogitating', 'Deliberating',
@@ -14,6 +15,13 @@ const THINKING_WORDS = [
 
 const SPINNER_ICONS = [Dot, Minus, Plus, Asterisk, SunDim, SunMedium, Sun];
 
+// Live preference cached at module scope; SettingsModal broadcasts updates
+// via the `sai-pref-sai-animation` window event.
+let saiAnimationPref = true;
+if (typeof window !== 'undefined' && (window as any).sai?.settingsGet) {
+  (window as any).sai.settingsGet('saiAnimationEnabled', true).then((v: boolean) => { saiAnimationPref = v !== false; });
+}
+
 interface ThinkingAnimationProps {
   color?: string;
 }
@@ -23,14 +31,22 @@ export default function ThinkingAnimation({ color }: ThinkingAnimationProps = {}
   const [charIndex, setCharIndex] = useState(0);
   const [phase, setPhase] = useState<'typing' | 'pause' | 'erasing'>('typing');
   const [iconIndex, setIconIndex] = useState(0);
+  const [saiAnimationEnabled, setSaiAnimationEnabled] = useState(saiAnimationPref);
 
   const word = THINKING_WORDS[wordIndex];
   const Icon = SPINNER_ICONS[iconIndex % SPINNER_ICONS.length];
 
-  // Cycle icons
+  // Cycle icons (only used when SAI animation is disabled)
   useEffect(() => {
+    if (saiAnimationEnabled) return;
     const interval = setInterval(() => setIconIndex(i => i + 1), 150);
     return () => clearInterval(interval);
+  }, [saiAnimationEnabled]);
+
+  useEffect(() => {
+    const onPref = (e: Event) => setSaiAnimationEnabled(!!(e as CustomEvent).detail);
+    window.addEventListener('sai-pref-sai-animation', onPref);
+    return () => window.removeEventListener('sai-pref-sai-animation', onPref);
   }, []);
 
   useEffect(() => {
@@ -60,7 +76,9 @@ export default function ThinkingAnimation({ color }: ThinkingAnimationProps = {}
 
   return (
     <div className="thinking-animation" style={color ? { color } : undefined}>
-      <Icon size={16} className="thinking-icon" style={color ? { color } : undefined} />
+      {saiAnimationEnabled
+        ? <SaiLogo mode="drift" size={18} className="thinking-icon" color={color || '#c7913b'} />
+        : <Icon size={16} className="thinking-icon" style={color ? { color } : undefined} />}
       <span className="thinking-text" style={color ? { color } : undefined}>
         {displayText}
         <span className="thinking-cursor thinking-cursor-breathing" style={color ? { color } : undefined}>|</span>

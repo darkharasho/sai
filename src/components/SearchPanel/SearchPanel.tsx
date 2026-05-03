@@ -3,6 +3,7 @@ import { Search, CaseSensitive, WholeWord, Regex, ChevronRight, ChevronDown, Rep
 import { useSearch } from '../../hooks/useSearch';
 import type { SearchQuery } from '../../types';
 import SearchResult from './SearchResult';
+import SaiLogo from '../SaiLogo';
 import './SearchPanel.css';
 
 export interface SearchPanelProps {
@@ -190,7 +191,10 @@ export default function SearchPanel({ projectPath, getOpenBuffers, applyMonacoEd
           <div className="search-empty">Type to search</div>
         )}
         {search.state === 'searching' && (
-          <div className="search-empty">Searching…</div>
+          <div className="search-empty search-empty-loading">
+            <SaiLogo mode="scanner" size={28} ariaLabel="Searching" />
+            <span>Searching…</span>
+          </div>
         )}
         {search.state === 'error' && (
           <div className="search-error">{search.error}</div>

@@ -80,6 +80,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [systemNotifications, setSystemNotifications] = useState(false);
   const [toolCallsExpanded, setToolCallsExpanded] = useState(true);
   const [typewriterEnabled, setTypewriterEnabled] = useState(true);
+  const [saiAnimationEnabled, setSaiAnimationEnabled] = useState(true);
   const [focusedChat, setFocusedChat] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(300);
   const [autoCompactThreshold, setAutoCompactThreshold] = useState(0);
@@ -107,6 +108,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.settingsGet('systemNotifications', false).then((v: boolean) => setSystemNotifications(v));
     window.sai.settingsGet('toolCallsExpanded', true).then((v: boolean) => setToolCallsExpanded(v));
     window.sai.settingsGet('typewriterEnabled', true).then((v: boolean) => setTypewriterEnabled(v));
+    window.sai.settingsGet('saiAnimationEnabled', true).then((v: boolean) => setSaiAnimationEnabled(v !== false));
     window.sai.settingsGet('focusedChat', false).then((v: boolean) => setFocusedChat(v));
     window.sai.settingsGet('sidebarWidth', 300).then((v: number) => setSidebarWidth(v));
     window.sai.settingsGet('autoCompactThreshold', 0).then((v: number) => setAutoCompactThreshold(v));
@@ -147,6 +149,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if ('systemNotifications' in remote) setSystemNotifications(remote.systemNotifications);
       if ('toolCallsExpanded' in remote) setToolCallsExpanded(remote.toolCallsExpanded);
       if ('typewriterEnabled' in remote) setTypewriterEnabled(remote.typewriterEnabled);
+      if ('saiAnimationEnabled' in remote) setSaiAnimationEnabled(remote.saiAnimationEnabled !== false);
       if ('focusedChat' in remote) setFocusedChat(remote.focusedChat);
       if ('sidebarWidth' in remote) setSidebarWidth(remote.sidebarWidth);
       if ('autoCompactThreshold' in remote) setAutoCompactThreshold(remote.autoCompactThreshold);
@@ -315,6 +318,13 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.settingsSet('typewriterEnabled', value);
     window.dispatchEvent(new CustomEvent('sai-pref-typewriter', { detail: value }));
     onSettingChange?.('typewriterEnabled', value);
+  };
+
+  const handleSaiAnimationEnabledChange = (value: boolean) => {
+    setSaiAnimationEnabled(value);
+    window.sai.settingsSet('saiAnimationEnabled', value);
+    window.dispatchEvent(new CustomEvent('sai-pref-sai-animation', { detail: value }));
+    onSettingChange?.('saiAnimationEnabled', value);
   };
 
   const handleSyncNow = () => {
@@ -541,6 +551,21 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             onClick={() => handleTypewriterEnabledChange(!typewriterEnabled)}
             role="switch"
             aria-checked={typewriterEnabled}
+          >
+            <span className="settings-toggle-thumb" />
+          </button>
+        </div>
+
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <div className="settings-row-name">SAI streaming animation</div>
+            <div className="settings-row-desc">Replace the streaming-message indicator with the SAI mark animation.</div>
+          </div>
+          <button
+            className={`settings-toggle${saiAnimationEnabled ? ' on' : ''}`}
+            onClick={() => handleSaiAnimationEnabledChange(!saiAnimationEnabled)}
+            role="switch"
+            aria-checked={saiAnimationEnabled}
           >
             <span className="settings-toggle-thumb" />
           </button>

@@ -4,6 +4,7 @@ import McpDetail from './McpDetail';
 import McpAddServer from './McpAddServer';
 import McpRegistryDetail from './McpRegistryDetail';
 import McpIcon from './McpIcon';
+import SaiLogo from '../SaiLogo';
 import type { McpServer, McpServerConfig, RegistryMcpServer } from '../../types';
 
 type Tab = 'installed' | 'browse';
@@ -165,7 +166,12 @@ export default function McpSidebar() {
       </div>
 
       <div className="sidebar-list">
-        {loading && <div className="sidebar-empty">Loading...</div>}
+        {loading && (
+          <div className="sidebar-empty" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+            <SaiLogo mode="scanner" size={28} />
+            <span>Loading...</span>
+          </div>
+        )}
         {error && (
           <div className="sidebar-error">
             <div>{error}</div>

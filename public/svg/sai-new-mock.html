@@ -1,0 +1,1006 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>SAI · ghost animations</title>
+<style>
+  :root {
+    --bg-0: #07090d;
+    --bg-1: #0d1117;
+    --ink: #e8eef7;
+    --dim: #7d8794;
+    --accent: #7cc4ff;
+    --accent-warm: #ffd27c;
+    --accent-hot: #ff7a59;
+    --grid: rgba(124, 196, 255, 0.06);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background:
+      radial-gradient(ellipse at 20% 10%, #14202c 0%, transparent 55%),
+      radial-gradient(ellipse at 80% 90%, #1a1426 0%, transparent 55%),
+      var(--bg-0);
+    color: var(--ink);
+    font-family: ui-sans-serif, -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse at center, black 30%, transparent 80%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  header {
+    position: relative;
+    z-index: 1;
+    padding: 56px 48px 16px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+
+  .toggle {
+    display: inline-flex;
+    border: 1px solid #243044;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #0c121d;
+  }
+  .toggle button {
+    background: transparent;
+    color: var(--dim);
+    border: 0;
+    padding: 8px 14px;
+    font: inherit;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background .2s, color .2s;
+  }
+  .toggle button:hover { color: var(--ink); }
+  .toggle button.on {
+    background: #182030;
+    color: var(--accent);
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 13px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--dim);
+    font-weight: 500;
+  }
+  h1 b { color: var(--ink); font-weight: 600; }
+
+  .legend {
+    font-size: 12px;
+    color: var(--dim);
+    letter-spacing: 0.04em;
+  }
+  .legend kbd {
+    background: #182030;
+    border: 1px solid #243044;
+    color: var(--ink);
+    padding: 2px 7px;
+    border-radius: 4px;
+    font: inherit;
+    font-size: 11px;
+  }
+
+  .grid {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 18px;
+    padding: 24px 48px 80px;
+  }
+
+  .cell {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    background:
+      radial-gradient(circle at 50% 35%, rgba(124,196,255,0.06), transparent 60%),
+      linear-gradient(180deg, #0e1320 0%, #080b12 100%);
+    border: 1px solid #1c2434;
+    border-radius: 14px;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    transition: border-color .25s, transform .25s;
+  }
+  .cell:hover {
+    border-color: #2c3a55;
+    transform: translateY(-2px);
+  }
+  .cell::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at 50% 110%, rgba(124,196,255,0.18), transparent 50%);
+    pointer-events: none;
+  }
+
+  .label {
+    position: absolute;
+    left: 12px; top: 12px;
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+  .label b {
+    display: block;
+    color: var(--ink);
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    margin-top: 2px;
+  }
+
+  .stage {
+    width: 60%;
+    aspect-ratio: 1 / 1;
+    display: grid;
+    place-items: center;
+    transform-style: preserve-3d;
+    perspective: 800px;
+  }
+
+  .sai {
+    width: 100%;
+    height: 100%;
+    color: var(--ink);
+    filter: drop-shadow(0 0 18px rgba(124,196,255,0.35));
+    overflow: visible;
+  }
+  .sai path { fill: currentColor; }
+  .sai .el {
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  .sai .shells-rotate,
+  .sai .shells-scale {
+    /* fill-box center = rig center, locked by an invisible anchor rect
+       so per-chevron scale/translate can't drift the pivot */
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  .sai .bbox-anchor { fill: none; stroke: none; pointer-events: none; }
+
+  /* ---------- helpers ---------- */
+  @keyframes spin-y { to { transform: rotateY(360deg); } }
+  @keyframes spin-x { to { transform: rotateX(360deg); } }
+  @keyframes spin-z { to { transform: rotateZ(360deg); } }
+  @keyframes float-y {
+    0%, 100% { translate: 0 -4%; }
+    50%      { translate: 0  4%; }
+  }
+  @keyframes breathe {
+    0%, 100% { filter: drop-shadow(0 0 12px rgba(124,196,255,0.35)); }
+    50%      { filter: drop-shadow(0 0 28px rgba(124,196,255,0.75)); }
+  }
+
+  /* ---------- 1. idle hover ---------- */
+  .a-idle .sai {
+    animation: float-y 4s ease-in-out infinite, breathe 5s ease-in-out infinite;
+  }
+
+  /* ---------- 2. slow Y spin (classic ghost twirl) ---------- */
+  .a-twirl .sai {
+    animation: spin-y 6s linear infinite, breathe 5s ease-in-out infinite;
+    transform-style: preserve-3d;
+  }
+
+  /* ---------- 3. tumble (xy spin) ---------- */
+  .a-tumble .sai {
+    animation: spin-y 7s linear infinite;
+    transform-style: preserve-3d;
+  }
+  .a-tumble .stage {
+    animation: spin-x 11s linear infinite;
+  }
+
+  /* ---------- 4. shell-shift: outer parts pull apart ---------- */
+  .a-shell .sai {
+    animation: spin-y 9s linear infinite;
+    transform-style: preserve-3d;
+  }
+  @keyframes shell-pulse {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.07); }
+  }
+  .a-shell .stage { animation: shell-pulse 3.4s ease-in-out infinite; }
+
+  /* ---------- 5. activate (boot up) ---------- */
+  @keyframes activate {
+    0%   { transform: rotateY(0)     scale(0.85); opacity: 0.4; }
+    40%  { transform: rotateY(540deg) scale(1.05); opacity: 1; }
+    70%  { transform: rotateY(720deg) scale(0.97); }
+    100% { transform: rotateY(720deg) scale(1); opacity: 1; }
+  }
+  .a-activate .sai {
+    animation: activate 2.6s cubic-bezier(.2,.7,.2,1.1) infinite;
+    transform-style: preserve-3d;
+  }
+
+  /* ---------- 6. scan (thinking) ---------- */
+  .a-scan { position: relative; }
+  .a-scan .sai { animation: float-y 4s ease-in-out infinite; }
+  .a-scan::before {
+    content: "";
+    position: absolute;
+    inset: 20% 20%;
+    border-radius: 50%;
+    background: conic-gradient(from 0deg,
+      transparent 0deg,
+      rgba(124,196,255,0.55) 30deg,
+      transparent 60deg,
+      transparent 360deg);
+    mask: radial-gradient(circle, transparent 38%, black 39%, black 50%, transparent 51%);
+    -webkit-mask: radial-gradient(circle, transparent 38%, black 39%, black 50%, transparent 51%);
+    animation: spin-z 2.8s linear infinite;
+    pointer-events: none;
+  }
+
+  /* ---------- 7. nervous wobble ---------- */
+  @keyframes wobble {
+    0%, 100% { transform: rotateZ(-6deg) translateY(0); }
+    25%      { transform: rotateZ(6deg)  translateY(-2%); }
+    50%      { transform: rotateZ(-4deg) translateY(0); }
+    75%      { transform: rotateZ(8deg)  translateY(-1%); }
+  }
+  .a-wobble .sai { animation: wobble 1.4s ease-in-out infinite; }
+
+  /* ---------- 8. glitch / error ---------- */
+  @keyframes glitch {
+    0%, 100% { transform: translate(0,0); filter: hue-rotate(0deg); }
+    20%      { transform: translate(2%, -1%); filter: hue-rotate(-30deg); }
+    40%      { transform: translate(-3%, 1%); }
+    60%      { transform: translate(1%, 2%); filter: hue-rotate(40deg); }
+    80%      { transform: translate(-1%, -2%); }
+  }
+  .a-glitch .sai {
+    color: #ffb4a3;
+    animation: glitch .35s steps(2) infinite, breathe 1.2s ease-in-out infinite;
+    filter: drop-shadow(0 0 14px rgba(255,122,89,0.6));
+  }
+
+  /* ---------- 9. happy (success) ---------- */
+  @keyframes hop {
+    0%, 100% { transform: translateY(0)   rotateZ(0); }
+    30%      { transform: translateY(-12%) rotateZ(-8deg); }
+    60%      { transform: translateY(0)   rotateZ(8deg); }
+    80%      { transform: translateY(-4%) rotateZ(-3deg); }
+  }
+  .a-happy .sai {
+    color: #b8ffd2;
+    animation: hop 1.6s cubic-bezier(.4,1.6,.5,1) infinite;
+    filter: drop-shadow(0 0 18px rgba(140,255,200,0.6));
+  }
+
+  /* ---------- 10. orbital (spin around vertical axis fast) ---------- */
+  .a-orbit .sai {
+    animation: spin-y 1.6s linear infinite;
+    transform-style: preserve-3d;
+  }
+
+  /* ---------- 11. flip & catch ---------- */
+  @keyframes flip-catch {
+    0%   { transform: rotateX(0)     translateY(0); }
+    35%  { transform: rotateX(360deg) translateY(-22%); }
+    65%  { transform: rotateX(360deg) translateY(0); }
+    75%  { transform: rotateX(360deg) translateY(-4%); }
+    100% { transform: rotateX(360deg) translateY(0); }
+  }
+  .a-flip .sai {
+    animation: flip-catch 3.2s cubic-bezier(.3,.7,.2,1) infinite;
+    transform-style: preserve-3d;
+  }
+
+  /* ---------- 12. dormant (sleep) ---------- */
+  @keyframes dormant {
+    0%, 100% { transform: rotateZ(-25deg) translateY(0); opacity: .55; }
+    50%      { transform: rotateZ(-25deg) translateY(-2%); opacity: .75; }
+  }
+  .a-dormant .sai {
+    color: #7d8794;
+    animation: dormant 4s ease-in-out infinite;
+    filter: drop-shadow(0 0 6px rgba(125,135,148,0.4));
+  }
+
+  /* ============================================================
+     Per-element animations (sai-new-2: 5 paths)
+       el-0 = bottom chevron
+       el-1 = left chevron
+       el-2 = right chevron
+       el-3 = center square
+       el-4 = top chevron
+
+     Outer 4 chevrons live inside .shells-rotate > .shells-scale.
+     - .shells-rotate animates rotation around the SVG center
+     - .shells-scale  animates scale around the SVG center
+     - each .el inside counter-rotates around its own center to
+       cancel the group rotation, so chevrons KEEP their orientation
+       (they orbit, they don't tumble).
+     ============================================================ */
+
+  @keyframes orbit-cw      { to { transform: rotate(360deg); } }
+  @keyframes orbit-ccw     { to { transform: rotate(-360deg); } }
+  @keyframes group-pulse   { 0%,100% { transform: scale(1); } 50% { transform: scale(1.22); } }
+  @keyframes group-pulse-h { 0%,100% { transform: scale(1); } 50% { transform: scale(1.4); } }
+  @keyframes group-contract{ 0%,100% { transform: scale(1); } 50% { transform: scale(0.78); } }
+
+
+  @keyframes el-pulse      { 0%,100% { transform: scale(1); } 50% { transform: scale(1.35); } }
+  @keyframes el-pulse-soft { 0%,100% { transform: scale(1); } 50% { transform: scale(1.15); } }
+  @keyframes el-grow-in    { 0% { transform: scale(0); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+  @keyframes el-pop        { 0%,70%,100% { transform: scale(1); } 80% { transform: scale(1.4); } }
+  @keyframes el-fade       { 0%,100% { opacity: 1; } 50% { opacity: 0.15; } }
+
+  /* 13. loader — chevron rig rotates as one piece, center pulses */
+  .a-loader .shells-rotate { animation: orbit-cw 2s linear infinite; }
+  .a-loader .el-3          { animation: el-pulse 1.8s ease-in-out infinite; }
+
+  /* 14. counter-spin — rig spins one way, center spins the other */
+  .a-counter .shells-rotate { animation: orbit-cw 2.4s linear infinite; }
+  .a-counter .el-3          { animation: orbit-ccw 2.4s linear infinite; }
+
+  /* 15. ripple — pure breathe: shells grow & contract as a unit (no rotation) */
+  .a-ripple .shells-scale { animation: group-pulse-h 1.6s ease-in-out infinite; }
+  .a-ripple .el-3         { animation: el-pulse 1.6s ease-in-out infinite; }
+
+  /* 16. assemble — pieces grow in from center one by one (boot) */
+  .a-assemble .el { animation: el-grow-in 2.4s ease-out infinite; opacity: 0; }
+  .a-assemble .el-3 { animation-delay: 0s;    }
+  .a-assemble .el-4 { animation-delay: 0.18s; }
+  .a-assemble .el-2 { animation-delay: 0.36s; }
+  .a-assemble .el-0 { animation-delay: 0.54s; }
+  .a-assemble .el-1 { animation-delay: 0.72s; }
+
+  /* 17. ping — each chevron pops in sequence (data signal) */
+  .a-ping .el { animation: el-pop 2.4s ease-out infinite; }
+  .a-ping .el-3 { animation-delay: 0s;    }
+  .a-ping .el-4 { animation-delay: 0.30s; }
+  .a-ping .el-2 { animation-delay: 0.60s; }
+  .a-ping .el-0 { animation-delay: 0.90s; }
+  .a-ping .el-1 { animation-delay: 1.20s; }
+
+  /* 18. orbit shells — rig spins fast as one piece */
+  .a-shells .shells-rotate { animation: orbit-cw 1.2s linear infinite; }
+
+  /* 19. scanner — chevrons fade in sequence around the center */
+  .a-scanner .el { animation: el-fade 1.6s ease-in-out infinite; }
+  .a-scanner .el-4 { animation-delay: 0s;    }
+  .a-scanner .el-2 { animation-delay: 0.40s; }
+  .a-scanner .el-0 { animation-delay: 0.80s; }
+  .a-scanner .el-1 { animation-delay: 1.20s; }
+  .a-scanner .el-3 { animation: el-pulse-soft 1.6s ease-in-out infinite; }
+
+  /* 20. error snap — rig spins then jolts as one piece */
+  @keyframes group-jolt {
+    0%   { transform: rotate(0)       translate(0,0); }
+    60%  { transform: rotate(540deg)  translate(0,0); }
+    70%  { transform: rotate(540deg)  translate(2%,-1.5%); }
+    80%  { transform: rotate(540deg)  translate(-1.5%,1.5%); }
+    100% { transform: rotate(720deg)  translate(0,0); }
+  }
+  .a-snap .shells-rotate { animation: group-jolt 2.4s cubic-bezier(.6,.1,.3,1) infinite; }
+  .a-snap .sai           { filter: drop-shadow(0 0 14px rgba(255,122,89,0.55)); }
+  .a-snap .el            { color: #ffb4a3; }
+
+  /* 21. breathe — slow pure scale, chevrons hold orientation */
+  .a-breathe .shells-scale { animation: group-pulse 3.2s ease-in-out infinite; }
+  .a-breathe .el-3         { animation: el-pulse-soft 3.2s ease-in-out infinite; }
+
+  /* 22. inhale — contracts rather than expands */
+  .a-inhale .shells-scale { animation: group-contract 2.6s ease-in-out infinite; }
+  .a-inhale .el-3         { animation: el-pulse-soft 2.6s ease-in-out infinite; }
+
+  /* ============================================================
+     Snap variants — rig spins/jolts as a unit, chevrons bounce
+     ============================================================ */
+
+  /* 23. snap-bounce — rig spins, each chevron pulses out-and-in */
+  @keyframes el-bounce {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.35); }
+  }
+  .a-snapb .shells-rotate { animation: orbit-cw 1.8s cubic-bezier(.55,.08,.4,.95) infinite; }
+  .a-snapb .el-0,
+  .a-snapb .el-1,
+  .a-snapb .el-2,
+  .a-snapb .el-4 { animation: el-bounce 0.6s ease-in-out infinite; }
+  .a-snapb .el-0 { animation-delay: 0s;    }
+  .a-snapb .el-2 { animation-delay: 0.15s; }
+  .a-snapb .el-4 { animation-delay: 0.30s; }
+  .a-snapb .el-1 { animation-delay: 0.45s; }
+
+  /* 24. snap-shake — rig spins steadily, chevrons jitter in place */
+  @keyframes el-jitter {
+    0%, 100% { transform: translate(0,0)          scale(1);    }
+    25%      { transform: translate(2.5%, -1.5%)  scale(1.05); }
+    50%      { transform: translate(-1.5%, 2%)    scale(0.97); }
+    75%      { transform: translate(1.5%, 1.5%)   scale(1.04); }
+  }
+  .a-shake .shells-rotate { animation: orbit-cw 2.6s linear infinite; }
+  .a-shake .el-0,
+  .a-shake .el-1,
+  .a-shake .el-2,
+  .a-shake .el-4 { animation: el-jitter 0.32s linear infinite; }
+
+  /* 25. snap-step — rig stutters around in 8 steps, chevrons pop on each */
+  @keyframes el-pop-step {
+    0%, 60%, 100% { transform: scale(1); }
+    20%, 40%      { transform: scale(1.25); }
+  }
+  .a-step .shells-rotate { animation: orbit-cw 2s steps(8, end) infinite; }
+  .a-step .el-0,
+  .a-step .el-1,
+  .a-step .el-2,
+  .a-step .el-4 { animation: el-pop-step 0.25s ease-out infinite; }
+
+  /* 26. snap-overshoot — rig swings past then settles, chevrons bounce */
+  @keyframes group-overshoot {
+    0%   { transform: rotate(0deg);   }
+    65%  { transform: rotate(395deg); }
+    80%  { transform: rotate(348deg); }
+    92%  { transform: rotate(365deg); }
+    100% { transform: rotate(360deg); }
+  }
+  @keyframes el-recoil {
+    0%, 60%, 100% { transform: scale(1); }
+    65%           { transform: scale(0.85); }
+    80%           { transform: scale(1.2);  }
+    92%           { transform: scale(0.95); }
+  }
+  .a-over .shells-rotate { animation: group-overshoot 1.8s cubic-bezier(.4,.05,.3,1.2) infinite; }
+  .a-over .el-0,
+  .a-over .el-1,
+  .a-over .el-2,
+  .a-over .el-4 { animation: el-recoil 1.8s cubic-bezier(.4,.05,.3,1.2) infinite; }
+
+  /* 27. snap-throw — quick rig spin then chevrons fly out, return */
+  @keyframes group-throw {
+    0%   { transform: rotate(0deg)    scale(1); }
+    55%  { transform: rotate(540deg)  scale(1); }
+    70%  { transform: rotate(540deg)  scale(1.08); }
+    100% { transform: rotate(720deg)  scale(1); }
+  }
+  @keyframes el-fly {
+    0%, 50%, 100% { transform: scale(1); }
+    65%           { transform: scale(1.4); }
+    80%           { transform: scale(0.92); }
+  }
+  .a-throw .shells-rotate { animation: group-throw 2.2s cubic-bezier(.5,.05,.3,1) infinite; }
+  .a-throw .el-0,
+  .a-throw .el-1,
+  .a-throw .el-2,
+  .a-throw .el-4 { animation: el-fly 2.2s cubic-bezier(.5,.05,.3,1) infinite; }
+  .a-throw .el-3 { animation: el-pulse 2.2s cubic-bezier(.5,.05,.3,1) infinite; }
+
+  /* 28. snap-search — rig hunts left-right, chevrons twitch */
+  @keyframes group-hunt {
+    0%, 100% { transform: rotate(-22deg); }
+    25%      { transform: rotate(0deg);   }
+    50%      { transform: rotate(22deg);  }
+    75%      { transform: rotate(0deg);   }
+  }
+  @keyframes el-twitch {
+    0%, 100% { transform: scale(1); }
+    20%      { transform: scale(1.12); }
+    40%      { transform: scale(1); }
+  }
+  .a-search .shells-rotate { animation: group-hunt 1.6s cubic-bezier(.4,0,.4,1) infinite; }
+  .a-search .el-0,
+  .a-search .el-1,
+  .a-search .el-2,
+  .a-search .el-4 { animation: el-twitch 0.6s ease-in-out infinite; }
+  .a-search .el-1 { animation-delay: 0.10s; }
+  .a-search .el-2 { animation-delay: 0.20s; }
+  .a-search .el-4 { animation-delay: 0.30s; }
+
+  /* 29. drift — full sequence with idle gaps between every active phase.
+     SVG runs a perpetual subtle bob; idle gaps add larger bobs + glow.
+
+     timeline (% of 28s cycle), idle gaps 3–4%:
+       0  – 6    spin 1
+       6  – 9    idle 1 (3%)
+       9  – 17   grow 1 (left → top → right → bottom)
+       17 – 21   idle 2 (4%)
+       21 – 27   spin 2 (fast)
+       27 – 30   idle 3 (3%)
+       30 – 38   grow 2 (bottom → right → left → top)
+       38 – 42   idle 4 (4%)
+       42 – 48   spin 3 (medium-fast)
+       48 – 51   idle 5 (3%)
+       51 – 59   grow 3 — SIMULTANEOUS
+       59 – 63   idle 6 (4%)
+       63 – 69   spin 4 (explosive)
+       69 – 72   idle 7 (3%)
+       72 – 80   grow 4 (top → left → bottom → right)
+       80 – 84   idle 8 (4%)
+       84 – 95   shake
+       95 – 100  settle */
+  @keyframes rig-drift-long {
+    /* spin 1 — MEDIUM (0-6%) */
+    0%    { transform: rotate(0deg); animation-timing-function: ease-out; }
+    3%    { transform: rotate(-40deg);  }
+    4%    { transform: rotate(-40deg);  }   /* HOLD */
+    4.5%  { transform: rotate(-20deg);  }
+    5.2%  { transform: rotate(200deg);  }
+    5.6%  { transform: rotate(330deg);  }
+    5.8%  { transform: rotate(355deg);  }
+    6%    { transform: rotate(360deg);  }
+    /* idle 1 + grow 1 + idle 2 — rig holds at 360 */
+    21%   { transform: rotate(360deg); animation-timing-function: ease-out; }
+    /* spin 2 — FAST (21-27%) */
+    24%   { transform: rotate(320deg);  }
+    25.5% { transform: rotate(320deg);  }   /* HOLD */
+    25.9% { transform: rotate(360deg);  }
+    26.4% { transform: rotate(620deg);  }
+    26.7% { transform: rotate(700deg);  }
+    26.9% { transform: rotate(717deg);  }
+    27%   { transform: rotate(720deg);  }
+    /* idle 3 + grow 2 + idle 4 hold */
+    42%   { transform: rotate(720deg); animation-timing-function: ease-out; }
+    /* spin 3 — MEDIUM-FAST (42-48%) */
+    45%   { transform: rotate(680deg);  }
+    46%   { transform: rotate(680deg);  }   /* HOLD */
+    46.4% { transform: rotate(710deg);  }
+    47%   { transform: rotate(960deg);  }
+    47.5% { transform: rotate(1055deg); }
+    47.8% { transform: rotate(1075deg); }
+    48%   { transform: rotate(1080deg); }
+    /* idle 5 + grow 3 + idle 6 hold */
+    63%   { transform: rotate(1080deg); animation-timing-function: ease-out; }
+    /* spin 4 — VERY FAST (63-69%) */
+    66%   { transform: rotate(1040deg); }
+    68%   { transform: rotate(1040deg); }   /* extra-long HOLD */
+    68.3% { transform: rotate(1100deg); }
+    68.6% { transform: rotate(1380deg); }
+    68.8% { transform: rotate(1430deg); }
+    68.95%{ transform: rotate(1438deg); }
+    69%   { transform: rotate(1440deg); }
+    /* idle 7 + grow 4 + idle 8 hold */
+    84%   { transform: rotate(1440deg); }
+    /* dog-shake (84-95%, ~10 oscillations in 11%) */
+    84.8% { transform: rotate(1465deg); }
+    85.9% { transform: rotate(1416deg); }
+    87%   { transform: rotate(1462deg); }
+    88.1% { transform: rotate(1418deg); }
+    89.2% { transform: rotate(1458deg); }
+    90.3% { transform: rotate(1422deg); }
+    91.4% { transform: rotate(1454deg); }
+    92.5% { transform: rotate(1424deg); }
+    93.6% { transform: rotate(1450deg); }
+    94.5% { transform: rotate(1432deg); }
+    95%   { transform: rotate(1440deg); }
+    /* settle */
+    100%  { transform: rotate(1440deg); }
+  }
+
+  /* per-chevron drift sequences — four grow phases, distinct orders.
+     Grow 1 (8-18%):  left  → top    → right  → bottom   (1, 4, 2, 0)
+     Grow 2 (26-36%): bottom → right → left   → top      (0, 2, 1, 4)
+     Grow 3 (44-54%): SIMULTANEOUS — all four peak together
+     Grow 4 (62-72%): top   → left   → bottom → right    (4, 1, 0, 2) */
+  @keyframes el0-drift-long { /* bottom — +y outward */
+    0%    { transform: translate(0, 0); }
+    /* grow 1 (9-17%) — 4th */
+    15%   { transform: translate(0, 0); }
+    16%   { transform: translate(0, 55%); }
+    17%   { transform: translate(0, 0); }
+    /* grow 2 (30-38%) — 1st */
+    30%   { transform: translate(0, 0); }
+    31%   { transform: translate(0, 38%); }
+    32%   { transform: translate(0, 0); }
+    /* grow 3 (51-59%) — simultaneous */
+    51%   { transform: translate(0, 0); }
+    55%   { transform: translate(0, 60%); }
+    59%   { transform: translate(0, 0); }
+    /* grow 4 (72-80%) — 3rd */
+    76%   { transform: translate(0, 0); }
+    77%   { transform: translate(0, 42%); }
+    78%   { transform: translate(0, 0); }
+    100%  { transform: translate(0, 0); }
+  }
+  @keyframes el1-drift-long { /* left — -x outward */
+    0%    { transform: translate(0, 0); }
+    /* grow 1 — 1st */
+    9%    { transform: translate(0, 0); }
+    10%   { transform: translate(-48%, 0); }
+    11%   { transform: translate(0, 0); }
+    /* grow 2 — 3rd */
+    34%   { transform: translate(0, 0); }
+    35%   { transform: translate(-30%, 0); }
+    36%   { transform: translate(0, 0); }
+    /* grow 3 — simultaneous */
+    51%   { transform: translate(0, 0); }
+    55%   { transform: translate(-55%, 0); }
+    59%   { transform: translate(0, 0); }
+    /* grow 4 — 2nd */
+    74%   { transform: translate(0, 0); }
+    75%   { transform: translate(-35%, 0); }
+    76%   { transform: translate(0, 0); }
+    100%  { transform: translate(0, 0); }
+  }
+  @keyframes el2-drift-long { /* right — +x outward */
+    0%    { transform: translate(0, 0); }
+    /* grow 1 — 3rd */
+    13%   { transform: translate(0, 0); }
+    14%   { transform: translate(40%, 0); }
+    15%   { transform: translate(0, 0); }
+    /* grow 2 — 2nd */
+    32%   { transform: translate(0, 0); }
+    33%   { transform: translate(58%, 0); }
+    34%   { transform: translate(0, 0); }
+    /* grow 3 — simultaneous */
+    51%   { transform: translate(0, 0); }
+    55%   { transform: translate(50%, 0); }
+    59%   { transform: translate(0, 0); }
+    /* grow 4 — 4th */
+    78%   { transform: translate(0, 0); }
+    79%   { transform: translate(45%, 0); }
+    80%   { transform: translate(0, 0); }
+    100%  { transform: translate(0, 0); }
+  }
+  @keyframes el4-drift-long { /* top — -y outward */
+    0%    { transform: translate(0, 0); }
+    /* grow 1 — 2nd */
+    11%   { transform: translate(0, 0); }
+    12%   { transform: translate(0, -62%); }
+    13%   { transform: translate(0, 0); }
+    /* grow 2 — 4th */
+    36%   { transform: translate(0, 0); }
+    37%   { transform: translate(0, -45%); }
+    38%   { transform: translate(0, 0); }
+    /* grow 3 — simultaneous */
+    51%   { transform: translate(0, 0); }
+    55%   { transform: translate(0, -55%); }
+    59%   { transform: translate(0, 0); }
+    /* grow 4 — 1st */
+    72%   { transform: translate(0, 0); }
+    73%   { transform: translate(0, -38%); }
+    74%   { transform: translate(0, 0); }
+    100%  { transform: translate(0, 0); }
+  }
+
+  /* perpetual subtle bob with idle gaps adding bigger bobs.
+     Each idle peak bleeds into the next phase via a residual stop ~2-3%
+     after the peak, so transitions blend instead of snapping back to 0. */
+  @keyframes drift-idle-bob {
+    0%    { translate: 0 0;        filter: drop-shadow(0 0 12px rgba(124,196,255,0.35)); }
+    /* spin 1 (0-6%) — subtle */
+    3%    { translate: 0 -0.5%; }
+    /* idle 1 peak (6-9%) → bleeds into grow 1 */
+    7.5%  { translate: 0 -2.8%;    filter: drop-shadow(0 0 22px rgba(124,196,255,0.6)); }
+    10.5% { translate: 0 -1.3%;    filter: drop-shadow(0 0 16px rgba(124,196,255,0.45)); }   /* bleed */
+    /* grow 1 (9-17%) — settles back to subtle */
+    14%   { translate: 0 -0.6%;    filter: drop-shadow(0 0 12px rgba(124,196,255,0.35)); }
+    /* idle 2 peak (17-21%) → bleeds into spin 2 */
+    19%   { translate: 0 -3.5%;    filter: drop-shadow(0 0 26px rgba(124,196,255,0.7)); }
+    22.5% { translate: 0 -1.5%;    filter: drop-shadow(0 0 16px rgba(124,196,255,0.45)); }   /* bleed */
+    /* spin 2 settling */
+    25%   { translate: 0 -0.4%;    filter: drop-shadow(0 0 12px rgba(124,196,255,0.35)); }
+    /* idle 3 peak (27-30%) → bleeds into grow 2 */
+    28.5% { translate: 0 -3%;      filter: drop-shadow(0 0 22px rgba(124,196,255,0.6)); }
+    31.5% { translate: 0 -1.4%;    filter: drop-shadow(0 0 16px rgba(124,196,255,0.45)); }   /* bleed */
+    /* grow 2 settling */
+    35%   { translate: 0 -0.7%;    filter: drop-shadow(0 0 12px rgba(124,196,255,0.35)); }
+    /* idle 4 peak (38-42%) → bleeds into spin 3 */
+    40%   { translate: 0 -3.5%;    filter: drop-shadow(0 0 26px rgba(124,196,255,0.7)); }
+    43.5% { translate: 0 -1.5%;    filter: drop-shadow(0 0 16px rgba(124,196,255,0.45)); }   /* bleed */
+    /* spin 3 settling */
+    46%   { translate: 0 -0.5%;    filter: drop-shadow(0 0 12px rgba(124,196,255,0.35)); }
+    /* idle 5 peak (48-51%) → bleeds into grow 3 */
+    49.5% { translate: 0 -3%;      filter: drop-shadow(0 0 22px rgba(124,196,255,0.6)); }
+    52.5% { translate: 0 -1.5%;    filter: drop-shadow(0 0 16px rgba(124,196,255,0.45)); }   /* bleed */
+    /* grow 3 simultaneous (slightly bigger ambient) */
+    55.5% { translate: 0 -1.2%;    filter: drop-shadow(0 0 12px rgba(124,196,255,0.35)); }
+    /* idle 6 peak (59-63%) → bleeds into spin 4 */
+    61%   { translate: 0 -3.5%;    filter: drop-shadow(0 0 26px rgba(124,196,255,0.7)); }
+    64.5% { translate: 0 -1.5%;    filter: drop-shadow(0 0 16px rgba(124,196,255,0.45)); }   /* bleed */
+    /* spin 4 settling */
+    67%   { translate: 0 -0.5%;    filter: drop-shadow(0 0 12px rgba(124,196,255,0.35)); }
+    /* idle 7 peak (69-72%) → bleeds into grow 4 */
+    70.5% { translate: 0 -3%;      filter: drop-shadow(0 0 22px rgba(124,196,255,0.6)); }
+    73.5% { translate: 0 -1.4%;    filter: drop-shadow(0 0 16px rgba(124,196,255,0.45)); }   /* bleed */
+    /* grow 4 settling */
+    77%   { translate: 0 -0.7%;    filter: drop-shadow(0 0 12px rgba(124,196,255,0.35)); }
+    /* idle 8 peak (80-84%) → bleeds into shake */
+    82%   { translate: 0 -3.8%;    filter: drop-shadow(0 0 28px rgba(124,196,255,0.75)); }
+    85.5% { translate: 0 -1.5%;    filter: drop-shadow(0 0 16px rgba(124,196,255,0.45)); }   /* bleed */
+    /* shake — subtle through */
+    90%   { translate: 0 -0.5%;    filter: drop-shadow(0 0 12px rgba(124,196,255,0.35)); }
+    /* settle / final idle */
+    97.5% { translate: 0 -3%;      filter: drop-shadow(0 0 22px rgba(124,196,255,0.6)); }
+    100%  { translate: 0 0;        filter: drop-shadow(0 0 12px rgba(124,196,255,0.35)); }
+  }
+  .a-drift .sai           { animation: drift-idle-bob 28s ease-in-out infinite; }
+  .a-drift .shells-rotate { animation: rig-drift-long 28s cubic-bezier(.55,.05,.4,.95) infinite; }
+  .a-drift .el-0 { animation: el0-drift-long 28s cubic-bezier(.4,.7,.3,1) infinite; }
+  .a-drift .el-1 { animation: el1-drift-long 28s cubic-bezier(.4,.7,.3,1) infinite; }
+  .a-drift .el-2 { animation: el2-drift-long 28s cubic-bezier(.4,.7,.3,1) infinite; }
+  .a-drift .el-4 { animation: el4-drift-long 28s cubic-bezier(.4,.7,.3,1) infinite; }
+
+  /* 30. drift no-idle — same rig + chevron animations, no svg bob/glow */
+  .a-drift-bare .shells-rotate { animation: rig-drift-long 28s cubic-bezier(.55,.05,.4,.95) infinite; }
+  .a-drift-bare .el-0 { animation: el0-drift-long 28s cubic-bezier(.4,.7,.3,1) infinite; }
+  .a-drift-bare .el-1 { animation: el1-drift-long 28s cubic-bezier(.4,.7,.3,1) infinite; }
+  .a-drift-bare .el-2 { animation: el2-drift-long 28s cubic-bezier(.4,.7,.3,1) infinite; }
+  .a-drift-bare .el-4 { animation: el4-drift-long 28s cubic-bezier(.4,.7,.3,1) infinite; }
+
+  footer {
+    position: relative;
+    z-index: 1;
+    padding: 0 48px 48px;
+    color: var(--dim);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1><b>SAI</b> &nbsp;/&nbsp; ghost animations &nbsp;·&nbsp; mock</h1>
+  <div class="toggle" id="toggle">
+    <button data-svg="v1">sai-new</button>
+    <button data-svg="v2" class="on">sai-new-2</button>
+  </div>
+  <div class="legend">hover a tile · pick a vibe · steal what you like</div>
+</header>
+
+<div class="grid" id="grid"></div>
+
+<footer>destiny-flavored · pure CSS · no deps</footer>
+
+<template id="t-cell">
+  <div class="cell">
+    <div class="label"></div>
+    <div class="stage"></div>
+  </div>
+</template>
+
+<script>
+  const SVGS = {
+    v1: {
+      viewBox: "0 0 198.70328 201.07719",
+      transform: "translate(223.32435,-5.1925971)",
+      // No shell mapping for v1 yet — falls back to flat structure.
+      d: "m -216.53294,205.91363 c -2.37822,-0.75411 -4.28038,-2.19234 -5.48524,-4.14744 -1.28225,-2.08066 -1.26164,-1.55337 -1.26164,-32.2672 0,-20.79078 0.0834,-29.00111 0.30113,-29.65146 0.49455,-1.47709 1.53889,-2.63773 2.9752,-3.30651 1.32838,-0.61853 1.49912,-0.63045 9.06273,-0.63299 l 7.70885,-0.003 1.41519,0.7393 c 1.03005,0.53811 1.63232,1.09041 2.21303,2.02942 l 0.79784,1.29011 0.13229,18.93881 0.13229,18.93882 0.70175,1.19062 c 0.67423,1.14394 1.4533,1.86841 2.87013,2.66896 0.5476,0.30942 4.09977,0.39652 20.6375,0.50604 l 19.97604,0.13229 1.10915,0.59287 c 1.23401,0.65961 2.23537,1.85679 2.69077,3.21693 0.1964,0.58661 0.30112,3.46491 0.30112,8.27673 0,8.02636 -0.0801,8.55377 -1.53539,10.10569 -0.39246,0.41853 -1.18982,0.98147 -1.7719,1.25096 -1.01123,0.46819 -2.4126,0.48947 -31.48542,0.47811 -23.81694,-0.009 -30.65701,-0.0848 -31.48542,-0.34748 z m 83.74063,-0.0445 c -1.44824,-0.63525 -2.61646,-1.93587 -3.04996,-3.39562 -0.46392,-1.56221 -0.56067,-14.2156 -0.1208,-15.79917 0.40747,-1.46692 1.3508,-2.6794 2.65183,-3.40846 l 1.18039,-0.66146 h 8.06979 8.06979 l 1.23714,0.72725 c 0.93717,0.55092 1.40506,1.07047 1.9297,2.14279 l 0.69256,1.41554 -0.0776,7.77908 c -0.0883,8.85541 -0.15624,9.17009 -2.30624,10.6895 l -1.12317,0.79375 -8.11368,0.0615 c -6.81234,0.0516 -8.26222,-0.004 -9.03973,-0.3447 z m 38.940286,0.1144 c -1.21458,-0.34989 -3.02865,-2.23851 -3.42531,-3.56606 -0.4341,-1.45283 -0.45428,-14.98351 -0.0243,-16.26784 0.45539,-1.36014 1.45676,-2.55732 2.69076,-3.21693 l 1.10916,-0.59287 19.57916,-0.13229 19.57917,-0.13229 1.26396,-0.6224 c 0.69518,-0.34232 1.5547,-1.00357 1.91005,-1.46945 1.50523,-1.97347 1.4562,-1.27957 1.4562,-20.6058 0,-19.83578 -0.0137,-19.66647 1.74674,-21.61505 1.56054,-1.72733 2.31713,-1.8573 10.80195,-1.85562 4.61334,9.2e-4 7.82832,0.11248 8.48568,0.29446 0.65516,0.18137 1.52527,0.76038 2.28404,1.51988 0.9921,0.99307 1.28315,1.50496 1.52716,2.68588 0.21735,1.05191 0.28139,9.39387 0.22951,29.89792 l -0.072,28.43893 -0.59431,1.46787 c -0.80759,1.99464 -1.95923,3.49288 -3.43749,4.47204 -2.53385,1.67835 -0.90793,1.60306 -34.05007,1.57685 -18.36438,-0.0145 -30.52497,-0.12306 -31.06013,-0.27723 z m -32.590286,-39.40567 c -0.88652,-0.39969 -3.74667,-3.0845 -11.19787,-10.51137 -5.50398,-5.48602 -10.23672,-10.41631 -10.51719,-10.95622 -0.74898,-1.4418 -0.66429,-3.03718 0.2366,-4.45666 0.41059,-0.64695 1.90602,-2.26413 3.32318,-3.59374 2.78058,-2.60879 4.04486,-3.23866 5.75926,-2.86924 1.56301,0.3368 2.11745,0.79594 7.36894,6.10219 3.01138,3.04278 5.53518,5.3716 6.06204,5.59371 1.89133,0.7973 2.30358,0.52639 8.35775,-5.49219 6.62589,-6.58694 7.43163,-7.05484 10.05417,-5.83847 1.43338,0.66482 6.65123,6.0064 6.88118,7.04436 0.096,0.43314 0.225206,0.9491 0.287226,1.14658 0.062,0.19749 -0.0169,0.85233 -0.175326,1.45521 -0.24942,0.94901 -1.67923,2.4939 -10.65205,11.50934 -6.88764,6.92036 -10.71894,10.57924 -11.42229,10.90825 -1.37289,0.64221 -2.88061,0.62779 -4.36562,-0.0418 z m -35.05729,-34.54629 c -1.31998,-0.687 -20.49096,-19.92498 -21.05566,-21.12924 -0.59002,-1.25828 -0.64879,-2.99717 -0.14113,-4.17568 0.41044,-0.95281 20.10626,-20.720136 21.23385,-21.310936 0.96292,-0.50453 2.96169,-0.49512 3.93169,0.0185 0.43656,0.23116 2.17663,1.82934 3.86681,3.5515 3.37084,3.4346 3.70458,4.09448 3.13695,6.20248 -0.24456,0.90822 -1.20449,2.01644 -5.63365,6.503906 -2.93637,2.97504 -5.44021,5.70524 -5.56408,6.06712 -0.57696,1.68555 -0.15698,2.29742 5.511,8.02897 4.40982,4.45928 5.43267,5.63439 5.7077,6.55736 0.58938,1.97794 0.0967,2.93423 -3.28299,6.37257 -1.62139,1.64953 -3.2695,3.16758 -3.66246,3.37344 -0.93758,0.49119 -3.04912,0.4599 -4.04803,-0.06 z m 69.967936,-0.32873 c -1.37182,-0.88988 -4.92327,-4.4651 -5.91503,-5.95462 -0.80744,-1.2127 -0.91233,-2.9104 -0.26008,-4.20955 0.23382,-0.46571 2.79367,-3.23463 5.68855,-6.15315 5.18114,-5.22345 5.26341,-5.32394 5.26341,-6.42928 0,-0.61759 -0.17057,-1.4444 -0.37905,-1.83736 -0.20848,-0.39296 -2.60184,-2.91712 -5.31859,-5.60926 -2.71674,-2.692126 -5.10601,-5.277916 -5.30949,-5.746186 -0.47539,-1.09405 -0.47339,-2.8139 0.004,-3.7258 0.69032,-1.31768 6.28987,-6.56846 7.38201,-6.92221 1.08394,-0.3511 2.4985,-0.19844 3.61163,0.38977 0.36883,0.1949 5.20447,4.91742 10.74587,10.4945 8.52963,8.584546 10.12277,10.307206 10.3849,11.229166 0.37907,1.33329 0.38062,1.54757 0.0208,2.87972 -0.24154,0.89439 -1.87053,2.64918 -10.51571,11.32781 -6.19252,6.21648 -10.58202,10.41945 -11.1221,10.64948 -1.45014,0.61764 -2.94508,0.4839 -4.28152,-0.38303 z M -132.41379,121.1049 c -2.2167,-0.53038 -3.93048,-2.50859 -4.2149,-4.86524 -0.0908,-0.75272 -0.12802,-4.6428 -0.0826,-8.64462 0.0816,-7.19725 0.0897,-7.28882 0.744,-8.456426 0.74372,-1.32718 1.96199,-2.2582 3.49518,-2.67104 0.64869,-0.17467 3.96137,-0.24841 8.88973,-0.19788 7.81819,0.0802 7.86135,0.0837 9.0361,0.74202 1.30104,0.72907 2.24436,1.94155 2.65183,3.408456 0.3667,1.32013 0.3468,15.47801 -0.0237,16.83216 -0.40752,1.48963 -2.42051,3.39272 -4.01272,3.79364 -1.35642,0.34155 -15.09644,0.39067 -16.48295,0.0589 z m -86.5004,-1.57903 c -1.91299,-0.48355 -3.25939,-1.59331 -3.95612,-3.26084 -0.60538,-1.44887 -0.60538,-16.684856 0,-18.133726 0.524,-1.25412 1.30481,-2.08408 2.6332,-2.79899 1.01831,-0.54802 1.36857,-0.56956 9.26042,-0.56956 h 8.20208 l 1.24974,0.73463 c 0.81041,0.47639 1.50799,1.17397 1.98438,1.98438 l 0.73464,1.24974 v 8.487586 8.48759 l -0.79612,1.28751 c -0.56498,0.91371 -1.17715,1.48374 -2.10859,1.96345 -1.3099,0.67461 -1.32735,0.67603 -8.86118,0.7224 -4.15179,0.0256 -7.90589,-0.0438 -8.34245,-0.15417 z m 173.831256,-0.0308 c -1.84189,-0.39402 -3.25233,-1.54558 -3.95613,-3.23 -0.3393,-0.81207 -0.4095,-2.36632 -0.4095,-9.06686 0,-6.70055 0.0702,-8.254796 0.4095,-9.066866 0.52401,-1.25412 1.30481,-2.08408 2.63321,-2.79899 0.9984,-0.53731 1.47787,-0.57452 8.46667,-0.6571 8.35275,-0.0987 9.68689,0.062 11.14473,1.34196 1.92432,1.68957 1.95214,1.84702 1.95214,11.046656 0,6.82179 -0.0697,8.38794 -0.4095,9.2012 -0.52401,1.25412 -1.30481,2.08408 -2.63321,2.79899 -1.01163,0.54443 -1.39687,0.57025 -8.73125,0.58519 -4.2201,0.009 -8.0301,-0.0608 -8.46666,-0.15418 z M -141.25898,82.835134 c -1.02775,-0.44125 -6.43523,-5.65524 -7.03001,-6.77847 -0.64382,-1.21586 -0.48348,-3.11892 0.3757,-4.45926 0.41471,-0.64695 5.24489,-5.581591 10.73372,-10.965862 8.11595,-7.961347 10.21102,-9.880097 11.21837,-10.274253 1.36486,-0.534041 2.69622,-0.452025 4.11073,0.253235 0.45766,0.228189 5.44873,5.017049 11.09125,10.641912 9.39129,9.361888 10.29204,10.336988 10.64805,11.526988 0.573846,1.91813 0.196426,2.96429 -1.88937,5.23714 -2.86803,3.12525 -4.99813,4.92408 -6.06872,5.12492 -2.08964,0.39202 -2.74709,-0.0582 -8.71576,-5.96786 -3.05594,-3.02575 -5.81631,-5.63404 -6.13417,-5.7962 -0.86818,-0.44293 -1.9662,-0.35487 -2.93416,0.23529 -0.47644,0.29049 -3.26146,2.90846 -6.18893,5.81773 -6.10814,6.07015 -6.7669,6.45645 -9.2167,5.40469 z m -78.08249,-4.97382 c -1.38395,-0.49457 -2.49056,-1.3557 -3.19209,-2.48399 l -0.61396,-0.9875 V 43.301283 12.212741 l 0.69722,-1.486961 c 0.98069,-2.0915294 2.38002,-3.5259924 4.41879,-4.5297474 l 1.75177,-0.862459 30.56507,-0.07346 c 27.39773,-0.06585 30.68001,-0.02991 31.67427,0.346777 1.62469,0.615539 2.45143,1.370505 3.1547,2.880817 0.61257,1.315537 0.62577,1.505629 0.6283,9.0433644 0.002,5.059441 -0.10066,8.007972 -0.29853,8.598958 -0.42635,1.273395 -1.3764,2.467519 -2.53749,3.189402 l -0.99785,0.620393 -19.97604,0.132291 c -19.8372,0.131373 -19.9834,0.136262 -21.03438,0.703373 -1.38546,0.747604 -2.3568,1.797412 -3.0213,3.265378 -0.52574,1.161444 -0.53909,1.64978 -0.54476,19.925025 -0.004,12.898832 -0.0978,19.099872 -0.30125,19.907702 -0.41042,1.6299 -2.02484,3.39827 -3.589,3.93123 -1.63435,0.55688 -15.25493,0.60268 -16.78347,0.0564 z m 174.124526,0.12511 c -1.8348,-0.57833 -2.97415,-1.52034 -3.86994,-3.19967 -0.46592,-0.87346 -0.50148,-2.04526 -0.62626,-20.637504 -0.14649,-21.82622 -0.0214,-20.365817 -1.89566,-22.129233 -2.05341,-1.931959 -0.55938,-1.800762 -22.18143,-1.947851 l -19.44687,-0.132291 -1.12084,-0.641989 c -1.23921,-0.709785 -2.32553,-2.098893 -2.72172,-3.480335 -0.14217,-0.495697 -0.25848,-4.177057 -0.25848,-8.180801 0,-4.003745 0.11631,-7.6851054 0.25848,-8.1808014 0.44331,-1.545741 1.56723,-2.879881 3.02831,-3.59472 l 1.36664,-0.668632 30.54776,0.07051 30.54777,0.07051 1.48417,0.728875 c 1.96272,0.963883 3.95156,3.094922 4.75842,5.0986434 l 0.63657,1.580816 v 30.294792 c 0,24.600304 -0.0664,30.482554 -0.35346,31.293704 -0.47458,1.34116 -1.46712,2.47294 -2.78867,3.17988 -1.04734,0.56024 -1.40495,0.58575 -8.89641,0.63442 -4.29286,0.0279 -8.10363,-0.0434 -8.46838,-0.15833 z M -132.39544,28.351647 c -1.37888,-0.487769 -2.9273,-2.159978 -3.3075,-3.571923 -0.20161,-0.748756 -0.27325,-3.536352 -0.21665,-8.430294 0.0922,-7.9670124 0.11461,-8.0929244 1.7146,-9.6127084 1.53704,-1.459994 2.04518,-1.535389 10.34807,-1.535389 h 7.62946 l 1.3787,0.687036 c 1.02358,0.510072 1.56513,1.004163 2.10247,1.918229 l 0.72377,1.231193 0.0821,7.2755864 c 0.0587,5.19944 -0.0113,7.60919 -0.24518,8.444659 -0.4279,1.528293 -2.13556,3.311375 -3.54112,3.697515 -1.65733,0.455304 -15.32883,0.370083 -16.66876,-0.103904 z"
+    },
+    v2: {
+      viewBox: "0 0 117.69488 117.0802",
+      transform: "translate(389.47605,-40.417133)",
+      shellsIdx: [0, 1, 2, 4],   // bottom, left, right, top chevrons
+      centerIdx: [3],            // center square
+      d: "m -332.87752,156.98433 c -0.88652,-0.39969 -3.74667,-3.0845 -11.19787,-10.51137 -5.50398,-5.48602 -10.23672,-10.41631 -10.51719,-10.95622 -0.74898,-1.4418 -0.66429,-3.03718 0.2366,-4.45666 0.41059,-0.64695 1.90602,-2.26413 3.32318,-3.59374 2.78058,-2.60879 4.04486,-3.23866 5.75926,-2.86924 1.56301,0.3368 2.11745,0.79594 7.36894,6.10219 3.01138,3.04278 5.53518,5.3716 6.06204,5.59371 1.89133,0.7973 2.30358,0.52639 8.35775,-5.49219 6.62589,-6.58694 7.43163,-7.05484 10.05417,-5.83847 1.43338,0.66482 6.65123,6.0064 6.88118,7.04436 0.096,0.43314 0.22521,0.9491 0.28723,1.14658 0.062,0.19749 -0.0169,0.85233 -0.17533,1.45521 -0.24942,0.94901 -1.67923,2.4939 -10.65205,11.50934 -6.88764,6.92036 -10.71894,10.57924 -11.42229,10.90825 -1.37289,0.64221 -2.88061,0.62779 -4.36562,-0.0418 z m -35.05729,-34.54629 c -1.31998,-0.687 -20.49096,-19.92498 -21.05566,-21.12924 -0.59002,-1.25828 -0.64879,-2.997174 -0.14113,-4.175684 0.41044,-0.95281 20.10626,-20.720136 21.23385,-21.310936 0.96292,-0.50453 2.96169,-0.49512 3.93169,0.0185 0.43656,0.23116 2.17663,1.82934 3.86681,3.5515 3.37084,3.4346 3.70458,4.09448 3.13695,6.20248 -0.24456,0.90822 -1.20449,2.01644 -5.63365,6.503906 -2.93637,2.97504 -5.44021,5.70524 -5.56408,6.06712 -0.57696,1.68555 -0.15698,2.297424 5.511,8.028974 4.40982,4.45928 5.43267,5.63439 5.7077,6.55736 0.58938,1.97794 0.0967,2.93423 -3.28299,6.37257 -1.62139,1.64953 -3.2695,3.16758 -3.66246,3.37344 -0.93758,0.49119 -3.04912,0.4599 -4.04803,-0.06 z m 69.96794,-0.32873 c -1.37182,-0.88988 -4.92327,-4.4651 -5.91503,-5.95462 -0.80744,-1.2127 -0.91233,-2.9104 -0.26008,-4.20955 0.23382,-0.46571 2.79367,-3.23463 5.68855,-6.15315 5.18114,-5.22345 5.26341,-5.32394 5.26341,-6.429284 0,-0.61759 -0.17057,-1.4444 -0.37905,-1.83736 -0.20848,-0.39296 -2.60184,-2.91712 -5.31859,-5.60926 -2.71674,-2.692126 -5.10601,-5.277916 -5.30949,-5.746186 -0.47539,-1.09405 -0.47339,-2.8139 0.004,-3.7258 0.69032,-1.31768 6.28987,-6.56846 7.38201,-6.92221 1.08394,-0.3511 2.4985,-0.19844 3.61163,0.38977 0.36883,0.1949 5.20447,4.91742 10.74587,10.4945 8.52963,8.584546 10.12277,10.307206 10.3849,11.229166 0.37907,1.33329 0.38062,1.54757 0.0208,2.879724 -0.24154,0.89439 -1.87053,2.64918 -10.51571,11.32781 -6.19252,6.21648 -10.58202,10.41945 -11.1221,10.64948 -1.45014,0.61764 -2.94508,0.4839 -4.28152,-0.38303 z M -338.849,111.51137 c -2.2167,-0.53038 -3.93048,-2.50859 -4.2149,-4.86524 -0.0908,-0.75272 -0.12802,-4.6428 -0.0826,-8.644624 0.0816,-7.19725 0.0897,-7.28882 0.744,-8.456426 0.74372,-1.32718 1.96199,-2.2582 3.49518,-2.67104 0.64869,-0.17467 3.96137,-0.24841 8.88973,-0.19788 7.81819,0.0802 7.86135,0.0837 9.0361,0.74202 1.30104,0.72907 2.24436,1.94155 2.65183,3.408456 0.3667,1.32013 0.3468,15.478014 -0.0237,16.832164 -0.40752,1.48963 -2.42051,3.39272 -4.01272,3.79364 -1.35642,0.34155 -15.09644,0.39067 -16.48295,0.0589 z m -8.84519,-38.26977 c -1.02775,-0.44125 -6.43523,-5.65524 -7.03001,-6.77847 -0.64382,-1.21586 -0.48348,-3.11892 0.3757,-4.45926 0.41471,-0.64695 5.24489,-5.581591 10.73372,-10.965862 8.11595,-7.961347 10.21102,-9.880097 11.21837,-10.274253 1.36486,-0.534041 2.69622,-0.452025 4.11073,0.253235 0.45766,0.228189 5.44873,5.017049 11.09125,10.641912 9.39129,9.361888 10.29204,10.336988 10.64805,11.526988 0.57385,1.91813 0.19643,2.96429 -1.88937,5.23714 -2.86803,3.12525 -4.99813,4.92408 -6.06872,5.12492 -2.08964,0.39202 -2.74709,-0.0582 -8.71576,-5.96786 -3.05594,-3.02575 -5.81631,-5.63404 -6.13417,-5.7962 -0.86818,-0.44293 -1.9662,-0.35487 -2.93416,0.23529 -0.47644,0.29049 -3.26146,2.90846 -6.18893,5.81773 -6.10814,6.07015 -6.7669,6.45645 -9.2167,5.40469 z"
+    }
+  };
+
+  const SVG_NS = "http://www.w3.org/2000/svg";
+
+  // Approximate bbox by walking absolute coord pairs. After splitPath every command
+  // (M, L, C, Z) uses pair-aligned coordinates, so this is exact for endpoint geometry.
+  function pathBbox(d) {
+    const tokens = d.match(/[a-zA-Z]|-?\d*\.?\d+(?:e[-+]?\d+)?/g) || [];
+    let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+    let i = 0;
+    while (i < tokens.length) {
+      if (/[a-zA-Z]/.test(tokens[i])) { i++; continue; }
+      const x = parseFloat(tokens[i++]);
+      const y = parseFloat(tokens[i++] || "0");
+      if (x < xMin) xMin = x; if (x > xMax) xMax = x;
+      if (y < yMin) yMin = y; if (y > yMax) yMax = y;
+    }
+    return { x: xMin, y: yMin, width: xMax - xMin, height: yMax - yMin };
+  }
+
+  function unionBbox(boxes) {
+    let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+    for (const b of boxes) {
+      if (b.x < xMin) xMin = b.x;
+      if (b.x + b.width > xMax) xMax = b.x + b.width;
+      if (b.y < yMin) yMin = b.y;
+      if (b.y + b.height > yMax) yMax = b.y + b.height;
+    }
+    return { x: xMin, y: yMin, width: xMax - xMin, height: yMax - yMin };
+  }
+
+  // Split a path's `d` into separate absolute-coordinate subpaths (one per closed shape).
+  // Handles m/M, l/L, h/H, v/V, c/C, z/Z which is all this path uses.
+  function splitPath(d) {
+    const re = /([a-zA-Z])|(-?\d*\.?\d+(?:e[-+]?\d+)?)/g;
+    const tokens = [];
+    let m;
+    while ((m = re.exec(d)) !== null) {
+      if (m[1]) tokens.push({ t: "c", v: m[1] });
+      else      tokens.push({ t: "n", v: parseFloat(m[2]) });
+    }
+
+    const out = [];
+    let buf = "", cmd = null, i = 0;
+    let cx = 0, cy = 0, sx = 0, sy = 0;
+    const num = (n) => { const a = []; for (let k = 0; k < n; k++) a.push(tokens[i++].v); return a; };
+
+    while (i < tokens.length) {
+      if (tokens[i].t === "c") { cmd = tokens[i].v; i++; }
+
+      if (cmd === "M" || cmd === "m") {
+        const [x, y] = num(2);
+        const ax = cmd === "M" ? x : cx + x;
+        const ay = cmd === "M" ? y : cy + y;
+        if (buf) out.push(buf);
+        buf = `M ${ax} ${ay}`;
+        cx = sx = ax; cy = sy = ay;
+        cmd = cmd === "M" ? "L" : "l";
+      } else if (cmd === "L" || cmd === "l") {
+        const [x, y] = num(2);
+        const ax = cmd === "L" ? x : cx + x;
+        const ay = cmd === "L" ? y : cy + y;
+        buf += ` L ${ax} ${ay}`;
+        cx = ax; cy = ay;
+      } else if (cmd === "H" || cmd === "h") {
+        const [x] = num(1);
+        const ax = cmd === "H" ? x : cx + x;
+        buf += ` L ${ax} ${cy}`;
+        cx = ax;
+      } else if (cmd === "V" || cmd === "v") {
+        const [y] = num(1);
+        const ay = cmd === "V" ? y : cy + y;
+        buf += ` L ${cx} ${ay}`;
+        cy = ay;
+      } else if (cmd === "C" || cmd === "c") {
+        const [x1,y1,x2,y2,x,y] = num(6);
+        const a = cmd === "C"
+          ? [x1,y1,x2,y2,x,y]
+          : [cx+x1,cy+y1,cx+x2,cy+y2,cx+x,cy+y];
+        buf += ` C ${a[0]} ${a[1]} ${a[2]} ${a[3]} ${a[4]} ${a[5]}`;
+        cx = a[4]; cy = a[5];
+      } else if (cmd === "Z" || cmd === "z") {
+        buf += " Z";
+        cx = sx; cy = sy;
+      } else {
+        i++; // unknown — skip defensively
+      }
+    }
+    if (buf) out.push(buf);
+    return out;
+  }
+
+  function makePath(d, idx) {
+    const p = document.createElementNS(SVG_NS, "path");
+    p.setAttribute("d", d);
+    p.setAttribute("class", `el el-${idx}`);
+    return p;
+  }
+
+  function buildSvg(key) {
+    const cfg = SVGS[key];
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("class", "sai");
+    svg.setAttribute("viewBox", cfg.viewBox);
+    const g = document.createElementNS(SVG_NS, "g");
+    g.setAttribute("transform", cfg.transform);
+
+    const subpaths = splitPath(cfg.d);
+
+    if (cfg.shellsIdx && cfg.centerIdx) {
+      // Rig center in path-space (the user space inside the parent translate).
+      const rigBbox = unionBbox(cfg.shellsIdx.map(i => pathBbox(subpaths[i])));
+      const rigCx = rigBbox.x + rigBbox.width  / 2;
+      const rigCy = rigBbox.y + rigBbox.height / 2;
+
+      const rot = document.createElementNS(SVG_NS, "g");
+      rot.setAttribute("class", "shells-rotate");
+
+      // Invisible oversized anchor rect — pins the rotate group's fill-box
+      // center to the rig center so child animations can't drag it.
+      const anchor = document.createElementNS(SVG_NS, "rect");
+      const W = 1000;
+      anchor.setAttribute("class", "bbox-anchor");
+      anchor.setAttribute("x", rigCx - W / 2);
+      anchor.setAttribute("y", rigCy - W / 2);
+      anchor.setAttribute("width", W);
+      anchor.setAttribute("height", W);
+      rot.appendChild(anchor);
+
+      const scl = document.createElementNS(SVG_NS, "g");
+      scl.setAttribute("class", "shells-scale");
+      // Same trick for the inner scale group.
+      const anchor2 = anchor.cloneNode(false);
+      scl.appendChild(anchor2);
+      cfg.shellsIdx.forEach(idx => scl.appendChild(makePath(subpaths[idx], idx)));
+      rot.appendChild(scl);
+      g.appendChild(rot);
+
+      const center = document.createElementNS(SVG_NS, "g");
+      center.setAttribute("class", "center");
+      cfg.centerIdx.forEach(idx => center.appendChild(makePath(subpaths[idx], idx)));
+      g.appendChild(center);
+    } else {
+      subpaths.forEach((sd, idx) => g.appendChild(makePath(sd, idx)));
+    }
+
+    svg.appendChild(g);
+    return svg;
+  }
+
+  const tiles = [
+    { cls: "a-idle",     tag: "01", name: "idle hover"   },
+    { cls: "a-twirl",    tag: "02", name: "ghost twirl"  },
+    { cls: "a-tumble",   tag: "03", name: "tumble"       },
+    { cls: "a-shell",    tag: "04", name: "shell pulse"  },
+    { cls: "a-activate", tag: "05", name: "activate"     },
+    { cls: "a-scan",     tag: "06", name: "scan"         },
+    { cls: "a-wobble",   tag: "07", name: "wobble"       },
+    { cls: "a-glitch",   tag: "08", name: "glitch / err" },
+    { cls: "a-happy",    tag: "09", name: "success"      },
+    { cls: "a-orbit",    tag: "10", name: "fast orbit"   },
+    { cls: "a-flip",     tag: "11", name: "flip & catch" },
+    { cls: "a-dormant",  tag: "12", name: "dormant"      },
+    { cls: "a-loader",   tag: "13", name: "loader"       },
+    { cls: "a-counter",  tag: "14", name: "counter-spin" },
+    { cls: "a-ripple",   tag: "15", name: "ripple"       },
+    { cls: "a-assemble", tag: "16", name: "assemble"     },
+    { cls: "a-ping",     tag: "17", name: "ping"         },
+    { cls: "a-shells",   tag: "18", name: "orbit shells" },
+    { cls: "a-scanner",  tag: "19", name: "scanner"      },
+    { cls: "a-snap",     tag: "20", name: "error snap"   },
+    { cls: "a-breathe",  tag: "21", name: "breathe"      },
+    { cls: "a-inhale",   tag: "22", name: "inhale"       },
+    { cls: "a-snapb",    tag: "23", name: "snap bounce"  },
+    { cls: "a-shake",    tag: "24", name: "snap shake"   },
+    { cls: "a-step",     tag: "25", name: "snap step"    },
+    { cls: "a-over",     tag: "26", name: "overshoot"    },
+    { cls: "a-throw",    tag: "27", name: "snap throw"   },
+    { cls: "a-search",   tag: "28", name: "search"       },
+    { cls: "a-drift",    tag: "29", name: "drift"        },
+    { cls: "a-drift-bare", tag: "30", name: "drift bare" },
+  ];
+
+  const grid = document.getElementById("grid");
+  const tpl  = document.getElementById("t-cell");
+
+  function render(key) {
+    grid.innerHTML = "";
+    for (const t of tiles) {
+      const node = tpl.content.firstElementChild.cloneNode(true);
+      node.classList.add(t.cls);
+      node.querySelector(".label").innerHTML = `${t.tag}<b>${t.name}</b>`;
+      node.querySelector(".stage").appendChild(buildSvg(key));
+      grid.appendChild(node);
+    }
+  }
+
+  const toggle = document.getElementById("toggle");
+  toggle.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-svg]");
+    if (!btn) return;
+    for (const b of toggle.querySelectorAll("button")) b.classList.toggle("on", b === btn);
+    render(btn.dataset.svg);
+  });
+
+  render("v2");
+</script>
+
+</body>
+</html>

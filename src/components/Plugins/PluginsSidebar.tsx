@@ -3,6 +3,7 @@ import { ChevronRight, Search } from 'lucide-react';
 import PluginIcon from './PluginIcon';
 import PluginDetail from './PluginDetail';
 import PluginRegistryDetail from './PluginRegistryDetail';
+import SaiLogo from '../SaiLogo';
 import type { Plugin, RegistryPlugin } from '../../types';
 
 type Tab = 'installed' | 'browse';
@@ -148,7 +149,12 @@ export default function PluginsSidebar() {
       </div>
 
       <div className="sidebar-list">
-        {loading && <div className="sidebar-empty">Loading...</div>}
+        {loading && (
+          <div className="sidebar-empty" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+            <SaiLogo mode="scanner" size={28} />
+            <span>Loading...</span>
+          </div>
+        )}
         {error && (
           <div className="sidebar-error">
             <div>{error}</div>

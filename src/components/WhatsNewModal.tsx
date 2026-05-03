@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { X } from 'lucide-react';
+import SaiLogo from './SaiLogo';
 import type { FetchStatus, ReleaseEntry } from '../hooks/useWhatsNew';
 
 interface Props {
@@ -66,7 +67,8 @@ export default function WhatsNewModal({ isOpen, version, releases, fetchStatus, 
           borderBottom: '1px solid var(--border)',
           flexShrink: 0,
         }}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <SaiLogo mode="idle" size={20} />
             {multiVersion ? "What's New" : `What's New in v${version}`}
           </span>
           <button
@@ -97,7 +99,10 @@ export default function WhatsNewModal({ isOpen, version, releases, fetchStatus, 
           color: 'var(--text)',
         }}>
           {fetchStatus === 'loading' && (
-            <span style={{ color: 'var(--text-muted)' }}>Loading release notes…</span>
+            <span style={{ color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <SaiLogo mode="scanner" size={16} />
+              Loading release notes…
+            </span>
           )}
 
           {fetchStatus === 'error' && (

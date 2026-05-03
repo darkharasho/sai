@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { RefreshCw, Download, CheckCircle, X } from 'lucide-react';
+import { Download, CheckCircle, X } from 'lucide-react';
+import SaiLogo from './SaiLogo';
 
 type UpdatePhase = 'idle' | 'checking' | 'downloading' | 'ready' | 'error';
 
@@ -64,7 +65,7 @@ export default function UpdateNotification() {
     <div className={`update-notification ${visible ? 'slide-in' : ''}`}>
       {phase === 'checking' && (
         <div className="update-pill update-checking">
-          <RefreshCw size={11} className="update-spin" />
+          <SaiLogo mode="scanner" size={14} />
           <span>Checking for updates...</span>
         </div>
       )}
@@ -149,13 +150,6 @@ export default function UpdateNotification() {
           color: var(--red);
           border-color: rgba(227, 85, 53, 0.3);
           background: rgba(227, 85, 53, 0.08);
-        }
-        .update-spin {
-          animation: update-spin 1s linear infinite;
-        }
-        @keyframes update-spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
         }
         .update-progress-track {
           width: 48px;

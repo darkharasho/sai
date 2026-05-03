@@ -6,6 +6,7 @@ import GitHubCloneModal from './GitHubCloneModal';
 import SettingsModal from './SettingsModal';
 import { LogOut, Settings, ChevronDown, FolderOpen, FolderPlus } from 'lucide-react';
 import { basename } from '../utils/pathUtils';
+import SaiLogo from './SaiLogo';
 
 interface GitHubUser {
   login: string;
@@ -143,7 +144,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
     <div className={`titlebar${window.sai.platform === 'darwin' ? ' titlebar-mac' : ''}${framelessRounded ? ' titlebar-frameless' : ''}`}>
       {window.sai.platform !== 'darwin' && (
         <div className="titlebar-brand">
-          <img src="svg/sai.svg" alt="SAI" width="18" height="18" />
+          <SaiLogo mode="static" size={18} ariaLabel="SAI" />
         </div>
       )}
       <div className="titlebar-drag" />
@@ -344,7 +345,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         )}
         {window.sai.platform === 'darwin' && (
           <div className="titlebar-brand">
-            <img src="svg/sai.svg" alt="SAI" width="18" height="18" />
+            <SaiLogo mode="static" size={18} ariaLabel="SAI" />
           </div>
         )}
         {framelessRounded && (
