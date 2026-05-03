@@ -777,12 +777,19 @@ describe('ChatPanel', () => {
       await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
       const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
 
+      // Initial turn starts streaming, user bypasses with a new message.
       await startStreaming(handler);
       await act(async () => {
         await latestChatInputProps.onSend('jump-the-line message');
       });
 
+      // Simulate the stop's `done` — the suppress flag should consume this.
+      await endStreaming(handler);
+      expect(onQueueShift).not.toHaveBeenCalled();
+
+      // The bypass message starts streaming, then ends — queue should drain now.
       mockSai.claudeSend.mockClear();
+      await startStreaming(handler);
       await endStreaming(handler);
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 350)); });
 

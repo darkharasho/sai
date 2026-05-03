@@ -1213,6 +1213,10 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     // dispatch immediately. The queue stays untouched and resumes draining
     // after this turn ends.
     if (isStreaming && messageQueue.length > 0) {
+      // The stop will cause the CLI to emit `done`, which flips isStreaming
+      // false and would otherwise wake the drain useEffect to shift a queued
+      // item. Suppress that one drain so only the user's new message runs.
+      suppressNextDrainRef.current = true;
       if (aiProvider === 'gemini') (window.sai as any).geminiStop?.(projectPath);
       else if (aiProvider === 'codex') window.sai.codexStop?.(projectPath);
       else window.sai.claudeStop?.(projectPath);
@@ -1275,11 +1279,16 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   };
 
   const prevStreamingRef = useRef(false);
+  const suppressNextDrainRef = useRef(false);
   useEffect(() => {
-    if (prevStreamingRef.current && !isStreaming && messageQueue.length > 0 && onQueueShift && sessionId) {
-      const next = messageQueue[0];
-      onQueueShift(sessionId);
-      setTimeout(() => handleSend(next.fullText, next.images), 300);
+    if (prevStreamingRef.current && !isStreaming) {
+      if (suppressNextDrainRef.current) {
+        suppressNextDrainRef.current = false;
+      } else if (messageQueue.length > 0 && onQueueShift && sessionId) {
+        const next = messageQueue[0];
+        onQueueShift(sessionId);
+        setTimeout(() => handleSend(next.fullText, next.images), 300);
+      }
     }
     prevStreamingRef.current = isStreaming;
   }, [isStreaming]);
