@@ -390,11 +390,6 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
         className="tool-call-card"
       >
         <div className={`tool-call-header${hasBody ? ' tool-call-header-expandable' : ''}`} onClick={() => hasBody && setExpanded(!expanded)}>
-          <Circle size={8} fill="var(--text-muted)" stroke="var(--text-muted)" className="tool-call-dot" />
-          <Icon size={14} className="tool-call-icon" />
-          <span className={`tool-call-name${sigClass ? ` ${sigClass}` : ''}`}>{toolCall.name}</span>
-          {!isBash && !isTodo && label && <span className="tool-call-label">{label}</span>}
-          {isBash && code && <span className="tool-call-label">{code}</span>}
           <AnimatePresence mode="popLayout" initial={false}>
             <motion.span
               key={status}
@@ -406,11 +401,15 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
               transition={badgeTransition}
               className={`tool-status tool-status-${status}`}
             >
-              {status === 'running' && <Circle size={6} fill="var(--accent)" stroke="none" />}
-              {status === 'done' && <Circle size={6} fill="var(--text-muted)" stroke="none" />}
-              {status === 'error' && <AlertCircle size={10} />}
+              {status === 'running' && <span className="tool-status-pulse" aria-hidden />}
+              {status === 'done' && <Circle size={8} fill="var(--green)" stroke="none" />}
+              {status === 'error' && <AlertCircle size={12} />}
             </motion.span>
           </AnimatePresence>
+          <Icon size={14} className="tool-call-icon" />
+          <span className={`tool-call-name${sigClass ? ` ${sigClass}` : ''}`}>{toolCall.name}</span>
+          {!isBash && !isTodo && label && <span className="tool-call-label">{label}</span>}
+          {isBash && code && <span className="tool-call-label">{code}</span>}
           {hasBody && (
             <motion.span
               className="tool-call-chevron-wrap"
@@ -500,9 +499,6 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
             border-radius: 8px;
             overflow: hidden;
             box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
-          }
-          .tool-call-dot {
-            flex-shrink: 0;
           }
           .tool-call-header {
             padding: 8px 12px;
@@ -750,8 +746,24 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
             flex-shrink: 0;
           }
           .tool-status-running { color: var(--accent); }
-          .tool-status-done { color: var(--text-muted); }
+          .tool-status-done { color: var(--green); }
           .tool-status-error { color: var(--red, #f85149); }
+          .tool-status-pulse {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent);
+          }
+          @media (prefers-reduced-motion: no-preference) {
+            @keyframes tool-status-hum {
+              0%, 100% { background: color-mix(in srgb, var(--accent) 40%, var(--bg-secondary)); }
+              50%      { background: color-mix(in srgb, var(--accent) 100%, transparent); }
+            }
+            .tool-status-pulse {
+              animation: tool-status-hum 2.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+            }
+          }
           /* Per-type tool-card entry signatures */
           @media (prefers-reduced-motion: no-preference) {
             @keyframes tool-sig-wipe {
