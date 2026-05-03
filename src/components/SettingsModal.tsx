@@ -883,8 +883,8 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   };
 
   return (
-    <div className="settings-overlay" onClick={onClose}>
-      <div className="settings-modal" onClick={e => e.stopPropagation()}>
+    <div className="settings-overlay sai-overlay-in" onClick={onClose}>
+      <div className="settings-modal sai-modal-in" onClick={e => e.stopPropagation()}>
         <div className="settings-header">
           <span className="settings-title">Settings</span>
           <div className="settings-header-right">

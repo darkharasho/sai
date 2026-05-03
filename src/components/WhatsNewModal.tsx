@@ -31,6 +31,7 @@ export default function WhatsNewModal({ isOpen, version, releases, fetchStatus, 
   return (
     <div
       data-testid="whats-new-backdrop"
+      className="sai-overlay-in"
       style={{
         position: 'fixed',
         inset: 0,
@@ -45,6 +46,7 @@ export default function WhatsNewModal({ isOpen, version, releases, fetchStatus, 
     >
       <div
         data-testid="whats-new-modal"
+        className="sai-modal-in"
         style={{
           background: 'var(--bg-elevated)',
           border: '1px solid var(--border)',

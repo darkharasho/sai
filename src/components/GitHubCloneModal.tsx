@@ -113,8 +113,8 @@ export default function GitHubCloneModal({ onCloned, onClose }: Props) {
   };
 
   return (
-    <div className="clone-modal-overlay" onClick={onClose}>
-      <div className="clone-modal" onClick={e => e.stopPropagation()}>
+    <div className="clone-modal-overlay sai-overlay-in" onClick={onClose}>
+      <div className="clone-modal sai-modal-in" onClick={e => e.stopPropagation()}>
         <button className="clone-modal-close" onClick={onClose}><X size={16} /></button>
 
         <div className="clone-modal-header">

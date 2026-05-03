@@ -249,13 +249,13 @@ function ImageModal({ src, onClose }: { src: string; onClose: () => void }) {
   };
 
   return createPortal(
-    <div className="img-modal-overlay" onClick={onClose} onContextMenu={handleContextMenu}>
+    <div className="img-modal-overlay sai-overlay-in" onClick={onClose} onContextMenu={handleContextMenu}>
       <button className="img-modal-close" onClick={onClose}><X size={18} /></button>
       <img
         ref={imgRef}
         src={src}
         alt="Full size"
-        className="img-modal-img"
+        className="img-modal-img sai-modal-in"
         onClick={e => e.stopPropagation()}
         onContextMenu={handleContextMenu}
       />

@@ -70,6 +70,30 @@
   .sai-fallen { animation: none; }
 }
 
+@keyframes sai-overlay-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes sai-modal-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.sai-overlay-in {
+  animation: sai-overlay-in var(--dur-fast) var(--ease-out-soft);
+}
+
+.sai-modal-in {
+  animation: sai-modal-in var(--dur-base) var(--ease-out-soft);
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sai-overlay-in,
+  .sai-modal-in { animation: none; }
+}
+
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 

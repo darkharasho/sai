@@ -239,8 +239,8 @@ export default function SearchPanel({ projectPath, getOpenBuffers, applyMonacoEd
       </div>
 
       {confirmOpen && (
-        <div className="search-confirm-overlay" onClick={() => setConfirmOpen(false)}>
-          <div className="search-confirm-dialog" onClick={e => e.stopPropagation()}>
+        <div className="search-confirm-overlay sai-overlay-in" onClick={() => setConfirmOpen(false)}>
+          <div className="search-confirm-dialog sai-modal-in" onClick={e => e.stopPropagation()}>
             <p>About to replace {totalMatches} match{totalMatches === 1 ? '' : 'es'} in {totalFiles} file{totalFiles === 1 ? '' : 's'}. Continue?</p>
             <div className="search-confirm-buttons">
               <button onClick={() => setConfirmOpen(false)}>Cancel</button>

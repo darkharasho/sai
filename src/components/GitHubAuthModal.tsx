@@ -72,8 +72,8 @@ export default function GitHubAuthModal({ onSuccess, onClose }: Props) {
   };
 
   return (
-    <div className="gh-modal-overlay" onClick={onClose}>
-      <div className="gh-modal" onClick={e => e.stopPropagation()}>
+    <div className="gh-modal-overlay sai-overlay-in" onClick={onClose}>
+      <div className="gh-modal sai-modal-in" onClick={e => e.stopPropagation()}>
         <button className="gh-modal-close" onClick={onClose}><X size={16} /></button>
 
         <div className="gh-modal-header">

@@ -152,8 +152,8 @@ export default function KeybindingsPage() {
       </div>
 
       {conflict && (
-        <div className="keybindings-modal-overlay" onClick={() => setConflict(null)}>
-          <div className="keybindings-modal" onClick={e => e.stopPropagation()}>
+        <div className="keybindings-modal-overlay sai-overlay-in" onClick={() => setConflict(null)}>
+          <div className="keybindings-modal sai-modal-in" onClick={e => e.stopPropagation()}>
             <p>
               <strong>{formatCombo(conflict.combo, platform)}</strong> is currently bound to{' '}
               <strong>{KEYBINDINGS.find(k => k.id === conflict.conflictWith)?.label}</strong>.
@@ -168,8 +168,8 @@ export default function KeybindingsPage() {
       )}
 
       {resetAllOpen && (
-        <div className="keybindings-modal-overlay" onClick={() => setResetAllOpen(false)}>
-          <div className="keybindings-modal" onClick={e => e.stopPropagation()}>
+        <div className="keybindings-modal-overlay sai-overlay-in" onClick={() => setResetAllOpen(false)}>
+          <div className="keybindings-modal sai-modal-in" onClick={e => e.stopPropagation()}>
             <p>Reset all keybindings to their defaults?</p>
             <div className="keybindings-modal-buttons">
               <button onClick={() => setResetAllOpen(false)}>Cancel</button>

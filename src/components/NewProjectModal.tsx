@@ -211,10 +211,12 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
 
   return (
     <div
+      className="sai-overlay-in"
       onClick={onClose}
       style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(2px)' }}
     >
       <div
+        className="sai-modal-in"
         onClick={e => e.stopPropagation()}
         style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10, padding: '24px 28px', width: 460, boxShadow: '0 8px 32px rgba(0,0,0,0.6)', display: 'flex', flexDirection: 'column', gap: 16 }}
       >

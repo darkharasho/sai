@@ -19,6 +19,7 @@ export default function UnsavedChangesModal({ fileName, onSave, onDiscard, onCan
 
   return (
     <div
+      className="sai-overlay-in"
       onClick={onCancel}
       style={{
         position: 'fixed',
@@ -32,6 +33,7 @@ export default function UnsavedChangesModal({ fileName, onSave, onDiscard, onCan
       }}
     >
       <div
+        className="sai-modal-in"
         onClick={(e) => e.stopPropagation()}
         style={{
           background: 'var(--bg-elevated)',

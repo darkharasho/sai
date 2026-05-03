@@ -46,6 +46,14 @@ export default function ApprovalBanner({ approvalWorkspaces, currentProjectPath,
           border-left: 3px solid #f59e0b;
           color: var(--text);
           flex-shrink: 0;
+          animation: approval-banner-in var(--dur-base) var(--ease-out-soft);
+        }
+        @keyframes approval-banner-in {
+          from { transform: translateY(-100%); opacity: 0; }
+          to   { transform: translateY(0); opacity: 1; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .approval-banner { animation: none; }
         }
         .approval-banner-icon {
           font-size: 14px;

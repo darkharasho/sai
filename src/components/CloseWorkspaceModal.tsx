@@ -21,6 +21,7 @@ export default function CloseWorkspaceModal({ projectPath, onConfirm, onCancel }
 
   return (
     <div
+      className="sai-overlay-in"
       onClick={onCancel}
       style={{
         position: 'fixed',
@@ -34,6 +35,7 @@ export default function CloseWorkspaceModal({ projectPath, onConfirm, onCancel }
       }}
     >
       <div
+        className="sai-modal-in"
         onClick={(e) => e.stopPropagation()}
         style={{
           background: 'var(--bg-elevated)',
