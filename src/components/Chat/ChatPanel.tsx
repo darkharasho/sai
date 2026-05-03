@@ -1,7 +1,31 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ChevronDown, CornerLeftUp } from 'lucide-react';
+import { motion, AnimatePresence, LayoutGroup } from 'motion/react';
 import { setFlipRect } from './flipRegistry';
 import ThinkingAnimation from '../ThinkingAnimation';
+import MotionPresence from './MotionPresence';
+import { SPRING, DISTANCE, EASING, useReducedMotionTransition } from './motion';
+
+function tweenScrollToBottom(container: HTMLElement, durationMs = 280) {
+  if (typeof window === 'undefined') return;
+  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+    container.scrollTop = container.scrollHeight;
+    return;
+  }
+  const start = container.scrollTop;
+  const target = container.scrollHeight - container.clientHeight;
+  if (target <= start) return;
+  const t0 = performance.now();
+  // Approximate ease-out cubic-bezier with a power curve: 1 - (1-t)^p
+  const p = 1 / (EASING.out[3] || 1);
+  const ease = (t: number) => 1 - Math.pow(1 - t, p);
+  const step = (t: number) => {
+    const k = Math.min(1, (t - t0) / durationMs);
+    container.scrollTop = start + (target - start) * ease(k);
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
 
 function ContextMeter({ used, total }: { used: number; total: number }) {
   const pct = Math.min((used / total) * 100, 100);
@@ -35,7 +59,11 @@ function CodexThinkingAnimation() {
   return (
     <div className="codex-thinking">
       <span className="codex-thinking-dot">•</span>
-      <span className="codex-working">Working</span>
+      <span className="codex-working codex-working-wave">
+        {'Working'.split('').map((c, i) => (
+          <span key={i} style={{ animationDelay: `${i * 50}ms` }}>{c}</span>
+        ))}
+      </span>
     </div>
   );
 }
@@ -181,6 +209,7 @@ function GeminiThinkingAnimation({ loadingPhrases = 'all' }: { loadingPhrases?: 
   const [frame, setFrame] = useState(0);
   const [color, setColor] = useState(GEMINI_COLORS[0]);
   const [hintIndex, setHintIndex] = useState(() => hints.length > 0 ? Math.floor(Math.random() * hints.length) : 0);
+  const hintTransition = useReducedMotionTransition({ duration: 0.18, ease: EASING.out });
 
   // Braille spinner at 80ms
   useEffect(() => {
@@ -223,18 +252,27 @@ function GeminiThinkingAnimation({ loadingPhrases = 'all' }: { loadingPhrases?: 
   return (
     <div className="gemini-thinking">
       <span className="gemini-spinner" style={{ color }}>{BRAILLE_FRAMES[frame]}</span>
-      <span className="gemini-hint">{hints.length > 0 ? hints[hintIndex] : 'Thinking...'}</span>
+      <AnimatePresence mode="popLayout" initial={false}>
+        <motion.span
+          key={hintIndex}
+          className="gemini-hint gemini-hint-slide"
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 0.85, y: 0 }}
+          exit={{ opacity: 0, y: -4 }}
+          transition={hintTransition}
+        >
+          {hints.length > 0 ? hints[hintIndex] : 'Thinking...'}
+        </motion.span>
+      </AnimatePresence>
     </div>
   );
 }
 
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
-import MessageQueue from './MessageQueue';
-import TodoProgress from './TodoProgress';
 import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, QueuedMessage, TerminalTab } from '../../types';
 import { buildHelpMessage } from './helpText';
-import { parseAiError } from './parseAiError';
+import { parseAiError, looksLikeApiError } from './parseAiError';
 
 type CodexPermission = 'auto' | 'read-only' | 'full-access';
 
@@ -273,6 +311,7 @@ interface ChatPanelProps {
   onQueueAdd?: (sessionId: string, text: string, fullText: string, images?: string[], attachments?: { images: number; files: number; terminal: boolean }) => void;
   onQueueRemove?: (sessionId: string, id: string) => void;
   onQueueShift?: (sessionId: string) => void;
+  onQueuePromote?: (sessionId: string, id: string) => void;
   sessionId?: string;
   terminalTabs?: TerminalTab[];
   onSlashCommandsUpdate?: (commands: string[]) => void;
@@ -468,10 +507,20 @@ function CyclingHints() {
   );
 }
 
+const FAKE_ERROR_VARIANTS = {
+  '': { status: 400, type: 'invalid_request_error', message: 'Output blocked by content filtering policy' },
+  'rate-limit': { status: 429, type: 'rate_limit_error', message: 'Number of request tokens has exceeded your per-minute rate limit' },
+  'auth':       { status: 401, type: 'authentication_error', message: 'Invalid bearer token' },
+  'permission': { status: 403, type: 'permission_error', message: 'OAuth token has been revoked' },
+  'overloaded': { status: 529, type: 'overloaded_error', message: 'The Anthropic API is temporarily overloaded' },
+  'server':     { status: 500, type: 'api_error', message: 'Internal server error' },
+  'timeout':    { status: 504, type: 'api_error', message: 'Request timed out upstream' },
+} as const;
+
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, sessionId, terminalTabs = [], onSlashCommandsUpdate }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(initialMessages || []);
   const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);
   const setMessages = useCallback((updater: ChatMessageType[] | ((prev: ChatMessageType[]) => ChatMessageType[])) => {
@@ -483,6 +532,10 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   }, []);
   const emptyPrompt = useMemo(() => EMPTY_PROMPTS[Math.floor(Math.random() * EMPTY_PROMPTS.length)], []);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [turnStartIndex, setTurnStartIndex] = useState<number | null>(null);
+  const thinkingTransition = useReducedMotionTransition(SPRING.pop);
+  const dockTransition = useReducedMotionTransition(SPRING.dock);
+  const followBtnTransition = useReducedMotionTransition(SPRING.flick);
   const turnSeqRef = useRef(0); // tracks the active turn's sequence number
   const [ready, setReady] = useState(false);
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
@@ -501,7 +554,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const userMsgRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const isAtBottomRef = useRef(true);
   const [pinnedUserMessage, setPinnedUserMessage] = useState<ChatMessageType | null>(null);
-  const [showNewMessages, setShowNewMessages] = useState(false);
+  const [followOn, setFollowOn] = useState(true);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   // Windowed rendering: only render messages from renderStart onward
   const [renderStart, setRenderStart] = useState(0);
@@ -598,6 +652,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
       if (msg.type === 'streaming_start') {
         if (msg.turnSeq != null) turnSeqRef.current = msg.turnSeq;
+        setTurnStartIndex(messagesRef.current.length);
         setIsStreaming(true);
         return;
       }
@@ -611,6 +666,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         if (msg.turnSeq != null && msg.turnSeq !== turnSeqRef.current) return;
         if (msg.type === 'done') {
           turnSeqRef.current = -1;
+          setTurnStartIndex(null);
           flushMessagesToParent();
           onTurnComplete?.();
         }
@@ -774,6 +830,26 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
         const text = textParts.join('');
 
+        if (text && tools.length === 0 && looksLikeApiError(text)) {
+          const error = parseAiError(text);
+          setMessages(prev => {
+            const next = [...prev];
+            const last = next[next.length - 1];
+            if (last?.role === 'assistant' && !last.toolCalls) {
+              next.pop();
+            }
+            next.push({
+              id: `${Date.now()}-${Math.random()}`,
+              role: 'system',
+              content: error.message,
+              timestamp: Date.now(),
+              error,
+            });
+            return next;
+          });
+          return;
+        }
+
         if (text || tools.length > 0) {
           setMessages(prev => {
             const last = prev[prev.length - 1];
@@ -918,7 +994,10 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     const el = chatContainerRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
-      if (e.deltaY < 0) isAtBottomRef.current = false;
+      if (e.deltaY < 0) {
+        isAtBottomRef.current = false;
+        setFollowOn(false);
+      }
     };
     el.addEventListener('wheel', onWheel, { passive: true });
     return () => el.removeEventListener('wheel', onWheel);
@@ -936,26 +1015,48 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   useEffect(() => {
     if (isActive) {
       isAtBottomRef.current = true;
-      setShowNewMessages(false);
+      setFollowOn(true);
+      setUnreadCount(0);
       requestAnimationFrame(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
       });
     }
   }, [isActive]);
 
+  // When the chat container shrinks (e.g. TodoProgress / approval panel /
+  // queue chips appear and push it up), keep the bottom in view if the user
+  // was already at the bottom. Without this the latest messages get hidden
+  // behind the now-taller bottom strip.
+  useEffect(() => {
+    const el = chatContainerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    let lastHeight = el.clientHeight;
+    const ro = new ResizeObserver(() => {
+      const h = el.clientHeight;
+      if (h < lastHeight && isAtBottomRef.current) {
+        el.scrollTop = el.scrollHeight;
+      }
+      lastHeight = h;
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   useEffect(() => {
     if (isAtBottomRef.current) {
-      setShowNewMessages(false);
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      setFollowOn(true);
+      setUnreadCount(0);
+      if (chatContainerRef.current) tweenScrollToBottom(chatContainerRef.current);
     } else if (messages[messages.length - 1]?.role === 'assistant') {
-      setShowNewMessages(true);
+      setUnreadCount(c => c + 1);
     }
   }, [messages, isStreaming, projectPath]);
 
   const scrollToBottom = () => {
     isAtBottomRef.current = true;
-    setShowNewMessages(false);
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setFollowOn(true);
+    setUnreadCount(0);
+    if (chatContainerRef.current) tweenScrollToBottom(chatContainerRef.current);
   };
 
   const userMessages = useMemo(
@@ -994,7 +1095,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 60;
     if (atBottom) {
       isAtBottomRef.current = true;
-      setShowNewMessages(false);
+      setFollowOn(true);
+      setUnreadCount(0);
     }
     // Update which user message is pinned as user scrolls through conversation
     if (!lastUserOutOfView.current) return;
@@ -1014,6 +1116,14 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     () => messages.slice(renderStart),
     [messages, renderStart]
   );
+
+  const firstAssistantOfTurnId = useMemo(() => {
+    if (turnStartIndex == null) return null;
+    for (let i = turnStartIndex; i < messages.length; i++) {
+      if (messages[i].role === 'assistant') return messages[i].id;
+    }
+    return null;
+  }, [messages, turnStartIndex]);
   const hasHiddenMessages = renderStart > 0;
 
   useEffect(() => {
@@ -1045,8 +1155,31 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     setPendingApproval(null);
   };
 
+  const handleFakeError = useCallback((text: string) => {
+    const arg = text.replace(/^\/fake-error\s*/, '').trim() as keyof typeof FAKE_ERROR_VARIANTS;
+    const variant = FAKE_ERROR_VARIANTS[arg] ?? FAKE_ERROR_VARIANTS[''];
+    const requestId = `req_fake_${Math.random().toString(16).slice(2, 14)}`;
+    const envelope = `API Error: ${variant.status} ${JSON.stringify({
+      type: 'error',
+      error: { type: variant.type, message: variant.message },
+      request_id: requestId,
+    })}`;
+    const error = parseAiError(envelope);
+    setMessages(prev => [...prev, {
+      id: `${Date.now()}-${Math.random()}`,
+      role: 'system',
+      content: error.message,
+      timestamp: Date.now(),
+      error,
+    }]);
+  }, [setMessages]);
+
   const handleSend = async (text: string, images?: string[]) => {
     // Handle built-in commands locally
+    if (import.meta.env.DEV && text.startsWith('/fake-error')) {
+      handleFakeError(text);
+      return;
+    }
     if (text === '/clear') {
       setMessages([]);
       setRenderStart(0);
@@ -1073,6 +1206,20 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           timestamp: Date.now() },
       ]);
       return;
+    }
+
+    // Bypass-queue-on-enter: when streaming AND the queue has items, plain
+    // Enter signals "send this now" — interrupt the current turn first, then
+    // dispatch immediately. The queue stays untouched and resumes draining
+    // after this turn ends.
+    if (isStreaming && messageQueue.length > 0) {
+      // The stop will cause the CLI to emit `done`, which flips isStreaming
+      // false and would otherwise wake the drain useEffect to shift a queued
+      // item. Suppress that one drain so only the user's new message runs.
+      suppressNextDrainRef.current = true;
+      if (aiProvider === 'gemini') (window.sai as any).geminiStop?.(projectPath);
+      else if (aiProvider === 'codex') window.sai.codexStop?.(projectPath);
+      else window.sai.claudeStop?.(projectPath);
     }
 
     isAtBottomRef.current = true;
@@ -1119,6 +1266,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     handleSend(lastUser.content, lastUser.images);
   }, [isStreaming]);
 
+  const handleClearContext = useCallback(() => {
+    setMessages([]);
+    setRenderStart(0);
+    pendingComposerRectRef.current = null;
+  }, [setMessages]);
+
   const handleQueue = (text: string, fullText: string, images?: string[], attachments?: { images: number; files: number; terminal: boolean }) => {
     if (sessionId && onQueueAdd) {
       onQueueAdd(sessionId, text, fullText, images, attachments);
@@ -1126,40 +1279,54 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   };
 
   const prevStreamingRef = useRef(false);
+  const suppressNextDrainRef = useRef(false);
   useEffect(() => {
-    if (prevStreamingRef.current && !isStreaming && messageQueue.length > 0 && onQueueShift && sessionId) {
-      const next = messageQueue[0];
-      onQueueShift(sessionId);
-      setTimeout(() => handleSend(next.fullText, next.images), 300);
+    if (prevStreamingRef.current && !isStreaming) {
+      if (suppressNextDrainRef.current) {
+        suppressNextDrainRef.current = false;
+      } else if (messageQueue.length > 0 && onQueueShift && sessionId) {
+        const next = messageQueue[0];
+        onQueueShift(sessionId);
+        setTimeout(() => handleSend(next.fullText, next.images), 300);
+      }
     }
     prevStreamingRef.current = isStreaming;
   }, [isStreaming]);
 
   return (
     <div className="chat-panel">
-      {pinnedUserMessage && (
-        <div className="pinned-prompt-bar" key={pinnedUserMessage.id}>
-          <div className="pinned-prompt-accent" />
-          <span className="pinned-prompt-label">You</span>
-          <span className="pinned-prompt-text">{pinnedUserMessage.content}</span>
-          <button
-            className="pinned-prompt-jump"
-            onClick={() => {
-              isAtBottomRef.current = false;
-              const el = userMsgRefs.current.get(pinnedUserMessage.id);
-              el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }}
-            title="Jump to message"
-          >
-            <CornerLeftUp size={11} strokeWidth={2.5} />
-            <span>Jump</span>
-          </button>
-        </div>
-      )}
+      <motion.div
+        className="pinned-prompt-bar"
+        layoutId={pinnedUserMessage ? `pinned-${pinnedUserMessage.id}` : undefined}
+        data-layout-id={pinnedUserMessage ? `pinned-${pinnedUserMessage.id}` : undefined}
+        animate={{ height: pinnedUserMessage ? 32 : 0, opacity: pinnedUserMessage ? 1 : 0 }}
+        transition={dockTransition}
+        style={{ overflow: 'hidden' }}
+      >
+        {pinnedUserMessage && (
+          <>
+            <div className="pinned-prompt-accent" />
+            <span className="pinned-prompt-label">You</span>
+            <span className="pinned-prompt-text">{pinnedUserMessage.content}</span>
+            <button
+              className="pinned-prompt-jump"
+              onClick={() => {
+                isAtBottomRef.current = false;
+                const el = userMsgRefs.current.get(pinnedUserMessage.id);
+                el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }}
+              title="Jump to message"
+            >
+              <CornerLeftUp size={11} strokeWidth={2.5} />
+              <span>Jump</span>
+            </button>
+          </>
+        )}
+      </motion.div>
       <div className="chat-messages" ref={chatContainerRef} onScroll={handleScroll}>
         {messages.length === 0 ? (
           <div className="chat-empty">
-            <img src="svg/sai.svg" alt="SAI" className="chat-empty-logo" />
+            <img src="svg/sai.svg" alt="SAI" className="chat-empty-logo chat-empty-logo-float" />
             <div className="chat-empty-title">SAI</div>
             <div className="chat-empty-subtitle">
               {projectPath ? emptyPrompt : 'Select a project to get started'}
@@ -1168,80 +1335,122 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           </div>
         ) : (
           <>
+            <div className="chat-messages-spacer" aria-hidden="true" />
             {hasHiddenMessages && (
               <div ref={sentinelRef} className="chat-load-sentinel">
                 <span className="chat-load-sentinel-text">Loading earlier messages...</span>
               </div>
             )}
             {visibleMessages.map(msg => msg.role === 'user'
-              ? <div key={msg.id} ref={el => { if (el) userMsgRefs.current.set(msg.id, el); else userMsgRefs.current.delete(msg.id); }}><ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} /></div>
-              : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} />
-            )}
+                ? (
+                  <div
+                    key={msg.id}
+                    ref={el => { if (el) userMsgRefs.current.set(msg.id, el); else userMsgRefs.current.delete(msg.id); }}
+                    data-layout-id={`pinned-${msg.id}`}
+                  >
+                    <ChatMessage
+                      message={msg}
+                      projectPath={projectPath}
+                      onFileOpen={onFileOpen}
+                      aiProvider={aiProvider}
+                      toolCallsExpanded={toolCallsExpanded}
+                      pinnedLayoutId={`pinned-${msg.id}`}
+                      isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId}
+                    />
+                  </div>
+                )
+                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} />
+              )}
           </>
         )}
-        {isStreaming && (aiProvider === 'gemini'
-          ? <GeminiThinkingAnimation loadingPhrases={geminiLoadingPhrases} />
-          : aiProvider === 'codex'
-          ? <CodexThinkingAnimation />
-          : <ThinkingAnimation />
-        )}
+        <MotionPresence>
+          {isStreaming && !firstAssistantOfTurnId && (
+            <motion.div
+              key="thinking"
+              initial={{ opacity: 0, y: DISTANCE.lift }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={thinkingTransition}
+            >
+              {aiProvider === 'gemini' ? <GeminiThinkingAnimation loadingPhrases={geminiLoadingPhrases} />
+                : aiProvider === 'codex' ? <CodexThinkingAnimation />
+                : <ThinkingAnimation />}
+            </motion.div>
+          )}
+        </MotionPresence>
         <div ref={messagesEndRef} />
       </div>
-      <div className="new-messages-anchor">
-        {showNewMessages && (
-          <button className="new-messages-btn" onClick={scrollToBottom}>
-            <ChevronDown size={12} />
-            new messages
-          </button>
-        )}
+      <div className="follow-btn-anchor">
+        <AnimatePresence>
+          {!followOn && (
+            <motion.button
+              data-testid="follow-btn"
+              className="follow-btn"
+              initial={{ opacity: 0, y: 6, scale: 0.85 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 6, scale: 0.85 }}
+              transition={followBtnTransition}
+              onClick={scrollToBottom}
+              title="Jump to latest"
+            >
+              <ChevronDown size={16} />
+              {unreadCount > 0 && (
+                <span data-testid="follow-btn-unread" className="follow-btn-unread" aria-label={`${unreadCount} new`} />
+              )}
+            </motion.button>
+          )}
+        </AnimatePresence>
       </div>
-      <TodoProgress messages={messages} isStreaming={isStreaming} />
-      <MessageQueue
-        queue={messageQueue}
-        onRemove={(id) => sessionId && onQueueRemove?.(sessionId, id)}
-      />
-      <ChatInput
-        onSend={handleSend}
-        onBeforeSend={(rect) => { pendingComposerRectRef.current = rect; }}
-        disabled={!ready}
-        slashCommands={slashCommands}
-        onQueue={handleQueue}
-        queueCount={messageQueue.length}
-        pendingApproval={pendingApproval}
-        onApprove={handleApprove}
-        onDeny={handleDeny}
-        onAlwaysAllow={handleAlwaysAllow}
-        isStreaming={isStreaming}
-        onStop={() => aiProvider === 'gemini' ? (window.sai as any).geminiStop(projectPath) : aiProvider === 'codex' ? window.sai.codexStop(projectPath) : window.sai.claudeStop?.(projectPath)}
-        permissionMode={permissionMode}
-        onPermissionChange={onPermissionChange}
-        effortLevel={effortLevel}
-        onEffortChange={onEffortChange}
-        modelChoice={modelChoice}
-        onModelChange={onModelChange}
-        contextUsage={contextUsage}
-        sessionUsage={sessionUsage}
-        sessionCost={sessionCost}
-        rateLimits={rateLimits}
-        billingMode={billingMode}
-        activeFilePath={activeFilePath}
-        fileContextEnabled={fileContextEnabled}
-        onFileContextToggle={() => setFileContextEnabled(prev => !prev)}
-        aiProvider={aiProvider}
-        codexModel={codexModel}
-        codexModels={codexModels}
-        onCodexModelChange={onCodexModelChange}
-        codexPermission={codexPermission}
-        onCodexPermissionChange={onCodexPermissionChange}
-        geminiModel={geminiModel}
-        geminiModels={geminiModels}
-        onGeminiModelChange={onGeminiModelChange}
-        geminiApprovalMode={geminiApprovalMode}
-        onGeminiApprovalModeChange={onGeminiApprovalModeChange}
-        geminiConversationMode={geminiConversationMode}
-        onGeminiConversationModeChange={onGeminiConversationModeChange}
-        terminalTabs={terminalTabs}
-      />
+      <LayoutGroup>
+        <div data-testid="chat-bottom-strip" className="chat-bottom-strip">
+          <ChatInput
+            onSend={handleSend}
+            onBeforeSend={(rect) => { pendingComposerRectRef.current = rect; }}
+            disabled={!ready}
+            slashCommands={slashCommands}
+            onQueue={handleQueue}
+            queueCount={messageQueue.length}
+            pendingApproval={pendingApproval}
+            onApprove={handleApprove}
+            onDeny={handleDeny}
+            onAlwaysAllow={handleAlwaysAllow}
+            isStreaming={isStreaming}
+            messages={messages}
+            onStop={() => aiProvider === 'gemini' ? (window.sai as any).geminiStop(projectPath) : aiProvider === 'codex' ? window.sai.codexStop(projectPath) : window.sai.claudeStop?.(projectPath)}
+            permissionMode={permissionMode}
+            onPermissionChange={onPermissionChange}
+            effortLevel={effortLevel}
+            onEffortChange={onEffortChange}
+            modelChoice={modelChoice}
+            onModelChange={onModelChange}
+            contextUsage={contextUsage}
+            sessionUsage={sessionUsage}
+            sessionCost={sessionCost}
+            rateLimits={rateLimits}
+            billingMode={billingMode}
+            activeFilePath={activeFilePath}
+            fileContextEnabled={fileContextEnabled}
+            onFileContextToggle={() => setFileContextEnabled(prev => !prev)}
+            aiProvider={aiProvider}
+            codexModel={codexModel}
+            codexModels={codexModels}
+            onCodexModelChange={onCodexModelChange}
+            codexPermission={codexPermission}
+            onCodexPermissionChange={onCodexPermissionChange}
+            geminiModel={geminiModel}
+            geminiModels={geminiModels}
+            onGeminiModelChange={onGeminiModelChange}
+            geminiApprovalMode={geminiApprovalMode}
+            onGeminiApprovalModeChange={onGeminiApprovalModeChange}
+            geminiConversationMode={geminiConversationMode}
+            onGeminiConversationModeChange={onGeminiConversationModeChange}
+            terminalTabs={terminalTabs}
+            messageQueue={messageQueue}
+            onQueueRemove={(id) => sessionId && onQueueRemove?.(sessionId, id)}
+            onQueuePromote={(id) => sessionId && onQueuePromote?.(sessionId, id)}
+          />
+        </div>
+      </LayoutGroup>
       <style>{`
         .chat-panel {
           flex: 1;
@@ -1250,39 +1459,58 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           min-height: 0;
           overflow: hidden;
         }
-        .new-messages-anchor {
+        .chat-bottom-strip {
+          display: flex;
+          flex-direction: column;
+        }
+        .follow-btn-anchor {
           position: relative;
           flex-shrink: 0;
           height: 0;
           z-index: 10;
         }
-        .new-messages-btn {
+        .follow-btn {
           position: absolute;
-          bottom: 8px;
-          left: 50%;
-          transform: translateX(-50%);
+          right: 12px;
+          bottom: 12px;
           z-index: 10;
           display: flex;
           align-items: center;
-          gap: 5px;
+          justify-content: center;
+          width: 32px;
+          height: 32px;
+          padding: 0;
+          border-radius: 50%;
+          border: 1px solid var(--border);
           background: var(--bg-secondary);
-          border: 1px solid var(--accent);
-          border-radius: 12px;
-          color: var(--text-muted);
-          font-size: 11px;
-          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
-          padding: 4px 12px;
+          color: var(--accent);
           cursor: pointer;
-          box-shadow: 0 2px 12px rgba(0,0,0,0.3);
-          white-space: nowrap;
-          transition: color 0.15s;
+          box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+          transition: background 0.15s, border-color 0.15s;
         }
-        .new-messages-btn:hover {
-          color: var(--text);
+        .follow-btn:hover {
+          background: color-mix(in srgb, var(--bg-secondary) 70%, var(--accent) 10%);
+          border-color: color-mix(in srgb, var(--border) 60%, var(--accent) 40%);
         }
-        @keyframes pinned-slide-in {
-          from { opacity: 0; transform: translateY(-100%); }
-          to   { opacity: 1; transform: translateY(0); }
+        .follow-btn-unread {
+          position: absolute;
+          top: 4px;
+          right: 4px;
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: var(--accent);
+          box-shadow: 0 0 0 2px var(--bg-secondary);
+        }
+        @media (prefers-reduced-motion: no-preference) {
+          @keyframes follow-btn-unread-pulse {
+            0%   { transform: scale(1); opacity: 1; }
+            50%  { transform: scale(1.4); opacity: 0.7; }
+            100% { transform: scale(1); opacity: 1; }
+          }
+          .follow-btn-unread {
+            animation: follow-btn-unread-pulse 1.4s ease-in-out infinite;
+          }
         }
         .pinned-prompt-bar {
           flex-shrink: 0;
@@ -1295,8 +1523,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           align-items: baseline;
           gap: 8px;
           min-width: 0;
-          height: 32px;
-          animation: pinned-slide-in 0.2s ease-out;
         }
         .pinned-prompt-accent {
           width: 3px;
@@ -1358,6 +1584,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           overflow-y: auto;
           padding: 16px;
           min-height: 0;
+          display: flex;
+          flex-direction: column;
+        }
+        .chat-messages-spacer {
+          flex: 1 1 auto;
+          min-height: 0;
         }
         .chat-load-sentinel {
           display: flex;
@@ -1388,6 +1620,15 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           height: 48px;
           opacity: 0.25;
           margin-bottom: 4px;
+        }
+        @media (prefers-reduced-motion: no-preference) {
+          @keyframes chat-empty-logo-float {
+            0%, 100% { transform: translateY(0); }
+            50%      { transform: translateY(-2px); }
+          }
+          .chat-empty-logo-float {
+            animation: chat-empty-logo-float 4s ease-in-out infinite;
+          }
         }
         .chat-empty-title {
           font-size: 32px;
@@ -1452,6 +1693,17 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           0%, 100% { opacity: 1; }
           50% { opacity: 0; }
         }
+        @media (prefers-reduced-motion: no-preference) {
+          @keyframes thinking-cursor-breathe {
+            0%, 100% { transform: scaleY(1.0); }
+            50%      { transform: scaleY(1.08); }
+          }
+          .thinking-cursor-breathing {
+            display: inline-block;
+            transform-origin: bottom;
+            animation: thinking-cursor-breathe 1.6s ease-in-out infinite;
+          }
+        }
         .codex-thinking {
           display: flex;
           align-items: center;
@@ -1485,6 +1737,16 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           from { background-position: 200% 0; }
           to { background-position: -200% 0; }
         }
+        @media (prefers-reduced-motion: no-preference) {
+          @keyframes codex-working-wave {
+            0%, 100% { transform: translateY(0); }
+            50%      { transform: translateY(-0.5px); }
+          }
+          .codex-working-wave > span {
+            display: inline-block;
+            animation: codex-working-wave 1.4s ease-in-out infinite;
+          }
+        }
         .gemini-thinking {
           display: flex;
           align-items: center;
@@ -1501,14 +1763,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           font-size: 13px;
           font-style: italic;
           color: var(--text);
-          opacity: 0.85;
-          animation: gemini-hint-fade 5s ease-in-out infinite;
-        }
-        @keyframes gemini-hint-fade {
-          0% { opacity: 0; }
-          8% { opacity: 0.85; }
-          88% { opacity: 0.85; }
-          100% { opacity: 0; }
         }
       `}</style>
     </div>

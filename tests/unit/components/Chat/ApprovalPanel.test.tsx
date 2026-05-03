@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import ApprovalPanel from '../../../../src/components/Chat/ApprovalPanel';
 import type { PendingApproval } from '../../../../src/types';
+import { SPRING } from '../../../../src/components/Chat/motion';
 
 function makeApproval(overrides: Partial<PendingApproval> = {}): PendingApproval {
   return {
@@ -228,5 +229,18 @@ describe('ApprovalPanel', () => {
       />
     );
     expect(screen.getByText('Checking files in dir')).toBeTruthy();
+  });
+
+  it('uses pop spring entry transition', () => {
+    const { container } = render(
+      <ApprovalPanel
+        approval={{ toolName: 'Bash', toolUseId: '1', command: 'ls', description: '', input: {} }}
+        onApprove={() => {}}
+        onDeny={() => {}}
+        onAlwaysAllow={() => {}}
+      />
+    );
+    const root = container.querySelector('[data-testid="approval-panel"]');
+    expect(root?.getAttribute('data-transition')).toBe(JSON.stringify(SPRING.pop));
   });
 });

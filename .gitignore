@@ -7,6 +7,6 @@ electron-dist
 .superpowers/
 .env
 .worktrees/
-coverage/playwright-report/
+coverage/
 .claude/scheduled_tasks.lock
 .claude/settings.local.json

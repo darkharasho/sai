@@ -1,51 +1,100 @@
-// tests/unit/components/Chat/MessageQueue.integration.test.tsx
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { fireEvent, render, waitFor } from '@testing-library/react';
 import MessageQueue from '../../../../src/components/Chat/MessageQueue';
 import type { QueuedMessage } from '../../../../src/types';
 
-describe('MessageQueue integration', () => {
-  it('renumbers cards after removal', async () => {
-    const queue: QueuedMessage[] = [
-      { id: '1', text: 'First' },
-      { id: '2', text: 'Second' },
-      { id: '3', text: 'Third' },
-    ];
-    const onRemove = vi.fn();
-    const { rerender } = render(<MessageQueue queue={queue} onRemove={onRemove} />);
+const buildQueue = (count: number): QueuedMessage[] =>
+  Array.from({ length: count }, (_, i) => ({
+    id: `q-${i}`,
+    text: `message ${i + 1}`,
+    fullText: `message ${i + 1}`,
+  }));
 
-    // Remove middle item
-    fireEvent.click(screen.getAllByTitle('Remove from queue')[1]);
-    expect(onRemove).toHaveBeenCalledWith('2');
-
-    // Simulate parent removing the item and re-rendering
-    const updated = queue.filter(m => m.id !== '2');
-    rerender(<MessageQueue queue={updated} onRemove={onRemove} />);
-
-    // AnimatePresence may keep the exiting card in the DOM briefly — wait for it
-    // to leave, then assert the renumbered indices.
-    await waitFor(() => {
-      expect(screen.queryAllByText('Second')).toHaveLength(0);
-    });
-    expect(screen.getByText('First')).toBeTruthy();
-    expect(screen.getByText('Third')).toBeTruthy();
-    expect(screen.queryByText('3')).toBeNull();
-  });
-
-  it('renders nothing after all items removed', () => {
-    const { container, rerender } = render(
-      <MessageQueue queue={[{ id: '1', text: 'Only one' }]} onRemove={vi.fn()} />
+describe('MessageQueue (badge + popover)', () => {
+  it('renders nothing when the queue is empty', () => {
+    const { container } = render(
+      <MessageQueue queue={[]} onRemove={vi.fn()} onPromote={vi.fn()} />
     );
-    expect(container.firstChild).not.toBeNull();
-
-    rerender(<MessageQueue queue={[]} onRemove={vi.fn()} />);
     expect(container.firstChild).toBeNull();
   });
 
-  it('truncates long message text via CSS (card structure is correct)', () => {
-    const longText = 'A'.repeat(200);
-    render(<MessageQueue queue={[{ id: '1', text: longText }]} onRemove={vi.fn()} />);
-    const textEl = screen.getByText(longText);
-    expect(textEl.className).toContain('message-queue-text');
+  it('renders the badge with "<n> queued" when the queue has items', () => {
+    const { container, getByText } = render(
+      <MessageQueue queue={buildQueue(3)} onRemove={vi.fn()} onPromote={vi.fn()} />
+    );
+    expect(container.querySelector('[data-testid="queue-badge"]')).toBeTruthy();
+    expect(getByText('3 queued')).toBeTruthy();
+  });
+
+  it('click opens the popover with all queued items', () => {
+    const { container } = render(
+      <MessageQueue queue={buildQueue(3)} onRemove={vi.fn()} onPromote={vi.fn()} />
+    );
+    expect(container.querySelector('[data-testid="queue-popover"]')).toBeNull();
+    fireEvent.click(container.querySelector('[data-testid="queue-badge"]') as HTMLElement);
+    const popover = container.querySelector('[data-testid="queue-popover"]');
+    expect(popover).toBeTruthy();
+    expect(popover?.textContent).toContain('message 1');
+    expect(popover?.textContent).toContain('message 2');
+    expect(popover?.textContent).toContain('message 3');
+  });
+
+  it('click outside closes the popover', async () => {
+    const { container } = render(
+      <MessageQueue queue={buildQueue(2)} onRemove={vi.fn()} onPromote={vi.fn()} />
+    );
+    fireEvent.click(container.querySelector('[data-testid="queue-badge"]') as HTMLElement);
+    expect(container.querySelector('[data-testid="queue-popover"]')).toBeTruthy();
+    fireEvent.mouseDown(document.body);
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="queue-popover"]')).toBeNull();
+    });
+  });
+
+  it('promote button is hidden on item at index 0', () => {
+    const { container } = render(
+      <MessageQueue queue={buildQueue(2)} onRemove={vi.fn()} onPromote={vi.fn()} />
+    );
+    fireEvent.click(container.querySelector('[data-testid="queue-badge"]') as HTMLElement);
+    const items = container.querySelectorAll('[data-testid="queue-item"]');
+    expect(items[0].querySelector('[data-testid="queue-promote"]')).toBeNull();
+    expect(items[1].querySelector('[data-testid="queue-promote"]')).toBeTruthy();
+  });
+
+  it('promote button calls onPromote with the item id', () => {
+    const onPromote = vi.fn();
+    const { container } = render(
+      <MessageQueue queue={buildQueue(3)} onRemove={vi.fn()} onPromote={onPromote} />
+    );
+    fireEvent.click(container.querySelector('[data-testid="queue-badge"]') as HTMLElement);
+    const items = container.querySelectorAll('[data-testid="queue-item"]');
+    const promoteBtn = items[2].querySelector('[data-testid="queue-promote"]') as HTMLElement;
+    fireEvent.click(promoteBtn);
+    expect(onPromote).toHaveBeenCalledWith('q-2');
+  });
+
+  it('remove button calls onRemove with the item id', () => {
+    const onRemove = vi.fn();
+    const { container } = render(
+      <MessageQueue queue={buildQueue(2)} onRemove={onRemove} onPromote={vi.fn()} />
+    );
+    fireEvent.click(container.querySelector('[data-testid="queue-badge"]') as HTMLElement);
+    const removeBtn = container.querySelector('[data-testid="queue-remove"]') as HTMLElement;
+    fireEvent.click(removeBtn);
+    expect(onRemove).toHaveBeenCalledWith('q-0');
+  });
+
+  it('renders attachment glyphs when an item has attachments', () => {
+    const queue: QueuedMessage[] = [{
+      id: 'q-att',
+      text: 'msg with attachments',
+      fullText: 'msg with attachments',
+      attachments: { images: 2, files: 1, terminal: true },
+    }];
+    const { container } = render(
+      <MessageQueue queue={queue} onRemove={vi.fn()} onPromote={vi.fn()} />
+    );
+    fireEvent.click(container.querySelector('[data-testid="queue-badge"]') as HTMLElement);
+    expect(container.querySelector('[data-testid="queue-attachments"]')).toBeTruthy();
   });
 });

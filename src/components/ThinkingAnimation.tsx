@@ -63,7 +63,7 @@ export default function ThinkingAnimation({ color }: ThinkingAnimationProps = {}
       <Icon size={16} className="thinking-icon" style={color ? { color } : undefined} />
       <span className="thinking-text" style={color ? { color } : undefined}>
         {displayText}
-        <span className="thinking-cursor" style={color ? { color } : undefined}>|</span>
+        <span className="thinking-cursor thinking-cursor-breathing" style={color ? { color } : undefined}>|</span>
         ...
       </span>
     </div>

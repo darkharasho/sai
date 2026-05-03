@@ -11,6 +11,7 @@ export interface ChatMessage {
     message: string;
     requestId?: string;
     details?: string;
+    errorType?: string;
   };
 }
 

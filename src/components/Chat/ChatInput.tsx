@@ -1,5 +1,7 @@
 import { useState, useRef, KeyboardEvent, useEffect } from 'react';
-import type { PendingApproval, TerminalTab } from '../../types';
+import type { PendingApproval, TerminalTab, ChatMessage as ChatMessageType, QueuedMessage } from '../../types';
+import TodoProgress from './TodoProgress';
+import MessageQueue from './MessageQueue';
 import { basename } from '../../utils/pathUtils';
 import ApprovalPanel from './ApprovalPanel';
 import {
@@ -22,6 +24,7 @@ interface ChatInputProps {
   disabled?: boolean;
   slashCommands?: string[];
   isStreaming?: boolean;
+  messages?: ChatMessageType[];
   onStop?: () => void;
   onQueue?: (text: string, fullText: string, images?: string[], attachments?: { images: number; files: number; terminal: boolean }) => void;
   queueCount?: number;
@@ -57,6 +60,9 @@ interface ChatInputProps {
   geminiConversationMode?: 'planning' | 'fast';
   onGeminiConversationModeChange?: (mode: 'planning' | 'fast') => void;
   terminalTabs?: TerminalTab[];
+  messageQueue?: QueuedMessage[];
+  onQueueRemove?: (id: string) => void;
+  onQueuePromote?: (id: string) => void;
 }
 
 interface AutocompleteItem {
@@ -220,7 +226,7 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommands = [], isStreaming, onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, sessionCost, rateLimits, billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, terminalTabs = [] }: ChatInputProps) {
+export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommands = [], isStreaming, messages = [], onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, sessionCost, rateLimits, billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote }: ChatInputProps) {
   const [value, setValue] = useState('');
   const [suggestions, setSuggestions] = useState<AutocompleteItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -824,6 +830,12 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
             <SquareSlash size={18} />
           </button>
           {aiProvider === 'claude' && contextUsage && <ContextRing used={contextUsage.used} total={contextUsage.total} onClick={() => onSend('/compact')} />}
+          <TodoProgress messages={messages} isStreaming={!!isStreaming} />
+          <MessageQueue
+            queue={messageQueue}
+            onRemove={onQueueRemove ?? (() => {})}
+            onPromote={onQueuePromote ?? (() => {})}
+          />
           {activeFilePath && (
             <span
               className={`active-file-chip${!fileContextEnabled ? ' disabled' : ''}`}

@@ -423,6 +423,18 @@ export default function App() {
     });
   }, []);
 
+  const handleQueuePromote = useCallback((sessionId: string, id: string) => {
+    setMessageQueues(prev => {
+      const queue = prev.get(sessionId) || [];
+      const idx = queue.findIndex(m => m.id === id);
+      if (idx <= 0) return prev;
+      const next = new Map(prev);
+      const reordered = [queue[idx], ...queue.slice(0, idx), ...queue.slice(idx + 1)];
+      next.set(sessionId, reordered);
+      return next;
+    });
+  }, []);
+
   // Derived state for the active workspace
   const projectPath = activeProjectPath;
   const sessions = activeWorkspace?.sessions ?? [];
@@ -1429,6 +1441,7 @@ export default function App() {
                   onQueueAdd={handleQueueAdd}
                   onQueueRemove={handleQueueRemove}
                   onQueueShift={handleQueueShift}
+                  onQueuePromote={handleQueuePromote}
                   sessionId={ws.activeSession.id}
                   onMessagesChange={(messages: ChatMessage[]) => {
                     wsMessagesRef.current.set(wsPath, messages);

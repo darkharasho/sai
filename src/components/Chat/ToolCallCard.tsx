@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { FileEdit, Terminal, FileText, Wrench, ChevronRight, Circle, Globe, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import type { ToolCall } from '../../types';
+import { SPRING, useReducedMotionTransition } from './motion';
 import { getShikiHighlighter, getActiveHighlightTheme } from '../../themes';
 
 function detectLang(toolCall: ToolCall): string {
@@ -356,26 +357,65 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
   const { label, code, langOverride, diff } = formatInput(toolCall);
   const lang = langOverride || detectLang(toolCall);
   const { truncated, isTruncated } = truncateCode(code, MAX_PREVIEW_LINES);
+  const entryTransition = useReducedMotionTransition(SPRING.pop);
+  const badgeTransition = useReducedMotionTransition(SPRING.flick);
+  const chevronTransition = useReducedMotionTransition(SPRING.flick);
+  const expandTransition = useReducedMotionTransition({ height: { duration: 0.26, ease: [0.22, 1, 0.36, 1] as const }, opacity: { duration: 0.18 } });
 
   const isBash = toolCall.type === 'terminal_command';
   const isTodo = toolCall.name === 'TodoWrite';
 
+  const status: 'running' | 'done' | 'error' =
+    toolCall.output && parseToolError(toolCall.output).isToolError ? 'error' :
+    toolCall.output ? 'done' : 'running';
+
   const hasBody = isBash ? !!toolCall.output : isTodo ? true : !!code;
+
+  const sigClass =
+    toolCall.type === 'file_edit'        ? 'tool-sig-wipe' :
+    toolCall.type === 'terminal_command' ? 'tool-sig-typed' :
+    toolCall.type === 'web_fetch'        ? 'tool-sig-shimmer' : '';
 
   return (
     <>
-      <div className="tool-call-card">
+      <motion.div
+        data-testid="tool-card"
+        data-entry-transition={JSON.stringify(entryTransition)}
+        data-entry-y={String(10)}
+        layout
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={entryTransition}
+        variants={{ hidden: { opacity: 0, y: 10 }, visible: { opacity: 1, y: 0 } }}
+        className="tool-call-card"
+      >
         <div className={`tool-call-header${hasBody ? ' tool-call-header-expandable' : ''}`} onClick={() => hasBody && setExpanded(!expanded)}>
           <Circle size={8} fill="var(--text-muted)" stroke="var(--text-muted)" className="tool-call-dot" />
           <Icon size={14} className="tool-call-icon" />
-          <span className="tool-call-name">{toolCall.name}</span>
+          <span className={`tool-call-name${sigClass ? ` ${sigClass}` : ''}`}>{toolCall.name}</span>
           {!isBash && !isTodo && label && <span className="tool-call-label">{label}</span>}
           {isBash && code && <span className="tool-call-label">{code}</span>}
+          <AnimatePresence mode="popLayout" initial={false}>
+            <motion.span
+              key={status}
+              data-testid="tool-status-badge"
+              data-status-transition={JSON.stringify(badgeTransition)}
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+              transition={badgeTransition}
+              className={`tool-status tool-status-${status}`}
+            >
+              {status === 'running' && <Circle size={6} fill="var(--accent)" stroke="none" />}
+              {status === 'done' && <Circle size={6} fill="var(--text-muted)" stroke="none" />}
+              {status === 'error' && <AlertCircle size={10} />}
+            </motion.span>
+          </AnimatePresence>
           {hasBody && (
             <motion.span
               className="tool-call-chevron-wrap"
               animate={{ rotate: expanded ? 90 : 0 }}
-              transition={{ type: 'spring', stiffness: 380, damping: 28 }}
+              transition={chevronTransition}
             >
               <ChevronRight size={14} className="tool-call-chevron" />
             </motion.span>
@@ -389,7 +429,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              transition={{ height: { duration: 0.26, ease: [0.22, 1, 0.36, 1] }, opacity: { duration: 0.18 } }}
+              transition={expandTransition}
               style={{ overflow: 'hidden' }}
             >
             {isBash && (
@@ -702,8 +742,55 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
           .todo-in_progress .todo-content { color: var(--text); }
           .todo-pending .todo-icon { color: var(--text-muted); }
           .todo-pending .todo-content { color: var(--text-secondary); }
+          /* Status badge */
+          .tool-status {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+          }
+          .tool-status-running { color: var(--accent); }
+          .tool-status-done { color: var(--text-muted); }
+          .tool-status-error { color: var(--red, #f85149); }
+          /* Per-type tool-card entry signatures */
+          @media (prefers-reduced-motion: no-preference) {
+            @keyframes tool-sig-wipe {
+              from { clip-path: inset(0 100% 0 0); }
+              to   { clip-path: inset(0 0 0 0); }
+            }
+            .tool-sig-wipe {
+              animation: tool-sig-wipe 380ms cubic-bezier(0.22, 1, 0.36, 1) 1;
+            }
+
+            @keyframes tool-sig-typed {
+              from { max-width: 0; }
+              to   { max-width: 100%; }
+            }
+            .tool-sig-typed {
+              display: inline-block;
+              overflow: hidden;
+              white-space: nowrap;
+              animation: tool-sig-typed 400ms steps(20, end) 1;
+            }
+
+            @keyframes tool-sig-shimmer {
+              0%   { background-position: -120% 0; }
+              100% { background-position:  220% 0; }
+            }
+            .tool-sig-shimmer {
+              background-image: linear-gradient(
+                90deg,
+                transparent 0%,
+                color-mix(in srgb, var(--accent) 25%, transparent) 50%,
+                transparent 100%
+              );
+              background-size: 60% 100%;
+              background-repeat: no-repeat;
+              animation: tool-sig-shimmer 700ms ease-out 1;
+            }
+          }
         `}</style>
-      </div>
+      </motion.div>
     </>
   );
 }

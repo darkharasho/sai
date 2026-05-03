@@ -94,5 +94,13 @@ export function parseAiError(text: string): ParsedError {
   const title = titleFor(status, errorType);
   const details = extracted ? JSON.stringify(extracted.json, null, 2) : undefined;
 
-  return { title, status, message, requestId, details };
+  return { title, status, message, requestId, details, errorType };
+}
+
+export function looksLikeApiError(text: string): boolean {
+  if (!text) return false;
+  const t = text.trim();
+  if (/^API Error\b/i.test(t)) return true;
+  if (/"type"\s*:\s*"error"/.test(t) && /"message"\s*:/.test(t)) return true;
+  return false;
 }
