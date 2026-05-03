@@ -1155,17 +1155,13 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     return null;
   }, [messages, turnStartIndex]);
   const lastAssistantId = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
+    if (turnStartIndex == null) return null;
+    for (let i = messages.length - 1; i >= turnStartIndex; i--) {
       if (messages[i].role === 'assistant') return messages[i].id;
     }
     return null;
-  }, [messages]);
-  const showThinking = useMemo(() => {
-    if (!isStreaming) return false;
-    if (!firstAssistantOfTurnId) return true;
-    const last = messages[messages.length - 1];
-    return last?.role === 'assistant' && !!last.toolCalls?.length;
-  }, [isStreaming, firstAssistantOfTurnId, messages]);
+  }, [messages, turnStartIndex]);
+  const showThinking = isStreaming;
   const hasHiddenMessages = renderStart > 0;
 
   useEffect(() => {
@@ -1701,7 +1697,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           display: flex;
           align-items: center;
           gap: 8px;
-          padding: 12px 0;
+          padding: 12px 14px;
           min-height: 40px;
         }
         .thinking-icon {
@@ -1738,7 +1734,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           display: flex;
           align-items: center;
           gap: 8px;
-          padding: 12px 0;
+          padding: 12px 14px;
         }
         .codex-thinking-dot {
           color: var(--text-muted);
@@ -1781,7 +1777,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           display: flex;
           align-items: center;
           gap: 8px;
-          padding: 8px 0;
+          padding: 8px 14px;
           margin-bottom: 12px;
         }
         .gemini-spinner {
