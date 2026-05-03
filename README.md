@@ -37,8 +37,17 @@ Keep multiple projects open in one app window and jump between them from the wor
 ### Chat with real project context
 Talk to your assistant inside the editor with your repository context already attached. SAI supports streaming responses, image attachments, file-aware prompting, persistent sessions, and a built-in chat history menu so you can resume past conversations without losing your place.
 
+### A composer that keeps up with you
+Queue follow-up prompts behind a streaming turn, promote any queued item to "next," and bypass the queue with a plain Enter to stop the current turn instead. A todo-progress ring and queue badge live inside the input toolbar, expanding into popovers when you need detail. A bottom-right follow button with an unread dot appears whenever new output lands off-screen, and autoscroll follows growing tool output without fighting your cursor.
+
 ### Review approvals, usage, and context in real time
-Stay in control while the model works. SAI exposes provider-specific approval modes, an inline approval panel for tool calls, context and token usage indicators, effort controls, and model pickers so you can trade off speed, cost, and autonomy without leaving the composer.
+Stay in control while the model works. SAI exposes provider-specific approval modes, an inline approval panel for tool calls, context and token usage indicators, effort controls, and model pickers so you can trade off speed, cost, and autonomy without leaving the composer. Each AI message shows its own response duration, each tool call reports how long it ran, and a cumulative turn timer makes long agentic runs legible at a glance.
+
+### A thinking animation with personality
+While the model works, SAI shows a mission-clock telemetry line — `[MM:SS.d]` plus an ALL-CAPS phrase like `LOCKING TELEMETRY` or `BREACHING ICE` and a hard-blinking block cursor — paired with a drifting SAI mark. Prefer something quieter? Disable the SAI animation in Settings and the row falls back to a calm lucide spinner with the classic "Thinking… Pondering…" word pool.
+
+### Errors that read like a terminal, not a stack trace
+When a provider call fails — or when the model returns text that looks like an API error — SAI routes it into a redesigned error card with a terminal-diagnostic look and a two-step clear-context button, so recovering from a bad turn doesn't mean re-reading a wall of red.
 
 ### Built-in editor and diff review
 A full Monaco-powered editor with tabs, syntax highlighting, unsaved-change protection, and side-by-side or unified diff views. Open file links directly from chat, inspect generated patches, and expand embedded code blocks into a focused fullscreen editor when you need room.
@@ -65,6 +74,7 @@ Grab the latest release for your platform:
 
 - **Linux** — [AppImage](https://github.com/darkharasho/sai/releases/latest)
 - **Windows** — [Installer](https://github.com/darkharasho/sai/releases/latest)
+- **macOS** — [DMG](https://github.com/darkharasho/sai/releases/latest)
 
 ### Prerequisites
 
@@ -94,7 +104,7 @@ npm run dist             # build distributable
 
 | Layer     | Technology                              |
 |-----------|-----------------------------------------|
-| Framework | Electron 33                             |
+| Framework | Electron 36                             |
 | Frontend  | React 19, TypeScript 5.7, Vite 6       |
 | Editor    | Monaco Editor                           |
 | Terminal  | XTerm.js + node-pty                     |
