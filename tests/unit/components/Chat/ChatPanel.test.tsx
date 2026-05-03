@@ -543,6 +543,16 @@ describe('ChatPanel', () => {
     window.matchMedia = original;
   });
 
+  it('does not render MessageQueue as a standalone child of the bottom strip', () => {
+    const props = {
+      ...baseProps(),
+      messageQueue: [{ id: 'q-0', text: 'a', fullText: 'a' }],
+    };
+    const { container } = render(<ChatPanel {...props} />);
+    const bottomStrip = container.querySelector('[data-testid="chat-bottom-strip"]');
+    expect(bottomStrip?.querySelector('[data-testid="queue-badge"]')).toBeNull();
+  });
+
   it('does not render TodoProgress as a standalone child of the bottom strip', () => {
     const props = baseProps();
     const { container } = render(<ChatPanel {...props} />);

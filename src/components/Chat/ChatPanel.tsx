@@ -270,7 +270,6 @@ function GeminiThinkingAnimation({ loadingPhrases = 'all' }: { loadingPhrases?: 
 
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
-import MessageQueue from './MessageQueue';
 import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, QueuedMessage, TerminalTab } from '../../types';
 import { buildHelpMessage } from './helpText';
 import { parseAiError, looksLikeApiError } from './parseAiError';
@@ -312,6 +311,7 @@ interface ChatPanelProps {
   onQueueAdd?: (sessionId: string, text: string, fullText: string, images?: string[], attachments?: { images: number; files: number; terminal: boolean }) => void;
   onQueueRemove?: (sessionId: string, id: string) => void;
   onQueueShift?: (sessionId: string) => void;
+  onQueuePromote?: (sessionId: string, id: string) => void;
   sessionId?: string;
   terminalTabs?: TerminalTab[];
   onSlashCommandsUpdate?: (commands: string[]) => void;
@@ -520,7 +520,7 @@ const FAKE_ERROR_VARIANTS = {
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, sessionId, terminalTabs = [], onSlashCommandsUpdate }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(initialMessages || []);
   const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);
   const setMessages = useCallback((updater: ChatMessageType[] | ((prev: ChatMessageType[]) => ChatMessageType[])) => {
@@ -1384,10 +1384,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       </div>
       <LayoutGroup>
         <div data-testid="chat-bottom-strip" className="chat-bottom-strip">
-          <MessageQueue
-            queue={messageQueue}
-            onRemove={(id) => sessionId && onQueueRemove?.(sessionId, id)}
-          />
           <ChatInput
             onSend={handleSend}
             onBeforeSend={(rect) => { pendingComposerRectRef.current = rect; }}
@@ -1430,6 +1426,9 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             geminiConversationMode={geminiConversationMode}
             onGeminiConversationModeChange={onGeminiConversationModeChange}
             terminalTabs={terminalTabs}
+            messageQueue={messageQueue}
+            onQueueRemove={(id) => sessionId && onQueueRemove?.(sessionId, id)}
+            onQueuePromote={(id) => sessionId && onQueuePromote?.(sessionId, id)}
           />
         </div>
       </LayoutGroup>
