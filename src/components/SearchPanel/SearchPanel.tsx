@@ -74,7 +74,7 @@ export default function SearchPanel({ projectPath, getOpenBuffers, applyMonacoEd
   };
 
   return (
-    <aside className="search-panel">
+    <aside className="search-panel sidebar-mount">
       <div className="search-header">
         <span className="search-header-icon"><Search size={14} /></span>
         <span className="search-header-title">Search</span>

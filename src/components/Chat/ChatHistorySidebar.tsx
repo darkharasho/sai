@@ -264,7 +264,7 @@ export default function ChatHistorySidebar({
   const providerColor = PROVIDER_COLORS[aiProvider] || '#888';
 
   return (
-    <div className="chat-history-sidebar">
+    <div className="chat-history-sidebar sidebar-mount">
       {/* Search bar */}
       <div className="chat-history-search">
         <Search size={12} className="chat-history-search-icon" />

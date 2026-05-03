@@ -122,7 +122,7 @@ export default function PluginsSidebar() {
   }
 
   return (
-    <div className="plugins-sidebar">
+    <div className="plugins-sidebar sidebar-mount">
       <div className="sidebar-tabs">
         <button
           className={`sidebar-tab ${tab === 'installed' ? 'active' : ''}`}

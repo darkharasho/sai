@@ -136,7 +136,7 @@ export default function McpSidebar() {
   }
 
   return (
-    <div className="mcp-sidebar">
+    <div className="mcp-sidebar sidebar-mount">
       <div className="sidebar-tabs">
         <button
           className={`sidebar-tab ${tab === 'installed' ? 'active' : ''}`}

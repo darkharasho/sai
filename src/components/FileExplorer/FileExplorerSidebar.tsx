@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Folder, FolderOpen, FileText, FileCode2, Image, ChevronRight, ChevronDown, FilePlus, FolderPlus } from 'lucide-react';
+import { Folder, FolderOpen, FileText, FileCode2, Image, ChevronRight, FilePlus, FolderPlus } from 'lucide-react';
 import type { DirEntry } from '../../types';
 import ContextMenu from './ContextMenu';
 import { basename } from '../../utils/pathUtils';
@@ -364,7 +364,7 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
             onClick={() => toggleDir(entry.path)}
             onContextMenu={e => handleContextMenu(e, entry, parentPath)}
           >
-            {isExpanded ? <ChevronDown size={14} className="tree-chevron" /> : <ChevronRight size={14} className="tree-chevron" />}
+            <ChevronRight size={14} className={`tree-chevron ${isExpanded ? 'tree-chevron-open' : ''}`} />
             {isExpanded ? <FolderOpen size={14} className="tree-icon folder" /> : <Folder size={14} className="tree-icon folder" />}
             {isRenaming ? (
               <InlineNameInput initialValue={inlineInput!.initialValue} onSubmit={handleInlineSubmit} onCancel={() => setInlineInput(null)} />
@@ -411,6 +411,7 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
 
   return (
     <div
+      className="sidebar-mount"
       style={{
         width: 'var(--sidebar-width)',
         minWidth: 'var(--sidebar-width)',
@@ -516,6 +517,10 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
           white-space: nowrap;
           overflow: hidden;
         }
+        .tree-row {
+          transition: background var(--dur-fast) var(--ease-out-soft),
+                      color var(--dur-fast) var(--ease-out-soft);
+        }
         .tree-row:hover {
           background: var(--bg-hover);
           color: var(--text);
@@ -523,6 +528,10 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
         .tree-chevron {
           color: var(--text-muted);
           flex-shrink: 0;
+          transition: transform 150ms var(--ease-out-soft);
+        }
+        .tree-chevron-open {
+          transform: rotate(90deg);
         }
         .tree-icon.folder {
           color: var(--accent);

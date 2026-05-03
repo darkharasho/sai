@@ -184,6 +184,7 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
 
   return (
     <div
+      className="sidebar-mount"
       style={{
         width: 'var(--sidebar-width)',
         minWidth: 'var(--sidebar-width)',

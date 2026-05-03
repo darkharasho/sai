@@ -85,9 +85,30 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0 }: 
           border: none;
           color: var(--text-muted);
           cursor: pointer;
-          border-radius: 8px;
+          border-radius: 0 8px 8px 0;
           position: relative;
-          transition: color 0.15s, background 0.15s;
+          transition: color var(--dur-fast) var(--ease-out-soft),
+                      background var(--dur-fast) var(--ease-out-soft),
+                      transform var(--dur-fast) var(--ease-out-soft);
+        }
+        .nav-btn::before {
+          content: '';
+          position: absolute;
+          left: 0;
+          top: 6px;
+          bottom: 6px;
+          width: 2px;
+          background: var(--accent);
+          border-radius: 0 2px 2px 0;
+          transform: scaleY(0);
+          transform-origin: center;
+          transition: transform var(--dur-base) var(--ease-out-soft);
+        }
+        .nav-btn.active::before {
+          transform: scaleY(1);
+        }
+        .nav-btn:active {
+          transform: scale(0.94);
         }
         .nav-label {
           font-size: 8px;
@@ -111,6 +132,11 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0 }: 
           text-align: center;
           border-radius: 8px;
           padding: 0 3px;
+          animation: badge-pop var(--dur-base) var(--ease-out-soft);
+        }
+        @keyframes badge-pop {
+          from { transform: scale(0.6); opacity: 0; }
+          to { transform: scale(1); opacity: 1; }
         }
         .nav-btn:hover {
           color: var(--text);
@@ -119,8 +145,6 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0 }: 
         .nav-btn.active {
           color: var(--accent);
           background: rgba(199, 145, 12, 0.08);
-          border-left: 2px solid var(--accent);
-          border-radius: 0 8px 8px 0;
         }
         .nav-divider {
           width: 24px;
