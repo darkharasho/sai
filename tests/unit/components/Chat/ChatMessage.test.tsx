@@ -183,6 +183,83 @@ describe('ChatMessage', () => {
     expect(container.querySelector('.chat-msg-error-pulse')).toBeTruthy();
   });
 
+  it('renders the new error status bar with error_type and HTTP status', () => {
+    const { container } = render(
+      <ChatMessage message={{
+        id: 'e-1', role: 'system', content: 'Output blocked',
+        timestamp: 0,
+        error: {
+          title: 'Invalid request',
+          status: 400,
+          message: 'Output blocked by content filtering policy',
+          requestId: 'req_abc',
+          errorType: 'invalid_request_error',
+        } as any,
+      }} />
+    );
+    const bar = container.querySelector('[data-testid="chat-msg-error-status-bar"]');
+    expect(bar).toBeTruthy();
+    expect(bar?.textContent).toContain('invalid_request_error');
+    expect(bar?.textContent).toContain('HTTP 400');
+  });
+
+  it('renders the prompt-style body with the error message', () => {
+    const { container } = render(
+      <ChatMessage message={{
+        id: 'e-2', role: 'system', content: 'Output blocked',
+        timestamp: 0,
+        error: { title: 'Invalid request', status: 400, message: 'Output blocked by content filtering policy' } as any,
+      }} />
+    );
+    const body = container.querySelector('[data-testid="chat-msg-error-body"]');
+    expect(body?.textContent).toContain('Output blocked by content filtering policy');
+  });
+
+  it('renders req_id meta when present and omits when absent', () => {
+    const { container, rerender } = render(
+      <ChatMessage message={{
+        id: 'e-3', role: 'system', content: 'x', timestamp: 0,
+        error: { title: 'X', message: 'x', requestId: 'req_abc' } as any,
+      }} />
+    );
+    expect(container.querySelector('[data-testid="chat-msg-error-meta"]')?.textContent).toContain('req_abc');
+
+    rerender(
+      <ChatMessage message={{
+        id: 'e-3', role: 'system', content: 'x', timestamp: 0,
+        error: { title: 'X', message: 'x' } as any,
+      }} />
+    );
+    expect(container.querySelector('[data-testid="chat-msg-error-meta"]')).toBeNull();
+  });
+
+  it('details toggle expands the RAW RESPONSE panel', () => {
+    const { container, getByText } = render(
+      <ChatMessage message={{
+        id: 'e-4', role: 'system', content: 'x', timestamp: 0,
+        error: { title: 'X', message: 'x', details: '{"raw":"yes"}' } as any,
+      }} />
+    );
+    expect(container.querySelector('[data-testid="chat-msg-error-details-panel"]')).toBeNull();
+    fireEvent.click(getByText(/Details/i));
+    expect(container.querySelector('[data-testid="chat-msg-error-details-panel"]')).toBeTruthy();
+    expect(container.textContent).toContain('RAW RESPONSE');
+  });
+
+  it('retry button calls onRetry', () => {
+    const onRetry = vi.fn();
+    const { getByText } = render(
+      <ChatMessage
+        onRetry={onRetry}
+        message={{
+          id: 'e-5', role: 'system', content: 'x', timestamp: 0,
+          error: { title: 'X', message: 'x' } as any,
+        }} />
+    );
+    fireEvent.click(getByText(/Retry/i));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
   it('marks streaming text with chat-streaming-tail class', () => {
     const { container } = render(
       <ChatMessage isStreaming message={{ id: 's-1', role: 'assistant', content: 'partial', timestamp: 0 }} />

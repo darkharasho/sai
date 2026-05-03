@@ -4,8 +4,8 @@ import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 import 'highlight.js/styles/monokai.css';
-import { AlertTriangle, Check, ChevronRight, Circle, Copy, RotateCw, Terminal, TerminalSquare, X } from 'lucide-react';
-import { motion } from 'motion/react';
+import { Check, ChevronRight, Circle, Copy, RotateCw, Terminal, TerminalSquare, X } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import ToolCallCard from './ToolCallCard';
 import Stagger from './Stagger';
 import { readFlipRect, hasFlipRect } from './flipRegistry';
@@ -311,6 +311,7 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
     ? { y: flipOffsetRef.current, opacity: 0.6 }
     : false as const;
   const flipTransition = useReducedMotionTransition(SPRING.dock);
+  const detailsTransition = useReducedMotionTransition(SPRING.gentle);
   const effectiveEntryProps = flipActive
     ? {
         initial: flipInitial,
@@ -406,41 +407,56 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
   }, [typewriterActive, rawAssistantContent.length, displayLen, message.id]);
 
   if (message.error) {
-    const { title, status, message: errMsg, requestId, details } = message.error;
+    const { title, status, message: errMsg, requestId, details, errorType } = message.error;
     const handleCopyDetails = () => {
       if (!details) return;
       navigator.clipboard.writeText(details);
       setErrorDetailsCopied(true);
       setTimeout(() => setErrorDetailsCopied(false), 1500);
     };
+
     return (
-      <motion.div className={`chat-msg chat-msg-error-wrap${message.error ? ' chat-msg-error-pulse' : ''}`} {...entryProps}>
+      <motion.div
+        className={`chat-msg chat-msg-error-wrap${message.error ? ' chat-msg-error-pulse' : ''}`}
+        {...entryProps}
+      >
         <div className="chat-msg-error">
-          <div className="chat-msg-error-header">
-            <AlertTriangle size={16} className="chat-msg-error-icon" />
-            <div className="chat-msg-error-title">
-              {title}
-              {status != null && <span className="chat-msg-error-status">HTTP {status}</span>}
-            </div>
+          <div className="chat-msg-error-status-bar" data-testid="chat-msg-error-status-bar">
+            <span className="chat-msg-error-dot" aria-hidden="true" />
+            <span className="chat-msg-error-status-label">
+              ERROR{errorType ? ` · ${errorType}` : ''}
+            </span>
+            {status != null && (
+              <span className="chat-msg-error-status-http">HTTP {status}</span>
+            )}
           </div>
-          <div className="chat-msg-error-body">{errMsg}</div>
+
+          <div className="chat-msg-error-body" data-testid="chat-msg-error-body">
+            <span className="chat-msg-error-prompt" aria-hidden="true">{'›'}</span>{' '}
+            <span className="chat-msg-error-msg">{errMsg}</span>
+          </div>
+
           {requestId && (
-            <div className="chat-msg-error-meta">
-              request_id <code>{requestId}</code>
+            <div className="chat-msg-error-meta" data-testid="chat-msg-error-meta">
+              <span className="chat-msg-error-meta-key">req_id</span>{' '}
+              <span className="chat-msg-error-meta-val">{requestId}</span>
             </div>
           )}
-          {details && (
-            <div className="chat-msg-error-details">
-              <button
-                type="button"
-                className="chat-msg-error-toggle"
-                onClick={() => setErrorDetailsOpen(o => !o)}
+
+          <AnimatePresence initial={false}>
+            {errorDetailsOpen && details && (
+              <motion.div
+                key="details-panel"
+                data-testid="chat-msg-error-details-panel"
+                className="chat-msg-error-details-panel"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={detailsTransition}
+                style={{ overflow: 'hidden' }}
               >
-                <ChevronRight size={12} className={`chat-msg-error-chev ${errorDetailsOpen ? 'open' : ''}`} />
-                {errorDetailsOpen ? 'Hide details' : 'Show details'}
-              </button>
-              {errorDetailsOpen && (
-                <div className="chat-msg-error-details-body">
+                <div className="chat-msg-error-details-header">
+                  <span className="chat-msg-error-details-label">RAW RESPONSE</span>
                   <button
                     type="button"
                     className="chat-msg-error-copy"
@@ -449,99 +465,172 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
                   >
                     {errorDetailsCopied ? <Check size={12} /> : <Copy size={12} />}
                   </button>
-                  <pre>{details}</pre>
                 </div>
-              )}
-            </div>
-          )}
-          {onRetry && (
-            <div className="chat-msg-error-actions">
-              <button type="button" className="chat-msg-error-retry" onClick={onRetry}>
+                <pre className="chat-msg-error-details-pre">{details}</pre>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <div className="chat-msg-error-actions">
+            {onRetry && (
+              <button
+                type="button"
+                className="chat-msg-error-retry"
+                data-testid="chat-msg-error-retry"
+                onClick={onRetry}
+              >
                 <RotateCw size={12} /> Retry
               </button>
-            </div>
-          )}
+            )}
+            {details && (
+              <button
+                type="button"
+                className="chat-msg-error-toggle"
+                onClick={() => setErrorDetailsOpen(o => !o)}
+              >
+                <ChevronRight
+                  size={12}
+                  className={`chat-msg-error-chev ${errorDetailsOpen ? 'open' : ''}`}
+                />
+                Details
+              </button>
+            )}
+          </div>
         </div>
+
         <style>{`
           @media (prefers-reduced-motion: no-preference) {
             @keyframes chat-msg-error-pulse {
               0%   { box-shadow: 0 0 0 1px var(--accent); }
               100% { box-shadow: 0 0 0 1px transparent; }
             }
-            .chat-msg-error-pulse {
-              animation: chat-msg-error-pulse 200ms ease-out 1;
+            .chat-msg-error-pulse { animation: chat-msg-error-pulse 200ms ease-out 1; }
+
+            @keyframes chat-msg-error-dot-pulse {
+              0%, 100% { transform: scale(1); box-shadow: 0 0 6px var(--red); }
+              50%      { transform: scale(1.15); box-shadow: 0 0 10px var(--red); }
+            }
+            .chat-msg-error-dot {
+              animation: chat-msg-error-dot-pulse 1.4s ease-in-out infinite;
             }
           }
           .chat-msg-error-wrap { margin-bottom: 16px; }
           .chat-msg-error {
-            border: 1px solid color-mix(in srgb, var(--red) 40%, var(--border));
-            background: color-mix(in srgb, var(--red) 8%, var(--bg-input));
-            border-left: 3px solid var(--red);
-            border-radius: 8px;
-            padding: 10px 14px;
-            color: var(--text);
-            font-size: 13px;
-            line-height: 1.5;
-          }
-          .chat-msg-error-header {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 4px;
-          }
-          .chat-msg-error-icon { color: var(--red); flex-shrink: 0; }
-          .chat-msg-error-title {
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-          }
-          .chat-msg-error-status {
-            font-size: 11px;
-            font-weight: 500;
-            color: var(--text-muted);
             background: var(--bg-secondary);
             border: 1px solid var(--border);
-            padding: 1px 6px;
-            border-radius: 4px;
-            font-family: monospace;
+            border-radius: 6px;
+            overflow: hidden;
+            color: var(--text);
+            font-size: 13px;
+            line-height: 1.55;
           }
-          .chat-msg-error-body { color: var(--text); white-space: pre-wrap; word-break: break-word; }
-          .chat-msg-error-actions {
-            margin-top: 8px;
+          .chat-msg-error-status-bar {
             display: flex;
+            align-items: center;
             gap: 8px;
+            padding: 6px 12px;
+            background: var(--bg-input);
+            border-bottom: 1px solid var(--border);
+            font-size: 11px;
+            letter-spacing: 0.06em;
+          }
+          .chat-msg-error-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--red);
+            box-shadow: 0 0 6px var(--red);
+            flex-shrink: 0;
+          }
+          .chat-msg-error-status-label {
+            color: var(--red);
+            font-weight: 600;
+          }
+          .chat-msg-error-status-http {
+            margin-left: auto;
+            color: var(--text-muted);
+            font-family: 'Geist Mono', 'JetBrains Mono', monospace;
+          }
+          .chat-msg-error-body {
+            padding: 10px 12px 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+          }
+          .chat-msg-error-prompt {
+            color: var(--red);
+            user-select: none;
+          }
+          .chat-msg-error-msg { color: var(--text); }
+          .chat-msg-error-meta {
+            padding: 4px 12px 10px;
+            font-size: 11px;
+            font-family: 'Geist Mono', 'JetBrains Mono', monospace;
+          }
+          .chat-msg-error-meta-key { color: var(--text-muted); }
+          .chat-msg-error-meta-val { color: var(--text-secondary); }
+          .chat-msg-error-details-panel {
+            border-top: 1px solid var(--border);
+          }
+          .chat-msg-error-details-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 12px;
+            font-size: 10px;
+            letter-spacing: 0.08em;
+          }
+          .chat-msg-error-details-label {
+            color: var(--text-muted);
+            font-weight: 600;
+          }
+          .chat-msg-error-copy {
+            margin-left: auto;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: flex;
+            padding: 2px;
+            border-radius: 3px;
+            transition: color 0.15s;
+          }
+          .chat-msg-error-copy:hover { color: var(--text); }
+          .chat-msg-error-details-pre {
+            padding: 8px 12px 10px;
+            margin: 0;
+            background: var(--bg-secondary);
+            font-family: 'Geist Mono', 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--text-secondary);
+            overflow-x: auto;
+            max-height: 200px;
+            overflow-y: auto;
+          }
+          .chat-msg-error-actions {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 6px 8px;
+            background: var(--bg-input);
+            border-top: 1px solid var(--border);
           }
           .chat-msg-error-retry {
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
-            color: var(--text);
+            background: var(--red);
+            color: var(--bg-primary);
+            border: none;
+            font-weight: 600;
             font-size: 12px;
-            padding: 4px 10px;
+            padding: 5px 12px;
             border-radius: 5px;
             cursor: pointer;
-            transition: background 0.15s, border-color 0.15s;
+            transition: background 0.15s;
           }
           .chat-msg-error-retry:hover {
-            background: var(--bg-hover);
-            border-color: color-mix(in srgb, var(--red) 50%, var(--border));
+            background: color-mix(in srgb, var(--red) 80%, white 20%);
           }
-          .chat-msg-error-meta {
-            margin-top: 6px;
-            font-size: 11px;
-            color: var(--text-muted);
-          }
-          .chat-msg-error-meta code {
-            font-family: monospace;
-            background: var(--bg-secondary);
-            padding: 1px 5px;
-            border-radius: 3px;
-            border: 1px solid var(--border);
-          }
-          .chat-msg-error-details { margin-top: 8px; }
           .chat-msg-error-toggle {
             display: inline-flex;
             align-items: center;
@@ -550,40 +639,17 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
             border: none;
             color: var(--text-muted);
             font-size: 11px;
+            padding: 4px 10px;
+            border-radius: 4px;
             cursor: pointer;
-            padding: 2px 0;
+            transition: color 0.15s, background 0.15s;
           }
-          .chat-msg-error-toggle:hover { color: var(--text); }
+          .chat-msg-error-toggle:hover {
+            color: var(--text);
+            background: rgba(255, 255, 255, 0.04);
+          }
           .chat-msg-error-chev { transition: transform 0.15s; }
           .chat-msg-error-chev.open { transform: rotate(90deg); }
-          .chat-msg-error-details-body {
-            position: relative;
-            margin-top: 6px;
-          }
-          .chat-msg-error-details-body pre {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 8px 10px;
-            margin: 0;
-            overflow-x: auto;
-            font-size: 11px;
-            color: var(--text-secondary);
-            max-height: 200px;
-          }
-          .chat-msg-error-copy {
-            position: absolute;
-            top: 6px;
-            right: 6px;
-            background: none;
-            border: none;
-            color: var(--text-muted);
-            opacity: 0.5;
-            cursor: pointer;
-            display: flex;
-            padding: 2px;
-          }
-          .chat-msg-error-copy:hover { opacity: 1; color: var(--text); }
         `}</style>
       </motion.div>
     );
