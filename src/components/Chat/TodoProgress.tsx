@@ -1,6 +1,6 @@
-import { useMemo, useState, useEffect, useRef } from 'react';
+import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import type { ChatMessage } from '../../types';
-import { ListChecks, X } from 'lucide-react';
+import { Check, X } from 'lucide-react';
 import { motion } from 'motion/react';
 import { SPRING, useReducedMotionTransition } from './motion';
 
@@ -54,12 +54,17 @@ function findLatestTodos(messages: ChatMessage[]): Todo[] | null {
   return null;
 }
 
+const RADIUS = 8;
+const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
+
 export default function TodoProgress({ messages, isStreaming }: TodoProgressProps) {
   const todos = useMemo(() => findLatestTodos(messages), [messages]);
   const [dismissed, setDismissed] = useState(false);
-  const fillTransition = useReducedMotionTransition(SPRING.gentle);
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLSpanElement | null>(null);
+  const ringTransition = useReducedMotionTransition(SPRING.gentle);
+  const popoverTransition = useReducedMotionTransition(SPRING.pop);
 
-  // Reset dismissed state when a new streaming turn begins.
   const prevStreamingRef = useRef(isStreaming);
   useEffect(() => {
     if (!prevStreamingRef.current && isStreaming) {
@@ -68,151 +73,227 @@ export default function TodoProgress({ messages, isStreaming }: TodoProgressProp
     prevStreamingRef.current = isStreaming;
   }, [isStreaming]);
 
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      const target = e.target as Node | null;
+      if (target && wrapRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
   const completed = todos ? todos.filter((t) => t.status === 'completed').length : 0;
   const total = todos ? todos.length : 0;
 
-  // Hide when: not streaming, no todos, dismissed, or all tasks complete.
+  const handleDismiss = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDismissed(true);
+    setOpen(false);
+  }, []);
+
   if (!isStreaming || !todos || total === 0 || dismissed || completed === total) return null;
 
   const inProgress = todos.find((t) => t.status === 'in_progress');
-  const percent = total > 0 ? (completed / total) * 100 : 0;
   const activeLabel = inProgress ? (inProgress.activeForm || inProgress.content) : 'Planning…';
+  const ratio = total > 0 ? completed / total : 0;
+  const dashOffset = CIRCUMFERENCE - ratio * CIRCUMFERENCE;
 
   return (
-    <div className="todo-progress" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={completed}>
-      <span className="todo-progress-icon">
-        <ListChecks size={11} />
-      </span>
-      <span className="todo-progress-count">
-        <span className="todo-progress-count-done">{completed}</span>
-        <span className="todo-progress-count-sep">/</span>
-        <span className="todo-progress-count-total">{total}</span>
-      </span>
-      <div className="todo-progress-track">
-        <motion.div
-          data-testid="todo-progress-fill"
-          data-transition={JSON.stringify(fillTransition)}
-          className={`todo-progress-fill${inProgress ? ' todo-progress-fill--active' : ''}`}
-          animate={{ width: `${percent}%` }}
-          transition={fillTransition}
+    <span
+      ref={wrapRef}
+      className="todo-ring-wrap"
+      data-testid="todo-ring"
+      onClick={() => setOpen(o => !o)}
+      title={open ? undefined : `${completed}/${total} · ${activeLabel}`}
+    >
+      <svg className="todo-ring-svg" width="22" height="22" viewBox="0 0 22 22">
+        <circle cx="11" cy="11" r={RADIUS} fill="none" stroke="var(--border)" strokeWidth="2.5" />
+        <motion.circle
+          cx="11" cy="11" r={RADIUS}
+          fill="none"
+          stroke="var(--green)"
+          strokeWidth="2.5"
+          strokeDasharray={CIRCUMFERENCE}
+          strokeLinecap="round"
+          transform="rotate(-90 11 11)"
+          animate={{ strokeDashoffset: dashOffset }}
+          transition={ringTransition}
         />
-      </div>
-      <span className="todo-progress-active-text" title={activeLabel}>{activeLabel}</span>
-      <button
-        className="todo-progress-dismiss"
-        onClick={() => setDismissed(true)}
-        aria-label="Dismiss todo progress"
-      >
-        <X size={10} />
-      </button>
+      </svg>
+      <span className="todo-ring-count">{completed}/{total}</span>
+
+      {open && (
+          <motion.div
+            data-testid="todo-ring-popover"
+            className="todo-ring-popover"
+            initial={{ opacity: 0, y: 4, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={popoverTransition}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="todo-ring-popover-header">
+              <span className="todo-ring-popover-title">Tasks</span>
+              <span className="todo-ring-popover-count">{completed}/{total}</span>
+              <button
+                data-testid="todo-ring-dismiss"
+                className="todo-ring-popover-dismiss"
+                onClick={handleDismiss}
+                aria-label="Dismiss task progress"
+              >
+                <X size={12} />
+              </button>
+            </div>
+            <ul className="todo-ring-popover-list">
+              {todos.map((t) => {
+                const status = t.status === 'completed' ? 'done' : t.status === 'in_progress' ? 'active' : 'pending';
+                return (
+                  <li
+                    key={t.id}
+                    data-testid="todo-ring-item"
+                    className={`todo-ring-item todo-ring-item--${status}`}
+                  >
+                    <span className={`todo-ring-status todo-ring-status--${status}`}>
+                      {status === 'done' && <Check size={9} strokeWidth={3} />}
+                    </span>
+                    <span className="todo-ring-text">
+                      {status === 'active' ? (t.activeForm || t.content) : t.content}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </motion.div>
+        )}
+
       <style>{`
-        @keyframes todo-progress-slide-in {
-          from { opacity: 0; transform: translateY(3px); }
-          to { opacity: 1; transform: translateY(0); }
+        .todo-ring-wrap {
+          position: relative;
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          padding: 2px 6px 2px 4px;
+          border-radius: 5px;
+          cursor: pointer;
+          transition: background 0.15s;
+          color: var(--green);
         }
-        @keyframes todo-progress-shimmer {
-          0% { transform: translateX(-100%); }
-          100% { transform: translateX(250%); }
+        .todo-ring-wrap:hover { background: color-mix(in srgb, var(--green) 8%, transparent); }
+        .todo-ring-svg { display: block; flex-shrink: 0; }
+        .todo-ring-count {
+          font-variant-numeric: tabular-nums;
+          font-weight: 600;
+          font-size: 10px;
+          color: var(--green);
         }
-        .todo-progress {
+
+        .todo-ring-popover {
+          position: absolute;
+          bottom: calc(100% + 8px);
+          left: 0;
+          width: 320px;
+          background: var(--bg-secondary);
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          padding: 0;
+          box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+          z-index: 10;
+          color: var(--text);
+          cursor: default;
+        }
+        .todo-ring-popover-header {
           display: flex;
           align-items: center;
           gap: 8px;
-          padding: 4px 10px;
-          margin: 0 15% 4px;
-          background: rgba(199, 145, 12, 0.04);
-          border: 1px solid rgba(199, 145, 12, 0.1);
-          border-radius: 7px;
-          animation: todo-progress-slide-in 0.2s ease-out both;
-          flex-shrink: 0;
+          padding: 6px 10px 6px 12px;
+          border-bottom: 1px solid var(--border);
           font-size: 11px;
-          height: 22px;
         }
-        .todo-progress-icon {
-          display: flex;
-          align-items: center;
-          color: var(--accent);
-          opacity: 0.7;
-          flex-shrink: 0;
-        }
-        .todo-progress-count {
-          display: inline-flex;
-          align-items: baseline;
+        .todo-ring-popover-title { font-weight: 600; color: var(--text); }
+        .todo-ring-popover-count {
+          color: var(--text-muted);
+          margin-left: auto;
           font-variant-numeric: tabular-nums;
-          font-weight: 600;
-          font-size: 10.5px;
-          flex-shrink: 0;
         }
-        .todo-progress-count-done {
-          color: var(--accent);
-        }
-        .todo-progress-count-sep {
+        .todo-ring-popover-dismiss {
+          background: none;
+          border: none;
           color: var(--text-muted);
-          opacity: 0.35;
-          margin: 0 1px;
-        }
-        .todo-progress-count-total {
-          color: var(--text-muted);
-          opacity: 0.65;
-        }
-        .todo-progress-track {
-          position: relative;
-          flex: 0 0 80px;
-          height: 3px;
-          background: rgba(199, 145, 12, 0.08);
-          border-radius: 2px;
-          overflow: hidden;
-        }
-        .todo-progress-fill {
-          position: relative;
-          height: 100%;
-          background: linear-gradient(90deg, var(--accent) 0%, var(--accent-hover, var(--accent)) 100%);
-          border-radius: 2px;
-          box-shadow: 0 0 4px rgba(199, 145, 12, 0.3);
-        }
-        .todo-progress-fill--active::after {
-          content: '';
-          position: absolute;
-          top: 0;
-          left: 0;
-          width: 40%;
-          height: 100%;
-          background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
-          animation: todo-progress-shimmer 1.6s ease-in-out infinite;
-        }
-        .todo-progress-active-text {
-          flex: 1;
-          min-width: 0;
-          overflow: hidden;
-          white-space: nowrap;
-          text-overflow: ellipsis;
-          color: var(--text-muted);
-          opacity: 0.8;
-          letter-spacing: 0.01em;
-          font-size: 11px;
-        }
-        .todo-progress-dismiss {
+          cursor: pointer;
+          width: 18px; height: 18px;
           display: flex;
           align-items: center;
           justify-content: center;
-          flex-shrink: 0;
-          width: 14px;
-          height: 14px;
-          padding: 0;
-          margin-left: 2px;
-          background: none;
-          border: none;
-          border-radius: 3px;
-          color: var(--text-muted);
-          opacity: 0.4;
-          cursor: pointer;
-          transition: opacity 0.15s, background 0.15s;
+          border-radius: 4px;
+          transition: color 0.15s, background 0.15s;
         }
-        .todo-progress-dismiss:hover {
-          opacity: 0.8;
-          background: rgba(255, 255, 255, 0.08);
+        .todo-ring-popover-dismiss:hover {
+          color: var(--text);
+          background: rgba(255, 255, 255, 0.06);
+        }
+        .todo-ring-popover-list {
+          list-style: none;
+          padding: 6px 0;
+          margin: 0;
+          max-height: 240px;
+          overflow-y: auto;
+        }
+        .todo-ring-item {
+          display: flex;
+          align-items: flex-start;
+          gap: 8px;
+          padding: 4px 12px;
+          font-size: 12px;
+          line-height: 1.45;
+          font-family: inherit;
+        }
+        .todo-ring-status {
+          width: 12px;
+          height: 12px;
+          flex-shrink: 0;
+          margin-top: 3px;
+          border-radius: 50%;
+          border: 1.5px solid var(--text-muted);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .todo-ring-status--done {
+          border-color: var(--green);
+          background: color-mix(in srgb, var(--green) 15%, transparent);
+          color: var(--green);
+        }
+        .todo-ring-status--active {
+          border-color: var(--green);
+          background: color-mix(in srgb, var(--green) 15%, transparent);
+          position: relative;
+        }
+        @media (prefers-reduced-motion: no-preference) {
+          @keyframes todo-ring-active-pulse {
+            0%, 100% { transform: scale(1); opacity: 0.4; }
+            50%      { transform: scale(1.35); opacity: 0; }
+          }
+          .todo-ring-status--active::after {
+            content: '';
+            position: absolute;
+            inset: -3px;
+            border-radius: 50%;
+            border: 1.5px solid var(--green);
+            animation: todo-ring-active-pulse 1.6s ease-in-out infinite;
+          }
+        }
+        .todo-ring-text { color: var(--text); word-break: break-word; }
+        .todo-ring-item--done .todo-ring-text {
+          color: var(--text-muted);
+          text-decoration: line-through;
+          text-decoration-color: color-mix(in srgb, var(--text-muted) 50%, transparent);
+        }
+        .todo-ring-item--active .todo-ring-text {
+          color: var(--text);
+          font-weight: 500;
         }
       `}</style>
-    </div>
+    </span>
   );
 }
