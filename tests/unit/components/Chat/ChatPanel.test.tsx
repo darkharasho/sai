@@ -505,11 +505,10 @@ describe('ChatPanel', () => {
     expect(smoothCalls).toHaveLength(0);
   });
 
-  it('empty-state logo has float class', () => {
-    // Build full props with initialMessages: [] (no messages -> empty state).
+  it('renders the SAI logo in the empty state', () => {
     const props = { ...baseProps(), initialMessages: [] };
     const { container } = render(<ChatPanel {...props} />);
-    expect(container.querySelector('.chat-empty-logo-float')).toBeTruthy();
+    expect(container.querySelector('.chat-empty-logo')).toBeTruthy();
   });
 
   it('renders without error under reduced-motion preference', () => {

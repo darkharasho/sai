@@ -128,22 +128,34 @@ describe('ChatMessage', () => {
     expect(mockSai.openExternal).toBeDefined();
   });
 
-  it('uses claude provider class by default for assistant', () => {
+  it('renders the SAI logo for assistant by default', () => {
     const msg = makeMessage({ role: 'assistant' });
     const { container } = render(<ChatMessage message={msg} />);
-    expect(container.querySelector('.chat-msg-claude')).toBeTruthy();
+    expect(container.querySelector('.chat-msg-sai')).toBeTruthy();
   });
 
-  it('uses gemini provider class for gemini provider', () => {
+  it('uses claude provider class when SAI animation is disabled', () => {
+    const msg = makeMessage({ role: 'assistant' });
+    const { container } = render(<ChatMessage message={msg} />);
+    act(() => { window.dispatchEvent(new CustomEvent('sai-pref-sai-animation', { detail: false })); });
+    expect(container.querySelector('.chat-msg-claude')).toBeTruthy();
+    act(() => { window.dispatchEvent(new CustomEvent('sai-pref-sai-animation', { detail: true })); });
+  });
+
+  it('uses gemini provider class when SAI animation is disabled', () => {
     const msg = makeMessage({ role: 'assistant' });
     const { container } = render(<ChatMessage message={msg} aiProvider="gemini" />);
+    act(() => { window.dispatchEvent(new CustomEvent('sai-pref-sai-animation', { detail: false })); });
     expect(container.querySelector('.chat-msg-gemini')).toBeTruthy();
+    act(() => { window.dispatchEvent(new CustomEvent('sai-pref-sai-animation', { detail: true })); });
   });
 
-  it('uses openai provider class for codex provider', () => {
+  it('uses openai provider class when SAI animation is disabled for codex', () => {
     const msg = makeMessage({ role: 'assistant' });
     const { container } = render(<ChatMessage message={msg} aiProvider="codex" />);
+    act(() => { window.dispatchEvent(new CustomEvent('sai-pref-sai-animation', { detail: false })); });
     expect(container.querySelector('.chat-msg-openai')).toBeTruthy();
+    act(() => { window.dispatchEvent(new CustomEvent('sai-pref-sai-animation', { detail: true })); });
   });
 
   it('uses pop spring with slide distance for assistant message entry', () => {
