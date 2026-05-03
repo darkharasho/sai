@@ -1766,6 +1766,31 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             animation: thinking-cursor-breathe 1.6s ease-in-out infinite;
           }
         }
+        .thinking-clock {
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
+          font-variant-numeric: tabular-nums;
+          font-size: 12px;
+          color: #6b6253;
+          letter-spacing: 0.04em;
+          margin-right: 2px;
+          flex-shrink: 0;
+        }
+        .thinking-cursor-block {
+          display: inline-block;
+          width: 0.55em;
+          height: 1em;
+          background: currentColor;
+          vertical-align: -0.15em;
+          margin-left: 3px;
+          animation: thinking-cursor-blink 1s steps(1) infinite;
+        }
+        @keyframes thinking-cursor-blink {
+          0%, 49% { opacity: 1; }
+          50%, 100% { opacity: 0; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .thinking-cursor-block { animation: none; opacity: 1; }
+        }
         .codex-thinking {
           display: flex;
           align-items: center;
