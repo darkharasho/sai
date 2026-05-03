@@ -1208,9 +1208,14 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       return;
     }
 
+    // Bypass-queue-on-enter: when streaming AND the queue has items, plain
+    // Enter signals "send this now" — interrupt the current turn first, then
+    // dispatch immediately. The queue stays untouched and resumes draining
+    // after this turn ends.
     if (isStreaming && messageQueue.length > 0) {
-      pendingImmediateRef.current = { text, images };
-      return;
+      if (aiProvider === 'gemini') (window.sai as any).geminiStop?.(projectPath);
+      else if (aiProvider === 'codex') window.sai.codexStop?.(projectPath);
+      else window.sai.claudeStop?.(projectPath);
     }
 
     isAtBottomRef.current = true;
@@ -1269,19 +1274,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     }
   };
 
-  const pendingImmediateRef = useRef<{ text: string; images?: string[] } | null>(null);
   const prevStreamingRef = useRef(false);
   useEffect(() => {
-    if (prevStreamingRef.current && !isStreaming) {
-      if (pendingImmediateRef.current) {
-        const pending = pendingImmediateRef.current;
-        pendingImmediateRef.current = null;
-        setTimeout(() => handleSend(pending.text, pending.images), 300);
-      } else if (messageQueue.length > 0 && onQueueShift && sessionId) {
-        const next = messageQueue[0];
-        onQueueShift(sessionId);
-        setTimeout(() => handleSend(next.fullText, next.images), 300);
-      }
+    if (prevStreamingRef.current && !isStreaming && messageQueue.length > 0 && onQueueShift && sessionId) {
+      const next = messageQueue[0];
+      onQueueShift(sessionId);
+      setTimeout(() => handleSend(next.fullText, next.images), 300);
     }
     prevStreamingRef.current = isStreaming;
   }, [isStreaming]);

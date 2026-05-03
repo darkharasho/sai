@@ -739,7 +739,7 @@ describe('ChatPanel', () => {
       });
     };
 
-    it('holds plain-Enter message while streaming with a non-empty queue', async () => {
+    it('plain-Enter while streaming with non-empty queue stops current turn and dispatches immediately', async () => {
       const onQueueShift = vi.fn();
       const props: ChatPanelProps = {
         ...baseProps(),
@@ -754,43 +754,18 @@ describe('ChatPanel', () => {
       await startStreaming(handler);
 
       mockSai.claudeSend.mockClear();
+      mockSai.claudeStop.mockClear();
       await act(async () => {
-        await latestChatInputProps.onSend('held message');
+        await latestChatInputProps.onSend('jump-the-line message');
       });
 
-      expect(mockSai.claudeSend).not.toHaveBeenCalled();
-      expect(onQueueShift).not.toHaveBeenCalled();
-    });
-
-    it('on streaming-end the held message fires before the queue drains', async () => {
-      const onQueueShift = vi.fn();
-      const props: ChatPanelProps = {
-        ...baseProps(),
-        messageQueue: [{ id: 'q-0', text: 'queued one', fullText: 'queued one' }],
-        onQueueShift,
-      };
-      render(<ChatPanel {...props} />);
-
-      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
-      const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
-
-      await startStreaming(handler);
-      await act(async () => {
-        await latestChatInputProps.onSend('held message');
-      });
-
-      mockSai.claudeSend.mockClear();
-      await endStreaming(handler);
-      await act(async () => {
-        await new Promise(resolve => setTimeout(resolve, 350));
-      });
-
+      expect(mockSai.claudeStop).toHaveBeenCalledTimes(1);
       expect(mockSai.claudeSend).toHaveBeenCalledTimes(1);
-      expect(mockSai.claudeSend.mock.calls[0][1]).toContain('held message');
+      expect(mockSai.claudeSend.mock.calls[0][1]).toContain('jump-the-line message');
       expect(onQueueShift).not.toHaveBeenCalled();
     });
 
-    it('after the held message turn ends, the queue resumes draining from index 0', async () => {
+    it('after the bypass message turn ends, the queue resumes draining from index 0', async () => {
       const onQueueShift = vi.fn();
       const props: ChatPanelProps = {
         ...baseProps(),
@@ -804,19 +779,39 @@ describe('ChatPanel', () => {
 
       await startStreaming(handler);
       await act(async () => {
-        await latestChatInputProps.onSend('held message');
+        await latestChatInputProps.onSend('jump-the-line message');
       });
-      await endStreaming(handler);
-      await act(async () => { await new Promise(resolve => setTimeout(resolve, 350)); });
 
       mockSai.claudeSend.mockClear();
-      await startStreaming(handler);
       await endStreaming(handler);
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 350)); });
 
       expect(onQueueShift).toHaveBeenCalledTimes(1);
       expect(mockSai.claudeSend).toHaveBeenCalledTimes(1);
       expect(mockSai.claudeSend.mock.calls[0][1]).toContain('queued one');
+    });
+
+    it('plain-Enter while not streaming with non-empty queue dispatches immediately without stop', async () => {
+      const onQueueShift = vi.fn();
+      const props: ChatPanelProps = {
+        ...baseProps(),
+        messageQueue: [{ id: 'q-0', text: 'queued one', fullText: 'queued one' }],
+        onQueueShift,
+      };
+      render(<ChatPanel {...props} />);
+
+      await waitFor(() => expect(latestChatInputProps).toBeTruthy());
+
+      mockSai.claudeSend.mockClear();
+      mockSai.claudeStop.mockClear();
+      await act(async () => {
+        await latestChatInputProps.onSend('immediate message');
+      });
+
+      expect(mockSai.claudeStop).not.toHaveBeenCalled();
+      expect(mockSai.claudeSend).toHaveBeenCalledTimes(1);
+      expect(mockSai.claudeSend.mock.calls[0][1]).toContain('immediate message');
+      expect(onQueueShift).not.toHaveBeenCalled();
     });
   });
 });
