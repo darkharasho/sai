@@ -1253,6 +1253,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     handleSend(lastUser.content, lastUser.images);
   }, [isStreaming]);
 
+  const handleClearContext = useCallback(() => {
+    setMessages([]);
+    setRenderStart(0);
+    pendingComposerRectRef.current = null;
+  }, [setMessages]);
+
   const handleQueue = (text: string, fullText: string, images?: string[], attachments?: { images: number; files: number; terminal: boolean }) => {
     if (sessionId && onQueueAdd) {
       onQueueAdd(sessionId, text, fullText, images, attachments);
@@ -1335,7 +1341,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
                     />
                   </div>
                 )
-                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} />
+                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} />
               )}
           </>
         )}

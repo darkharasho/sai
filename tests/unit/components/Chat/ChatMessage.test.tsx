@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent } from '@testing-library/react';
 import { installMockSai } from '../../../helpers/ipc-mock';
 
 // Mock react-markdown to avoid complex rendering issues in jsdom
@@ -272,5 +272,75 @@ describe('ChatMessage', () => {
       <ChatMessage message={{ id: 's-2', role: 'assistant', content: 'done', timestamp: 0 }} />
     );
     expect(container.querySelector('.chat-streaming-tail')).toBeFalsy();
+  });
+
+  // ── Clear-context two-step button ──────────────────────────────────────────
+
+  const errorMsg = (id = 'c-1') => ({
+    id, role: 'system' as const, content: 'x', timestamp: 0,
+    error: { title: 'X', message: 'x' } as any,
+  });
+
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('renders Clear context button when onClearContext is provided', () => {
+    const { container } = render(
+      <ChatMessage onClearContext={vi.fn()} message={errorMsg()} />
+    );
+    const btn = container.querySelector('[data-testid="chat-msg-error-clear"]');
+    expect(btn).toBeTruthy();
+    expect(btn?.textContent).toContain('Clear context');
+  });
+
+  it('does not render Clear context button without onClearContext', () => {
+    const { container } = render(<ChatMessage message={errorMsg()} />);
+    expect(container.querySelector('[data-testid="chat-msg-error-clear"]')).toBeNull();
+  });
+
+  it('first click on Clear context shows Confirm? and does not call onClearContext', () => {
+    const onClearContext = vi.fn();
+    const { container } = render(
+      <ChatMessage onClearContext={onClearContext} message={errorMsg()} />
+    );
+    const btn = container.querySelector('[data-testid="chat-msg-error-clear"]') as HTMLButtonElement;
+    fireEvent.click(btn);
+    expect(btn.textContent).toContain('Confirm?');
+    expect(onClearContext).not.toHaveBeenCalled();
+  });
+
+  it('second click within 3s calls onClearContext', () => {
+    const onClearContext = vi.fn();
+    const { container } = render(
+      <ChatMessage onClearContext={onClearContext} message={errorMsg()} />
+    );
+    const btn = container.querySelector('[data-testid="chat-msg-error-clear"]') as HTMLButtonElement;
+    fireEvent.click(btn);
+    fireEvent.click(btn);
+    expect(onClearContext).toHaveBeenCalledTimes(1);
+  });
+
+  it('confirming state resets after 3s of no second click', () => {
+    const onClearContext = vi.fn();
+    const { container } = render(
+      <ChatMessage onClearContext={onClearContext} message={errorMsg()} />
+    );
+    const btn = container.querySelector('[data-testid="chat-msg-error-clear"]') as HTMLButtonElement;
+    fireEvent.click(btn);
+    expect(btn.textContent).toContain('Confirm?');
+    act(() => { vi.advanceTimersByTime(3100); });
+    expect(btn.textContent).toContain('Clear context');
+  });
+
+  it('outside click resets the confirming state', () => {
+    const onClearContext = vi.fn();
+    const { container } = render(
+      <ChatMessage onClearContext={onClearContext} message={errorMsg()} />
+    );
+    const btn = container.querySelector('[data-testid="chat-msg-error-clear"]') as HTMLButtonElement;
+    fireEvent.click(btn);
+    expect(btn.textContent).toContain('Confirm?');
+    fireEvent.mouseDown(document.body);
+    expect(btn.textContent).toContain('Clear context');
   });
 });

@@ -4,7 +4,7 @@ import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 import 'highlight.js/styles/monokai.css';
-import { Check, ChevronRight, Circle, Copy, RotateCw, Terminal, TerminalSquare, X } from 'lucide-react';
+import { Check, ChevronRight, Circle, Copy, Eraser, RotateCw, Terminal, TerminalSquare, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ToolCallCard from './ToolCallCard';
 import Stagger from './Stagger';
@@ -259,7 +259,29 @@ function ImageModal({ src, onClose }: { src: string; onClose: () => void }) {
   );
 }
 
-function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', toolCallsExpanded = true, onRetry, isStreaming = false, isFirstAssistantOfTurn = false, pinnedLayoutId }: { message: ChatMessageType; projectPath?: string; onFileOpen?: (path: string, line?: number) => void; aiProvider?: 'claude' | 'codex' | 'gemini'; toolCallsExpanded?: boolean; onRetry?: () => void; isStreaming?: boolean; isFirstAssistantOfTurn?: boolean; pinnedLayoutId?: string }) {
+function ChatMessage({
+  message,
+  projectPath,
+  onFileOpen,
+  aiProvider = 'claude',
+  toolCallsExpanded = true,
+  onRetry,
+  onClearContext,
+  isStreaming = false,
+  isFirstAssistantOfTurn = false,
+  pinnedLayoutId,
+}: {
+  message: ChatMessageType;
+  projectPath?: string;
+  onFileOpen?: (path: string, line?: number) => void;
+  aiProvider?: 'claude' | 'codex' | 'gemini';
+  toolCallsExpanded?: boolean;
+  onRetry?: () => void;
+  onClearContext?: () => void;
+  isStreaming?: boolean;
+  isFirstAssistantOfTurn?: boolean;
+  pinnedLayoutId?: string;
+}) {
   const dotColor = getDotColor(message.role);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [errorDetailsOpen, setErrorDetailsOpen] = useState(false);
@@ -312,6 +334,48 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
     : false as const;
   const flipTransition = useReducedMotionTransition(SPRING.dock);
   const detailsTransition = useReducedMotionTransition(SPRING.gentle);
+
+  const [confirmingClear, setConfirmingClear] = useState(false);
+  const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearBtnRef = useRef<HTMLButtonElement | null>(null);
+  const clearLabelTransition = useReducedMotionTransition(SPRING.flick);
+
+  const cancelConfirm = useCallback(() => {
+    setConfirmingClear(false);
+    if (confirmTimerRef.current) {
+      clearTimeout(confirmTimerRef.current);
+      confirmTimerRef.current = null;
+    }
+  }, []);
+
+  const handleClearClick = useCallback(() => {
+    if (confirmingClear) {
+      cancelConfirm();
+      onClearContext?.();
+      return;
+    }
+    setConfirmingClear(true);
+    if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+    confirmTimerRef.current = setTimeout(() => {
+      setConfirmingClear(false);
+      confirmTimerRef.current = null;
+    }, 3000);
+  }, [confirmingClear, cancelConfirm, onClearContext]);
+
+  useEffect(() => {
+    if (!confirmingClear) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node | null;
+      if (target && clearBtnRef.current?.contains(target)) return;
+      cancelConfirm();
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, [confirmingClear, cancelConfirm]);
+
+  useEffect(() => () => {
+    if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+  }, []);
   const effectiveEntryProps = flipActive
     ? {
         initial: flipInitial,
@@ -482,6 +546,29 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
                 <RotateCw size={12} /> Retry
               </button>
             )}
+            {onClearContext && (
+              <motion.button
+                ref={clearBtnRef}
+                type="button"
+                data-testid="chat-msg-error-clear"
+                className={`chat-msg-error-clear${confirmingClear ? ' chat-msg-error-clear--confirming' : ''}`}
+                layout
+                onClick={handleClearClick}
+              >
+                <Eraser size={12} />
+                <AnimatePresence mode="popLayout" initial={false}>
+                  <motion.span
+                    key={confirmingClear ? 'confirm' : 'idle'}
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={clearLabelTransition}
+                  >
+                    {confirmingClear ? 'Confirm?' : 'Clear context'}
+                  </motion.span>
+                </AnimatePresence>
+              </motion.button>
+            )}
             {details && (
               <button
                 type="button"
@@ -650,6 +737,31 @@ function ChatMessage({ message, projectPath, onFileOpen, aiProvider = 'claude', 
           }
           .chat-msg-error-chev { transition: transform 0.15s; }
           .chat-msg-error-chev.open { transform: rotate(90deg); }
+          .chat-msg-error-clear {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: none;
+            border: 1px solid transparent;
+            color: var(--text-muted);
+            font-size: 11px;
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: color 0.15s, background 0.15s, border-color 0.15s;
+          }
+          .chat-msg-error-clear:hover {
+            color: var(--text);
+            background: rgba(255, 255, 255, 0.04);
+          }
+          .chat-msg-error-clear--confirming {
+            color: var(--red);
+            background: color-mix(in srgb, var(--red) 8%, transparent);
+            border-color: color-mix(in srgb, var(--red) 30%, transparent);
+          }
+          .chat-msg-error-clear--confirming:hover {
+            background: color-mix(in srgb, var(--red) 14%, transparent);
+          }
         `}</style>
       </motion.div>
     );
@@ -1045,5 +1157,6 @@ export default memo(ChatMessage, (prev, next) =>
   prev.isStreaming === next.isStreaming &&
   prev.isFirstAssistantOfTurn === next.isFirstAssistantOfTurn &&
   prev.pinnedLayoutId === next.pinnedLayoutId &&
-  Boolean(prev.onRetry) === Boolean(next.onRetry)
+  Boolean(prev.onRetry) === Boolean(next.onRetry) &&
+  prev.onClearContext === next.onClearContext
 );
