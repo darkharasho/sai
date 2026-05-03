@@ -1362,16 +1362,39 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         )}
       </motion.div>
       <div className="chat-messages" ref={chatContainerRef} onScroll={handleScroll}>
-        {messages.length === 0 ? (
-          <div className="chat-empty">
-            <SaiLogo mode="idle" size={64} className="chat-empty-logo" ariaLabel="SAI" />
-            <div className="chat-empty-title">SAI</div>
-            <div className="chat-empty-subtitle">
-              {projectPath ? emptyPrompt : 'Select a project to get started'}
+        <LayoutGroup id="sai-brand">
+          {messages.length === 0 ? (
+            <div className="chat-empty">
+              <motion.div layoutId="sai-brand-logo" layout="position" transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}>
+                <SaiLogo mode="idle" size={64} className="chat-empty-logo" ariaLabel="SAI" />
+              </motion.div>
+              <motion.div layoutId="sai-brand-title" layout="position" transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }} className="chat-empty-title">SAI</motion.div>
+              <AnimatePresence>
+                <motion.div
+                  key="empty-extras"
+                  className="chat-empty-extras"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.25 }}
+                >
+                  <div className="chat-empty-subtitle">
+                    {projectPath ? emptyPrompt : 'Select a project to get started'}
+                  </div>
+                  {projectPath && <CyclingHints />}
+                </motion.div>
+              </AnimatePresence>
             </div>
-            {projectPath && <CyclingHints />}
-          </div>
-        ) : (
+          ) : (
+            <div className="chat-conversation-header">
+              <motion.div layoutId="sai-brand-logo" layout="position" transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}>
+                <SaiLogo mode="idle" size={64} className="chat-empty-logo" ariaLabel="SAI" />
+              </motion.div>
+              <motion.div layoutId="sai-brand-title" layout="position" transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }} className="chat-empty-title">SAI</motion.div>
+            </div>
+          )}
+        </LayoutGroup>
+        {messages.length > 0 && (
           <>
             <div className="chat-messages-spacer" aria-hidden="true" />
             {hasHiddenMessages && (
@@ -1648,6 +1671,19 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           height: 100%;
           gap: 12px;
           animation: empty-fade 0.5s ease-out;
+        }
+        .chat-conversation-header {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 12px;
+          padding: 24px 0;
+        }
+        .chat-empty-extras {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 12px;
         }
         @keyframes empty-fade {
           from { opacity: 0; transform: scale(0.97); }
