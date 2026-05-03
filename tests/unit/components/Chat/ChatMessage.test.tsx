@@ -384,5 +384,10 @@ describe('ChatMessage', () => {
       render(<ChatMessage message={msg} />);
       expect(document.querySelector('[data-testid="msg-duration"]')).toBeNull();
     });
+
+    it('duration element is a descendant of .chat-msg-body, not next to the icon', () => {
+      const { container } = render(<ChatMessage message={makeMessage({ durationMs: 3750 })} />);
+      expect(container.querySelector('.chat-msg-body [data-testid="msg-duration"]')).toBeTruthy();
+    });
   });
 });

@@ -877,7 +877,17 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
               updated[updated.length - 1] = { ...last, content: newContent };
               return updated;
             }
-            return [...prev, {
+            // Before pushing a new assistant message, stamp durationMs on the most recent
+            // unstamped assistant text bubble so each bubble records its own duration.
+            const stamped = [...prev];
+            for (let i = stamped.length - 1; i >= 0; i--) {
+              const m = stamped[i];
+              if (m.role === 'assistant' && m.content && m.content.length > 0 && typeof m.durationMs !== 'number') {
+                stamped[i] = { ...m, durationMs: Date.now() - m.timestamp };
+                break;
+              }
+            }
+            return [...stamped, {
               id: `${Date.now()}-${Math.random()}`,
               role: 'assistant',
               content: text,
@@ -1330,22 +1340,28 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const turnStartedAtRef = useRef<number | null>(null);
   useEffect(() => {
     if (prevStreamingRef.current && !isStreaming) {
-      // Stamp the duration on the last assistant message with non-empty content
-      if (turnStartedAtRef.current !== null) {
-        const durationMs = Math.round(performance.now() - turnStartedAtRef.current);
-        setMessages(prev => {
-          let lastIdx = -1;
-          for (let i = prev.length - 1; i >= 0; i--) {
-            if (prev[i].role === 'assistant' && prev[i].content && prev[i].content.length > 0) {
-              lastIdx = i;
-              break;
-            }
+      // Stamp durationMs on every unstamped assistant text bubble in the current turn.
+      // Each bubble's timestamp is set when the bubble is first created, so
+      // durationMs = Date.now() - message.timestamp gives per-bubble timing.
+      setMessages(prev => {
+        const startIdx = turnStartIndex ?? 0;
+        const now = Date.now();
+        let changed = false;
+        const next = prev.map((m, i) => {
+          if (
+            i >= startIdx &&
+            m.role === 'assistant' &&
+            m.content && m.content.length > 0 &&
+            typeof m.durationMs !== 'number'
+          ) {
+            changed = true;
+            return { ...m, durationMs: now - m.timestamp };
           }
-          if (lastIdx === -1) return prev;
-          const next = [...prev];
-          next[lastIdx] = { ...next[lastIdx], durationMs };
-          return next;
+          return m;
         });
+        return changed ? next : prev;
+      });
+      if (turnStartedAtRef.current !== null) {
         turnStartedAtRef.current = null;
       }
       if (suppressNextDrainRef.current) {
