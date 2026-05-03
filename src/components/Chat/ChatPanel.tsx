@@ -945,11 +945,14 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             if (last?.role === 'assistant') {
               return [...prev.slice(0, -1), { ...last, content: text }];
             }
+            const startedAt = nextSegmentStartRef.current ?? Date.now();
+            nextSegmentStartRef.current = null;
             return [...prev, {
               id: `result-${Date.now()}`,
               role: 'assistant',
               content: text,
               timestamp: Date.now(),
+              startedAt,
             }];
           });
         }
