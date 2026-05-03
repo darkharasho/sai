@@ -657,6 +657,9 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       if (msg.type === 'streaming_start') {
         if (msg.turnSeq != null) turnSeqRef.current = msg.turnSeq;
         setTurnStartIndex(messagesRef.current.length);
+        if (turnStartedAtRef.current === null) {
+          turnStartedAtRef.current = performance.now();
+        }
         setIsStreaming(true);
         return;
       }
@@ -1318,8 +1321,27 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
   const prevStreamingRef = useRef(false);
   const suppressNextDrainRef = useRef(false);
+  const turnStartedAtRef = useRef<number | null>(null);
   useEffect(() => {
     if (prevStreamingRef.current && !isStreaming) {
+      // Stamp the duration on the last assistant message with non-empty content
+      if (turnStartedAtRef.current !== null) {
+        const durationMs = Math.round(performance.now() - turnStartedAtRef.current);
+        setMessages(prev => {
+          let lastIdx = -1;
+          for (let i = prev.length - 1; i >= 0; i--) {
+            if (prev[i].role === 'assistant' && prev[i].content && prev[i].content.length > 0) {
+              lastIdx = i;
+              break;
+            }
+          }
+          if (lastIdx === -1) return prev;
+          const next = [...prev];
+          next[lastIdx] = { ...next[lastIdx], durationMs };
+          return next;
+        });
+        turnStartedAtRef.current = null;
+      }
       if (suppressNextDrainRef.current) {
         suppressNextDrainRef.current = false;
       } else if (messageQueue.length > 0 && onQueueShift && sessionId) {

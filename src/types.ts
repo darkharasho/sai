@@ -5,6 +5,7 @@ export interface ChatMessage {
   timestamp: number;
   toolCalls?: ToolCall[];
   images?: string[];
+  durationMs?: number;
   error?: {
     title: string;
     status?: number;

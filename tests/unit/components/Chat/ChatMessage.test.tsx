@@ -355,4 +355,34 @@ describe('ChatMessage', () => {
     fireEvent.mouseDown(document.body);
     expect(btn.textContent).toContain('Clear context');
   });
+
+  describe('durationMs display', () => {
+    it('renders frozen clock when assistant message has durationMs', () => {
+      const msg = makeMessage({ role: 'assistant', durationMs: 3750 });
+      render(<ChatMessage message={msg} />);
+      const el = document.querySelector('[data-testid="msg-duration"]');
+      expect(el).toBeTruthy();
+      expect(el?.textContent).toMatch(/^\[\d{2}:\d{2}\.\d\]$/);
+    });
+
+    it('renders correct formatted time for durationMs', () => {
+      // 75300 ms = 1 min 15.3 sec
+      const msg = makeMessage({ role: 'assistant', durationMs: 75300 });
+      render(<ChatMessage message={msg} />);
+      const el = document.querySelector('[data-testid="msg-duration"]');
+      expect(el?.textContent).toBe('[01:15.3]');
+    });
+
+    it('does not render clock when durationMs is undefined', () => {
+      const msg = makeMessage({ role: 'assistant' });
+      render(<ChatMessage message={msg} />);
+      expect(document.querySelector('[data-testid="msg-duration"]')).toBeNull();
+    });
+
+    it('does not render clock for user messages even with durationMs', () => {
+      const msg = makeMessage({ role: 'user', content: 'Hi', durationMs: 5000 } as any);
+      render(<ChatMessage message={msg} />);
+      expect(document.querySelector('[data-testid="msg-duration"]')).toBeNull();
+    });
+  });
 });

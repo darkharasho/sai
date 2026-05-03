@@ -49,6 +49,14 @@ function snapToWordBoundary(text: string, len: number): number {
 
 const FILE_PATH_RE = /(?<![:/])\b((?:\.{1,2}\/)?(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte))(?::(\d+))?\b|(?<![:/.\w])((?:\/[\w.-]+)+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte))(?::(\d+))?\b/g;
 
+function formatMs(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  const d = Math.floor((ms % 1000) / 100);
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${d}`;
+}
+
 const URL_RE = /https?:\/\/[^\s<>)\]]+/g;
 
 function linkifyText(text: string): any[] {
@@ -801,6 +809,9 @@ function ChatMessage({
                 ? <SaiLogo mode="static" size={16} className="chat-msg-dot chat-msg-sai" />
                 : <span className={`chat-msg-dot ${aiProvider === 'gemini' ? 'chat-msg-gemini' : aiProvider === 'codex' ? 'chat-msg-openai' : 'chat-msg-claude'}`} />)
             : <Circle size={8} fill={dotColor} stroke={dotColor} className="chat-msg-dot" />}
+          {message.role === 'assistant' && typeof message.durationMs === 'number' && (
+            <span className="thinking-clock" data-testid="msg-duration">[{formatMs(message.durationMs)}]</span>
+          )}
           <div className={`chat-msg-body${isAssistantStreaming ? ' chat-streaming-tail' : ''}`}>
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
