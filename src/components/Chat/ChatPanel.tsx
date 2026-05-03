@@ -658,7 +658,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         if (msg.turnSeq != null) turnSeqRef.current = msg.turnSeq;
         setTurnStartIndex(messagesRef.current.length);
         if (turnStartedAtRef.current === null) {
-          turnStartedAtRef.current = performance.now();
+          turnStartedAtRef.current = Date.now();
         }
         nextSegmentStartRef.current = Date.now();
         setIsStreaming(true);
@@ -881,11 +881,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             }
             // Before pushing a new assistant message, stamp durationMs on the most recent
             // unstamped assistant text bubble so each bubble records its own duration.
+            const turnStart = turnStartedAtRef.current ?? Date.now();
             const stamped = [...prev];
             for (let i = stamped.length - 1; i >= 0; i--) {
               const m = stamped[i];
               if (m.role === 'assistant' && m.content && m.content.length > 0 && typeof m.durationMs !== 'number') {
-                stamped[i] = { ...m, durationMs: Date.now() - (m.startedAt ?? m.timestamp) };
+                stamped[i] = { ...m, durationMs: Date.now() - turnStart };
                 break;
               }
             }
@@ -1349,8 +1350,10 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const nextSegmentStartRef = useRef<number | null>(null);
   useEffect(() => {
     if (prevStreamingRef.current && !isStreaming) {
-      // Stamp durationMs on every unstamped assistant text bubble in the current turn.
-      // Use startedAt (set when the bubble was first pushed) for accurate per-segment timing.
+      // Stamp durationMs on every unstamped assistant text bubble in the current
+      // turn. Each bubble gets cumulative time from turn start so the displayed
+      // value monotonically grows across a multi-bubble turn.
+      const turnStart = turnStartedAtRef.current;
       setMessages(prev => {
         const startIdx = turnStartIndex ?? 0;
         const now = Date.now();
@@ -1363,7 +1366,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             typeof m.durationMs !== 'number'
           ) {
             changed = true;
-            return { ...m, durationMs: now - (m.startedAt ?? m.timestamp) };
+            return { ...m, durationMs: now - (turnStart ?? m.startedAt ?? m.timestamp) };
           }
           return m;
         });
