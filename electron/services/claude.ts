@@ -599,9 +599,11 @@ export function registerClaudeHandlers(win: BrowserWindow) {
     if (!approved) {
       for (const buffered of claude.approvalBuffered) {
         if (buffered.type === 'result') {
+          const responseTurnSeq = claude.activeTurnSeq;
           claude.busy = false;
-          safeSend(win, 'claude:message', { ...buffered, projectPath: ws.projectPath, scope: effectiveScope });
-          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
+          claude.activeTurnSeq = claude.turnSeq;
+          safeSend(win, 'claude:message', { ...buffered, projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
+          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
         } else {
           safeSend(win, 'claude:message', { ...buffered, projectPath: ws.projectPath, scope: effectiveScope });
         }
@@ -638,9 +640,11 @@ export function registerClaudeHandlers(win: BrowserWindow) {
       // Flush any buffered messages to the renderer
       for (const buffered of claude.approvalBuffered) {
         if (buffered.type === 'result') {
+          const responseTurnSeq = claude.activeTurnSeq;
           claude.busy = false;
-          safeSend(win, 'claude:message', { ...buffered, projectPath: ws.projectPath, scope: effectiveScope });
-          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
+          claude.activeTurnSeq = claude.turnSeq;
+          safeSend(win, 'claude:message', { ...buffered, projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
+          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
         } else {
           safeSend(win, 'claude:message', { ...buffered, projectPath: ws.projectPath, scope: effectiveScope });
         }
