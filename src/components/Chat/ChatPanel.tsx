@@ -271,7 +271,6 @@ function GeminiThinkingAnimation({ loadingPhrases = 'all' }: { loadingPhrases?: 
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import MessageQueue from './MessageQueue';
-import TodoProgress from './TodoProgress';
 import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, QueuedMessage, TerminalTab } from '../../types';
 import { buildHelpMessage } from './helpText';
 import { parseAiError, looksLikeApiError } from './parseAiError';
@@ -1385,7 +1384,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       </div>
       <LayoutGroup>
         <div data-testid="chat-bottom-strip" className="chat-bottom-strip">
-          <TodoProgress messages={messages} isStreaming={isStreaming} />
           <MessageQueue
             queue={messageQueue}
             onRemove={(id) => sessionId && onQueueRemove?.(sessionId, id)}
@@ -1402,6 +1400,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             onDeny={handleDeny}
             onAlwaysAllow={handleAlwaysAllow}
             isStreaming={isStreaming}
+            messages={messages}
             onStop={() => aiProvider === 'gemini' ? (window.sai as any).geminiStop(projectPath) : aiProvider === 'codex' ? window.sai.codexStop(projectPath) : window.sai.claudeStop?.(projectPath)}
             permissionMode={permissionMode}
             onPermissionChange={onPermissionChange}

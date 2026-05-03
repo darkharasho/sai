@@ -543,6 +543,13 @@ describe('ChatPanel', () => {
     window.matchMedia = original;
   });
 
+  it('does not render TodoProgress as a standalone child of the bottom strip', () => {
+    const props = baseProps();
+    const { container } = render(<ChatPanel {...props} />);
+    const bottomStrip = container.querySelector('[data-testid="chat-bottom-strip"]');
+    expect(bottomStrip?.querySelector('.todo-ring-wrap')).toBeNull();
+  });
+
   it('does not render the follow button when at-bottom', () => {
     const props = baseProps();
     const { container } = render(<ChatPanel {...props} />);
