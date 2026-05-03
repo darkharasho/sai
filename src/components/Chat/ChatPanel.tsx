@@ -1208,6 +1208,11 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       return;
     }
 
+    if (isStreaming && messageQueue.length > 0) {
+      pendingImmediateRef.current = { text, images };
+      return;
+    }
+
     isAtBottomRef.current = true;
     if (pendingComposerRectRef.current) {
       setFlipRect(newMessageId, pendingComposerRectRef.current);
@@ -1264,12 +1269,19 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     }
   };
 
+  const pendingImmediateRef = useRef<{ text: string; images?: string[] } | null>(null);
   const prevStreamingRef = useRef(false);
   useEffect(() => {
-    if (prevStreamingRef.current && !isStreaming && messageQueue.length > 0 && onQueueShift && sessionId) {
-      const next = messageQueue[0];
-      onQueueShift(sessionId);
-      setTimeout(() => handleSend(next.fullText, next.images), 300);
+    if (prevStreamingRef.current && !isStreaming) {
+      if (pendingImmediateRef.current) {
+        const pending = pendingImmediateRef.current;
+        pendingImmediateRef.current = null;
+        setTimeout(() => handleSend(pending.text, pending.images), 300);
+      } else if (messageQueue.length > 0 && onQueueShift && sessionId) {
+        const next = messageQueue[0];
+        onQueueShift(sessionId);
+        setTimeout(() => handleSend(next.fullText, next.images), 300);
+      }
     }
     prevStreamingRef.current = isStreaming;
   }, [isStreaming]);
