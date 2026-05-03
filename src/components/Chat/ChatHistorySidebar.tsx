@@ -293,7 +293,9 @@ export default function ChatHistorySidebar({
       <div className="chat-history-list">
         {filteredSessions.length === 0 ? (
           <div className="chat-history-empty">
-            <SaiLogo mode="static" size={44} className="sai-fallen" ariaLabel="" />
+            {debouncedQuery
+              ? <SaiLogo mode="static" size={44} className="sai-fallen" ariaLabel="" />
+              : <SaiLogo mode="idle" size={44} ariaLabel="" />}
             <span>{debouncedQuery ? 'No matching conversations' : 'No conversations yet'}</span>
           </div>
         ) : (

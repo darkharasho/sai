@@ -386,7 +386,7 @@ export default function CommandPalette({
             );
           })}
 
-          {totalResults === 0 && mode !== 'grep' && (
+          {totalResults === 0 && mode !== 'grep' && query.length > 0 && (
             <div className="cp-empty cp-empty-fallen">
               <SaiLogo mode="static" size={48} className="sai-fallen" ariaLabel="" />
               <span>No results</span>

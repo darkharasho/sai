@@ -198,7 +198,12 @@ export default function McpSidebar() {
         ))}
 
         {!loading && !error && tab === 'installed' && filteredInstalled.length === 0 && (
-          <div className="sidebar-empty">No MCP servers configured</div>
+          <div className="sidebar-empty sidebar-empty-stack">
+            {search
+              ? <SaiLogo mode="static" size={40} className="sai-fallen" ariaLabel="" />
+              : <SaiLogo mode="idle" size={40} ariaLabel="" />}
+            <span>{search ? 'No matching servers' : 'No MCP servers configured'}</span>
+          </div>
         )}
 
         {!loading && !error && tab === 'browse' && filteredRegistry.map(server => (
@@ -227,7 +232,12 @@ export default function McpSidebar() {
         ))}
 
         {!loading && !error && tab === 'browse' && filteredRegistry.length === 0 && (
-          <div className="sidebar-empty">No servers found</div>
+          <div className="sidebar-empty sidebar-empty-stack">
+            {search
+              ? <SaiLogo mode="static" size={40} className="sai-fallen" ariaLabel="" />
+              : <SaiLogo mode="idle" size={40} ariaLabel="" />}
+            <span>{search ? 'No matching servers' : 'No servers found'}</span>
+          </div>
         )}
       </div>
 
@@ -252,16 +262,28 @@ export default function McpSidebar() {
           font-size: 11px;
           background: none;
           border: none;
-          border-bottom: 2px solid transparent;
           color: var(--text-muted);
           cursor: pointer;
-          transition: color 0.15s;
+          position: relative;
+          transition: color var(--dur-fast) var(--ease-out-soft);
+        }
+        .sidebar-tab::after {
+          content: '';
+          position: absolute;
+          left: 8px;
+          right: 8px;
+          bottom: 0;
+          height: 2px;
+          background: var(--accent);
+          transform: scaleX(0);
+          transform-origin: center;
+          transition: transform var(--dur-base) var(--ease-out-soft);
         }
         .sidebar-tab.active {
           color: var(--accent);
-          border-bottom-color: var(--accent);
           font-weight: 600;
         }
+        .sidebar-tab.active::after { transform: scaleX(1); }
         .sidebar-tab:hover { color: var(--text); }
         .sidebar-search-row {
           display: flex;
@@ -386,6 +408,13 @@ export default function McpSidebar() {
           padding: 24px;
           color: var(--text-muted);
           font-size: 12px;
+        }
+        .sidebar-empty-stack {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 12px;
+          padding: 32px 16px;
         }
         .sidebar-error {
           text-align: center;
