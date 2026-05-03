@@ -798,7 +798,7 @@ function ChatMessage({
             ? <Terminal size={14} color="var(--green)" strokeWidth={2.5} className="chat-msg-dot chat-msg-chevron" />
             : message.role === 'assistant'
             ? (saiAnimationEnabled
-                ? <SaiLogo mode={isAssistantStreaming ? 'drift' : 'static'} size={16} className="chat-msg-dot chat-msg-sai" />
+                ? <SaiLogo mode="static" size={16} className="chat-msg-dot chat-msg-sai" />
                 : <span className={`chat-msg-dot ${aiProvider === 'gemini' ? 'chat-msg-gemini' : aiProvider === 'codex' ? 'chat-msg-openai' : 'chat-msg-claude'}`} />)
             : <Circle size={8} fill={dotColor} stroke={dotColor} className="chat-msg-dot" />}
           <div className={`chat-msg-body${isAssistantStreaming ? ' chat-streaming-tail' : ''}`}>
