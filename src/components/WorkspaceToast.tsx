@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
 
+export type ToastTone = 'success' | 'error';
+
 interface WorkspaceToastProps {
   message: string;
   onDismiss: () => void;
+  tone?: ToastTone;
 }
 
-export default function WorkspaceToast({ message, onDismiss }: WorkspaceToastProps) {
+export default function WorkspaceToast({ message, onDismiss, tone = 'success' }: WorkspaceToastProps) {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -16,6 +19,9 @@ export default function WorkspaceToast({ message, onDismiss }: WorkspaceToastPro
     }, 4000);
     return () => clearTimeout(timer);
   }, [onDismiss]);
+
+  const accentVar = tone === 'error' ? 'var(--red)' : 'var(--accent)';
+  const glyph = tone === 'error' ? '⚠' : '✓';
 
   return (
     <div
@@ -40,7 +46,7 @@ export default function WorkspaceToast({ message, onDismiss }: WorkspaceToastPro
         pointerEvents: 'auto',
       }}
     >
-      <span style={{ color: 'var(--accent)', fontSize: 14 }}>&#10003;</span>
+      <span style={{ color: accentVar, fontSize: 14 }}>{glyph}</span>
       {message}
     </div>
   );

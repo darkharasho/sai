@@ -628,13 +628,24 @@ export function registerClaudeHandlers(win: BrowserWindow) {
       const claudeDir = path.join(projectPath, '.claude');
       const settingsPath = path.join(claudeDir, 'settings.local.json');
       let settings: Record<string, any> = {};
-      try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')); } catch {}
-      if (!settings.permissions) settings.permissions = {};
-      if (!Array.isArray(settings.permissions.allow)) settings.permissions.allow = [];
-      if (!settings.permissions.allow.includes(pending.toolName)) {
-        settings.permissions.allow.push(pending.toolName);
-        try { fs.mkdirSync(claudeDir, { recursive: true }); } catch {}
-        fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+      let canWriteSettings = true;
+      if (fs.existsSync(settingsPath)) {
+        try {
+          settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+        } catch (err) {
+          // Don't clobber a malformed user-edited file. Surface the error and skip the write.
+          canWriteSettings = false;
+          console.warn(`[sai] Refusing to overwrite malformed ${settingsPath}:`, err);
+        }
+      }
+      if (canWriteSettings) {
+        if (!settings.permissions) settings.permissions = {};
+        if (!Array.isArray(settings.permissions.allow)) settings.permissions.allow = [];
+        if (!settings.permissions.allow.includes(pending.toolName)) {
+          settings.permissions.allow.push(pending.toolName);
+          try { fs.mkdirSync(claudeDir, { recursive: true }); } catch {}
+          fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+        }
       }
 
       // Flush any buffered messages to the renderer

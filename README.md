@@ -61,6 +61,18 @@ Stage files, commit all, switch or create branches, push, pull, discard changes,
 ### File explorer with drag-and-drop
 Browse, create, rename, delete, and reorganize files without touching the terminal. Drag and drop entries to move them, use context menus for quick actions, and keep everything anchored to the current project root.
 
+### Project-wide search and replace
+A dedicated search panel finds matches across the project with regex, case, and whole-word toggles, groups results by file, and supports inline replace — including across unsaved buffers in the editor.
+
+### Command palette and customizable keybindings
+Hit the command palette to jump between files and trigger actions without leaving the keyboard. Every shortcut in SAI — from chat focus to sidebar toggles — is rebindable from `Settings → Keybindings`, including chord bindings.
+
+### Plugins and MCP servers
+Browse and install Claude Code plugins and MCP servers from inside SAI. Dedicated sidebars expose installed servers, registry browsing, and per-server configuration so you can extend the assistant without dropping to a config file.
+
+### Inline image preview
+Click any image attached in chat to open a themed lightbox modal — handy for screenshots, design comps, and generated assets without leaving the conversation.
+
 ### Synced settings, notifications, and updates
 Sign in with GitHub to sync settings through a private `sai-config` repo across devices. SAI can send desktop notifications when background responses finish, badges active workspaces in the UI, and checks for app updates automatically.
 

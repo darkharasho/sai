@@ -153,7 +153,7 @@ export default function App() {
   const [focusedChat, setFocusedChat] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [fileIndex, setFileIndex] = useState<string[]>([]);
-  const [toast, setToast] = useState<{ message: string; key: number } | null>(null);
+  const [toast, setToast] = useState<{ message: string; key: number; tone?: 'success' | 'error' } | null>(null);
   const { isOpen: whatsNewOpen, version: whatsNewVersion, releases, fetchStatus, openWhatsNew, closeWhatsNew } = useWhatsNew();
   const [showNewProject, setShowNewProject] = useState(false);
   const slashCommandsRef = useRef<string[]>([]);
@@ -1158,7 +1158,10 @@ export default function App() {
             : f
         ),
       }));
-    } catch { }
+    } catch (err) {
+      const name = filePath.split('/').pop() || filePath;
+      setToast({ message: `Failed to reload ${name}: ${err instanceof Error ? err.message : String(err)}`, key: Date.now(), tone: 'error' });
+    }
     setExternallyModified(prev => {
       const next = new Set(prev);
       next.delete(filePath);
@@ -1177,7 +1180,10 @@ export default function App() {
           ),
         }));
       }
-    } catch { }
+    } catch (err) {
+      const name = filePath.split('/').pop() || filePath;
+      setToast({ message: `Couldn't read ${name}: ${err instanceof Error ? err.message : String(err)}`, key: Date.now(), tone: 'error' });
+    }
     setExternallyModified(prev => {
       const next = new Set(prev);
       next.delete(filePath);
@@ -1762,7 +1768,7 @@ export default function App() {
       )}
 
       {toast && (
-        <WorkspaceToast key={toast.key} message={toast.message} onDismiss={() => setToast(null)} />
+        <WorkspaceToast key={toast.key} message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} />
       )}
 
       {projectPath && <CommandPalette

@@ -41,7 +41,7 @@
 - [x] typeahead for slash commands needs tab autocomplete
 - [x] clicking the file context pill should change the icon to a closed eye and not include it in context
 - [x] add autocorrect to the chat input
-- [ ] markdown viewer support
+- [x] markdown viewer support
 - [x] show a spinner in the titlebar if theres a background workspace currently with an active conversation. have a faint number for how many workspaces are actively mid conversation
 - [x] spellchecker needs to be faster, auto complete even if the user has moved on from the word
 - [x] whats new shows every launch
