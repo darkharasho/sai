@@ -1,0 +1,1041 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>SAI · thinking animation candidates</title>
+<style>
+  :root {
+    --bg-0: #07090d;
+    --bg-1: #0d1117;
+    --ink: #e8eef7;
+    --dim: #7d8794;
+    --accent: #c7913b;
+    --grid: rgba(199, 145, 59, 0.06);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background:
+      radial-gradient(ellipse at 20% 10%, #14202c 0%, transparent 55%),
+      radial-gradient(ellipse at 80% 90%, #1a1426 0%, transparent 55%),
+      var(--bg-0);
+    color: var(--ink);
+    font-family: ui-sans-serif, -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
+    min-height: 100vh;
+  }
+  body::before {
+    content: ""; position: fixed; inset: 0;
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse at center, black 30%, transparent 80%);
+    pointer-events: none; z-index: 0;
+  }
+  header {
+    position: relative; z-index: 1;
+    padding: 56px 48px 16px;
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 24px; flex-wrap: wrap;
+  }
+  h1 {
+    font-size: 22px; font-weight: 600; letter-spacing: 0.04em;
+    color: var(--ink); margin: 0;
+  }
+  .sub { color: var(--dim); font-size: 13px; margin-top: 4px; }
+  .grid {
+    position: relative; z-index: 1;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 18px;
+    padding: 24px 48px 96px;
+  }
+  .tile {
+    background: linear-gradient(180deg, #0e131c 0%, #0a0e15 100%);
+    border: 1px solid #1a2230;
+    border-radius: 12px;
+    padding: 22px 18px 14px;
+    display: flex; flex-direction: column; align-items: center; gap: 14px;
+    min-height: 200px;
+  }
+  .tile.section {
+    grid-column: 1 / -1;
+    background: transparent; border: 0; padding: 18px 0 4px;
+    min-height: 0; align-items: flex-start;
+  }
+  .tile.section h2 {
+    margin: 0; font-size: 12px; font-weight: 600;
+    letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim);
+  }
+  .label {
+    font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--dim);
+    font-family: ui-monospace, "Geist Mono", "JetBrains Mono", monospace;
+  }
+  .chain-label {
+    letter-spacing: 0.04em;
+    text-align: center;
+    line-height: 1.5;
+    word-break: break-word;
+    min-height: 2.4em;
+  }
+  .chain-label::first-letter { text-transform: lowercase; }
+  .desc {
+    font-size: 11px; color: var(--dim); text-align: center;
+    line-height: 1.5; opacity: 0.7;
+  }
+  .stage {
+    width: 96px; height: 96px;
+    display: grid; place-items: center;
+  }
+
+  /* SAI logo base */
+  .sai { display: inline-block; overflow: visible; color: var(--accent); }
+  .sai path { fill: currentColor; }
+  .sai .el {
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  .sai .shells-rotate, .sai .shells-scale {
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  .sai .bbox-anchor { fill: none; stroke: none; pointer-events: none; }
+
+  /* ================================================================
+     Existing variants for reference
+     ================================================================ */
+
+  /* drift (current default — escalating clockwise spins, mixed chevron timings, dog-shake) */
+  @keyframes drift-rig {
+    0%    { transform: rotate(0deg); animation-timing-function: ease-out; }
+    3%    { transform: rotate(-40deg);  }
+    4%    { transform: rotate(-40deg);  }
+    4.5%  { transform: rotate(-20deg);  }
+    5.2%  { transform: rotate(200deg);  }
+    5.6%  { transform: rotate(330deg);  }
+    5.8%  { transform: rotate(355deg);  }
+    6%    { transform: rotate(360deg);  }
+    21%   { transform: rotate(360deg); animation-timing-function: ease-out; }
+    24%   { transform: rotate(320deg);  }
+    25.5% { transform: rotate(320deg);  }
+    25.9% { transform: rotate(360deg);  }
+    26.4% { transform: rotate(620deg);  }
+    26.7% { transform: rotate(700deg);  }
+    26.9% { transform: rotate(717deg);  }
+    27%   { transform: rotate(720deg);  }
+    42%   { transform: rotate(720deg); animation-timing-function: ease-out; }
+    45%   { transform: rotate(680deg);  }
+    46%   { transform: rotate(680deg);  }
+    46.4% { transform: rotate(710deg);  }
+    47%   { transform: rotate(960deg);  }
+    47.5% { transform: rotate(1055deg); }
+    47.8% { transform: rotate(1075deg); }
+    48%   { transform: rotate(1080deg); }
+    63%   { transform: rotate(1080deg); animation-timing-function: ease-out; }
+    66%   { transform: rotate(1040deg); }
+    68%   { transform: rotate(1040deg); }
+    68.3% { transform: rotate(1100deg); }
+    68.6% { transform: rotate(1380deg); }
+    68.8% { transform: rotate(1430deg); }
+    68.95%{ transform: rotate(1438deg); }
+    69%   { transform: rotate(1440deg); }
+    84%   { transform: rotate(1440deg); }
+    84.8% { transform: rotate(1465deg); }
+    85.9% { transform: rotate(1416deg); }
+    87%   { transform: rotate(1462deg); }
+    88.1% { transform: rotate(1418deg); }
+    89.2% { transform: rotate(1458deg); }
+    90.3% { transform: rotate(1422deg); }
+    91.4% { transform: rotate(1454deg); }
+    92.5% { transform: rotate(1424deg); }
+    93.6% { transform: rotate(1450deg); }
+    94.5% { transform: rotate(1432deg); }
+    95%   { transform: rotate(1440deg); }
+    100%  { transform: rotate(1440deg); }
+  }
+  @keyframes drift-el0 {
+    0%, 15% { transform: translate(0, 0); }
+    16% { transform: translate(0, 55%); } 17% { transform: translate(0, 0); }
+    30% { transform: translate(0, 0); } 31% { transform: translate(0, 38%); } 32% { transform: translate(0, 0); }
+    51% { transform: translate(0, 0); } 55% { transform: translate(0, 60%); } 59% { transform: translate(0, 0); }
+    76% { transform: translate(0, 0); } 77% { transform: translate(0, 42%); } 78% { transform: translate(0, 0); }
+    100% { transform: translate(0, 0); }
+  }
+  @keyframes drift-el1 {
+    0%, 9% { transform: translate(0, 0); }
+    10% { transform: translate(-48%, 0); } 11% { transform: translate(0, 0); }
+    34% { transform: translate(0, 0); } 35% { transform: translate(-30%, 0); } 36% { transform: translate(0, 0); }
+    51% { transform: translate(0, 0); } 55% { transform: translate(-55%, 0); } 59% { transform: translate(0, 0); }
+    74% { transform: translate(0, 0); } 75% { transform: translate(-35%, 0); } 76% { transform: translate(0, 0); }
+    100% { transform: translate(0, 0); }
+  }
+  @keyframes drift-el2 {
+    0%, 13% { transform: translate(0, 0); }
+    14% { transform: translate(40%, 0); } 15% { transform: translate(0, 0); }
+    32% { transform: translate(0, 0); } 33% { transform: translate(58%, 0); } 34% { transform: translate(0, 0); }
+    51% { transform: translate(0, 0); } 55% { transform: translate(50%, 0); } 59% { transform: translate(0, 0); }
+    78% { transform: translate(0, 0); } 79% { transform: translate(45%, 0); } 80% { transform: translate(0, 0); }
+    100% { transform: translate(0, 0); }
+  }
+  @keyframes drift-el4 {
+    0%, 11% { transform: translate(0, 0); }
+    12% { transform: translate(0, -62%); } 13% { transform: translate(0, 0); }
+    36% { transform: translate(0, 0); } 37% { transform: translate(0, -45%); } 38% { transform: translate(0, 0); }
+    51% { transform: translate(0, 0); } 55% { transform: translate(0, -55%); } 59% { transform: translate(0, 0); }
+    72% { transform: translate(0, 0); } 73% { transform: translate(0, -38%); } 74% { transform: translate(0, 0); }
+    100% { transform: translate(0, 0); }
+  }
+  .v-drift .shells-rotate { animation: drift-rig 28s cubic-bezier(.55,.05,.4,.95) infinite; }
+  .v-drift .el-0 { animation: drift-el0 28s cubic-bezier(.4,.7,.3,1) infinite; }
+  .v-drift .el-1 { animation: drift-el1 28s cubic-bezier(.4,.7,.3,1) infinite; }
+  .v-drift .el-2 { animation: drift-el2 28s cubic-bezier(.4,.7,.3,1) infinite; }
+  .v-drift .el-4 { animation: drift-el4 28s cubic-bezier(.4,.7,.3,1) infinite; }
+
+  /* drift-b "chase" (counter-clockwise, tight chevron chase) — abridged copy */
+  @keyframes driftb-rig {
+    0% { transform: rotate(0deg); animation-timing-function: ease-out; }
+    3% { transform: rotate(40deg); } 4% { transform: rotate(40deg); }
+    4.5% { transform: rotate(20deg); } 5.2% { transform: rotate(-200deg); }
+    5.6% { transform: rotate(-330deg); } 6% { transform: rotate(-360deg); }
+    22% { transform: rotate(-360deg); animation-timing-function: ease-out; }
+    25% { transform: rotate(-330deg); } 26% { transform: rotate(-330deg); }
+    26.5% { transform: rotate(-380deg); } 27.5% { transform: rotate(-700deg); }
+    28% { transform: rotate(-720deg); }
+    44% { transform: rotate(-720deg); animation-timing-function: ease-out; }
+    47% { transform: rotate(-680deg); } 48% { transform: rotate(-680deg); }
+    48.5% { transform: rotate(-740deg); } 49.4% { transform: rotate(-1280deg); }
+    50% { transform: rotate(-1430deg); } 50.3% { transform: rotate(-1440deg); }
+    66% { transform: rotate(-1440deg); animation-timing-function: ease-out; }
+    69% { transform: rotate(-1410deg); } 71% { transform: rotate(-1410deg); }
+    71.5% { transform: rotate(-1460deg); } 72.5% { transform: rotate(-1780deg); }
+    73% { transform: rotate(-1800deg); } 85% { transform: rotate(-1800deg); }
+    86% { transform: rotate(-1788deg); } 88% { transform: rotate(-1812deg); }
+    90% { transform: rotate(-1790deg); } 92% { transform: rotate(-1810deg); }
+    94% { transform: rotate(-1796deg); } 96% { transform: rotate(-1804deg); }
+    100% { transform: rotate(-1800deg); }
+  }
+  @keyframes driftb-el1 {
+    0%, 14% { transform: translate(0, 0); } 15% { transform: translate(-50%, 0); }
+    16%, 35% { transform: translate(0, 0); } 36% { transform: translate(-40%, 0); }
+    37%, 56% { transform: translate(0, 0); } 57% { transform: translate(-55%, 0); }
+    58%, 78% { transform: translate(0, 0); } 79% { transform: translate(-32%, 0); }
+    80%, 100% { transform: translate(0, 0); }
+  }
+  @keyframes driftb-el4 {
+    0%, 15% { transform: translate(0, 0); } 16% { transform: translate(0, -55%); }
+    17%, 36% { transform: translate(0, 0); } 37% { transform: translate(0, -42%); }
+    38%, 57% { transform: translate(0, 0); } 58% { transform: translate(0, -60%); }
+    59%, 79% { transform: translate(0, 0); } 80% { transform: translate(0, -38%); }
+    81%, 100% { transform: translate(0, 0); }
+  }
+  @keyframes driftb-el2 {
+    0%, 16% { transform: translate(0, 0); } 17% { transform: translate(45%, 0); }
+    18%, 37% { transform: translate(0, 0); } 38% { transform: translate(58%, 0); }
+    39%, 58% { transform: translate(0, 0); } 59% { transform: translate(40%, 0); }
+    60%, 80% { transform: translate(0, 0); } 81% { transform: translate(50%, 0); }
+    82%, 100% { transform: translate(0, 0); }
+  }
+  @keyframes driftb-el0 {
+    0%, 17% { transform: translate(0, 0); } 18% { transform: translate(0, 50%); }
+    19%, 38% { transform: translate(0, 0); } 39% { transform: translate(0, 40%); }
+    40%, 59% { transform: translate(0, 0); } 60% { transform: translate(0, 58%); }
+    61%, 81% { transform: translate(0, 0); } 82% { transform: translate(0, 36%); }
+    83%, 100% { transform: translate(0, 0); }
+  }
+  .v-driftb .shells-rotate { animation: driftb-rig 26s cubic-bezier(.55,.05,.4,.95) infinite; }
+  .v-driftb .el-0 { animation: driftb-el0 26s cubic-bezier(.4,.7,.3,1) infinite; }
+  .v-driftb .el-1 { animation: driftb-el1 26s cubic-bezier(.4,.7,.3,1) infinite; }
+  .v-driftb .el-2 { animation: driftb-el2 26s cubic-bezier(.4,.7,.3,1) infinite; }
+  .v-driftb .el-4 { animation: driftb-el4 26s cubic-bezier(.4,.7,.3,1) infinite; }
+
+  /* drift-c "salvo" — abridged copy */
+  @keyframes driftc-rig {
+    0% { transform: rotate(0deg); animation-timing-function: ease-out; }
+    3% { transform: rotate(-30deg); } 4% { transform: rotate(-30deg); }
+    4.5% { transform: rotate(180deg); } 5% { transform: rotate(340deg); } 5.3% { transform: rotate(360deg); }
+    19% { transform: rotate(360deg); animation-timing-function: ease-out; }
+    22% { transform: rotate(330deg); } 23% { transform: rotate(330deg); }
+    23.5% { transform: rotate(380deg); } 24.3% { transform: rotate(680deg); } 24.8% { transform: rotate(720deg); }
+    38% { transform: rotate(720deg); animation-timing-function: ease-out; }
+    41% { transform: rotate(690deg); } 42% { transform: rotate(690deg); }
+    42.5% { transform: rotate(740deg); } 43.3% { transform: rotate(1040deg); } 43.8% { transform: rotate(1080deg); }
+    57% { transform: rotate(1080deg); animation-timing-function: ease-out; }
+    60% { transform: rotate(1050deg); } 61% { transform: rotate(1050deg); }
+    61.5% { transform: rotate(1100deg); } 62.3% { transform: rotate(1400deg); } 62.8% { transform: rotate(1440deg); }
+    76% { transform: rotate(1440deg); animation-timing-function: ease-out; }
+    79% { transform: rotate(1410deg); } 80% { transform: rotate(1410deg); }
+    80.5% { transform: rotate(1460deg); } 81.3% { transform: rotate(1760deg); } 81.8% { transform: rotate(1800deg); }
+    88% { transform: rotate(1800deg); }
+    88.8% { transform: rotate(1818deg); } 89.6% { transform: rotate(1784deg); }
+    90.4% { transform: rotate(1814deg); } 91.2% { transform: rotate(1788deg); }
+    92% { transform: rotate(1810deg); } 92.8% { transform: rotate(1792deg); }
+    93.6% { transform: rotate(1806deg); } 94.4% { transform: rotate(1796deg); }
+    95% { transform: rotate(1800deg); } 100% { transform: rotate(1800deg); }
+  }
+  @keyframes driftc-el0 {
+    0%, 12% { transform: translate(0, 0); } 13% { transform: translate(0, 50%); }
+    14%, 31% { transform: translate(0, 0); } 32% { transform: translate(0, 42%); }
+    33%, 50% { transform: translate(0, 0); } 51% { transform: translate(0, 58%); }
+    52%, 69% { transform: translate(0, 0); } 70% { transform: translate(0, 38%); }
+    71%, 100% { transform: translate(0, 0); }
+  }
+  @keyframes driftc-el1 {
+    0%, 12% { transform: translate(0, 0); } 13% { transform: translate(-45%, 0); }
+    14%, 31% { transform: translate(0, 0); } 32% { transform: translate(-55%, 0); }
+    33%, 50% { transform: translate(0, 0); } 51% { transform: translate(-38%, 0); }
+    52%, 69% { transform: translate(0, 0); } 70% { transform: translate(-50%, 0); }
+    71%, 100% { transform: translate(0, 0); }
+  }
+  @keyframes driftc-el2 {
+    0%, 12% { transform: translate(0, 0); } 13% { transform: translate(55%, 0); }
+    14%, 31% { transform: translate(0, 0); } 32% { transform: translate(38%, 0); }
+    33%, 50% { transform: translate(0, 0); } 51% { transform: translate(50%, 0); }
+    52%, 69% { transform: translate(0, 0); } 70% { transform: translate(42%, 0); }
+    71%, 100% { transform: translate(0, 0); }
+  }
+  @keyframes driftc-el4 {
+    0%, 12% { transform: translate(0, 0); } 13% { transform: translate(0, -42%); }
+    14%, 31% { transform: translate(0, 0); } 32% { transform: translate(0, -58%); }
+    33%, 50% { transform: translate(0, 0); } 51% { transform: translate(0, -45%); }
+    52%, 69% { transform: translate(0, 0); } 70% { transform: translate(0, -55%); }
+    71%, 100% { transform: translate(0, 0); }
+  }
+  .v-driftc .shells-rotate { animation: driftc-rig 22s cubic-bezier(.55,.05,.4,.95) infinite; }
+  .v-driftc .el-0 { animation: driftc-el0 22s cubic-bezier(.4,.7,.3,1) infinite; }
+  .v-driftc .el-1 { animation: driftc-el1 22s cubic-bezier(.4,.7,.3,1) infinite; }
+  .v-driftc .el-2 { animation: driftc-el2 22s cubic-bezier(.4,.7,.3,1) infinite; }
+  .v-driftc .el-4 { animation: driftc-el4 22s cubic-bezier(.4,.7,.3,1) infinite; }
+
+  /* ================================================================
+     New candidates
+     ================================================================ */
+
+  /* PULSE — heartbeat. Chevrons breathe outward then inward in unison
+     with a gentle stagger. No rotation. */
+  @keyframes pulse-out-y { 0%,100% { transform: translate(0,0); } 30% { transform: translate(0, 28%); } 60% { transform: translate(0, 28%); } }
+  @keyframes pulse-in-y  { 0%,100% { transform: translate(0,0); } 30% { transform: translate(0, -28%); } 60% { transform: translate(0, -28%); } }
+  @keyframes pulse-out-x-pos { 0%,100% { transform: translate(0,0); } 30% { transform: translate(28%,0); } 60% { transform: translate(28%,0); } }
+  @keyframes pulse-out-x-neg { 0%,100% { transform: translate(0,0); } 30% { transform: translate(-28%,0); } 60% { transform: translate(-28%,0); } }
+  @keyframes pulse-center-breathe {
+    0%, 100% { transform: scale(1); }
+    30%      { transform: scale(0.78); }
+    60%      { transform: scale(0.78); }
+  }
+  .v-pulse .el-0 { animation: pulse-out-y 2.4s cubic-bezier(.5,.05,.5,1) infinite; }
+  .v-pulse .el-1 { animation: pulse-out-x-neg 2.4s cubic-bezier(.5,.05,.5,1) infinite; animation-delay: -0.05s; }
+  .v-pulse .el-2 { animation: pulse-out-x-pos 2.4s cubic-bezier(.5,.05,.5,1) infinite; animation-delay: -0.05s; }
+  .v-pulse .el-4 { animation: pulse-in-y 2.4s cubic-bezier(.5,.05,.5,1) infinite; }
+  .v-pulse .center .el-3 { animation: pulse-center-breathe 2.4s cubic-bezier(.5,.05,.5,1) infinite; transform-box: fill-box; transform-origin: center; }
+
+  /* CLOCKWORK — sharp 90° tick rotations with overshoot. Chevrons static.
+     Like a second hand snapping forward. */
+  @keyframes clockwork-rig {
+    0%   { transform: rotate(0deg); }
+    20%  { transform: rotate(0deg); animation-timing-function: cubic-bezier(.7,0,.3,1.6); }
+    25%  { transform: rotate(96deg); animation-timing-function: ease-out; }
+    27%  { transform: rotate(90deg); }
+    45%  { transform: rotate(90deg); animation-timing-function: cubic-bezier(.7,0,.3,1.6); }
+    50%  { transform: rotate(186deg); animation-timing-function: ease-out; }
+    52%  { transform: rotate(180deg); }
+    70%  { transform: rotate(180deg); animation-timing-function: cubic-bezier(.7,0,.3,1.6); }
+    75%  { transform: rotate(276deg); animation-timing-function: ease-out; }
+    77%  { transform: rotate(270deg); }
+    95%  { transform: rotate(270deg); animation-timing-function: cubic-bezier(.7,0,.3,1.6); }
+    100% { transform: rotate(366deg); }
+  }
+  @keyframes clockwork-flash {
+    0%, 23%, 27%, 48%, 52%, 73%, 77%, 98%, 100% { opacity: 1; }
+    25%, 50%, 75% { opacity: 0.45; }
+  }
+  .v-clockwork .shells-rotate { animation: clockwork-rig 8s linear infinite; }
+  .v-clockwork .el { animation: clockwork-flash 8s linear infinite; }
+
+  /* SCATTER-GATHER — explode outward, hold + spin while exploded, snap back. */
+  @keyframes scatter-rig {
+    0%, 18% { transform: rotate(0deg); }
+    50%     { transform: rotate(540deg); }
+    82%, 100% { transform: rotate(720deg); }
+  }
+  @keyframes scatter-el0 {
+    0% { transform: translate(0,0); }
+    18% { transform: translate(0, 80%); }
+    82% { transform: translate(0, 80%); }
+    100% { transform: translate(0,0); }
+  }
+  @keyframes scatter-el1 {
+    0% { transform: translate(0,0); }
+    18% { transform: translate(-80%, 0); }
+    82% { transform: translate(-80%, 0); }
+    100% { transform: translate(0,0); }
+  }
+  @keyframes scatter-el2 {
+    0% { transform: translate(0,0); }
+    18% { transform: translate(80%, 0); }
+    82% { transform: translate(80%, 0); }
+    100% { transform: translate(0,0); }
+  }
+  @keyframes scatter-el4 {
+    0% { transform: translate(0,0); }
+    18% { transform: translate(0, -80%); }
+    82% { transform: translate(0, -80%); }
+    100% { transform: translate(0,0); }
+  }
+  .v-scatter .shells-rotate { animation: scatter-rig 4.8s cubic-bezier(.5,.05,.4,1) infinite; }
+  .v-scatter .el-0 { animation: scatter-el0 4.8s cubic-bezier(.6,-0.2,.4,1.2) infinite; }
+  .v-scatter .el-1 { animation: scatter-el1 4.8s cubic-bezier(.6,-0.2,.4,1.2) infinite; }
+  .v-scatter .el-2 { animation: scatter-el2 4.8s cubic-bezier(.6,-0.2,.4,1.2) infinite; }
+  .v-scatter .el-4 { animation: scatter-el4 4.8s cubic-bezier(.6,-0.2,.4,1.2) infinite; }
+
+  /* WAVE — chevrons bob outward in a continuous clockwise wave.
+     left → top → right → bottom → repeat. No assembly rotation. */
+  @keyframes wave-y-out { 0%, 25% { transform: translate(0, 0); } 35% { transform: translate(0, 35%); } 50%, 100% { transform: translate(0, 0); } }
+  @keyframes wave-y-in  { 0%, 75% { transform: translate(0, 0); } 85% { transform: translate(0, -35%); } 100% { transform: translate(0, 0); } }
+  @keyframes wave-x-pos { 0%, 50% { transform: translate(0, 0); } 60% { transform: translate(35%, 0); } 75%, 100% { transform: translate(0, 0); } }
+  @keyframes wave-x-neg { 0%, 0%  { transform: translate(0, 0); } 10% { transform: translate(-35%, 0); } 25%, 100% { transform: translate(0, 0); } }
+  .v-wave .el-1 { animation: wave-x-neg 2.6s ease-in-out infinite; } /* left first */
+  .v-wave .el-4 { animation: wave-y-in 2.6s ease-in-out infinite; }  /* top */
+  .v-wave .el-2 { animation: wave-x-pos 2.6s ease-in-out infinite; } /* right */
+  .v-wave .el-0 { animation: wave-y-out 2.6s ease-in-out infinite; } /* bottom */
+
+  /* GLITCH — hard stepped jolts with rotation, scale, and blackouts.
+     Larger displacements so it reads at small sizes. */
+  @keyframes glitch-el0 {
+    0%, 100%   { transform: translate(0,0) rotate(0deg) scale(1); opacity: 1; }
+    9%, 13%    { transform: translate(0,0); opacity: 1; }
+    10%, 12%   { transform: translate(22%, 70%) rotate(20deg); opacity: 0; }
+    37%, 41%   { transform: translate(0,0); opacity: 1; }
+    38%, 40%   { transform: translate(-30%, 55%) rotate(-25deg) scale(1.18); opacity: 0.5; }
+    64%, 68%   { transform: translate(0,0); opacity: 1; }
+    65%, 67%   { transform: translate(40%, 60%) rotate(15deg); opacity: 0.3; }
+    85%, 89%   { transform: translate(0,0); opacity: 1; }
+    86%, 88%   { transform: translate(-12%, 78%) rotate(-10deg); opacity: 0; }
+  }
+  @keyframes glitch-el1 {
+    0%, 100%   { transform: translate(0,0) rotate(0deg) scale(1); opacity: 1; }
+    4%, 8%     { transform: translate(0,0); opacity: 1; }
+    5%, 7%     { transform: translate(-72%, 12%) rotate(-30deg); opacity: 0; }
+    29%, 33%   { transform: translate(0,0); opacity: 1; }
+    30%, 32%   { transform: translate(-58%, -16%) rotate(20deg) scale(0.85); opacity: 0.4; }
+    54%, 58%   { transform: translate(0,0); opacity: 1; }
+    55%, 57%   { transform: translate(-80%, 8%) rotate(-15deg); opacity: 0.6; }
+    78%, 82%   { transform: translate(0,0); opacity: 1; }
+    79%, 81%   { transform: translate(-48%, 22%) rotate(35deg); opacity: 0; }
+  }
+  @keyframes glitch-el2 {
+    0%, 100%   { transform: translate(0,0) rotate(0deg) scale(1); opacity: 1; }
+    9%, 13%    { transform: translate(0,0); opacity: 1; }
+    10%, 12%   { transform: translate(75%, 18%) rotate(28deg) scale(1.12); opacity: 0.4; }
+    46%, 50%   { transform: translate(0,0); opacity: 1; }
+    47%, 49%   { transform: translate(60%, -22%) rotate(-22deg); opacity: 0; }
+    64%, 68%   { transform: translate(0,0); opacity: 1; }
+    65%, 67%   { transform: translate(85%, 14%) rotate(18deg); opacity: 0.6; }
+    85%, 89%   { transform: translate(0,0); opacity: 1; }
+    86%, 88%   { transform: translate(52%, -8%) rotate(-30deg) scale(0.8); opacity: 0.3; }
+  }
+  @keyframes glitch-el4 {
+    0%, 100%   { transform: translate(0,0) rotate(0deg) scale(1); opacity: 1; }
+    18%, 22%   { transform: translate(0,0); opacity: 1; }
+    19%, 21%   { transform: translate(-10%, -76%) rotate(-15deg); opacity: 0; }
+    37%, 41%   { transform: translate(0,0); opacity: 1; }
+    38%, 40%   { transform: translate(18%, -60%) rotate(28deg) scale(1.15); opacity: 0.45; }
+    72%, 76%   { transform: translate(0,0); opacity: 1; }
+    73%, 75%   { transform: translate(-22%, -82%) rotate(-32deg); opacity: 0; }
+    93%, 97%   { transform: translate(0,0); opacity: 1; }
+    94%, 96%   { transform: translate(8%, -52%) rotate(12deg); opacity: 0.55; }
+  }
+  @keyframes glitch-center {
+    0%, 100%   { opacity: 1; transform: scale(1) rotate(0deg); }
+    14%, 18%   { opacity: 1; transform: scale(1); }
+    15%, 17%   { opacity: 0.2; transform: scale(0.6) rotate(20deg); }
+    37%, 41%   { opacity: 1; transform: scale(1); }
+    38%, 40%   { opacity: 0; transform: scale(1.5); }
+    60%, 64%   { opacity: 1; transform: scale(1); }
+    61%, 63%   { opacity: 0.4; transform: scale(0.7) rotate(-30deg); }
+    85%, 89%   { opacity: 1; transform: scale(1); }
+    86%, 88%   { opacity: 0.15; transform: scale(1.3) rotate(15deg); }
+  }
+  .v-glitch .el-0 { animation: glitch-el0 2.4s steps(1, end) infinite; }
+  .v-glitch .el-1 { animation: glitch-el1 2.4s steps(1, end) infinite; }
+  .v-glitch .el-2 { animation: glitch-el2 2.4s steps(1, end) infinite; }
+  .v-glitch .el-4 { animation: glitch-el4 2.4s steps(1, end) infinite; }
+  .v-glitch .center .el-3 { animation: glitch-center 2.4s steps(1, end) infinite; transform-box: fill-box; transform-origin: center; }
+
+  /* INHALE — squeeze inward, spin while compressed, burst outward back to rest. */
+  @keyframes inhale-rig {
+    0%, 18% { transform: rotate(0deg) scale(1); }
+    35%     { transform: rotate(180deg) scale(0.55); }
+    55%     { transform: rotate(540deg) scale(0.55); }
+    72%     { transform: rotate(720deg) scale(1.08); }
+    82%, 100% { transform: rotate(720deg) scale(1); }
+  }
+  @keyframes inhale-burst {
+    0%, 65% { transform: translate(0, 0); }
+    72%     { transform: translate(0, 0); }
+    /* slight individual outward kick on burst frame */
+    78%     { transform: translate(0, 0); }
+    100%    { transform: translate(0, 0); }
+  }
+  .v-inhale .shells-rotate { animation: inhale-rig 5.4s cubic-bezier(.5,.05,.4,1.1) infinite; }
+  /* Center pulses with the breath */
+  @keyframes inhale-center { 0%, 18% { transform: scale(1); } 35%, 55% { transform: scale(1.25); } 82%, 100% { transform: scale(1); } }
+  .v-inhale .center .el-3 { animation: inhale-center 5.4s cubic-bezier(.5,.05,.4,1.1) infinite; transform-box: fill-box; transform-origin: center; }
+
+  /* VORTEX — chevrons spiral inward toward center while shrinking,
+     then spiral back out while growing. Single deep breath, with curl. */
+  @keyframes vortex-rig {
+    0%, 12% { transform: rotate(0deg); }
+    50%     { transform: rotate(540deg); }
+    88%, 100% { transform: rotate(1080deg); }
+  }
+  @keyframes vortex-el-shrink-grow {
+    0%, 12% { transform: scale(1); }
+    50%     { transform: scale(0.35); }
+    88%, 100% { transform: scale(1); }
+  }
+  /* Per-chevron: scale shrinks the offset because transform-origin is fill-box center,
+     but they're already away from center, so scaling them does NOT pull them inward.
+     We need a translate toward 0 too. The shells-scale group lets us do all-shells uniform scale. */
+  @keyframes vortex-shells-scale {
+    0%, 12% { transform: scale(1); }
+    50%     { transform: scale(0.35); }
+    88%, 100% { transform: scale(1); }
+  }
+  .v-vortex .shells-rotate { animation: vortex-rig 5s cubic-bezier(.4,.05,.4,1) infinite; }
+  .v-vortex .shells-scale  { animation: vortex-shells-scale 5s cubic-bezier(.4,.05,.4,1) infinite; }
+  /* Center stays put but pulses brighter at peak compression */
+  @keyframes vortex-center { 0%, 12%, 88%, 100% { transform: scale(1); opacity: 0.8; } 50% { transform: scale(1.4); opacity: 1; } }
+  .v-vortex .center .el-3 { animation: vortex-center 5s cubic-bezier(.4,.05,.4,1) infinite; transform-box: fill-box; transform-origin: center; }
+
+  /* PENDULUM — assembly swings ±60° like a metronome (starts at center).
+     Chevrons gently overshoot on each swing (lag/whip). */
+  @keyframes pendulum-rig {
+    0%   { transform: rotate(0deg);   animation-timing-function: cubic-bezier(.45,0,.55,1); }
+    25%  { transform: rotate(60deg);  animation-timing-function: cubic-bezier(.45,0,.55,1); }
+    50%  { transform: rotate(0deg);   animation-timing-function: cubic-bezier(.45,0,.55,1); }
+    75%  { transform: rotate(-60deg); animation-timing-function: cubic-bezier(.45,0,.55,1); }
+    100% { transform: rotate(0deg); }
+  }
+  @keyframes pendulum-whip-cw {
+    0%, 100% { transform: rotate(0deg); }
+    25%      { transform: rotate(8deg); }
+    75%      { transform: rotate(-8deg); }
+  }
+  .v-pendulum .shells-rotate { animation: pendulum-rig 3.6s infinite; }
+  .v-pendulum .el-0, .v-pendulum .el-1, .v-pendulum .el-2, .v-pendulum .el-4 {
+    animation: pendulum-whip-cw 3.6s ease-in-out infinite;
+  }
+
+  /* COMET — single chevron fires far outward like a cannon, returns;
+     next one fires; cycles around. Always exactly one chevron is out. */
+  @keyframes comet-bottom {
+    0%, 100% { transform: translate(0, 0); }
+    /* fires during 0-25% window */
+    8%   { transform: translate(0, 95%); }
+    18%  { transform: translate(0, 0); }
+  }
+  @keyframes comet-left {
+    0%, 100% { transform: translate(0, 0); }
+    /* fires during 25-50% window */
+    33%  { transform: translate(-95%, 0); }
+    43%  { transform: translate(0, 0); }
+  }
+  @keyframes comet-top {
+    0%, 100% { transform: translate(0, 0); }
+    /* fires during 50-75% window */
+    58%  { transform: translate(0, -95%); }
+    68%  { transform: translate(0, 0); }
+  }
+  @keyframes comet-right {
+    0%, 100% { transform: translate(0, 0); }
+    /* fires during 75-100% window */
+    83%  { transform: translate(95%, 0); }
+    93%  { transform: translate(0, 0); }
+  }
+  .v-comet .el-0 { animation: comet-bottom 4.8s cubic-bezier(.3,1.4,.5,1) infinite; }
+  .v-comet .el-1 { animation: comet-left   4.8s cubic-bezier(.3,1.4,.5,1) infinite; }
+  .v-comet .el-4 { animation: comet-top    4.8s cubic-bezier(.3,1.4,.5,1) infinite; }
+  .v-comet .el-2 { animation: comet-right  4.8s cubic-bezier(.3,1.4,.5,1) infinite; }
+
+  /* RIPPLE — center pulses, then each chevron fade-pulses outward
+     in a radial wave from the core. Sonar / radar emission. */
+  @keyframes ripple-center {
+    0%   { transform: scale(1); opacity: 1; }
+    8%   { transform: scale(1.45); opacity: 1; }
+    18%  { transform: scale(1); opacity: 0.7; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  /* Each chevron: tiny outward bump + brightness pulse, staggered after center */
+  @keyframes ripple-bottom {
+    0%, 18%, 100% { transform: translate(0,0); opacity: 0.55; }
+    24% { transform: translate(0, 22%); opacity: 1; }
+    34% { transform: translate(0, 0); opacity: 0.55; }
+  }
+  @keyframes ripple-left {
+    0%, 22%, 100% { transform: translate(0,0); opacity: 0.55; }
+    28% { transform: translate(-22%, 0); opacity: 1; }
+    38% { transform: translate(0, 0); opacity: 0.55; }
+  }
+  @keyframes ripple-top {
+    0%, 26%, 100% { transform: translate(0,0); opacity: 0.55; }
+    32% { transform: translate(0, -22%); opacity: 1; }
+    42% { transform: translate(0, 0); opacity: 0.55; }
+  }
+  @keyframes ripple-right {
+    0%, 30%, 100% { transform: translate(0,0); opacity: 0.55; }
+    36% { transform: translate(22%, 0); opacity: 1; }
+    46% { transform: translate(0, 0); opacity: 0.55; }
+  }
+  .v-ripple .center .el-3 { animation: ripple-center 2.6s cubic-bezier(.4,.05,.4,1) infinite; transform-box: fill-box; transform-origin: center; }
+  .v-ripple .el-0 { animation: ripple-bottom 2.6s ease-out infinite; }
+  .v-ripple .el-1 { animation: ripple-left   2.6s ease-out infinite; }
+  .v-ripple .el-4 { animation: ripple-top    2.6s ease-out infinite; }
+  .v-ripple .el-2 { animation: ripple-right  2.6s ease-out infinite; }
+
+  /* Whole-SVG transforms (used by flip / squish / bloom / searchlight)
+     pivot around the SVG's geometric center. */
+  .sai { transform-origin: 50% 50%; transform-box: view-box; }
+
+  /* FLIP — card flip: rotate 360° while squashing vertically at each
+     half-turn so it reads as a flip, not just a spin. */
+  @keyframes flip-svg {
+    0%, 12%   { transform: rotate(0deg) scaleY(1); }
+    27%       { transform: rotate(90deg) scaleY(0.12); }
+    42%, 58%  { transform: rotate(180deg) scaleY(1); }
+    73%       { transform: rotate(270deg) scaleY(0.12); }
+    88%, 100% { transform: rotate(360deg) scaleY(1); }
+  }
+  .v-flip { animation: flip-svg 4s cubic-bezier(.5,.05,.5,1) infinite; }
+
+  /* TYPEWRITER — each chevron briefly "re-stamps" in clockwise sequence.
+     Starts and ends at full visibility. */
+  @keyframes type-top    { 0%, 100%      { opacity: 1; transform: scale(1); }
+                           5%            { opacity: 0; transform: scale(0.3); }
+                           10%           { opacity: 1; transform: scale(1); } }
+  @keyframes type-right  { 0%, 18%, 100% { opacity: 1; transform: scale(1); }
+                           23%           { opacity: 0; transform: scale(0.3); }
+                           28%           { opacity: 1; transform: scale(1); } }
+  @keyframes type-bottom { 0%, 36%, 100% { opacity: 1; transform: scale(1); }
+                           41%           { opacity: 0; transform: scale(0.3); }
+                           46%           { opacity: 1; transform: scale(1); } }
+  @keyframes type-left   { 0%, 54%, 100% { opacity: 1; transform: scale(1); }
+                           59%           { opacity: 0; transform: scale(0.3); }
+                           64%           { opacity: 1; transform: scale(1); } }
+  .v-typewriter .el-4 { animation: type-top    3s cubic-bezier(.4,1.5,.6,1) infinite; }
+  .v-typewriter .el-2 { animation: type-right  3s cubic-bezier(.4,1.5,.6,1) infinite; }
+  .v-typewriter .el-0 { animation: type-bottom 3s cubic-bezier(.4,1.5,.6,1) infinite; }
+  .v-typewriter .el-1 { animation: type-left   3s cubic-bezier(.4,1.5,.6,1) infinite; }
+
+  /* MORSE — chevrons blink "off" briefly in stepped patterns.
+     Starts and ends fully on; off-blips form a signaling rhythm. */
+  @keyframes morse-top    { 0%, 100% { opacity: 1; } 10%, 14% { opacity: 0.18; } 26%, 30% { opacity: 0.18; } 60%, 70% { opacity: 0.18; } }
+  @keyframes morse-right  { 0%, 100% { opacity: 1; } 18%, 32% { opacity: 0.18; } 54%, 58% { opacity: 0.18; } 80%, 88% { opacity: 0.18; } }
+  @keyframes morse-bottom { 0%, 100% { opacity: 1; }  6%, 10% { opacity: 0.18; } 36%, 50% { opacity: 0.18; } 72%, 76% { opacity: 0.18; } }
+  @keyframes morse-left   { 0%, 100% { opacity: 1; } 22%, 36% { opacity: 0.18; } 66%, 82% { opacity: 0.18; } }
+  .v-morse .el-4 { animation: morse-top    3.5s steps(1, end) infinite; }
+  .v-morse .el-2 { animation: morse-right  3.5s steps(1, end) infinite; }
+  .v-morse .el-0 { animation: morse-bottom 3.5s steps(1, end) infinite; }
+  .v-morse .el-1 { animation: morse-left   3.5s steps(1, end) infinite; }
+
+  /* SQUISH — alternating horizontal/vertical squash, jelly bouncing.
+     Whole logo deforms together. */
+  @keyframes squish-svg {
+    0%, 100% { transform: scaleX(1) scaleY(1); }
+    14%      { transform: scaleX(1.22) scaleY(0.78); }
+    28%      { transform: scaleX(0.94) scaleY(1.06); }
+    42%      { transform: scaleX(0.78) scaleY(1.22); }
+    56%      { transform: scaleX(1.06) scaleY(0.94); }
+    72%      { transform: scaleX(0.97) scaleY(1.03); }
+    86%      { transform: scaleX(1) scaleY(1); }
+  }
+  .v-squish { animation: squish-svg 2.2s cubic-bezier(.45,0,.55,1) infinite; }
+
+  /* BLOOM — closes into a tight bud, then spirals back open with bounce.
+     Starts and ends at full size. */
+  @keyframes bloom-svg {
+    0%, 4%    { transform: rotate(0deg)    scale(1);    opacity: 1; }
+    30%       { transform: rotate(360deg)  scale(0.22); opacity: 0.35; }
+    76%       { transform: rotate(1080deg) scale(1.12); opacity: 1; }
+    86%       { transform: rotate(1080deg) scale(0.94); opacity: 1; }
+    92%, 100% { transform: rotate(1080deg) scale(1);    opacity: 1; }
+  }
+  .v-bloom { animation: bloom-svg 3.6s cubic-bezier(.4,.05,.3,1) infinite; }
+
+  /* SEARCHLIGHT — short scanning back-and-forth rotations, then a
+     single full sweep at the end. No chevron motion. */
+  @keyframes searchlight-rig {
+    0%   { transform: rotate(0deg); }
+    8%   { transform: rotate(32deg); }
+    16%  { transform: rotate(-12deg); }
+    24%  { transform: rotate(28deg); }
+    32%  { transform: rotate(-20deg); }
+    40%  { transform: rotate(36deg); }
+    48%  { transform: rotate(-6deg); }
+    56%  { transform: rotate(24deg); }
+    64%  { transform: rotate(0deg); }
+    /* big sweep */
+    78%  { transform: rotate(180deg); }
+    100% { transform: rotate(360deg); }
+  }
+  .v-searchlight .shells-rotate { animation: searchlight-rig 3.4s cubic-bezier(.45,0,.55,1) infinite; }
+
+  /* STUTTER — tries to spin, gets stuck, jitters back, retries,
+     finally breaks free with a full turn. Struggle / loading feel. */
+  @keyframes stutter-rig {
+    0%   { transform: rotate(0deg); animation-timing-function: ease-out; }
+    /* attempt 1 — gets to 80°, snaps back */
+    8%   { transform: rotate(80deg); }
+    9%   { transform: rotate(75deg); animation-timing-function: cubic-bezier(.7,0,.3,1); }
+    14%  { transform: rotate(20deg); }
+    /* tiny shudder */
+    16%  { transform: rotate(28deg); }
+    18%  { transform: rotate(20deg); }
+    /* attempt 2 — pushes to 130°, slips back */
+    20%  { transform: rotate(20deg); animation-timing-function: ease-out; }
+    30%  { transform: rotate(130deg); }
+    31%  { transform: rotate(125deg); animation-timing-function: cubic-bezier(.7,0,.3,1); }
+    37%  { transform: rotate(60deg); }
+    39%  { transform: rotate(68deg); }
+    41%  { transform: rotate(60deg); }
+    /* attempt 3 — wind up further back, then breaks free */
+    44%  { transform: rotate(60deg); animation-timing-function: cubic-bezier(.7,0,.3,1); }
+    48%  { transform: rotate(40deg); }
+    50%  { transform: rotate(40deg); animation-timing-function: cubic-bezier(.4,0,.2,1); }
+    72%  { transform: rotate(420deg); animation-timing-function: cubic-bezier(.3,0,.3,1.2); }
+    78%  { transform: rotate(376deg); }
+    82%  { transform: rotate(364deg); }
+    86%  { transform: rotate(360deg); }
+    100% { transform: rotate(360deg); }
+  }
+  .v-stutter .shells-rotate { animation: stutter-rig 6.2s infinite; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sai *, .sai .shells-rotate { animation: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>SAI · thinking animation candidates</h1>
+    <div class="sub">Existing variants for reference (top), new candidates below. All same logo, same color, same baseline tile size.</div>
+  </div>
+</header>
+
+<div class="grid">
+
+  <div class="tile section"><h2>Existing — currently shipping</h2></div>
+
+  <div class="tile">
+    <div class="stage" data-variant="v-drift"></div>
+    <div class="label">drift</div>
+    <div class="desc">Escalating clockwise spins (1×→2×→3×→4×) with mixed chevron timings, dog-shake settle. 28s loop.</div>
+  </div>
+  <div class="tile">
+    <div class="stage" data-variant="v-driftb"></div>
+    <div class="label">drift-b · chase</div>
+    <div class="desc">Counter-clockwise spins, chevrons fire in tight left → top → right → bottom chase, short shimmy. 26s.</div>
+  </div>
+  <div class="tile">
+    <div class="stage" data-variant="v-driftc"></div>
+    <div class="label">drift-c · salvo</div>
+    <div class="desc">Five quick clockwise spins, all four chevrons fire together at each beat, tight wobble settle. 22s.</div>
+  </div>
+
+  <div class="tile section"><h2>New candidates</h2></div>
+
+  <div class="tile">
+    <div class="stage" data-variant="v-pulse"></div>
+    <div class="label">pulse · heartbeat</div>
+    <div class="desc">Chevrons breathe outward and back together while center contracts. No rotation. Steady 2.4s rhythm.</div>
+  </div>
+  <div class="tile">
+    <div class="stage" data-variant="v-clockwork"></div>
+    <div class="label">clockwork</div>
+    <div class="desc">Sharp 90° tick rotations with tiny overshoot, chevrons flash dim at each tick. Mechanical, second-hand feel. 8s.</div>
+  </div>
+  <div class="tile">
+    <div class="stage" data-variant="v-scatter"></div>
+    <div class="label">scatter-gather</div>
+    <div class="desc">Chevrons explode outward, assembly spins 720° while exploded, then snaps back to center. 4.8s.</div>
+  </div>
+  <div class="tile">
+    <div class="stage" data-variant="v-wave"></div>
+    <div class="label">wave</div>
+    <div class="desc">Chevrons bob outward in a continuous clockwise wave: left → top → right → bottom. Hypnotic, no spin. 2.6s.</div>
+  </div>
+  <div class="tile">
+    <div class="stage" data-variant="v-glitch"></div>
+    <div class="label">glitch</div>
+    <div class="desc">Hard stepped jolts with rotation, scale, and full blackouts. Larger displacements so it reads at small sizes. 2.4s.</div>
+  </div>
+  <div class="tile">
+    <div class="stage" data-variant="v-inhale"></div>
+    <div class="label">inhale</div>
+    <div class="desc">Whole assembly squeezes inward while spinning, briefly overshoots on the way back out. Single deep breath. 5.4s.</div>
+  </div>
+
+  <div class="tile section"><h2>More candidates · round 2</h2></div>
+
+  <div class="tile">
+    <div class="stage" data-variant="v-vortex"></div>
+    <div class="label">vortex</div>
+    <div class="desc">Chevrons spiral inward toward center while shrinking, center brightens at peak compression, spirals back out. 5s.</div>
+  </div>
+  <div class="tile">
+    <div class="stage" data-variant="v-pendulum"></div>
+    <div class="label">pendulum</div>
+    <div class="desc">Starts at center, swings to +60°, back through center, to -60°, returns. Chevrons whip slightly past on each swing. 3.6s.</div>
+  </div>
+  <div class="tile">
+    <div class="stage" data-variant="v-comet"></div>
+    <div class="label">comet</div>
+    <div class="desc">One chevron at a time fires far outward like a cannon and snaps back, cycling around the cardinals. 4.8s.</div>
+  </div>
+  <div class="tile">
+    <div class="stage" data-variant="v-ripple"></div>
+    <div class="label">ripple</div>
+    <div class="desc">Center pulses then each chevron fade-pulses outward in sequence — a radial sonar wave from the core. 2.6s.</div>
+  </div>
+  <div class="tile">
+    <div class="stage" data-variant="v-stutter"></div>
+    <div class="label">stutter</div>
+    <div class="desc">Tries to spin, gets stuck partway, jitters back, winds up again and finally breaks free into a full turn. 6.2s.</div>
+  </div>
+
+  <div class="tile section"><h2>Round 3</h2></div>
+
+  <div class="tile">
+    <div class="stage" data-variant="v-flip"></div>
+    <div class="label">flip</div>
+    <div class="desc">Whole logo flips like a card — rotates 360° while squashing vertically at each half-turn so it reads as a flip, not a spin. 4s.</div>
+  </div>
+  <div class="tile">
+    <div class="stage" data-variant="v-typewriter"></div>
+    <div class="label">typewriter</div>
+    <div class="desc">Each chevron briefly disappears and pops back in clockwise sequence — top, right, bottom, left — like the logo is being re-stamped. 3s.</div>
+  </div>
+  <div class="tile">
+    <div class="stage" data-variant="v-morse"></div>
+    <div class="label">morse</div>
+    <div class="desc">Chevrons stay mostly bright; brief "off" blips at different rhythms make the logo read as a signal lamp. 3.5s.</div>
+  </div>
+  <div class="tile">
+    <div class="stage" data-variant="v-squish"></div>
+    <div class="label">squish</div>
+    <div class="desc">Jelly: whole logo squashes horizontally, recoils, squashes vertically, recoils, settles. No rotation. 2.2s.</div>
+  </div>
+  <div class="tile">
+    <div class="stage" data-variant="v-bloom"></div>
+    <div class="label">bloom</div>
+    <div class="desc">Closes into a tight bud while rotating, then spirals back open to full size with an overshoot bounce. 3.6s.</div>
+  </div>
+  <div class="tile">
+    <div class="stage" data-variant="v-searchlight"></div>
+    <div class="label">searchlight</div>
+    <div class="desc">Short scanning rotations back and forth (searching), then one big full sweep at the end. 3.4s.</div>
+  </div>
+
+  <div class="tile section">
+    <h2>Chained sequences · random samples of 2–4 animations played in order, re-shuffled each cycle</h2>
+  </div>
+
+  <div class="tile chain-tile"><div class="stage chain-stage"></div><div class="label chain-label">…</div><div class="desc">Chain #1</div></div>
+  <div class="tile chain-tile"><div class="stage chain-stage"></div><div class="label chain-label">…</div><div class="desc">Chain #2</div></div>
+  <div class="tile chain-tile"><div class="stage chain-stage"></div><div class="label chain-label">…</div><div class="desc">Chain #3</div></div>
+  <div class="tile chain-tile"><div class="stage chain-stage"></div><div class="label chain-label">…</div><div class="desc">Chain #4</div></div>
+  <div class="tile chain-tile"><div class="stage chain-stage"></div><div class="label chain-label">…</div><div class="desc">Chain #5</div></div>
+  <div class="tile chain-tile"><div class="stage chain-stage"></div><div class="label chain-label">…</div><div class="desc">Chain #6</div></div>
+
+</div>
+
+<script>
+  // The actual SAI path data, copied from src/components/SaiLogo.tsx (ORIGINAL_D).
+  // We split it into 5 subpaths and render with the same structure SaiLogo uses
+  // so .shells-rotate / .el-N selectors line up.
+  const ORIGINAL_D = "m -332.87752,156.98433 c -0.88652,-0.39969 -3.74667,-3.0845 -11.19787,-10.51137 -5.50398,-5.48602 -10.23672,-10.41631 -10.51719,-10.95622 -0.74898,-1.4418 -0.66429,-3.03718 0.2366,-4.45666 0.41059,-0.64695 1.90602,-2.26413 3.32318,-3.59374 2.78058,-2.60879 4.04486,-3.23866 5.75926,-2.86924 1.56301,0.3368 2.11745,0.79594 7.36894,6.10219 3.01138,3.04278 5.53518,5.3716 6.06204,5.59371 1.89133,0.7973 2.30358,0.52639 8.35775,-5.49219 6.62589,-6.58694 7.43163,-7.05484 10.05417,-5.83847 1.43338,0.66482 6.65123,6.0064 6.88118,7.04436 0.096,0.43314 0.22521,0.9491 0.28723,1.14658 0.062,0.19749 -0.0169,0.85233 -0.17533,1.45521 -0.24942,0.94901 -1.67923,2.4939 -10.65205,11.50934 -6.88764,6.92036 -10.71894,10.57924 -11.42229,10.90825 -1.37289,0.64221 -2.88061,0.62779 -4.36562,-0.0418 z m -35.05729,-34.54629 c -1.31998,-0.687 -20.49096,-19.92498 -21.05566,-21.12924 -0.59002,-1.25828 -0.64879,-2.997174 -0.14113,-4.175684 0.41044,-0.95281 20.10626,-20.720136 21.23385,-21.310936 0.96292,-0.50453 2.96169,-0.49512 3.93169,0.0185 0.43656,0.23116 2.17663,1.82934 3.86681,3.5515 3.37084,3.4346 3.70458,4.09448 3.13695,6.20248 -0.24456,0.90822 -1.20449,2.01644 -5.63365,6.503906 -2.93637,2.97504 -5.44021,5.70524 -5.56408,6.06712 -0.57696,1.68555 -0.15698,2.297424 5.511,8.028974 4.40982,4.45928 5.43267,5.63439 5.7077,6.55736 0.58938,1.97794 0.0967,2.93423 -3.28299,6.37257 -1.62139,1.64953 -3.2695,3.16758 -3.66246,3.37344 -0.93758,0.49119 -3.04912,0.4599 -4.04803,-0.06 z m 69.96794,-0.32873 c -1.37182,-0.88988 -4.92327,-4.4651 -5.91503,-5.95462 -0.80744,-1.2127 -0.91233,-2.9104 -0.26008,-4.20955 0.23382,-0.46571 2.79367,-3.23463 5.68855,-6.15315 5.18114,-5.22345 5.26341,-5.32394 5.26341,-6.429284 0,-0.61759 -0.17057,-1.4444 -0.37905,-1.83736 -0.20848,-0.39296 -2.60184,-2.91712 -5.31859,-5.60926 -2.71674,-2.692126 -5.10601,-5.277916 -5.30949,-5.746186 -0.47539,-1.09405 -0.47339,-2.8139 0.004,-3.7258 0.69032,-1.31768 6.28987,-6.56846 7.38201,-6.92221 1.08394,-0.3511 2.4985,-0.19844 3.61163,0.38977 0.36883,0.1949 5.20447,4.91742 10.74587,10.4945 8.52963,8.584546 10.12277,10.307206 10.3849,11.229166 0.37907,1.33329 0.38062,1.54757 0.0208,2.879724 -0.24154,0.89439 -1.87053,2.64918 -10.51571,11.32781 -6.19252,6.21648 -10.58202,10.41945 -11.1221,10.64948 -1.45014,0.61764 -2.94508,0.4839 -4.28152,-0.38303 z M -338.849,111.51137 c -2.2167,-0.53038 -3.93048,-2.50859 -4.2149,-4.86524 -0.0908,-0.75272 -0.12802,-4.6428 -0.0826,-8.644624 0.0816,-7.19725 0.0897,-7.28882 0.744,-8.456426 0.74372,-1.32718 1.96199,-2.2582 3.49518,-2.67104 0.64869,-0.17467 3.96137,-0.24841 8.88973,-0.19788 7.81819,0.0802 7.86135,0.0837 9.0361,0.74202 1.30104,0.72907 2.24436,1.94155 2.65183,3.408456 0.3667,1.32013 0.3468,15.478014 -0.0237,16.832164 -0.40752,1.48963 -2.42051,3.39272 -4.01272,3.79364 -1.35642,0.34155 -15.09644,0.39067 -16.48295,0.0589 z m -8.84519,-38.26977 c -1.02775,-0.44125 -6.43523,-5.65524 -7.03001,-6.77847 -0.64382,-1.21586 -0.48348,-3.11892 0.3757,-4.45926 0.41471,-0.64695 5.24489,-5.581591 10.73372,-10.965862 8.11595,-7.961347 10.21102,-9.880097 11.21837,-10.274253 1.36486,-0.534041 2.69622,-0.452025 4.11073,0.253235 0.45766,0.228189 5.44873,5.017049 11.09125,10.641912 9.39129,9.361888 10.29204,10.336988 10.64805,11.526988 0.57385,1.91813 0.19643,2.96429 -1.88937,5.23714 -2.86803,3.12525 -4.99813,4.92408 -6.06872,5.12492 -2.08964,0.39202 -2.74709,-0.0582 -8.71576,-5.96786 -3.05594,-3.02575 -5.81631,-5.63404 -6.13417,-5.7962 -0.86818,-0.44293 -1.9662,-0.35487 -2.93416,0.23529 -0.47644,0.29049 -3.26146,2.90846 -6.18893,5.81773 -6.10814,6.07015 -6.7669,6.45645 -9.2167,5.40469 z";
+
+  // ---- splitter (mirrors SaiLogo.tsx splitPath) ----
+  function splitPath(d) {
+    const re = /([a-zA-Z])|(-?\d*\.?\d+(?:e[-+]?\d+)?)/g;
+    const tokens = [];
+    let m;
+    while ((m = re.exec(d)) !== null) {
+      if (m[1]) tokens.push({ t: 'c', v: m[1] });
+      else tokens.push({ t: 'n', v: parseFloat(m[2]) });
+    }
+    const out = [];
+    let buf = '', cmd = null, i = 0;
+    let cx = 0, cy = 0, sx = 0, sy = 0;
+    const num = (n) => { const a = []; for (let k = 0; k < n; k++) a.push(tokens[i++].v); return a; };
+    while (i < tokens.length) {
+      if (tokens[i].t === 'c') { cmd = tokens[i].v; i++; }
+      if (cmd === 'M' || cmd === 'm') {
+        const [x, y] = num(2);
+        const ax = cmd === 'M' ? x : cx + x, ay = cmd === 'M' ? y : cy + y;
+        if (buf) out.push(buf);
+        buf = `M ${ax} ${ay}`;
+        cx = sx = ax; cy = sy = ay;
+        cmd = cmd === 'M' ? 'L' : 'l';
+      } else if (cmd === 'L' || cmd === 'l') {
+        const [x, y] = num(2);
+        const ax = cmd === 'L' ? x : cx + x, ay = cmd === 'L' ? y : cy + y;
+        buf += ` L ${ax} ${ay}`; cx = ax; cy = ay;
+      } else if (cmd === 'C' || cmd === 'c') {
+        const [x1, y1, x2, y2, x, y] = num(6);
+        const a = cmd === 'C' ? [x1, y1, x2, y2, x, y]
+          : [cx + x1, cy + y1, cx + x2, cy + y2, cx + x, cy + y];
+        buf += ` C ${a[0]} ${a[1]} ${a[2]} ${a[3]} ${a[4]} ${a[5]}`;
+        cx = a[4]; cy = a[5];
+      } else if (cmd === 'Z' || cmd === 'z') {
+        buf += ' Z'; cx = sx; cy = sy;
+      } else { i++; }
+    }
+    if (buf) out.push(buf);
+    return out;
+  }
+  function pathBbox(d) {
+    const tokens = d.match(/[a-zA-Z]|-?\d*\.?\d+(?:e[-+]?\d+)?/g) || [];
+    let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+    let i = 0;
+    while (i < tokens.length) {
+      if (/[a-zA-Z]/.test(tokens[i])) { i++; continue; }
+      const x = parseFloat(tokens[i++]);
+      const y = parseFloat(tokens[i++] || '0');
+      if (x < xMin) xMin = x; if (x > xMax) xMax = x;
+      if (y < yMin) yMin = y; if (y > yMax) yMax = y;
+    }
+    return { x: xMin, y: yMin, w: xMax - xMin, h: yMax - yMin };
+  }
+
+  const SUBPATHS = splitPath(ORIGINAL_D);
+  const SHELL_IDXS = [0, 1, 2, 4];
+  const CENTER_IDX = 3;
+  const ANCHOR = 1000;
+  let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+  for (const i of SHELL_IDXS) {
+    const b = pathBbox(SUBPATHS[i]);
+    if (b.x < xMin) xMin = b.x; if (b.x + b.w > xMax) xMax = b.x + b.w;
+    if (b.y < yMin) yMin = b.y; if (b.y + b.h > yMax) yMax = b.y + b.h;
+  }
+  const cx = (xMin + xMax) / 2, cy = (yMin + yMax) / 2;
+
+  function makeSai(variantClass) {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('class', `sai ${variantClass}`);
+    svg.setAttribute('width', '88');
+    svg.setAttribute('height', '88');
+    svg.setAttribute('viewBox', '0 0 117.69488 117.0802');
+
+    const wrap = document.createElementNS(ns, 'g');
+    wrap.setAttribute('transform', 'translate(389.47605 -40.417133)');
+    svg.appendChild(wrap);
+
+    const rotate = document.createElementNS(ns, 'g');
+    rotate.setAttribute('class', 'shells-rotate');
+    wrap.appendChild(rotate);
+
+    const anchor = document.createElementNS(ns, 'rect');
+    anchor.setAttribute('class', 'bbox-anchor');
+    anchor.setAttribute('x', cx - ANCHOR / 2);
+    anchor.setAttribute('y', cy - ANCHOR / 2);
+    anchor.setAttribute('width', ANCHOR);
+    anchor.setAttribute('height', ANCHOR);
+    rotate.appendChild(anchor);
+
+    const scale = document.createElementNS(ns, 'g');
+    scale.setAttribute('class', 'shells-scale');
+    rotate.appendChild(scale);
+    for (const i of SHELL_IDXS) {
+      const p = document.createElementNS(ns, 'path');
+      p.setAttribute('class', `el el-${i}`);
+      p.setAttribute('d', SUBPATHS[i]);
+      scale.appendChild(p);
+    }
+
+    const center = document.createElementNS(ns, 'g');
+    center.setAttribute('class', 'center');
+    const c = document.createElementNS(ns, 'path');
+    c.setAttribute('class', `el el-${CENTER_IDX}`);
+    c.setAttribute('d', SUBPATHS[CENTER_IDX]);
+    center.appendChild(c);
+    wrap.appendChild(center);
+
+    return svg;
+  }
+
+  document.querySelectorAll('.stage[data-variant]').forEach(stage => {
+    const v = stage.getAttribute('data-variant');
+    stage.appendChild(makeSai(v));
+  });
+
+  // ---- Chained sequences ----
+  // Pool of self-contained animations that start AND end at neutral
+  // (translate 0, rotation a multiple of 360°). Durations are the loop
+  // length: we play exactly one cycle, then swap to the next.
+  const POOL = [
+    { cls: 'v-pulse',     dur: 2400, name: 'pulse' },
+    { cls: 'v-scatter',   dur: 4800, name: 'scatter' },
+    { cls: 'v-wave',      dur: 2600, name: 'wave' },
+    { cls: 'v-glitch',    dur: 2400, name: 'glitch' },
+    { cls: 'v-inhale',    dur: 5400, name: 'inhale' },
+    { cls: 'v-vortex',    dur: 5000, name: 'vortex' },
+    { cls: 'v-pendulum',  dur: 3600, name: 'pendulum' },
+    { cls: 'v-comet',     dur: 4800, name: 'comet' },
+    { cls: 'v-ripple',    dur: 2600, name: 'ripple' },
+    { cls: 'v-clockwork', dur: 8000, name: 'clockwork' },
+    { cls: 'v-stutter',   dur: 6200, name: 'stutter' },
+    { cls: 'v-flip',        dur: 4000, name: 'flip' },
+    { cls: 'v-typewriter',  dur: 3000, name: 'typewriter' },
+    { cls: 'v-morse',       dur: 3500, name: 'morse' },
+    { cls: 'v-squish',      dur: 2200, name: 'squish' },
+    { cls: 'v-bloom',       dur: 3600, name: 'bloom' },
+    { cls: 'v-searchlight', dur: 3400, name: 'searchlight' },
+  ];
+
+  function sampleChain(n) {
+    const shuffled = POOL.slice().sort(() => Math.random() - 0.5);
+    return shuffled.slice(0, n);
+  }
+
+  function playChain(svg, labelEl, currentIdxFn) {
+    let cancelled = false;
+    async function loop() {
+      while (!cancelled) {
+        const n = 2 + Math.floor(Math.random() * 3); // 2..4 inclusive
+        const seq = sampleChain(n);
+        const baseLabel = seq.map(s => s.name).join(' → ');
+        for (let i = 0; i < seq.length; i++) {
+          if (cancelled) return;
+          // Highlight current step in the chain label
+          labelEl.textContent = seq.map((s, j) => j === i ? '[' + s.name + ']' : s.name).join(' → ');
+          const step = seq[i];
+          svg.classList.add(step.cls);
+          await new Promise(r => setTimeout(r, step.dur));
+          svg.classList.remove(step.cls);
+          // tiny pause so the next animation re-fires from neutral cleanly
+          await new Promise(r => setTimeout(r, 80));
+        }
+        // brief breath between cycles
+        labelEl.textContent = baseLabel;
+        await new Promise(r => setTimeout(r, 250));
+      }
+    }
+    loop();
+    return () => { cancelled = true; };
+  }
+
+  document.querySelectorAll('.chain-tile').forEach(tile => {
+    const stage = tile.querySelector('.chain-stage');
+    const labelEl = tile.querySelector('.chain-label');
+    // Build a no-variant SAI; chain JS will toggle classes on it
+    const svg = makeSai('');
+    stage.appendChild(svg);
+    playChain(svg, labelEl);
+  });
+</script>
+
+</body>
+</html>

@@ -1796,10 +1796,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           flex-shrink: 0;
         }
         .thinking-text {
-          font-size: 14px;
+          font-family: 'Departure Mono', 'Geist Mono', 'JetBrains Mono', monospace;
+          font-size: 13px;
+          line-height: 1;
           color: var(--accent);
-          font-weight: 500;
-          letter-spacing: 0.3px;
+          font-weight: 400;
+          letter-spacing: 0.4px;
         }
         .thinking-cursor {
           animation: blink-cursor 0.6s step-end infinite;
@@ -1824,7 +1826,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         .thinking-clock {
           font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-variant-numeric: tabular-nums;
-          font-size: 12px;
+          font-size: 11px;
           color: #6b6253;
           letter-spacing: 0.04em;
           margin-right: 2px;

@@ -1,6 +1,11 @@
 import './SaiLogo.css';
 
-export type SaiLogoMode = 'static' | 'idle' | 'scanner' | 'drift';
+export type SaiLogoMode =
+  | 'static' | 'idle' | 'scanner'
+  | 'drift' | 'drift-b' | 'drift-c'
+  | 'pulse' | 'clockwork' | 'scatter' | 'wave' | 'glitch' | 'inhale'
+  | 'vortex' | 'pendulum' | 'comet' | 'ripple' | 'stutter'
+  | 'flip' | 'typewriter' | 'morse' | 'squish' | 'bloom' | 'searchlight';
 
 interface SaiLogoProps {
   mode?: SaiLogoMode;

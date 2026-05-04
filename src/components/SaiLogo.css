@@ -176,7 +176,540 @@
 .sai-logo-drift .el-2          { animation: sai-el2-drift-long 28s cubic-bezier(.4,.7,.3,1) infinite; }
 .sai-logo-drift .el-4          { animation: sai-el4-drift-long 28s cubic-bezier(.4,.7,.3,1) infinite; }
 
+/* ---------- mode: drift-b "chase" — counter-clockwise, tight chevron chase ---------- */
+@keyframes sai-rig-drift-b {
+  0%    { transform: rotate(0deg); animation-timing-function: ease-out; }
+  3%    { transform: rotate(40deg); }
+  4%    { transform: rotate(40deg); }
+  4.5%  { transform: rotate(20deg); }
+  5.2%  { transform: rotate(-200deg); }
+  5.6%  { transform: rotate(-330deg); }
+  6%    { transform: rotate(-360deg); }
+  22%   { transform: rotate(-360deg); animation-timing-function: ease-out; }
+  /* spin 2 — slow single turn */
+  25%   { transform: rotate(-330deg); }
+  26%   { transform: rotate(-330deg); }
+  26.5% { transform: rotate(-380deg); }
+  27.5% { transform: rotate(-700deg); }
+  28%   { transform: rotate(-720deg); }
+  44%   { transform: rotate(-720deg); animation-timing-function: ease-out; }
+  /* spin 3 — fast 2 turns the other way (windup back, then surge) */
+  47%   { transform: rotate(-680deg); }
+  48%   { transform: rotate(-680deg); }
+  48.5% { transform: rotate(-740deg); }
+  49.4% { transform: rotate(-1280deg); }
+  50%   { transform: rotate(-1430deg); }
+  50.3% { transform: rotate(-1440deg); }
+  66%   { transform: rotate(-1440deg); animation-timing-function: ease-out; }
+  /* spin 4 — single turn */
+  69%   { transform: rotate(-1410deg); }
+  71%   { transform: rotate(-1410deg); }
+  71.5% { transform: rotate(-1460deg); }
+  72.5% { transform: rotate(-1780deg); }
+  73%   { transform: rotate(-1800deg); }
+  85%   { transform: rotate(-1800deg); }
+  /* short shimmy (no big shake) */
+  86%   { transform: rotate(-1788deg); }
+  88%   { transform: rotate(-1812deg); }
+  90%   { transform: rotate(-1790deg); }
+  92%   { transform: rotate(-1810deg); }
+  94%   { transform: rotate(-1796deg); }
+  96%   { transform: rotate(-1804deg); }
+  100%  { transform: rotate(-1800deg); }
+}
+/* chevrons fire in a tight chase: left → top → right → bottom, then repeat each beat */
+@keyframes sai-el1-drift-b { /* left */
+  0%, 14%   { transform: translate(0, 0); }
+  15%       { transform: translate(-50%, 0); }
+  16%, 35%  { transform: translate(0, 0); }
+  36%       { transform: translate(-40%, 0); }
+  37%, 56%  { transform: translate(0, 0); }
+  57%       { transform: translate(-55%, 0); }
+  58%, 78%  { transform: translate(0, 0); }
+  79%       { transform: translate(-32%, 0); }
+  80%, 100% { transform: translate(0, 0); }
+}
+@keyframes sai-el4-drift-b { /* top */
+  0%, 15%   { transform: translate(0, 0); }
+  16%       { transform: translate(0, -55%); }
+  17%, 36%  { transform: translate(0, 0); }
+  37%       { transform: translate(0, -42%); }
+  38%, 57%  { transform: translate(0, 0); }
+  58%       { transform: translate(0, -60%); }
+  59%, 79%  { transform: translate(0, 0); }
+  80%       { transform: translate(0, -38%); }
+  81%, 100% { transform: translate(0, 0); }
+}
+@keyframes sai-el2-drift-b { /* right */
+  0%, 16%   { transform: translate(0, 0); }
+  17%       { transform: translate(45%, 0); }
+  18%, 37%  { transform: translate(0, 0); }
+  38%       { transform: translate(58%, 0); }
+  39%, 58%  { transform: translate(0, 0); }
+  59%       { transform: translate(40%, 0); }
+  60%, 80%  { transform: translate(0, 0); }
+  81%       { transform: translate(50%, 0); }
+  82%, 100% { transform: translate(0, 0); }
+}
+@keyframes sai-el0-drift-b { /* bottom */
+  0%, 17%   { transform: translate(0, 0); }
+  18%       { transform: translate(0, 50%); }
+  19%, 38%  { transform: translate(0, 0); }
+  39%       { transform: translate(0, 40%); }
+  40%, 59%  { transform: translate(0, 0); }
+  60%       { transform: translate(0, 58%); }
+  61%, 81%  { transform: translate(0, 0); }
+  82%       { transform: translate(0, 36%); }
+  83%, 100% { transform: translate(0, 0); }
+}
+.sai-logo-drift-b .shells-rotate { animation: sai-rig-drift-b 26s cubic-bezier(.55,.05,.4,.95) infinite; }
+.sai-logo-drift-b .el-0          { animation: sai-el0-drift-b 26s cubic-bezier(.4,.7,.3,1) infinite; }
+.sai-logo-drift-b .el-1          { animation: sai-el1-drift-b 26s cubic-bezier(.4,.7,.3,1) infinite; }
+.sai-logo-drift-b .el-2          { animation: sai-el2-drift-b 26s cubic-bezier(.4,.7,.3,1) infinite; }
+.sai-logo-drift-b .el-4          { animation: sai-el4-drift-b 26s cubic-bezier(.4,.7,.3,1) infinite; }
+
+/* ---------- mode: drift-c "salvo" — all chevrons fire together, 5 quick spins ---------- */
+@keyframes sai-rig-drift-c {
+  0%    { transform: rotate(0deg); animation-timing-function: ease-out; }
+  3%    { transform: rotate(-30deg); }
+  4%    { transform: rotate(-30deg); }
+  4.5%  { transform: rotate(180deg); }
+  5%    { transform: rotate(340deg); }
+  5.3%  { transform: rotate(360deg); }
+  19%   { transform: rotate(360deg); animation-timing-function: ease-out; }
+  22%   { transform: rotate(330deg); }
+  23%   { transform: rotate(330deg); }
+  23.5% { transform: rotate(380deg); }
+  24.3% { transform: rotate(680deg); }
+  24.8% { transform: rotate(720deg); }
+  38%   { transform: rotate(720deg); animation-timing-function: ease-out; }
+  41%   { transform: rotate(690deg); }
+  42%   { transform: rotate(690deg); }
+  42.5% { transform: rotate(740deg); }
+  43.3% { transform: rotate(1040deg); }
+  43.8% { transform: rotate(1080deg); }
+  57%   { transform: rotate(1080deg); animation-timing-function: ease-out; }
+  60%   { transform: rotate(1050deg); }
+  61%   { transform: rotate(1050deg); }
+  61.5% { transform: rotate(1100deg); }
+  62.3% { transform: rotate(1400deg); }
+  62.8% { transform: rotate(1440deg); }
+  76%   { transform: rotate(1440deg); animation-timing-function: ease-out; }
+  79%   { transform: rotate(1410deg); }
+  80%   { transform: rotate(1410deg); }
+  80.5% { transform: rotate(1460deg); }
+  81.3% { transform: rotate(1760deg); }
+  81.8% { transform: rotate(1800deg); }
+  88%   { transform: rotate(1800deg); }
+  /* tight wobble settle */
+  88.8% { transform: rotate(1818deg); }
+  89.6% { transform: rotate(1784deg); }
+  90.4% { transform: rotate(1814deg); }
+  91.2% { transform: rotate(1788deg); }
+  92%   { transform: rotate(1810deg); }
+  92.8% { transform: rotate(1792deg); }
+  93.6% { transform: rotate(1806deg); }
+  94.4% { transform: rotate(1796deg); }
+  95%   { transform: rotate(1800deg); }
+  100%  { transform: rotate(1800deg); }
+}
+/* All four chevrons salvo at the same beats — but slightly staggered amplitudes so it doesn't look mechanical */
+@keyframes sai-el0-drift-c {
+  0%, 12%   { transform: translate(0, 0); }
+  13%       { transform: translate(0, 50%); }
+  14%, 31%  { transform: translate(0, 0); }
+  32%       { transform: translate(0, 42%); }
+  33%, 50%  { transform: translate(0, 0); }
+  51%       { transform: translate(0, 58%); }
+  52%, 69%  { transform: translate(0, 0); }
+  70%       { transform: translate(0, 38%); }
+  71%, 100% { transform: translate(0, 0); }
+}
+@keyframes sai-el1-drift-c {
+  0%, 12%   { transform: translate(0, 0); }
+  13%       { transform: translate(-45%, 0); }
+  14%, 31%  { transform: translate(0, 0); }
+  32%       { transform: translate(-55%, 0); }
+  33%, 50%  { transform: translate(0, 0); }
+  51%       { transform: translate(-38%, 0); }
+  52%, 69%  { transform: translate(0, 0); }
+  70%       { transform: translate(-50%, 0); }
+  71%, 100% { transform: translate(0, 0); }
+}
+@keyframes sai-el2-drift-c {
+  0%, 12%   { transform: translate(0, 0); }
+  13%       { transform: translate(55%, 0); }
+  14%, 31%  { transform: translate(0, 0); }
+  32%       { transform: translate(38%, 0); }
+  33%, 50%  { transform: translate(0, 0); }
+  51%       { transform: translate(50%, 0); }
+  52%, 69%  { transform: translate(0, 0); }
+  70%       { transform: translate(42%, 0); }
+  71%, 100% { transform: translate(0, 0); }
+}
+@keyframes sai-el4-drift-c {
+  0%, 12%   { transform: translate(0, 0); }
+  13%       { transform: translate(0, -42%); }
+  14%, 31%  { transform: translate(0, 0); }
+  32%       { transform: translate(0, -58%); }
+  33%, 50%  { transform: translate(0, 0); }
+  51%       { transform: translate(0, -45%); }
+  52%, 69%  { transform: translate(0, 0); }
+  70%       { transform: translate(0, -55%); }
+  71%, 100% { transform: translate(0, 0); }
+}
+.sai-logo-drift-c .shells-rotate { animation: sai-rig-drift-c 22s cubic-bezier(.55,.05,.4,.95) infinite; }
+.sai-logo-drift-c .el-0          { animation: sai-el0-drift-c 22s cubic-bezier(.4,.7,.3,1) infinite; }
+.sai-logo-drift-c .el-1          { animation: sai-el1-drift-c 22s cubic-bezier(.4,.7,.3,1) infinite; }
+.sai-logo-drift-c .el-2          { animation: sai-el2-drift-c 22s cubic-bezier(.4,.7,.3,1) infinite; }
+.sai-logo-drift-c .el-4          { animation: sai-el4-drift-c 22s cubic-bezier(.4,.7,.3,1) infinite; }
+
+/* ================================================================
+   Chain-pool variants — each loop starts and ends at neutral state
+   so they can be played as one cycle and chained back-to-back.
+   ================================================================ */
+
+/* Whole-svg variants (flip / squish / bloom) pivot around viewbox center. */
+.sai-logo-flip,
+.sai-logo-squish,
+.sai-logo-bloom {
+  transform-origin: 50% 50%;
+  transform-box: view-box;
+}
+
+/* ---------- pulse — heartbeat ---------- */
+@keyframes sai-pulse-y-out  { 0%, 100% { transform: translate(0, 0); } 30%, 60% { transform: translate(0, 28%); } }
+@keyframes sai-pulse-y-in   { 0%, 100% { transform: translate(0, 0); } 30%, 60% { transform: translate(0, -28%); } }
+@keyframes sai-pulse-x-pos  { 0%, 100% { transform: translate(0, 0); } 30%, 60% { transform: translate(28%, 0); } }
+@keyframes sai-pulse-x-neg  { 0%, 100% { transform: translate(0, 0); } 30%, 60% { transform: translate(-28%, 0); } }
+@keyframes sai-pulse-center { 0%, 100% { transform: scale(1); } 30%, 60% { transform: scale(0.78); } }
+.sai-logo-pulse .el-0 { animation: sai-pulse-y-out 2.4s cubic-bezier(.5,.05,.5,1) infinite; }
+.sai-logo-pulse .el-1 { animation: sai-pulse-x-neg 2.4s cubic-bezier(.5,.05,.5,1) infinite; animation-delay: -0.05s; }
+.sai-logo-pulse .el-2 { animation: sai-pulse-x-pos 2.4s cubic-bezier(.5,.05,.5,1) infinite; animation-delay: -0.05s; }
+.sai-logo-pulse .el-4 { animation: sai-pulse-y-in  2.4s cubic-bezier(.5,.05,.5,1) infinite; }
+.sai-logo-pulse .center .el-3 { animation: sai-pulse-center 2.4s cubic-bezier(.5,.05,.5,1) infinite; }
+
+/* ---------- clockwork — tick rotations + brightness flash ---------- */
+@keyframes sai-clockwork-rig {
+  0%   { transform: rotate(0deg); }
+  20%  { transform: rotate(0deg); animation-timing-function: cubic-bezier(.7,0,.3,1.6); }
+  25%  { transform: rotate(96deg); animation-timing-function: ease-out; }
+  27%  { transform: rotate(90deg); }
+  45%  { transform: rotate(90deg); animation-timing-function: cubic-bezier(.7,0,.3,1.6); }
+  50%  { transform: rotate(186deg); animation-timing-function: ease-out; }
+  52%  { transform: rotate(180deg); }
+  70%  { transform: rotate(180deg); animation-timing-function: cubic-bezier(.7,0,.3,1.6); }
+  75%  { transform: rotate(276deg); animation-timing-function: ease-out; }
+  77%  { transform: rotate(270deg); }
+  95%  { transform: rotate(270deg); animation-timing-function: cubic-bezier(.7,0,.3,1.6); }
+  100% { transform: rotate(366deg); }
+}
+@keyframes sai-clockwork-flash {
+  0%, 23%, 27%, 48%, 52%, 73%, 77%, 98%, 100% { opacity: 1; }
+  25%, 50%, 75% { opacity: 0.45; }
+}
+.sai-logo-clockwork .shells-rotate { animation: sai-clockwork-rig 8s linear infinite; }
+.sai-logo-clockwork .el { animation: sai-clockwork-flash 8s linear infinite; }
+
+/* ---------- scatter — explode + spin + snap back ---------- */
+@keyframes sai-scatter-rig {
+  0%, 18%   { transform: rotate(0deg); }
+  50%       { transform: rotate(540deg); }
+  82%, 100% { transform: rotate(720deg); }
+}
+@keyframes sai-scatter-el0 { 0% { transform: translate(0,0); } 18% { transform: translate(0, 80%); } 82% { transform: translate(0, 80%); } 100% { transform: translate(0,0); } }
+@keyframes sai-scatter-el1 { 0% { transform: translate(0,0); } 18% { transform: translate(-80%, 0); } 82% { transform: translate(-80%, 0); } 100% { transform: translate(0,0); } }
+@keyframes sai-scatter-el2 { 0% { transform: translate(0,0); } 18% { transform: translate(80%, 0); } 82% { transform: translate(80%, 0); } 100% { transform: translate(0,0); } }
+@keyframes sai-scatter-el4 { 0% { transform: translate(0,0); } 18% { transform: translate(0, -80%); } 82% { transform: translate(0, -80%); } 100% { transform: translate(0,0); } }
+.sai-logo-scatter .shells-rotate { animation: sai-scatter-rig 4.8s cubic-bezier(.5,.05,.4,1) infinite; }
+.sai-logo-scatter .el-0 { animation: sai-scatter-el0 4.8s cubic-bezier(.6,-0.2,.4,1.2) infinite; }
+.sai-logo-scatter .el-1 { animation: sai-scatter-el1 4.8s cubic-bezier(.6,-0.2,.4,1.2) infinite; }
+.sai-logo-scatter .el-2 { animation: sai-scatter-el2 4.8s cubic-bezier(.6,-0.2,.4,1.2) infinite; }
+.sai-logo-scatter .el-4 { animation: sai-scatter-el4 4.8s cubic-bezier(.6,-0.2,.4,1.2) infinite; }
+
+/* ---------- wave — continuous clockwise chevron wave ---------- */
+@keyframes sai-wave-y-out { 0%, 25% { transform: translate(0, 0); } 35% { transform: translate(0, 35%); } 50%, 100% { transform: translate(0, 0); } }
+@keyframes sai-wave-y-in  { 0%, 75% { transform: translate(0, 0); } 85% { transform: translate(0, -35%); } 100% { transform: translate(0, 0); } }
+@keyframes sai-wave-x-pos { 0%, 50% { transform: translate(0, 0); } 60% { transform: translate(35%, 0); } 75%, 100% { transform: translate(0, 0); } }
+@keyframes sai-wave-x-neg { 0%      { transform: translate(0, 0); } 10% { transform: translate(-35%, 0); } 25%, 100% { transform: translate(0, 0); } }
+.sai-logo-wave .el-1 { animation: sai-wave-x-neg 2.6s ease-in-out infinite; }
+.sai-logo-wave .el-4 { animation: sai-wave-y-in  2.6s ease-in-out infinite; }
+.sai-logo-wave .el-2 { animation: sai-wave-x-pos 2.6s ease-in-out infinite; }
+.sai-logo-wave .el-0 { animation: sai-wave-y-out 2.6s ease-in-out infinite; }
+
+/* ---------- glitch — hard stepped jolts with rotation, scale and blackouts.
+   Larger displacements so it reads at 18px. Several "burst" moments where
+   multiple chevrons hit near-simultaneously for staccato signal-corruption. */
+@keyframes sai-glitch-el0 {  /* bottom */
+  0%, 100%        { transform: translate(0,0) rotate(0deg) scale(1); opacity: 1; }
+  9%, 13%         { transform: translate(0,0) rotate(0deg) scale(1); opacity: 1; }
+  10%, 12%        { transform: translate(22%, 70%) rotate(20deg); opacity: 0; }
+  37%, 41%        { transform: translate(0,0); opacity: 1; }
+  38%, 40%        { transform: translate(-30%, 55%) rotate(-25deg) scale(1.18); opacity: 0.5; }
+  64%, 68%        { transform: translate(0,0); opacity: 1; }
+  65%, 67%        { transform: translate(40%, 60%) rotate(15deg); opacity: 0.3; }
+  85%, 89%        { transform: translate(0,0); opacity: 1; }
+  86%, 88%        { transform: translate(-12%, 78%) rotate(-10deg); opacity: 0; }
+}
+@keyframes sai-glitch-el1 {  /* left */
+  0%, 100%        { transform: translate(0,0) rotate(0deg) scale(1); opacity: 1; }
+  4%, 8%          { transform: translate(0,0); opacity: 1; }
+  5%, 7%          { transform: translate(-72%, 12%) rotate(-30deg); opacity: 0; }
+  29%, 33%        { transform: translate(0,0); opacity: 1; }
+  30%, 32%        { transform: translate(-58%, -16%) rotate(20deg) scale(0.85); opacity: 0.4; }
+  54%, 58%        { transform: translate(0,0); opacity: 1; }
+  55%, 57%        { transform: translate(-80%, 8%) rotate(-15deg); opacity: 0.6; }
+  78%, 82%        { transform: translate(0,0); opacity: 1; }
+  79%, 81%        { transform: translate(-48%, 22%) rotate(35deg); opacity: 0; }
+}
+@keyframes sai-glitch-el2 {  /* right */
+  0%, 100%        { transform: translate(0,0) rotate(0deg) scale(1); opacity: 1; }
+  9%, 13%         { transform: translate(0,0); opacity: 1; }
+  10%, 12%        { transform: translate(75%, 18%) rotate(28deg) scale(1.12); opacity: 0.4; }
+  46%, 50%        { transform: translate(0,0); opacity: 1; }
+  47%, 49%        { transform: translate(60%, -22%) rotate(-22deg); opacity: 0; }
+  64%, 68%        { transform: translate(0,0); opacity: 1; }
+  65%, 67%        { transform: translate(85%, 14%) rotate(18deg); opacity: 0.6; }
+  85%, 89%        { transform: translate(0,0); opacity: 1; }
+  86%, 88%        { transform: translate(52%, -8%) rotate(-30deg) scale(0.8); opacity: 0.3; }
+}
+@keyframes sai-glitch-el4 {  /* top */
+  0%, 100%        { transform: translate(0,0) rotate(0deg) scale(1); opacity: 1; }
+  18%, 22%        { transform: translate(0,0); opacity: 1; }
+  19%, 21%        { transform: translate(-10%, -76%) rotate(-15deg); opacity: 0; }
+  37%, 41%        { transform: translate(0,0); opacity: 1; }
+  38%, 40%        { transform: translate(18%, -60%) rotate(28deg) scale(1.15); opacity: 0.45; }
+  72%, 76%        { transform: translate(0,0); opacity: 1; }
+  73%, 75%        { transform: translate(-22%, -82%) rotate(-32deg); opacity: 0; }
+  93%, 97%        { transform: translate(0,0); opacity: 1; }
+  94%, 96%        { transform: translate(8%, -52%) rotate(12deg); opacity: 0.55; }
+}
+@keyframes sai-glitch-center {
+  0%, 100%        { opacity: 1; transform: scale(1) rotate(0deg); }
+  14%, 18%        { opacity: 1; transform: scale(1); }
+  15%, 17%        { opacity: 0.2; transform: scale(0.6) rotate(20deg); }
+  37%, 41%        { opacity: 1; transform: scale(1); }
+  38%, 40%        { opacity: 0; transform: scale(1.5); }
+  60%, 64%        { opacity: 1; transform: scale(1); }
+  61%, 63%        { opacity: 0.4; transform: scale(0.7) rotate(-30deg); }
+  85%, 89%        { opacity: 1; transform: scale(1); }
+  86%, 88%        { opacity: 0.15; transform: scale(1.3) rotate(15deg); }
+}
+.sai-logo-glitch .el-0 { animation: sai-glitch-el0 2.4s steps(1, end) infinite; }
+.sai-logo-glitch .el-1 { animation: sai-glitch-el1 2.4s steps(1, end) infinite; }
+.sai-logo-glitch .el-2 { animation: sai-glitch-el2 2.4s steps(1, end) infinite; }
+.sai-logo-glitch .el-4 { animation: sai-glitch-el4 2.4s steps(1, end) infinite; }
+.sai-logo-glitch .center .el-3 { animation: sai-glitch-center 2.4s steps(1, end) infinite; }
+
+/* ---------- inhale — squeeze + spin + burst ---------- */
+@keyframes sai-inhale-rig {
+  0%, 18%   { transform: rotate(0deg) scale(1); }
+  35%       { transform: rotate(180deg) scale(0.55); }
+  55%       { transform: rotate(540deg) scale(0.55); }
+  72%       { transform: rotate(720deg) scale(1.08); }
+  82%, 100% { transform: rotate(720deg) scale(1); }
+}
+@keyframes sai-inhale-center {
+  0%, 18%   { transform: scale(1); }
+  35%, 55%  { transform: scale(1.25); }
+  82%, 100% { transform: scale(1); }
+}
+.sai-logo-inhale .shells-rotate { animation: sai-inhale-rig 5.4s cubic-bezier(.5,.05,.4,1.1) infinite; }
+.sai-logo-inhale .center .el-3 { animation: sai-inhale-center 5.4s cubic-bezier(.5,.05,.4,1.1) infinite; }
+
+/* ---------- vortex — spiral inward + center brighten + spiral out ---------- */
+@keyframes sai-vortex-rig {
+  0%, 12%   { transform: rotate(0deg); }
+  50%       { transform: rotate(540deg); }
+  88%, 100% { transform: rotate(1080deg); }
+}
+@keyframes sai-vortex-scale {
+  0%, 12%   { transform: scale(1); }
+  50%       { transform: scale(0.35); }
+  88%, 100% { transform: scale(1); }
+}
+@keyframes sai-vortex-center {
+  0%, 12%, 88%, 100% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.4); opacity: 1; }
+}
+.sai-logo-vortex .shells-rotate { animation: sai-vortex-rig 5s cubic-bezier(.4,.05,.4,1) infinite; }
+.sai-logo-vortex .shells-scale  { animation: sai-vortex-scale 5s cubic-bezier(.4,.05,.4,1) infinite; }
+.sai-logo-vortex .center .el-3  { animation: sai-vortex-center 5s cubic-bezier(.4,.05,.4,1) infinite; }
+
+/* ---------- pendulum — ±60° swing + chevron whip (starts at center) ---------- */
+@keyframes sai-pendulum-rig {
+  0%   { transform: rotate(0deg);    animation-timing-function: cubic-bezier(.45,0,.55,1); }
+  25%  { transform: rotate(60deg);   animation-timing-function: cubic-bezier(.45,0,.55,1); }
+  50%  { transform: rotate(0deg);    animation-timing-function: cubic-bezier(.45,0,.55,1); }
+  75%  { transform: rotate(-60deg);  animation-timing-function: cubic-bezier(.45,0,.55,1); }
+  100% { transform: rotate(0deg); }
+}
+@keyframes sai-pendulum-whip {
+  0%, 100% { transform: rotate(0deg); }
+  25%      { transform: rotate(8deg); }
+  75%      { transform: rotate(-8deg); }
+}
+.sai-logo-pendulum .shells-rotate { animation: sai-pendulum-rig 3.6s infinite; }
+.sai-logo-pendulum .el-0,
+.sai-logo-pendulum .el-1,
+.sai-logo-pendulum .el-2,
+.sai-logo-pendulum .el-4 { animation: sai-pendulum-whip 3.6s ease-in-out infinite; }
+
+/* ---------- comet — sequential cannon fire ---------- */
+@keyframes sai-comet-bottom { 0%, 100% { transform: translate(0, 0); } 8%  { transform: translate(0,  95%); } 18% { transform: translate(0, 0); } }
+@keyframes sai-comet-left   { 0%, 100% { transform: translate(0, 0); } 33% { transform: translate(-95%, 0); } 43% { transform: translate(0, 0); } }
+@keyframes sai-comet-top    { 0%, 100% { transform: translate(0, 0); } 58% { transform: translate(0, -95%); } 68% { transform: translate(0, 0); } }
+@keyframes sai-comet-right  { 0%, 100% { transform: translate(0, 0); } 83% { transform: translate(95%, 0);  } 93% { transform: translate(0, 0); } }
+.sai-logo-comet .el-0 { animation: sai-comet-bottom 4.8s cubic-bezier(.3,1.4,.5,1) infinite; }
+.sai-logo-comet .el-1 { animation: sai-comet-left   4.8s cubic-bezier(.3,1.4,.5,1) infinite; }
+.sai-logo-comet .el-4 { animation: sai-comet-top    4.8s cubic-bezier(.3,1.4,.5,1) infinite; }
+.sai-logo-comet .el-2 { animation: sai-comet-right  4.8s cubic-bezier(.3,1.4,.5,1) infinite; }
+
+/* ---------- ripple — sonar wave from center ---------- */
+@keyframes sai-ripple-center {
+  0%   { transform: scale(1); opacity: 1; }
+  8%   { transform: scale(1.45); opacity: 1; }
+  18%  { transform: scale(1); opacity: 0.7; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes sai-ripple-bottom { 0%, 18%, 100% { transform: translate(0,0); opacity: 0.55; } 24% { transform: translate(0, 22%);  opacity: 1; } 34% { transform: translate(0,0); opacity: 0.55; } }
+@keyframes sai-ripple-left   { 0%, 22%, 100% { transform: translate(0,0); opacity: 0.55; } 28% { transform: translate(-22%, 0); opacity: 1; } 38% { transform: translate(0,0); opacity: 0.55; } }
+@keyframes sai-ripple-top    { 0%, 26%, 100% { transform: translate(0,0); opacity: 0.55; } 32% { transform: translate(0, -22%); opacity: 1; } 42% { transform: translate(0,0); opacity: 0.55; } }
+@keyframes sai-ripple-right  { 0%, 30%, 100% { transform: translate(0,0); opacity: 0.55; } 36% { transform: translate(22%, 0);  opacity: 1; } 46% { transform: translate(0,0); opacity: 0.55; } }
+.sai-logo-ripple .center .el-3 { animation: sai-ripple-center 2.6s cubic-bezier(.4,.05,.4,1) infinite; }
+.sai-logo-ripple .el-0 { animation: sai-ripple-bottom 2.6s ease-out infinite; }
+.sai-logo-ripple .el-1 { animation: sai-ripple-left   2.6s ease-out infinite; }
+.sai-logo-ripple .el-4 { animation: sai-ripple-top    2.6s ease-out infinite; }
+.sai-logo-ripple .el-2 { animation: sai-ripple-right  2.6s ease-out infinite; }
+
+/* ---------- stutter — try, fail, retry, finally spin ---------- */
+@keyframes sai-stutter-rig {
+  0%   { transform: rotate(0deg); animation-timing-function: ease-out; }
+  8%   { transform: rotate(80deg); }
+  9%   { transform: rotate(75deg); animation-timing-function: cubic-bezier(.7,0,.3,1); }
+  14%  { transform: rotate(20deg); }
+  16%  { transform: rotate(28deg); }
+  18%  { transform: rotate(20deg); }
+  20%  { transform: rotate(20deg); animation-timing-function: ease-out; }
+  30%  { transform: rotate(130deg); }
+  31%  { transform: rotate(125deg); animation-timing-function: cubic-bezier(.7,0,.3,1); }
+  37%  { transform: rotate(60deg); }
+  39%  { transform: rotate(68deg); }
+  41%  { transform: rotate(60deg); }
+  44%  { transform: rotate(60deg); animation-timing-function: cubic-bezier(.7,0,.3,1); }
+  48%  { transform: rotate(40deg); }
+  50%  { transform: rotate(40deg); animation-timing-function: cubic-bezier(.4,0,.2,1); }
+  72%  { transform: rotate(420deg); animation-timing-function: cubic-bezier(.3,0,.3,1.2); }
+  78%  { transform: rotate(376deg); }
+  82%  { transform: rotate(364deg); }
+  86%  { transform: rotate(360deg); }
+  100% { transform: rotate(360deg); }
+}
+.sai-logo-stutter .shells-rotate { animation: sai-stutter-rig 6.2s infinite; }
+
+/* ---------- flip — card flip with squash ---------- */
+@keyframes sai-flip-svg {
+  0%, 12%   { transform: rotate(0deg) scaleY(1); }
+  27%       { transform: rotate(90deg) scaleY(0.12); }
+  42%, 58%  { transform: rotate(180deg) scaleY(1); }
+  73%       { transform: rotate(270deg) scaleY(0.12); }
+  88%, 100% { transform: rotate(360deg) scaleY(1); }
+}
+.sai-logo-flip { animation: sai-flip-svg 4s cubic-bezier(.5,.05,.5,1) infinite; }
+
+/* ---------- typewriter — each chevron briefly "re-stamps" in sequence ----------
+   Starts and ends at full visibility; mid-cycle each chevron disappears
+   and pops back staggered clockwise (top → right → bottom → left). */
+@keyframes sai-type-top    { 0%, 100%        { opacity: 1; transform: scale(1); }
+                              5%             { opacity: 0; transform: scale(0.3); }
+                             10%             { opacity: 1; transform: scale(1); } }
+@keyframes sai-type-right  { 0%, 18%, 100%   { opacity: 1; transform: scale(1); }
+                             23%             { opacity: 0; transform: scale(0.3); }
+                             28%             { opacity: 1; transform: scale(1); } }
+@keyframes sai-type-bottom { 0%, 36%, 100%   { opacity: 1; transform: scale(1); }
+                             41%             { opacity: 0; transform: scale(0.3); }
+                             46%             { opacity: 1; transform: scale(1); } }
+@keyframes sai-type-left   { 0%, 54%, 100%   { opacity: 1; transform: scale(1); }
+                             59%             { opacity: 0; transform: scale(0.3); }
+                             64%             { opacity: 1; transform: scale(1); } }
+.sai-logo-typewriter .el-4 { animation: sai-type-top    3s cubic-bezier(.4,1.5,.6,1) infinite; }
+.sai-logo-typewriter .el-2 { animation: sai-type-right  3s cubic-bezier(.4,1.5,.6,1) infinite; }
+.sai-logo-typewriter .el-0 { animation: sai-type-bottom 3s cubic-bezier(.4,1.5,.6,1) infinite; }
+.sai-logo-typewriter .el-1 { animation: sai-type-left   3s cubic-bezier(.4,1.5,.6,1) infinite; }
+
+/* ---------- morse — stepped on/off blinking, mostly on ----------
+   Starts and ends fully on; brief "off" blips form a signaling pattern. */
+@keyframes sai-morse-top {     /* . . _   off blips at irregular intervals */
+  0%, 100% { opacity: 1; }
+  10%, 14% { opacity: 0.18; }
+  26%, 30% { opacity: 0.18; }
+  60%, 70% { opacity: 0.18; }
+}
+@keyframes sai-morse-right {   /* _ .  */
+  0%, 100% { opacity: 1; }
+  18%, 32% { opacity: 0.18; }
+  54%, 58% { opacity: 0.18; }
+  80%, 88% { opacity: 0.18; }
+}
+@keyframes sai-morse-bottom {  /* . _ . */
+  0%, 100% { opacity: 1; }
+   6%, 10% { opacity: 0.18; }
+  36%, 50% { opacity: 0.18; }
+  72%, 76% { opacity: 0.18; }
+}
+@keyframes sai-morse-left {    /* _ _   */
+  0%, 100% { opacity: 1; }
+  22%, 36% { opacity: 0.18; }
+  66%, 82% { opacity: 0.18; }
+}
+.sai-logo-morse .el-4 { animation: sai-morse-top    3.5s steps(1, end) infinite; }
+.sai-logo-morse .el-2 { animation: sai-morse-right  3.5s steps(1, end) infinite; }
+.sai-logo-morse .el-0 { animation: sai-morse-bottom 3.5s steps(1, end) infinite; }
+.sai-logo-morse .el-1 { animation: sai-morse-left   3.5s steps(1, end) infinite; }
+
+/* ---------- squish — jelly h/v alternation ---------- */
+@keyframes sai-squish-svg {
+  0%, 100% { transform: scaleX(1)    scaleY(1); }
+  14%      { transform: scaleX(1.22) scaleY(0.78); }
+  28%      { transform: scaleX(0.94) scaleY(1.06); }
+  42%      { transform: scaleX(0.78) scaleY(1.22); }
+  56%      { transform: scaleX(1.06) scaleY(0.94); }
+  72%      { transform: scaleX(0.97) scaleY(1.03); }
+  86%      { transform: scaleX(1)    scaleY(1); }
+}
+.sai-logo-squish { animation: sai-squish-svg 2.2s cubic-bezier(.45,0,.55,1) infinite; }
+
+/* ---------- bloom — close into bud, then spiral open with bounce ----------
+   Starts and ends at full size. Mid-cycle: closes/dims into a tight
+   bud, then spirals back open with a small overshoot bounce. */
+@keyframes sai-bloom-svg {
+  0%, 4%    { transform: rotate(0deg)    scale(1);    opacity: 1; }
+  30%       { transform: rotate(360deg)  scale(0.22); opacity: 0.35; }
+  76%       { transform: rotate(1080deg) scale(1.12); opacity: 1; }
+  86%       { transform: rotate(1080deg) scale(0.94); opacity: 1; }
+  92%, 100% { transform: rotate(1080deg) scale(1);    opacity: 1; }
+}
+.sai-logo-bloom { animation: sai-bloom-svg 3.6s cubic-bezier(.4,.05,.3,1) infinite; }
+
+/* ---------- searchlight — scanning then a big sweep ---------- */
+@keyframes sai-searchlight-rig {
+  0%   { transform: rotate(0deg); }
+  8%   { transform: rotate(32deg); }
+  16%  { transform: rotate(-12deg); }
+  24%  { transform: rotate(28deg); }
+  32%  { transform: rotate(-20deg); }
+  40%  { transform: rotate(36deg); }
+  48%  { transform: rotate(-6deg); }
+  56%  { transform: rotate(24deg); }
+  64%  { transform: rotate(0deg); }
+  78%  { transform: rotate(180deg); }
+  100% { transform: rotate(360deg); }
+}
+.sai-logo-searchlight .shells-rotate { animation: sai-searchlight-rig 3.4s cubic-bezier(.45,0,.55,1) infinite; }
+
 @media (prefers-reduced-motion: reduce) {
-  .sai-logo-idle, .sai-logo-scanner .el, .sai-logo-drift .el,
-  .sai-logo-drift .shells-rotate { animation: none !important; }
+  .sai-logo,
+  .sai-logo *,
+  .sai-logo .shells-rotate,
+  .sai-logo .shells-scale { animation: none !important; }
 }
