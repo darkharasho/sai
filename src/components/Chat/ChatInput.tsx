@@ -286,6 +286,31 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
     }
   }, [disabled]);
 
+  // Refocus chat input when the window regains focus (alt-tab back into SAI),
+  // unless the user is actively in another text input/editor.
+  useEffect(() => {
+    const onWindowFocus = () => {
+      const active = document.activeElement as HTMLElement | null;
+      if (active && active !== document.body && active !== textareaRef.current) {
+        // Skip if user is in another non-terminal text input/editor
+        if (active.closest('.xterm')) {
+          // fall through and steal focus from terminal
+        } else {
+          const tag = active.tagName;
+          const editable = active.isContentEditable
+            || tag === 'INPUT'
+            || tag === 'TEXTAREA'
+            || tag === 'SELECT'
+            || !!active.closest('.monaco-editor');
+          if (editable) return;
+        }
+      }
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    };
+    window.addEventListener('focus', onWindowFocus);
+    return () => window.removeEventListener('focus', onWindowFocus);
+  }, []);
+
   // Autocomplete
   useEffect(() => {
     if (showAddMenu) { setSuggestions([]); return; }

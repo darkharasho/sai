@@ -29,6 +29,7 @@ import McpSidebar from './components/MCP/McpSidebar';
 import { isImageFile } from './utils/imageFiles';
 import { getMonacoEditorFor } from './utils/monacoEditorRegistry';
 import * as monaco from 'monaco-editor';
+import { motion, AnimatePresence } from 'motion/react';
 
 function applyEditsClientSide(content: string, edits: { line: number; column: number; length: number; replacement: string }[]): string {
   const sorted = [...edits].sort((a, b) => b.line - a.line || b.column - a.column);
@@ -1620,32 +1621,84 @@ export default function App() {
       />
       <div className="app-body">
         <NavBar activeSidebar={sidebarOpen} onToggle={toggleSidebar} gitChangeCount={gitChangeCount} />
-        {sidebarOpen === 'files' && <FileExplorerSidebar projectPath={projectPath} onFileOpen={handleFileOpen} />}
-        {sidebarOpen === 'git' && <GitSidebar projectPath={projectPath} onFileClick={handleFileClick} commitMessageProvider={commitMessageProvider} />}
-        {sidebarOpen === 'search' && (
-          <SearchPanel
-            projectPath={projectPath}
-            getOpenBuffers={() => openFiles
-              .filter(f => f.isDirty && typeof f.content === 'string')
-              .map(f => ({ path: f.path, content: f.content as string }))}
-            applyMonacoEdits={(p, edits) => applySearchEditsToMonaco(p, edits)}
-            onOpenFile={handleFileOpen}
-          />
-        )}
-        {sidebarOpen === 'chats' && (
-          <ChatHistorySidebar
-            sessions={sessions}
-            activeSessionId={activeSession.id}
-            aiProvider={aiProvider}
-            onSelectSession={handleSelectSession}
-            onNewChat={handleNewChat}
-            onUpdateSessions={handleUpdateSessions}
-            projectPath={projectPath}
-            titleGeneratingIds={titleGeneratingIds}
-          />
-        )}
-        {sidebarOpen === 'plugins' && <PluginsSidebar />}
-        {sidebarOpen === 'mcp' && <McpSidebar />}
+        <AnimatePresence initial={false}>
+          {sidebarOpen === 'files' && (
+            <motion.div
+              key="sidebar-files"
+              className="sidebar-slot"
+              exit={{ opacity: 0, x: -12 }}
+              transition={{ duration: 0.16, ease: 'easeIn' }}
+            >
+              <FileExplorerSidebar projectPath={projectPath} onFileOpen={handleFileOpen} />
+            </motion.div>
+          )}
+          {sidebarOpen === 'git' && (
+            <motion.div
+              key="sidebar-git"
+              className="sidebar-slot"
+              exit={{ opacity: 0, x: -12 }}
+              transition={{ duration: 0.16, ease: 'easeIn' }}
+            >
+              <GitSidebar projectPath={projectPath} onFileClick={handleFileClick} commitMessageProvider={commitMessageProvider} />
+            </motion.div>
+          )}
+          {sidebarOpen === 'search' && (
+            <motion.div
+              key="sidebar-search"
+              className="sidebar-slot"
+              exit={{ opacity: 0, x: -12 }}
+              transition={{ duration: 0.16, ease: 'easeIn' }}
+            >
+              <SearchPanel
+                projectPath={projectPath}
+                getOpenBuffers={() => openFiles
+                  .filter(f => f.isDirty && typeof f.content === 'string')
+                  .map(f => ({ path: f.path, content: f.content as string }))}
+                applyMonacoEdits={(p, edits) => applySearchEditsToMonaco(p, edits)}
+                onOpenFile={handleFileOpen}
+              />
+            </motion.div>
+          )}
+          {sidebarOpen === 'chats' && (
+            <motion.div
+              key="sidebar-chats"
+              className="sidebar-slot"
+              exit={{ opacity: 0, x: -12 }}
+              transition={{ duration: 0.16, ease: 'easeIn' }}
+            >
+              <ChatHistorySidebar
+                sessions={sessions}
+                activeSessionId={activeSession.id}
+                aiProvider={aiProvider}
+                onSelectSession={handleSelectSession}
+                onNewChat={handleNewChat}
+                onUpdateSessions={handleUpdateSessions}
+                projectPath={projectPath}
+                titleGeneratingIds={titleGeneratingIds}
+              />
+            </motion.div>
+          )}
+          {sidebarOpen === 'plugins' && (
+            <motion.div
+              key="sidebar-plugins"
+              className="sidebar-slot"
+              exit={{ opacity: 0, x: -12 }}
+              transition={{ duration: 0.16, ease: 'easeIn' }}
+            >
+              <PluginsSidebar />
+            </motion.div>
+          )}
+          {sidebarOpen === 'mcp' && (
+            <motion.div
+              key="sidebar-mcp"
+              className="sidebar-slot"
+              exit={{ opacity: 0, x: -12 }}
+              transition={{ duration: 0.16, ease: 'easeIn' }}
+            >
+              <McpSidebar />
+            </motion.div>
+          )}
+        </AnimatePresence>
         <div className="tm-views-wrapper">
           <div className="main-content" ref={mainContentRef}>
             {allPanels.map((panel, i) => (

@@ -45,6 +45,11 @@
   will-change: transform, opacity;
 }
 
+.sidebar-slot {
+  display: flex;
+  flex-shrink: 0;
+}
+
 .sai-dot {
   display: inline-block;
   background: currentColor;

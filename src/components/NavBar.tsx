@@ -121,18 +121,27 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0 }: 
           position: absolute;
           top: 2px;
           right: 0px;
-          background: var(--accent);
           color: #000;
-          font-size: 9px;
+          font-size: 10px;
           font-weight: 700;
           font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           min-width: 16px;
           height: 16px;
-          line-height: 16px;
-          text-align: center;
-          border-radius: 8px;
-          padding: 0 3px;
+          padding: 0 2px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          isolation: isolate;
           animation: badge-pop var(--dur-base) var(--ease-out-soft);
+        }
+        .git-badge::before {
+          content: '';
+          position: absolute;
+          inset: 2px;
+          background: var(--accent);
+          -webkit-mask: url('/svg/dot.svg') center / 100% 100% no-repeat;
+          mask: url('/svg/dot.svg') center / 100% 100% no-repeat;
+          z-index: -1;
         }
         @keyframes badge-pop {
           from { transform: scale(0.6); opacity: 0; }
