@@ -51,7 +51,7 @@ const isModelChoice = (v: unknown): v is ModelChoice => typeof v === 'string' &&
 
 // Cap the in-memory active-session message window. Older messages stay in
 // IndexedDB and are paginated in via ChatPanel's startReached callback.
-const MESSAGE_TAIL_LIMIT = 200;
+const MESSAGE_TAIL_LIMIT = 100;
 const MESSAGE_PAGE_SIZE = 100;
 type AIProvider = 'claude' | 'codex' | 'gemini';
 type GeminiApprovalMode = 'default' | 'auto_edit' | 'yolo' | 'plan';

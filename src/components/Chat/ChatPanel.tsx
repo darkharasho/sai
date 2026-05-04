@@ -561,8 +561,13 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const [followOn, setFollowOn] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
 
-  // Windowed rendering: only render messages from renderStart onward
-  const [renderStart, setRenderStart] = useState(0);
+  // Windowed rendering: only render messages from renderStart onward.
+  // Initialize to the tail so the first render after mount doesn't pay the
+  // cost of rendering the entire history before the windowing effect runs.
+  const [renderStart, setRenderStart] = useState(() => {
+    const len = initialMessages?.length ?? 0;
+    return len > RENDER_CHUNK ? len - RENDER_CHUNK : 0;
+  });
   const sentinelRef = useRef<HTMLDivElement>(null);
   const pendingComposerRectRef = useRef<DOMRect | null>(null);
 
