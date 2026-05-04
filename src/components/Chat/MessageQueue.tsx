@@ -12,10 +12,18 @@ interface MessageQueueProps {
 
 export default function MessageQueue({ queue, onRemove, onPromote }: MessageQueueProps) {
   const [open, setOpen] = useState(false);
+  const [pulseKey, setPulseKey] = useState(0);
+  const prevLenRef = useRef(queue.length);
   const wrapRef = useRef<HTMLSpanElement | null>(null);
   const popoverTransition = useReducedMotionTransition(SPRING.pop);
   const badgeTransition = useReducedMotionTransition(SPRING.flick);
   const itemTransition = useReducedMotionTransition(SPRING.gentle);
+  const pulseTransition = useReducedMotionTransition({ duration: 0.28, ease: 'easeOut' });
+
+  useEffect(() => {
+    if (queue.length > prevLenRef.current) setPulseKey(k => k + 1);
+    prevLenRef.current = queue.length;
+  }, [queue.length]);
 
   useEffect(() => {
     if (!open) return;
@@ -45,16 +53,19 @@ export default function MessageQueue({ queue, onRemove, onPromote }: MessageQueu
         exit={{ opacity: 0, scale: 0.85 }}
         transition={badgeTransition}
       >
-        <button
+        <motion.button
           type="button"
           data-testid="queue-badge"
           className={`queue-badge${open ? ' queue-badge--open' : ''}`}
           onClick={() => setOpen(o => !o)}
           title={open ? undefined : `${queue.length} queued`}
+          animate={pulseKey > 0 ? { scale: [1, 1.12, 1] } : undefined}
+          transition={pulseTransition}
+          key={`badge-${pulseKey}`}
         >
           <ListOrdered size={13} />
           <span className="queue-badge-count">{queue.length} queued</span>
-        </button>
+        </motion.button>
 
         <AnimatePresence>
           {open && (
