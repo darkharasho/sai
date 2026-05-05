@@ -5,6 +5,7 @@ import McpAddServer from './McpAddServer';
 import McpRegistryDetail from './McpRegistryDetail';
 import McpIcon from './McpIcon';
 import SaiLogo from '../SaiLogo';
+import { DOT_MASK_URL } from '../../lib/assets';
 import type { McpServer, McpServerConfig, RegistryMcpServer } from '../../types';
 
 type Tab = 'installed' | 'browse';
@@ -386,8 +387,8 @@ export default function McpSidebar() {
           width: 8px;
           height: 8px;
           background: currentColor;
-          -webkit-mask: url('/svg/dot.svg') center / contain no-repeat;
-          mask: url('/svg/dot.svg') center / contain no-repeat;
+          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
         }
         .status-dot.active { color: var(--green); }
         .status-dot.inactive { color: var(--red); }

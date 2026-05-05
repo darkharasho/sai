@@ -4,6 +4,7 @@ import PluginIcon from './PluginIcon';
 import PluginDetail from './PluginDetail';
 import PluginRegistryDetail from './PluginRegistryDetail';
 import SaiLogo from '../SaiLogo';
+import { DOT_MASK_URL } from '../../lib/assets';
 import type { Plugin, RegistryPlugin } from '../../types';
 
 type Tab = 'installed' | 'browse';
@@ -345,8 +346,8 @@ export default function PluginsSidebar() {
           width: 8px;
           height: 8px;
           background: currentColor;
-          -webkit-mask: url('/svg/dot.svg') center / contain no-repeat;
-          mask: url('/svg/dot.svg') center / contain no-repeat;
+          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
         }
         .status-dot.active { color: var(--green); }
         .status-dot.inactive { color: var(--red); }

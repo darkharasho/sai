@@ -1,6 +1,7 @@
 import { ArrowLeft, Trash2 } from 'lucide-react';
 import PluginIcon from './PluginIcon';
 import type { Plugin } from '../../types';
+import { DOT_MASK_URL } from '../../lib/assets';
 
 interface PluginDetailProps {
   plugin: Plugin;
@@ -130,8 +131,8 @@ export default function PluginDetail({ plugin, onBack, onUninstall, onToggleEnab
           width: 8px;
           height: 8px;
           background: currentColor;
-          -webkit-mask: url('/svg/dot.svg') center / contain no-repeat;
-          mask: url('/svg/dot.svg') center / contain no-repeat;
+          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
         }
         .status-dot.active { color: var(--green); }
         .status-dot.inactive { color: var(--red); }

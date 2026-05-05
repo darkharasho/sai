@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ArrowLeft, RotateCcw, Server, Trash2 } from 'lucide-react';
 import type { McpServer, McpTool } from '../../types';
+import { DOT_MASK_URL } from '../../lib/assets';
 
 interface McpDetailProps {
   server: McpServer;
@@ -136,8 +137,8 @@ export default function McpDetail({ server, onBack, onRemove, onToggleEnabled, o
           width: 9px;
           height: 9px;
           background: currentColor;
-          -webkit-mask: url('/svg/dot.svg') center / contain no-repeat;
-          mask: url('/svg/dot.svg') center / contain no-repeat;
+          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
         }
         .detail-actions {
           display: flex;

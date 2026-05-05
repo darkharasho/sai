@@ -7,6 +7,7 @@ import SettingsModal from './SettingsModal';
 import { LogOut, Settings, ChevronDown, FolderOpen, FolderPlus } from 'lucide-react';
 import { basename } from '../utils/pathUtils';
 import SaiLogo from './SaiLogo';
+import { DOT_MASK_URL } from '../lib/assets';
 
 interface GitHubUser {
   login: string;
@@ -782,8 +783,8 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           width: 9px;
           height: 9px;
           flex-shrink: 0;
-          -webkit-mask: url('/svg/dot.svg') center / contain no-repeat;
-          mask: url('/svg/dot.svg') center / contain no-repeat;
+          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
         }
         .workspace-dot-active {
           background: #4ade80;

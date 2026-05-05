@@ -3,6 +3,7 @@ import { Search, File, ChevronRight, FileCode2, MessageSquare } from 'lucide-rea
 import { fuzzyMatch } from '../utils/fuzzyMatch';
 import { basename } from '../utils/pathUtils';
 import SaiLogo from './SaiLogo';
+import { DOT_MASK_URL } from '../lib/assets';
 
 type PaletteMode = 'files' | 'commands' | 'grep' | 'sessions';
 
@@ -504,8 +505,8 @@ export default function CommandPalette({
           width: 9px;
           height: 9px;
           flex-shrink: 0;
-          -webkit-mask: url('/svg/dot.svg') center / contain no-repeat;
-          mask: url('/svg/dot.svg') center / contain no-repeat;
+          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
         }
         .cp-result-info {
           flex: 1;

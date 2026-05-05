@@ -1,4 +1,5 @@
 import { FolderClosed, GitBranch, Clock, Puzzle, Server, Search } from 'lucide-react';
+import { DOT_MASK_URL } from '../lib/assets';
 
 interface NavBarProps {
   activeSidebar: string | null;
@@ -139,8 +140,8 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0 }: 
           position: absolute;
           inset: 2px;
           background: var(--accent);
-          -webkit-mask: url('/svg/dot.svg') center / 100% 100% no-repeat;
-          mask: url('/svg/dot.svg') center / 100% 100% no-repeat;
+          -webkit-mask: url("${DOT_MASK_URL}") center / 100% 100% no-repeat;
+          mask: url("${DOT_MASK_URL}") center / 100% 100% no-repeat;
           z-index: -1;
         }
         @keyframes badge-pop {

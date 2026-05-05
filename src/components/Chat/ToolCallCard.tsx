@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import type { ToolCall } from '../../types';
 import { SPRING, useReducedMotionTransition } from './motion';
 import { getShikiHighlighter, getActiveHighlightTheme } from '../../themes';
+import { DOT_MASK_URL } from '../../lib/assets';
 
 function formatMs(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -777,8 +778,8 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
             width: 9px;
             height: 9px;
             background: currentColor;
-            -webkit-mask: url('/svg/dot.svg') center / contain no-repeat;
-            mask: url('/svg/dot.svg') center / contain no-repeat;
+            -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+            mask: url("${DOT_MASK_URL}") center / contain no-repeat;
           }
           .tool-status-pulse { background: var(--accent); }
           .tool-status-dot-done { background: var(--green); }
