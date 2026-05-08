@@ -612,10 +612,11 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         }
         .workspace-done-dot {
           display: inline-block;
-          width: 7px;
-          height: 7px;
-          border-radius: 50%;
-          background: var(--accent);
+          width: 9px;
+          height: 9px;
+          background: var(--green);
+          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
           margin-left: 6px;
           vertical-align: middle;
           animation: done-pulse 2s ease-in-out infinite;
@@ -631,10 +632,14 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           display: inline-block;
           width: 9px;
           height: 9px;
-          border: 1.5px solid rgba(199, 145, 12, 0.25);
-          border-top-color: var(--accent);
-          border-radius: 50%;
-          animation: workspace-spin 0.8s linear infinite;
+          background: var(--accent);
+          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+          animation: dot-spinner-pulse 2.2s ease-in-out infinite;
+        }
+        @keyframes dot-spinner-pulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50%      { opacity: 0.35; transform: scale(0.75); }
         }
         .titlebar-busy-count {
           font-size: 10px;
@@ -792,18 +797,14 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         .workspace-spinner {
           width: 10px;
           height: 10px;
-          border: 1.5px solid rgba(199, 145, 12, 0.3);
-          border-top-color: var(--accent);
-          border-radius: 50%;
+          background: var(--accent);
+          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
           flex-shrink: 0;
-          animation: workspace-spin 0.8s linear infinite;
+          animation: dot-spinner-pulse 2.2s ease-in-out infinite;
         }
         .dropdown-item.active .workspace-spinner {
-          border-color: rgba(0, 0, 0, 0.2);
-          border-top-color: #000;
-        }
-        @keyframes workspace-spin {
-          to { transform: rotate(360deg); }
+          background: #000;
         }
         .workspace-dot-suspended {
           background: #d4a72c;
