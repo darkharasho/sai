@@ -1,0 +1,57 @@
+---
+import MissionClock from './MissionClock.astro';
+const base = import.meta.env.BASE_URL;
+---
+<section class="hero">
+  <div class="container hero-grid">
+    <div class="copy">
+      <div class="brand">
+        <img src={`${base}img/sai.png`} alt="" width="44" height="44" />
+        <span class="wordmark">SAI</span>
+        <span class="sub">Simply AI</span>
+      </div>
+      <h1>Stop context-switching.<br/><span class="accent">Start shipping.</span></h1>
+      <p class="lede">
+        A desktop code editor built around AI. Chat with Claude, Codex, or Gemini,
+        edit code, run commands, and manage Git — all without ever leaving the window.
+      </p>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/darkharasho/sai/releases/latest">↓ Download SAI</a>
+        <a class="btn" href="https://github.com/darkharasho/sai">View on GitHub →</a>
+      </div>
+    </div>
+    <div class="clock-wrap">
+      <MissionClock />
+    </div>
+  </div>
+</section>
+
+<style>
+  .hero {
+    padding: 80px 0 96px;
+    background:
+      radial-gradient(900px 500px at 80% 0%, rgba(200, 148, 62, 0.10), transparent 60%),
+      radial-gradient(700px 400px at 10% 80%, rgba(200, 148, 62, 0.06), transparent 70%);
+    border-top: 0;
+  }
+  .hero-grid {
+    display: grid;
+    grid-template-columns: 1.05fr 0.95fr;
+    gap: 56px;
+    align-items: center;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 24px;
+  }
+  .brand img { border-radius: 8px; }
+  .wordmark { font-family: var(--mono); font-weight: 700; letter-spacing: 0.08em; font-size: 1.1rem; }
+  .sub { font-family: var(--mono); font-size: 0.85rem; color: var(--fg-mute); }
+  .accent { color: var(--accent); }
+  .lede { color: var(--fg-dim); font-size: 1.15rem; max-width: 56ch; margin-top: 20px; }
+  .cta { display: flex; gap: 12px; margin-top: 28px; flex-wrap: wrap; }
+
+  @media (max-width: 900px) {
+    .hero-grid { grid-template-columns: 1fr; gap: 40px; }
+  }
+</style>
