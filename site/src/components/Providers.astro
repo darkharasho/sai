@@ -1,0 +1,48 @@
+---
+const providers = [
+  { name: 'Claude', role: 'Anthropic’s coding agent', accent: '#d4a14a' },
+  { name: 'Codex', role: 'OpenAI’s CLI agent',         accent: '#7aa376' },
+  { name: 'Gemini', role: 'Google’s coding agent',     accent: '#6f9bd1' },
+];
+---
+<section class="providers" aria-labelledby="providers-title">
+  <div class="container">
+    <p class="eyebrow">Bring your own AI</p>
+    <h2 id="providers-title">Use the agent you already trust.</h2>
+    <p class="lede">Switch providers any time from <code>Settings → AI Provider</code>. SAI keeps each provider’s models, approval modes, and conversation preferences separate.</p>
+    <div class="grid">
+      {providers.map((p) => (
+        <article class="card">
+          <span class="badge" style={`--badge: ${p.accent}`}>{p.name[0]}</span>
+          <h3>{p.name}</h3>
+          <p>{p.role}</p>
+        </article>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .lede { color: var(--fg-dim); max-width: 60ch; margin: 14px 0 40px; font-size: 1.08rem; }
+  .lede code { font-family: var(--mono); color: var(--accent); background: var(--bg-panel); padding: 2px 6px; border-radius: 4px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .card {
+    padding: 28px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .badge {
+    display: inline-grid; place-items: center;
+    width: 40px; height: 40px; border-radius: 10px;
+    background: color-mix(in srgb, var(--badge) 20%, transparent);
+    color: var(--badge);
+    font-family: var(--mono); font-weight: 700; font-size: 1.1rem;
+    margin-bottom: 16px;
+  }
+  .card h3 { margin-bottom: 6px; }
+  .card p { color: var(--fg-dim); margin: 0; }
+  @media (max-width: 760px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>

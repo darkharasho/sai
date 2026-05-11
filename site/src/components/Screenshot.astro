@@ -1,0 +1,38 @@
+---
+const base = import.meta.env.BASE_URL;
+---
+<section class="shot" aria-labelledby="shot-title">
+  <div class="container">
+    <p class="eyebrow">A look inside</p>
+    <h2 id="shot-title">The whole loop, one window.</h2>
+    <p class="lede">Open a project, pick your provider, ask it to build a feature, and watch it happen in real time. Review diffs, stage changes, commit — done.</p>
+    <div class="frame">
+      <div class="chrome">
+        <span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span>
+      </div>
+      <img src={`${base}img/screenshot.png`} alt="SAI desktop application showing chat, editor, terminal, and Git panels" width="1400" height="900" loading="lazy" />
+    </div>
+  </div>
+</section>
+
+<style>
+  .lede { color: var(--fg-dim); max-width: 60ch; margin: 14px 0 36px; font-size: 1.08rem; }
+  .frame {
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: var(--bg-panel);
+    box-shadow: 0 40px 100px -40px rgba(200, 148, 62, 0.2);
+  }
+  .chrome {
+    display: flex; gap: 8px;
+    padding: 10px 14px;
+    background: #100c07;
+    border-bottom: 1px solid var(--border);
+  }
+  .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .dot-r { background: #c4554a; }
+  .dot-y { background: #c89a4a; }
+  .dot-g { background: #65a37a; }
+  .frame img { display: block; width: 100%; height: auto; }
+</style>
