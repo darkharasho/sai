@@ -1,34 +1,150 @@
 ---
 ---
-<footer class="footer">
-  <div class="container row">
-    <div class="left">
-      <span class="wordmark">SAI</span>
-      <span class="tagline">Built for developers who'd rather ship than configure.</span>
+<footer class="ftr sec--console">
+  <div class="container">
+    <div class="status-bar" aria-hidden="true" style="margin: 0;">
+      <span class="cell">STATUS · NOMINAL</span>
+      <span class="cell green">UPTIME · ∞</span>
+      <span class="cell">BUILD · v1.0.3</span>
+      <span class="cell dim" style="margin-left:auto">END OF TRANSMISSION</span>
     </div>
-    <nav class="links" aria-label="Footer">
-      <a href="https://github.com/darkharasho/sai">GitHub</a>
-      <a href="https://github.com/darkharasho/sai/blob/main/LICENSE">License</a>
-      <a href="https://github.com/darkharasho/sai/releases">Releases</a>
-      <img alt="Latest release" src="https://img.shields.io/github/v/release/darkharasho/sai?style=flat-square&color=c8943e" />
-    </nav>
+
+    <div class="row">
+      <div class="brand">
+        <span class="word">SAI</span>
+        <span class="display tag">Simply AI.</span>
+        <p class="tagline">Built for developers who'd rather ship than configure.</p>
+      </div>
+      <nav class="links" aria-label="Footer">
+        <div class="col">
+          <span class="hd">Project</span>
+          <a href="https://github.com/darkharasho/sai">github</a>
+          <a href="https://github.com/darkharasho/sai/releases">releases</a>
+          <a href="https://github.com/darkharasho/sai/blob/main/LICENSE">license</a>
+        </div>
+        <div class="col">
+          <span class="hd">Providers</span>
+          <a href="https://docs.anthropic.com/en/docs/claude-code">claude</a>
+          <a href="https://developers.openai.com/codex/cli">codex</a>
+          <a href="https://geminicli.com/">gemini</a>
+        </div>
+        <div class="col">
+          <span class="hd">Signals</span>
+          <span class="kv"><span>lat</span><span data-fl>04ms</span></span>
+          <span class="kv"><span>buf</span><span>62%</span></span>
+          <span class="kv"><span>tps</span><span>184</span></span>
+        </div>
+      </nav>
+    </div>
+
+    <div class="ascii" aria-hidden="true">
+      <pre>{`  ___    _    ___
+ / __|  /_\\  |_ _|
+ \\__ \\ / _ \\  | |
+ |___//_/ \\_\\|___|`}</pre>
+    </div>
+
+    <div class="bot">
+      <span class="cp">© 2026 SAI · open source</span>
+      <span class="bot-mid">simply ai. simply ship.</span>
+      <span class="rev">REV-7DB</span>
+    </div>
   </div>
+
+  <script is:inline>
+    const el = document.querySelector('[data-fl]');
+    if (el) setInterval(() => {
+      const v = 3 + Math.floor(Math.random() * 5);
+      el.textContent = String(v).padStart(2, '0') + 'ms';
+    }, 1100);
+  </script>
 </footer>
 
 <style>
-  .footer {
-    padding: 48px 0;
-    border-top: 1px solid var(--border);
-    background: var(--bg-elev);
+  .ftr {
+    background: var(--ink);
+    color: var(--phosphor-2);
+    padding: 0 0 32px;
+    border-top: 1px solid var(--rule);
+    position: relative;
+  }
+  .ftr::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(to bottom, transparent 0, transparent 3px, rgba(0,0,0,0.15) 3px, rgba(0,0,0,0.15) 4px);
+    mix-blend-mode: multiply; opacity: 0.4;
   }
   .row {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 24px; flex-wrap: wrap;
+    margin-top: 56px;
+    display: grid; grid-template-columns: 1.1fr 1.6fr; gap: 64px;
+    align-items: start;
   }
-  .left { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
-  .wordmark { font-family: var(--mono); font-weight: 700; letter-spacing: 0.08em; }
-  .tagline { color: var(--fg-mute); font-size: 0.95rem; }
-  .links { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
-  .links a { color: var(--fg-dim); font-family: var(--mono); font-size: 0.9rem; }
-  .links a:hover { color: var(--accent); }
+  .brand .word {
+    font-family: var(--mono); font-weight: 800;
+    font-size: clamp(3rem, 7vw, 5.4rem);
+    color: var(--phosphor); letter-spacing: -0.04em; line-height: 1;
+  }
+  .brand .tag {
+    display: block;
+    font-family: var(--display); font-style: italic;
+    color: var(--phosphor-2); font-size: 1.6rem; margin-top: 6px;
+  }
+  .brand .tagline {
+    margin-top: 18px; max-width: 36ch;
+    font-family: var(--mono); font-size: 13px; line-height: 1.7;
+    color: var(--phosphor-dim);
+  }
+
+  .links {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px;
+  }
+  .col { display: flex; flex-direction: column; gap: 10px; }
+  .hd {
+    font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--phosphor-dim);
+    margin-bottom: 6px;
+    border-bottom: 1px dashed var(--rule-2);
+    padding-bottom: 8px;
+  }
+  .col a {
+    font-family: var(--mono); font-size: 13px;
+    color: var(--phosphor-2);
+    transition: color 120ms;
+  }
+  .col a:hover { color: var(--phosphor); }
+  .kv {
+    display: flex; justify-content: space-between;
+    font-family: var(--mono); font-size: 12px;
+    color: var(--phosphor-2);
+    letter-spacing: 0.06em;
+  }
+  .kv span:first-child { color: var(--phosphor-dim); text-transform: uppercase; letter-spacing: 0.22em; font-size: 10px; }
+
+  .ascii {
+    margin-top: 56px;
+    overflow: hidden;
+  }
+  .ascii pre {
+    margin: 0;
+    font-family: var(--mono); font-size: 10px; line-height: 1.2;
+    color: var(--phosphor-dim);
+    opacity: 0.45;
+  }
+
+  .bot {
+    margin-top: 32px;
+    padding-top: 16px;
+    border-top: 1px dashed var(--rule-2);
+    display: flex; align-items: center; justify-content: space-between;
+    font-family: var(--mono); font-size: 11px;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--phosphor-dim);
+  }
+  .bot-mid { font-family: var(--display); font-style: italic; text-transform: none; letter-spacing: 0; color: var(--phosphor-2); font-size: 14px; }
+
+  @media (max-width: 900px) {
+    .row { grid-template-columns: 1fr; gap: 40px; }
+    .links { grid-template-columns: repeat(2, 1fr); gap: 28px; }
+    .bot { flex-direction: column; gap: 8px; align-items: flex-start; }
+  }
 </style>

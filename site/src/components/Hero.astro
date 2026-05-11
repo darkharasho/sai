@@ -2,56 +2,182 @@
 import MissionClock from './MissionClock.astro';
 const base = import.meta.env.BASE_URL;
 ---
-<section class="hero">
-  <div class="container hero-grid">
-    <div class="copy">
-      <div class="brand">
-        <img src={`${base}img/sai.png`} alt="" width="44" height="44" />
-        <span class="wordmark">SAI</span>
-        <span class="sub">Simply AI</span>
-      </div>
-      <h1>Stop context-switching.<br/><span class="accent">Start shipping.</span></h1>
-      <p class="lede">
-        A desktop code editor built around AI. Chat with Claude, Codex, or Gemini,
-        edit code, run commands, and manage Git — all without ever leaving the window.
-      </p>
-      <div class="cta">
-        <a class="btn btn-primary" href="https://github.com/darkharasho/sai/releases/latest">↓ Download SAI</a>
-        <a class="btn" href="https://github.com/darkharasho/sai">View on GitHub →</a>
-      </div>
+<section class="sec sec--console hero" aria-labelledby="hero-title">
+  <div class="container">
+    <!-- top spec strip -->
+    <div class="status-bar" aria-hidden="true">
+      <span class="cell">SYS · SAI/01</span>
+      <span class="cell green">LINK · NOMINAL</span>
+      <span class="cell">CHANNEL · 01</span>
+      <span class="cell dim">REV · v1.0.3</span>
+      <span class="cell red" style="margin-left:auto">REC</span>
+      <span class="cell" data-utc>00:00 UTC</span>
     </div>
-    <div class="clock-wrap">
-      <MissionClock />
+
+    <div class="hero-grid">
+      <div class="copy">
+        <div class="callsign">
+          <img src={`${base}img/sai.png`} alt="" width="44" height="44" />
+          <div>
+            <div class="callsign-line">SAI · SIMPLY AI</div>
+            <div class="callsign-sub">// callsign · editor // mode · agentic</div>
+          </div>
+        </div>
+
+        <h1 id="hero-title" class="hero-title">
+          <span class="line-mono">Stop context-</span>
+          <span class="line-mono">switching.</span>
+          <span class="line-serif display">Start <em>shipping</em>.</span>
+        </h1>
+
+        <p class="lede">
+          <span class="tick">→</span> A desktop code editor wired around the agent.
+          Chat with Claude, Codex, or Gemini. Edit. Run. Commit. One window,
+          start to ship.
+        </p>
+
+        <div class="cta">
+          <a class="btn" href="https://github.com/darkharasho/sai/releases/latest">
+            <span>↓</span> Acquire SAI
+          </a>
+          <a class="btn btn-ghost" href="https://github.com/darkharasho/sai">
+            <span>◇</span> Inspect source
+          </a>
+        </div>
+
+        <dl class="vitals">
+          <div><dt>PLATFORM</dt><dd>linux · win · mac</dd></div>
+          <div><dt>RUNTIME</dt><dd>electron 36</dd></div>
+          <div><dt>LICENSE</dt><dd>see LICENSE</dd></div>
+          <div><dt>LATENCY</dt><dd class="tabnum" data-lat>04ms</dd></div>
+        </dl>
+      </div>
+
+      <aside class="console-wrap brackets">
+        <span class="br-tr"></span><span class="br-bl"></span>
+        <MissionClock />
+      </aside>
     </div>
   </div>
+
+  <script is:inline>
+    // UTC clock
+    const utc = document.querySelector('[data-utc]');
+    const lat = document.querySelector('[data-lat]');
+    const updUtc = () => {
+      const d = new Date();
+      const hh = String(d.getUTCHours()).padStart(2, '0');
+      const mm = String(d.getUTCMinutes()).padStart(2, '0');
+      const ss = String(d.getUTCSeconds()).padStart(2, '0');
+      if (utc) utc.textContent = `${hh}:${mm}:${ss} UTC`;
+    };
+    updUtc(); setInterval(updUtc, 1000);
+
+    // Jittered latency for vibe
+    if (lat) {
+      setInterval(() => {
+        const v = 3 + Math.floor(Math.random() * 5);
+        lat.textContent = String(v).padStart(2, '0') + 'ms';
+      }, 1100);
+    }
+  </script>
 </section>
 
 <style>
-  .hero {
-    padding: 80px 0 96px;
-    background:
-      radial-gradient(900px 500px at 80% 0%, rgba(200, 148, 62, 0.10), transparent 60%),
-      radial-gradient(700px 400px at 10% 80%, rgba(200, 148, 62, 0.06), transparent 70%);
-    border-top: 0;
-  }
+  .hero { padding-top: 28px; padding-bottom: 140px; overflow: hidden; }
   .hero-grid {
+    margin-top: 72px;
     display: grid;
-    grid-template-columns: 1.05fr 0.95fr;
+    grid-template-columns: 1.1fr 0.9fr;
     gap: 56px;
-    align-items: center;
+    align-items: start;
   }
-  .brand {
-    display: flex; align-items: center; gap: 12px;
-    margin-bottom: 24px;
-  }
-  .brand img { border-radius: 8px; }
-  .wordmark { font-family: var(--mono); font-weight: 700; letter-spacing: 0.08em; font-size: 1.1rem; }
-  .sub { font-family: var(--mono); font-size: 0.85rem; color: var(--fg-mute); }
-  .accent { color: var(--accent); }
-  .lede { color: var(--fg-dim); font-size: 1.15rem; max-width: 56ch; margin-top: 20px; }
-  .cta { display: flex; gap: 12px; margin-top: 28px; flex-wrap: wrap; }
 
-  @media (max-width: 900px) {
-    .hero-grid { grid-template-columns: 1fr; gap: 40px; }
+  .callsign {
+    display: flex; align-items: center; gap: 16px;
+    margin-bottom: 40px;
+  }
+  .callsign img { border: 1px solid var(--phosphor-dim); border-radius: 4px; padding: 4px; background: var(--ink-2); }
+  .callsign-line {
+    font-family: var(--mono); font-size: 12px; font-weight: 600;
+    color: var(--phosphor); letter-spacing: 0.22em; text-transform: uppercase;
+  }
+  .callsign-sub {
+    font-family: var(--mono); font-size: 11px;
+    color: var(--phosphor-dim); letter-spacing: 0.12em; text-transform: uppercase;
+    margin-top: 4px;
+  }
+
+  .hero-title {
+    display: flex; flex-direction: column;
+    font-size: clamp(2.6rem, 6.4vw, 5.6rem);
+    line-height: 0.95;
+    letter-spacing: -0.04em;
+  }
+  .line-mono {
+    font-family: var(--mono);
+    font-weight: 700;
+    color: var(--phosphor);
+    text-transform: lowercase;
+  }
+  .line-serif {
+    font-family: var(--display);
+    font-weight: 400;
+    color: var(--phosphor-2);
+    margin-top: 6px;
+    font-size: 1.18em;
+    letter-spacing: -0.025em;
+  }
+  .line-serif em {
+    font-style: italic;
+    color: var(--phosphor);
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 8px;
+    text-decoration-color: var(--phosphor-dim);
+  }
+
+  .lede {
+    margin-top: 36px; max-width: 52ch;
+    font-family: var(--mono); font-size: 14px; line-height: 1.7;
+    color: var(--phosphor-2);
+  }
+  .lede .tick { color: var(--phosphor); margin-right: 6px; }
+
+  .cta { display: flex; gap: 14px; margin-top: 36px; flex-wrap: wrap; }
+
+  .vitals {
+    margin: 56px 0 0;
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 0;
+    border-top: 1px dashed var(--rule-2);
+    border-bottom: 1px dashed var(--rule-2);
+  }
+  .vitals > div { padding: 18px 0; }
+  .vitals > div + div { border-left: 1px dashed var(--rule-2); padding-left: 18px; }
+  .vitals dt {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.22em;
+    color: var(--phosphor-dim); text-transform: uppercase; margin-bottom: 8px;
+  }
+  .vitals dd {
+    margin: 0;
+    font-family: var(--mono); font-size: 13px; font-weight: 500;
+    color: var(--phosphor); text-transform: uppercase; letter-spacing: 0.04em;
+  }
+
+  .console-wrap {
+    padding: 22px;
+    color: var(--phosphor-dim);
+  }
+  .console-wrap > :global(.clock) { animation: flicker 6s infinite; }
+
+  @media (max-width: 1000px) {
+    .hero-grid { grid-template-columns: 1fr; gap: 56px; }
+    .vitals { grid-template-columns: repeat(2, 1fr); }
+    .vitals > div + div { border-left: 0; padding-left: 0; }
+    .vitals > div:nth-child(odd) { border-right: 1px dashed var(--rule-2); padding-right: 18px; }
+  }
+  @media (max-width: 720px) {
+    .status-bar { font-size: 10px; gap: 16px; }
+    .hero-title { font-size: clamp(2.2rem, 11vw, 3.6rem); }
   }
 </style>

@@ -1,35 +1,89 @@
 ---
 interface Props {
+  coord: string;
   title: string;
   blurb: string;
-  glyph: string;
+  meta: string;
+  index: number;
 }
-const { title, blurb, glyph } = Astro.props;
+const { coord, title, blurb, meta, index } = Astro.props;
+const n = String(index + 1).padStart(2, '0');
 ---
-<article class="card">
-  <span class="glyph" aria-hidden="true">{glyph}</span>
-  <h3>{title}</h3>
-  <p>{blurb}</p>
+<article class="card" style={`--n: ${index}`}>
+  <header class="hdr">
+    <span class="coord">{coord}</span>
+    <span class="n">№ {n}</span>
+  </header>
+  <h3 class="t">{title}</h3>
+  <p class="b">{blurb}</p>
+  <footer class="ft">
+    <span class="meta">{meta}</span>
+    <span class="dot" aria-hidden="true">◆</span>
+  </footer>
 </article>
 
 <style>
   .card {
-    padding: 28px;
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    transition: border-color 150ms, transform 150ms;
+    position: relative;
+    padding: 28px 24px 22px;
+    border: 1px solid var(--rule-2);
+    background: linear-gradient(180deg, rgba(255,180,84,0.025), transparent 30%), var(--ink-2);
+    color: var(--phosphor-2);
+    overflow: hidden;
+    transition: transform 200ms, border-color 200ms, background 200ms;
   }
-  .card:hover { border-color: var(--border-strong); }
-  .glyph {
-    display: inline-flex; align-items: center; justify-content: center;
-    min-width: 40px; height: 40px; padding: 0 10px;
-    font-family: var(--mono); font-weight: 600; font-size: 0.95rem;
-    color: var(--accent);
-    background: var(--accent-soft);
-    border-radius: 8px;
-    margin-bottom: 16px;
+  .card::before {
+    content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: var(--phosphor);
+    transform: scaleX(0); transform-origin: left;
+    transition: transform 240ms ease;
   }
-  .card h3 { margin-bottom: 10px; }
-  .card p { color: var(--fg-dim); margin: 0; font-size: 0.98rem; }
+  .card:hover { transform: translateY(-2px); border-color: var(--phosphor-dim); background: linear-gradient(180deg, rgba(255,180,84,0.05), transparent 40%), var(--console); }
+  .card:hover::before { transform: scaleX(1); }
+
+  .hdr {
+    display: flex; align-items: center; justify-content: space-between;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--phosphor-dim);
+    margin-bottom: 28px;
+  }
+  .coord {
+    color: var(--phosphor);
+    border: 1px solid var(--phosphor-dim);
+    padding: 3px 8px;
+    font-weight: 600;
+  }
+  .n { font-family: var(--display); font-style: italic; font-size: 18px; color: var(--phosphor-dim); letter-spacing: 0; }
+
+  .t {
+    font-family: var(--mono);
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--phosphor);
+    line-height: 1.25;
+    letter-spacing: -0.005em;
+    margin-bottom: 14px;
+  }
+  .b {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 13px; line-height: 1.65;
+    color: var(--phosphor-2);
+    opacity: 0.78;
+  }
+  .ft {
+    margin-top: 26px;
+    padding-top: 14px;
+    border-top: 1px dashed var(--rule-2);
+    display: flex; align-items: center; justify-content: space-between;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--phosphor-dim);
+  }
+  .dot { color: var(--phosphor); font-size: 10px; }
 </style>

@@ -1,48 +1,57 @@
 export interface Feature {
+  coord: string;
   title: string;
   blurb: string;
-  glyph: string;
+  meta: string;
 }
 
 export const features: Feature[] = [
   {
-    title: 'Chat with real project context',
-    blurb: 'Talk to your assistant inside the editor with your repository already attached. Streaming, image attachments, persistent sessions, full history.',
-    glyph: '◉',
+    coord: 'A-01',
+    title: 'Project-context chat',
+    blurb: 'Talk to your agent inside the editor with your repository already attached. Streaming, image attachments, persistent sessions, full history.',
+    meta: 'mod · chat · streaming',
   },
   {
-    title: 'A composer that keeps up',
-    blurb: 'Queue follow-up prompts behind a streaming turn, promote any item to “next,” or bypass the queue with Enter. Todo ring and queue badge live in the toolbar.',
-    glyph: '»»',
+    coord: 'A-02',
+    title: 'Composer queue',
+    blurb: 'Queue follow-up prompts behind a streaming turn, promote any item to “next,” or bypass with Enter. Todo-ring and queue badge live in the toolbar.',
+    meta: 'mod · composer · queue',
   },
   {
+    coord: 'A-03',
     title: 'Approvals & telemetry',
-    blurb: 'Provider-specific approval modes, inline tool-call approvals, context/token meters, response timers, and a cumulative turn timer for long runs.',
-    glyph: '[ok]',
+    blurb: 'Provider-specific approval modes, inline tool-call approvals, context/token meters, response timers, and a cumulative turn timer.',
+    meta: 'mod · approvals · telemetry',
   },
   {
-    title: 'Monaco editor & diff review',
+    coord: 'B-01',
+    title: 'Monaco editor & diffs',
     blurb: 'Tabs, syntax highlighting, unsaved-change protection, side-by-side and unified diffs. Open file links from chat, expand snippets to fullscreen.',
-    glyph: '{ }',
+    meta: 'mod · editor · diff',
   },
   {
-    title: 'Integrated terminal',
-    blurb: 'A real PTY-backed terminal — XTerm.js, interactive shell, clickable links, proper color rendering. Runs in your project directory.',
-    glyph: '▶_',
+    coord: 'B-02',
+    title: 'Integrated PTY terminal',
+    blurb: 'A real PTY terminal — XTerm.js, interactive shell, clickable links, true-color rendering. Runs in your project root, always ready.',
+    meta: 'mod · terminal · pty',
   },
   {
+    coord: 'B-03',
     title: 'First-class Git',
-    blurb: 'Stage, commit, branch, push, pull, discard, and review diffs from the sidebar. Background status refresh. AI-generated commit messages on demand.',
-    glyph: 'git',
+    blurb: 'Stage, commit, branch, push, pull, discard, and review diffs from the sidebar. Background status refresh. Provider-generated commit messages on demand.',
+    meta: 'mod · git · sidebar',
   },
   {
-    title: 'Search & replace, project-wide',
+    coord: 'C-01',
+    title: 'Project-wide search/replace',
     blurb: 'Regex, case, whole-word toggles. Results grouped by file. Inline replace across unsaved buffers in the editor.',
-    glyph: '⌕',
+    meta: 'mod · search · replace',
   },
   {
+    coord: 'C-02',
     title: 'Plugins & MCP servers',
-    blurb: 'Browse and install Claude Code plugins and MCP servers from inside SAI. Dedicated sidebars for installed servers and registry browsing.',
-    glyph: '∷',
+    blurb: 'Install Claude Code plugins and MCP servers from inside SAI. Dedicated sidebars for installed servers and registry browsing.',
+    meta: 'mod · plugins · mcp',
   },
 ];

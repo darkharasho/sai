@@ -1,0 +1,58 @@
+---
+const items = [
+  'LOCKING TELEMETRY',
+  'BREACHING ICE',
+  'SPOOLING CONTEXT',
+  'COMPILING DIFFS',
+  'INDEXING REPOSITORY',
+  'NEGOTIATING HANDSHAKE',
+  'STREAMING TOKENS',
+  'AUTHORIZING APPROVALS',
+  'PARSING DIRECTIVE',
+  'ROUTING TO MODEL',
+];
+// Double for seamless loop
+const loop = [...items, ...items];
+---
+<div class="marquee" aria-hidden="true">
+  <div class="track">
+    {loop.map((t) => (
+      <span class="item">
+        <span class="bullet">◆</span>
+        {t}
+      </span>
+    ))}
+  </div>
+</div>
+
+<style>
+  .marquee {
+    overflow: hidden;
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    background: var(--ink-2);
+    padding: 16px 0;
+    position: relative;
+  }
+  .marquee::before, .marquee::after {
+    content: ""; position: absolute; top: 0; bottom: 0; width: 120px; z-index: 1; pointer-events: none;
+  }
+  .marquee::before { left: 0;  background: linear-gradient(to right, var(--ink-2), transparent); }
+  .marquee::after  { right: 0; background: linear-gradient(to left,  var(--ink-2), transparent); }
+
+  .track {
+    display: inline-flex; gap: 56px;
+    animation: marquee 48s linear infinite;
+    white-space: nowrap;
+  }
+  .item {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: var(--phosphor);
+    display: inline-flex; align-items: center; gap: 18px;
+  }
+  .bullet { color: var(--phosphor-dim); }
+</style>

@@ -2,25 +2,75 @@
 import FeatureCard from './FeatureCard.astro';
 import { features } from '../data/features';
 ---
-<section class="features" aria-labelledby="features-title">
+<section class="sec sec--console feat" aria-labelledby="feat-title">
   <div class="container">
-    <p class="eyebrow">Everything you need, in one window</p>
-    <h2 id="features-title">Built for the way you actually ship.</h2>
+    <div class="head">
+      <p class="eyebrow">Schedule 04 · MODULE INVENTORY</p>
+      <h2 id="feat-title" class="head-title">
+        <span class="mono">Eight modules.</span>
+        <span class="display">One control surface.</span>
+      </h2>
+      <p class="head-lede">
+        Every part of the SAI cockpit is built for the agent loop — prompt,
+        review, run, ship. Nothing bolted on. Nothing in the way.
+      </p>
+    </div>
+
     <div class="grid">
-      {features.map((f) => (
-        <FeatureCard title={f.title} blurb={f.blurb} glyph={f.glyph} />
+      {features.map((f, i) => (
+        <FeatureCard coord={f.coord} title={f.title} blurb={f.blurb} meta={f.meta} index={i} />
       ))}
     </div>
+
+    <p class="legend">
+      <span>LEGEND ·</span>
+      <span><span class="sw a"></span> A-series · agent loop</span>
+      <span><span class="sw b"></span> B-series · workspace</span>
+      <span><span class="sw c"></span> C-series · extensibility</span>
+    </p>
   </div>
 </section>
 
 <style>
+  .feat { padding-bottom: 140px; }
+  .head { max-width: 880px; margin-bottom: 56px; }
+  .head-title { display: grid; gap: 4px; font-size: clamp(2rem, 4.6vw, 3.8rem); line-height: 1; }
+  .head-title .mono { font-family: var(--mono); font-weight: 700; color: var(--phosphor); letter-spacing: -0.02em; }
+  .head-title .display { font-family: var(--display); font-style: italic; color: var(--phosphor-2); font-weight: 400; letter-spacing: -0.015em; }
+  .head-lede { margin-top: 22px; max-width: 60ch; color: var(--phosphor-2); font-size: 14px; line-height: 1.7; }
+
   .grid {
-    margin-top: 40px;
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 18px;
+    gap: 0;
+    border: 1px solid var(--rule-2);
   }
-  @media (max-width: 1100px) { .grid { grid-template-columns: repeat(2, 1fr); } }
-  @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+  .grid > :global(.card) { border: none; border-right: 1px solid var(--rule-2); border-bottom: 1px solid var(--rule-2); }
+  .grid > :global(.card:nth-child(4n)) { border-right: none; }
+  .grid > :global(.card:nth-last-child(-n+4)) { border-bottom: none; }
+
+  .legend {
+    margin-top: 28px;
+    display: flex; gap: 28px; flex-wrap: wrap;
+    font-family: var(--mono); font-size: 11px;
+    letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--phosphor-dim);
+  }
+  .legend .sw { display: inline-block; width: 10px; height: 10px; margin-right: 8px; vertical-align: -1px; border: 1px solid var(--phosphor-dim); }
+  .legend .sw.a { background: var(--phosphor); border-color: var(--phosphor); }
+  .legend .sw.b { background: var(--green); border-color: var(--green); }
+  .legend .sw.c { background: var(--blue); border-color: var(--blue); }
+
+  @media (max-width: 1100px) {
+    .grid { grid-template-columns: repeat(2, 1fr); }
+    .grid > :global(.card) { border-right: 1px solid var(--rule-2); border-bottom: 1px solid var(--rule-2); }
+    .grid > :global(.card:nth-child(2n)) { border-right: none; }
+    .grid > :global(.card:nth-last-child(-n+2)) { border-bottom: none; }
+    .grid > :global(.card:nth-child(4n)) { border-right: none; }
+  }
+  @media (max-width: 640px) {
+    .grid { grid-template-columns: 1fr; }
+    .grid > :global(.card) { border-right: none !important; border-bottom: 1px solid var(--rule-2) !important; }
+    .grid > :global(.card:last-child) { border-bottom: none !important; }
+  }
 </style>

@@ -1,38 +1,123 @@
 ---
 const base = import.meta.env.BASE_URL;
 ---
-<section class="shot" aria-labelledby="shot-title">
+<section class="sec sec--console shot" aria-labelledby="shot-title">
   <div class="container">
-    <p class="eyebrow">A look inside</p>
-    <h2 id="shot-title">The whole loop, one window.</h2>
-    <p class="lede">Open a project, pick your provider, ask it to build a feature, and watch it happen in real time. Review diffs, stage changes, commit — done.</p>
-    <div class="frame">
-      <div class="chrome">
-        <span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span>
-      </div>
-      <img src={`${base}img/screenshot.png`} alt="SAI desktop application showing chat, editor, terminal, and Git panels" width="1400" height="900" loading="lazy" />
+    <div class="head">
+      <p class="eyebrow">// transmission · 02</p>
+      <h2 id="shot-title" class="head-title">
+        <span class="mono">The whole loop,</span>
+        <span class="display">one window.</span>
+      </h2>
+      <p class="head-lede">
+        Open a project. Pick your agent. Describe a feature. Review diffs,
+        stage changes, commit — without ever switching context.
+      </p>
     </div>
+
+    <figure class="screen brackets">
+      <span class="br-tr"></span><span class="br-bl"></span>
+      <header class="screen-bar">
+        <span class="lbl">CHANNEL · 01</span>
+        <span class="lbl">RES · 1400×900</span>
+        <span class="lbl ok">● LIVE</span>
+        <span class="lbl mar" data-time>--:--:--</span>
+      </header>
+      <div class="img-wrap">
+        <img src={`${base}img/screenshot.png`} alt="SAI desktop showing chat, editor, terminal, and Git panels" width="1400" height="900" loading="lazy" />
+        <span class="aberration" aria-hidden="true"></span>
+        <span class="scanlines" aria-hidden="true"></span>
+        <span class="reticle reticle-tl" aria-hidden="true">+</span>
+        <span class="reticle reticle-tr" aria-hidden="true">+</span>
+        <span class="reticle reticle-bl" aria-hidden="true">+</span>
+        <span class="reticle reticle-br" aria-hidden="true">+</span>
+      </div>
+      <footer class="screen-foot">
+        <span>FRAME · 00:01:24:08</span>
+        <span>EXPOSURE · AUTO</span>
+        <span>GAIN · +0db</span>
+        <span class="ml">CAM · 01/A</span>
+      </footer>
+    </figure>
   </div>
+
+  <script is:inline>
+    const el = document.querySelector('[data-time]');
+    if (el) {
+      const upd = () => {
+        const d = new Date();
+        el.textContent = [d.getHours(), d.getMinutes(), d.getSeconds()]
+          .map(n => String(n).padStart(2, '0')).join(':');
+      };
+      upd(); setInterval(upd, 1000);
+    }
+  </script>
 </section>
 
 <style>
-  .lede { color: var(--fg-dim); max-width: 60ch; margin: 14px 0 36px; font-size: 1.08rem; }
-  .frame {
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius);
-    overflow: hidden;
-    background: var(--bg-panel);
-    box-shadow: 0 40px 100px -40px rgba(200, 148, 62, 0.2);
+  .shot { padding-bottom: 120px; }
+  .head { max-width: 880px; margin-bottom: 64px; }
+  .head .eyebrow { margin-bottom: 22px; }
+  .head-title {
+    display: grid; gap: 6px;
+    font-size: clamp(2rem, 4.6vw, 3.8rem);
+    line-height: 1;
   }
-  .chrome {
-    display: flex; gap: 8px;
-    padding: 10px 14px;
-    background: #100c07;
-    border-bottom: 1px solid var(--border);
+  .head-title .mono { font-family: var(--mono); color: var(--phosphor); font-weight: 700; letter-spacing: -0.02em; }
+  .head-title .display { font-family: var(--display); font-style: italic; color: var(--phosphor-2); font-weight: 400; letter-spacing: -0.015em; }
+  .head-lede { margin-top: 22px; max-width: 60ch; color: var(--phosphor-2); font-size: 14px; line-height: 1.7; }
+
+  .screen {
+    margin: 0;
+    border: 1px solid var(--rule-2);
+    background: #08090b;
+    color: var(--phosphor-dim);
+    box-shadow:
+      inset 0 0 0 1px rgba(255,180,84,0.06),
+      0 50px 120px -40px rgba(255,180,84,0.25);
   }
-  .dot { width: 10px; height: 10px; border-radius: 50%; }
-  .dot-r { background: #c4554a; }
-  .dot-y { background: #c89a4a; }
-  .dot-g { background: #65a37a; }
-  .frame img { display: block; width: 100%; height: auto; }
+  .screen-bar, .screen-foot {
+    display: flex; gap: 28px; align-items: center;
+    padding: 12px 18px;
+    font-family: var(--mono); font-size: 11px;
+    color: var(--phosphor-dim);
+    letter-spacing: 0.18em; text-transform: uppercase;
+    border-bottom: 1px solid var(--rule);
+  }
+  .screen-foot { border-bottom: none; border-top: 1px solid var(--rule); }
+  .screen-bar .ok { color: var(--green); }
+  .screen-bar .mar { margin-left: auto; color: var(--phosphor); }
+  .screen-foot .ml { margin-left: auto; color: var(--phosphor); }
+
+  .img-wrap { position: relative; }
+  .img-wrap img {
+    display: block; width: 100%; height: auto;
+    filter: contrast(1.02) saturate(1.05);
+  }
+  .scanlines {
+    position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 2px,
+      rgba(0,0,0,0.18) 2px,
+      rgba(0,0,0,0.18) 3px
+    );
+    mix-blend-mode: multiply;
+  }
+  .aberration {
+    position: absolute; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.55) 100%);
+    mix-blend-mode: multiply;
+  }
+  .reticle {
+    position: absolute; color: var(--phosphor); font-family: var(--mono); font-weight: 700;
+    font-size: 22px; line-height: 1; padding: 4px;
+    text-shadow: 0 0 8px rgba(255,180,84,0.5);
+  }
+  .reticle-tl { top: 12px; left: 12px; }
+  .reticle-tr { top: 12px; right: 12px; }
+  .reticle-bl { bottom: 12px; left: 12px; }
+  .reticle-br { bottom: 12px; right: 12px; }
 </style>

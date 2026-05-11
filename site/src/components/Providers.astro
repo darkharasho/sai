@@ -1,48 +1,148 @@
 ---
 const providers = [
-  { name: 'Claude', role: 'Anthropic’s coding agent', accent: '#d4a14a' },
-  { name: 'Codex', role: 'OpenAI’s CLI agent',         accent: '#7aa376' },
-  { name: 'Gemini', role: 'Google’s coding agent',     accent: '#6f9bd1' },
+  {
+    name: 'Claude',
+    org: 'Anthropic',
+    role: 'Generalist coding agent. Strong reasoning, long context, careful tool use.',
+    cli: 'claude-code',
+    classify: 'CLASS · A',
+    swatch: '#c78950',
+  },
+  {
+    name: 'Codex',
+    org: 'OpenAI',
+    role: 'Pragmatic CLI agent. Fast diffs, terminal-native loops, broad tool coverage.',
+    cli: 'codex',
+    classify: 'CLASS · A',
+    swatch: '#3b6f4f',
+  },
+  {
+    name: 'Gemini',
+    org: 'Google',
+    role: 'Wide-context agent. Multimodal review, planning, and code synthesis.',
+    cli: 'gemini',
+    classify: 'CLASS · A',
+    swatch: '#3b6098',
+  },
 ];
 ---
-<section class="providers" aria-labelledby="providers-title">
+<section class="sec sec--paper roster" aria-labelledby="roster-title">
   <div class="container">
-    <p class="eyebrow">Bring your own AI</p>
-    <h2 id="providers-title">Use the agent you already trust.</h2>
-    <p class="lede">Switch providers any time from <code>Settings → AI Provider</code>. SAI keeps each provider’s models, approval modes, and conversation preferences separate.</p>
-    <div class="grid">
-      {providers.map((p) => (
-        <article class="card">
-          <span class="badge" style={`--badge: ${p.accent}`}>{p.name[0]}</span>
-          <h3>{p.name}</h3>
-          <p>{p.role}</p>
-        </article>
-      ))}
+    <div class="head">
+      <p class="eyebrow">Sheet 03 · BRING-YOUR-OWN-AGENT</p>
+      <h2 id="roster-title" class="head-title">
+        <span class="mono">Roster of</span>
+        <span class="display">trusted agents.</span>
+      </h2>
+      <p class="head-lede">
+        SAI is provider-agnostic. Swap between Claude, Codex, or Gemini from
+        <code>Settings → AI Provider</code> — model picks, approval modes, and
+        conversation history stay tagged to the right provider, every time.
+      </p>
     </div>
+
+    <table class="ros">
+      <thead>
+        <tr>
+          <th class="num">№</th>
+          <th>Provider</th>
+          <th>Org</th>
+          <th>CLI binding</th>
+          <th>Disposition</th>
+          <th class="cls">Cls.</th>
+        </tr>
+      </thead>
+      <tbody>
+        {providers.map((p, i) => (
+          <tr>
+            <td class="num">{String(i + 1).padStart(2, '0')}</td>
+            <td class="prov">
+              <span class="swatch" style={`background:${p.swatch}`}></span>
+              <span class="name">{p.name}</span>
+            </td>
+            <td class="org">{p.org}</td>
+            <td class="cli"><code>{p.cli}</code></td>
+            <td class="role">{p.role}</td>
+            <td class="cls"><span class="stamp">{p.classify}</span></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+
+    <p class="foot">
+      <span class="caret">⟶</span>
+      Switch in-app. Each provider keeps its own model menu, approval rules, and
+      session history. No re-onboarding when you swap.
+    </p>
   </div>
 </section>
 
 <style>
-  .lede { color: var(--fg-dim); max-width: 60ch; margin: 14px 0 40px; font-size: 1.08rem; }
-  .lede code { font-family: var(--mono); color: var(--accent); background: var(--bg-panel); padding: 2px 6px; border-radius: 4px; }
-  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
-  .card {
-    padding: 28px;
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
+  .roster { color: var(--paper-ink); }
+  .head { max-width: 880px; margin-bottom: 60px; }
+  .head .eyebrow { color: var(--paper-ink); }
+  .head-title { display: grid; gap: 4px; font-size: clamp(2rem, 4.6vw, 3.6rem); line-height: 1; }
+  .head-title .mono { font-family: var(--mono); font-weight: 700; letter-spacing: -0.02em; }
+  .head-title .display { font-family: var(--display); font-style: italic; font-weight: 400; letter-spacing: -0.015em; color: #3b3024; }
+  .head-lede { margin-top: 22px; max-width: 64ch; font-family: var(--mono); font-size: 14px; line-height: 1.7; color: #3b3024; }
+  .head-lede code { font-weight: 600; background: rgba(28,24,20,0.08); padding: 2px 6px; }
+
+  .ros {
+    width: 100%; border-collapse: collapse;
+    font-family: var(--mono);
+    border-top: 2px solid var(--paper-ink);
+    border-bottom: 2px solid var(--paper-ink);
   }
-  .badge {
-    display: inline-grid; place-items: center;
-    width: 40px; height: 40px; border-radius: 10px;
-    background: color-mix(in srgb, var(--badge) 20%, transparent);
-    color: var(--badge);
-    font-family: var(--mono); font-weight: 700; font-size: 1.1rem;
-    margin-bottom: 16px;
+  .ros th, .ros td { padding: 18px 14px; text-align: left; vertical-align: top; }
+  .ros thead th {
+    font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
+    border-bottom: 1px solid var(--paper-ink);
+    color: var(--paper-ink);
   }
-  .card h3 { margin-bottom: 6px; }
-  .card p { color: var(--fg-dim); margin: 0; }
-  @media (max-width: 760px) {
-    .grid { grid-template-columns: 1fr; }
+  .ros tbody tr + tr td { border-top: 1px dashed rgba(28,24,20,0.35); }
+  .ros .num { width: 64px; font-size: 24px; font-family: var(--display); font-style: italic; color: #6a5a44; line-height: 1; }
+  .ros .prov { width: 200px; }
+  .ros .prov .name { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+  .ros .swatch {
+    display: inline-block; width: 16px; height: 16px; margin-right: 10px;
+    vertical-align: -3px; border: 1px solid var(--paper-ink);
+  }
+  .ros .org { width: 120px; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: #4a3c2c; padding-top: 24px; }
+  .ros .cli { width: 200px; padding-top: 24px; }
+  .ros .cli code {
+    font-family: var(--mono); font-size: 13px; font-weight: 500;
+    background: var(--paper-ink); color: var(--paper);
+    padding: 4px 10px;
+    letter-spacing: 0.04em;
+  }
+  .ros .role { color: #2e2618; font-size: 14px; line-height: 1.55; max-width: 44ch; padding-top: 24px; }
+  .ros .cls { width: 90px; text-align: right; padding-top: 24px; }
+  .ros .stamp {
+    display: inline-block;
+    border: 1.5px solid var(--paper-ink);
+    padding: 4px 10px;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase;
+    transform: rotate(-3deg);
+    color: var(--paper-ink);
+  }
+
+  .foot {
+    margin-top: 40px;
+    font-family: var(--mono); font-size: 13px; color: #3b3024;
+    border-top: 1px dashed rgba(28,24,20,0.35);
+    padding-top: 20px;
+    max-width: 70ch;
+  }
+  .foot .caret { color: var(--paper-ink); margin-right: 8px; font-weight: 700; }
+
+  @media (max-width: 880px) {
+    .ros, .ros thead, .ros tbody, .ros tr, .ros th, .ros td { display: block; }
+    .ros thead { display: none; }
+    .ros tbody tr { padding: 22px 0; border-top: 1px dashed rgba(28,24,20,0.35); }
+    .ros tbody tr:first-child { border-top: none; }
+    .ros td { padding: 4px 0; border-top: 0 !important; }
+    .ros .num { font-size: 32px; }
+    .ros .prov .name { font-size: 28px; }
+    .ros .cls { text-align: left; margin-top: 10px; }
   }
 </style>
