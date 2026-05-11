@@ -1,5 +1,6 @@
 ---
 import { Icon } from 'astro-icon/components';
+import SaiMark from './SaiMark.astro';
 // Sourced from src/components/ThinkingAnimation.tsx — the real SAI word pool.
 const phrases = [
   // mission-control / NASA
@@ -73,7 +74,7 @@ const userPrompts = [
   </header>
 
   <div class="screen">
-    <img class="drift-logo" src={`${import.meta.env.BASE_URL}img/sai.png`} alt="" aria-hidden="true" />
+    <SaiMark className="drift-logo" />
     <span class="scan" aria-hidden="true"></span>
 
     <div class="chat">
@@ -245,36 +246,34 @@ const userPrompts = [
     min-height: 380px;
     padding: 0;
   }
+  /* Idle animation ported from src/components/SaiLogo.css (mode="idle").
+     Two stacked loops: a slow vertical float and a breathing drop-shadow. */
   .drift-logo {
     position: absolute;
     top: 50%; left: 50%;
     width: 320px; height: 320px;
     max-width: 70%;
-    object-fit: contain;
-    opacity: 0.11;
+    transform: translate(-50%, -50%);
     pointer-events: none;
-    transform-origin: 50% 100%;
-    filter: brightness(1.2) saturate(0.8) drop-shadow(0 0 24px var(--phosphor-glow));
-    animation: drift-bounce 1.4s cubic-bezier(0.28, 0, 0.32, 1) infinite;
+    color: var(--phosphor);
+    opacity: 0.12;
     z-index: 0;
-    will-change: transform;
+    animation:
+      drift-float-y 4s ease-in-out infinite,
+      drift-breathe 5s ease-in-out infinite;
   }
-  @keyframes drift-bounce {
-    /* Ascent: pull off the ground, slight stretch */
-    0%   { transform: translate(-50%, -30%) scale(1, 1); }
-    40%  { transform: translate(-50%, -68%) scale(0.96, 1.06); }
-    /* Top of arc: hang briefly, return to neutral */
-    50%  { transform: translate(-50%, -72%) scale(1, 1); }
-    60%  { transform: translate(-50%, -68%) scale(0.96, 1.06); }
-    /* Impact: squash on landing */
-    92%  { transform: translate(-50%, -30%) scale(1.10, 0.86); }
-    100% { transform: translate(-50%, -30%) scale(1, 1); }
+  @keyframes drift-float-y {
+    0%, 100% { translate: 0 -4%; }
+    50%      { translate: 0  4%; }
+  }
+  @keyframes drift-breathe {
+    0%, 100% { filter: drop-shadow(0 0 12px rgba(255, 180, 84, 0.30)); }
+    50%      { filter: drop-shadow(0 0 32px rgba(255, 180, 84, 0.75)); }
   }
   @media (prefers-reduced-motion: reduce) {
     .drift-logo {
       animation: none;
-      transform: translate(-50%, -50%);
-      opacity: 0.10;
+      filter: drop-shadow(0 0 18px rgba(255, 180, 84, 0.5));
     }
   }
   .scan {
