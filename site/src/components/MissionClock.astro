@@ -11,87 +11,71 @@ const phrases = [
   'PARSING DIRECTIVE',
   'ROUTING TO MODEL',
 ];
-const providers = ['CLAUDE/SONNET-4', 'CODEX/GPT-5', 'GEMINI/PRO-2.5'];
+const userPrompts = [
+  'refactor the queue scheduler',
+  'add a dark-mode toggle to settings',
+  'fix the off-by-one in markdown preview',
+  'wire mcp servers into the sidebar',
+  'write tests for the diff viewer',
+];
 ---
-<div class="clock" role="img" aria-label="SAI mission-clock telemetry">
+<div class="clock" role="img" aria-label="SAI thinking animation">
   <header class="clock-chrome">
     <span class="dots">
       <span class="d d-r"></span><span class="d d-y"></span><span class="d d-g"></span>
     </span>
-    <span class="title">sai · session 001 · agent.live</span>
-    <span class="sig" data-sig>SIG ●●●●○</span>
+    <span class="title">sai · session 001</span>
+    <span class="badge">claude · sonnet</span>
   </header>
 
   <div class="screen">
     <img class="drift-logo" src={`${import.meta.env.BASE_URL}img/sai.png`} alt="" aria-hidden="true" />
     <span class="scan" aria-hidden="true"></span>
 
-    <ol class="readout">
-      <li class="row hot">
-        <span class="ts tabnum" data-clock>[00:00.0]</span>
-        <span class="phrase" data-phrase>{phrases[0]}</span>
-        <span class="cursor" aria-hidden="true">▌</span>
-      </li>
-      <li class="row">
-        <span class="ts tabnum">[T-00:00]</span>
-        <span class="k">PROVIDER</span>
-        <span class="v" data-provider>{providers[0]}</span>
-      </li>
-      <li class="row">
-        <span class="ts tabnum">[T-00:00]</span>
-        <span class="k">CONTEXT</span>
-        <span class="v"><span class="bar"><span class="bar-fill" data-ctx></span></span> <span data-ctx-pct>62%</span></span>
-      </li>
-      <li class="row">
-        <span class="ts tabnum">[T-00:00]</span>
-        <span class="k">TOKENS / SEC</span>
-        <span class="v tabnum" data-tps>184</span>
-      </li>
-      <li class="row dim">
-        <span class="ts tabnum">[T-00:00]</span>
-        <span class="k">APPROVAL</span>
-        <span class="v ok">AUTO · low-risk</span>
-      </li>
-      <li class="row dim">
-        <span class="ts tabnum">[T-00:00]</span>
-        <span class="k">QUEUE</span>
-        <span class="v">02 pending → 01 next</span>
-      </li>
-    </ol>
+    <div class="chat">
+      <div class="msg user">
+        <span class="who">you</span>
+        <span class="body" data-user-msg>{userPrompts[0]}</span>
+      </div>
 
-    <footer class="prompt">
-      <span class="caret">$</span>
-      <span class="typed" data-typed></span>
-      <span class="cursor" aria-hidden="true">▌</span>
-    </footer>
+      <div class="msg assistant">
+        <span class="who">sai</span>
+        <span class="thinking">
+          <span class="ts tabnum" data-clock>[00:00.0]</span>
+          <span class="phrase" data-phrase>{phrases[0]}</span>
+          <span class="cursor" aria-hidden="true">▌</span>
+        </span>
+      </div>
+    </div>
+
+    <form class="prompt" onsubmit="return false">
+      <span class="caret">›</span>
+      <span class="input" data-typed></span>
+      <span class="cursor input-cursor" aria-hidden="true">▌</span>
+      <span class="kbd">⏎</span>
+    </form>
   </div>
 </div>
 
-<script is:inline define:vars={{ phrases, providers }}>
+<script is:inline define:vars={{ phrases, userPrompts }}>
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
   const clockEl = document.querySelector('[data-clock]');
   const phraseEl = document.querySelector('[data-phrase]');
-  const provEl = document.querySelector('[data-provider]');
-  const ctxEl = document.querySelector('[data-ctx]');
-  const ctxPctEl = document.querySelector('[data-ctx-pct]');
-  const tpsEl = document.querySelector('[data-tps]');
-  const sigEl = document.querySelector('[data-sig]');
+  const userMsgEl = document.querySelector('[data-user-msg]');
   const typedEl = document.querySelector('[data-typed]');
 
-  const promptScript = [
-    'refactor the queue scheduler',
-    'add a dark-mode toggle to settings',
-    'fix the off-by-one in markdown preview',
-    'wire mcp servers into the sidebar',
-    'write tests for the diff viewer',
+  const nextDrafts = [
+    'show me the diff for the last commit',
+    'open the terminal in /src',
+    'rename getCwd to getCurrentWorkingDirectory',
+    'add a follow-up: also update the readme',
+    'queue: run the test suite when done',
   ];
 
   if (reduced) {
     clockEl && (clockEl.textContent = '[00:12.4]');
     phraseEl && (phraseEl.textContent = phrases[0]);
-    typedEl && (typedEl.textContent = promptScript[0]);
-    if (ctxEl) ctxEl.style.width = '62%';
+    typedEl && (typedEl.textContent = nextDrafts[0]);
   } else {
     // Mission clock
     if (clockEl) {
@@ -116,52 +100,29 @@ const providers = ['CLAUDE/SONNET-4', 'CODEX/GPT-5', 'GEMINI/PRO-2.5'];
       }, 1800);
     }
 
-    // Provider rotator
-    if (provEl) {
-      let p = 0;
+    // User msg rotates slowly
+    if (userMsgEl) {
+      let u = 0;
       setInterval(() => {
-        p = (p + 1) % providers.length;
-        provEl.textContent = providers[p];
-      }, 4200);
+        u = (u + 1) % userPrompts.length;
+        userMsgEl.textContent = userPrompts[u];
+      }, 6500);
     }
 
-    // Context bar / tokens-per-sec drift
-    if (ctxEl && ctxPctEl) {
-      let pct = 62;
-      setInterval(() => {
-        pct += (Math.random() - 0.5) * 6;
-        pct = Math.max(28, Math.min(94, pct));
-        ctxEl.style.width = pct.toFixed(0) + '%';
-        ctxPctEl.textContent = pct.toFixed(0) + '%';
-      }, 900);
-    }
-    if (tpsEl) {
-      setInterval(() => {
-        tpsEl.textContent = String(120 + Math.floor(Math.random() * 110));
-      }, 700);
-    }
-
-    // Signal bars
-    if (sigEl) {
-      const states = ['SIG ●●●●○', 'SIG ●●●●●', 'SIG ●●●○○', 'SIG ●●●●○'];
-      let s = 0;
-      setInterval(() => { s = (s + 1) % states.length; sigEl.textContent = states[s]; }, 1500);
-    }
-
-    // Typewriter on the prompt line — cycles
+    // Typewriter on the input — cycles
     if (typedEl) {
       let idx = 0, ch = 0, dir = 1;
       const step = () => {
-        const target = promptScript[idx];
+        const target = nextDrafts[idx];
         if (dir > 0) {
           ch++;
-          if (ch >= target.length) { dir = -1; setTimeout(step, 1600); return; }
+          if (ch >= target.length) { dir = -1; setTimeout(step, 1800); return; }
         } else {
           ch--;
-          if (ch <= 0) { dir = 1; idx = (idx + 1) % promptScript.length; setTimeout(step, 400); return; }
+          if (ch <= 0) { dir = 1; idx = (idx + 1) % nextDrafts.length; setTimeout(step, 500); return; }
         }
         typedEl.textContent = target.slice(0, ch);
-        setTimeout(step, dir > 0 ? 55 : 30);
+        setTimeout(step, dir > 0 ? 55 : 28);
       };
       step();
     }
@@ -195,24 +156,34 @@ const providers = ['CLAUDE/SONNET-4', 'CODEX/GPT-5', 'GEMINI/PRO-2.5'];
   .d-y { background: var(--phosphor); }
   .d-g { background: var(--green); }
   .title { letter-spacing: 0.08em; }
-  .sig { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--phosphor); }
+  .badge {
+    margin-left: auto;
+    color: var(--phosphor);
+    border: 1px solid var(--phosphor-dim);
+    padding: 3px 8px;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+  }
 
+  /* Screen is a flex column so the prompt can hard-pin to the bottom */
   .screen {
     position: relative;
-    padding: 28px 28px 0;
-    min-height: 360px;
+    display: flex; flex-direction: column;
+    min-height: 380px;
+    padding: 0;
   }
   .drift-logo {
     position: absolute;
     top: 50%; left: 50%;
     width: 320px; height: 320px;
-    max-width: 80%;
+    max-width: 70%;
     object-fit: contain;
     transform: translate(-50%, -50%);
-    opacity: 0.10;
+    opacity: 0.09;
     pointer-events: none;
-    filter: brightness(1.2) saturate(0.8) drop-shadow(0 0 20px var(--phosphor-glow));
+    filter: brightness(1.2) saturate(0.8) drop-shadow(0 0 24px var(--phosphor-glow));
     animation: drift-spin 22s ease-in-out infinite, drift-pulse 4s ease-in-out infinite;
+    z-index: 0;
   }
   @keyframes drift-spin {
     0%   { transform: translate(-50%, -50%) rotate(0deg) scale(1); }
@@ -227,7 +198,7 @@ const providers = ['CLAUDE/SONNET-4', 'CODEX/GPT-5', 'GEMINI/PRO-2.5'];
     .drift-logo { animation: none; opacity: 0.08; }
   }
   .scan {
-    position: absolute; inset: 0; pointer-events: none;
+    position: absolute; inset: 0; pointer-events: none; z-index: 1;
     background: repeating-linear-gradient(
       to bottom,
       transparent 0,
@@ -238,70 +209,88 @@ const providers = ['CLAUDE/SONNET-4', 'CODEX/GPT-5', 'GEMINI/PRO-2.5'];
     mix-blend-mode: multiply;
   }
 
-  .readout {
+  /* Chat: flex:1 so it grows; prompt at bottom uses margin-top:auto */
+  .chat {
     position: relative;
-    list-style: none; padding: 0; margin: 0;
-    display: flex; flex-direction: column; gap: 12px;
-    font-size: 13px;
+    z-index: 2;
+    flex: 1;
+    padding: 28px 28px 20px;
+    display: flex; flex-direction: column; gap: 18px;
+    overflow: hidden;
   }
-  .row {
-    display: grid;
-    grid-template-columns: 86px 110px 1fr auto;
-    align-items: baseline;
-    column-gap: 14px;
-  }
-  .row.hot { grid-template-columns: 86px 1fr auto; }
-  .ts { white-space: nowrap; }
-  .row.dim { color: var(--phosphor-dim); }
-  .ts { color: var(--phosphor); opacity: 0.85; }
-  .row.dim .ts { color: var(--phosphor-dim); }
-  .k { color: var(--phosphor-dim); text-transform: uppercase; letter-spacing: 0.16em; font-size: 11px; }
-  .v { color: var(--phosphor-2); }
-  .v.ok { color: var(--green); }
-  .phrase {
-    color: var(--phosphor);
+  .msg { display: grid; grid-template-columns: 60px 1fr; column-gap: 14px; align-items: baseline; }
+  .who {
+    font-size: 10px;
+    letter-spacing: 0.22em;
     text-transform: uppercase;
-    letter-spacing: 0.16em;
+    color: var(--phosphor-dim);
+    padding-top: 2px;
+  }
+  .msg.user .body {
+    color: var(--phosphor-2);
+    font-size: 14px; line-height: 1.55;
+  }
+  .msg.user .body::before {
+    content: "› ";
+    color: var(--phosphor-dim);
+  }
+  .msg.assistant .who { color: var(--phosphor); }
+
+  .thinking {
+    display: inline-flex; align-items: baseline; gap: 12px;
+    font-size: 14px;
+  }
+  .thinking .ts {
+    color: var(--phosphor);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .thinking .phrase {
+    color: var(--phosphor);
     font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
   }
   .cursor { color: var(--phosphor); animation: blink 1s steps(2, start) infinite; }
 
-  .bar {
-    display: inline-block; width: 120px; height: 8px;
-    background: rgba(255,180,84,0.12);
-    border: 1px solid var(--phosphor-dim);
-    vertical-align: middle;
-    position: relative;
-    margin-right: 8px;
-  }
-  .bar-fill {
-    display: block; height: 100%;
-    background: var(--phosphor);
-    width: 62%;
-    transition: width 700ms ease;
-    background-image: repeating-linear-gradient(
-      45deg, rgba(0,0,0,0.18) 0 3px, transparent 3px 6px
-    );
-  }
-
+  /* Hard-locked to the bottom */
   .prompt {
-    margin: 22px -28px 0;
-    padding: 16px 28px;
-    border-top: 1px dashed var(--rule-2);
-    background: rgba(0,0,0,0.25);
-    display: flex; gap: 10px; align-items: center;
-    font-size: 13px;
-    color: var(--phosphor-2);
     position: relative; z-index: 2;
+    margin-top: auto;
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    align-items: center;
+    column-gap: 10px;
+    padding: 16px 22px;
+    background: rgba(0, 0, 0, 0.35);
+    border-top: 1px solid var(--rule-2);
+    font-size: 13.5px;
+    color: var(--phosphor-2);
   }
-  .caret { color: var(--phosphor); }
-  .typed { white-space: nowrap; overflow: hidden; }
+  .prompt .caret {
+    color: var(--phosphor);
+    font-size: 16px;
+    line-height: 1;
+  }
+  .prompt .input {
+    min-height: 1.4em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: clip;
+  }
+  .input-cursor { font-size: 14px; }
+  .prompt .kbd {
+    font-size: 10px;
+    color: var(--phosphor-dim);
+    border: 1px solid var(--phosphor-dim);
+    padding: 3px 8px;
+    letter-spacing: 0.16em;
+  }
 
   @media (max-width: 720px) {
-    .screen { padding: 22px 18px 0; }
-    .row { grid-template-columns: 60px 90px 1fr; }
-    .row.hot { grid-template-columns: 60px 1fr auto; }
-    .prompt { margin: 22px -18px 0; padding: 14px 18px; }
-    .drift { font-size: 7rem; }
+    .chat { padding: 22px 18px 14px; }
+    .msg { grid-template-columns: 48px 1fr; column-gap: 10px; }
+    .prompt { padding: 14px 18px; }
+    .drift-logo { width: 240px; height: 240px; }
   }
 </style>
