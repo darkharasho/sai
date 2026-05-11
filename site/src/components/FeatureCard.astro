@@ -1,12 +1,15 @@
 ---
+import { Icon } from 'astro-icon/components';
+
 interface Props {
   coord: string;
   title: string;
   blurb: string;
   meta: string;
+  icon: string;
   index: number;
 }
-const { coord, title, blurb, meta, index } = Astro.props;
+const { coord, title, blurb, meta, icon, index } = Astro.props;
 const n = String(index + 1).padStart(2, '0');
 ---
 <article class="card" style={`--n: ${index}`}>
@@ -14,6 +17,9 @@ const n = String(index + 1).padStart(2, '0');
     <span class="coord">{coord}</span>
     <span class="n">№ {n}</span>
   </header>
+  <span class="ic" aria-hidden="true">
+    <Icon name={`lucide:${icon}`} />
+  </span>
   <h3 class="t">{title}</h3>
   <p class="b">{blurb}</p>
   <footer class="ft">
@@ -40,6 +46,7 @@ const n = String(index + 1).padStart(2, '0');
   }
   .card:hover { transform: translateY(-2px); border-color: var(--phosphor-dim); background: linear-gradient(180deg, rgba(255,180,84,0.05), transparent 40%), var(--console); }
   .card:hover::before { transform: scaleX(1); }
+  .card:hover .ic { color: var(--phosphor); transform: translateY(-1px); }
 
   .hdr {
     display: flex; align-items: center; justify-content: space-between;
@@ -48,7 +55,7 @@ const n = String(index + 1).padStart(2, '0');
     letter-spacing: 0.18em;
     text-transform: uppercase;
     color: var(--phosphor-dim);
-    margin-bottom: 28px;
+    margin-bottom: 24px;
   }
   .coord {
     color: var(--phosphor);
@@ -57,6 +64,18 @@ const n = String(index + 1).padStart(2, '0');
     font-weight: 600;
   }
   .n { font-family: var(--display); font-style: italic; font-size: 18px; color: var(--phosphor-dim); letter-spacing: 0; }
+
+  .ic {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 36px; height: 36px;
+    color: var(--phosphor-2);
+    margin-bottom: 18px;
+    transition: color 180ms, transform 180ms;
+  }
+  .ic :global(svg) {
+    width: 28px; height: 28px;
+    stroke-width: 1.5;
+  }
 
   .t {
     font-family: var(--mono);

@@ -110,6 +110,7 @@ h1, h2, h3, h4 { font-weight: 600; letter-spacing: -0.01em; line-height: 1.1; ma
 .btn:hover { background: var(--phosphor); color: var(--ink); border-color: var(--phosphor); }
 .btn:hover::before, .btn:hover::after { border-color: var(--ink); }
 .btn:focus-visible { outline: 2px solid var(--phosphor); outline-offset: 3px; }
+.btn :global(svg), .btn svg { width: 16px; height: 16px; stroke-width: 1.75; }
 
 .btn-ghost { color: var(--phosphor); border-color: var(--rule-2); }
 .btn-ghost:hover { color: var(--ink); }
