@@ -1,0 +1,114 @@
+---
+const phrases = [
+  'LOCKING TELEMETRY',
+  'BREACHING ICE',
+  'INDEXING REPOSITORY',
+  'NEGOTIATING HANDSHAKE',
+  'SPOOLING CONTEXT',
+  'AUTHORIZING APPROVALS',
+  'STREAMING TOKENS',
+  'COMPILING DIFFS',
+];
+---
+<div class="clock" role="img" aria-label="SAI mission-clock animation">
+  <div class="chrome">
+    <span class="dot dot-r"></span>
+    <span class="dot dot-y"></span>
+    <span class="dot dot-g"></span>
+    <span class="title">sai · session 1</span>
+  </div>
+  <div class="screen">
+    <span class="drift" aria-hidden="true">SAI</span>
+    <div class="line">
+      <span class="ts" data-clock>[00:00.0]</span>
+      <span class="phrase" data-phrase>{phrases[0]}</span>
+      <span class="cursor" aria-hidden="true">█</span>
+    </div>
+    <div class="line dim"><span class="ts">[00:00.0]</span> &gt; awaiting input…</div>
+  </div>
+</div>
+
+<script is:inline define:vars={{ phrases }}>
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const clockEl = document.querySelector('[data-clock]');
+  const phraseEl = document.querySelector('[data-phrase]');
+
+  if (clockEl && phraseEl) {
+    if (reduced) {
+      clockEl.textContent = '[00:12.4]';
+      phraseEl.textContent = phrases[0];
+    } else {
+      const start = performance.now();
+      const tick = (now) => {
+        const elapsed = (now - start) / 1000;
+        const m = Math.floor(elapsed / 60);
+        const s = Math.floor(elapsed % 60);
+        const d = Math.floor((elapsed * 10) % 10);
+        const mm = String(m).padStart(2, '0');
+        const ss = String(s).padStart(2, '0');
+        clockEl.textContent = `[${mm}:${ss}.${d}]`;
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+
+      let i = 0;
+      setInterval(() => {
+        i = (i + 1) % phrases.length;
+        phraseEl.textContent = phrases[i];
+      }, 1800);
+    }
+  }
+</script>
+
+<style>
+  .clock {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: 0 30px 80px -30px rgba(200, 148, 62, 0.25), 0 0 0 1px rgba(200, 148, 62, 0.06);
+    font-family: var(--mono);
+  }
+  .chrome {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px;
+    background: #100c07;
+    border-bottom: 1px solid var(--border);
+  }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .dot-r { background: #c4554a; }
+  .dot-y { background: #c89a4a; }
+  .dot-g { background: #65a37a; }
+  .title { margin-left: 10px; font-size: 0.78rem; color: var(--fg-mute); letter-spacing: 0.05em; }
+
+  .screen {
+    position: relative;
+    padding: 28px 24px 32px;
+    min-height: 220px;
+  }
+  .drift {
+    position: absolute; inset: 0;
+    display: grid; place-items: center;
+    font-size: 8rem; font-weight: 800; letter-spacing: 0.08em;
+    color: var(--accent);
+    opacity: 0.06;
+    pointer-events: none;
+    animation: drift 14s ease-in-out infinite alternate;
+  }
+  .line { display: flex; align-items: baseline; gap: 12px; font-size: 0.98rem; line-height: 1.9; }
+  .line.dim { color: var(--fg-mute); }
+  .ts { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .phrase { color: var(--fg); font-weight: 600; letter-spacing: 0.08em; }
+  .cursor {
+    color: var(--accent);
+    animation: blink 1s steps(2, start) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  @keyframes drift {
+    0%   { transform: translate(-4%, -2%); }
+    100% { transform: translate(4%, 2%); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .cursor, .drift { animation: none; }
+  }
+</style>
