@@ -247,8 +247,10 @@ const userPrompts = [
     padding: 0;
   }
   /* Idle animation ported from src/components/SaiLogo.css (mode="idle").
-     Two stacked loops: a slow vertical float and a breathing drop-shadow. */
-  .drift-logo {
+     Two stacked loops: a slow vertical float and a breathing drop-shadow.
+     :global() because the SVG renders inside SaiMark and carries that
+     component's Astro scope, not MissionClock's. */
+  :global(.drift-logo) {
     position: absolute;
     top: 50%; left: 50%;
     width: 320px; height: 320px;
@@ -271,7 +273,7 @@ const userPrompts = [
     50%      { filter: drop-shadow(0 0 32px rgba(255, 180, 84, 0.75)); }
   }
   @media (prefers-reduced-motion: reduce) {
-    .drift-logo {
+    :global(.drift-logo) {
       animation: none;
       filter: drop-shadow(0 0 18px rgba(255, 180, 84, 0.5));
     }
