@@ -39,15 +39,41 @@ const base = import.meta.env.BASE_URL;
         <span class="ml">CAM · 01/A</span>
       </footer>
     </figure>
+
+    <figure class="screen brackets alt">
+      <span class="br-tr"></span><span class="br-bl"></span>
+      <header class="screen-bar">
+        <span class="lbl">CHANNEL · 02</span>
+        <span class="lbl">RES · 1400×900</span>
+        <span class="lbl ok">● LIVE</span>
+        <span class="lbl mar" data-time-b>--:--:--</span>
+      </header>
+      <div class="img-wrap">
+        <img src={`${base}img/screenshot-2.png`} alt="SAI showing another view of the editor, chat, and tooling" width="1400" height="900" loading="lazy" />
+        <span class="aberration" aria-hidden="true"></span>
+        <span class="scanlines" aria-hidden="true"></span>
+        <span class="reticle reticle-tl" aria-hidden="true">+</span>
+        <span class="reticle reticle-tr" aria-hidden="true">+</span>
+        <span class="reticle reticle-bl" aria-hidden="true">+</span>
+        <span class="reticle reticle-br" aria-hidden="true">+</span>
+      </div>
+      <footer class="screen-foot">
+        <span>FRAME · 00:02:48:12</span>
+        <span>EXPOSURE · AUTO</span>
+        <span>GAIN · +0db</span>
+        <span class="ml">CAM · 02/B</span>
+      </footer>
+    </figure>
   </div>
 
   <script is:inline>
-    const el = document.querySelector('[data-time]');
-    if (el) {
+    const targets = document.querySelectorAll('[data-time], [data-time-b]');
+    if (targets.length) {
       const upd = () => {
         const d = new Date();
-        el.textContent = [d.getHours(), d.getMinutes(), d.getSeconds()]
+        const t = [d.getHours(), d.getMinutes(), d.getSeconds()]
           .map(n => String(n).padStart(2, '0')).join(':');
+        targets.forEach(el => { el.textContent = t; });
       };
       upd(); setInterval(upd, 1000);
     }
@@ -76,6 +102,7 @@ const base = import.meta.env.BASE_URL;
       inset 0 0 0 1px rgba(255,180,84,0.06),
       0 50px 120px -40px rgba(255,180,84,0.25);
   }
+  .screen + .screen { margin-top: 48px; }
   .screen-bar, .screen-foot {
     display: flex; gap: 28px; align-items: center;
     padding: 12px 18px;
