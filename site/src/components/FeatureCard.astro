@@ -1,0 +1,35 @@
+---
+interface Props {
+  title: string;
+  blurb: string;
+  glyph: string;
+}
+const { title, blurb, glyph } = Astro.props;
+---
+<article class="card">
+  <span class="glyph" aria-hidden="true">{glyph}</span>
+  <h3>{title}</h3>
+  <p>{blurb}</p>
+</article>
+
+<style>
+  .card {
+    padding: 28px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    transition: border-color 150ms, transform 150ms;
+  }
+  .card:hover { border-color: var(--border-strong); }
+  .glyph {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 40px; height: 40px; padding: 0 10px;
+    font-family: var(--mono); font-weight: 600; font-size: 0.95rem;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-radius: 8px;
+    margin-bottom: 16px;
+  }
+  .card h3 { margin-bottom: 10px; }
+  .card p { color: var(--fg-dim); margin: 0; font-size: 0.98rem; }
+</style>

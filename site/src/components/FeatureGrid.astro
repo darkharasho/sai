@@ -1,0 +1,26 @@
+---
+import FeatureCard from './FeatureCard.astro';
+import { features } from '../data/features';
+---
+<section class="features" aria-labelledby="features-title">
+  <div class="container">
+    <p class="eyebrow">Everything you need, in one window</p>
+    <h2 id="features-title">Built for the way you actually ship.</h2>
+    <div class="grid">
+      {features.map((f) => (
+        <FeatureCard title={f.title} blurb={f.blurb} glyph={f.glyph} />
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .grid {
+    margin-top: 40px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 18px;
+  }
+  @media (max-width: 1100px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+</style>
