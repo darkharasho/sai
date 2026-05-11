@@ -1,0 +1,75 @@
+---
+const releaseUrl = 'https://github.com/darkharasho/sai/releases/latest';
+const platforms = [
+  { os: 'Linux',   format: 'AppImage',  href: releaseUrl, glyph: 'tux' },
+  { os: 'Windows', format: 'Installer', href: releaseUrl, glyph: 'win' },
+  { os: 'macOS',   format: 'DMG',       href: releaseUrl, glyph: 'mac' },
+];
+---
+<section class="download" aria-labelledby="download-title" id="download">
+  <div class="container">
+    <p class="eyebrow">Get SAI</p>
+    <h2 id="download-title">Download for your platform.</h2>
+    <div class="tiles">
+      {platforms.map((p) => (
+        <a class="tile" href={p.href}>
+          <span class="glyph">{p.glyph}</span>
+          <span class="os">{p.os}</span>
+          <span class="fmt">{p.format}</span>
+        </a>
+      ))}
+    </div>
+
+    <div class="source">
+      <h3>Or build from source</h3>
+      <pre><code>{`git clone https://github.com/darkharasho/sai.git
+cd sai
+npm install
+npm run electron:dev`}</code></pre>
+    </div>
+  </div>
+</section>
+
+<style>
+  .tiles {
+    margin-top: 32px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  .tile {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+    padding: 28px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--fg);
+    transition: border-color 150ms, transform 150ms;
+  }
+  .tile:hover { border-color: var(--accent); text-decoration: none; transform: translateY(-2px); }
+  .tile .glyph {
+    font-family: var(--mono); font-size: 0.8rem; color: var(--accent);
+    background: var(--accent-soft); padding: 4px 10px; border-radius: 6px;
+    letter-spacing: 0.1em; text-transform: uppercase;
+  }
+  .tile .os { font-size: 1.3rem; font-weight: 700; margin-top: 6px; }
+  .tile .fmt { font-family: var(--mono); color: var(--fg-mute); font-size: 0.9rem; }
+
+  .source { margin-top: 56px; }
+  .source h3 { margin-bottom: 14px; color: var(--fg-dim); font-family: var(--mono); font-size: 0.9rem; letter-spacing: 0.1em; text-transform: uppercase; }
+  .source pre {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 0.95rem;
+    line-height: 1.7;
+    color: var(--fg);
+  }
+
+  @media (max-width: 760px) {
+    .tiles { grid-template-columns: 1fr; }
+  }
+</style>
