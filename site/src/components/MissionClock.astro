@@ -23,7 +23,7 @@ const providers = ['CLAUDE/SONNET-4', 'CODEX/GPT-5', 'GEMINI/PRO-2.5'];
   </header>
 
   <div class="screen">
-    <span class="drift" aria-hidden="true">SAI</span>
+    <img class="drift-logo" src={`${import.meta.env.BASE_URL}img/sai.png`} alt="" aria-hidden="true" />
     <span class="scan" aria-hidden="true"></span>
 
     <ol class="readout">
@@ -202,16 +202,29 @@ const providers = ['CLAUDE/SONNET-4', 'CODEX/GPT-5', 'GEMINI/PRO-2.5'];
     padding: 28px 28px 0;
     min-height: 360px;
   }
-  .drift {
-    position: absolute; inset: 0;
-    display: grid; place-items: center;
-    font-family: var(--display);
-    font-style: italic;
-    font-size: 13rem;
-    color: var(--phosphor);
-    opacity: 0.05;
+  .drift-logo {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 320px; height: 320px;
+    max-width: 80%;
+    object-fit: contain;
+    transform: translate(-50%, -50%);
+    opacity: 0.10;
     pointer-events: none;
-    animation: drift 14s ease-in-out infinite;
+    filter: brightness(1.2) saturate(0.8) drop-shadow(0 0 20px var(--phosphor-glow));
+    animation: drift-spin 22s ease-in-out infinite, drift-pulse 4s ease-in-out infinite;
+  }
+  @keyframes drift-spin {
+    0%   { transform: translate(-50%, -50%) rotate(0deg) scale(1); }
+    50%  { transform: translate(-50%, -50%) rotate(180deg) scale(1.08); }
+    100% { transform: translate(-50%, -50%) rotate(360deg) scale(1); }
+  }
+  @keyframes drift-pulse {
+    0%, 100% { opacity: 0.07; }
+    50%      { opacity: 0.14; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .drift-logo { animation: none; opacity: 0.08; }
   }
   .scan {
     position: absolute; inset: 0; pointer-events: none;
@@ -233,11 +246,12 @@ const providers = ['CLAUDE/SONNET-4', 'CODEX/GPT-5', 'GEMINI/PRO-2.5'];
   }
   .row {
     display: grid;
-    grid-template-columns: 64px 90px 1fr auto;
+    grid-template-columns: 86px 110px 1fr auto;
     align-items: baseline;
     column-gap: 14px;
   }
-  .row.hot { grid-template-columns: 64px 1fr auto; }
+  .row.hot { grid-template-columns: 86px 1fr auto; }
+  .ts { white-space: nowrap; }
   .row.dim { color: var(--phosphor-dim); }
   .ts { color: var(--phosphor); opacity: 0.85; }
   .row.dim .ts { color: var(--phosphor-dim); }
