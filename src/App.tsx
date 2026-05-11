@@ -147,6 +147,10 @@ export default function App() {
   const [externallyModified, setExternallyModified] = useState<Set<string>>(new Set());
   const [completedWorkspaces, setCompletedWorkspaces] = useState<Set<string>>(new Set());
   const [busyWorkspaces, setBusyWorkspaces] = useState<Set<string>>(new Set());
+  // Workspaces with an in-flight chat turn. Distinct from busyWorkspaces, which
+  // also counts terminal-scope activity. Lifted out of ChatPanel so the panel's
+  // streaming indicator survives remounts (e.g. session/key swaps).
+  const [chatStreamingWorkspaces, setChatStreamingWorkspaces] = useState<Set<string>>(new Set());
   const [approvalWorkspaces, setApprovalWorkspaces] = useState<Map<string, PendingApproval>>(new Map());
   const [notificationCounts, setNotificationCounts] = useState<Map<string, number>>(new Map());
   const wsTurnSeqRef = useRef<Map<string, number>>(new Map());
@@ -753,6 +757,9 @@ export default function App() {
         const count = busyScopeCountRef.current.get(msg.projectPath) || 0;
         busyScopeCountRef.current.set(msg.projectPath, count + 1);
         setBusyWorkspaces(prev => new Set(prev).add(msg.projectPath));
+        if ((msg.scope || 'chat') === 'chat') {
+          setChatStreamingWorkspaces(prev => prev.has(msg.projectPath) ? prev : new Set(prev).add(msg.projectPath));
+        }
       }
       if (msg.type === 'approval_needed') {
         setApprovalWorkspaces(prev => {
@@ -791,6 +798,14 @@ export default function App() {
           if (expected != null && msg.turnSeq !== expected) return;
         }
         wsTurnSeqRef.current.set(scopeKey, -1);
+        if ((msg.scope || 'chat') === 'chat') {
+          setChatStreamingWorkspaces(prev => {
+            if (!prev.has(msg.projectPath)) return prev;
+            const next = new Set(prev);
+            next.delete(msg.projectPath);
+            return next;
+          });
+        }
         // Decrement busy scope count
         const count = busyScopeCountRef.current.get(msg.projectPath) || 0;
         const newCount = Math.max(0, count - 1);
@@ -1444,6 +1459,7 @@ export default function App() {
                   activeFilePath={ws.activeFilePath}
                   onFileOpen={handleFileOpen}
                   isActive={wsPath === activeProjectPath}
+                  isStreaming={chatStreamingWorkspaces.has(wsPath)}
                   messageQueue={messageQueues.get(ws.activeSession.id) || []}
                   onQueueAdd={handleQueueAdd}
                   onQueueRemove={handleQueueRemove}

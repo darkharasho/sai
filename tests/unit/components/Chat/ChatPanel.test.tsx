@@ -283,7 +283,7 @@ describe('ChatPanel', () => {
       onSlashCommandsUpdate: vi.fn(),
     };
 
-    const { container } = render(<ChatPanel {...props} />);
+    const { container, rerender } = render(<ChatPanel {...props} />);
 
     await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
 
@@ -292,6 +292,7 @@ describe('ChatPanel', () => {
         (handler as (msg: any) => void)({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
       }
     });
+    rerender(<ChatPanel {...props} isStreaming />);
 
     expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
   });
@@ -426,7 +427,7 @@ describe('ChatPanel', () => {
 
   it('Claude thinking has breathing-cursor class when streaming', async () => {
     const props = { ...baseProps(), aiProvider: 'claude' as const };
-    const { container } = render(<ChatPanel {...props} />);
+    const { container, rerender } = render(<ChatPanel {...props} />);
 
     await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
 
@@ -435,6 +436,7 @@ describe('ChatPanel', () => {
         (handler as (msg: any) => void)({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
       }
     });
+    rerender(<ChatPanel {...props} isStreaming />);
 
     expect(container.querySelector('.thinking-cursor.thinking-cursor-block')).toBeTruthy();
     expect(container.querySelector('.thinking-clock')?.textContent).toMatch(/^\[\d{2}:\d{2}\.\d\]$/);
@@ -442,7 +444,7 @@ describe('ChatPanel', () => {
 
   it('Codex thinking applies wave to Working text when streaming', async () => {
     const props = { ...baseProps(), aiProvider: 'codex' as const };
-    const { container } = render(<ChatPanel {...props} />);
+    const { container, rerender } = render(<ChatPanel {...props} />);
 
     await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
 
@@ -451,13 +453,14 @@ describe('ChatPanel', () => {
         (handler as (msg: any) => void)({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
       }
     });
+    rerender(<ChatPanel {...props} isStreaming />);
 
     expect(container.querySelector('.codex-working-wave')).toBeTruthy();
   });
 
   it('Gemini thinking hint has cross-slide class when streaming', async () => {
     const props = { ...baseProps(), aiProvider: 'gemini' as const };
-    const { container } = render(<ChatPanel {...props} />);
+    const { container, rerender } = render(<ChatPanel {...props} />);
 
     await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
 
@@ -466,6 +469,7 @@ describe('ChatPanel', () => {
         (handler as (msg: any) => void)({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
       }
     });
+    rerender(<ChatPanel {...props} isStreaming />);
 
     expect(container.querySelector('.gemini-hint-slide')).toBeTruthy();
   });
@@ -729,17 +733,6 @@ describe('ChatPanel', () => {
   });
 
   describe('bypass-queue-on-enter', () => {
-    const startStreaming = async (handler: (msg: any) => void) => {
-      await act(async () => {
-        handler({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
-      });
-    };
-    const endStreaming = async (handler: (msg: any) => void) => {
-      await act(async () => {
-        handler({ type: 'done', projectPath: '/project', scope: 'chat' });
-      });
-    };
-
     it('plain-Enter while streaming with non-empty queue stops current turn and dispatches immediately', async () => {
       const onQueueShift = vi.fn();
       const props: ChatPanelProps = {
@@ -747,12 +740,15 @@ describe('ChatPanel', () => {
         messageQueue: [{ id: 'q-0', text: 'queued one', fullText: 'queued one' }],
         onQueueShift,
       };
-      render(<ChatPanel {...props} />);
+      const { rerender } = render(<ChatPanel {...props} />);
 
       await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
       const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
 
-      await startStreaming(handler);
+      await act(async () => {
+        handler({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+      });
+      rerender(<ChatPanel {...props} isStreaming />);
 
       mockSai.claudeSend.mockClear();
       mockSai.claudeStop.mockClear();
@@ -773,25 +769,37 @@ describe('ChatPanel', () => {
         messageQueue: [{ id: 'q-0', text: 'queued one', fullText: 'queued one' }],
         onQueueShift,
       };
-      render(<ChatPanel {...props} />);
+      const { rerender } = render(<ChatPanel {...props} />);
 
       await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
       const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
 
       // Initial turn starts streaming, user bypasses with a new message.
-      await startStreaming(handler);
+      await act(async () => {
+        handler({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+      });
+      rerender(<ChatPanel {...props} isStreaming />);
       await act(async () => {
         await latestChatInputProps.onSend('jump-the-line message');
       });
 
       // Simulate the stop's `done` — the suppress flag should consume this.
-      await endStreaming(handler);
+      await act(async () => {
+        handler({ type: 'done', projectPath: '/project', scope: 'chat' });
+      });
+      rerender(<ChatPanel {...props} isStreaming={false} />);
       expect(onQueueShift).not.toHaveBeenCalled();
 
       // The bypass message starts streaming, then ends — queue should drain now.
       mockSai.claudeSend.mockClear();
-      await startStreaming(handler);
-      await endStreaming(handler);
+      await act(async () => {
+        handler({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+      });
+      rerender(<ChatPanel {...props} isStreaming />);
+      await act(async () => {
+        handler({ type: 'done', projectPath: '/project', scope: 'chat' });
+      });
+      rerender(<ChatPanel {...props} isStreaming={false} />);
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 350)); });
 
       expect(onQueueShift).toHaveBeenCalledTimes(1);
@@ -826,7 +834,7 @@ describe('ChatPanel', () => {
   it('durationMs reflects the gap between streaming_start and stream end, not ~0', async () => {
     const onMessagesChange = vi.fn();
     const props: ChatPanelProps = { ...baseProps(), onMessagesChange };
-    render(<ChatPanel {...props} />);
+    const { rerender } = render(<ChatPanel {...props} />);
 
     await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
     const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
@@ -836,6 +844,7 @@ describe('ChatPanel', () => {
     await act(async () => {
       handler({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
     });
+    rerender(<ChatPanel {...props} isStreaming />);
 
     // Simulate assistant text arriving at t=1000 (same tick, no duration yet)
     await act(async () => {
@@ -852,6 +861,7 @@ describe('ChatPanel', () => {
     await act(async () => {
       handler({ type: 'done', projectPath: '/project', scope: 'chat' });
     });
+    rerender(<ChatPanel {...props} isStreaming={false} />);
 
     vi.restoreAllMocks();
 

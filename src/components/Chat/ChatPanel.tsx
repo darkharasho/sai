@@ -311,6 +311,7 @@ interface ChatPanelProps {
   activeFilePath?: string | null;
   onFileOpen?: (path: string, line?: number) => void;
   isActive?: boolean;
+  isStreaming?: boolean;
   messageQueue?: QueuedMessage[];
   onQueueAdd?: (sessionId: string, text: string, fullText: string, images?: string[], attachments?: { images: number; files: number; terminal: boolean }) => void;
   onQueueRemove?: (sessionId: string, id: string) => void;
@@ -524,7 +525,7 @@ const FAKE_ERROR_VARIANTS = {
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(initialMessages || []);
   const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);
   const setMessages = useCallback((updater: ChatMessageType[] | ((prev: ChatMessageType[]) => ChatMessageType[])) => {
@@ -535,7 +536,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     });
   }, []);
   const emptyPrompt = useMemo(() => EMPTY_PROMPTS[Math.floor(Math.random() * EMPTY_PROMPTS.length)], []);
-  const [isStreaming, setIsStreaming] = useState(false);
   const [turnStartIndex, setTurnStartIndex] = useState<number | null>(null);
   const thinkingTransition = useReducedMotionTransition(SPRING.pop);
   const dockTransition = useReducedMotionTransition(SPRING.dock);
@@ -621,12 +621,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     window.sai.claudeCompact(projectPath, permissionMode, effortLevel, modelChoice);
   }, [contextUsage, isStreaming]);
 
-  // Safety: clear orphaned streaming state when effect re-runs (e.g. provider switch)
-  useEffect(() => {
-    setIsStreaming(false);
-  }, [projectPath, aiProvider]);
-
-
 
   useEffect(() => {
     setReady(false);
@@ -666,7 +660,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           turnStartedAtRef.current = Date.now();
         }
         nextSegmentStartRef.current = Date.now();
-        setIsStreaming(true);
         return;
       }
 
@@ -683,7 +676,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           flushMessagesToParent();
           onTurnComplete?.();
         }
-        setIsStreaming(false);
         setPendingApproval(null);
         // Don't return for 'result' — fall through to process usage data below
         if (msg.type === 'done') return;
@@ -691,7 +683,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
       if (msg.type === 'process_exit') {
         setReady(false);
-        setIsStreaming(false);
         setPendingApproval(null);
         flushMessagesToParent();
         onTurnComplete?.();
