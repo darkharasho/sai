@@ -74,7 +74,7 @@ const userPrompts = [
   </header>
 
   <div class="screen">
-    <SaiMark className="drift-logo" />
+    <SaiMark mode="idle" className="drift-logo" />
     <span class="scan" aria-hidden="true"></span>
 
     <div class="chat">
@@ -86,7 +86,7 @@ const userPrompts = [
       <div class="msg assistant">
         <span class="who">sai</span>
         <span class="thinking-animation">
-          <img class="thinking-icon" src={`${import.meta.env.BASE_URL}img/sai.png`} alt="" aria-hidden="true" />
+          <SaiMark mode="pulse" className="thinking-icon" size={18} dataAttr="thinking-icon" />
           <span class="thinking-clock tabnum" data-clock>[00:00.0]</span>
           <span class="thinking-text">
             <span data-phrase></span><span class="thinking-cursor-block" aria-hidden="true"></span>
@@ -137,6 +137,53 @@ const userPrompts = [
       };
       requestAnimationFrame(tick);
     }
+
+    // Chain-pool cycler for the small SAI icon — mirrors CHAIN_POOL behavior
+    // in src/components/ThinkingAnimation.tsx: pick 2–4 modes, play each for
+    // its duration, gap with 80ms 'static', then re-shuffle.
+    const CHAIN_POOL = [
+      { mode: 'pulse',       dur: 2400 },
+      { mode: 'scatter',     dur: 4800 },
+      { mode: 'wave',        dur: 2600 },
+      { mode: 'glitch',      dur: 2400 },
+      { mode: 'inhale',      dur: 5400 },
+      { mode: 'vortex',      dur: 5000 },
+      { mode: 'pendulum',    dur: 3600 },
+      { mode: 'comet',       dur: 4800 },
+      { mode: 'ripple',      dur: 2600 },
+      { mode: 'clockwork',   dur: 8000 },
+      { mode: 'stutter',     dur: 6200 },
+      { mode: 'flip',        dur: 4000 },
+      { mode: 'typewriter',  dur: 3000 },
+      { mode: 'morse',       dur: 3500 },
+      { mode: 'squish',      dur: 2200 },
+      { mode: 'bloom',       dur: 3600 },
+      { mode: 'searchlight', dur: 3400 },
+    ];
+    const iconEl = document.querySelector('[data-thinking-icon]');
+    const setMode = (m) => {
+      if (!iconEl) return;
+      // Strip any prior sai-logo-<mode> class (but keep the base sai-logo class)
+      for (const cls of Array.from(iconEl.classList)) {
+        if (cls.startsWith('sai-logo-')) iconEl.classList.remove(cls);
+      }
+      iconEl.classList.add(`sai-logo-${m}`);
+    };
+    const sample = (n) => CHAIN_POOL.slice().sort(() => Math.random() - 0.5).slice(0, n);
+    (async function chainLoop() {
+      if (!iconEl) return;
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      while (true) {
+        const n = 2 + Math.floor(Math.random() * 3); // 2..4
+        const chain = sample(n);
+        for (const step of chain) {
+          setMode(step.mode);
+          await wait(step.dur);
+          setMode('static');
+          await wait(80);
+        }
+      }
+    })();
 
     // Typewriter phrase loop — matches src/components/ThinkingAnimation.tsx:
     //   type char-by-char (~40+rand 30ms), pause ~1200+rand 600ms,
@@ -322,15 +369,12 @@ const userPrompts = [
     display: flex; align-items: center; gap: 8px;
     min-height: 40px;
   }
-  .thinking-icon {
-    width: 18px; height: 18px;
+  /* The thinking-icon is now a SaiMark SVG; sizing/positioning only here,
+     real animations live in styles/sai-logo.css and are toggled via class. */
+  :global(.thinking-icon) {
     flex-shrink: 0;
+    color: var(--phosphor);
     filter: drop-shadow(0 0 6px var(--phosphor-glow));
-    animation: thinking-pulse 2.4s ease-in-out infinite;
-  }
-  @keyframes thinking-pulse {
-    0%, 100% { transform: scale(1);    opacity: 0.85; }
-    50%      { transform: scale(1.12); opacity: 1; }
   }
   .thinking-clock {
     font-variant-numeric: tabular-nums;
