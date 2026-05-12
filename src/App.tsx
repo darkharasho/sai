@@ -30,6 +30,7 @@ import SwarmSidebar from './components/Swarm/SwarmSidebar';
 import NewTaskPopover from './components/Swarm/NewTaskPopover';
 import SwarmTaskHeader from './components/Swarm/SwarmTaskHeader';
 import OrchestratorView, { type ReadyTaskRow, type RecentTaskRow } from './components/Swarm/OrchestratorView';
+import QuitSwarmConfirmModal from './components/Swarm/QuitSwarmConfirmModal';
 import { swarmGetTasks, swarmCreateTask, swarmUpdateTask, swarmGetApprovals, swarmResolveApproval } from './swarmDb';
 import { SwarmScheduler, isLikelyReadOnlyPrompt } from './lib/swarmScheduler';
 import { landTask, discardTask } from './lib/swarmLanding';
@@ -193,6 +194,7 @@ export default function App() {
   const [toast, setToast] = useState<{ message: string; key: number; tone?: 'success' | 'error' } | null>(null);
   const { isOpen: whatsNewOpen, version: whatsNewVersion, releases, fetchStatus, openWhatsNew, closeWhatsNew } = useWhatsNew();
   const [showNewProject, setShowNewProject] = useState(false);
+  const [quitConfirmTasks, setQuitConfirmTasks] = useState<{ id: string; title: string }[] | null>(null);
   const slashCommandsRef = useRef<string[]>([]);
   const workspacesRef = useRef(workspaces);
   const activeProjectPathRef = useRef(activeProjectPath);
@@ -210,6 +212,26 @@ export default function App() {
 
   useEffect(() => { workspacesRef.current = workspaces; }, [workspaces]);
   useEffect(() => { swarmTasksByWsRef.current = swarmTasksByWs; }, [swarmTasksByWs]);
+
+  // Task 26: Quit confirmation when swarm tasks are still streaming.
+  useEffect(() => {
+    const sai = window.sai as any;
+    if (!sai?.onRequestQuit) return;
+    const cleanup = sai.onRequestQuit(() => {
+      const streaming: { id: string; title: string }[] = [];
+      for (const tasks of swarmTasksByWsRef.current.values()) {
+        for (const t of tasks) {
+          if (t.status === 'streaming') streaming.push({ id: t.id, title: t.title });
+        }
+      }
+      if (streaming.length === 0) {
+        sai.confirmQuit?.();
+        return;
+      }
+      setQuitConfirmTasks(streaming);
+    });
+    return cleanup;
+  }, []);
   useEffect(() => {
     activeProjectPathRef.current = activeProjectPath;
     setActiveWorkspace(activeProjectPath);
@@ -2487,6 +2509,38 @@ export default function App() {
           />
         );
       })()}
+
+      {quitConfirmTasks && (
+        <QuitSwarmConfirmModal
+          tasks={quitConfirmTasks}
+          onCancel={() => setQuitConfirmTasks(null)}
+          onConfirm={async () => {
+            const tasksToPause = quitConfirmTasks;
+            setQuitConfirmTasks(null);
+            try {
+              await Promise.all(tasksToPause.map(t => swarmUpdateTask(t.id, { status: 'paused' })));
+            } catch { /* ignore */ }
+            // Update local state to reflect the pause across all workspaces.
+            setSwarmTasksByWs(prev => {
+              const idSet = new Set(tasksToPause.map(t => t.id));
+              const m = new Map(prev);
+              for (const [ws, tasks] of prev) {
+                let changed = false;
+                const updated = tasks.map(t => {
+                  if (idSet.has(t.id) && t.status === 'streaming') {
+                    changed = true;
+                    return { ...t, status: 'paused' as const };
+                  }
+                  return t;
+                });
+                if (changed) m.set(ws, updated);
+              }
+              return m;
+            });
+            (window.sai as any).confirmQuit?.();
+          }}
+        />
+      )}
 
       {showNewProject && (
         <NewProjectModal

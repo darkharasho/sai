@@ -30,6 +30,7 @@ if (process.env.SAI_REMOTE_DEBUG) {
 }
 
 let mainWindow: BrowserWindow | null = null;
+let quitConfirmed = false;
 
 const THEME_TITLEBAR: Record<string, { color: string; symbolColor: string; bg: string }> = {
   default:  { color: '#0c0f11', symbolColor: '#bec6d0', bg: '#111418' },
@@ -132,7 +133,12 @@ function createWindow() {
     }
   });
 
-  mainWindow.on('close', () => {
+  mainWindow.on('close', (e) => {
+    if (!quitConfirmed) {
+      e.preventDefault();
+      mainWindow?.webContents.send('swarm:request-quit');
+      return;
+    }
     if (mainWindow) writeSetting('windowBounds', mainWindow.getBounds());
     stopSuspendTimer();
     destroyAllTerminals();
@@ -240,6 +246,10 @@ function createWindow() {
     else mainWindow.maximize();
   });
   ipcMain.on('window:close', () => mainWindow?.close());
+  ipcMain.on('app:confirmQuit', () => {
+    quitConfirmed = true;
+    mainWindow?.close();
+  });
 
   ipcMain.handle('github:syncNow', async () => {
     const auth = getAuthInfo();

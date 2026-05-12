@@ -148,6 +148,12 @@ contextBridge.exposeInMainWorld('sai', {
   windowMinimize: () => ipcRenderer.send('window:minimize'),
   windowMaximizeToggle: () => ipcRenderer.send('window:maximizeToggle'),
   windowClose: () => ipcRenderer.send('window:close'),
+  confirmQuit: () => ipcRenderer.send('app:confirmQuit'),
+  onRequestQuit: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('swarm:request-quit', listener);
+    return () => ipcRenderer.removeListener('swarm:request-quit', listener);
+  },
   windowOnMaximizedChange: (callback: (maximized: boolean) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, maximized: boolean) => callback(maximized);
     ipcRenderer.on('window:maximizedChange', listener);
