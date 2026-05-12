@@ -1,6 +1,6 @@
 import SwarmTaskRow from './SwarmTaskRow';
 import { Zap, Plus } from 'lucide-react';
-import type { SwarmTask } from '@/types';
+import type { SwarmTask } from '../../types';
 
 interface Props {
   tasks: SwarmTask[];

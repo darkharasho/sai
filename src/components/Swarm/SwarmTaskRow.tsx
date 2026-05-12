@@ -1,4 +1,4 @@
-import type { SwarmTaskStatus } from '@/types';
+import type { SwarmTaskStatus } from '../../types';
 
 interface Props {
   id: string;
