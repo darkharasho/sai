@@ -1,11 +1,9 @@
 import React from 'react';
 import { Info } from 'lucide-react';
 import OrchestratorComposer from './OrchestratorComposer';
-import ApprovalTray, { type ApprovalRow } from './ApprovalTray';
 import ReadyToLandTray, { type ReadyTaskRow } from './ReadyToLandTray';
 import { type RecentTaskRow } from './RecentActivity';
 
-export type { ApprovalRow };
 export type { ReadyTaskRow };
 export type { RecentTaskRow };
 
@@ -21,13 +19,8 @@ interface Props {
   orchestratorSessionId: string;
   projectPath: string;
   stats: OrchestratorStats;
-  approvals: ApprovalRow[];
   readyTasks: ReadyTaskRow[];
   onCommand: (cmd: { text: string; splitLines: boolean }) => void;
-  onApproveApproval?: (id: string) => void;
-  onDenyApproval?: (id: string) => void;
-  onApproveAllReads?: () => void;
-  onDenyAllApprovals?: () => void;
   onLand?: (id: string) => void;
   onDiscard?: (id: string) => void;
   onDiff?: (id: string) => void;
@@ -54,8 +47,7 @@ function formatRuntime(sec?: number): string | null {
 }
 
 export default function OrchestratorView({
-  projectPath, stats, approvals, readyTasks, onCommand,
-  onApproveApproval, onDenyApproval, onApproveAllReads, onDenyAllApprovals,
+  projectPath, stats, readyTasks, onCommand,
   onLand, onDiscard, onDiff, onLandAll,
   orchestratorProvider, orchestratorModel,
   chatSlot, readySlot,
@@ -136,13 +128,6 @@ export default function OrchestratorView({
         {chatSlot}
       </div>
 
-      <ApprovalTray
-        approvals={approvals}
-        onApprove={onApproveApproval ?? (() => {})}
-        onDeny={onDenyApproval ?? (() => {})}
-        onApproveAllReads={onApproveAllReads ?? (() => {})}
-        onDenyAll={onDenyAllApprovals ?? (() => {})}
-      />
       <ReadyToLandTray
         tasks={readyTasks}
         onLand={onLand ?? (() => {})}

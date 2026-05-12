@@ -30,8 +30,10 @@ import SwarmSidebar from './components/Swarm/SwarmSidebar';
 import NewTaskPopover from './components/Swarm/NewTaskPopover';
 import SwarmTaskHeader from './components/Swarm/SwarmTaskHeader';
 import OrchestratorView, { type ReadyTaskRow } from './components/Swarm/OrchestratorView';
+import SwarmToolCardSelector from './components/Swarm/cards/SwarmToolCardSelector';
+import InlineApprovalCard from './components/Swarm/cards/InlineApprovalCard';
 import QuitSwarmConfirmModal from './components/Swarm/QuitSwarmConfirmModal';
-import { swarmInit, swarmGetApprovals, swarmResolveApproval } from './swarmDb';
+import { swarmInit, swarmGetApprovals, swarmResolveApproval, swarmCreateApproval } from './swarmDb';
 import { SwarmScheduler, isLikelyReadOnlyPrompt } from './lib/swarmScheduler';
 import { runSwarmTask } from './lib/swarmTaskRunner';
 import { landTask, discardTask } from './lib/swarmLanding';
@@ -1366,6 +1368,64 @@ export default function App() {
             next.set(msg.projectPath, list);
             return next;
           });
+
+          // Persist the approval so swarmHost.approve/deny can resolve it,
+          // then inject an inline approval card into the orchestrator chat
+          // for this workspace so the user can act without leaving the chat.
+          const approvalId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+            ? crypto.randomUUID()
+            : `appr-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          const approvalRecord: SwarmApproval = {
+            id: approvalId,
+            taskId: swarmTask.id,
+            workspaceId: msg.projectPath,
+            toolName: msg.toolName,
+            toolUseId: msg.toolUseId,
+            command: msg.command,
+            description: msg.description,
+            input: msg.input,
+            createdAt: Date.now(),
+          };
+          void swarmCreateApproval(approvalRecord)
+            .then(() => {
+              setSwarmApprovalsByWs(prev => {
+                const m = new Map(prev);
+                const list = m.get(msg.projectPath) ?? [];
+                if (!list.find(a => a.id === approvalId)) {
+                  m.set(msg.projectPath, [...list, approvalRecord]);
+                }
+                return m;
+              });
+            })
+            .catch(() => { /* ignore — fall back to existing flow */ });
+
+          const orchSessionId = orchestratorSessionIdByWsRef.current.get(msg.projectPath);
+          if (orchSessionId) {
+            const cardMsg: ChatMessage = {
+              id: `appr-msg-${approvalId}`,
+              role: 'system',
+              content: '',
+              timestamp: Date.now(),
+              meta: {
+                type: 'approval',
+                approvalId,
+                taskId: swarmTask.id,
+                taskTitle: swarmTask.title,
+                toolName: msg.toolName,
+                command: msg.command,
+                branch: swarmTask.branch,
+                createdAt: Date.now(),
+              },
+            };
+            const existing = orchMessagesRef.current.get(orchSessionId) ?? [];
+            const next = [...existing, cardMsg];
+            orchMessagesRef.current.set(orchSessionId, next);
+            setOrchMessagesByWs(prev => {
+              const m = new Map(prev);
+              m.set(orchSessionId, next);
+              return m;
+            });
+          }
         }
         setApprovalWorkspaces(prev => {
           const next = new Map(prev);
@@ -1407,6 +1467,31 @@ export default function App() {
           next.delete(msg.projectPath);
           return next;
         });
+        // Collapse any unresolved inline approval cards for this workspace's
+        // orchestrator session. We don't know which specific approval the
+        // event corresponds to (the bridge doesn't echo toolUseId), so we
+        // mark all currently-pending cards as approved — best-effort. The
+        // canonical state lives in swarmDb / swarmApprovalsByWs.
+        const orchId = orchestratorSessionIdByWsRef.current.get(msg.projectPath);
+        if (orchId) {
+          const list = orchMessagesRef.current.get(orchId) ?? [];
+          let touched = false;
+          const next = list.map(m => {
+            if (m.meta?.type === 'approval' && !m.meta.resolved) {
+              touched = true;
+              return { ...m, meta: { ...m.meta, resolved: 'approved' as const } };
+            }
+            return m;
+          });
+          if (touched) {
+            orchMessagesRef.current.set(orchId, next);
+            setOrchMessagesByWs(prev => {
+              const m = new Map(prev);
+              m.set(orchId, next);
+              return m;
+            });
+          }
+        }
       }
       // Treat 'result' as authoritative end-of-turn — clear busy immediately
       // so the titlebar spinner doesn't stay stuck if the 'done' message is lost.
@@ -2359,6 +2444,39 @@ export default function App() {
                           ? { handled: true, reply: (outcome as { handled: true; reply: string }).reply }
                           : false;
                       }}
+                      renderToolCall={(tc) => (
+                        <SwarmToolCardSelector
+                          toolCall={tc}
+                          tasks={swarmTasksByWs.get(wsPath) ?? []}
+                          approvals={swarmApprovalsByWs.get(wsPath) ?? []}
+                          onFocusTask={(id) => setSwarmSelected(id)}
+                        />
+                      )}
+                      renderMessage={(message) => {
+                        const meta = message.meta;
+                        if (!meta || meta.type !== 'approval') return null;
+                        const resolveLocally = (resolved: 'approved' | 'denied') => {
+                          const list = orchMessagesRef.current.get(orchSessionId) ?? [];
+                          const next = list.map(m =>
+                            m.id === message.id && m.meta?.type === 'approval'
+                              ? { ...m, meta: { ...m.meta, resolved } }
+                              : m
+                          );
+                          orchMessagesRef.current.set(orchSessionId, next);
+                          setOrchMessagesByWs(prev => {
+                            const m = new Map(prev);
+                            m.set(orchSessionId, next);
+                            return m;
+                          });
+                        };
+                        return (
+                          <InlineApprovalCard
+                            meta={meta}
+                            onApprove={(id) => { void swarmHost.approve(id); resolveLocally('approved'); }}
+                            onDeny={(id) => { void swarmHost.deny(id); resolveLocally('denied'); }}
+                          />
+                        );
+                      }}
                       onTurnComplete={() => {
                         const latestMessages = orchMessagesRef.current.get(orchSessionId) || [];
                         if (latestMessages.length === 0) return;
@@ -2399,26 +2517,6 @@ export default function App() {
                       active: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'streaming').length,
                       approvals: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'awaiting_approval').length,
                       ready: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'done').length,
-                    }}
-                    approvals={(() => {
-                      const tasks = swarmTasksByWs.get(wsPath) ?? [];
-                      const taskTitle = (id: string) => tasks.find(t => t.id === id)?.title ?? id.slice(0, 8);
-                      return (swarmApprovalsByWs.get(wsPath) ?? []).map(a => ({
-                        id: a.id, taskId: a.taskId, taskTitle: taskTitle(a.taskId),
-                        toolName: a.toolName, command: a.command, createdAt: a.createdAt,
-                      }));
-                    })()}
-                    onApproveApproval={(id) => swarmHost.approve(id)}
-                    onDenyApproval={(id) => swarmHost.deny(id)}
-                    onApproveAllReads={() => {
-                      const READ_TOOLS = new Set(['read', 'Read', 'view', 'View', 'cat']);
-                      (swarmApprovalsByWs.get(wsPath) ?? [])
-                        .filter(a => READ_TOOLS.has(a.toolName))
-                        .forEach(a => swarmHost.approve(a.id).catch(() => { /* ignore */ }));
-                    }}
-                    onDenyAllApprovals={() => {
-                      (swarmApprovalsByWs.get(wsPath) ?? [])
-                        .forEach(a => swarmHost.deny(a.id).catch(() => { /* ignore */ }));
                     }}
                     readyTasks={(() => {
                       const done = (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'done');

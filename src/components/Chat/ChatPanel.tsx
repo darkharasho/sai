@@ -337,6 +337,18 @@ interface ChatPanelProps {
   claudeKind?: 'chat' | 'task' | 'orchestrator';
   /** Optional: orchestrator prompt context (only used when claudeKind === 'orchestrator'). */
   claudeOrchestratorContext?: any;
+  /**
+   * Optional: override how individual tool calls in messages are rendered.
+   * Return `null` to fall back to the default `<ToolCallCard>`. Used by the
+   * orchestrator chat to swap in purpose-built swarm cards.
+   */
+  renderToolCall?: (tc: ToolCall, defaultExpanded: boolean) => React.ReactNode | null;
+  /**
+   * Optional: override how an entire message is rendered. Return `null` to
+   * fall back to the default render. Used by the orchestrator chat to render
+   * inline approval cards in place of synthetic system messages.
+   */
+  renderMessage?: (message: ChatMessageType) => React.ReactNode | null;
 }
 
 const EMPTY_PROMPTS = [
@@ -542,7 +554,7 @@ const FAKE_ERROR_VARIANTS = {
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, renderToolCall, renderMessage }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(initialMessages || []);
   const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);
   const setMessages = useCallback((updater: ChatMessageType[] | ((prev: ChatMessageType[]) => ChatMessageType[])) => {
@@ -1513,10 +1525,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
                       toolCallsExpanded={toolCallsExpanded}
                       pinnedLayoutId={`pinned-${msg.id}`}
                       isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId}
+                      renderToolCall={renderToolCall}
+                      renderMessage={renderMessage}
                     />
                   </div>
                 )
-                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId} />
+                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId} renderToolCall={renderToolCall} renderMessage={renderMessage} />
               )}
           </>
         )}

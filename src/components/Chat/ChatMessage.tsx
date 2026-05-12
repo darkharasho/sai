@@ -1,4 +1,4 @@
-import { memo, useState, useRef, useCallback, useEffect } from 'react';
+import React, { memo, useState, useRef, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
@@ -281,6 +281,8 @@ function ChatMessage({
   isStreaming = false,
   isFirstAssistantOfTurn = false,
   pinnedLayoutId,
+  renderToolCall,
+  renderMessage,
 }: {
   message: ChatMessageType;
   projectPath?: string;
@@ -292,7 +294,18 @@ function ChatMessage({
   isStreaming?: boolean;
   isFirstAssistantOfTurn?: boolean;
   pinnedLayoutId?: string;
+  /** Optional override for tool-call rendering. Return `null` to fall back to the default `ToolCallCard`. */
+  renderToolCall?: (tc: import('../../types').ToolCall, defaultExpanded: boolean) => React.ReactNode | null;
+  /** Optional whole-message override (e.g. for inline approval cards). Return `null` to use the default renderer. */
+  renderMessage?: (message: ChatMessageType) => React.ReactNode | null;
 }) {
+  // Allow callers to substitute the entire message render for special meta
+  // types (e.g. inline approval cards). Done before any of the normal layout
+  // setup so we don't waste effort.
+  if (renderMessage) {
+    const custom = renderMessage(message);
+    if (custom != null) return <>{custom}</>;
+  }
   const dotColor = getDotColor(message.role);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [errorDetailsOpen, setErrorDetailsOpen] = useState(false);
@@ -864,9 +877,13 @@ function ChatMessage({
       )}
       {message.toolCalls && message.toolCalls.length > 0 && (
         <Stagger cadence="default">
-          {message.toolCalls.map((tc, i) => (
-            <ToolCallCard key={i} toolCall={tc} defaultExpanded={toolCallsExpanded} />
-          ))}
+          {message.toolCalls.map((tc, i) => {
+            if (renderToolCall) {
+              const custom = renderToolCall(tc, toolCallsExpanded);
+              if (custom != null) return <React.Fragment key={i}>{custom}</React.Fragment>;
+            }
+            return <ToolCallCard key={i} toolCall={tc} defaultExpanded={toolCallsExpanded} />;
+          })}
         </Stagger>
       )}
       {lightboxSrc && <ImageModal src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
@@ -1194,5 +1211,7 @@ export default memo(ChatMessage, (prev, next) =>
   prev.isFirstAssistantOfTurn === next.isFirstAssistantOfTurn &&
   prev.pinnedLayoutId === next.pinnedLayoutId &&
   Boolean(prev.onRetry) === Boolean(next.onRetry) &&
-  prev.onClearContext === next.onClearContext
+  prev.onClearContext === next.onClearContext &&
+  prev.renderToolCall === next.renderToolCall &&
+  prev.renderMessage === next.renderMessage
 );

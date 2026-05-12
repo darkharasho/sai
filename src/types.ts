@@ -15,6 +15,28 @@ export interface ChatMessage {
     details?: string;
     errorType?: string;
   };
+  /**
+   * Optional metadata for non-standard rendering (e.g. inline swarm approval
+   * cards injected into the orchestrator chat). Generic chat panels ignore
+   * this field; the orchestrator's renderToolCall / renderMessage hooks use
+   * it to render purpose-built cards instead of plain text.
+   */
+  meta?: ChatMessageMeta;
+}
+
+export type ChatMessageMeta = ApprovalChatMeta;
+
+export interface ApprovalChatMeta {
+  type: 'approval';
+  approvalId: string;
+  taskId: string;
+  taskTitle: string;
+  toolName: string;
+  command?: string;
+  branch?: string;
+  createdAt: number;
+  /** Set when the approval has been resolved; collapses the card. */
+  resolved?: 'approved' | 'denied';
 }
 
 export type AIProvider = 'claude' | 'codex' | 'gemini';
