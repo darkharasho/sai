@@ -39,6 +39,7 @@ import { resolveTaskRef } from './lib/swarmRef';
 
 const SWARM_DEFAULT_CAP = 5;
 import { swarmBranchName } from './lib/swarmSlug';
+import { shouldRequireApproval } from './lib/swarmApprovalPolicy';
 import { isImageFile } from './utils/imageFiles';
 import { getMonacoEditorFor } from './utils/monacoEditorRegistry';
 import * as monaco from 'monaco-editor';
@@ -195,6 +196,7 @@ export default function App() {
   const slashCommandsRef = useRef<string[]>([]);
   const workspacesRef = useRef(workspaces);
   const activeProjectPathRef = useRef(activeProjectPath);
+  const swarmTasksByWsRef = useRef(swarmTasksByWs);
   // Tracks the last swarm task we routed the active session to, to avoid
   // re-firing the session-switch effect on every state update.
   const lastSwarmRoutedRef = useRef<string | null>(null);
@@ -207,6 +209,7 @@ export default function App() {
   }, [notificationCounts]);
 
   useEffect(() => { workspacesRef.current = workspaces; }, [workspaces]);
+  useEffect(() => { swarmTasksByWsRef.current = swarmTasksByWs; }, [swarmTasksByWs]);
   useEffect(() => {
     activeProjectPathRef.current = activeProjectPath;
     setActiveWorkspace(activeProjectPath);
@@ -1157,6 +1160,33 @@ export default function App() {
         }
       }
       if (msg.type === 'approval_needed') {
+        // Swarm-aware interception: if this approval belongs to a swarm task
+        // (msg.scope === task.sessionId), consult the task's approval policy.
+        const scope = msg.scope || 'chat';
+        const swarmTask = scope !== 'chat'
+          ? (swarmTasksByWsRef.current.get(msg.projectPath) ?? []).find(t => t.sessionId === scope)
+          : undefined;
+        if (swarmTask) {
+          if (!shouldRequireApproval(swarmTask.approvalPolicy, msg.toolName)) {
+            // Auto-approve without surfacing UI or transitioning task state.
+            try { (window.sai as any).claudeApprove(msg.projectPath, msg.toolUseId, true, undefined, scope); } catch {}
+            return;
+          }
+          // Approval required: transition the task to awaiting_approval.
+          (async () => {
+            try {
+              await swarmUpdateTask(swarmTask.id, { status: 'awaiting_approval', lastActivityAt: Date.now() });
+              setSwarmTasksByWs(prev => {
+                const next = new Map(prev);
+                const list = (next.get(msg.projectPath) ?? []).map(t =>
+                  t.id === swarmTask.id ? { ...t, status: 'awaiting_approval' as const, lastActivityAt: Date.now() } : t
+                );
+                next.set(msg.projectPath, list);
+                return next;
+              });
+            } catch {}
+          })();
+        }
         setApprovalWorkspaces(prev => {
           const next = new Map(prev);
           next.set(msg.projectPath, {
@@ -1177,6 +1207,25 @@ export default function App() {
         }
       }
       if (msg.type === 'approval_resolved') {
+        const scope = msg.scope || 'chat';
+        const swarmTask = scope !== 'chat'
+          ? (swarmTasksByWsRef.current.get(msg.projectPath) ?? []).find(t => t.sessionId === scope)
+          : undefined;
+        if (swarmTask && swarmTask.status === 'awaiting_approval') {
+          (async () => {
+            try {
+              await swarmUpdateTask(swarmTask.id, { status: 'streaming', lastActivityAt: Date.now() });
+              setSwarmTasksByWs(prev => {
+                const next = new Map(prev);
+                const list = (next.get(msg.projectPath) ?? []).map(t =>
+                  t.id === swarmTask.id ? { ...t, status: 'streaming' as const, lastActivityAt: Date.now() } : t
+                );
+                next.set(msg.projectPath, list);
+                return next;
+              });
+            } catch {}
+          })();
+        }
         setApprovalWorkspaces(prev => {
           if (!prev.has(msg.projectPath)) return prev;
           const next = new Map(prev);
