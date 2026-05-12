@@ -37,6 +37,7 @@ import { SwarmScheduler, isLikelyReadOnlyPrompt } from './lib/swarmScheduler';
 import { landTask, discardTask } from './lib/swarmLanding';
 import { ensureOrchestratorSession } from './lib/swarmOrchestratorSession';
 import { handleSwarmToolRequest, type SwarmHost } from './lib/swarmOrchestratorDispatcher';
+import { isOrchestratorToolDrift, describeToolDrift } from './lib/orchestratorToolDrift';
 import { resolveTaskRef } from './lib/swarmRef';
 
 const SWARM_DEFAULT_CAP = 5;
@@ -205,6 +206,7 @@ export default function App() {
   const workspacesRef = useRef(workspaces);
   const activeProjectPathRef = useRef(activeProjectPath);
   const swarmTasksByWsRef = useRef(swarmTasksByWs);
+  const orchestratorSessionIdByWsRef = useRef(orchestratorSessionIdByWs);
   // Tracks the last swarm task we routed the active session to, to avoid
   // re-firing the session-switch effect on every state update.
   const lastSwarmRoutedRef = useRef<string | null>(null);
@@ -218,6 +220,7 @@ export default function App() {
 
   useEffect(() => { workspacesRef.current = workspaces; }, [workspaces]);
   useEffect(() => { swarmTasksByWsRef.current = swarmTasksByWs; }, [swarmTasksByWs]);
+  useEffect(() => { orchestratorSessionIdByWsRef.current = orchestratorSessionIdByWs; }, [orchestratorSessionIdByWs]);
 
   // Task 26: Quit confirmation when swarm tasks are still streaming.
   useEffect(() => {
@@ -1250,6 +1253,26 @@ export default function App() {
         setBusyWorkspaces(prev => new Set(prev).add(msg.projectPath));
         if ((msg.scope || 'chat') === 'chat') {
           setChatStreamingWorkspaces(prev => prev.has(msg.projectPath) ? prev : new Set(prev).add(msg.projectPath));
+        }
+      }
+      // Orchestrator tool drift observability (Task 7).
+      // claude.ts forwards assistant messages whose `content` may contain
+      // tool_use blocks. With --tools "" + --strict-mcp-config the orchestrator
+      // shouldn't have access to any non-swarm tool — log if one slips through.
+      if (msg.type === 'assistant' && msg.message?.content && Array.isArray(msg.message.content)) {
+        const orchSessionIds = orchestratorSessionIdByWsRef.current;
+        const isOrchSession = Array.from(orchSessionIds.values()).includes(msg.scope);
+        if (isOrchSession) {
+          for (const block of msg.message.content) {
+            if (block?.type === 'tool_use' && block.name && isOrchestratorToolDrift(block.name)) {
+              // eslint-disable-next-line no-console
+              console.warn('[orch-drift]', describeToolDrift(block.name), {
+                scope: msg.scope,
+                toolName: block.name,
+                input: block.input,
+              });
+            }
+          }
         }
       }
       if (msg.type === 'approval_needed') {
