@@ -19,7 +19,7 @@ import { basename } from './utils/pathUtils';
 import { createSession, generateSmartTitle } from './sessions';
 import { computeUnmountFlushes } from './workspaceFlush';
 import { dbGetSessions, dbGetMessages, dbGetMessagesTail, dbSaveSession, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
-import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy } from './types';
+import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval } from './types';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, setActiveHighlightTheme, type HighlightThemeId } from './themes';
 import ApprovalBanner from './components/ApprovalBanner';
 import { MessageSquare, TerminalSquare, Code2, ChevronRight, MessageCirclePlus } from 'lucide-react';
@@ -30,7 +30,7 @@ import SwarmSidebar from './components/Swarm/SwarmSidebar';
 import NewTaskPopover from './components/Swarm/NewTaskPopover';
 import SwarmTaskHeader from './components/Swarm/SwarmTaskHeader';
 import OrchestratorView from './components/Swarm/OrchestratorView';
-import { swarmGetTasks, swarmCreateTask, swarmUpdateTask } from './swarmDb';
+import { swarmGetTasks, swarmCreateTask, swarmUpdateTask, swarmGetApprovals, swarmResolveApproval } from './swarmDb';
 import { SwarmScheduler, isLikelyReadOnlyPrompt } from './lib/swarmScheduler';
 import { landTask, discardTask } from './lib/swarmLanding';
 import { ensureOrchestratorSession } from './lib/swarmOrchestratorSession';
@@ -148,6 +148,7 @@ export default function App() {
   const [geminiLoadingPhrases, setGeminiLoadingPhrases] = useState<'witty' | 'tips' | 'all' | 'off'>('all');
   const [workspaces, setWorkspaces] = useState<Map<string, WorkspaceContext>>(new Map());
   const [swarmTasksByWs, setSwarmTasksByWs] = useState<Map<string, SwarmTask[]>>(new Map());
+  const [swarmApprovalsByWs, setSwarmApprovalsByWs] = useState<Map<string, SwarmApproval[]>>(new Map());
   const [swarmSelected, setSwarmSelected] = useState<'overview' | string>('overview');
   const [orchestratorSessionIdByWs, setOrchestratorSessionIdByWs] = useState<Map<string, string>>(new Map());
   const [showNewTaskPopover, setShowNewTaskPopover] = useState(false);
@@ -248,6 +249,22 @@ export default function App() {
     }, 1000);
     return () => window.clearInterval(id);
   }, [activeProjectPath]);
+
+  // Refresh approvals whenever tasks change (status transitions to/from awaiting_approval)
+  // or when the active workspace changes.
+  useEffect(() => {
+    if (!activeProjectPath) return;
+    let cancelled = false;
+    swarmGetApprovals(activeProjectPath).then(approvals => {
+      if (cancelled) return;
+      setSwarmApprovalsByWs(prev => {
+        const m = new Map(prev);
+        m.set(activeProjectPath, approvals);
+        return m;
+      });
+    }).catch(() => { /* ignore */ });
+    return () => { cancelled = true; };
+  }, [activeProjectPath, swarmTasksByWs]);
 
   const swarmSchedulers = useRef<Map<string, SwarmScheduler>>(new Map());
 
@@ -1726,7 +1743,57 @@ export default function App() {
                       approvals: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'awaiting_approval').length,
                       ready: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'done').length,
                     }}
-                    approvals={[]}
+                    approvals={(() => {
+                      const tasks = swarmTasksByWs.get(wsPath) ?? [];
+                      const taskTitle = (id: string) => tasks.find(t => t.id === id)?.title ?? id.slice(0, 8);
+                      return (swarmApprovalsByWs.get(wsPath) ?? []).map(a => ({
+                        id: a.id, taskId: a.taskId, taskTitle: taskTitle(a.taskId),
+                        toolName: a.toolName, command: a.command, createdAt: a.createdAt,
+                      }));
+                    })()}
+                    onApproveApproval={async (id) => {
+                      // TODO(Task 21): also call provider-side approveToolCall for per-session resolution
+                      await swarmResolveApproval(id);
+                      setSwarmApprovalsByWs(prev => {
+                        const m = new Map(prev);
+                        m.set(wsPath, (prev.get(wsPath) ?? []).filter(a => a.id !== id));
+                        return m;
+                      });
+                    }}
+                    onDenyApproval={async (id) => {
+                      // TODO(Task 21): also call provider-side denyToolCall for per-session resolution
+                      await swarmResolveApproval(id);
+                      setSwarmApprovalsByWs(prev => {
+                        const m = new Map(prev);
+                        m.set(wsPath, (prev.get(wsPath) ?? []).filter(a => a.id !== id));
+                        return m;
+                      });
+                    }}
+                    onApproveAllReads={() => {
+                      const READ_TOOLS = new Set(['read', 'Read', 'view', 'View', 'cat']);
+                      (swarmApprovalsByWs.get(wsPath) ?? [])
+                        .filter(a => READ_TOOLS.has(a.toolName))
+                        .forEach(a => {
+                          swarmResolveApproval(a.id).then(() => {
+                            setSwarmApprovalsByWs(prev => {
+                              const m = new Map(prev);
+                              m.set(wsPath, (prev.get(wsPath) ?? []).filter(x => x.id !== a.id));
+                              return m;
+                            });
+                          }).catch(() => { /* ignore */ });
+                        });
+                    }}
+                    onDenyAllApprovals={() => {
+                      (swarmApprovalsByWs.get(wsPath) ?? []).forEach(a => {
+                        swarmResolveApproval(a.id).then(() => {
+                          setSwarmApprovalsByWs(prev => {
+                            const m = new Map(prev);
+                            m.set(wsPath, (prev.get(wsPath) ?? []).filter(x => x.id !== a.id));
+                            return m;
+                          });
+                        }).catch(() => { /* ignore */ });
+                      });
+                    }}
                     readyTasks={[]}
                     onCommand={() => { /* TODO(Task 21): host.sendOrchestratorCommand */ }}
                   />

@@ -1,5 +1,8 @@
 import React from 'react';
 import OrchestratorComposer from './OrchestratorComposer';
+import ApprovalTray, { type ApprovalRow } from './ApprovalTray';
+
+export type { ApprovalRow };
 
 export interface OrchestratorStats {
   active: number;
@@ -13,17 +16,21 @@ interface Props {
   orchestratorSessionId: string;
   projectPath: string;
   stats: OrchestratorStats;
-  approvals: any[];      // will be typed in Task 19
+  approvals: ApprovalRow[];
   readyTasks: any[];     // will be typed in Task 20
   onCommand: (cmd: { text: string; splitLines: boolean }) => void;
+  onApproveApproval?: (id: string) => void;
+  onDenyApproval?: (id: string) => void;
+  onApproveAllReads?: () => void;
+  onDenyAllApprovals?: () => void;
   chatSlot?: React.ReactNode;       // App.tsx can pass an embedded ChatPanel here
-  approvalSlot?: React.ReactNode;   // Task 19 ApprovalTray
   readySlot?: React.ReactNode;      // Task 20 ReadyToLandTray
 }
 
 export default function OrchestratorView({
   orchestratorSessionId, projectPath, stats, approvals, readyTasks, onCommand,
-  chatSlot, approvalSlot, readySlot,
+  onApproveApproval, onDenyApproval, onApproveAllReads, onDenyAllApprovals,
+  chatSlot, readySlot,
 }: Props) {
   return (
     <div className="orch-view" style={{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0 }}>
@@ -35,7 +42,13 @@ export default function OrchestratorView({
           {typeof stats.runtimeSec === 'number' && ` · ${Math.round(stats.runtimeSec)}s`}
         </span>
       </header>
-      {approvalSlot}
+      <ApprovalTray
+        approvals={approvals}
+        onApprove={onApproveApproval ?? (() => {})}
+        onDeny={onDenyApproval ?? (() => {})}
+        onApproveAllReads={onApproveAllReads ?? (() => {})}
+        onDenyAll={onDenyAllApprovals ?? (() => {})}
+      />
       {readySlot}
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }} data-testid="orch-chat-slot">
         {chatSlot}
