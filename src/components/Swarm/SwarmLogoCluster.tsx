@@ -4,9 +4,9 @@ import SaiLogo from '../SaiLogo';
 interface Props {
   /** Diameter of the lead logo in px. Default 64 (matches default chat empty state). */
   leadSize?: number;
-  /** Number of follower logos arranged behind the leader. Default 8. */
+  /** Number of follower logos arranged behind the leader. Default 3. Max 5. */
   followerCount?: number;
-  /** Total cluster footprint width/height in px. Default 280. */
+  /** Total cluster footprint width/height in px. Default 260. */
   footprint?: number;
 }
 
@@ -39,53 +39,48 @@ function seedRandom(seed: number) {
   };
 }
 
-function buildFlock(leadSize: number, followerCount: number, footprint: number): { lead: Bee; followers: Bee[] } {
-  const rng = seedRandom(leadSize * 31 + followerCount * 11 + footprint);
+function buildFlock(leadSize: number, followerCount: number, _footprint: number): { lead: Bee; followers: Bee[] } {
+  const rng = seedRandom(leadSize * 31 + followerCount * 11);
   const lead: Bee = {
     x: 0,
     y: 0,
     z: 0,
     size: leadSize,
     delay: 0,
-    duration: 3.2,
-    amplitude: 3,
-    rotateAmplitude: 3,
+    duration: 3.4,
+    amplitude: 2.5,
+    rotateAmplitude: 2.5,
     zIndex: 100,
     opacity: 1,
     blur: 0,
   };
 
   const followers: Bee[] = [];
-  // Spread the followers around the leader, biased upward (geese flying up
-  // and away) and into the distance. Each gets pushed further back along Z.
-  for (let i = 0; i < followerCount; i++) {
-    // Angle around the leader, biased to the top half (-π to 0 in screen coords)
-    // → -180° to 0° spans the upper semicircle. Add jitter.
-    const t = i / Math.max(1, followerCount - 1); // 0..1
-    const angle = Math.PI + t * Math.PI + (rng() - 0.5) * 0.4; // π..2π with jitter (= top semicircle)
-    // Distance from center in 2D — followers tile outward in concentric rings
-    const ringIndex = i % 3; // 0 closest ring, 2 farthest ring
-    const ringRadius = 30 + ringIndex * 36 + (rng() - 0.5) * 10;
-    const x = Math.cos(angle) * ringRadius;
-    // Compress Y so the flock reads as receding, not vertically tall
-    const y = Math.sin(angle) * ringRadius * 0.55 - 6 - ringIndex * 4;
-    // Push further back along Z with each ring + per-bee jitter. Strong z gives
-    // browser perspective good material to work with.
-    const z = -(60 + ringIndex * 80 + rng() * 40);
+  // Sparse, clearly separated formation. Each follower is well behind the
+  // leader and offset enough to read as distinct. Symmetric placements so the
+  // composition feels intentional rather than chaotic.
+  const slots: Array<{ x: number; y: number; z: number; opacity: number; blur: number }> = [];
+  if (followerCount >= 1) slots.push({ x: -60, y: -20, z: -120, opacity: 0.7, blur: 0 });
+  if (followerCount >= 2) slots.push({ x:  60, y: -20, z: -120, opacity: 0.7, blur: 0 });
+  if (followerCount >= 3) slots.push({ x:   0, y: -34, z: -220, opacity: 0.5, blur: 0.5 });
+  if (followerCount >= 4) slots.push({ x: -95, y: -45, z: -260, opacity: 0.4, blur: 0.7 });
+  if (followerCount >= 5) slots.push({ x:  95, y: -45, z: -260, opacity: 0.4, blur: 0.7 });
+
+  slots.slice(0, followerCount).forEach((slot, i) => {
     followers.push({
-      x,
-      y,
-      z,
-      size: leadSize, // browser scales via perspective; keep base size uniform
+      x: slot.x,
+      y: slot.y,
+      z: slot.z,
+      size: leadSize,
       delay: rng() * -3,
-      duration: 2.2 + rng() * 2.2,
-      amplitude: 3 + rng() * 5,
-      rotateAmplitude: 4 + rng() * 8,
-      zIndex: 50 - ringIndex * 10 - Math.floor(rng() * 5),
-      opacity: 0.85 - ringIndex * 0.18,
-      blur: ringIndex >= 2 ? 0.6 : 0,
+      duration: 3.0 + rng() * 1.8,
+      amplitude: 3 + rng() * 3,
+      rotateAmplitude: 3 + rng() * 5,
+      zIndex: 50 - i * 2,
+      opacity: slot.opacity,
+      blur: slot.blur,
     });
-  }
+  });
   return { lead, followers };
 }
 
@@ -96,8 +91,8 @@ function buildFlock(leadSize: number, followerCount: number, footprint: number):
  */
 export default function SwarmLogoCluster({
   leadSize = 64,
-  followerCount = 8,
-  footprint = 280,
+  followerCount = 3,
+  footprint = 260,
 }: Props) {
   const { lead, followers } = useMemo(
     () => buildFlock(leadSize, followerCount, footprint),

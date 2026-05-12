@@ -2589,7 +2589,7 @@ export default function App() {
                       terminalTabs={ws.terminalTabs ?? []}
                       claudeScope={orchSessionId}
                       claudeKind="orchestrator"
-                      emptyStateVisual={<SwarmLogoCluster />}
+                      emptyStateVisual={<SwarmLogoCluster leadSize={96} />}
                       claudeOrchestratorContext={(() => {
                         const wsName = wsPath.split(/[\\/]/).filter(Boolean).pop() || wsPath;
                         const cfg = swarmSettingsRef.current;
