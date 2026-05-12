@@ -123,7 +123,11 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
     setTree(prev => {
       const next = new Map(prev);
       const existing = next.get(dirPath);
-      next.set(dirPath, { entries: existing?.entries ?? [], expanded: true, loading: true, error: null });
+      // Only show the Loading row on the initial fetch. Background poll
+      // refreshes keep loading=false so the structure doesn't flash a row
+      // in and out under each expanded folder every 2s.
+      const isInitial = !existing || existing.entries.length === 0;
+      next.set(dirPath, { entries: existing?.entries ?? [], expanded: true, loading: isInitial, error: null });
       return next;
     });
     try {
