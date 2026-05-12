@@ -9,6 +9,11 @@ import { extractCodexCommitMessage } from './commit-message-parser';
 import { ensureGeminiCommitSession, ensureGeminiTransport, promptGeminiText } from './gemini';
 import * as swarmMcpHost from './swarmMcpHost';
 import { writeSwarmMcpConfig } from './swarmMcpConfig';
+import {
+  buildOrchestratorSystemPrompt,
+  resolveOrchestratorPromptContext,
+  type OrchestratorPromptContext,
+} from '../../src/lib/orchestratorSystemPrompt';
 
 const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
 
@@ -170,6 +175,8 @@ export interface BuildArgsOptions {
   /** Workspace path passed to the swarm MCP server as SAI_SWARM_WORKSPACE.
    *  Required when kind === 'orchestrator'. */
   workspace?: string;
+  /** Optional orchestrator system-prompt context. Falls back to defaults. */
+  orchestratorContext?: Partial<OrchestratorPromptContext> | null;
   /** Override hooks for tests. */
   getMcpHandle?: () => { socketPath: string; secret: string };
   resolveMcpServerScriptPath?: () => string;
@@ -197,6 +204,7 @@ export function buildArgs(options: BuildArgsOptions = {}): string[] {
     model,
     kind = 'chat',
     workspace,
+    orchestratorContext,
     getMcpHandle = () => swarmMcpHost.start(),
     resolveMcpServerScriptPath = defaultMcpServerScriptPath,
     resolveElectronExecPath = () => process.execPath,
@@ -240,6 +248,16 @@ export function buildArgs(options: BuildArgsOptions = {}): string[] {
     args.push('--strict-mcp-config');
     // Disable all built-in tools — only mcp__swarm__* will be available.
     args.push('--tools', '');
+    // Replace Claude Code's default system prompt with the orchestrator one,
+    // which steers the model to dispatch tasks instead of writing code itself.
+    const ctx = resolveOrchestratorPromptContext({
+      ...(orchestratorContext || {}),
+      workspacePath: orchestratorContext?.workspacePath || workspace || '',
+      workspaceName:
+        orchestratorContext?.workspaceName ||
+        (workspace ? workspace.split(/[\\/]/).filter(Boolean).pop() || workspace : undefined),
+    });
+    args.push('--system-prompt', buildOrchestratorSystemPrompt(ctx));
   } else {
     // Chat/task: pass through user MCP config path(s) from SAI settings.
     const mcpConfig = readSetting('mcpConfigPath');
@@ -292,6 +310,7 @@ function ensureProcess(
     model,
     kind: claude.kind,
     workspace: ws.projectPath,
+    orchestratorContext: (claude.orchestratorContext as Partial<OrchestratorPromptContext> | null) || null,
   });
 
   // Resume existing session if we have one
@@ -490,11 +509,20 @@ function ensureProcess(
 export function registerClaudeHandlers(win: BrowserWindow) {
   // claude:start — no longer spawns a probe. Just signals ready.
   // Sends cached slash commands immediately so they're available before the process init.
-  ipcMain.handle('claude:start', (_event, cwd: string, scope?: string, kind?: 'chat' | 'task' | 'orchestrator') => {
+  ipcMain.handle('claude:start', (
+    _event,
+    cwd: string,
+    scope?: string,
+    kind?: 'chat' | 'task' | 'orchestrator',
+    orchestratorContext?: Partial<OrchestratorPromptContext> | null,
+  ) => {
     if (!cwd) return;
     const ws = getOrCreate(cwd);
     const claude = getClaude(ws, scope || 'chat', kind);
     claude.cwd = cwd;
+    if (kind === 'orchestrator' && orchestratorContext) {
+      claude.orchestratorContext = orchestratorContext as Record<string, unknown>;
+    }
 
     safeSend(win, 'claude:message', { type: 'ready', projectPath: ws.projectPath, scope: scope || 'chat' });
 

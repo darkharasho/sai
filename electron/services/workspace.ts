@@ -32,6 +32,9 @@ export interface WorkspaceClaude {
   /** What kind of session this scope is. Determines CLI args (e.g. orchestrator
    *  gets --strict-mcp-config + --tools "" for swarm-only tooling). */
   kind: 'chat' | 'task' | 'orchestrator';
+  /** For orchestrator-kind scopes: context used to build the --system-prompt.
+   *  Set by claude:start; consumed by ensureProcess at spawn time. */
+  orchestratorContext?: Record<string, unknown> | null;
 }
 
 export interface WorkspaceCodex {
@@ -94,6 +97,7 @@ function newClaudeScope(cwd: string): WorkspaceClaude {
     approvalBuffered: [],
     awaitingApproval: false,
     kind: 'chat',
+    orchestratorContext: null,
   };
 }
 

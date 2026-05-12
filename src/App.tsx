@@ -42,6 +42,7 @@ import { resolveTaskRef } from './lib/swarmRef';
 const SWARM_DEFAULT_CAP = 5;
 import { swarmBranchName } from './lib/swarmSlug';
 import { shouldRequireApproval } from './lib/swarmApprovalPolicy';
+import type { OrchestratorPromptContext } from './lib/orchestratorSystemPrompt';
 import { isImageFile } from './utils/imageFiles';
 import { getMonacoEditorFor } from './utils/monacoEditorRegistry';
 import * as monaco from 'monaco-editor';
@@ -1875,7 +1876,17 @@ export default function App() {
       // mounts and triggers ensureProcess, the spawned CLI gets the
       // SAI-managed MCP config + --strict-mcp-config + --tools "" flags.
       try {
-        (window as any).sai?.claudeStart?.(activeProjectPath, session.id, 'orchestrator');
+        const wsName = activeProjectPath.split(/[\\/]/).filter(Boolean).pop() || activeProjectPath;
+        const cfg = swarmSettingsRef.current;
+        const orchestratorContext: OrchestratorPromptContext = {
+          workspaceName: wsName,
+          workspacePath: activeProjectPath,
+          defaultProvider: cfg.defaultTaskProvider ?? aiProvider ?? 'claude',
+          defaultModel: cfg.defaultTaskModel || modelChoice || 'opus',
+          defaultApprovalPolicy: cfg.defaultApprovalPolicy ?? 'auto-read',
+          concurrencyCap: cfg.concurrencyCap ?? 5,
+        };
+        (window as any).sai?.claudeStart?.(activeProjectPath, session.id, 'orchestrator', orchestratorContext);
       } catch { /* ignore — kind will fall back to chat if preload missing */ }
       dbGetSessions(activeProjectPath).then(fresh => {
         updateWorkspace(activeProjectPath, ws => ({ ...ws, sessions: fresh }));

@@ -51,6 +51,45 @@ describe('buildArgs (orchestrator vs chat kinds)', () => {
     expect(args).not.toContain('--tools');
   });
 
+  it('orchestrator kind injects --system-prompt with the orchestrator prompt', () => {
+    const args = buildArgs({
+      kind: 'orchestrator',
+      workspace: '/repos/my-app',
+      orchestratorContext: {
+        workspaceName: 'my-app',
+        workspacePath: '/repos/my-app',
+        defaultProvider: 'claude',
+        defaultModel: 'opus',
+        defaultApprovalPolicy: 'auto-read',
+        concurrencyCap: 5,
+      },
+      ...baseStubs,
+    });
+    const idx = args.indexOf('--system-prompt');
+    expect(idx).toBeGreaterThan(-1);
+    const prompt = args[idx + 1];
+    expect(prompt).toMatch(/swarm orchestrator/i);
+    expect(prompt).toContain('"my-app"');
+    expect(prompt).toContain('/repos/my-app');
+    expect(prompt).toContain('mcp__swarm__*');
+  });
+
+  it('orchestrator kind derives workspace name from workspace path when no context given', () => {
+    const args = buildArgs({
+      kind: 'orchestrator',
+      workspace: '/repos/derived-name',
+      ...baseStubs,
+    });
+    const idx = args.indexOf('--system-prompt');
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toContain('"derived-name"');
+  });
+
+  it('chat kind does NOT include --system-prompt', () => {
+    const args = buildArgs({ kind: 'chat', ...baseStubs });
+    expect(args).not.toContain('--system-prompt');
+  });
+
   it('chat kind passes through user mcpConfigPath setting', () => {
     const args = buildArgs({
       kind: 'chat',
