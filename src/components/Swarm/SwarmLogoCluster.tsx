@@ -39,8 +39,8 @@ function seedRandom(seed: number) {
   };
 }
 
-function buildFlock(leadSize: number, followerCount: number, _footprint: number): { lead: Bee; followers: Bee[] } {
-  const rng = seedRandom(leadSize * 31 + followerCount * 11);
+function buildFlock(leadSize: number, _followerCount: number, _footprint: number): { lead: Bee; followers: Bee[] } {
+  const rng = seedRandom(leadSize * 31);
   const lead: Bee = {
     x: 0,
     y: 0,
@@ -55,32 +55,37 @@ function buildFlock(leadSize: number, followerCount: number, _footprint: number)
     blur: 0,
   };
 
-  const followers: Bee[] = [];
-  // Sparse, clearly separated formation. Each follower is well behind the
-  // leader and offset enough to read as distinct. Symmetric placements so the
-  // composition feels intentional rather than chaotic.
-  const slots: Array<{ x: number; y: number; z: number; opacity: number; blur: number }> = [];
-  if (followerCount >= 1) slots.push({ x: -60, y: -20, z: -120, opacity: 0.7, blur: 0 });
-  if (followerCount >= 2) slots.push({ x:  60, y: -20, z: -120, opacity: 0.7, blur: 0 });
-  if (followerCount >= 3) slots.push({ x:   0, y: -34, z: -220, opacity: 0.5, blur: 0.5 });
-  if (followerCount >= 4) slots.push({ x: -95, y: -45, z: -260, opacity: 0.4, blur: 0.7 });
-  if (followerCount >= 5) slots.push({ x:  95, y: -45, z: -260, opacity: 0.4, blur: 0.7 });
+  // Pairs only — strict V formation, no center slot (would overlap the leader).
+  // Three rows expanding up-and-out behind the leader. Each follower is sized
+  // at 60% of the leader's base; browser perspective further shrinks rows that
+  // are further back along Z.
+  const followerBaseSize = leadSize * 0.6;
+  const rows: Array<{ x: number; y: number; z: number; opacity: number; blur: number }> = [
+    // Row 1 — close behind, gentle outward fan
+    { x: -60, y: -16, z: -90,  opacity: 0.8, blur: 0 },
+    { x:  60, y: -16, z: -90,  opacity: 0.8, blur: 0 },
+    // Row 2 — mid distance
+    { x: -118, y: -34, z: -200, opacity: 0.55, blur: 0.3 },
+    { x:  118, y: -34, z: -200, opacity: 0.55, blur: 0.3 },
+    // Row 3 — far back
+    { x: -176, y: -54, z: -320, opacity: 0.35, blur: 0.7 },
+    { x:  176, y: -54, z: -320, opacity: 0.35, blur: 0.7 },
+  ];
 
-  slots.slice(0, followerCount).forEach((slot, i) => {
-    followers.push({
-      x: slot.x,
-      y: slot.y,
-      z: slot.z,
-      size: leadSize,
-      delay: rng() * -3,
-      duration: 3.0 + rng() * 1.8,
-      amplitude: 3 + rng() * 3,
-      rotateAmplitude: 3 + rng() * 5,
-      zIndex: 50 - i * 2,
-      opacity: slot.opacity,
-      blur: slot.blur,
-    });
-  });
+  const followers: Bee[] = rows.map((slot, i) => ({
+    x: slot.x,
+    y: slot.y,
+    z: slot.z,
+    size: followerBaseSize,
+    delay: rng() * -3,
+    duration: 3.0 + rng() * 1.8,
+    amplitude: 3 + rng() * 3,
+    rotateAmplitude: 3 + rng() * 5,
+    zIndex: 50 - i,
+    opacity: slot.opacity,
+    blur: slot.blur,
+  }));
+
   return { lead, followers };
 }
 
@@ -90,9 +95,9 @@ function buildFlock(leadSize: number, followerCount: number, _footprint: number)
  * empty state — gives the feel of a swarm trailing the leader through space.
  */
 export default function SwarmLogoCluster({
-  leadSize = 64,
-  followerCount = 3,
-  footprint = 260,
+  leadSize = 96,
+  followerCount = 6,
+  footprint = 420,
 }: Props) {
   const { lead, followers } = useMemo(
     () => buildFlock(leadSize, followerCount, footprint),
