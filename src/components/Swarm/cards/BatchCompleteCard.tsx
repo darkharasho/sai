@@ -1,6 +1,6 @@
 import React from 'react';
 import type { ToolCall } from '../../../types';
-import { cardBase, cardHeader, SWARM_GREEN, SWARM_RED, safeJsonParse, btnBase, btnPrimary } from './cardStyles';
+import { cardBase, SWARM_GREEN, SWARM_RED, safeJsonParse, btnBase, btnPrimary } from './cardStyles';
 import Sparkline from '../Sparkline';
 
 interface Input {
@@ -36,19 +36,51 @@ function formatDuration(ms: number | undefined): string {
   return parts.join(' ');
 }
 
-const statStyle: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'flex-start',
-  gap: 2,
-  minWidth: 0,
-};
-const statLabel: React.CSSProperties = {
-  fontSize: 9,
-  letterSpacing: 0.6,
-  textTransform: 'uppercase',
-  opacity: 0.55,
-};
+interface StatProps {
+  label: string;
+  value: React.ReactNode;
+  color?: string;
+  emphasized?: boolean;
+}
+
+function Stat({ label, value, color, emphasized }: StatProps) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'flex-start',
+        gap: 4,
+        padding: '10px 12px',
+        background: 'var(--bg-secondary)',
+        border: '1px solid var(--border)',
+        borderRadius: 6,
+        minWidth: 0,
+      }}
+    >
+      <span
+        style={{
+          fontSize: 9,
+          letterSpacing: 0.8,
+          textTransform: 'uppercase',
+          opacity: 0.55,
+        }}
+      >
+        {label}
+      </span>
+      <span
+        style={{
+          fontSize: emphasized ? 22 : 18,
+          fontWeight: 600,
+          color: color ?? 'var(--text)',
+          lineHeight: 1.1,
+        }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
 
 export default function BatchCompleteCard({ toolCall, onLandAll, onFocusChat, hasLandable }: Props) {
   const input = safeJsonParse<Input>(toolCall.input) ?? {};
@@ -58,63 +90,102 @@ export default function BatchCompleteCard({ toolCall, onLandAll, onFocusChat, ha
   const failed = input.failed ?? 0;
   const buckets = Array.isArray(input.completionBuckets) ? input.completionBuckets : [];
   const hasBuckets = buckets.some(v => v > 0);
+  const showCost = typeof input.totalCost === 'number';
 
   return (
-    <div data-testid="swarm-batch-complete-card" style={{ ...cardBase }}>
-      <div style={cardHeader}>
-        <span>🎯 Batch complete</span>
-        <span style={{ opacity: 0.65, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
-          {formatDuration(input.durationMs)}
-        </span>
+    <div
+      data-testid="swarm-batch-complete-card"
+      style={{
+        ...cardBase,
+        width: '100%',
+        padding: 16,
+        margin: '12px 0',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
+          gap: 12,
+          marginBottom: 14,
+        }}
+      >
+        <div>
+          <div
+            style={{
+              fontSize: 10,
+              letterSpacing: 1,
+              textTransform: 'uppercase',
+              opacity: 0.55,
+              marginBottom: 2,
+            }}
+          >
+            Batch complete
+          </div>
+          <div style={{ fontSize: 18, fontWeight: 600 }}>
+            🎯 {total} task{total === 1 ? '' : 's'} done
+          </div>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          {formatDuration(input.durationMs)} elapsed
+        </div>
       </div>
 
       <div
         style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 14,
-          flexWrap: 'wrap',
+          display: 'grid',
+          gridTemplateColumns: `repeat(${showCost ? 5 : 4}, 1fr)`,
+          gap: 8,
+          marginBottom: 14,
         }}
       >
-        <div style={statStyle}>
-          <span style={statLabel}>Total</span>
-          <span style={{ fontSize: 14, fontWeight: 600 }}>{total}</span>
-        </div>
-        <div style={statStyle}>
-          <span style={statLabel}>Landed</span>
-          <span style={{ fontSize: 14, fontWeight: 600, color: SWARM_GREEN }}>{landed}</span>
-        </div>
-        <div style={statStyle}>
-          <span style={statLabel}>Discarded</span>
-          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-muted)' }}>{discarded}</span>
-        </div>
-        <div style={statStyle}>
-          <span style={statLabel}>Failed</span>
-          <span style={{ fontSize: 14, fontWeight: 600, color: SWARM_RED }}>{failed}</span>
-        </div>
-        {typeof input.totalCost === 'number' && (
-          <div style={statStyle}>
-            <span style={statLabel}>Cost</span>
-            <span style={{ fontSize: 14, fontWeight: 600 }}>${input.totalCost.toFixed(2)}</span>
-          </div>
-        )}
+        <Stat label="Total" value={total} emphasized />
+        <Stat label="Landed" value={landed} color={SWARM_GREEN} emphasized />
+        <Stat label="Discarded" value={discarded} color="var(--text-muted)" />
+        <Stat label="Failed" value={failed} color={SWARM_RED} />
+        {showCost && <Stat label="Cost" value={`$${input.totalCost!.toFixed(2)}`} />}
       </div>
 
       {hasBuckets && (
-        <div data-testid="swarm-batch-complete-sparkline" style={{ marginTop: 8, color: 'var(--accent)' }}>
-          <Sparkline data={buckets} width={220} height={24} fillOpacity={0.18} />
+        <div
+          data-testid="swarm-batch-complete-sparkline"
+          style={{
+            marginBottom: 14,
+            padding: '10px 12px',
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border)',
+            borderRadius: 6,
+            color: 'var(--accent)',
+          }}
+        >
+          <div
+            style={{
+              fontSize: 9,
+              letterSpacing: 0.8,
+              textTransform: 'uppercase',
+              opacity: 0.55,
+              color: 'var(--text)',
+              marginBottom: 6,
+            }}
+          >
+            Completion timeline
+          </div>
+          <div style={{ width: '100%' }}>
+            <Sparkline data={buckets} width={800} height={56} fillOpacity={0.22} strokeWidth={1.5} fullWidth />
+          </div>
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-        {onLandAll && hasLandable && landed >= 0 && (
-          <button type="button" style={btnPrimary} onClick={onLandAll}>
-            Land all green
-          </button>
-        )}
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
         {onFocusChat && (
           <button type="button" style={btnBase} onClick={onFocusChat}>
-            View summary in chat history
+            View summary
+          </button>
+        )}
+        {onLandAll && hasLandable && (
+          <button type="button" style={btnPrimary} onClick={onLandAll}>
+            Land all green
           </button>
         )}
       </div>

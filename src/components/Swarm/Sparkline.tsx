@@ -7,6 +7,8 @@ interface Props {
   color?: string;
   fillOpacity?: number;
   strokeWidth?: number;
+  /** When true, the SVG stretches to fill its container (overrides intrinsic width). */
+  fullWidth?: boolean;
 }
 
 /**
@@ -23,6 +25,7 @@ export default function Sparkline({
   color = 'currentColor',
   fillOpacity = 0.2,
   strokeWidth = 1.25,
+  fullWidth = false,
 }: Props) {
   if (!data || data.length === 0) return null;
   const n = data.length;
@@ -50,7 +53,8 @@ export default function Sparkline({
       width={width}
       height={height}
       viewBox={`0 0 ${width} ${height}`}
-      style={{ display: 'block', overflow: 'visible' }}
+      style={{ display: 'block', overflow: 'visible', ...(fullWidth ? { width: '100%' } : {}) }}
+      preserveAspectRatio={fullWidth ? 'none' : 'xMidYMid meet'}
       aria-hidden="true"
     >
       <path d={areaPath} fill={color} fillOpacity={fillOpacity} stroke="none" />
