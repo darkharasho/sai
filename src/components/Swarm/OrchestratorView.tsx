@@ -146,7 +146,7 @@ export default function OrchestratorView({
         <div className="orch-non-claude-banner" data-testid="orch-non-claude-banner">
           <Info size={13} />
           <span>
-            Chat-driven dispatch requires Claude. You can still use the trays, slash commands (<code>/spawn</code>, <code>/land</code>, …), or switch provider in <b>Settings → Swarm</b>.
+            Chat-driven dispatch requires Claude. You can still use the sidebar, slash commands (<code>/spawn</code>, <code>/land</code>, …), or switch provider in <b>Settings → Swarm</b>.
           </span>
           <style>{`
             .orch-non-claude-banner {
