@@ -1,6 +1,6 @@
 import React from 'react';
 import type { ToolCall } from '../../../types';
-import { cardBase, SWARM_GREEN, SWARM_RED, safeJsonParse, btnBase, btnPrimary } from './cardStyles';
+import { cardBase, SWARM_GREEN, SWARM_RED, safeJsonParse, btnPrimary } from './cardStyles';
 import Sparkline from '../Sparkline';
 
 interface Input {
@@ -17,8 +17,6 @@ interface Props {
   toolCall: ToolCall;
   /** When provided, hooked up to "Land all green" — only fires for `done` task ids. */
   onLandAll?: () => void;
-  /** Best-effort focus to chat history (no-op default for now). */
-  onFocusChat?: () => void;
   /** True if there are still tasks in `done` state we could land. */
   hasLandable?: boolean;
 }
@@ -82,7 +80,7 @@ function Stat({ label, value, color, emphasized }: StatProps) {
   );
 }
 
-export default function BatchCompleteCard({ toolCall, onLandAll, onFocusChat, hasLandable }: Props) {
+export default function BatchCompleteCard({ toolCall, onLandAll, hasLandable }: Props) {
   const input = safeJsonParse<Input>(toolCall.input) ?? {};
   const total = input.totalTasks ?? 0;
   const landed = input.landed ?? 0;
@@ -147,42 +145,87 @@ export default function BatchCompleteCard({ toolCall, onLandAll, onFocusChat, ha
         {showCost && <Stat label="Cost" value={`$${input.totalCost!.toFixed(2)}`} />}
       </div>
 
-      {hasBuckets && (
-        <div
-          data-testid="swarm-batch-complete-sparkline"
-          style={{
-            marginBottom: 14,
-            padding: '10px 12px',
-            background: 'var(--bg-secondary)',
-            border: '1px solid var(--border)',
-            borderRadius: 6,
-            color: 'var(--accent)',
-          }}
-        >
+      {hasBuckets && (() => {
+        const peak = buckets.reduce((a, b) => Math.max(a, b), 0);
+        const totalSec = Math.max(0, Math.round((input.durationMs ?? 0) / 1000));
+        const startLabel = totalSec >= 60
+          ? `−${Math.floor(totalSec / 60)}m ${totalSec % 60}s`
+          : `−${totalSec}s`;
+        return (
           <div
+            data-testid="swarm-batch-complete-sparkline"
             style={{
-              fontSize: 9,
-              letterSpacing: 0.8,
-              textTransform: 'uppercase',
-              opacity: 0.55,
-              color: 'var(--text)',
-              marginBottom: 6,
+              marginBottom: 14,
+              padding: '10px 12px',
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
             }}
           >
-            Completion timeline
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                justifyContent: 'space-between',
+                marginBottom: 6,
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 9,
+                  letterSpacing: 0.8,
+                  textTransform: 'uppercase',
+                  opacity: 0.55,
+                  color: 'var(--text)',
+                }}
+              >
+                Completion timeline
+              </span>
+              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                peak {peak} task{peak === 1 ? '' : 's'} / bucket
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'stretch', gap: 6 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  fontSize: 9,
+                  fontFamily: "'Geist Mono', 'JetBrains Mono', ui-monospace, monospace",
+                  color: 'var(--text-muted)',
+                  width: 16,
+                  textAlign: 'right',
+                  paddingTop: 1,
+                  paddingBottom: 1,
+                }}
+              >
+                <span>{peak}</span>
+                <span>0</span>
+              </div>
+              <div style={{ flex: 1, color: 'var(--accent)' }}>
+                <Sparkline data={buckets} width={800} height={56} fillOpacity={0.22} strokeWidth={1.5} fullWidth />
+              </div>
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                marginTop: 4,
+                fontSize: 9,
+                fontFamily: "'Geist Mono', 'JetBrains Mono', ui-monospace, monospace",
+                color: 'var(--text-muted)',
+                paddingLeft: 22,
+              }}
+            >
+              <span>{startLabel}</span>
+              <span>now</span>
+            </div>
           </div>
-          <div style={{ width: '100%' }}>
-            <Sparkline data={buckets} width={800} height={56} fillOpacity={0.22} strokeWidth={1.5} fullWidth />
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-        {onFocusChat && (
-          <button type="button" style={btnBase} onClick={onFocusChat}>
-            View summary
-          </button>
-        )}
         {onLandAll && hasLandable && (
           <button type="button" style={btnPrimary} onClick={onLandAll}>
             Land all green

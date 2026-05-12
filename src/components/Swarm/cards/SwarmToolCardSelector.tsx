@@ -27,7 +27,6 @@ interface Props {
   onRetry?: (prompt: string) => void;
   onScrollToApproval?: (taskId: string) => void;
   onLandAllGreen?: () => void;
-  onFocusChat?: () => void;
 }
 
 const SWARM_PREFIX = 'mcp__swarm__';
@@ -42,7 +41,7 @@ export default function SwarmToolCardSelector(props: Props): React.ReactElement 
   const {
     toolCall, tasks, approvals, diffStats, toolHistory,
     onFocusTask, onRebaseRetry, onLand, onDiscard, onDiff, onRetry, onScrollToApproval,
-    onLandAllGreen, onFocusChat,
+    onLandAllGreen,
   } = props;
   if (!toolCall.name?.startsWith(SWARM_PREFIX)) return null;
   const baseName = toolCall.name.slice(SWARM_PREFIX.length);
@@ -95,7 +94,6 @@ export default function SwarmToolCardSelector(props: Props): React.ReactElement 
         <BatchCompleteCard
           toolCall={toolCall}
           onLandAll={onLandAllGreen}
-          onFocusChat={onFocusChat}
           hasLandable={hasLandable}
         />
       );

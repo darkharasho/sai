@@ -2850,11 +2850,18 @@ export default function App() {
                           approvals={swarmApprovalsByWs.get(wsPath) ?? []}
                           diffStats={swarmDiffStats}
                           toolHistory={toolHistory}
-                          onLandAllGreen={() => {
-                            const ready = (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'done');
-                            for (const t of ready) void landWithCard(t.id);
+                          onLandAllGreen={async () => {
+                            // Snapshot the ready ids first; each land mutates state and
+                            // removes the task from the list, so iterating directly off
+                            // the live array would race. Await each to surface failures.
+                            const readyIds = (swarmTasksByWs.get(wsPath) ?? [])
+                              .filter(t => t.status === 'done')
+                              .map(t => t.id);
+                            for (const id of readyIds) {
+                              try { await landWithCard(id); }
+                              catch (err) { console.error('swarm: landAllGreen land failed', id, err); }
+                            }
                           }}
-                          onFocusChat={() => { /* no-op for now — chat is already focused */ }}
                           onFocusTask={(id) => setSwarmSelected(id)}
                           onLand={(id) => { void landWithCard(id); }}
                           onDiscard={(id) => { void discardWithCard(id); }}
