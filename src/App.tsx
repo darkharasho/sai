@@ -29,7 +29,7 @@ import McpSidebar from './components/MCP/McpSidebar';
 import SwarmSidebar from './components/Swarm/SwarmSidebar';
 import NewTaskPopover from './components/Swarm/NewTaskPopover';
 import SwarmTaskHeader from './components/Swarm/SwarmTaskHeader';
-import OrchestratorView, { type ReadyTaskRow } from './components/Swarm/OrchestratorView';
+import OrchestratorView from './components/Swarm/OrchestratorView';
 import SwarmToolCardSelector from './components/Swarm/cards/SwarmToolCardSelector';
 import InlineApprovalCard from './components/Swarm/cards/InlineApprovalCard';
 import QuitSwarmConfirmModal from './components/Swarm/QuitSwarmConfirmModal';
@@ -2691,23 +2691,6 @@ export default function App() {
                       active: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'streaming').length,
                       approvals: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'awaiting_approval').length,
                       ready: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'done').length,
-                    }}
-                    readyTasks={(() => {
-                      const done = (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'done');
-                      return done.map<ReadyTaskRow>(t => ({
-                        id: t.id,
-                        title: t.title,
-                        branch: t.branch,
-                        additions: swarmDiffStats.get(t.id)?.additions ?? 0,
-                        deletions: swarmDiffStats.get(t.id)?.deletions ?? 0,
-                      }));
-                    })()}
-                    onLand={(id) => landWithCard(id)}
-                    onDiscard={(id) => discardWithCard(id)}
-                    onDiff={(id) => { setSwarmSelected(id); }}
-                    onLandAll={async () => {
-                      const done = (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'done');
-                      for (const task of done) await landWithCard(task.id);
                     }}
                     onCommand={({ text, splitLines }) => {
                       const trimmed = text.trim();

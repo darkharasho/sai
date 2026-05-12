@@ -1,7 +1,7 @@
 import React from 'react';
 import { Info } from 'lucide-react';
 import OrchestratorComposer from './OrchestratorComposer';
-import ReadyToLandTray, { type ReadyTaskRow } from './ReadyToLandTray';
+import { type ReadyTaskRow } from './ReadyToLandTray';
 import { type RecentTaskRow } from './RecentActivity';
 
 export type { ReadyTaskRow };
@@ -19,16 +19,10 @@ interface Props {
   orchestratorSessionId: string;
   projectPath: string;
   stats: OrchestratorStats;
-  readyTasks: ReadyTaskRow[];
   onCommand: (cmd: { text: string; splitLines: boolean }) => void;
-  onLand?: (id: string) => void;
-  onDiscard?: (id: string) => void;
-  onDiff?: (id: string) => void;
-  onLandAll?: () => void;
   orchestratorProvider?: string | null;
   orchestratorModel?: string | null;
   chatSlot?: React.ReactNode;       // App.tsx can pass an embedded ChatPanel here
-  readySlot?: React.ReactNode;      // legacy slot (unused now)
 }
 
 function basename(p: string): string {
@@ -47,10 +41,9 @@ function formatRuntime(sec?: number): string | null {
 }
 
 export default function OrchestratorView({
-  projectPath, stats, readyTasks, onCommand,
-  onLand, onDiscard, onDiff, onLandAll,
+  projectPath, stats, onCommand,
   orchestratorProvider, orchestratorModel,
-  chatSlot, readySlot,
+  chatSlot,
 }: Props) {
   const project = basename(projectPath) || 'project';
   const runtime = formatRuntime(stats.runtimeSec);
@@ -128,14 +121,6 @@ export default function OrchestratorView({
         {chatSlot}
       </div>
 
-      <ReadyToLandTray
-        tasks={readyTasks}
-        onLand={onLand ?? (() => {})}
-        onDiscard={onDiscard ?? (() => {})}
-        onDiff={onDiff ?? (() => {})}
-        onLandAll={onLandAll ?? (() => {})}
-      />
-      {readySlot}
       {!chatSlot && <OrchestratorComposer onCommand={onCommand} />}
     </div>
   );
