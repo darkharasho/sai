@@ -222,6 +222,11 @@ export default function App() {
   const activeProjectPathRef = useRef(activeProjectPath);
   const swarmTasksByWsRef = useRef(swarmTasksByWs);
   const swarmDiffStatsRef = useRef(swarmDiffStats);
+  // Dedupe synthetic completion/failure card emissions. claude.ts emits both
+  // 'result' and 'done' at end of turn — both hit the status mirror before
+  // the ref re-syncs, so without this guard the same task fires task_completed
+  // twice (visible as duplicate inline cards).
+  const emittedLifecycleRef = useRef<Set<string>>(new Set());
   const orchestratorSessionIdByWsRef = useRef(orchestratorSessionIdByWs);
   // Tracks the last swarm task we routed the active session to, to avoid
   // re-firing the session-switch effect on every state update.
@@ -1361,30 +1366,36 @@ export default function App() {
           // background task lifecycle events appear inline as a live feed.
           if (mirror.patch.kind === 'status' && patchedTask) {
             const statusPatch = mirror.patch;
-            const kind = statusPatch.status === 'done' ? 'task_completed' : 'task_failed';
-            const stats = swarmDiffStatsRef.current.get(patchedTask.id);
-            const input: Record<string, unknown> = {
-              taskId: patchedTask.id,
-              title: patchedTask.title,
-              branch: patchedTask.branch,
-              toolCallCount: patchedTask.toolCallCount,
-              durationMs: statusPatch.lastActivityAt - patchedTask.createdAt,
-            };
-            if (kind === 'task_completed' && stats) {
-              input.additions = stats.additions;
-              input.deletions = stats.deletions;
+            const dedupeKey = `${patchedTask.id}:${statusPatch.status}`;
+            // claude.ts emits both 'result' and 'done' at end of turn; both pass
+            // through the mirror before the ref re-syncs, so skip the second one.
+            if (!emittedLifecycleRef.current.has(dedupeKey)) {
+              emittedLifecycleRef.current.add(dedupeKey);
+              const kind = statusPatch.status === 'done' ? 'task_completed' : 'task_failed';
+              const stats = swarmDiffStatsRef.current.get(patchedTask.id);
+              const input: Record<string, unknown> = {
+                taskId: patchedTask.id,
+                title: patchedTask.title,
+                branch: patchedTask.branch,
+                toolCallCount: patchedTask.toolCallCount,
+                durationMs: statusPatch.lastActivityAt - patchedTask.createdAt,
+              };
+              if (kind === 'task_completed' && stats) {
+                input.additions = stats.additions;
+                input.deletions = stats.deletions;
+              }
+              if (kind === 'task_failed') {
+                input.prompt = patchedTask.prompt;
+                if ((statusPatch as any).reason) input.reason = (statusPatch as any).reason;
+              }
+              void (window.sai as any).swarmEmitCard?.(msg.projectPath, kind, input)
+                .then((r: { id: string } | null) => {
+                  if (r?.id) {
+                    (window.sai as any).swarmEmitCardResult?.(msg.projectPath, r.id, { ok: statusPatch.status === 'done' });
+                  }
+                })
+                .catch(() => { /* best-effort */ });
             }
-            if (kind === 'task_failed') {
-              input.prompt = patchedTask.prompt;
-              if ((statusPatch as any).reason) input.reason = (statusPatch as any).reason;
-            }
-            void (window.sai as any).swarmEmitCard?.(msg.projectPath, kind, input)
-              .then((r: { id: string } | null) => {
-                if (r?.id) {
-                  (window.sai as any).swarmEmitCardResult?.(msg.projectPath, r.id, { ok: statusPatch.status === 'done' });
-                }
-              })
-              .catch(() => { /* best-effort */ });
           }
         }
       }
