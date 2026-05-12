@@ -324,6 +324,7 @@ interface ChatPanelProps {
   sessionId?: string;
   terminalTabs?: TerminalTab[];
   onSlashCommandsUpdate?: (commands: string[]) => void;
+  onInterceptSend?: (text: string) => Promise<boolean | { handled: boolean; reply?: string }>;
 }
 
 const EMPTY_PROMPTS = [
@@ -529,7 +530,7 @@ const FAKE_ERROR_VARIANTS = {
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(initialMessages || []);
   const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);
   const setMessages = useCallback((updater: ChatMessageType[] | ((prev: ChatMessageType[]) => ChatMessageType[])) => {
@@ -1245,6 +1246,31 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     if (import.meta.env.DEV && text.startsWith('/fake-error')) {
       handleFakeError(text);
       return;
+    }
+    // Slash-command interception (orchestrator chat). When the parent provides
+    // onInterceptSend and reports the message as handled, we add the user msg
+    // and a synthetic assistant reply locally and skip provider dispatch.
+    if (onInterceptSend) {
+      try {
+        const outcome = await onInterceptSend(text);
+        const handled = outcome === true || (typeof outcome === 'object' && outcome !== null && (outcome as any).handled);
+        if (handled) {
+          const userId = `slash-user-${Date.now()}`;
+          const userTs = Date.now();
+          const reply = typeof outcome === 'object' && outcome !== null ? (outcome as any).reply : '';
+          setMessages(prev => [...prev, { id: userId, role: 'user', content: text, timestamp: userTs }]);
+          if (reply) {
+            const replyId = `slash-reply-${Date.now()}`;
+            setMessages(prev => [...prev, { id: replyId, role: 'assistant', content: String(reply), timestamp: userTs + 1 }]);
+          }
+          // Flush to parent so onTurnComplete-style persistence picks these up.
+          flushMessagesToParent();
+          onTurnComplete?.();
+          return;
+        }
+      } catch (err) {
+        console.error('onInterceptSend error', err);
+      }
     }
     if (text === '/clear') {
       setMessages([]);

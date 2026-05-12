@@ -37,6 +37,7 @@ import { SwarmScheduler, isLikelyReadOnlyPrompt } from './lib/swarmScheduler';
 import { landTask, discardTask } from './lib/swarmLanding';
 import { ensureOrchestratorSession } from './lib/swarmOrchestratorSession';
 import { handleSwarmToolRequest, type SwarmHost } from './lib/swarmOrchestratorDispatcher';
+import { executeSlashCommand } from './lib/orchestratorSlashCommands';
 import { isOrchestratorToolDrift, describeToolDrift } from './lib/orchestratorToolDrift';
 import { resolveTaskRef } from './lib/swarmRef';
 
@@ -2217,6 +2218,12 @@ export default function App() {
                       }}
                       onSlashCommandsUpdate={(cmds: string[]) => { slashCommandsRef.current = cmds; }}
                       terminalTabs={ws.terminalTabs ?? []}
+                      onInterceptSend={async (text: string) => {
+                        const outcome = await executeSlashCommand(text, swarmHostRef.current);
+                        return outcome.handled
+                          ? { handled: true, reply: (outcome as { handled: true; reply: string }).reply }
+                          : false;
+                      }}
                       onTurnComplete={() => {
                         const latestMessages = orchMessagesRef.current.get(orchSessionId) || [];
                         if (latestMessages.length === 0) return;
