@@ -32,6 +32,7 @@ import SwarmTaskHeader from './components/Swarm/SwarmTaskHeader';
 import { swarmGetTasks, swarmCreateTask, swarmUpdateTask } from './swarmDb';
 import { SwarmScheduler, isLikelyReadOnlyPrompt } from './lib/swarmScheduler';
 import { landTask, discardTask } from './lib/swarmLanding';
+import { ensureOrchestratorSession } from './lib/swarmOrchestratorSession';
 
 const SWARM_DEFAULT_CAP = 3;
 import { swarmBranchName } from './lib/swarmSlug';
@@ -147,6 +148,7 @@ export default function App() {
   const [workspaces, setWorkspaces] = useState<Map<string, WorkspaceContext>>(new Map());
   const [swarmTasksByWs, setSwarmTasksByWs] = useState<Map<string, SwarmTask[]>>(new Map());
   const [swarmSelected, setSwarmSelected] = useState<'overview' | string>('overview');
+  const [orchestratorSessionIdByWs, setOrchestratorSessionIdByWs] = useState<Map<string, string>>(new Map());
   const [showNewTaskPopover, setShowNewTaskPopover] = useState(false);
   const [messageQueues, setMessageQueues] = useState<Map<string, QueuedMessage[]>>(new Map());
   const [pendingClose, setPendingClose] = useState<string | null>(null);
@@ -1482,6 +1484,19 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sidebarOpen, swarmSelected, activeProjectPath, swarmTasksByWs]);
+
+  // Ensure a singleton orchestrator session exists when the swarm sidebar opens for a workspace
+  useEffect(() => {
+    if (sidebarOpen !== 'swarm' || !activeProjectPath) return;
+    if (orchestratorSessionIdByWs.has(activeProjectPath)) return;
+    ensureOrchestratorSession(activeProjectPath, aiProvider).then(session => {
+      setOrchestratorSessionIdByWs(prev => new Map(prev).set(activeProjectPath, session.id));
+      dbGetSessions(activeProjectPath).then(fresh => {
+        updateWorkspace(activeProjectPath, ws => ({ ...ws, sessions: fresh }));
+      });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sidebarOpen, activeProjectPath]);
 
   const handleUpdateSessions = useCallback((updated: ChatSession[]) => {
     if (!activeProjectPath) return;
