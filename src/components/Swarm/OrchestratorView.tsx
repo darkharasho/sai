@@ -18,6 +18,8 @@ export interface OrchestratorStats {
   cost?: number;
   runtimeSec?: number;
   tokRate?: number;
+  /** 12-element ring buffer of recent active counts (one sample / 5s). */
+  activeHistory?: number[];
 }
 
 interface Props {
@@ -127,6 +129,7 @@ export default function OrchestratorView({
             cap={stats.cap}
             cost={stats.cost}
             runtimeSec={stats.runtimeSec}
+            activeHistory={stats.activeHistory}
           />
 
           <ActivityRibbon

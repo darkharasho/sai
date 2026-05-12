@@ -32,6 +32,7 @@ import SwarmTaskHeader from './components/Swarm/SwarmTaskHeader';
 import OrchestratorView from './components/Swarm/OrchestratorView';
 import SwarmLogoCluster from './components/Swarm/SwarmLogoCluster';
 import SwarmToolCardSelector from './components/Swarm/cards/SwarmToolCardSelector';
+import { bucketToolCalls, trimEvents, pushRing, type TimedEvent } from './lib/swarmActivityHistory';
 import InlineApprovalCard from './components/Swarm/cards/InlineApprovalCard';
 import QuitSwarmConfirmModal from './components/Swarm/QuitSwarmConfirmModal';
 import { swarmInit, swarmGetApprovals, swarmResolveApproval, swarmCreateApproval } from './swarmDb';
@@ -228,6 +229,33 @@ export default function App() {
   // the ref re-syncs, so without this guard the same task fires task_completed
   // twice (visible as duplicate inline cards).
   const emittedLifecycleRef = useRef<Set<string>>(new Set());
+  // Per-workspace activity ring buffers powering the orchestrator sparklines.
+  // - tools: timed tool_use events (filtered per task for SpawnTaskCard)
+  // - activeBuckets: 12-element ring of `streaming+queued+awaiting_approval`
+  //   counts sampled every 5s for the StatStrip ACTIVE background sparkline.
+  const activityHistoryRef = useRef<Map<string, { tools: TimedEvent[]; activeBuckets: number[] }>>(new Map());
+  // Bumped whenever we want consumers (StatStrip / SpawnTaskCard sparklines)
+  // to pick up the freshest snapshot of activityHistoryRef.
+  const [activityTick, setActivityTick] = useState(0);
+  // Per-workspace batch detection state for end-of-batch wrap-up cards.
+  // - activeCount: previous tick's active count (>0 means an active window is open)
+  // - startedAt: timestamp when the active window opened
+  // - startCount: total tasks observed in this active window
+  // - completionEvents: per-task completion timestamps (for the bar-chart sparkline)
+  // - knownTaskIds: ids we've already counted toward startCount
+  // - landedAtStart / failedAtStart / discardedAtStart: snapshots so we report
+  //   only deltas accumulated within this batch window.
+  const batchStateRef = useRef<Map<string, {
+    activeCount: number;
+    startedAt: number;
+    startCount: number;
+    completionEvents: number[];
+    knownTaskIds: Set<string>;
+    landedAtStart: number;
+    failedAtStart: number;
+    discardedAtStart: number;
+    countersAtStart: { landed: number; failed: number; discarded: number };
+  }>>(new Map());
   const orchestratorSessionIdByWsRef = useRef(orchestratorSessionIdByWs);
   // Tracks the last swarm task we routed the active session to, to avoid
   // re-firing the session-switch effect on every state update.
@@ -307,6 +335,136 @@ export default function App() {
     }).catch(() => { /* ignore */ });
     return () => { cancelled = true; };
   }, [activeProjectPath, swarmTasksByWs]);
+
+  // Poll active task counts every 5s into a 12-element ring buffer per
+  // workspace so the StatStrip ACTIVE card can render a 60s background
+  // sparkline. The poller drives both an "is active now" sample and a
+  // re-render bump for sparkline consumers.
+  useEffect(() => {
+    const tick = () => {
+      let changed = false;
+      for (const [ws, tasks] of swarmTasksByWsRef.current.entries()) {
+        const active = tasks.filter(t =>
+          t.status === 'streaming' || t.status === 'queued' || t.status === 'awaiting_approval'
+        ).length;
+        const entry = activityHistoryRef.current.get(ws) ?? { tools: [], activeBuckets: [] };
+        entry.activeBuckets = pushRing(entry.activeBuckets, active, 12);
+        activityHistoryRef.current.set(ws, entry);
+        changed = true;
+      }
+      if (changed) setActivityTick(t => t + 1);
+    };
+    const id = setInterval(tick, 5000);
+    return () => clearInterval(id);
+  }, []);
+
+  // End-of-batch wrap-up card detection. We watch swarmTasksByWs and, per
+  // workspace, treat the period during which active count (streaming+queued
+  // +awaiting_approval) > 0 as a "batch window". When the window closes
+  // (active returns to 0) AND the batch had >= 2 tasks total, emit a
+  // synthetic batch_complete card summarizing landed/discarded/failed +
+  // a completion-bucket bar chart.
+  useEffect(() => {
+    const now = Date.now();
+    for (const [ws, tasks] of swarmTasksByWs.entries()) {
+      const active = tasks.filter(t =>
+        t.status === 'streaming' || t.status === 'queued' || t.status === 'awaiting_approval'
+      ).length;
+      const landed = tasks.filter(t => t.status === 'landed').length;
+      const failed = tasks.filter(t => t.status === 'failed').length;
+      const discarded = tasks.filter(t => t.status === 'discarded').length;
+      const state = batchStateRef.current.get(ws);
+      if (!state) {
+        batchStateRef.current.set(ws, {
+          activeCount: active,
+          startedAt: active > 0 ? now : 0,
+          startCount: active,
+          completionEvents: [],
+          knownTaskIds: new Set(tasks.filter(t =>
+            t.status === 'streaming' || t.status === 'queued' || t.status === 'awaiting_approval'
+          ).map(t => t.id)),
+          landedAtStart: landed,
+          failedAtStart: failed,
+          discardedAtStart: discarded,
+          countersAtStart: { landed, failed, discarded },
+        });
+        continue;
+      }
+      // Window opens: 0 → 1+
+      if (state.activeCount === 0 && active > 0) {
+        state.startedAt = now;
+        state.startCount = active;
+        state.completionEvents = [];
+        state.knownTaskIds = new Set(tasks.filter(t =>
+          t.status === 'streaming' || t.status === 'queued' || t.status === 'awaiting_approval'
+        ).map(t => t.id));
+        state.countersAtStart = { landed, failed, discarded };
+      } else if (active > 0) {
+        // Window open: discover any newly added active tasks
+        for (const t of tasks) {
+          if ((t.status === 'streaming' || t.status === 'queued' || t.status === 'awaiting_approval')
+              && !state.knownTaskIds.has(t.id)) {
+            state.knownTaskIds.add(t.id);
+            state.startCount += 1;
+          }
+        }
+        // Track completion timestamps for the bar chart sparkline
+        for (const t of tasks) {
+          if ((t.status === 'done' || t.status === 'landed' || t.status === 'failed' || t.status === 'discarded')
+              && state.knownTaskIds.has(t.id)) {
+            // Use lastActivityAt as a proxy for completion time. Dedup by
+            // pushing only once per task — track via knownTaskIds removal.
+            // We piggy-back on the task lifecycle + a separate completed set.
+          }
+        }
+      }
+      // Window closes: > 0 → 0
+      if (state.activeCount > 0 && active === 0) {
+        const totalTasks = state.startCount;
+        if (totalTasks >= 2) {
+          const batchLanded = Math.max(0, landed - state.countersAtStart.landed);
+          const batchFailed = Math.max(0, failed - state.countersAtStart.failed);
+          const batchDiscarded = Math.max(0, discarded - state.countersAtStart.discarded);
+          // Build completion buckets from per-task lastActivityAt within window
+          const completionTimes: number[] = [];
+          for (const t of tasks) {
+            if (state.knownTaskIds.has(t.id)
+                && (t.status === 'done' || t.status === 'landed' || t.status === 'failed' || t.status === 'discarded')) {
+              completionTimes.push(t.lastActivityAt);
+            }
+          }
+          const durationMs = Math.max(0, now - state.startedAt);
+          const bucketMs = Math.max(1000, Math.ceil(durationMs / 12));
+          const buckets = bucketToolCalls(
+            completionTimes.map(ts => ({ ts })),
+            now,
+            12,
+            bucketMs,
+          );
+          const input = {
+            totalTasks,
+            landed: batchLanded,
+            discarded: batchDiscarded,
+            failed: batchFailed,
+            durationMs,
+            completionBuckets: buckets,
+          };
+          void (window.sai as any).swarmEmitCard?.(ws, 'batch_complete', input)
+            .then((r: { id: string } | null) => {
+              if (r?.id) {
+                (window.sai as any).swarmEmitCardResult?.(ws, r.id, { ok: true });
+              }
+            })
+            .catch(() => { /* best-effort */ });
+        }
+        state.startCount = 0;
+        state.startedAt = 0;
+        state.knownTaskIds = new Set();
+        state.completionEvents = [];
+      }
+      state.activeCount = active;
+    }
+  }, [swarmTasksByWs]);
 
   const swarmSchedulers = useRef<Map<string, SwarmScheduler>>(new Map());
   const swarmSettingsRef = useRef<{
@@ -1372,6 +1530,19 @@ export default function App() {
         const mirror = deriveSwarmMirror(msg, tasks);
         if (mirror) {
           const patchedTask = tasks.find(t => t.id === mirror.taskId);
+          // Activity history: track tool_use bursts for the per-task
+          // sparkline ornaments on SpawnTaskCard.
+          if (mirror.patch.kind === 'toolCount') {
+            const ws = msg.projectPath as string;
+            const entry = activityHistoryRef.current.get(ws) ?? { tools: [], activeBuckets: [] };
+            const now = Date.now();
+            for (let i = 0; i < mirror.patch.delta; i++) {
+              entry.tools.push({ taskId: mirror.taskId, ts: now });
+            }
+            entry.tools = trimEvents(entry.tools, now);
+            activityHistoryRef.current.set(ws, entry);
+            setActivityTick(t => t + 1);
+          }
           setSwarmTasksByWs(prev => {
             const m = new Map(prev);
             const list = (m.get(msg.projectPath) ?? []).map(t =>
@@ -2634,12 +2805,39 @@ export default function App() {
                           ? { handled: true, reply: (outcome as { handled: true; reply: string }).reply }
                           : false;
                       }}
-                      renderToolCall={(tc) => (
+                      renderToolCall={(tc) => {
+                        // Derive per-task tool_use bucket counts (last 60s)
+                        // for SpawnTaskCard sparklines. We re-derive on each
+                        // render — activityTick triggers re-renders so the
+                        // map reflects the freshest ring buffer state.
+                        void activityTick;
+                        const wsHist = activityHistoryRef.current.get(wsPath);
+                        const toolHistory = new Map<string, number[]>();
+                        if (wsHist && wsHist.tools.length > 0) {
+                          const now = Date.now();
+                          const byTask = new Map<string, TimedEvent[]>();
+                          for (const ev of wsHist.tools) {
+                            if (!ev.taskId) continue;
+                            const arr = byTask.get(ev.taskId) ?? [];
+                            arr.push(ev);
+                            byTask.set(ev.taskId, arr);
+                          }
+                          for (const [tid, evs] of byTask.entries()) {
+                            toolHistory.set(tid, bucketToolCalls(evs, now));
+                          }
+                        }
+                        return (
                         <SwarmToolCardSelector
                           toolCall={tc}
                           tasks={swarmTasksByWs.get(wsPath) ?? []}
                           approvals={swarmApprovalsByWs.get(wsPath) ?? []}
                           diffStats={swarmDiffStats}
+                          toolHistory={toolHistory}
+                          onLandAllGreen={() => {
+                            const ready = (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'done');
+                            for (const t of ready) void landWithCard(t.id);
+                          }}
+                          onFocusChat={() => { /* no-op for now — chat is already focused */ }}
                           onFocusTask={(id) => setSwarmSelected(id)}
                           onLand={(id) => { void landWithCard(id); }}
                           onDiscard={(id) => { void discardWithCard(id); }}
@@ -2664,7 +2862,8 @@ export default function App() {
                             } catch { /* noop */ }
                           }}
                         />
-                      )}
+                        );
+                      }}
                       renderMessage={(message) => {
                         const meta = message.meta;
                         if (!meta || meta.type !== 'approval') return null;
@@ -2732,6 +2931,7 @@ export default function App() {
                       ready: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'done').length,
                       queued: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'queued').length,
                       cap: swarmSettingsRef.current.concurrencyCap,
+                      activeHistory: (() => { void activityTick; return activityHistoryRef.current.get(wsPath)?.activeBuckets; })(),
                     }}
                     onCommand={({ text, splitLines }) => {
                       const trimmed = text.trim();

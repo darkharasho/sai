@@ -1,6 +1,7 @@
 import React from 'react';
 import type { ToolCall, SwarmTask, SwarmTaskStatus } from '../../../types';
 import { cardBase, cardHeader, safeJsonParse, btnBase, btnPrimary, btnDanger } from './cardStyles';
+import Sparkline from '../Sparkline';
 
 interface DispatchedTask {
   /** Best-effort title parsed from the orchestrator's input. */
@@ -15,6 +16,12 @@ interface Props {
   tasks?: SwarmTask[];
   /** Live diff stats keyed by task id — populated as tasks complete. */
   diffStats?: Map<string, { additions: number; deletions: number }>;
+  /**
+   * Per-task tool_use bucket counts over the last 60s (12 × 5s buckets).
+   * When provided and the task has any non-zero buckets, a tiny inline
+   * sparkline is rendered after the diff stats.
+   */
+  toolHistory?: Map<string, number[]>;
   onFocusTask?: (taskId: string) => void;
   onLand?: (taskId: string) => void;
   onDiscard?: (taskId: string) => void;
@@ -88,6 +95,7 @@ export default function SpawnTaskCard({
   toolCall,
   tasks = [],
   diffStats,
+  toolHistory,
   onFocusTask,
   onLand,
   onDiscard,
@@ -151,6 +159,18 @@ export default function SpawnTaskCard({
                     <span style={{ color: '#b44' }}>−{stats.deletions}</span>
                   </span>
                 )}
+                {(() => {
+                  const hist = live ? toolHistory?.get(live.id) : undefined;
+                  if (!hist || !hist.some(v => v > 0)) return null;
+                  return (
+                    <span
+                      data-testid="swarm-spawn-row-sparkline"
+                      style={{ marginLeft: 8, display: 'inline-flex', verticalAlign: 'middle', color: 'var(--accent)' }}
+                    >
+                      <Sparkline data={hist} width={50} height={12} fillOpacity={0.25} />
+                    </span>
+                  );
+                })()}
               </div>
               <StatusPill status={status} />
               <div

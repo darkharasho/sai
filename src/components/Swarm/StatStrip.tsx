@@ -1,4 +1,5 @@
 import React from 'react';
+import Sparkline from './Sparkline';
 
 interface Props {
   active: number;
@@ -8,6 +9,8 @@ interface Props {
   cap: number;
   cost?: number;
   runtimeSec?: number;
+  /** Workspace-wide active count history (12-element ring buffer, ~60s). */
+  activeHistory?: number[];
 }
 
 function formatRuntime(sec?: number): string | null {
@@ -33,9 +36,10 @@ const cardBase: React.CSSProperties = {
   minWidth: 0,
 };
 
-export default function StatStrip({ active, approvals, ready, queued, cap, cost, runtimeSec }: Props) {
+export default function StatStrip({ active, approvals, ready, queued, cap, cost, runtimeSec, activeHistory }: Props) {
   const runtime = formatRuntime(runtimeSec);
   const approvalsMuted = approvals <= 0;
+  const showActiveSpark = !!activeHistory && activeHistory.some(v => v > 0);
   return (
     <div
       data-testid="orch-stat-strip"
@@ -54,10 +58,32 @@ export default function StatStrip({ active, approvals, ready, queued, cap, cost,
           ...cardBase,
           borderColor: 'var(--accent)',
           background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-elevated))',
+          position: 'relative',
+          overflow: 'hidden',
         }}
       >
-        <div style={labelStyle}>Active</div>
-        <div style={{ fontSize: 22, fontWeight: 600, color: 'var(--accent)' }}>{active}</div>
+        {showActiveSpark && activeHistory && (
+          <div
+            data-testid="stat-active-sparkline"
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              opacity: 0.25,
+              color: 'var(--accent)',
+              pointerEvents: 'none',
+              padding: 4,
+              display: 'flex',
+              alignItems: 'flex-end',
+            }}
+          >
+            <Sparkline data={activeHistory} width={120} height={40} fillOpacity={0.4} strokeWidth={1} />
+          </div>
+        )}
+        <div style={{ position: 'relative' }}>
+          <div style={labelStyle}>Active</div>
+          <div style={{ fontSize: 22, fontWeight: 600, color: 'var(--accent)' }}>{active}</div>
+        </div>
       </div>
 
       <div

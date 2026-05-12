@@ -10,6 +10,7 @@ import TaskCompletedCard from './TaskCompletedCard';
 import TaskFailedCard from './TaskFailedCard';
 import TaskStartedCard from './TaskStartedCard';
 import AutoApprovedCard from './AutoApprovedCard';
+import BatchCompleteCard from './BatchCompleteCard';
 
 interface Props {
   toolCall: ToolCall;
@@ -17,6 +18,8 @@ interface Props {
   tasks?: SwarmTask[];
   approvals?: SwarmApproval[];
   diffStats?: Map<string, { additions: number; deletions: number }>;
+  /** Per-task tool_use bucket counts over the last 60s (12 × 5s buckets). */
+  toolHistory?: Map<string, number[]>;
   onFocusTask?: (taskId: string) => void;
   onRebaseRetry?: (taskRef: string) => void;
   onLand?: (taskId: string) => void;
@@ -24,6 +27,8 @@ interface Props {
   onDiff?: (taskId: string) => void;
   onRetry?: (prompt: string) => void;
   onScrollToApproval?: (taskId: string) => void;
+  onLandAllGreen?: () => void;
+  onFocusChat?: () => void;
 }
 
 const SWARM_PREFIX = 'mcp__swarm__';
@@ -36,8 +41,9 @@ const SWARM_PREFIX = 'mcp__swarm__';
  */
 export default function SwarmToolCardSelector(props: Props): React.ReactElement | null {
   const {
-    toolCall, tasks, approvals, diffStats,
+    toolCall, tasks, approvals, diffStats, toolHistory,
     onFocusTask, onRebaseRetry, onLand, onDiscard, onDiff, onRetry, onScrollToApproval,
+    onLandAllGreen, onFocusChat,
   } = props;
   if (!toolCall.name?.startsWith(SWARM_PREFIX)) return null;
   const baseName = toolCall.name.slice(SWARM_PREFIX.length);
@@ -49,6 +55,7 @@ export default function SwarmToolCardSelector(props: Props): React.ReactElement 
           toolCall={toolCall}
           tasks={tasks}
           diffStats={diffStats}
+          toolHistory={toolHistory}
           onFocusTask={onFocusTask}
           onLand={onLand}
           onDiscard={onDiscard}
@@ -85,6 +92,17 @@ export default function SwarmToolCardSelector(props: Props): React.ReactElement 
       return <TaskStartedCard toolCall={toolCall} />;
     case 'auto_approved':
       return <AutoApprovedCard toolCall={toolCall} />;
+    case 'batch_complete': {
+      const hasLandable = !!tasks?.some(t => t.status === 'done');
+      return (
+        <BatchCompleteCard
+          toolCall={toolCall}
+          onLandAll={onLandAllGreen}
+          onFocusChat={onFocusChat}
+          hasLandable={hasLandable}
+        />
+      );
+    }
     default:
       // Unknown swarm tool — fall back to the default renderer so we don't
       // silently swallow new tools the orchestrator might learn.
