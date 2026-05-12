@@ -1,5 +1,5 @@
 import type { SwarmTask } from '../../types';
-import { Pause, Trash2, GitMerge, Diff } from 'lucide-react';
+import { Pause, Play, Trash2, GitMerge, Diff } from 'lucide-react';
 
 interface Props {
   task: SwarmTask;
@@ -7,10 +7,12 @@ interface Props {
   onDiscard: () => void;
   onLand: () => void;
   onOpenDiff: () => void;
+  onResume?: () => void;
 }
 
-export default function SwarmTaskHeader({ task, onPause, onDiscard, onLand, onOpenDiff }: Props) {
+export default function SwarmTaskHeader({ task, onPause, onDiscard, onLand, onOpenDiff, onResume }: Props) {
   const landDisabled = task.status !== 'done';
+  const isPaused = task.status === 'paused';
   return (
     <div className="swarm-task-header">
       <div className="title">{task.title}</div>
@@ -20,6 +22,11 @@ export default function SwarmTaskHeader({ task, onPause, onDiscard, onLand, onOp
         <span className="muted">{task.provider}/{task.model}</span>
       </div>
       <div className="actions">
+        {isPaused && onResume && (
+          <button aria-label="Resume" title="Resume" onClick={onResume}>
+            <Play size={12}/> Resume
+          </button>
+        )}
         <button aria-label="Pause" title="Pause" onClick={onPause}><Pause size={12}/></button>
         <button aria-label="Open diff" title="Open diff" onClick={onOpenDiff}><Diff size={12}/></button>
         <button aria-label="Discard" title="Discard" onClick={onDiscard}><Trash2 size={12}/></button>

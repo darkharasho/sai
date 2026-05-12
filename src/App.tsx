@@ -31,7 +31,8 @@ import NewTaskPopover from './components/Swarm/NewTaskPopover';
 import SwarmTaskHeader from './components/Swarm/SwarmTaskHeader';
 import OrchestratorView, { type ReadyTaskRow, type RecentTaskRow } from './components/Swarm/OrchestratorView';
 import QuitSwarmConfirmModal from './components/Swarm/QuitSwarmConfirmModal';
-import { swarmGetTasks, swarmCreateTask, swarmUpdateTask, swarmGetApprovals, swarmResolveApproval } from './swarmDb';
+import { swarmInit, swarmGetTasks, swarmCreateTask, swarmUpdateTask, swarmGetApprovals, swarmResolveApproval } from './swarmDb';
+import { reconcileTasksOnStartup } from './lib/swarmReconcile';
 import { SwarmScheduler, isLikelyReadOnlyPrompt } from './lib/swarmScheduler';
 import { landTask, discardTask } from './lib/swarmLanding';
 import { ensureOrchestratorSession } from './lib/swarmOrchestratorSession';
@@ -232,6 +233,27 @@ export default function App() {
     });
     return cleanup;
   }, []);
+
+  // Task 27: On app start, reconcile any swarm task left in `streaming` to
+  // `paused` (the model wasn't running across the relaunch). Runs once before
+  // per-workspace task hydration so the UI sees the demoted state.
+  useEffect(() => {
+    (async () => {
+      try {
+        await swarmInit();
+        const sai = window.sai as any;
+        const wsList: any[] = (await sai?.workspaceGetAll?.()) ?? [];
+        for (const w of wsList) {
+          if (w?.projectPath) {
+            await reconcileTasksOnStartup(w.projectPath);
+          }
+        }
+      } catch {
+        /* best-effort: ignore startup reconcile failures */
+      }
+    })();
+  }, []);
+
   useEffect(() => {
     activeProjectPathRef.current = activeProjectPath;
     setActiveWorkspace(activeProjectPath);
@@ -2037,6 +2059,18 @@ export default function App() {
                       });
                     }}
                     onOpenDiff={() => { /* TODO(Task 12) */ }}
+                    onResume={() => {
+                      const id = focusedSwarmTask.id;
+                      swarmUpdateTask(id, { status: 'queued' });
+                      setSwarmTasksByWs(prev => {
+                        const m = new Map(prev);
+                        const list = (m.get(activeProjectPath) ?? []).map(t =>
+                          t.id === id ? { ...t, status: 'queued' as const } : t
+                        );
+                        m.set(activeProjectPath, list);
+                        return m;
+                      });
+                    }}
                   />
                 )}
                 {sidebarOpen === 'swarm' && swarmSelected === 'overview' && orchestratorSessionIdByWs.get(wsPath) ? (
