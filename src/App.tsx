@@ -44,7 +44,6 @@ import { resolveTaskRef } from './lib/swarmRef';
 const SWARM_DEFAULT_CAP = 5;
 import { swarmBranchName } from './lib/swarmSlug';
 import { shouldRequireApproval } from './lib/swarmApprovalPolicy';
-import type { OrchestratorPromptContext } from './lib/orchestratorSystemPrompt';
 import { isImageFile } from './utils/imageFiles';
 import { getMonacoEditorFor } from './utils/monacoEditorRegistry';
 import * as monaco from 'monaco-editor';
@@ -1896,22 +1895,8 @@ export default function App() {
     if (orchestratorSessionIdByWs.has(activeProjectPath)) return;
     ensureOrchestratorSession(activeProjectPath, aiProvider).then(session => {
       setOrchestratorSessionIdByWs(prev => new Map(prev).set(activeProjectPath, session.id));
-      // Pre-warm the Claude scope with kind='orchestrator' so when ChatPanel
-      // mounts and triggers ensureProcess, the spawned CLI gets the
-      // SAI-managed MCP config + --strict-mcp-config + --tools "" flags.
-      try {
-        const wsName = activeProjectPath.split(/[\\/]/).filter(Boolean).pop() || activeProjectPath;
-        const cfg = swarmSettingsRef.current;
-        const orchestratorContext: OrchestratorPromptContext = {
-          workspaceName: wsName,
-          workspacePath: activeProjectPath,
-          defaultProvider: cfg.defaultTaskProvider ?? aiProvider ?? 'claude',
-          defaultModel: cfg.defaultTaskModel || modelChoice || 'opus',
-          defaultApprovalPolicy: cfg.defaultApprovalPolicy ?? 'auto-read',
-          concurrencyCap: cfg.concurrencyCap ?? 5,
-        };
-        (window as any).sai?.claudeStart?.(activeProjectPath, session.id, 'orchestrator', orchestratorContext);
-      } catch { /* ignore — kind will fall back to chat if preload missing */ }
+      // ChatPanel mounts with claudeScope={session.id} + claudeKind='orchestrator'
+      // and triggers ensureProcess on its own with the right args.
       dbGetSessions(activeProjectPath).then(fresh => {
         updateWorkspace(activeProjectPath, ws => ({ ...ws, sessions: fresh }));
       });
@@ -2218,6 +2203,20 @@ export default function App() {
                       }}
                       onSlashCommandsUpdate={(cmds: string[]) => { slashCommandsRef.current = cmds; }}
                       terminalTabs={ws.terminalTabs ?? []}
+                      claudeScope={orchSessionId}
+                      claudeKind="orchestrator"
+                      claudeOrchestratorContext={(() => {
+                        const wsName = wsPath.split(/[\\/]/).filter(Boolean).pop() || wsPath;
+                        const cfg = swarmSettingsRef.current;
+                        return {
+                          workspaceName: wsName,
+                          workspacePath: wsPath,
+                          defaultProvider: cfg.defaultTaskProvider ?? aiProvider ?? 'claude',
+                          defaultModel: cfg.defaultTaskModel || modelChoice || 'opus',
+                          defaultApprovalPolicy: cfg.defaultApprovalPolicy ?? 'auto-read',
+                          concurrencyCap: cfg.concurrencyCap ?? 5,
+                        };
+                      })()}
                       onInterceptSend={async (text: string) => {
                         const outcome = await executeSlashCommand(text, swarmHostRef.current);
                         return outcome.handled

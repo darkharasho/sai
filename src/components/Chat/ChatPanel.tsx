@@ -325,6 +325,18 @@ interface ChatPanelProps {
   terminalTabs?: TerminalTab[];
   onSlashCommandsUpdate?: (commands: string[]) => void;
   onInterceptSend?: (text: string) => Promise<boolean | { handled: boolean; reply?: string }>;
+  /**
+   * IPC scope to use for claude:start / send / stop / message routing.
+   * Defaults to 'chat' (the workspace's default chat scope). Pass the
+   * orchestrator's session id when this ChatPanel is mounted for an
+   * orchestrator session — otherwise its messages and tool args go to
+   * the wrong process.
+   */
+  claudeScope?: string;
+  /** Optional: pass 'orchestrator' to start the Claude process in orchestrator mode. */
+  claudeKind?: 'chat' | 'task' | 'orchestrator';
+  /** Optional: orchestrator prompt context (only used when claudeKind === 'orchestrator'). */
+  claudeOrchestratorContext?: any;
 }
 
 const EMPTY_PROMPTS = [
@@ -530,7 +542,7 @@ const FAKE_ERROR_VARIANTS = {
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(initialMessages || []);
   const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);
   const setMessages = useCallback((updater: ChatMessageType[] | ((prev: ChatMessageType[]) => ChatMessageType[])) => {
@@ -623,14 +635,17 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     if (Date.now() < autoCompactCooldownRef.current) return;
     // Trigger compact and set 60s cooldown
     autoCompactCooldownRef.current = Date.now() + 60_000;
-    window.sai.claudeCompact(projectPath, permissionMode, effortLevel, modelChoice);
+    window.sai.claudeCompact(projectPath, permissionMode, effortLevel, modelChoice, claudeScope);
   }, [contextUsage, isStreaming]);
 
 
   useEffect(() => {
     setReady(false);
     const startFn = aiProvider === 'gemini' ? (window.sai as any).geminiStart : aiProvider === 'codex' ? window.sai.codexStart : window.sai.claudeStart;
-    startFn(projectPath || '').then((result: any) => {
+    const startArgs: any[] = aiProvider === 'claude'
+      ? [projectPath || '', claudeScope, claudeKind, claudeOrchestratorContext]
+      : [projectPath || ''];
+    startFn(...startArgs).then((result: any) => {
       setReady(true);
       if (result?.slashCommands?.length) {
         setSlashCommands(result.slashCommands);
@@ -640,7 +655,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
       // Only process messages for this workspace and chat scope
       if (msg.projectPath && msg.projectPath !== projectPath) return;
-      if (msg.scope && msg.scope !== 'chat') return;
+      if (msg.scope && msg.scope !== claudeScope) return;
 
       if (msg.type === 'ready') {
         setReady(true);
@@ -1279,7 +1294,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       return;
     }
     if (text === '/compact' && aiProvider === 'claude') {
-      window.sai.claudeCompact(projectPath, permissionMode, effortLevel, modelChoice);
+      window.sai.claudeCompact(projectPath, permissionMode, effortLevel, modelChoice, claudeScope);
       pendingComposerRectRef.current = null;
       return;
     }
@@ -1311,7 +1326,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       suppressNextDrainRef.current = true;
       if (aiProvider === 'gemini') (window.sai as any).geminiStop?.(projectPath);
       else if (aiProvider === 'codex') window.sai.codexStop?.(projectPath);
-      else window.sai.claudeStop?.(projectPath);
+      else window.sai.claudeStop?.(projectPath, claudeScope);
     }
 
     isAtBottomRef.current = true;
@@ -1341,7 +1356,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     } else if (aiProvider === 'codex') {
       window.sai.codexSend(projectPath, prompt, imagePaths, codexPermission, codexModel);
     } else {
-      window.sai.claudeSend(projectPath, prompt, imagePaths, permissionMode, effortLevel, modelChoice);
+      window.sai.claudeSend(projectPath, prompt, imagePaths, permissionMode, effortLevel, modelChoice, claudeScope);
     }
   };
 
@@ -1558,7 +1573,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             onAlwaysAllow={handleAlwaysAllow}
             isStreaming={isStreaming}
             messages={messages}
-            onStop={() => aiProvider === 'gemini' ? (window.sai as any).geminiStop(projectPath) : aiProvider === 'codex' ? window.sai.codexStop(projectPath) : window.sai.claudeStop?.(projectPath)}
+            onStop={() => aiProvider === 'gemini' ? (window.sai as any).geminiStop(projectPath) : aiProvider === 'codex' ? window.sai.codexStop(projectPath) : window.sai.claudeStop?.(projectPath, claudeScope)}
             permissionMode={permissionMode}
             onPermissionChange={onPermissionChange}
             effortLevel={effortLevel}
