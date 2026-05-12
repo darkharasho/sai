@@ -168,7 +168,11 @@ function createWindow() {
     console.log('[swarm-mcp] socket listening at', mcpHandle.socketPath);
 
     // Bridge MCP tool calls (from socket) into the renderer over IPC.
-    const pendingMcpCalls = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+    const pendingMcpCalls = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; toolUseId: string; workspace: string; orchSessionId: string | undefined }>();
+    // Per-workspace orchestrator session id, registered by the renderer when
+    // ensureOrchestratorSession resolves. Used to tag synthetic claude:message
+    // events so ChatPanel renders inline tool cards for MCP calls.
+    const swarmOrchestratorSessions = new Map<string, string>();
 
     const safeSendMcp = (channel: string, payload: unknown) => {
       try {
@@ -178,10 +182,38 @@ function createWindow() {
       } catch { /* noop */ }
     };
 
+    ipcMain.handle('swarm:set-orchestrator-session', (_evt, workspace: string, sessionId: string) => {
+      if (typeof workspace === 'string' && typeof sessionId === 'string') {
+        swarmOrchestratorSessions.set(workspace, sessionId);
+      }
+    });
+
     swarmMcpHost.onToolCall(async (req) => {
       const id = `mcp-${crypto.randomUUID()}`;
+      // Deterministic tool_use id so the later tool_result can be matched.
+      const toolUseId = `mcp-tooluse-${id}`;
+      const orchSessionId = swarmOrchestratorSessions.get(req.workspace);
+
+      // Inject a synthetic assistant tool_use into the orchestrator chat so a
+      // SwarmToolCardSelector card renders inline. Claude CLI's stream-json
+      // output doesn't surface tool_use blocks for MCP tools (they're absorbed
+      // into the MCP exchange), so without this fallback the orchestrator chat
+      // looks like the model "did nothing" even though tasks landed.
+      if (orchSessionId) {
+        safeSendMcp('claude:message', {
+          type: 'assistant',
+          projectPath: req.workspace,
+          scope: orchSessionId,
+          message: {
+            content: [
+              { type: 'tool_use', id: toolUseId, name: `mcp__swarm__${req.tool}`, input: req.input },
+            ],
+          },
+        });
+      }
+
       return await new Promise<unknown>((resolve, reject) => {
-        pendingMcpCalls.set(id, { resolve, reject });
+        pendingMcpCalls.set(id, { resolve, reject, toolUseId, workspace: req.workspace, orchSessionId });
         safeSendMcp('swarm:tool-request', {
           id,
           tool: req.tool,
@@ -197,10 +229,31 @@ function createWindow() {
       });
     });
 
+    const emitSyntheticToolResult = (
+      pending: { toolUseId: string; workspace: string; orchSessionId: string | undefined },
+      content: string,
+      isError: boolean,
+    ) => {
+      if (!pending.orchSessionId) return;
+      safeSendMcp('claude:message', {
+        type: 'user',
+        projectPath: pending.workspace,
+        scope: pending.orchSessionId,
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: pending.toolUseId, content, is_error: isError },
+          ],
+        },
+      });
+    };
+
     ipcMain.on('swarm:tool-response', (_evt, id: string, result: unknown) => {
       const pending = pendingMcpCalls.get(id);
       if (!pending) return;
       pendingMcpCalls.delete(id);
+      let serialized: string;
+      try { serialized = typeof result === 'string' ? result : JSON.stringify(result); } catch { serialized = String(result); }
+      emitSyntheticToolResult(pending, serialized, false);
       pending.resolve(result);
     });
 
@@ -208,6 +261,7 @@ function createWindow() {
       const pending = pendingMcpCalls.get(id);
       if (!pending) return;
       pendingMcpCalls.delete(id);
+      emitSyntheticToolResult(pending, String(error ?? 'error'), true);
       pending.reject(new Error(error));
     });
   } catch (err) {

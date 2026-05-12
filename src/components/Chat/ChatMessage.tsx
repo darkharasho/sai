@@ -877,7 +877,6 @@ function ChatMessage({
       )}
       {message.toolCalls && message.toolCalls.length > 0 && (
         <Stagger cadence="default">
-          {(() => { try { console.log('[ChatMessage]', { msgId: message.id, count: message.toolCalls!.length, names: message.toolCalls!.map(t => t.name) }); } catch { /* noop */ } return null; })()}
           {message.toolCalls.map((tc, i) => {
             if (renderToolCall) {
               const custom = renderToolCall(tc, toolCallsExpanded);

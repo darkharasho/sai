@@ -222,6 +222,8 @@ contextBridge.exposeInMainWorld('sai', {
   },
   respondSwarmTool: (id: string, result: unknown) => ipcRenderer.send('swarm:tool-response', id, result),
   respondSwarmToolError: (id: string, error: string) => ipcRenderer.send('swarm:tool-response-error', id, error),
+  swarmSetOrchestratorSession: (workspace: string, sessionId: string) =>
+    ipcRenderer.invoke('swarm:set-orchestrator-session', workspace, sessionId),
   swarm: {
     worktreeAdd: (projectPath: string, taskId: string, branch: string, baseBranch: string) =>
       ipcRenderer.invoke('swarm:worktree-add', projectPath, taskId, branch, baseBranch),

@@ -387,8 +387,6 @@ function ensureProcess(
           const content = Array.isArray(msg.message.content) ? msg.message.content : [];
           for (const block of content) {
             if (block.type === 'tool_use') {
-              // [DEBUG swarm-card-loss] Log every tool_use seen in CLI stream.
-              try { console.log('[claude.ts]', { scope, toolName: block.name, blockType: block.type }); } catch { /* noop */ }
               claude.pendingToolUse = {
                 toolName: block.name,
                 toolUseId: block.id,

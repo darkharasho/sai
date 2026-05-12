@@ -38,7 +38,7 @@ import { SwarmScheduler, isLikelyReadOnlyPrompt } from './lib/swarmScheduler';
 import { runSwarmTask } from './lib/swarmTaskRunner';
 import { landTask, discardTask } from './lib/swarmLanding';
 import { ensureOrchestratorSession } from './lib/swarmOrchestratorSession';
-import { handleSwarmToolRequest, type SwarmHost, buildSyntheticToolUseMessage, applySyntheticToolResult } from './lib/swarmOrchestratorDispatcher';
+import { handleSwarmToolRequest, type SwarmHost } from './lib/swarmOrchestratorDispatcher';
 import { executeSlashCommand } from './lib/orchestratorSlashCommands';
 import { isOrchestratorToolDrift, describeToolDrift } from './lib/orchestratorToolDrift';
 import { resolveTaskRef } from './lib/swarmRef';
@@ -667,58 +667,21 @@ export default function App() {
   // Bridge tool calls from the orchestrator MCP socket (main process) into
   // dispatchSwarmTool here in the renderer, then return the result over IPC.
   //
-  // Also synthesize a tool_use card into the orchestrator's chat messages so
-  // the user sees a SwarmToolCardSelector card for each MCP call. Claude CLI's
-  // stream-json output doesn't reliably surface `tool_use` blocks for MCP
-  // tools (they're absorbed into the MCP exchange), so without this fallback
-  // the orchestrator chat looks like the model "did nothing" even though
-  // tasks landed in the tray.
+  // Dispatch MCP swarm tool requests from main to the renderer-side host.
+  // The synthetic tool_use card injection is now handled in the main process,
+  // which emits a synthetic claude:message tagged with the orchestrator's
+  // scope. ChatPanel's existing message handler renders it inline.
   useEffect(() => {
     const sai = window.sai as any;
     if (typeof sai?.onSwarmToolRequest !== 'function') return; // mocks / tests
 
-    const pushSyntheticCard = (req: { id: string; tool: string; input: any; workspace: string }) => {
-      const orchSessionId = orchestratorSessionIdByWsRef.current.get(req.workspace);
-      if (!orchSessionId) return;
-      const synthetic = buildSyntheticToolUseMessage(req) as unknown as ChatMessage;
-      const existing = orchMessagesRef.current.get(orchSessionId) ?? [];
-      const next = [...existing, synthetic];
-      orchMessagesRef.current.set(orchSessionId, next);
-      setOrchMessagesByWs(prev => {
-        const m = new Map(prev);
-        m.set(orchSessionId, next);
-        return m;
-      });
-    };
-
-    const attachResult = (req: { id: string; workspace: string }, payload: unknown) => {
-      const orchSessionId = orchestratorSessionIdByWsRef.current.get(req.workspace);
-      if (!orchSessionId) return;
-      const existing = orchMessagesRef.current.get(orchSessionId) ?? [];
-      const next = applySyntheticToolResult(existing, req.id, payload);
-      if (next === existing) return;
-      orchMessagesRef.current.set(orchSessionId, next);
-      setOrchMessagesByWs(prev => {
-        const m = new Map(prev);
-        m.set(orchSessionId, next);
-        return m;
-      });
-    };
-
     const unsub = sai.onSwarmToolRequest((req: { id: string; tool: string; input: any; workspace: string }) => {
-      pushSyntheticCard(req);
       void handleSwarmToolRequest(req, {
         activeWorkspace: activeProjectPathRef.current,
         host: swarmHostRef.current,
         responder: {
-          respond: (id, result) => {
-            attachResult(req, result);
-            sai.respondSwarmTool(id, result);
-          },
-          respondError: (id, error) => {
-            attachResult(req, { ok: false, error });
-            sai.respondSwarmToolError(id, error);
-          },
+          respond: (id, result) => sai.respondSwarmTool(id, result),
+          respondError: (id, error) => sai.respondSwarmToolError(id, error),
         },
       });
     });
@@ -2117,6 +2080,11 @@ export default function App() {
     if (orchestratorSessionIdByWs.has(activeProjectPath)) return;
     ensureOrchestratorSession(activeProjectPath, aiProvider).then(session => {
       setOrchestratorSessionIdByWs(prev => new Map(prev).set(activeProjectPath, session.id));
+      // Tell main about this orchestrator session so the swarm MCP host can
+      // tag synthetic claude:message events (tool_use cards) with the right
+      // scope. ChatPanel filters by scope, so without this the synthetic
+      // tool_use blocks get dropped.
+      try { (window.sai as any).swarmSetOrchestratorSession?.(activeProjectPath, session.id); } catch { /* noop */ }
       // ChatPanel mounts with claudeScope={session.id} + claudeKind='orchestrator'
       // and triggers ensureProcess on its own with the right args.
       dbGetSessions(activeProjectPath).then(fresh => {
