@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { Info, ChevronDown, ChevronUp } from 'lucide-react';
-import OrchestratorComposer from './OrchestratorComposer';
 import StatStrip from './StatStrip';
 import ActivityRibbon from './ActivityRibbon';
 import OrchestratorModelPicker from './OrchestratorModelPicker';
@@ -28,7 +27,6 @@ interface Props {
   orchestratorSessionId: string;
   projectPath: string;
   stats: OrchestratorStats;
-  onCommand: (cmd: { text: string; splitLines: boolean }) => void;
   orchestratorProvider?: string | null;
   orchestratorModel?: string | null;
   onProviderModelChange?: (provider: AIProvider, model: string) => void;
@@ -51,7 +49,7 @@ function formatRuntime(sec?: number): string | null {
 }
 
 export default function OrchestratorView({
-  projectPath, stats, onCommand,
+  projectPath, stats,
   orchestratorProvider, orchestratorModel,
   onProviderModelChange,
   chatSlot,
@@ -187,8 +185,6 @@ export default function OrchestratorView({
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }} data-testid="orch-chat-slot">
         {chatSlot}
       </div>
-
-      {!chatSlot && <OrchestratorComposer onCommand={onCommand} />}
     </div>
   );
 }

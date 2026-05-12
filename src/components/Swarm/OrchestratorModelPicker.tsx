@@ -102,7 +102,7 @@ export default function OrchestratorModelPicker({ provider, model, onChange, dis
             border: '1px solid var(--border)',
             borderRadius: 6,
             padding: 6,
-            zIndex: 50,
+            zIndex: 1000,
             boxShadow: '0 6px 20px rgba(0,0,0,0.3)',
             fontSize: 11,
             color: 'var(--text)',

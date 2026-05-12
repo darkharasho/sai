@@ -589,6 +589,15 @@ export default function App() {
             );
             if (!dispatched) {
               console.warn(`swarm: provider '${task.provider}' is not yet supported for task runner; marking failed`);
+              try {
+                void (window.sai as any).swarmEmitCard?.(task.workspaceId, 'task_failed', {
+                  taskId: task.id,
+                  title: task.title,
+                  branch: task.branch,
+                  prompt: task.prompt,
+                  reason: 'Task runner currently supports Claude only. Codex / Gemini support is a planned follow-up.',
+                });
+              } catch { /* best-effort */ }
               removeFromList();
             }
           } catch (err) {
@@ -2949,6 +2958,7 @@ export default function App() {
                             meta={meta}
                             onApprove={(id) => { void swarmHost.approve(id); resolveLocally('approved'); }}
                             onDeny={(id) => { void swarmHost.deny(id); resolveLocally('denied'); }}
+                            onView={() => setSwarmSelected(meta.taskId)}
                           />
                         );
                       }}
@@ -3025,17 +3035,6 @@ export default function App() {
                       queued: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'queued').length,
                       cap: swarmSettingsRef.current.concurrencyCap,
                       activeHistory: (() => { void activityTick; return activityHistoryRef.current.get(wsPath)?.activeBuckets; })(),
-                    }}
-                    onCommand={({ text, splitLines }) => {
-                      const trimmed = text.trim();
-                      if (!trimmed) return;
-                      if (splitLines) {
-                        const lines = trimmed.split('\n').map(l => l.trim()).filter(Boolean);
-                        if (lines.length === 0) return;
-                        void swarmHost.spawnTasks(lines).catch(err => console.error('swarm: spawnTasks failed', err));
-                      } else {
-                        void swarmHost.spawnTask({ prompt: trimmed }).catch(err => console.error('swarm: spawnTask failed', err));
-                      }
                     }}
                   />
                   );
