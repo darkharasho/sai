@@ -29,7 +29,7 @@ import McpSidebar from './components/MCP/McpSidebar';
 import SwarmSidebar from './components/Swarm/SwarmSidebar';
 import NewTaskPopover from './components/Swarm/NewTaskPopover';
 import SwarmTaskHeader from './components/Swarm/SwarmTaskHeader';
-import OrchestratorView, { type ReadyTaskRow } from './components/Swarm/OrchestratorView';
+import OrchestratorView, { type ReadyTaskRow, type RecentTaskRow } from './components/Swarm/OrchestratorView';
 import { swarmGetTasks, swarmCreateTask, swarmUpdateTask, swarmGetApprovals, swarmResolveApproval } from './swarmDb';
 import { SwarmScheduler, isLikelyReadOnlyPrompt } from './lib/swarmScheduler';
 import { landTask, discardTask } from './lib/swarmLanding';
@@ -1943,6 +1943,19 @@ export default function App() {
                       const done = (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'done');
                       for (const task of done) await swarmHost.land(task.id);
                     }}
+                    recentTasks={(() => {
+                      const RECENT_STATUSES = new Set(['landed', 'discarded', 'failed']);
+                      return (swarmTasksByWs.get(wsPath) ?? [])
+                        .filter(t => RECENT_STATUSES.has(t.status))
+                        .sort((a, b) => b.lastActivityAt - a.lastActivityAt)
+                        .slice(0, 10)
+                        .map<RecentTaskRow>(t => ({
+                          id: t.id,
+                          title: t.title,
+                          status: t.status as 'landed' | 'discarded' | 'failed',
+                          lastActivityAt: t.lastActivityAt,
+                        }));
+                    })()}
                     onCommand={() => { /* model-driven commands deferred; see Task 17 deferral on provider tool schema injection */ }}
                   />
                 ) : (

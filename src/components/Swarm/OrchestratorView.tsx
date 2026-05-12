@@ -2,9 +2,11 @@ import React from 'react';
 import OrchestratorComposer from './OrchestratorComposer';
 import ApprovalTray, { type ApprovalRow } from './ApprovalTray';
 import ReadyToLandTray, { type ReadyTaskRow } from './ReadyToLandTray';
+import RecentActivity, { type RecentTaskRow } from './RecentActivity';
 
 export type { ApprovalRow };
 export type { ReadyTaskRow };
+export type { RecentTaskRow };
 
 export interface OrchestratorStats {
   active: number;
@@ -29,6 +31,7 @@ interface Props {
   onDiscard?: (id: string) => void;
   onDiff?: (id: string) => void;
   onLandAll?: () => void;
+  recentTasks?: RecentTaskRow[];
   chatSlot?: React.ReactNode;       // App.tsx can pass an embedded ChatPanel here
   readySlot?: React.ReactNode;      // legacy slot (unused now)
 }
@@ -37,6 +40,7 @@ export default function OrchestratorView({
   orchestratorSessionId, projectPath, stats, approvals, readyTasks, onCommand,
   onApproveApproval, onDenyApproval, onApproveAllReads, onDenyAllApprovals,
   onLand, onDiscard, onDiff, onLandAll,
+  recentTasks = [],
   chatSlot, readySlot,
 }: Props) {
   return (
@@ -64,6 +68,7 @@ export default function OrchestratorView({
         onLandAll={onLandAll ?? (() => {})}
       />
       {readySlot}
+      <RecentActivity items={recentTasks} />
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }} data-testid="orch-chat-slot">
         {chatSlot}
       </div>
