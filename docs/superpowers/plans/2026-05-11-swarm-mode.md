@@ -12,6 +12,21 @@
 
 ---
 
+## Resume Status (as of 2026-05-11)
+
+Branch: `feat/swarm-mode` (not pushed). Working tree clean.
+
+**Completed:**
+- [x] Task 1 — Types & migration field (`502cf1c`)
+- [x] Task 2 — swarmDb (`b5fd219` + fix `2eaea3c`: atomic update + transaction error handlers)
+- [x] Task 3 — Branch-slug helper (`6ea124b`)
+
+**Next up:** Task 4 — Electron worktree IPC.
+
+**Execution mode:** subagent-driven-development with two-stage review. To resume, see the bottom of this file for the continuation prompt.
+
+---
+
 ## File Map
 
 ### New files
@@ -2086,3 +2101,9 @@ git commit -m "test(swarm): e2e smoke for spawn → land"
 - [ ] Manual: spawn 6 tasks against a real repo, observe scheduler caps at 5, verify worktree directories are sibling-of-project, land one cleanly, discard one cleanly
 - [ ] Manual: trigger an approval, resolve through orchestrator chat ("approve a1"), watch task resume
 - [ ] Manual: quit with active tasks, relaunch, observe they appear as paused with ▶ Resume buttons
+
+---
+
+## Continuation Prompt (paste into new session)
+
+> Resume executing the swarm-mode plan at `docs/superpowers/plans/2026-05-11-swarm-mode.md`. Tasks 1–3 are done and committed on branch `feat/swarm-mode` (commits `502cf1c`, `b5fd219`, `2eaea3c`, `6ea124b`). Use the superpowers:subagent-driven-development skill, starting from Task 4 (Electron worktree IPC). Match the prior cadence: implementer subagent → spec compliance review → code quality review → fix loop if needed → commit → next task. For trivial spec-verbatim tasks you may skip the two-stage review and just verify the commit + tests. Continue through Phase 1 (Tasks 1–13) at minimum. Final goal: a usable "spawn task → focus → land" feature shippable from this branch.
