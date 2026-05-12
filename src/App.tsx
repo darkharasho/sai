@@ -28,6 +28,7 @@ import PluginsSidebar from './components/Plugins/PluginsSidebar';
 import McpSidebar from './components/MCP/McpSidebar';
 import SwarmSidebar from './components/Swarm/SwarmSidebar';
 import NewTaskPopover from './components/Swarm/NewTaskPopover';
+import SwarmTaskHeader from './components/Swarm/SwarmTaskHeader';
 import { swarmGetTasks, swarmCreateTask, swarmUpdateTask } from './swarmDb';
 import { SwarmScheduler, isLikelyReadOnlyPrompt } from './lib/swarmScheduler';
 
@@ -186,6 +187,9 @@ export default function App() {
   const slashCommandsRef = useRef<string[]>([]);
   const workspacesRef = useRef(workspaces);
   const activeProjectPathRef = useRef(activeProjectPath);
+  // Tracks the last swarm task we routed the active session to, to avoid
+  // re-firing the session-switch effect on every state update.
+  const lastSwarmRoutedRef = useRef<string | null>(null);
 
   // Update taskbar badge count when notifications are pending
   useEffect(() => {
@@ -585,6 +589,11 @@ export default function App() {
   const activeSession = activeWorkspace?.activeSession ?? createSession();
   const openFiles = activeWorkspace?.openFiles ?? [];
   const activeFilePath = activeWorkspace?.activeFilePath ?? null;
+
+  // Currently-focused swarm task (when swarm sidebar is open and a row is selected).
+  const focusedSwarmTask = (sidebarOpen === 'swarm' && swarmSelected !== 'overview')
+    ? (swarmTasksByWs.get(activeProjectPath) ?? []).find(t => t.id === swarmSelected)
+    : undefined;
 
   // Load persisted settings from main process (file-based, works in dev+prod)
   useEffect(() => {
@@ -1409,6 +1418,46 @@ export default function App() {
     }
   };
 
+  // Route the workspace's active session to the focused swarm task's sessionId
+  // when a swarm task row is selected. Guarded to avoid loops.
+  useEffect(() => {
+    if (!activeProjectPath) return;
+    if (sidebarOpen !== 'swarm' || swarmSelected === 'overview') {
+      lastSwarmRoutedRef.current = null;
+      return;
+    }
+    const task = (swarmTasksByWs.get(activeProjectPath) ?? []).find(t => t.id === swarmSelected);
+    if (!task) return;
+    if (lastSwarmRoutedRef.current === task.id) return;
+    if (activeSession.id === task.sessionId) {
+      lastSwarmRoutedRef.current = task.id;
+      return;
+    }
+    lastSwarmRoutedRef.current = task.id;
+    const inMemory = sessions.find(s => s.id === task.sessionId);
+    if (inMemory) {
+      handleSelectSession(task.sessionId);
+    } else {
+      // Refresh sessions from db, then select.
+      dbGetSessions(activeProjectPath).then(fresh => {
+        updateWorkspace(activeProjectPath, ws => ({ ...ws, sessions: fresh }));
+        const selected = fresh.find(s => s.id === task.sessionId);
+        if (!selected) return;
+        window.sai.claudeSetSessionId(activeProjectPath, selected.claudeSessionId);
+        (window.sai as any).codexSetSessionId(activeProjectPath, selected.codexSessionId);
+        window.sai.geminiSetSessionId?.(activeProjectPath, selected.geminiSessionId, 'chat');
+        dbGetMessagesTail(selected.id, MESSAGE_TAIL_LIMIT).then(({ messages, totalCount }) => {
+          wsFirstLoadedIdxRef.current.set(activeProjectPath, totalCount - messages.length);
+          updateWorkspace(activeProjectPath, ws => ({
+            ...ws,
+            activeSession: { ...selected, messages },
+          }));
+        });
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sidebarOpen, swarmSelected, activeProjectPath, swarmTasksByWs]);
+
   const handleUpdateSessions = useCallback((updated: ChatSession[]) => {
     if (!activeProjectPath) return;
     updateWorkspace(activeProjectPath, ws => ({
@@ -1571,6 +1620,26 @@ export default function App() {
                   overflow: 'hidden',
                 }}
               >
+                {wsPath === activeProjectPath && focusedSwarmTask && (
+                  <SwarmTaskHeader
+                    task={focusedSwarmTask}
+                    onPause={() => {
+                      const id = focusedSwarmTask.id;
+                      swarmUpdateTask(id, { status: 'paused' });
+                      setSwarmTasksByWs(prev => {
+                        const m = new Map(prev);
+                        const list = (m.get(activeProjectPath) ?? []).map(t =>
+                          t.id === id ? { ...t, status: 'paused' as const } : t
+                        );
+                        m.set(activeProjectPath, list);
+                        return m;
+                      });
+                    }}
+                    onDiscard={() => { /* TODO(Task 12) */ }}
+                    onLand={() => { /* TODO(Task 12) */ }}
+                    onOpenDiff={() => { /* TODO(Task 12) */ }}
+                  />
+                )}
                 <ChatPanel
                   key={ws.activeSession.id}
                   projectPath={wsPath}
