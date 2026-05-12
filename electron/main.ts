@@ -18,6 +18,7 @@ import { registerMcpHandlers } from './services/mcp';
 import { registerScaffoldHandler } from './services/scaffold';
 import { registerSearchHandlers } from './services/search';
 import { registerSwarmHandlers } from './services/swarm';
+import * as swarmMcpHost from './services/swarmMcpHost';
 
 // Allow E2E tests to isolate userData
 if (process.env.SAI_USER_DATA_DIR) {
@@ -161,6 +162,12 @@ function createWindow() {
   registerSearchHandlers();
   registerMcpHandlers();
   registerSwarmHandlers();
+  try {
+    const mcpHandle = swarmMcpHost.start();
+    console.log('[swarm-mcp] socket listening at', mcpHandle.socketPath);
+  } catch (err) {
+    console.error('[swarm-mcp] failed to start host:', err);
+  }
   registerUpdater(mainWindow!);
   registerUsageHandlers(mainWindow!);
   startSuspendTimer(mainWindow, () => {
@@ -351,10 +358,14 @@ process.on('uncaughtException', (err) => {
 });
 
 app.whenReady().then(createWindow);
+app.on('before-quit', () => {
+  try { swarmMcpHost.stop(); } catch { /* noop */ }
+});
 app.on('window-all-closed', () => {
   stopSuspendTimer();
   destroyUsagePolling();
   destroyAllTerminals();
   if (mainWindow) destroyAll(mainWindow);
+  try { swarmMcpHost.stop(); } catch { /* noop */ }
   app.quit();
 });
