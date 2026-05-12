@@ -45,6 +45,7 @@ const SWARM_DEFAULT_CAP = 5;
 import { swarmBranchName } from './lib/swarmSlug';
 import { shouldRequireApproval } from './lib/swarmApprovalPolicy';
 import { deriveSwarmMirror, applySwarmPatch } from './lib/swarmStatusMirror';
+import { convertAssistantEnvelope, appendAssistantChunk, mergePersistedWithBuffer } from './lib/swarmTaskMessageBuffer';
 import { isImageFile } from './utils/imageFiles';
 import { getMonacoEditorFor } from './utils/monacoEditorRegistry';
 import * as monaco from 'monaco-editor';
@@ -1253,6 +1254,11 @@ export default function App() {
   // Listen for background workspace completions
   // Track busy scope count per workspace so overlapping chat+terminal don't cancel each other
   const busyScopeCountRef = useRef(new Map<string, number>());
+  // Per-task assistant message buffer for background swarm tasks.
+  // Keyed by task sessionId (msg.scope). Flushed to chatDb on done/result so
+  // background tasks (whose ChatPanel isn't mounted) still persist Claude's
+  // reply alongside the injected user prompt.
+  const taskMessagesBufferRef = useRef<Map<string, ChatMessage[]>>(new Map());
   useEffect(() => {
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
       if (!msg.projectPath) return;
@@ -1273,6 +1279,32 @@ export default function App() {
             m.set(msg.projectPath, list);
             return m;
           });
+        }
+      }
+      // Background-task assistant message capture. When a swarm task runs
+      // while its ChatPanel isn't mounted (user is on overview / another task),
+      // accumulate assistant chunks here so we can flush them to chatDb on
+      // done/result. We skip when the focused workspace's active session IS
+      // this task — in that case ChatPanel's own onTurnComplete handles
+      // persistence and a parallel write would race / duplicate.
+      if (msg.type === 'assistant' && msg.message?.content) {
+        const scope = msg.scope || 'chat';
+        if (scope !== 'chat') {
+          const tasks = swarmTasksByWsRef.current.get(msg.projectPath) ?? [];
+          const swarmTask = tasks.find(t => t.sessionId === scope);
+          if (swarmTask) {
+            const focusedWs = workspacesRef.current.get(msg.projectPath);
+            const isFocusedHere =
+              msg.projectPath === activeProjectPathRef.current
+              && focusedWs?.activeSession.id === scope;
+            if (!isFocusedHere) {
+              const converted = convertAssistantEnvelope(msg);
+              if (converted) {
+                const prev = taskMessagesBufferRef.current.get(scope) ?? [];
+                taskMessagesBufferRef.current.set(scope, appendAssistantChunk(prev, converted));
+              }
+            }
+          }
         }
       }
       if (msg.type === 'streaming_start') {
@@ -1394,6 +1426,42 @@ export default function App() {
               try {
                 new Notification(`SAI · ${swarmTask.title}`, { body: 'Task complete' });
               } catch {}
+            }
+          }
+        }
+        // Flush any buffered assistant messages for this background task to
+        // chatDb. Merged with the persisted prefix (the injected user prompt)
+        // so the task's chat panel shows the full exchange when the user
+        // clicks the row. ChatPanel's onTurnComplete handles the focused-task
+        // case; the buffer is only populated when the task wasn't focused.
+        {
+          const scope = msg.scope || 'chat';
+          if (scope !== 'chat') {
+            const buffered = taskMessagesBufferRef.current.get(scope);
+            if (buffered && buffered.length > 0) {
+              taskMessagesBufferRef.current.delete(scope);
+              const wsPath = msg.projectPath;
+              void (async () => {
+                try {
+                  const existing = await dbGetMessages(scope);
+                  const merged = mergePersistedWithBuffer(existing, buffered);
+                  const sessions = await dbGetSessions(wsPath);
+                  const taskSession = sessions.find(s => s.id === scope);
+                  if (!taskSession) return;
+                  await dbSaveSession(wsPath, {
+                    ...taskSession,
+                    messages: merged,
+                    messageCount: merged.length,
+                    updatedAt: Date.now(),
+                  }, 0);
+                  // Refresh sessions list so sidebar message counts update.
+                  const refreshed = await dbGetSessions(wsPath);
+                  updateWorkspace(wsPath, w => ({ ...w, sessions: refreshed }));
+                } catch (err) {
+                  // eslint-disable-next-line no-console
+                  console.error('swarm: persist task messages failed', err);
+                }
+              })();
             }
           }
         }
