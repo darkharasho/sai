@@ -2406,6 +2406,8 @@ export default function App() {
                 <ChatPanel
                   key={ws.activeSession.id}
                   projectPath={wsPath}
+                  claudeScope={ws.activeSession.kind === 'task' ? ws.activeSession.id : 'chat'}
+                  claudeKind={ws.activeSession.kind === 'task' ? 'task' : 'chat'}
                   permissionMode={permissionMode}
                   onPermissionChange={handlePermissionChange}
                   effortLevel={effortLevel}
