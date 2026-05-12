@@ -27,4 +27,36 @@ describe('SwarmSidebar', () => {
     fireEvent.click(screen.getByText('migrate users'));
     expect(onSelect).toHaveBeenCalledWith('t2');
   });
+
+  it('renders a discard button per task and fires onDiscard with the task', () => {
+    const onSelect = vi.fn();
+    const onDiscard = vi.fn();
+    render(
+      <SwarmSidebar
+        tasks={tasks as any}
+        selectedId="overview"
+        onSelect={onSelect}
+        onNewTask={() => {}}
+        onDiscard={onDiscard}
+      />
+    );
+    const btn = screen.getByLabelText('Discard refactor auth');
+    fireEvent.click(btn);
+    expect(onDiscard).toHaveBeenCalledTimes(1);
+    expect(onDiscard.mock.calls[0][0]).toMatchObject({ id: 't1', title: 'refactor auth' });
+    // Clicking discard must not trigger row selection.
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('omits the discard button when onDiscard is not provided', () => {
+    render(
+      <SwarmSidebar
+        tasks={tasks as any}
+        selectedId="overview"
+        onSelect={() => {}}
+        onNewTask={() => {}}
+      />
+    );
+    expect(screen.queryByLabelText('Discard refactor auth')).toBeNull();
+  });
 });

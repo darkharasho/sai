@@ -168,6 +168,13 @@ export default function App() {
   // the regular wsMessagesRef (keyed by wsPath) doesn't get clobbered by the
   // orchestrator ChatPanel's onMessagesChange.
   const orchMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
+  // Mounted-mirror of orchMessagesRef so React re-renders trigger a fresh
+  // initialMessages prop when ChatPanel remounts (e.g. user navigates from
+  // overview → focused task → back). Without this, ChatPanel mounts with
+  // initialMessages=[] because ws.sessions stores messageless rows.
+  const [orchMessagesByWs, setOrchMessagesByWs] = useState<Map<string, ChatMessage[]>>(new Map());
+  // Pending debounced save timer per orchestrator session id.
+  const orchSaveTimerRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   // Absolute index in the full session of messages[0] for the workspace's
   // currently-loaded message window. 0 means the full session is loaded.
   // Saves use this so paginated tails don't clobber older DB messages.
@@ -179,6 +186,10 @@ export default function App() {
   // also counts terminal-scope activity. Lifted out of ChatPanel so the panel's
   // streaming indicator survives remounts (e.g. session/key swaps).
   const [chatStreamingWorkspaces, setChatStreamingWorkspaces] = useState<Set<string>>(new Set());
+  // Tracks streaming state per (workspace, scope) so non-chat scopes (e.g. the
+  // orchestrator's own session id) can drive the ChatPanel thinking animation.
+  // Keys are `${projectPath}:${scope}` — scope defaults to 'chat'.
+  const [streamingScopes, setStreamingScopes] = useState<Set<string>>(new Set());
   // Unsent draft text and attached context per workspace, persisted across
   // workspace switches and session-key remounts so partial messages survive
   // navigation.
@@ -1254,6 +1265,7 @@ export default function App() {
         if ((msg.scope || 'chat') === 'chat') {
           setChatStreamingWorkspaces(prev => prev.has(msg.projectPath) ? prev : new Set(prev).add(msg.projectPath));
         }
+        setStreamingScopes(prev => prev.has(scopeKey) ? prev : new Set(prev).add(scopeKey));
       }
       // Orchestrator tool drift observability (Task 7).
       // claude.ts forwards assistant messages whose `content` may contain
@@ -1385,6 +1397,12 @@ export default function App() {
             return next;
           });
         }
+        setStreamingScopes(prev => {
+          if (!prev.has(scopeKey)) return prev;
+          const next = new Set(prev);
+          next.delete(scopeKey);
+          return next;
+        });
         // Decrement busy scope count
         const count = busyScopeCountRef.current.get(msg.projectPath) || 0;
         const newCount = Math.max(0, count - 1);
@@ -1900,6 +1918,17 @@ export default function App() {
       dbGetSessions(activeProjectPath).then(fresh => {
         updateWorkspace(activeProjectPath, ws => ({ ...ws, sessions: fresh }));
       });
+      // Load persisted orchestrator messages so ChatPanel mounts with prior
+      // history. dbGetSessions returns sessions WITHOUT messages (the messages
+      // store is separate), so we have to fetch them explicitly.
+      dbGetMessages(session.id).then(msgs => {
+        orchMessagesRef.current.set(session.id, msgs);
+        setOrchMessagesByWs(prev => {
+          const m = new Map(prev);
+          m.set(session.id, msgs);
+          return m;
+        });
+      }).catch(() => {});
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sidebarOpen, activeProjectPath]);
@@ -2140,7 +2169,14 @@ export default function App() {
                   const orchProvider: AIProvider = swarmSettingsRef.current.orchestratorProvider ?? aiProvider;
                   const orchModelRaw = swarmSettingsRef.current.orchestratorModel;
                   const orchModel: ModelChoice = isModelChoice(orchModelRaw) ? orchModelRaw : modelChoice;
-                  const orchMessages = orchSession?.messages ?? [];
+                  // Prefer the live ref (set by onMessagesChange) over the
+                  // mounted-mirror map; fall back to the map for first mount,
+                  // and finally the stored session (which is always empty
+                  // because dbGetSessions strips messages — kept as a safety).
+                  const orchMessages = orchMessagesRef.current.get(orchSessionId)
+                    ?? orchMessagesByWs.get(orchSessionId)
+                    ?? orchSession?.messages
+                    ?? [];
                   const orchChatSlot = (
                     <ChatPanel
                       key={orchSessionId}
@@ -2169,7 +2205,7 @@ export default function App() {
                       activeFilePath={ws.activeFilePath}
                       onFileOpen={handleFileOpen}
                       isActive={wsPath === activeProjectPath}
-                      isStreaming={chatStreamingWorkspaces.has(wsPath)}
+                      isStreaming={streamingScopes.has(`${wsPath}:${orchSessionId}`)}
                       initialDraft={chatDraftsRef.current.get(wsPath) || ''}
                       onDraftChange={(draft: string) => handleDraftChange(wsPath, draft)}
                       initialContextItems={(chatContextItemsRef.current.get(wsPath) as any) || []}
@@ -2182,6 +2218,36 @@ export default function App() {
                       sessionId={orchSessionId}
                       onMessagesChange={(messages: ChatMessage[]) => {
                         orchMessagesRef.current.set(orchSessionId, messages);
+                        // Debounced persist + ws.sessions refresh so a mid-turn
+                        // navigate-away doesn't lose chat history. Also keeps
+                        // the mounted-mirror Map in sync so ChatPanel remounts
+                        // pick up the latest initialMessages.
+                        const existing = orchSaveTimerRef.current.get(orchSessionId);
+                        if (existing) clearTimeout(existing);
+                        orchSaveTimerRef.current.set(orchSessionId, setTimeout(() => {
+                          orchSaveTimerRef.current.delete(orchSessionId);
+                          const latest = orchMessagesRef.current.get(orchSessionId) || [];
+                          if (latest.length === 0) return;
+                          const wsNow = workspacesRef.current.get(wsPath);
+                          const existingSession = wsNow?.sessions.find(s => s.id === orchSessionId);
+                          if (!existingSession) return;
+                          const updated = {
+                            ...existingSession,
+                            messages: latest,
+                            updatedAt: Date.now(),
+                            aiProvider: orchProvider,
+                            messageCount: latest.length,
+                          };
+                          dbSaveSession(wsPath, updated, 0).then(() => {
+                            // Mirror into orchMessagesByWs so a remount reads
+                            // fresh data without an extra DB round-trip.
+                            setOrchMessagesByWs(prev => {
+                              const m = new Map(prev);
+                              m.set(orchSessionId, latest);
+                              return m;
+                            });
+                          }).catch(() => {});
+                        }, 400));
                       }}
                       onClaudeSessionId={(sessionId: string) => {
                         updateWorkspace(wsPath, w => ({
@@ -2233,7 +2299,18 @@ export default function App() {
                           const firstUserMsg = latestMessages.find(m => m.role === 'user');
                           if (firstUserMsg) updated.title = generateSmartTitle(firstUserMsg.content);
                         }
+                        // Cancel any pending debounced save — we're flushing now.
+                        const pending = orchSaveTimerRef.current.get(orchSessionId);
+                        if (pending) {
+                          clearTimeout(pending);
+                          orchSaveTimerRef.current.delete(orchSessionId);
+                        }
                         dbSaveSession(wsPath, updated, 0).then(() => {
+                          setOrchMessagesByWs(prev => {
+                            const m = new Map(prev);
+                            m.set(orchSessionId, latestMessages);
+                            return m;
+                          });
                           dbGetSessions(wsPath).then(sessions => {
                             updateWorkspace(wsPath, w2 => ({ ...w2, sessions }));
                           });
@@ -2665,6 +2742,7 @@ export default function App() {
                 selectedId={swarmSelected}
                 onSelect={setSwarmSelected}
                 onNewTask={() => setShowNewTaskPopover(true)}
+                onDiscard={(task) => swarmHost.discard(task.id)}
               />
             </motion.div>
           )}

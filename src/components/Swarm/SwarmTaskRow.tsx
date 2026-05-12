@@ -1,3 +1,4 @@
+import { Trash2 } from 'lucide-react';
 import type { SwarmTaskStatus } from '../../types';
 
 interface Props {
@@ -8,6 +9,7 @@ interface Props {
   hasApproval: boolean;
   selected: boolean;
   onClick: () => void;
+  onDiscard?: () => void;
 }
 
 const STATUS_COLOR: Record<SwarmTaskStatus, string> = {
@@ -33,6 +35,15 @@ export default function SwarmTaskRow(p: Props) {
         <div className="row-sub">{p.status} · {p.toolCallCount} tools</div>
       </div>
       <span className="row-icon" style={{ color: STATUS_COLOR[p.status] }}>{STATUS_ICON[p.status]}</span>
+      {p.onDiscard && (
+        <button
+          className="row-discard"
+          aria-label={`Discard ${p.title}`}
+          onClick={(e) => { e.stopPropagation(); p.onDiscard!(); }}
+        >
+          <Trash2 size={12} />
+        </button>
+      )}
     </div>
   );
 }

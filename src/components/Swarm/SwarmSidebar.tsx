@@ -7,9 +7,10 @@ interface Props {
   selectedId: 'overview' | string;
   onSelect: (id: 'overview' | string) => void;
   onNewTask: () => void;
+  onDiscard?: (task: SwarmTask) => void;
 }
 
-export default function SwarmSidebar({ tasks, selectedId, onSelect, onNewTask }: Props) {
+export default function SwarmSidebar({ tasks, selectedId, onSelect, onNewTask, onDiscard }: Props) {
   const activeCount = tasks.filter(t => t.status === 'streaming').length;
   const apprCount = tasks.filter(t => t.status === 'awaiting_approval').length;
   const readyCount = tasks.filter(t => t.status === 'done').length;
@@ -37,6 +38,7 @@ export default function SwarmSidebar({ tasks, selectedId, onSelect, onNewTask }:
             toolCallCount={t.toolCallCount} hasApproval={t.status === 'awaiting_approval'}
             selected={selectedId === t.id}
             onClick={() => onSelect(t.id)}
+            onDiscard={onDiscard ? () => onDiscard(t) : undefined}
           />
         ))}
       </div>
@@ -152,6 +154,32 @@ export default function SwarmSidebar({ tasks, selectedId, onSelect, onNewTask }:
         .swarm-row .row-main {
           min-width: 0;
           flex: 1;
+        }
+        .swarm-row .row-discard {
+          opacity: 0;
+          background: none;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          padding: 2px;
+          border-radius: 3px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+          transition: opacity 0.15s, color 0.15s, background 0.15s;
+        }
+        .swarm-row:hover .row-discard {
+          opacity: 0.6;
+        }
+        .swarm-row .row-discard:hover {
+          opacity: 1;
+          color: var(--red, #b44);
+          background: var(--bg-hover);
+        }
+        .swarm-row .row-discard:focus-visible {
+          opacity: 1;
+          outline: 1px solid var(--accent);
         }
       `}</style>
     </aside>
