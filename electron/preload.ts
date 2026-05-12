@@ -208,4 +208,14 @@ contextBridge.exposeInMainWorld('sai', {
   mcpRemove: (name: string) => ipcRenderer.invoke('mcp:remove', name),
   mcpUpdate: (name: string, updates: any) => ipcRenderer.invoke('mcp:update', name, updates),
   mcpRegistryList: () => ipcRenderer.invoke('mcp:registryList'),
+  swarm: {
+    worktreeAdd: (projectPath: string, taskId: string, branch: string, baseBranch: string) =>
+      ipcRenderer.invoke('swarm:worktree-add', projectPath, taskId, branch, baseBranch),
+    worktreeRemove: (projectPath: string, worktreePath: string, branch: string) =>
+      ipcRenderer.invoke('swarm:worktree-remove', projectPath, worktreePath, branch),
+    canFastForward: (projectPath: string, source: string, target: string) =>
+      ipcRenderer.invoke('swarm:can-ff', projectPath, source, target),
+    ffMerge: (projectPath: string, source: string) =>
+      ipcRenderer.invoke('swarm:ff-merge', projectPath, source),
+  },
 });

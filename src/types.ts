@@ -228,6 +228,12 @@ declare global {
     geminiSetSessionId?: (projectPath: string, sessionId: string | undefined, scope?: string) => void;
     searchRun?: SaiSearchApi['searchRun'];
     searchReplaceFile?: SaiSearchApi['searchReplaceFile'];
+    swarm?: {
+      worktreeAdd: (projectPath: string, taskId: string, branch: string, baseBranch: string) => Promise<string>;
+      worktreeRemove: (projectPath: string, worktreePath: string, branch: string) => Promise<void>;
+      canFastForward: (projectPath: string, source: string, target: string) => Promise<boolean>;
+      ffMerge: (projectPath: string, source: string) => Promise<void>;
+    };
   }
 
   interface Window {

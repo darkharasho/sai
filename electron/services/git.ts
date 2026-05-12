@@ -115,6 +115,29 @@ function resolveHunks(content: string, resolution: 'ours' | 'theirs' | 'both'): 
   return result.join(eol);
 }
 
+export async function gitWorktreeAdd(repoCwd: string, worktreePath: string, branch: string, baseBranch: string) {
+  await fs.promises.mkdir(path.dirname(worktreePath), { recursive: true });
+  // create branch off baseBranch and check it out in the new worktree
+  await git(repoCwd).raw(['worktree', 'add', '-b', branch, worktreePath, baseBranch]);
+}
+
+export async function gitWorktreeRemove(repoCwd: string, worktreePath: string) {
+  await git(repoCwd).raw(['worktree', 'remove', '--force', worktreePath]);
+}
+
+export async function gitDeleteBranch(repoCwd: string, branch: string) {
+  await git(repoCwd).raw(['branch', '-D', branch]).catch(() => {});
+}
+
+export async function gitCanFastForward(repoCwd: string, sourceBranch: string, targetBranch: string): Promise<boolean> {
+  // target is ancestor of source => FF possible
+  return await git(repoCwd).raw(['merge-base', '--is-ancestor', targetBranch, sourceBranch]).then(() => true).catch(() => false);
+}
+
+export async function gitFastForwardMerge(repoCwd: string, sourceBranch: string) {
+  await git(repoCwd).raw(['merge', '--ff-only', sourceBranch]);
+}
+
 export function registerGitHandlers() {
   ipcMain.handle('git:status', async (_event, cwd: string) => {
     const status = await git(cwd).status();

@@ -17,6 +17,7 @@ import { registerPluginHandlers } from './services/plugins';
 import { registerMcpHandlers } from './services/mcp';
 import { registerScaffoldHandler } from './services/scaffold';
 import { registerSearchHandlers } from './services/search';
+import { registerSwarmHandlers } from './services/swarm';
 
 // Allow E2E tests to isolate userData
 if (process.env.SAI_USER_DATA_DIR) {
@@ -153,6 +154,7 @@ function createWindow() {
   registerPluginHandlers(readSettings);
   registerSearchHandlers();
   registerMcpHandlers();
+  registerSwarmHandlers();
   registerUpdater(mainWindow!);
   registerUsageHandlers(mainWindow!);
   startSuspendTimer(mainWindow, () => {
