@@ -19,7 +19,7 @@ import { basename } from './utils/pathUtils';
 import { createSession, generateSmartTitle } from './sessions';
 import { computeUnmountFlushes } from './workspaceFlush';
 import { dbGetSessions, dbGetMessages, dbGetMessagesTail, dbSaveSession, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
-import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask } from './types';
+import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy } from './types';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, setActiveHighlightTheme, type HighlightThemeId } from './themes';
 import ApprovalBanner from './components/ApprovalBanner';
 import { MessageSquare, TerminalSquare, Code2, ChevronRight, MessageCirclePlus } from 'lucide-react';
@@ -27,7 +27,9 @@ import ChatHistorySidebar from './components/Chat/ChatHistorySidebar';
 import PluginsSidebar from './components/Plugins/PluginsSidebar';
 import McpSidebar from './components/MCP/McpSidebar';
 import SwarmSidebar from './components/Swarm/SwarmSidebar';
-import { swarmGetTasks } from './swarmDb';
+import NewTaskPopover from './components/Swarm/NewTaskPopover';
+import { swarmGetTasks, swarmCreateTask } from './swarmDb';
+import { swarmBranchName } from './lib/swarmSlug';
 import { isImageFile } from './utils/imageFiles';
 import { getMonacoEditorFor } from './utils/monacoEditorRegistry';
 import * as monaco from 'monaco-editor';
@@ -211,6 +213,61 @@ export default function App() {
     })();
     return () => { cancelled = true; };
   }, [activeProjectPath]);
+
+  async function spawnSwarmTask(input: { prompt: string; provider: AIProvider; model: string; approvalPolicy: ApprovalPolicy }) {
+    if (!activeProjectPath) return;
+    const id = crypto.randomUUID();
+    const sessionId = crypto.randomUUID();
+    const title = input.prompt.split('\n')[0].slice(0, 60) || 'task';
+    const branch = swarmBranchName(title, id);
+    let baseBranch = 'main';
+    try {
+      const branchInfo = await (window.sai as any).gitBranches?.(activeProjectPath);
+      if (branchInfo?.current) baseBranch = branchInfo.current;
+    } catch {
+      // fall back to 'main'
+    }
+
+    const now = Date.now();
+    await dbSaveSession(activeProjectPath, {
+      id: sessionId,
+      title,
+      messages: [],
+      aiProvider: input.provider,
+      projectPath: activeProjectPath,
+      pinned: false,
+      messageCount: 0,
+      kind: 'task',
+      swarmTaskId: id,
+      createdAt: now,
+      updatedAt: now,
+    } as any);
+
+    const task: SwarmTask = {
+      id,
+      workspaceId: activeProjectPath,
+      sessionId,
+      title,
+      prompt: input.prompt,
+      provider: input.provider,
+      model: input.model,
+      approvalPolicy: input.approvalPolicy,
+      status: 'queued',
+      branch,
+      baseBranch,
+      worktreePath: null,
+      createdAt: now,
+      lastActivityAt: now,
+      costEstimate: 0,
+      toolCallCount: 0,
+    };
+    await swarmCreateTask(task);
+    setSwarmTasksByWs(prev => {
+      const m = new Map(prev);
+      m.set(activeProjectPath, [task, ...(m.get(activeProjectPath) ?? [])]);
+      return m;
+    });
+  }
 
   // Track which workspaces are currently mounted in the chat panel render.
   // When a workspace transitions out of the mounted set (no longer active
@@ -1777,6 +1834,13 @@ export default function App() {
             </motion.div>
           )}
         </AnimatePresence>
+        <NewTaskPopover
+          open={showNewTaskPopover}
+          onClose={() => setShowNewTaskPopover(false)}
+          onSubmit={(input) => { void spawnSwarmTask(input); setShowNewTaskPopover(false); }}
+          defaultProvider={aiProvider}
+          defaultModel=""
+        />
         <div className="tm-views-wrapper">
           <div className="main-content" ref={mainContentRef}>
             {allPanels.map((panel, i) => (
