@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Check, ChevronDown, Settings as SettingsIcon, Monitor, Type, PanelLeft, Palette, HardDrive, Keyboard } from 'lucide-react';
+import { X, Check, ChevronDown, Settings as SettingsIcon, Monitor, Type, PanelLeft, Palette, HardDrive, Keyboard, Zap } from 'lucide-react';
 import KeybindingsPage from './Settings/KeybindingsPage';
+import SwarmSettings from './Settings/SwarmSettings';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, getActiveHighlightTheme, setActiveHighlightTheme, getShikiHighlighter, type HighlightThemeId } from '../themes';
 
 interface Props {
@@ -48,7 +49,7 @@ const RETENTION_OPTIONS: { label: string; value: number | null }[] = [
 ];
 
 type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error';
-type SettingsPage = 'general' | 'editor' | 'layout' | 'style' | 'storage' | 'provider' | 'claude' | 'codex' | 'gemini' | 'keybindings';
+type SettingsPage = 'general' | 'editor' | 'layout' | 'style' | 'storage' | 'provider' | 'claude' | 'codex' | 'gemini' | 'swarm' | 'keybindings';
 
 function formatRelative(ts: number): string {
   const secs = Math.floor((Date.now() - ts) / 1000);
@@ -878,6 +879,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       case 'claude': return renderClaudePage();
       case 'codex': return renderCodexPage();
       case 'gemini': return renderGeminiPage();
+      case 'swarm': return <SwarmSettings onSettingChange={onSettingChange} />;
       case 'keybindings': return <KeybindingsPage />;
     }
   };
@@ -975,6 +977,13 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
                 <span>{p.id.charAt(0).toUpperCase() + p.id.slice(1)}</span>
               </button>
             ))}
+            <button
+              className={`settings-nav-item${activePage === 'swarm' ? ' active' : ''}`}
+              onClick={() => setActivePage('swarm')}
+            >
+              <Zap size={14} />
+              <span>Swarm</span>
+            </button>
           </nav>
 
           <div className="settings-content">

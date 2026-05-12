@@ -37,7 +37,7 @@ import { ensureOrchestratorSession } from './lib/swarmOrchestratorSession';
 import type { SwarmHost } from './lib/swarmOrchestratorDispatcher';
 import { resolveTaskRef } from './lib/swarmRef';
 
-const SWARM_DEFAULT_CAP = 3;
+const SWARM_DEFAULT_CAP = 5;
 import { swarmBranchName } from './lib/swarmSlug';
 import { isImageFile } from './utils/imageFiles';
 import { getMonacoEditorFor } from './utils/monacoEditorRegistry';
@@ -270,13 +270,48 @@ export default function App() {
   }, [activeProjectPath, swarmTasksByWs]);
 
   const swarmSchedulers = useRef<Map<string, SwarmScheduler>>(new Map());
+  const swarmSettingsRef = useRef<{
+    concurrencyCap: number;
+    defaultApprovalPolicy: ApprovalPolicy;
+    defaultTaskProvider: AIProvider | null;
+    defaultTaskModel: string;
+    worktreeRoot: string;
+  }>({
+    concurrencyCap: SWARM_DEFAULT_CAP,
+    defaultApprovalPolicy: 'auto-read',
+    defaultTaskProvider: null,
+    defaultTaskModel: '',
+    worktreeRoot: '',
+  });
+
+  useEffect(() => {
+    const sai = window.sai as any;
+    if (!sai?.settingsGet) return;
+    Promise.all([
+      sai.settingsGet('swarm.concurrencyCap', SWARM_DEFAULT_CAP),
+      sai.settingsGet('swarm.defaultApprovalPolicy', 'auto-read'),
+      sai.settingsGet('swarm.defaultTaskProvider', null),
+      sai.settingsGet('swarm.defaultTaskModel', ''),
+      sai.settingsGet('swarm.worktreeRoot', ''),
+    ]).then(([cap, policy, provider, model, root]) => {
+      swarmSettingsRef.current = {
+        concurrencyCap: typeof cap === 'number' && cap > 0 ? cap : SWARM_DEFAULT_CAP,
+        defaultApprovalPolicy: (policy === 'auto' || policy === 'auto-read' || policy === 'always-ask') ? policy : 'auto-read',
+        defaultTaskProvider: (provider === 'claude' || provider === 'codex' || provider === 'gemini') ? provider : null,
+        defaultTaskModel: typeof model === 'string' ? model : '',
+        worktreeRoot: typeof root === 'string' ? root : '',
+      };
+      // Propagate cap to any already-created schedulers.
+      swarmSchedulers.current.forEach(s => s.setCap(swarmSettingsRef.current.concurrencyCap));
+    }).catch(() => { /* ignore */ });
+  }, []);
 
   useEffect(() => {
     if (!activeProjectPath) return;
     let s = swarmSchedulers.current.get(activeProjectPath);
     if (!s) {
       s = new SwarmScheduler({
-        cap: SWARM_DEFAULT_CAP,
+        cap: swarmSettingsRef.current.concurrencyCap,
         onStart: async (task) => {
           const now = Date.now();
           await swarmUpdateTask(task.id, { status: 'streaming', lastActivityAt: now });
@@ -437,11 +472,15 @@ export default function App() {
     }
 
     const spawnTask = async (i: { prompt: string; title?: string; provider?: string; model?: string; approvalPolicy?: string }) => {
+      const cfg = swarmSettingsRef.current;
+      const provider = (i.provider as AIProvider) ?? cfg.defaultTaskProvider ?? aiProvider;
+      const model = i.model ?? (cfg.defaultTaskModel || undefined) ?? modelChoice;
+      const approvalPolicy = (i.approvalPolicy as ApprovalPolicy) ?? cfg.defaultApprovalPolicy ?? 'auto-read';
       const created = await spawnSwarmTask({
         prompt: i.prompt,
-        provider: (i.provider as AIProvider) ?? aiProvider,
-        model: i.model ?? modelChoice,
-        approvalPolicy: (i.approvalPolicy as ApprovalPolicy) ?? 'auto-read',
+        provider,
+        model,
+        approvalPolicy,
       });
       return { id: created.id, title: created.title };
     };
@@ -2179,6 +2218,23 @@ export default function App() {
           if (key === 'focusedChat') { setFocusedChat(value); if (value) { setExpanded(['chat', 'terminal']); setSplitRatio(0.66); } }
           if (key === 'defaultView') { /* persisted only, applies on next launch */ }
           if (key === 'sidebarWidth') document.documentElement.style.setProperty('--sidebar-width', `${value}px`);
+          if (typeof key === 'string' && key.startsWith('swarm.')) {
+            const cfg = swarmSettingsRef.current;
+            if (key === 'swarm.concurrencyCap') {
+              const n = typeof value === 'number' && value > 0 ? value : SWARM_DEFAULT_CAP;
+              cfg.concurrencyCap = n;
+              swarmSchedulers.current.forEach(s => s.setCap(n));
+            } else if (key === 'swarm.defaultApprovalPolicy') {
+              if (value === 'auto' || value === 'auto-read' || value === 'always-ask') cfg.defaultApprovalPolicy = value;
+            } else if (key === 'swarm.defaultTaskProvider') {
+              if (value === 'claude' || value === 'codex' || value === 'gemini') cfg.defaultTaskProvider = value;
+              else if (value == null || value === '') cfg.defaultTaskProvider = null;
+            } else if (key === 'swarm.defaultTaskModel') {
+              cfg.defaultTaskModel = typeof value === 'string' ? value : '';
+            } else if (key === 'swarm.worktreeRoot') {
+              cfg.worktreeRoot = typeof value === 'string' ? value : '';
+            }
+          }
         }}
         onOpenWhatsNew={openWhatsNew}
         onNewProject={() => setShowNewProject(true)}
