@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import NavBar from './components/NavBar';
 import ChatPanel from './components/Chat/ChatPanel';
 import TerminalPanel from './components/Terminal/TerminalPanel';
@@ -34,6 +34,8 @@ import { swarmGetTasks, swarmCreateTask, swarmUpdateTask, swarmGetApprovals, swa
 import { SwarmScheduler, isLikelyReadOnlyPrompt } from './lib/swarmScheduler';
 import { landTask, discardTask } from './lib/swarmLanding';
 import { ensureOrchestratorSession } from './lib/swarmOrchestratorSession';
+import type { SwarmHost } from './lib/swarmOrchestratorDispatcher';
+import { resolveTaskRef } from './lib/swarmRef';
 
 const SWARM_DEFAULT_CAP = 3;
 import { swarmBranchName } from './lib/swarmSlug';
@@ -337,8 +339,8 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProjectPath, swarmTasksByWs]);
 
-  async function spawnSwarmTask(input: { prompt: string; provider: AIProvider; model: string; approvalPolicy: ApprovalPolicy }) {
-    if (!activeProjectPath) return;
+  async function spawnSwarmTask(input: { prompt: string; provider: AIProvider; model: string; approvalPolicy: ApprovalPolicy }): Promise<SwarmTask> {
+    if (!activeProjectPath) throw new Error('no active workspace');
     const id = crypto.randomUUID();
     const sessionId = crypto.randomUUID();
     const title = input.prompt.split('\n')[0].slice(0, 60) || 'task';
@@ -390,7 +392,142 @@ export default function App() {
       m.set(activeProjectPath, [task, ...(m.get(activeProjectPath) ?? [])]);
       return m;
     });
+    return task;
   }
+
+  const swarmHost = useMemo<SwarmHost>(() => {
+    const ws = activeProjectPath ?? '';
+
+    const wsTasks = () => swarmTasksByWs.get(ws) ?? [];
+
+    const landDeps = {
+      canFastForward: (cwd: string, src: string, tgt: string) =>
+        (window.sai as any).swarm.canFastForward(cwd, src, tgt),
+      ffMerge: (cwd: string, src: string) =>
+        (window.sai as any).swarm.ffMerge(cwd, src),
+      worktreeRemove: (cwd: string, wt: string, br: string) =>
+        (window.sai as any).swarm.worktreeRemove(cwd, wt, br),
+      updateTask: swarmUpdateTask,
+    };
+    const discardDeps = {
+      worktreeRemove: (cwd: string, wt: string, br: string) =>
+        (window.sai as any).swarm.worktreeRemove(cwd, wt, br),
+      updateTask: swarmUpdateTask,
+    };
+
+    function byRef(ref: string) {
+      const t = resolveTaskRef(wsTasks(), ref);
+      if (!t) throw new Error(`task not found: ${ref}`);
+      return t;
+    }
+
+    function stopProvider(task: SwarmTask) {
+      const p = task.provider;
+      if (p === 'codex') return (window.sai as any).codexStop?.(ws);
+      if (p === 'gemini') return (window.sai as any).geminiStop?.(ws);
+      return (window.sai as any).claudeStop?.(ws);
+    }
+
+    function resolveProviderApproval(task: SwarmTask, toolUseId: string, approved: boolean) {
+      const p = task.provider;
+      // codexApprove/geminiApprove don't exist in the current preload; degrade gracefully.
+      if (p === 'codex') return (window.sai as any).codexApprove?.(ws, toolUseId, approved);
+      if (p === 'gemini') return (window.sai as any).geminiApprove?.(ws, toolUseId, approved);
+      return (window.sai as any).claudeApprove?.(ws, toolUseId, approved);
+    }
+
+    const spawnTask = async (i: { prompt: string; title?: string; provider?: string; model?: string; approvalPolicy?: string }) => {
+      const created = await spawnSwarmTask({
+        prompt: i.prompt,
+        provider: (i.provider as AIProvider) ?? aiProvider,
+        model: i.model ?? modelChoice,
+        approvalPolicy: (i.approvalPolicy as ApprovalPolicy) ?? 'auto-read',
+      });
+      return { id: created.id, title: created.title };
+    };
+
+    const host: SwarmHost = {
+      spawnTask,
+      spawnTasks: async (prompts) => Promise.all(prompts.map(p => spawnTask({ prompt: p }))),
+      snapshot: async () => {
+        const tasks = wsTasks();
+        return {
+          active: tasks.filter(t => t.status === 'streaming').length,
+          approvals: tasks.filter(t => t.status === 'awaiting_approval').length,
+          ready: tasks.filter(t => t.status === 'done').length,
+          tasks: tasks.map(t => ({ id: t.id, title: t.title, status: t.status })),
+        };
+      },
+      pause: async (ref) => {
+        const t = byRef(ref);
+        await stopProvider(t);
+        await swarmUpdateTask(t.id, { status: 'paused' });
+        setSwarmTasksByWs(prev => {
+          const m = new Map(prev);
+          m.set(ws, (m.get(ws) ?? []).map(x => x.id === t.id ? { ...x, status: 'paused' as const } : x));
+          return m;
+        });
+      },
+      resume: async (ref) => {
+        const t = byRef(ref);
+        await swarmUpdateTask(t.id, { status: 'queued' });
+        setSwarmTasksByWs(prev => {
+          const m = new Map(prev);
+          m.set(ws, (m.get(ws) ?? []).map(x => x.id === t.id ? { ...x, status: 'queued' as const } : x));
+          return m;
+        });
+      },
+      approve: async (approvalId) => {
+        const all = await swarmGetApprovals(ws);
+        const a = all.find(x => x.id === approvalId);
+        if (!a) return;
+        const task = wsTasks().find(t => t.id === a.taskId);
+        if (task) await resolveProviderApproval(task, a.toolUseId, true);
+        await swarmResolveApproval(a.id);
+        setSwarmApprovalsByWs(prev => {
+          const m = new Map(prev);
+          m.set(ws, (m.get(ws) ?? []).filter(x => x.id !== approvalId));
+          return m;
+        });
+      },
+      deny: async (approvalId) => {
+        const all = await swarmGetApprovals(ws);
+        const a = all.find(x => x.id === approvalId);
+        if (!a) return;
+        const task = wsTasks().find(t => t.id === a.taskId);
+        if (task) await resolveProviderApproval(task, a.toolUseId, false);
+        await swarmResolveApproval(a.id);
+        setSwarmApprovalsByWs(prev => {
+          const m = new Map(prev);
+          m.set(ws, (m.get(ws) ?? []).filter(x => x.id !== approvalId));
+          return m;
+        });
+      },
+      land: async (ref) => {
+        const t = byRef(ref);
+        const r = await landTask(t, landDeps);
+        if (r.ok) {
+          setSwarmTasksByWs(prev => {
+            const m = new Map(prev);
+            m.set(ws, (m.get(ws) ?? []).map(x => x.id === t.id ? { ...x, status: 'landed' as const, worktreePath: null } : x));
+            return m;
+          });
+        }
+        return r;
+      },
+      discard: async (ref) => {
+        const t = byRef(ref);
+        await discardTask(t, discardDeps);
+        setSwarmTasksByWs(prev => {
+          const m = new Map(prev);
+          m.set(ws, (m.get(ws) ?? []).map(x => x.id === t.id ? { ...x, status: 'discarded' as const, worktreePath: null } : x));
+          return m;
+        });
+      },
+    };
+    return host;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProjectPath, swarmTasksByWs, swarmApprovalsByWs, aiProvider, modelChoice]);
 
   // Track which workspaces are currently mounted in the chat panel render.
   // When a workspace transitions out of the mounted set (no longer active
@@ -1777,48 +1914,17 @@ export default function App() {
                         toolName: a.toolName, command: a.command, createdAt: a.createdAt,
                       }));
                     })()}
-                    onApproveApproval={async (id) => {
-                      // TODO(Task 21): also call provider-side approveToolCall for per-session resolution
-                      await swarmResolveApproval(id);
-                      setSwarmApprovalsByWs(prev => {
-                        const m = new Map(prev);
-                        m.set(wsPath, (prev.get(wsPath) ?? []).filter(a => a.id !== id));
-                        return m;
-                      });
-                    }}
-                    onDenyApproval={async (id) => {
-                      // TODO(Task 21): also call provider-side denyToolCall for per-session resolution
-                      await swarmResolveApproval(id);
-                      setSwarmApprovalsByWs(prev => {
-                        const m = new Map(prev);
-                        m.set(wsPath, (prev.get(wsPath) ?? []).filter(a => a.id !== id));
-                        return m;
-                      });
-                    }}
+                    onApproveApproval={(id) => swarmHost.approve(id)}
+                    onDenyApproval={(id) => swarmHost.deny(id)}
                     onApproveAllReads={() => {
                       const READ_TOOLS = new Set(['read', 'Read', 'view', 'View', 'cat']);
                       (swarmApprovalsByWs.get(wsPath) ?? [])
                         .filter(a => READ_TOOLS.has(a.toolName))
-                        .forEach(a => {
-                          swarmResolveApproval(a.id).then(() => {
-                            setSwarmApprovalsByWs(prev => {
-                              const m = new Map(prev);
-                              m.set(wsPath, (prev.get(wsPath) ?? []).filter(x => x.id !== a.id));
-                              return m;
-                            });
-                          }).catch(() => { /* ignore */ });
-                        });
+                        .forEach(a => swarmHost.approve(a.id).catch(() => { /* ignore */ }));
                     }}
                     onDenyAllApprovals={() => {
-                      (swarmApprovalsByWs.get(wsPath) ?? []).forEach(a => {
-                        swarmResolveApproval(a.id).then(() => {
-                          setSwarmApprovalsByWs(prev => {
-                            const m = new Map(prev);
-                            m.set(wsPath, (prev.get(wsPath) ?? []).filter(x => x.id !== a.id));
-                            return m;
-                          });
-                        }).catch(() => { /* ignore */ });
-                      });
+                      (swarmApprovalsByWs.get(wsPath) ?? [])
+                        .forEach(a => swarmHost.deny(a.id).catch(() => { /* ignore */ }));
                     }}
                     readyTasks={(() => {
                       const done = (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'done');
@@ -1830,63 +1936,14 @@ export default function App() {
                         deletions: swarmDiffStats.get(t.id)?.deletions ?? 0,
                       }));
                     })()}
-                    onLand={async (id) => {
-                      const task = (swarmTasksByWs.get(wsPath) ?? []).find(t => t.id === id);
-                      if (!task) return;
-                      const r = await landTask(task, {
-                        canFastForward: (cwd, s, t) => (window as any).sai.swarm.canFastForward(cwd, s, t),
-                        ffMerge: (cwd, s) => (window as any).sai.swarm.ffMerge(cwd, s),
-                        worktreeRemove: (cwd, wt, br) => (window as any).sai.swarm.worktreeRemove(cwd, wt, br),
-                        updateTask: (tid, patch) => swarmUpdateTask(tid, patch),
-                      });
-                      if (!r.ok && r.reason === 'rebase-needed') return;
-                      setSwarmTasksByWs(prev => {
-                        const m = new Map(prev);
-                        const list = (m.get(task.workspaceId) ?? []).map(t =>
-                          t.id === task.id ? { ...t, status: 'landed' as const, worktreePath: null } : t
-                        );
-                        m.set(task.workspaceId, list);
-                        return m;
-                      });
-                    }}
-                    onDiscard={async (id) => {
-                      const task = (swarmTasksByWs.get(wsPath) ?? []).find(t => t.id === id);
-                      if (!task) return;
-                      await discardTask(task, {
-                        worktreeRemove: (cwd, wt, br) => (window as any).sai.swarm.worktreeRemove(cwd, wt, br),
-                        updateTask: (tid, patch) => swarmUpdateTask(tid, patch),
-                      });
-                      setSwarmTasksByWs(prev => {
-                        const m = new Map(prev);
-                        const list = (m.get(task.workspaceId) ?? []).map(t =>
-                          t.id === task.id ? { ...t, status: 'discarded' as const, worktreePath: null } : t
-                        );
-                        m.set(task.workspaceId, list);
-                        return m;
-                      });
-                    }}
+                    onLand={(id) => swarmHost.land(id)}
+                    onDiscard={(id) => swarmHost.discard(id)}
                     onDiff={(id) => { setSwarmSelected(id); }}
                     onLandAll={async () => {
                       const done = (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'done');
-                      for (const task of done) {
-                        const r = await landTask(task, {
-                          canFastForward: (cwd, s, t) => (window as any).sai.swarm.canFastForward(cwd, s, t),
-                          ffMerge: (cwd, s) => (window as any).sai.swarm.ffMerge(cwd, s),
-                          worktreeRemove: (cwd, wt, br) => (window as any).sai.swarm.worktreeRemove(cwd, wt, br),
-                          updateTask: (tid, patch) => swarmUpdateTask(tid, patch),
-                        });
-                        if (!r.ok) continue;
-                        setSwarmTasksByWs(prev => {
-                          const m = new Map(prev);
-                          const list = (m.get(task.workspaceId) ?? []).map(t =>
-                            t.id === task.id ? { ...t, status: 'landed' as const, worktreePath: null } : t
-                          );
-                          m.set(task.workspaceId, list);
-                          return m;
-                        });
-                      }
+                      for (const task of done) await swarmHost.land(task.id);
                     }}
-                    onCommand={() => { /* TODO(Task 21): host.sendOrchestratorCommand */ }}
+                    onCommand={() => { /* model-driven commands deferred; see Task 17 deferral on provider tool schema injection */ }}
                   />
                 ) : (
                 <ChatPanel
