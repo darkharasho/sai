@@ -29,6 +29,7 @@ import McpSidebar from './components/MCP/McpSidebar';
 import SwarmSidebar from './components/Swarm/SwarmSidebar';
 import NewTaskPopover from './components/Swarm/NewTaskPopover';
 import SwarmTaskHeader from './components/Swarm/SwarmTaskHeader';
+import OrchestratorView from './components/Swarm/OrchestratorView';
 import { swarmGetTasks, swarmCreateTask, swarmUpdateTask } from './swarmDb';
 import { SwarmScheduler, isLikelyReadOnlyPrompt } from './lib/swarmScheduler';
 import { landTask, discardTask } from './lib/swarmLanding';
@@ -1716,6 +1717,20 @@ export default function App() {
                     onOpenDiff={() => { /* TODO(Task 12) */ }}
                   />
                 )}
+                {sidebarOpen === 'swarm' && swarmSelected === 'overview' && orchestratorSessionIdByWs.get(wsPath) ? (
+                  <OrchestratorView
+                    orchestratorSessionId={orchestratorSessionIdByWs.get(wsPath)!}
+                    projectPath={wsPath}
+                    stats={{
+                      active: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'streaming').length,
+                      approvals: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'awaiting_approval').length,
+                      ready: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'done').length,
+                    }}
+                    approvals={[]}
+                    readyTasks={[]}
+                    onCommand={() => { /* TODO(Task 21): host.sendOrchestratorCommand */ }}
+                  />
+                ) : (
                 <ChatPanel
                   key={ws.activeSession.id}
                   projectPath={wsPath}
@@ -1849,6 +1864,7 @@ export default function App() {
                     }
                   }}
                 />
+                )}
               </div>
             ))}
             {panel === 'editor' && activeFilePath && (
