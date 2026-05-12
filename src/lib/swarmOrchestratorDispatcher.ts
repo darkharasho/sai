@@ -24,3 +24,46 @@ export async function dispatchSwarmTool(name: string, input: any, host: SwarmHos
     default: return { ok: false, error: `unknown tool: ${name}` };
   }
 }
+
+export interface SwarmToolRequest {
+  id: string;
+  tool: string;
+  input: any;
+  workspace: string;
+}
+
+export interface SwarmToolResponder {
+  respond: (id: string, result: unknown) => void;
+  respondError: (id: string, error: string) => void;
+}
+
+/**
+ * Routes an incoming swarm tool request from the orchestrator MCP socket
+ * (forwarded over IPC by the main process) to the active workspace's
+ * SwarmHost. Rejects when the request's workspace does not match the
+ * currently active workspace — orchestrator sessions are bound to the
+ * workspace that was active when the socket connected.
+ */
+export async function handleSwarmToolRequest(
+  req: SwarmToolRequest,
+  opts: {
+    activeWorkspace: string;
+    host: SwarmHost;
+    responder: SwarmToolResponder;
+  },
+): Promise<void> {
+  const { activeWorkspace, host, responder } = opts;
+  try {
+    if (req.workspace && req.workspace !== activeWorkspace) {
+      responder.respondError(
+        req.id,
+        `workspace mismatch: orchestrator socket bound to ${req.workspace} but active workspace is ${activeWorkspace}`,
+      );
+      return;
+    }
+    const result = await dispatchSwarmTool(req.tool, req.input, host);
+    responder.respond(req.id, result);
+  } catch (err: any) {
+    responder.respondError(req.id, err?.message ?? String(err));
+  }
+}

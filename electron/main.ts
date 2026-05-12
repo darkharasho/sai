@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, Menu, MenuItem, screen } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { registerTerminalHandlers, destroyAllTerminals } from './services/pty';
 import { registerClaudeHandlers } from './services/claude';
 import { registerGitHandlers } from './services/git';
@@ -165,6 +166,50 @@ function createWindow() {
   try {
     const mcpHandle = swarmMcpHost.start();
     console.log('[swarm-mcp] socket listening at', mcpHandle.socketPath);
+
+    // Bridge MCP tool calls (from socket) into the renderer over IPC.
+    const pendingMcpCalls = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+
+    const safeSendMcp = (channel: string, payload: unknown) => {
+      try {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send(channel, payload);
+        }
+      } catch { /* noop */ }
+    };
+
+    swarmMcpHost.onToolCall(async (req) => {
+      const id = `mcp-${crypto.randomUUID()}`;
+      return await new Promise<unknown>((resolve, reject) => {
+        pendingMcpCalls.set(id, { resolve, reject });
+        safeSendMcp('swarm:tool-request', {
+          id,
+          tool: req.tool,
+          input: req.input,
+          workspace: req.workspace,
+        });
+        setTimeout(() => {
+          if (pendingMcpCalls.has(id)) {
+            pendingMcpCalls.delete(id);
+            reject(new Error(`tool call ${req.tool} timed out after 60s`));
+          }
+        }, 60_000);
+      });
+    });
+
+    ipcMain.on('swarm:tool-response', (_evt, id: string, result: unknown) => {
+      const pending = pendingMcpCalls.get(id);
+      if (!pending) return;
+      pendingMcpCalls.delete(id);
+      pending.resolve(result);
+    });
+
+    ipcMain.on('swarm:tool-response-error', (_evt, id: string, error: string) => {
+      const pending = pendingMcpCalls.get(id);
+      if (!pending) return;
+      pendingMcpCalls.delete(id);
+      pending.reject(new Error(error));
+    });
   } catch (err) {
     console.error('[swarm-mcp] failed to start host:', err);
   }

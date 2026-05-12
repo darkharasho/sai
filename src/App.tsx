@@ -36,7 +36,7 @@ import { reconcileTasksOnStartup } from './lib/swarmReconcile';
 import { SwarmScheduler, isLikelyReadOnlyPrompt } from './lib/swarmScheduler';
 import { landTask, discardTask } from './lib/swarmLanding';
 import { ensureOrchestratorSession } from './lib/swarmOrchestratorSession';
-import type { SwarmHost } from './lib/swarmOrchestratorDispatcher';
+import { handleSwarmToolRequest, type SwarmHost } from './lib/swarmOrchestratorDispatcher';
 import { resolveTaskRef } from './lib/swarmRef';
 
 const SWARM_DEFAULT_CAP = 5;
@@ -639,6 +639,29 @@ export default function App() {
     return host;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProjectPath, swarmTasksByWs, swarmApprovalsByWs, aiProvider, modelChoice]);
+
+  // Keep a ref to swarmHost so the IPC handler installed once (below) always
+  // dispatches against the current host instance, not a stale closure.
+  const swarmHostRef = useRef(swarmHost);
+  useEffect(() => { swarmHostRef.current = swarmHost; }, [swarmHost]);
+
+  // Bridge tool calls from the orchestrator MCP socket (main process) into
+  // dispatchSwarmTool here in the renderer, then return the result over IPC.
+  useEffect(() => {
+    const sai = window.sai as any;
+    if (typeof sai?.onSwarmToolRequest !== 'function') return; // mocks / tests
+    const unsub = sai.onSwarmToolRequest((req: { id: string; tool: string; input: any; workspace: string }) => {
+      void handleSwarmToolRequest(req, {
+        activeWorkspace: activeProjectPathRef.current,
+        host: swarmHostRef.current,
+        responder: {
+          respond: (id, result) => sai.respondSwarmTool(id, result),
+          respondError: (id, error) => sai.respondSwarmToolError(id, error),
+        },
+      });
+    });
+    return unsub;
+  }, []);
 
   // Track which workspaces are currently mounted in the chat panel render.
   // When a workspace transitions out of the mounted set (no longer active

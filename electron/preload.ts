@@ -214,6 +214,13 @@ contextBridge.exposeInMainWorld('sai', {
   mcpRemove: (name: string) => ipcRenderer.invoke('mcp:remove', name),
   mcpUpdate: (name: string, updates: any) => ipcRenderer.invoke('mcp:update', name, updates),
   mcpRegistryList: () => ipcRenderer.invoke('mcp:registryList'),
+  onSwarmToolRequest: (cb: (req: { id: string; tool: string; input: any; workspace: string }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, req: { id: string; tool: string; input: any; workspace: string }) => cb(req);
+    ipcRenderer.on('swarm:tool-request', listener);
+    return () => ipcRenderer.removeListener('swarm:tool-request', listener);
+  },
+  respondSwarmTool: (id: string, result: unknown) => ipcRenderer.send('swarm:tool-response', id, result),
+  respondSwarmToolError: (id: string, error: string) => ipcRenderer.send('swarm:tool-response-error', id, error),
   swarm: {
     worktreeAdd: (projectPath: string, taskId: string, branch: string, baseBranch: string) =>
       ipcRenderer.invoke('swarm:worktree-add', projectPath, taskId, branch, baseBranch),
