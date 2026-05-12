@@ -1,4 +1,5 @@
 import React from 'react';
+import { Info } from 'lucide-react';
 import OrchestratorComposer from './OrchestratorComposer';
 import ApprovalTray, { type ApprovalRow } from './ApprovalTray';
 import ReadyToLandTray, { type ReadyTaskRow } from './ReadyToLandTray';
@@ -98,6 +99,38 @@ export default function OrchestratorView({
           {providerLabel && <span style={{ opacity: 0.6 }}>{providerLabel} ▾</span>}
         </div>
       </header>
+
+      {orchestratorProvider && orchestratorProvider !== 'claude' && (
+        <div className="orch-non-claude-banner" data-testid="orch-non-claude-banner">
+          <Info size={13} />
+          <span>
+            Chat-driven dispatch requires Claude. You can still use the trays, slash commands (<code>/spawn</code>, <code>/land</code>, …), or switch provider in <b>Settings → Swarm</b>.
+          </span>
+          <style>{`
+            .orch-non-claude-banner {
+              display: flex;
+              align-items: center;
+              gap: 8px;
+              padding: 6px 12px;
+              background: color-mix(in srgb, var(--accent) 10%, transparent);
+              border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+              color: var(--text-secondary);
+              font-size: 11px;
+            }
+            .orch-non-claude-banner code {
+              background: var(--bg-elevated);
+              padding: 1px 5px;
+              border-radius: 3px;
+              font-size: 10px;
+              color: var(--text);
+            }
+            .orch-non-claude-banner svg {
+              color: var(--accent);
+              flex-shrink: 0;
+            }
+          `}</style>
+        </div>
+      )}
 
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }} data-testid="orch-chat-slot">
         {chatSlot}
