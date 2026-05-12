@@ -279,12 +279,16 @@ export default function App() {
     defaultTaskProvider: AIProvider | null;
     defaultTaskModel: string;
     worktreeRoot: string;
+    notifyOnComplete: boolean;
+    notifyOnApproval: boolean;
   }>({
     concurrencyCap: SWARM_DEFAULT_CAP,
     defaultApprovalPolicy: 'auto-read',
     defaultTaskProvider: null,
     defaultTaskModel: '',
     worktreeRoot: '',
+    notifyOnComplete: false,
+    notifyOnApproval: false,
   });
 
   useEffect(() => {
@@ -296,16 +300,25 @@ export default function App() {
       sai.settingsGet('swarm.defaultTaskProvider', null),
       sai.settingsGet('swarm.defaultTaskModel', ''),
       sai.settingsGet('swarm.worktreeRoot', ''),
-    ]).then(([cap, policy, provider, model, root]) => {
+      sai.settingsGet('swarm.notifyOnComplete', false),
+      sai.settingsGet('swarm.notifyOnApproval', false),
+    ]).then(([cap, policy, provider, model, root, notifyComplete, notifyApproval]) => {
       swarmSettingsRef.current = {
         concurrencyCap: typeof cap === 'number' && cap > 0 ? cap : SWARM_DEFAULT_CAP,
         defaultApprovalPolicy: (policy === 'auto' || policy === 'auto-read' || policy === 'always-ask') ? policy : 'auto-read',
         defaultTaskProvider: (provider === 'claude' || provider === 'codex' || provider === 'gemini') ? provider : null,
         defaultTaskModel: typeof model === 'string' ? model : '',
         worktreeRoot: typeof root === 'string' ? root : '',
+        notifyOnComplete: !!notifyComplete,
+        notifyOnApproval: !!notifyApproval,
       };
       // Propagate cap to any already-created schedulers.
       swarmSchedulers.current.forEach(s => s.setCap(swarmSettingsRef.current.concurrencyCap));
+      // Request notification permission once if any swarm notification is enabled.
+      if ((swarmSettingsRef.current.notifyOnComplete || swarmSettingsRef.current.notifyOnApproval)
+        && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+        try { Notification.requestPermission().catch(() => {}); } catch {}
+      }
     }).catch(() => { /* ignore */ });
   }, []);
 
@@ -1172,6 +1185,13 @@ export default function App() {
             try { (window.sai as any).claudeApprove(msg.projectPath, msg.toolUseId, true, undefined, scope); } catch {}
             return;
           }
+          // Fire renderer-side notification (gated by swarm.notifyOnApproval).
+          if (swarmSettingsRef.current.notifyOnApproval
+            && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+            try {
+              new Notification(`SAI · ${swarmTask.title}`, { body: `${msg.toolName} needs approval` });
+            } catch {}
+          }
           // Approval required: transition the task to awaiting_approval.
           (async () => {
             try {
@@ -1242,6 +1262,18 @@ export default function App() {
           if (expected != null && msg.turnSeq !== expected) return;
         }
         wsTurnSeqRef.current.set(scopeKey, -1);
+        // Swarm-aware completion notification (gated by swarm.notifyOnComplete).
+        {
+          const scope = msg.scope || 'chat';
+          if (scope !== 'chat' && swarmSettingsRef.current.notifyOnComplete) {
+            const swarmTask = (swarmTasksByWsRef.current.get(msg.projectPath) ?? []).find(t => t.sessionId === scope);
+            if (swarmTask && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+              try {
+                new Notification(`SAI · ${swarmTask.title}`, { body: 'Task complete' });
+              } catch {}
+            }
+          }
+        }
         if ((msg.scope || 'chat') === 'chat') {
           setChatStreamingWorkspaces(prev => {
             if (!prev.has(msg.projectPath)) return prev;
@@ -2282,6 +2314,16 @@ export default function App() {
               cfg.defaultTaskModel = typeof value === 'string' ? value : '';
             } else if (key === 'swarm.worktreeRoot') {
               cfg.worktreeRoot = typeof value === 'string' ? value : '';
+            } else if (key === 'swarm.notifyOnComplete') {
+              cfg.notifyOnComplete = !!value;
+              if (cfg.notifyOnComplete && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+                try { Notification.requestPermission().catch(() => {}); } catch {}
+              }
+            } else if (key === 'swarm.notifyOnApproval') {
+              cfg.notifyOnApproval = !!value;
+              if (cfg.notifyOnApproval && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+                try { Notification.requestPermission().catch(() => {}); } catch {}
+              }
             }
           }
         }}
