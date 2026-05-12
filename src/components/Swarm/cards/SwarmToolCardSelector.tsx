@@ -8,7 +8,6 @@ import PauseResumeCard from './PauseResumeCard';
 import ApprovalActionCard from './ApprovalActionCard';
 import TaskCompletedCard from './TaskCompletedCard';
 import TaskFailedCard from './TaskFailedCard';
-import TaskStartedCard from './TaskStartedCard';
 import AutoApprovedCard from './AutoApprovedCard';
 import BatchCompleteCard from './BatchCompleteCard';
 
@@ -88,8 +87,6 @@ export default function SwarmToolCardSelector(props: Props): React.ReactElement 
       );
     case 'task_failed':
       return <TaskFailedCard toolCall={toolCall} onRetry={onRetry} onDiscard={onDiscard} />;
-    case 'task_started':
-      return <TaskStartedCard toolCall={toolCall} />;
     case 'auto_approved':
       return <AutoApprovedCard toolCall={toolCall} />;
     case 'batch_complete': {

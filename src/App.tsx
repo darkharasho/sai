@@ -549,23 +549,6 @@ export default function App() {
             m.set(task.workspaceId, list);
             return m;
           });
-          // Emit a synthetic task_started card so the orchestrator chat shows
-          // the queued → streaming transition inline. Dedupe through the same
-          // emittedLifecycleRef used for completed/failed cards.
-          {
-            const startedKey = `${task.id}:streaming`;
-            if (!emittedLifecycleRef.current.has(startedKey)) {
-              emittedLifecycleRef.current.add(startedKey);
-              try {
-                void (window.sai as any).swarmEmitCard?.(task.workspaceId, 'task_started', {
-                  taskId: task.id,
-                  title: task.title,
-                  branch: task.branch,
-                  prompt: task.prompt,
-                });
-              } catch { /* best-effort */ }
-            }
-          }
           const removeFromList = () => {
             setSwarmTasksByWs(prev => {
               const m = new Map(prev);
