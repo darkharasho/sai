@@ -3,9 +3,20 @@ import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
-import { handleRequest, type JsonRpcRequest, type JsonRpcSuccess, type JsonRpcError } from '../../electron/swarm-mcp-server';
+import {
+  handleRequest,
+  makeSocketTransport,
+  type JsonRpcRequest,
+  type JsonRpcSuccess,
+  type JsonRpcError,
+  type SwarmCallTransport,
+} from '../../electron/swarm-mcp-server';
 import { SWARM_TOOL_SCHEMA } from '../../src/lib/swarmOrchestratorTools';
 import * as swarmMcpHost from '../../electron/services/swarmMcpHost';
+
+const noopTransport: SwarmCallTransport = {
+  call: () => Promise.reject(new Error('transport not used in this test')),
+};
 
 function asSuccess(res: unknown): JsonRpcSuccess {
   if (!res || typeof res !== 'object' || !('result' in res)) {
@@ -22,9 +33,9 @@ function asError(res: unknown): JsonRpcError {
 }
 
 describe('swarm MCP server protocol', () => {
-  it('responds to initialize with protocol version and server info', () => {
+  it('responds to initialize with protocol version and server info', async () => {
     const req: JsonRpcRequest = { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} };
-    const res = asSuccess(handleRequest(req));
+    const res = asSuccess(await handleRequest(req, noopTransport));
     expect(res).toEqual({
       jsonrpc: '2.0',
       id: 1,
@@ -36,9 +47,9 @@ describe('swarm MCP server protocol', () => {
     });
   });
 
-  it('lists all 9 swarm tools with swarm_ prefix and matching schemas', () => {
+  it('lists all 9 swarm tools with swarm_ prefix and matching schemas', async () => {
     const req: JsonRpcRequest = { jsonrpc: '2.0', id: 2, method: 'tools/list' };
-    const res = asSuccess(handleRequest(req));
+    const res = asSuccess(await handleRequest(req, noopTransport));
     const result = res.result as { tools: Array<{ name: string; description: string; inputSchema: unknown }> };
     expect(result.tools).toHaveLength(9);
     for (const [i, tool] of result.tools.entries()) {
@@ -49,30 +60,94 @@ describe('swarm MCP server protocol', () => {
     }
   });
 
-  it('returns -32601 for tools/call until socket transport is wired', () => {
-    const req: JsonRpcRequest = {
-      jsonrpc: '2.0',
-      id: 3,
-      method: 'tools/call',
-      params: { name: 'swarm_spawn_task', arguments: { prompt: 'do a thing' } },
-    };
-    const res = asError(handleRequest(req));
-    expect(res.id).toBe(3);
-    expect(res.error.code).toBe(-32601);
-    expect(res.error.message).toMatch(/not yet implemented/i);
-  });
-
-  it('treats notifications/initialized as a no-op', () => {
+  it('treats notifications/initialized as a no-op', async () => {
     const req: JsonRpcRequest = { jsonrpc: '2.0', method: 'notifications/initialized' };
-    expect(handleRequest(req)).toBeNull();
+    expect(await handleRequest(req, noopTransport)).toBeNull();
   });
 
-  it('returns -32601 method-not-found for unknown methods', () => {
+  it('returns -32601 method-not-found for unknown methods', async () => {
     const req: JsonRpcRequest = { jsonrpc: '2.0', id: 4, method: 'definitely/not/a/method' };
-    const res = asError(handleRequest(req));
+    const res = asError(await handleRequest(req, noopTransport));
     expect(res.id).toBe(4);
     expect(res.error.code).toBe(-32601);
     expect(res.error.message).toBe('method not found');
+  });
+});
+
+describe('tools/call dispatch', () => {
+  function makeMockTransport(impl: (tool: string, input: unknown) => Promise<unknown>) {
+    const calls: Array<{ tool: string; input: unknown }> = [];
+    const transport: SwarmCallTransport = {
+      call: (tool, input) => {
+        calls.push({ tool, input });
+        return impl(tool, input);
+      },
+    };
+    return { transport, calls };
+  }
+
+  it('dispatches via transport and wraps result in MCP content shape', async () => {
+    const { transport, calls } = makeMockTransport(async () => ({
+      ok: true,
+      task: { id: 'a1', title: 'x' },
+    }));
+    const req: JsonRpcRequest = {
+      jsonrpc: '2.0',
+      id: 10,
+      method: 'tools/call',
+      params: { name: 'swarm_spawn_task', arguments: { prompt: 'x' } },
+    };
+    const res = asSuccess(await handleRequest(req, transport));
+    expect(calls).toEqual([{ tool: 'spawn_task', input: { prompt: 'x' } }]);
+    const result = res.result as { content: Array<{ type: string; text: string }>; isError?: boolean };
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0].type).toBe('text');
+    expect(JSON.parse(result.content[0].text)).toEqual({ ok: true, task: { id: 'a1', title: 'x' } });
+  });
+
+  it('returns -32602 for unknown swarm_* tool', async () => {
+    const { transport, calls } = makeMockTransport(async () => ({}));
+    const req: JsonRpcRequest = {
+      jsonrpc: '2.0',
+      id: 11,
+      method: 'tools/call',
+      params: { name: 'swarm_does_not_exist', arguments: {} },
+    };
+    const res = asError(await handleRequest(req, transport));
+    expect(res.error.code).toBe(-32602);
+    expect(res.error.message).toMatch(/unknown tool: swarm_does_not_exist/);
+    expect(calls).toEqual([]);
+  });
+
+  it('returns -32602 for non-swarm_ prefixed tools', async () => {
+    const { transport, calls } = makeMockTransport(async () => ({}));
+    const req: JsonRpcRequest = {
+      jsonrpc: '2.0',
+      id: 12,
+      method: 'tools/call',
+      params: { name: 'edit_file', arguments: {} },
+    };
+    const res = asError(await handleRequest(req, transport));
+    expect(res.error.code).toBe(-32602);
+    expect(res.error.message).toMatch(/unknown tool: edit_file/);
+    expect(calls).toEqual([]);
+  });
+
+  it('returns isError content block when transport rejects', async () => {
+    const { transport } = makeMockTransport(async () => {
+      throw new Error('host blew up');
+    });
+    const req: JsonRpcRequest = {
+      jsonrpc: '2.0',
+      id: 13,
+      method: 'tools/call',
+      params: { name: 'swarm_land', arguments: { taskRef: 'foo' } },
+    };
+    const res = asSuccess(await handleRequest(req, transport));
+    const result = res.result as { content: Array<{ type: string; text: string }>; isError?: boolean };
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe('host blew up');
   });
 });
 
@@ -248,5 +323,64 @@ describe('swarmMcpHost socket', () => {
 
     a.socket.destroy();
     b.socket.destroy();
+  });
+});
+
+describe('makeSocketTransport ↔ swarmMcpHost end-to-end', () => {
+  let handle: { socketPath: string; secret: string };
+
+  beforeEach(() => {
+    swarmMcpHost._resetForTests();
+    handle = swarmMcpHost._test_start({
+      socketPath: tmpSocketPath('e2e'),
+      secret: 'b'.repeat(64),
+    });
+  });
+
+  afterEach(() => {
+    swarmMcpHost._resetForTests();
+  });
+
+  it('connects, handshakes, dispatches a tool call, and returns the result', async () => {
+    let capturedReq: any = null;
+    swarmMcpHost.onToolCall(async (req) => {
+      capturedReq = req;
+      return { ok: true, echo: req.input };
+    });
+
+    const transport = makeSocketTransport({
+      socketPath: handle.socketPath,
+      secret: handle.secret,
+      workspace: '/ws/e2e',
+      exitOnClose: false,
+    });
+    try {
+      await transport.ready();
+      const result = await transport.call('spawn_task', { prompt: 'hello' });
+      expect(result).toEqual({ ok: true, echo: { prompt: 'hello' } });
+      expect(capturedReq).toMatchObject({
+        tool: 'spawn_task',
+        input: { prompt: 'hello' },
+        workspace: '/ws/e2e',
+      });
+      expect(typeof capturedReq.id).toBe('string');
+      expect(capturedReq.id.length).toBeGreaterThan(0);
+    } finally {
+      transport.close();
+    }
+  });
+
+  it('ready() rejects when handshake secret is wrong', async () => {
+    const transport = makeSocketTransport({
+      socketPath: handle.socketPath,
+      secret: 'definitely-wrong',
+      workspace: '/ws/x',
+      exitOnClose: false,
+    });
+    try {
+      await expect(transport.ready()).rejects.toThrow(/auth failed/);
+    } finally {
+      transport.close();
+    }
   });
 });
