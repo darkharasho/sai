@@ -1871,6 +1871,12 @@ export default function App() {
     if (orchestratorSessionIdByWs.has(activeProjectPath)) return;
     ensureOrchestratorSession(activeProjectPath, aiProvider).then(session => {
       setOrchestratorSessionIdByWs(prev => new Map(prev).set(activeProjectPath, session.id));
+      // Pre-warm the Claude scope with kind='orchestrator' so when ChatPanel
+      // mounts and triggers ensureProcess, the spawned CLI gets the
+      // SAI-managed MCP config + --strict-mcp-config + --tools "" flags.
+      try {
+        (window as any).sai?.claudeStart?.(activeProjectPath, session.id, 'orchestrator');
+      } catch { /* ignore — kind will fall back to chat if preload missing */ }
       dbGetSessions(activeProjectPath).then(fresh => {
         updateWorkspace(activeProjectPath, ws => ({ ...ws, sessions: fresh }));
       });

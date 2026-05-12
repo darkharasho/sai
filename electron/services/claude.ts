@@ -7,6 +7,8 @@ import * as fs from 'node:fs';
 import { notifyCompletion, notifyApproval } from './notify';
 import { extractCodexCommitMessage } from './commit-message-parser';
 import { ensureGeminiCommitSession, ensureGeminiTransport, promptGeminiText } from './gemini';
+import * as swarmMcpHost from './swarmMcpHost';
+import { writeSwarmMcpConfig } from './swarmMcpConfig';
 
 const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
 
@@ -160,10 +162,48 @@ function readSaiSetting(key: string): any {
   }
 }
 
+export interface BuildArgsOptions {
+  permMode?: string;
+  effort?: string;
+  model?: string;
+  kind?: 'chat' | 'task' | 'orchestrator';
+  /** Workspace path passed to the swarm MCP server as SAI_SWARM_WORKSPACE.
+   *  Required when kind === 'orchestrator'. */
+  workspace?: string;
+  /** Override hooks for tests. */
+  getMcpHandle?: () => { socketPath: string; secret: string };
+  resolveMcpServerScriptPath?: () => string;
+  resolveElectronExecPath?: () => string;
+  writeMcpConfig?: typeof writeSwarmMcpConfig;
+  readSetting?: (key: string) => any;
+}
+
+function defaultMcpServerScriptPath(): string {
+  // vite-electron emits both main and the swarm-mcp-server bundle into
+  // the same dist-electron directory, so __dirname resolution works in
+  // dev and packaged builds alike.
+  return path.join(__dirname, 'swarm-mcp-server.js');
+}
+
 /**
  * Build CLI args for the persistent process based on current config.
+ * Exported for unit tests and to support orchestrator-kind sessions which
+ * need extra `--mcp-config` / `--strict-mcp-config` / `--tools` flags.
  */
-function buildArgs(permMode?: string, effort?: string, model?: string): string[] {
+export function buildArgs(options: BuildArgsOptions = {}): string[] {
+  const {
+    permMode,
+    effort,
+    model,
+    kind = 'chat',
+    workspace,
+    getMcpHandle = () => swarmMcpHost.start(),
+    resolveMcpServerScriptPath = defaultMcpServerScriptPath,
+    resolveElectronExecPath = () => process.execPath,
+    writeMcpConfig = writeSwarmMcpConfig,
+    readSetting = readSaiSetting,
+  } = options;
+
   const args = [
     '-p',
     '--input-format', 'stream-json',
@@ -186,13 +226,29 @@ function buildArgs(permMode?: string, effort?: string, model?: string): string[]
     args.push('--model', model);
   }
 
-  // Pass through MCP config path(s) from SAI settings
-  const mcpConfig = readSaiSetting('mcpConfigPath');
-  if (mcpConfig) {
-    const paths = Array.isArray(mcpConfig) ? mcpConfig : [mcpConfig];
-    for (const p of paths) {
-      if (typeof p === 'string' && p.trim()) {
-        args.push('--mcp-config', p.trim());
+  if (kind === 'orchestrator') {
+    // Orchestrator: SAI-managed MCP only, no built-in tools.
+    const handle = getMcpHandle();
+    const configPath = writeMcpConfig({
+      socketPath: handle.socketPath,
+      secret: handle.secret,
+      workspace: workspace || '',
+      mcpServerScriptPath: resolveMcpServerScriptPath(),
+      electronExecPath: resolveElectronExecPath(),
+    });
+    args.push('--mcp-config', configPath);
+    args.push('--strict-mcp-config');
+    // Disable all built-in tools — only mcp__swarm__* will be available.
+    args.push('--tools', '');
+  } else {
+    // Chat/task: pass through user MCP config path(s) from SAI settings.
+    const mcpConfig = readSetting('mcpConfigPath');
+    if (mcpConfig) {
+      const paths = Array.isArray(mcpConfig) ? mcpConfig : [mcpConfig];
+      for (const p of paths) {
+        if (typeof p === 'string' && p.trim()) {
+          args.push('--mcp-config', p.trim());
+        }
       }
     }
   }
@@ -230,7 +286,13 @@ function ensureProcess(
     claude.process = null;
   }
 
-  const args = buildArgs(permMode, effort, model);
+  const args = buildArgs({
+    permMode,
+    effort,
+    model,
+    kind: claude.kind,
+    workspace: ws.projectPath,
+  });
 
   // Resume existing session if we have one
   if (claude.sessionId) {
@@ -428,10 +490,10 @@ function ensureProcess(
 export function registerClaudeHandlers(win: BrowserWindow) {
   // claude:start — no longer spawns a probe. Just signals ready.
   // Sends cached slash commands immediately so they're available before the process init.
-  ipcMain.handle('claude:start', (_event, cwd: string, scope?: string) => {
+  ipcMain.handle('claude:start', (_event, cwd: string, scope?: string, kind?: 'chat' | 'task' | 'orchestrator') => {
     if (!cwd) return;
     const ws = getOrCreate(cwd);
-    const claude = getClaude(ws, scope || 'chat');
+    const claude = getClaude(ws, scope || 'chat', kind);
     claude.cwd = cwd;
 
     safeSend(win, 'claude:message', { type: 'ready', projectPath: ws.projectPath, scope: scope || 'chat' });

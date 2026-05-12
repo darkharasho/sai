@@ -29,6 +29,9 @@ export interface WorkspaceClaude {
   pendingToolUse: PendingToolUse | null;
   approvalBuffered: any[];
   awaitingApproval: boolean;
+  /** What kind of session this scope is. Determines CLI args (e.g. orchestrator
+   *  gets --strict-mcp-config + --tools "" for swarm-only tooling). */
+  kind: 'chat' | 'task' | 'orchestrator';
 }
 
 export interface WorkspaceCodex {
@@ -90,15 +93,29 @@ function newClaudeScope(cwd: string): WorkspaceClaude {
     pendingToolUse: null,
     approvalBuffered: [],
     awaitingApproval: false,
+    kind: 'chat',
   };
 }
 
-/** Get (or create) the Claude instance for a given scope within a workspace */
-export function getClaude(ws: Workspace, scope: string = 'chat'): WorkspaceClaude {
+/** Get (or create) the Claude instance for a given scope within a workspace.
+ *  If `kind` is provided and differs from a previously stored kind, the new
+ *  kind takes effect on the NEXT process spawn (the in-flight process is left
+ *  alone — call sites should respawn explicitly if needed). */
+export function getClaude(
+  ws: Workspace,
+  scope: string = 'chat',
+  kind?: 'chat' | 'task' | 'orchestrator',
+): WorkspaceClaude {
   let c = ws.claudeScopes.get(scope);
   if (!c) {
     c = newClaudeScope(ws.projectPath);
     ws.claudeScopes.set(scope, c);
+  }
+  if (kind && c.kind !== kind) {
+    if (c.process) {
+      console.warn(`[sai] claude scope "${scope}" kind changed ${c.kind} -> ${kind} while process running; new kind applies on next spawn`);
+    }
+    c.kind = kind;
   }
   return c;
 }
