@@ -138,6 +138,23 @@ export async function gitFastForwardMerge(repoCwd: string, sourceBranch: string)
   await git(repoCwd).raw(['merge', '--ff-only', sourceBranch]);
 }
 
+export async function gitDiffShortstat(
+  cwd: string,
+  baseBranch: string,
+  branch: string
+): Promise<{ additions: number; deletions: number; files: number }> {
+  // `git diff --shortstat baseBranch..branch` returns e.g. " 3 files changed, 18 insertions(+), 7 deletions(-)"
+  const out = await git(cwd).raw(['diff', '--shortstat', `${baseBranch}..${branch}`]).catch(() => '');
+  const files = /(\d+)\s+files?\s+changed/.exec(out)?.[1];
+  const adds = /(\d+)\s+insertions?\(\+\)/.exec(out)?.[1];
+  const dels = /(\d+)\s+deletions?\(-\)/.exec(out)?.[1];
+  return {
+    files: files ? parseInt(files, 10) : 0,
+    additions: adds ? parseInt(adds, 10) : 0,
+    deletions: dels ? parseInt(dels, 10) : 0,
+  };
+}
+
 export function registerGitHandlers() {
   ipcMain.handle('git:status', async (_event, cwd: string) => {
     const status = await git(cwd).status();

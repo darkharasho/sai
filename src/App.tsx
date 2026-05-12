@@ -29,7 +29,7 @@ import McpSidebar from './components/MCP/McpSidebar';
 import SwarmSidebar from './components/Swarm/SwarmSidebar';
 import NewTaskPopover from './components/Swarm/NewTaskPopover';
 import SwarmTaskHeader from './components/Swarm/SwarmTaskHeader';
-import OrchestratorView from './components/Swarm/OrchestratorView';
+import OrchestratorView, { type ReadyTaskRow } from './components/Swarm/OrchestratorView';
 import { swarmGetTasks, swarmCreateTask, swarmUpdateTask, swarmGetApprovals, swarmResolveApproval } from './swarmDb';
 import { SwarmScheduler, isLikelyReadOnlyPrompt } from './lib/swarmScheduler';
 import { landTask, discardTask } from './lib/swarmLanding';
@@ -150,6 +150,7 @@ export default function App() {
   const [swarmTasksByWs, setSwarmTasksByWs] = useState<Map<string, SwarmTask[]>>(new Map());
   const [swarmApprovalsByWs, setSwarmApprovalsByWs] = useState<Map<string, SwarmApproval[]>>(new Map());
   const [swarmSelected, setSwarmSelected] = useState<'overview' | string>('overview');
+  const [swarmDiffStats, setSwarmDiffStats] = useState<Map<string, { additions: number; deletions: number }>>(new Map());
   const [orchestratorSessionIdByWs, setOrchestratorSessionIdByWs] = useState<Map<string, string>>(new Map());
   const [showNewTaskPopover, setShowNewTaskPopover] = useState(false);
   const [messageQueues, setMessageQueues] = useState<Map<string, QueuedMessage[]>>(new Map());
@@ -309,6 +310,31 @@ export default function App() {
       swarmSchedulers.current.set(activeProjectPath, s);
     }
     s.setTasks(swarmTasksByWs.get(activeProjectPath) ?? []);
+  }, [activeProjectPath, swarmTasksByWs]);
+
+  // Fetch diff stats for ready (done) tasks in the active workspace
+  useEffect(() => {
+    if (!activeProjectPath) return;
+    const readyTasks = (swarmTasksByWs.get(activeProjectPath) ?? []).filter(t => t.status === 'done');
+    if (readyTasks.length === 0) return;
+    let cancelled = false;
+    const sai = window.sai as any;
+    for (const task of readyTasks) {
+      if (swarmDiffStats.has(task.id)) continue;
+      if (!sai.swarm?.diffStats) continue;
+      sai.swarm.diffStats(task.workspaceId, task.baseBranch, task.branch)
+        .then((stats: { additions: number; deletions: number }) => {
+          if (cancelled) return;
+          setSwarmDiffStats(prev => {
+            const m = new Map(prev);
+            m.set(task.id, stats);
+            return m;
+          });
+        })
+        .catch(() => { /* ignore fetch errors */ });
+    }
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProjectPath, swarmTasksByWs]);
 
   async function spawnSwarmTask(input: { prompt: string; provider: AIProvider; model: string; approvalPolicy: ApprovalPolicy }) {
@@ -1794,7 +1820,72 @@ export default function App() {
                         }).catch(() => { /* ignore */ });
                       });
                     }}
-                    readyTasks={[]}
+                    readyTasks={(() => {
+                      const done = (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'done');
+                      return done.map<ReadyTaskRow>(t => ({
+                        id: t.id,
+                        title: t.title,
+                        branch: t.branch,
+                        additions: swarmDiffStats.get(t.id)?.additions ?? 0,
+                        deletions: swarmDiffStats.get(t.id)?.deletions ?? 0,
+                      }));
+                    })()}
+                    onLand={async (id) => {
+                      const task = (swarmTasksByWs.get(wsPath) ?? []).find(t => t.id === id);
+                      if (!task) return;
+                      const r = await landTask(task, {
+                        canFastForward: (cwd, s, t) => (window as any).sai.swarm.canFastForward(cwd, s, t),
+                        ffMerge: (cwd, s) => (window as any).sai.swarm.ffMerge(cwd, s),
+                        worktreeRemove: (cwd, wt, br) => (window as any).sai.swarm.worktreeRemove(cwd, wt, br),
+                        updateTask: (tid, patch) => swarmUpdateTask(tid, patch),
+                      });
+                      if (!r.ok && r.reason === 'rebase-needed') return;
+                      setSwarmTasksByWs(prev => {
+                        const m = new Map(prev);
+                        const list = (m.get(task.workspaceId) ?? []).map(t =>
+                          t.id === task.id ? { ...t, status: 'landed' as const, worktreePath: null } : t
+                        );
+                        m.set(task.workspaceId, list);
+                        return m;
+                      });
+                    }}
+                    onDiscard={async (id) => {
+                      const task = (swarmTasksByWs.get(wsPath) ?? []).find(t => t.id === id);
+                      if (!task) return;
+                      await discardTask(task, {
+                        worktreeRemove: (cwd, wt, br) => (window as any).sai.swarm.worktreeRemove(cwd, wt, br),
+                        updateTask: (tid, patch) => swarmUpdateTask(tid, patch),
+                      });
+                      setSwarmTasksByWs(prev => {
+                        const m = new Map(prev);
+                        const list = (m.get(task.workspaceId) ?? []).map(t =>
+                          t.id === task.id ? { ...t, status: 'discarded' as const, worktreePath: null } : t
+                        );
+                        m.set(task.workspaceId, list);
+                        return m;
+                      });
+                    }}
+                    onDiff={(id) => { setSwarmSelected(id); }}
+                    onLandAll={async () => {
+                      const done = (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'done');
+                      for (const task of done) {
+                        const r = await landTask(task, {
+                          canFastForward: (cwd, s, t) => (window as any).sai.swarm.canFastForward(cwd, s, t),
+                          ffMerge: (cwd, s) => (window as any).sai.swarm.ffMerge(cwd, s),
+                          worktreeRemove: (cwd, wt, br) => (window as any).sai.swarm.worktreeRemove(cwd, wt, br),
+                          updateTask: (tid, patch) => swarmUpdateTask(tid, patch),
+                        });
+                        if (!r.ok) continue;
+                        setSwarmTasksByWs(prev => {
+                          const m = new Map(prev);
+                          const list = (m.get(task.workspaceId) ?? []).map(t =>
+                            t.id === task.id ? { ...t, status: 'landed' as const, worktreePath: null } : t
+                          );
+                          m.set(task.workspaceId, list);
+                          return m;
+                        });
+                      }
+                    }}
                     onCommand={() => { /* TODO(Task 21): host.sendOrchestratorCommand */ }}
                   />
                 ) : (

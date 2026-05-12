@@ -1,8 +1,10 @@
 import React from 'react';
 import OrchestratorComposer from './OrchestratorComposer';
 import ApprovalTray, { type ApprovalRow } from './ApprovalTray';
+import ReadyToLandTray, { type ReadyTaskRow } from './ReadyToLandTray';
 
 export type { ApprovalRow };
+export type { ReadyTaskRow };
 
 export interface OrchestratorStats {
   active: number;
@@ -17,19 +19,24 @@ interface Props {
   projectPath: string;
   stats: OrchestratorStats;
   approvals: ApprovalRow[];
-  readyTasks: any[];     // will be typed in Task 20
+  readyTasks: ReadyTaskRow[];
   onCommand: (cmd: { text: string; splitLines: boolean }) => void;
   onApproveApproval?: (id: string) => void;
   onDenyApproval?: (id: string) => void;
   onApproveAllReads?: () => void;
   onDenyAllApprovals?: () => void;
+  onLand?: (id: string) => void;
+  onDiscard?: (id: string) => void;
+  onDiff?: (id: string) => void;
+  onLandAll?: () => void;
   chatSlot?: React.ReactNode;       // App.tsx can pass an embedded ChatPanel here
-  readySlot?: React.ReactNode;      // Task 20 ReadyToLandTray
+  readySlot?: React.ReactNode;      // legacy slot (unused now)
 }
 
 export default function OrchestratorView({
   orchestratorSessionId, projectPath, stats, approvals, readyTasks, onCommand,
   onApproveApproval, onDenyApproval, onApproveAllReads, onDenyAllApprovals,
+  onLand, onDiscard, onDiff, onLandAll,
   chatSlot, readySlot,
 }: Props) {
   return (
@@ -48,6 +55,13 @@ export default function OrchestratorView({
         onDeny={onDenyApproval ?? (() => {})}
         onApproveAllReads={onApproveAllReads ?? (() => {})}
         onDenyAll={onDenyAllApprovals ?? (() => {})}
+      />
+      <ReadyToLandTray
+        tasks={readyTasks}
+        onLand={onLand ?? (() => {})}
+        onDiscard={onDiscard ?? (() => {})}
+        onDiff={onDiff ?? (() => {})}
+        onLandAll={onLandAll ?? (() => {})}
       />
       {readySlot}
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }} data-testid="orch-chat-slot">

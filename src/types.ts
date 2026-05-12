@@ -233,6 +233,7 @@ declare global {
       worktreeRemove: (projectPath: string, worktreePath: string, branch: string) => Promise<void>;
       canFastForward: (projectPath: string, source: string, target: string) => Promise<boolean>;
       ffMerge: (projectPath: string, source: string) => Promise<void>;
+      diffStats: (cwd: string, baseBranch: string, branch: string) => Promise<{ additions: number; deletions: number; files: number }>;
     };
   }
 

@@ -217,5 +217,7 @@ contextBridge.exposeInMainWorld('sai', {
       ipcRenderer.invoke('swarm:can-ff', projectPath, source, target),
     ffMerge: (projectPath: string, source: string) =>
       ipcRenderer.invoke('swarm:ff-merge', projectPath, source),
+    diffStats: (cwd: string, baseBranch: string, branch: string) =>
+      ipcRenderer.invoke('swarm:diff-stats', cwd, baseBranch, branch),
   },
 });
