@@ -38,6 +38,80 @@ export interface SwarmToolResponder {
 }
 
 /**
+ * Build a synthetic assistant ChatMessage that carries a single tool_use card
+ * for an MCP swarm tool. Used as a fallback render path when the Claude CLI
+ * does not surface MCP tool_use blocks in its stream-json output (so the
+ * orchestrator chat would otherwise show no card for spawn_task et al.).
+ *
+ * The id format `mcp-tooluse-${requestId}` lets a follow-up call to
+ * {@link applySyntheticToolResult} attach the tool's output to the same card.
+ */
+export function buildSyntheticToolUseMessage(req: SwarmToolRequest, now: number = Date.now()): {
+  id: string;
+  role: 'assistant';
+  content: string;
+  timestamp: number;
+  startedAt: number;
+  toolCalls: Array<{
+    id: string;
+    type: 'other';
+    name: string;
+    input: string;
+    startedAt: number;
+  }>;
+} {
+  const fullName = req.tool.startsWith('mcp__swarm__') ? req.tool : `mcp__swarm__${req.tool}`;
+  return {
+    id: `mcp-msg-${req.id}`,
+    role: 'assistant',
+    content: '',
+    timestamp: now,
+    startedAt: now,
+    toolCalls: [
+      {
+        id: `mcp-tooluse-${req.id}`,
+        type: 'other',
+        name: fullName,
+        input: typeof req.input === 'string' ? req.input : JSON.stringify(req.input ?? {}, null, 2),
+        startedAt: now,
+      },
+    ],
+  };
+}
+
+/**
+ * Returns a new message list with the tool-call output attached to the
+ * synthetic card created by {@link buildSyntheticToolUseMessage}. If no card
+ * matching `requestId` is found, returns the input unchanged (best-effort).
+ */
+export function applySyntheticToolResult<M extends { id: string; toolCalls?: Array<{ id?: string; output?: string; durationMs?: number; startedAt?: number }> }>(
+  messages: M[],
+  requestId: string,
+  result: unknown,
+  now: number = Date.now(),
+): M[] {
+  const targetId = `mcp-tooluse-${requestId}`;
+  let touched = false;
+  const next = messages.map(m => {
+    if (!m.toolCalls || !m.toolCalls.length) return m;
+    let updated = false;
+    const newCalls = m.toolCalls.map(tc => {
+      if (tc.id !== targetId) return tc;
+      updated = true;
+      const output = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+      const durationMs = typeof tc.startedAt === 'number' ? now - tc.startedAt : undefined;
+      return { ...tc, output, ...(durationMs != null ? { durationMs } : {}) };
+    });
+    if (updated) {
+      touched = true;
+      return { ...m, toolCalls: newCalls };
+    }
+    return m;
+  });
+  return touched ? next : messages;
+}
+
+/**
  * Routes an incoming swarm tool request from the orchestrator MCP socket
  * (forwarded over IPC by the main process) to the active workspace's
  * SwarmHost. Rejects when the request's workspace does not match the

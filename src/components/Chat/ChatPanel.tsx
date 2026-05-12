@@ -857,6 +857,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             textParts.push(block.text);
           }
           if (block.type === 'tool_use') {
+            // [DEBUG swarm-card-loss] Log every tool_use processed by ChatPanel.
+            try { console.log('[ChatPanel]', { scope: claudeScope, toolName: block.name }); } catch { /* noop */ }
             tools.push({
               id: block.id,
               type: block.name?.includes('Edit') || block.name?.includes('Write') ? 'file_edit' :
