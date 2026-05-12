@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, ChevronDown } from 'lucide-react';
 import type { AIProvider } from '../../types';
 
@@ -42,15 +43,28 @@ function modelLabel(provider: AIProvider, model: string): string {
 export default function OrchestratorModelPicker({ provider, model, onChange, disabled }: Props) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [coords, setCoords] = useState<{ top: number; right: number } | null>(null);
 
+  // Close on outside click — both wrapper (button) and dropdown (portaled)
+  // count as inside.
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
-      if (!wrapperRef.current) return;
-      if (!wrapperRef.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (wrapperRef.current?.contains(t)) return;
+      if (dropdownRef.current?.contains(t)) return;
+      setOpen(false);
     };
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  // Compute portal position from the trigger button's bounding rect when opened.
+  useLayoutEffect(() => {
+    if (!open || !wrapperRef.current) return;
+    const r = wrapperRef.current.getBoundingClientRect();
+    setCoords({ top: r.bottom + 4, right: window.innerWidth - r.right });
   }, [open]);
 
   const providerLabel = PROVIDERS.find(p => p.id === provider)?.label ?? provider;
@@ -61,11 +75,7 @@ export default function OrchestratorModelPicker({ provider, model, onChange, dis
       ref={wrapperRef}
       className="orch-model-picker"
       data-testid="orch-model-picker"
-      // Bump z-index when open so the dropdown — which extends down past the
-      // header into the chat-area's DOM order — paints above the chat input.
-      // Neither wrapper creates a stacking context by default; assign one here
-      // when the dropdown is shown so its children win against later siblings.
-      style={{ position: 'relative', display: 'inline-block', zIndex: open ? 5000 : 'auto' }}
+      style={{ position: 'relative', display: 'inline-block' }}
     >
       <button
         type="button"
@@ -92,21 +102,22 @@ export default function OrchestratorModelPicker({ provider, model, onChange, dis
         <ChevronDown size={11} style={{ opacity: 0.6 }} />
       </button>
 
-      {open && (
+      {open && coords && createPortal(
         <div
+          ref={dropdownRef}
           className="orch-model-dropdown"
           data-testid="orch-model-picker-dropdown"
           role="menu"
           style={{
-            position: 'absolute',
-            right: 0,
-            top: 'calc(100% + 4px)',
+            position: 'fixed',
+            top: coords.top,
+            right: coords.right,
             minWidth: 260,
             background: 'var(--bg-elevated, var(--bg, #1c1c1c))',
             border: '1px solid var(--border)',
             borderRadius: 6,
             padding: 6,
-            zIndex: 1000,
+            zIndex: 9999,
             boxShadow: '0 6px 20px rgba(0,0,0,0.3)',
             fontSize: 11,
             color: 'var(--text)',
@@ -209,7 +220,8 @@ export default function OrchestratorModelPicker({ provider, model, onChange, dis
               (model selection unavailable for orchestrator yet)
             </div>
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
