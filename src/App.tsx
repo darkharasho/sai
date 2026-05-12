@@ -151,6 +151,19 @@ export default function App() {
   // also counts terminal-scope activity. Lifted out of ChatPanel so the panel's
   // streaming indicator survives remounts (e.g. session/key swaps).
   const [chatStreamingWorkspaces, setChatStreamingWorkspaces] = useState<Set<string>>(new Set());
+  // Unsent draft text and attached context per workspace, persisted across
+  // workspace switches and session-key remounts so partial messages survive
+  // navigation.
+  const chatDraftsRef = useRef(new Map<string, string>());
+  const chatContextItemsRef = useRef(new Map<string, unknown[]>());
+  const handleDraftChange = useCallback((wsPath: string, draft: string) => {
+    if (draft) chatDraftsRef.current.set(wsPath, draft);
+    else chatDraftsRef.current.delete(wsPath);
+  }, []);
+  const handleContextItemsChange = useCallback((wsPath: string, items: unknown[]) => {
+    if (items.length) chatContextItemsRef.current.set(wsPath, items);
+    else chatContextItemsRef.current.delete(wsPath);
+  }, []);
   const [approvalWorkspaces, setApprovalWorkspaces] = useState<Map<string, PendingApproval>>(new Map());
   const [notificationCounts, setNotificationCounts] = useState<Map<string, number>>(new Map());
   const wsTurnSeqRef = useRef<Map<string, number>>(new Map());
@@ -1460,6 +1473,10 @@ export default function App() {
                   onFileOpen={handleFileOpen}
                   isActive={wsPath === activeProjectPath}
                   isStreaming={chatStreamingWorkspaces.has(wsPath)}
+                  initialDraft={chatDraftsRef.current.get(wsPath) || ''}
+                  onDraftChange={(draft: string) => handleDraftChange(wsPath, draft)}
+                  initialContextItems={(chatContextItemsRef.current.get(wsPath) as any) || []}
+                  onContextItemsChange={(items: any[]) => handleContextItemsChange(wsPath, items)}
                   messageQueue={messageQueues.get(ws.activeSession.id) || []}
                   onQueueAdd={handleQueueAdd}
                   onQueueRemove={handleQueueRemove}

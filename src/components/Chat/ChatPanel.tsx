@@ -273,7 +273,7 @@ function GeminiThinkingAnimation({ loadingPhrases = 'all' }: { loadingPhrases?: 
 }
 
 import ChatMessage from './ChatMessage';
-import ChatInput from './ChatInput';
+import ChatInput, { type ContextItem } from './ChatInput';
 import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, QueuedMessage, TerminalTab } from '../../types';
 import { buildHelpMessage } from './helpText';
 import { parseAiError, looksLikeApiError } from './parseAiError';
@@ -312,6 +312,10 @@ interface ChatPanelProps {
   onFileOpen?: (path: string, line?: number) => void;
   isActive?: boolean;
   isStreaming?: boolean;
+  initialDraft?: string;
+  onDraftChange?: (draft: string) => void;
+  initialContextItems?: ContextItem[];
+  onContextItemsChange?: (items: ContextItem[]) => void;
   messageQueue?: QueuedMessage[];
   onQueueAdd?: (sessionId: string, text: string, fullText: string, images?: string[], attachments?: { images: number; files: number; terminal: boolean }) => void;
   onQueueRemove?: (sessionId: string, id: string) => void;
@@ -525,7 +529,7 @@ const FAKE_ERROR_VARIANTS = {
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(initialMessages || []);
   const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);
   const setMessages = useCallback((updater: ChatMessageType[] | ((prev: ChatMessageType[]) => ChatMessageType[])) => {
@@ -1560,6 +1564,10 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             messageQueue={messageQueue}
             onQueueRemove={(id) => sessionId && onQueueRemove?.(sessionId, id)}
             onQueuePromote={(id) => sessionId && onQueuePromote?.(sessionId, id)}
+            initialDraft={initialDraft}
+            onDraftChange={onDraftChange}
+            initialContextItems={initialContextItems}
+            onContextItemsChange={onContextItemsChange}
           />
         </div>
       </LayoutGroup>

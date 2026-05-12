@@ -63,6 +63,10 @@ interface ChatInputProps {
   messageQueue?: QueuedMessage[];
   onQueueRemove?: (id: string) => void;
   onQueuePromote?: (id: string) => void;
+  initialDraft?: string;
+  onDraftChange?: (draft: string) => void;
+  initialContextItems?: ContextItem[];
+  onContextItemsChange?: (items: ContextItem[]) => void;
 }
 
 interface AutocompleteItem {
@@ -72,7 +76,7 @@ interface AutocompleteItem {
   icon: React.ReactNode;
 }
 
-interface ContextItem {
+export interface ContextItem {
   label: string;
   type: 'file' | 'url' | 'image' | 'terminal';
   data?: string; // base64 data for images, path for files, content for terminal
@@ -226,12 +230,12 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommands = [], isStreaming, messages = [], onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, sessionCost, rateLimits, billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote }: ChatInputProps) {
-  const [value, setValue] = useState('');
+export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommands = [], isStreaming, messages = [], onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, sessionCost, rateLimits, billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange }: ChatInputProps) {
+  const [value, setValue] = useState(initialDraft);
   const [suggestions, setSuggestions] = useState<AutocompleteItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [showAddMenu, setShowAddMenu] = useState(false);
-  const [contextItems, setContextItems] = useState<ContextItem[]>([]);
+  const [contextItems, setContextItems] = useState<ContextItem[]>(initialContextItems);
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [tickerDir, setTickerDir] = useState<'up' | 'down' | null>(null);
@@ -275,8 +279,24 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
 
   // Always focus textarea on mount (workspace switch remounts via key change)
   useEffect(() => {
-    requestAnimationFrame(() => textareaRef.current?.focus());
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      // Place caret at the end of restored draft text so typing continues there.
+      const len = el.value.length;
+      try { el.setSelectionRange(len, len); } catch { /* ignore */ }
+    });
   }, []);
+
+  // Persist draft text and attached context to the parent so they survive
+  // workspace switches and session-key remounts.
+  useEffect(() => {
+    onDraftChange?.(value);
+  }, [value, onDraftChange]);
+  useEffect(() => {
+    onContextItemsChange?.(contextItems);
+  }, [contextItems, onContextItemsChange]);
 
   // Re-focus when input becomes enabled (e.g. after streaming ends)
   useEffect(() => {
