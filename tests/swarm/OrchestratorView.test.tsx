@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import OrchestratorView from '../../src/components/Swarm/OrchestratorView';
 
-const stats = { active: 5, approvals: 1, ready: 1, cost: 0.42, runtimeSec: 134 };
+const stats = { active: 5, approvals: 1, ready: 1, queued: 0, cap: 5, cost: 0.42, runtimeSec: 134 };
 
 describe('OrchestratorView', () => {
   it('renders header and composer', () => {
@@ -26,6 +26,12 @@ describe('OrchestratorView', () => {
   it('does NOT render banner when orchestratorProvider is undefined', () => {
     render(<OrchestratorView orchestratorSessionId="o1" projectPath="/p" stats={stats} readyTasks={[]} onCommand={vi.fn()}/>);
     expect(screen.queryByTestId('orch-non-claude-banner')).not.toBeInTheDocument();
+  });
+
+  it('renders the stat strip and activity ribbon', () => {
+    render(<OrchestratorView orchestratorSessionId="o1" projectPath="/p" stats={stats} readyTasks={[]} onCommand={vi.fn()}/>);
+    expect(screen.getByTestId('orch-stat-strip')).toBeInTheDocument();
+    expect(screen.getByTestId('orch-activity-ribbon')).toBeInTheDocument();
   });
 
   it('burst toggle sends one command per line', () => {

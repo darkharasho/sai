@@ -8,6 +8,8 @@ import PauseResumeCard from './PauseResumeCard';
 import ApprovalActionCard from './ApprovalActionCard';
 import TaskCompletedCard from './TaskCompletedCard';
 import TaskFailedCard from './TaskFailedCard';
+import TaskStartedCard from './TaskStartedCard';
+import AutoApprovedCard from './AutoApprovedCard';
 
 interface Props {
   toolCall: ToolCall;
@@ -79,6 +81,10 @@ export default function SwarmToolCardSelector(props: Props): React.ReactElement 
       );
     case 'task_failed':
       return <TaskFailedCard toolCall={toolCall} onRetry={onRetry} onDiscard={onDiscard} />;
+    case 'task_started':
+      return <TaskStartedCard toolCall={toolCall} />;
+    case 'auto_approved':
+      return <AutoApprovedCard toolCall={toolCall} />;
     default:
       // Unknown swarm tool — fall back to the default renderer so we don't
       // silently swallow new tools the orchestrator might learn.

@@ -382,6 +382,23 @@ export default function App() {
             m.set(task.workspaceId, list);
             return m;
           });
+          // Emit a synthetic task_started card so the orchestrator chat shows
+          // the queued → streaming transition inline. Dedupe through the same
+          // emittedLifecycleRef used for completed/failed cards.
+          {
+            const startedKey = `${task.id}:streaming`;
+            if (!emittedLifecycleRef.current.has(startedKey)) {
+              emittedLifecycleRef.current.add(startedKey);
+              try {
+                void (window.sai as any).swarmEmitCard?.(task.workspaceId, 'task_started', {
+                  taskId: task.id,
+                  title: task.title,
+                  branch: task.branch,
+                  prompt: task.prompt,
+                });
+              } catch { /* best-effort */ }
+            }
+          }
           const removeFromList = () => {
             setSwarmTasksByWs(prev => {
               const m = new Map(prev);
@@ -1467,6 +1484,15 @@ export default function App() {
           if (!shouldRequireApproval(swarmTask.approvalPolicy, msg.toolName)) {
             // Auto-approve without surfacing UI or transitioning task state.
             try { (window.sai as any).claudeApprove(msg.projectPath, msg.toolUseId, true, undefined, scope); } catch {}
+            // Emit a subtle inline auto_approved card so the orchestrator chat
+            // surfaces what would otherwise be silent activity.
+            try {
+              void (window.sai as any).swarmEmitCard?.(msg.projectPath, 'auto_approved', {
+                taskTitle: swarmTask.title,
+                toolName: msg.toolName,
+                branch: swarmTask.branch,
+              });
+            } catch { /* best-effort */ }
             return;
           }
           // Fire renderer-side notification (gated by swarm.notifyOnApproval).
@@ -2704,6 +2730,8 @@ export default function App() {
                       active: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'streaming').length,
                       approvals: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'awaiting_approval').length,
                       ready: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'done').length,
+                      queued: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'queued').length,
+                      cap: swarmSettingsRef.current.concurrencyCap,
                     }}
                     onCommand={({ text, splitLines }) => {
                       const trimmed = text.trim();

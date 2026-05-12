@@ -1,6 +1,8 @@
 import React from 'react';
 import { Info } from 'lucide-react';
 import OrchestratorComposer from './OrchestratorComposer';
+import StatStrip from './StatStrip';
+import ActivityRibbon from './ActivityRibbon';
 import { type ReadyTaskRow } from './ReadyToLandTray';
 import { type RecentTaskRow } from './RecentActivity';
 
@@ -11,8 +13,11 @@ export interface OrchestratorStats {
   active: number;
   approvals: number;
   ready: number;
+  queued: number;
+  cap: number;
   cost?: number;
   runtimeSec?: number;
+  tokRate?: number;
 }
 
 interface Props {
@@ -84,6 +89,24 @@ export default function OrchestratorView({
           {providerLabel && <span style={{ opacity: 0.6 }}>{providerLabel} ▾</span>}
         </div>
       </header>
+
+      <StatStrip
+        active={stats.active}
+        approvals={stats.approvals}
+        ready={stats.ready}
+        queued={stats.queued}
+        cap={stats.cap}
+        cost={stats.cost}
+        runtimeSec={stats.runtimeSec}
+      />
+
+      <ActivityRibbon
+        active={stats.active}
+        ready={stats.ready}
+        approvals={stats.approvals}
+        cost={stats.cost}
+        tokRate={stats.tokRate}
+      />
 
       {orchestratorProvider && orchestratorProvider !== 'claude' && (
         <div className="orch-non-claude-banner" data-testid="orch-non-claude-banner">
