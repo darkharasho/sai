@@ -29,7 +29,7 @@ import McpSidebar from './components/MCP/McpSidebar';
 import SwarmSidebar from './components/Swarm/SwarmSidebar';
 import NewTaskPopover from './components/Swarm/NewTaskPopover';
 import SwarmTaskHeader from './components/Swarm/SwarmTaskHeader';
-import OrchestratorView, { type ReadyTaskRow, type RecentTaskRow } from './components/Swarm/OrchestratorView';
+import OrchestratorView, { type ReadyTaskRow } from './components/Swarm/OrchestratorView';
 import QuitSwarmConfirmModal from './components/Swarm/QuitSwarmConfirmModal';
 import { swarmInit, swarmGetTasks, swarmCreateTask, swarmUpdateTask, swarmGetApprovals, swarmResolveApproval } from './swarmDb';
 import { reconcileTasksOnStartup } from './lib/swarmReconcile';
@@ -162,6 +162,10 @@ export default function App() {
   const [pendingClose, setPendingClose] = useState<string | null>(null);
   // Ref to hold latest messages per workspace without triggering re-renders during streaming
   const wsMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
+  // Latest orchestrator-session messages, keyed by orchestrator session id, so
+  // the regular wsMessagesRef (keyed by wsPath) doesn't get clobbered by the
+  // orchestrator ChatPanel's onMessagesChange.
+  const orchMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
   // Absolute index in the full session of messages[0] for the workspace's
   // currently-loaded message window. 0 means the full session is loaded.
   // Saves use this so paginated tails don't clobber older DB messages.
@@ -322,6 +326,8 @@ export default function App() {
     defaultApprovalPolicy: ApprovalPolicy;
     defaultTaskProvider: AIProvider | null;
     defaultTaskModel: string;
+    orchestratorProvider: AIProvider | null;
+    orchestratorModel: string | null;
     worktreeRoot: string;
     notifyOnComplete: boolean;
     notifyOnApproval: boolean;
@@ -330,6 +336,8 @@ export default function App() {
     defaultApprovalPolicy: 'auto-read',
     defaultTaskProvider: null,
     defaultTaskModel: '',
+    orchestratorProvider: null,
+    orchestratorModel: null,
     worktreeRoot: '',
     notifyOnComplete: false,
     notifyOnApproval: false,
@@ -346,12 +354,16 @@ export default function App() {
       sai.settingsGet('swarm.worktreeRoot', ''),
       sai.settingsGet('swarm.notifyOnComplete', false),
       sai.settingsGet('swarm.notifyOnApproval', false),
-    ]).then(([cap, policy, provider, model, root, notifyComplete, notifyApproval]) => {
+      sai.settingsGet('swarm.orchestratorProvider', null),
+      sai.settingsGet('swarm.orchestratorModel', null),
+    ]).then(([cap, policy, provider, model, root, notifyComplete, notifyApproval, orchProvider, orchModel]) => {
       swarmSettingsRef.current = {
         concurrencyCap: typeof cap === 'number' && cap > 0 ? cap : SWARM_DEFAULT_CAP,
         defaultApprovalPolicy: (policy === 'auto' || policy === 'auto-read' || policy === 'always-ask') ? policy : 'auto-read',
         defaultTaskProvider: (provider === 'claude' || provider === 'codex' || provider === 'gemini') ? provider : null,
         defaultTaskModel: typeof model === 'string' ? model : '',
+        orchestratorProvider: (orchProvider === 'claude' || orchProvider === 'codex' || orchProvider === 'gemini') ? orchProvider : null,
+        orchestratorModel: typeof orchModel === 'string' && orchModel ? orchModel : null,
         worktreeRoot: typeof root === 'string' ? root : '',
         notifyOnComplete: !!notifyComplete,
         notifyOnApproval: !!notifyApproval,
@@ -2073,10 +2085,100 @@ export default function App() {
                     }}
                   />
                 )}
-                {sidebarOpen === 'swarm' && swarmSelected === 'overview' && orchestratorSessionIdByWs.get(wsPath) ? (
+                {sidebarOpen === 'swarm' && swarmSelected === 'overview' && orchestratorSessionIdByWs.get(wsPath) ? (() => {
+                  const orchSessionId = orchestratorSessionIdByWs.get(wsPath)!;
+                  const orchSession = ws.sessions.find(s => s.id === orchSessionId);
+                  const orchProvider: AIProvider = swarmSettingsRef.current.orchestratorProvider ?? aiProvider;
+                  const orchModelRaw = swarmSettingsRef.current.orchestratorModel;
+                  const orchModel: ModelChoice = isModelChoice(orchModelRaw) ? orchModelRaw : modelChoice;
+                  const orchMessages = orchSession?.messages ?? [];
+                  const orchChatSlot = (
+                    <ChatPanel
+                      key={orchSessionId}
+                      projectPath={wsPath}
+                      permissionMode={permissionMode}
+                      onPermissionChange={handlePermissionChange}
+                      effortLevel={effortLevel}
+                      onEffortChange={handleEffortChange}
+                      modelChoice={orchModel}
+                      onModelChange={handleModelChange}
+                      aiProvider={orchProvider}
+                      codexModel={codexModel}
+                      onCodexModelChange={handleCodexModelChange}
+                      codexModels={codexModels}
+                      codexPermission={codexPermission}
+                      onCodexPermissionChange={handleCodexPermissionChange}
+                      geminiModel={geminiModel}
+                      onGeminiModelChange={handleGeminiModelChange}
+                      geminiModels={geminiModels}
+                      geminiApprovalMode={geminiApprovalMode}
+                      onGeminiApprovalModeChange={handleGeminiApprovalModeChange}
+                      geminiConversationMode={geminiConversationMode}
+                      onGeminiConversationModeChange={handleGeminiConversationModeChange}
+                      geminiLoadingPhrases={geminiLoadingPhrases}
+                      initialMessages={orchMessages}
+                      activeFilePath={ws.activeFilePath}
+                      onFileOpen={handleFileOpen}
+                      isActive={wsPath === activeProjectPath}
+                      isStreaming={chatStreamingWorkspaces.has(wsPath)}
+                      initialDraft={chatDraftsRef.current.get(wsPath) || ''}
+                      onDraftChange={(draft: string) => handleDraftChange(wsPath, draft)}
+                      initialContextItems={(chatContextItemsRef.current.get(wsPath) as any) || []}
+                      onContextItemsChange={(items: any[]) => handleContextItemsChange(wsPath, items)}
+                      messageQueue={messageQueues.get(orchSessionId) || []}
+                      onQueueAdd={handleQueueAdd}
+                      onQueueRemove={handleQueueRemove}
+                      onQueueShift={handleQueueShift}
+                      onQueuePromote={handleQueuePromote}
+                      sessionId={orchSessionId}
+                      onMessagesChange={(messages: ChatMessage[]) => {
+                        orchMessagesRef.current.set(orchSessionId, messages);
+                      }}
+                      onClaudeSessionId={(sessionId: string) => {
+                        updateWorkspace(wsPath, w => ({
+                          ...w,
+                          sessions: w.sessions.map(s => s.id === orchSessionId ? { ...s, claudeSessionId: sessionId } : s),
+                        }));
+                      }}
+                      onGeminiSessionId={(sessionId: string) => {
+                        updateWorkspace(wsPath, w => ({
+                          ...w,
+                          sessions: w.sessions.map(s => s.id === orchSessionId ? { ...s, geminiSessionId: sessionId } : s),
+                        }));
+                      }}
+                      onCodexSessionId={(sessionId: string) => {
+                        updateWorkspace(wsPath, w => ({
+                          ...w,
+                          sessions: w.sessions.map(s => s.id === orchSessionId ? { ...s, codexSessionId: sessionId } : s),
+                        }));
+                      }}
+                      onSlashCommandsUpdate={(cmds: string[]) => { slashCommandsRef.current = cmds; }}
+                      terminalTabs={ws.terminalTabs ?? []}
+                      onTurnComplete={() => {
+                        const latestMessages = orchMessagesRef.current.get(orchSessionId) || [];
+                        if (latestMessages.length === 0) return;
+                        const existing = ws.sessions.find(s => s.id === orchSessionId);
+                        if (!existing) return;
+                        const updated = { ...existing, messages: latestMessages, updatedAt: Date.now(), aiProvider: orchProvider, messageCount: latestMessages.length };
+                        if (!updated.title) {
+                          const firstUserMsg = latestMessages.find(m => m.role === 'user');
+                          if (firstUserMsg) updated.title = generateSmartTitle(firstUserMsg.content);
+                        }
+                        dbSaveSession(wsPath, updated, 0).then(() => {
+                          dbGetSessions(wsPath).then(sessions => {
+                            updateWorkspace(wsPath, w2 => ({ ...w2, sessions }));
+                          });
+                        }).catch(() => {});
+                      }}
+                    />
+                  );
+                  return (
                   <OrchestratorView
-                    orchestratorSessionId={orchestratorSessionIdByWs.get(wsPath)!}
+                    chatSlot={orchChatSlot}
+                    orchestratorSessionId={orchSessionId}
                     projectPath={wsPath}
+                    orchestratorProvider={orchProvider}
+                    orchestratorModel={orchModel}
                     stats={{
                       active: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'streaming').length,
                       approvals: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'awaiting_approval').length,
@@ -2119,22 +2221,20 @@ export default function App() {
                       const done = (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'done');
                       for (const task of done) await swarmHost.land(task.id);
                     }}
-                    recentTasks={(() => {
-                      const RECENT_STATUSES = new Set(['landed', 'discarded', 'failed']);
-                      return (swarmTasksByWs.get(wsPath) ?? [])
-                        .filter(t => RECENT_STATUSES.has(t.status))
-                        .sort((a, b) => b.lastActivityAt - a.lastActivityAt)
-                        .slice(0, 10)
-                        .map<RecentTaskRow>(t => ({
-                          id: t.id,
-                          title: t.title,
-                          status: t.status as 'landed' | 'discarded' | 'failed',
-                          lastActivityAt: t.lastActivityAt,
-                        }));
-                    })()}
-                    onCommand={() => { /* model-driven commands deferred; see Task 17 deferral on provider tool schema injection */ }}
+                    onCommand={({ text, splitLines }) => {
+                      const trimmed = text.trim();
+                      if (!trimmed) return;
+                      if (splitLines) {
+                        const lines = trimmed.split('\n').map(l => l.trim()).filter(Boolean);
+                        if (lines.length === 0) return;
+                        void swarmHost.spawnTasks(lines).catch(err => console.error('swarm: spawnTasks failed', err));
+                      } else {
+                        void swarmHost.spawnTask({ prompt: trimmed }).catch(err => console.error('swarm: spawnTask failed', err));
+                      }
+                    }}
                   />
-                ) : (
+                  );
+                })() : (
                 <ChatPanel
                   key={ws.activeSession.id}
                   projectPath={wsPath}
@@ -2380,6 +2480,11 @@ export default function App() {
               if (cfg.notifyOnApproval && typeof Notification !== 'undefined' && Notification.permission === 'default') {
                 try { Notification.requestPermission().catch(() => {}); } catch {}
               }
+            } else if (key === 'swarm.orchestratorProvider') {
+              if (value === 'claude' || value === 'codex' || value === 'gemini') cfg.orchestratorProvider = value;
+              else if (value == null || value === '') cfg.orchestratorProvider = null;
+            } else if (key === 'swarm.orchestratorModel') {
+              cfg.orchestratorModel = typeof value === 'string' && value ? value : null;
             }
           }
         }}

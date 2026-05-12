@@ -12,10 +12,10 @@ describe('OrchestratorView', () => {
     expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument();
   });
 
-  it('split-lines toggle sends one command per line', () => {
+  it('burst toggle sends one command per line', () => {
     const onCommand = vi.fn();
     render(<OrchestratorView orchestratorSessionId="o1" projectPath="/p" stats={stats} approvals={[]} readyTasks={[]} onCommand={onCommand}/>);
-    fireEvent.click(screen.getByLabelText(/split lines/i));
+    fireEvent.click(screen.getByLabelText(/burst/i));
     fireEvent.change(screen.getByPlaceholderText(/ask the orchestrator/i), { target: { value: 'a\nb\nc' }});
     fireEvent.click(screen.getByRole('button', { name: /send/i }));
     expect(onCommand).toHaveBeenCalledWith({ text: 'a\nb\nc', splitLines: true });
