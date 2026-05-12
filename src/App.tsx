@@ -29,6 +29,7 @@ import McpSidebar from './components/MCP/McpSidebar';
 import SwarmSidebar from './components/Swarm/SwarmSidebar';
 import NewTaskPopover from './components/Swarm/NewTaskPopover';
 import SwarmTaskHeader from './components/Swarm/SwarmTaskHeader';
+import SwarmDiffModal from './components/Swarm/SwarmDiffModal';
 import OrchestratorView from './components/Swarm/OrchestratorView';
 import SwarmLogoCluster from './components/Swarm/SwarmLogoCluster';
 import SwarmToolCardSelector from './components/Swarm/cards/SwarmToolCardSelector';
@@ -219,6 +220,10 @@ export default function App() {
   const { isOpen: whatsNewOpen, version: whatsNewVersion, releases, fetchStatus, openWhatsNew, closeWhatsNew } = useWhatsNew();
   const [showNewProject, setShowNewProject] = useState(false);
   const [quitConfirmTasks, setQuitConfirmTasks] = useState<{ id: string; title: string }[] | null>(null);
+  const [swarmDiffModal, setSwarmDiffModal] = useState<
+    | { title: string; branch: string; baseBranch: string; diff: string; loading: boolean; error?: string }
+    | null
+  >(null);
   const slashCommandsRef = useRef<string[]>([]);
   const workspacesRef = useRef(workspaces);
   const activeProjectPathRef = useRef(activeProjectPath);
@@ -2584,6 +2589,11 @@ export default function App() {
                     task={focusedSwarmTask}
                     onPause={() => {
                       const id = focusedSwarmTask.id;
+                      const task = focusedSwarmTask;
+                      // Stop the task's Claude scope so streaming actually halts.
+                      try {
+                        (window.sai as any).claudeStop?.(task.workspaceId, task.sessionId);
+                      } catch { /* noop */ }
                       setSwarmTasksByWs(prev => {
                         const m = new Map(prev);
                         const list = (m.get(activeProjectPath) ?? []).map(t =>
@@ -2595,90 +2605,109 @@ export default function App() {
                     }}
                     onLand={async () => {
                       if (!focusedSwarmTask) return;
-                      const task = focusedSwarmTask;
-                      const sai = (window.sai as any) ?? {};
-                      let cardId: string | undefined;
+                      const taskId = focusedSwarmTask.id;
                       try {
-                        const r0 = await sai.swarmEmitCard?.(task.workspaceId, 'land', {
-                          taskRef: task.id,
-                          title: task.title,
-                          branch: task.branch,
-                        });
-                        cardId = r0?.id;
-                      } catch { /* noop */ }
-                      const r = await landTask(task, {
-                        canFastForward: (cwd, s, t) => (window as any).sai.swarm.canFastForward(cwd, s, t),
-                        ffMerge: (cwd, s) => (window as any).sai.swarm.ffMerge(cwd, s),
-                        worktreeRemove: (cwd, wt, br) => (window as any).sai.swarm.worktreeRemove(cwd, wt, br),
-                        updateTask: async () => { /* tasks are ephemeral */ },
-                      });
-                      if (cardId) {
-                        try {
-                          sai.swarmEmitCardResult?.(task.workspaceId, cardId, {
-                            ok: r.ok !== false,
-                            reason: (r as any).reason,
-                            branch: task.branch,
-                            additions: swarmDiffStats.get(task.id)?.additions ?? 0,
-                            deletions: swarmDiffStats.get(task.id)?.deletions ?? 0,
-                          }, r.ok === false);
-                        } catch { /* noop */ }
-                      }
-                      if (!r.ok && r.reason === 'rebase-needed') {
-                        window.alert('Cannot fast-forward: rebase needed before landing.');
+                        const r = await landWithCard(taskId);
+                        if (r && (r as any).ok === false && (r as any).reason === 'rebase-needed') {
+                          window.alert('Cannot fast-forward: rebase needed before landing.');
+                          return;
+                        }
+                      } catch (err) {
+                        console.error('swarm: land failed', err);
                         return;
                       }
-                      // Terminal state: drop the card from the sidebar.
+                      // Terminal state: drop the card from the sidebar and
+                      // bounce the user back to the orchestrator overview so
+                      // they aren't staring at a header for a non-existent task.
                       setSwarmTasksByWs(prev => {
                         const m = new Map(prev);
-                        m.set(task.workspaceId, (m.get(task.workspaceId) ?? []).filter(t => t.id !== task.id));
+                        m.set(activeProjectPath, (m.get(activeProjectPath) ?? []).filter(t => t.id !== taskId));
                         return m;
                       });
+                      setSwarmSelected('overview');
                     }}
                     onDiscard={async () => {
                       if (!focusedSwarmTask) return;
-                      const task = focusedSwarmTask;
-                      const sai = (window.sai as any) ?? {};
-                      let cardId: string | undefined;
+                      const taskId = focusedSwarmTask.id;
                       try {
-                        const r0 = await sai.swarmEmitCard?.(task.workspaceId, 'discard', {
-                          taskRef: task.id,
-                          title: task.title,
-                          branch: task.branch,
-                        });
-                        cardId = r0?.id;
-                      } catch { /* noop */ }
-                      try {
-                        await discardTask(task, {
-                          worktreeRemove: (cwd, wt, br) => (window as any).sai.swarm.worktreeRemove(cwd, wt, br),
-                          updateTask: async () => { /* tasks are ephemeral */ },
-                        });
-                        if (cardId) {
-                          try { sai.swarmEmitCardResult?.(task.workspaceId, cardId, { ok: true, branch: task.branch }, false); } catch { /* noop */ }
-                        }
+                        await discardWithCard(taskId);
                       } catch (err) {
-                        if (cardId) {
-                          try { sai.swarmEmitCardResult?.(task.workspaceId, cardId, { ok: false, reason: String(err) }, true); } catch { /* noop */ }
-                        }
-                        throw err;
+                        console.error('swarm: discard failed', err);
+                        return;
                       }
-                      // Terminal state: drop the card from the sidebar.
                       setSwarmTasksByWs(prev => {
                         const m = new Map(prev);
-                        m.set(task.workspaceId, (m.get(task.workspaceId) ?? []).filter(t => t.id !== task.id));
+                        m.set(activeProjectPath, (m.get(activeProjectPath) ?? []).filter(t => t.id !== taskId));
                         return m;
                       });
+                      setSwarmSelected('overview');
                     }}
-                    onOpenDiff={() => { /* TODO(Task 12) */ }}
-                    onResume={() => {
-                      const id = focusedSwarmTask.id;
+                    onOpenDiff={async () => {
+                      if (!focusedSwarmTask) return;
+                      const task = focusedSwarmTask;
+                      setSwarmDiffModal({
+                        title: task.title,
+                        branch: task.branch,
+                        baseBranch: task.baseBranch,
+                        diff: '',
+                        loading: true,
+                      });
+                      try {
+                        const sai = (window.sai as any) ?? {};
+                        const diff: string = await sai.swarm?.branchDiff?.(task.workspaceId, task.baseBranch, task.branch) ?? '';
+                        setSwarmDiffModal({
+                          title: task.title,
+                          branch: task.branch,
+                          baseBranch: task.baseBranch,
+                          diff,
+                          loading: false,
+                        });
+                      } catch (err) {
+                        setSwarmDiffModal({
+                          title: task.title,
+                          branch: task.branch,
+                          baseBranch: task.baseBranch,
+                          diff: '',
+                          loading: false,
+                          error: err instanceof Error ? err.message : String(err),
+                        });
+                      }
+                    }}
+                    onResume={async () => {
+                      if (!focusedSwarmTask) return;
+                      const task = focusedSwarmTask;
+                      // Note: Claude CLI spawns a fresh process per turn, so a
+                      // true "resume" of the prior process isn't possible —
+                      // "resume" here re-dispatches the original prompt as a
+                      // new turn. If this feels misleading, consider renaming
+                      // the button to "Re-run" in SwarmTaskHeader.
                       setSwarmTasksByWs(prev => {
                         const m = new Map(prev);
                         const list = (m.get(activeProjectPath) ?? []).map(t =>
-                          t.id === id ? { ...t, status: 'queued' as const } : t
+                          t.id === task.id ? { ...t, status: 'queued' as const } : t
                         );
                         m.set(activeProjectPath, list);
                         return m;
                       });
+                      try {
+                        const sai = window.sai as any;
+                        const dispatched = await runSwarmTask(
+                          { ...task, worktreePath: task.worktreePath },
+                          { claudeStart: sai.claudeStart, claudeSend: sai.claudeSend },
+                        );
+                        if (dispatched) {
+                          setSwarmTasksByWs(prev => {
+                            const m = new Map(prev);
+                            const list = (m.get(activeProjectPath) ?? []).map(t =>
+                              t.id === task.id ? { ...t, status: 'streaming' as const } : t
+                            );
+                            m.set(activeProjectPath, list);
+                            return m;
+                          });
+                        }
+                      } catch (err) {
+                        console.error('swarm: resume failed', err);
+                      }
                     }}
                   />
                 )}
@@ -3442,6 +3471,18 @@ export default function App() {
           releases={releases}
           fetchStatus={fetchStatus}
           onClose={closeWhatsNew}
+        />
+      )}
+
+      {swarmDiffModal && (
+        <SwarmDiffModal
+          title={swarmDiffModal.title}
+          branch={swarmDiffModal.branch}
+          baseBranch={swarmDiffModal.baseBranch}
+          diff={swarmDiffModal.diff}
+          loading={swarmDiffModal.loading}
+          error={swarmDiffModal.error}
+          onClose={() => setSwarmDiffModal(null)}
         />
       )}
 

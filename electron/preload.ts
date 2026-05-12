@@ -239,5 +239,7 @@ contextBridge.exposeInMainWorld('sai', {
       ipcRenderer.invoke('swarm:ff-merge', projectPath, source),
     diffStats: (cwd: string, baseBranch: string, branch: string) =>
       ipcRenderer.invoke('swarm:diff-stats', cwd, baseBranch, branch),
+    branchDiff: (cwd: string, baseBranch: string, branch: string) =>
+      ipcRenderer.invoke('swarm:branch-diff', cwd, baseBranch, branch),
   },
 });

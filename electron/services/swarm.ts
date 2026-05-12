@@ -2,7 +2,7 @@ import { ipcMain } from 'electron';
 import * as path from 'node:path';
 import {
   gitWorktreeAdd, gitWorktreeRemove, gitDeleteBranch,
-  gitCanFastForward, gitFastForwardMerge, gitDiffShortstat,
+  gitCanFastForward, gitFastForwardMerge, gitDiffShortstat, gitBranchDiff,
 } from './git';
 
 const SWARM_ROOT = '.sai-swarm'; // sibling-of-project dir
@@ -29,4 +29,6 @@ export function registerSwarmHandlers() {
     gitFastForwardMerge(projectPath, source));
   ipcMain.handle('swarm:diff-stats', (_e, projectPath: string, baseBranch: string, branch: string) =>
     gitDiffShortstat(projectPath, baseBranch, branch));
+  ipcMain.handle('swarm:branch-diff', (_e, projectPath: string, baseBranch: string, branch: string) =>
+    gitBranchDiff(projectPath, baseBranch, branch));
 }

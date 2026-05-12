@@ -138,6 +138,16 @@ export async function gitFastForwardMerge(repoCwd: string, sourceBranch: string)
   await git(repoCwd).raw(['merge', '--ff-only', sourceBranch]);
 }
 
+export async function gitBranchDiff(
+  cwd: string,
+  baseBranch: string,
+  branch: string
+): Promise<string> {
+  // `git diff baseBranch..branch` returns the full unified diff between
+  // baseBranch and branch. Returns empty string on failure.
+  return await git(cwd).raw(['diff', `${baseBranch}..${branch}`]).catch(() => '');
+}
+
 export async function gitDiffShortstat(
   cwd: string,
   baseBranch: string,
