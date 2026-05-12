@@ -44,6 +44,7 @@ import { resolveTaskRef } from './lib/swarmRef';
 const SWARM_DEFAULT_CAP = 5;
 import { swarmBranchName } from './lib/swarmSlug';
 import { shouldRequireApproval } from './lib/swarmApprovalPolicy';
+import { deriveSwarmMirror, applySwarmPatch } from './lib/swarmStatusMirror';
 import { isImageFile } from './utils/imageFiles';
 import { getMonacoEditorFor } from './utils/monacoEditorRegistry';
 import * as monaco from 'monaco-editor';
@@ -1257,6 +1258,23 @@ export default function App() {
       if (!msg.projectPath) return;
       // Use composite key (projectPath:scope) for turnSeq tracking
       const scopeKey = `${msg.projectPath}:${msg.scope || 'chat'}`;
+      // Swarm status mirror — runs for every workspace+scope so background
+      // tasks (whose ChatPanel isn't mounted) still get status/tool-count
+      // updates. See src/lib/swarmStatusMirror.ts.
+      {
+        const tasks = swarmTasksByWsRef.current.get(msg.projectPath) ?? [];
+        const mirror = deriveSwarmMirror(msg, tasks);
+        if (mirror) {
+          setSwarmTasksByWs(prev => {
+            const m = new Map(prev);
+            const list = (m.get(msg.projectPath) ?? []).map(t =>
+              t.id === mirror.taskId ? applySwarmPatch(t, mirror.patch) : t
+            );
+            m.set(msg.projectPath, list);
+            return m;
+          });
+        }
+      }
       if (msg.type === 'streaming_start') {
         if (msg.turnSeq != null) wsTurnSeqRef.current.set(scopeKey, msg.turnSeq);
         const count = busyScopeCountRef.current.get(msg.projectPath) || 0;
@@ -2477,20 +2495,9 @@ export default function App() {
 
                       return { ...w, activeSession: updated };
                     });
-
-                    // Task 13: Swarm — mirror turn completion onto the SwarmTask if this session belongs to one
-                    const activeSess = ws.activeSession;
-                    if (activeSess?.kind === 'task' && activeSess.swarmTaskId) {
-                      const taskId = activeSess.swarmTaskId;
-                      setSwarmTasksByWs(prev => {
-                        const m = new Map(prev);
-                        const list = (m.get(wsPath) ?? []).map(t =>
-                          t.id === taskId ? { ...t, status: 'done' as const, lastActivityAt: Date.now() } : t
-                        );
-                        m.set(wsPath, list);
-                        return m;
-                      });
-                    }
+                    // Note: SwarmTask status mirror lives in App.tsx's claude:message
+                    // listener (see deriveSwarmMirror) so it fires for every scope,
+                    // including background tasks whose ChatPanel isn't mounted.
                   }}
                 />
                 )}
