@@ -31,6 +31,7 @@ import NewTaskPopover from './components/Swarm/NewTaskPopover';
 import SwarmTaskHeader from './components/Swarm/SwarmTaskHeader';
 import { swarmGetTasks, swarmCreateTask, swarmUpdateTask } from './swarmDb';
 import { SwarmScheduler, isLikelyReadOnlyPrompt } from './lib/swarmScheduler';
+import { landTask, discardTask } from './lib/swarmLanding';
 
 const SWARM_DEFAULT_CAP = 3;
 import { swarmBranchName } from './lib/swarmSlug';
@@ -1635,8 +1636,44 @@ export default function App() {
                         return m;
                       });
                     }}
-                    onDiscard={() => { /* TODO(Task 12) */ }}
-                    onLand={() => { /* TODO(Task 12) */ }}
+                    onLand={async () => {
+                      if (!focusedSwarmTask) return;
+                      const task = focusedSwarmTask;
+                      const r = await landTask(task, {
+                        canFastForward: (cwd, s, t) => (window as any).sai.swarm.canFastForward(cwd, s, t),
+                        ffMerge: (cwd, s) => (window as any).sai.swarm.ffMerge(cwd, s),
+                        worktreeRemove: (cwd, wt, br) => (window as any).sai.swarm.worktreeRemove(cwd, wt, br),
+                        updateTask: (id, patch) => swarmUpdateTask(id, patch),
+                      });
+                      if (!r.ok && r.reason === 'rebase-needed') {
+                        window.alert('Cannot fast-forward: rebase needed before landing.');
+                        return;
+                      }
+                      setSwarmTasksByWs(prev => {
+                        const m = new Map(prev);
+                        const list = (m.get(task.workspaceId) ?? []).map(t =>
+                          t.id === task.id ? { ...t, status: 'landed' as const, worktreePath: null } : t
+                        );
+                        m.set(task.workspaceId, list);
+                        return m;
+                      });
+                    }}
+                    onDiscard={async () => {
+                      if (!focusedSwarmTask) return;
+                      const task = focusedSwarmTask;
+                      await discardTask(task, {
+                        worktreeRemove: (cwd, wt, br) => (window as any).sai.swarm.worktreeRemove(cwd, wt, br),
+                        updateTask: (id, patch) => swarmUpdateTask(id, patch),
+                      });
+                      setSwarmTasksByWs(prev => {
+                        const m = new Map(prev);
+                        const list = (m.get(task.workspaceId) ?? []).map(t =>
+                          t.id === task.id ? { ...t, status: 'discarded' as const, worktreePath: null } : t
+                        );
+                        m.set(task.workspaceId, list);
+                        return m;
+                      });
+                    }}
                     onOpenDiff={() => { /* TODO(Task 12) */ }}
                   />
                 )}
