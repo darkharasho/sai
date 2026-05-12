@@ -67,38 +67,64 @@ function idbReq<T>(r: IDBRequest<T>): Promise<T> {
   });
 }
 
-async function store(name: string, mode: IDBTransactionMode): Promise<IDBObjectStore> {
-  const d = await openDb();
-  return d.transaction(name, mode).objectStore(name);
-}
-
 // ---------------------------------------------------------------------------
 // Tasks
 // ---------------------------------------------------------------------------
 
 export async function swarmCreateTask(t: SwarmTask): Promise<void> {
-  await idbReq((await store(TASKS, 'readwrite')).put(t));
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(TASKS, 'readwrite');
+    tx.objectStore(TASKS).put(t);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
 export async function swarmGetTask(id: string): Promise<SwarmTask | undefined> {
-  return idbReq((await store(TASKS, 'readonly')).get(id)) as Promise<SwarmTask | undefined>;
+  const db = await openDb();
+  const tx = db.transaction(TASKS, 'readonly');
+  return idbReq(tx.objectStore(TASKS).get(id)) as Promise<SwarmTask | undefined>;
 }
 
 export async function swarmGetTasks(workspaceId: string): Promise<SwarmTask[]> {
-  const idx = (await store(TASKS, 'readonly')).index('workspaceId');
+  const db = await openDb();
+  const tx = db.transaction(TASKS, 'readonly');
+  const idx = tx.objectStore(TASKS).index('workspaceId');
   return idbReq(idx.getAll(IDBKeyRange.only(workspaceId)));
 }
 
 export async function swarmUpdateTask(id: string, patch: Partial<SwarmTask>): Promise<void> {
-  const s = await store(TASKS, 'readonly');
-  const cur = (await idbReq(s.get(id))) as SwarmTask | undefined;
-  if (!cur) return;
-  const ws = await store(TASKS, 'readwrite');
-  await idbReq(ws.put({ ...cur, ...patch, lastActivityAt: Date.now() }));
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(TASKS, 'readwrite');
+    const store = tx.objectStore(TASKS);
+    const getReq = store.get(id);
+
+    getReq.onsuccess = () => {
+      const cur = getReq.result as SwarmTask | undefined;
+      if (!cur) {
+        // Task not found — resolve without writing (same behaviour as before)
+        resolve();
+        return;
+      }
+      store.put({ ...cur, ...patch, lastActivityAt: Date.now() });
+    };
+    getReq.onerror = () => reject(getReq.error);
+
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
 export async function swarmDeleteTask(id: string): Promise<void> {
-  await idbReq((await store(TASKS, 'readwrite')).delete(id));
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(TASKS, 'readwrite');
+    tx.objectStore(TASKS).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -106,14 +132,28 @@ export async function swarmDeleteTask(id: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export async function swarmCreateApproval(a: SwarmApproval): Promise<void> {
-  await idbReq((await store(APPR, 'readwrite')).put(a));
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(APPR, 'readwrite');
+    tx.objectStore(APPR).put(a);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
 export async function swarmGetApprovals(workspaceId: string): Promise<SwarmApproval[]> {
-  const idx = (await store(APPR, 'readonly')).index('workspaceId');
+  const db = await openDb();
+  const tx = db.transaction(APPR, 'readonly');
+  const idx = tx.objectStore(APPR).index('workspaceId');
   return idbReq(idx.getAll(IDBKeyRange.only(workspaceId)));
 }
 
 export async function swarmResolveApproval(id: string): Promise<void> {
-  await idbReq((await store(APPR, 'readwrite')).delete(id));
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(APPR, 'readwrite');
+    tx.objectStore(APPR).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
