@@ -222,6 +222,30 @@ export default function App() {
     return () => { cancelled = true; };
   }, [activeProjectPath]);
 
+  // Task 13: Poll swarm tasks for the active workspace so out-of-band updates
+  // (scheduler state changes, approvals, etc.) reflect in the sidebar promptly.
+  useEffect(() => {
+    if (!activeProjectPath) return;
+    const id = window.setInterval(async () => {
+      try {
+        const tasks = await swarmGetTasks(activeProjectPath);
+        setSwarmTasksByWs(prev => {
+          const cur = prev.get(activeProjectPath);
+          if (cur && cur.length === tasks.length &&
+              cur.every((t, i) => t.id === tasks[i].id && t.status === tasks[i].status &&
+                                   t.toolCallCount === tasks[i].toolCallCount &&
+                                   t.worktreePath === tasks[i].worktreePath)) {
+            return prev;
+          }
+          const m = new Map(prev);
+          m.set(activeProjectPath, tasks);
+          return m;
+        });
+      } catch { /* ignore */ }
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [activeProjectPath]);
+
   const swarmSchedulers = useRef<Map<string, SwarmScheduler>>(new Map());
 
   useEffect(() => {
@@ -1787,6 +1811,27 @@ export default function App() {
 
                       return { ...w, activeSession: updated };
                     });
+
+                    // Task 13: Swarm — mirror turn completion onto the SwarmTask if this session belongs to one
+                    const activeSess = ws.activeSession;
+                    if (activeSess?.kind === 'task' && activeSess.swarmTaskId) {
+                      const taskId = activeSess.swarmTaskId;
+                      void (async () => {
+                        try {
+                          await swarmUpdateTask(taskId, { status: 'done', lastActivityAt: Date.now() });
+                          setSwarmTasksByWs(prev => {
+                            const m = new Map(prev);
+                            const list = (m.get(wsPath) ?? []).map(t =>
+                              t.id === taskId ? { ...t, status: 'done' as const, lastActivityAt: Date.now() } : t
+                            );
+                            m.set(wsPath, list);
+                            return m;
+                          });
+                        } catch (err) {
+                          console.error('swarm: onTurnComplete mirror failed', err);
+                        }
+                      })();
+                    }
                   }}
                 />
               </div>
