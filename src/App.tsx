@@ -1346,6 +1346,7 @@ export default function App() {
         const tasks = swarmTasksByWsRef.current.get(msg.projectPath) ?? [];
         const mirror = deriveSwarmMirror(msg, tasks);
         if (mirror) {
+          const patchedTask = tasks.find(t => t.id === mirror.taskId);
           setSwarmTasksByWs(prev => {
             const m = new Map(prev);
             const list = (m.get(msg.projectPath) ?? []).map(t =>
@@ -1354,6 +1355,26 @@ export default function App() {
             m.set(msg.projectPath, list);
             return m;
           });
+          // Emit a completion / failure card into the orchestrator chat so
+          // background task lifecycle events appear inline as a live feed.
+          if (mirror.patch.kind === 'status' && patchedTask) {
+            const statusPatch = mirror.patch;
+            const kind = statusPatch.status === 'done' ? 'task_completed' : 'task_failed';
+            const input = {
+              taskId: patchedTask.id,
+              title: patchedTask.title,
+              branch: patchedTask.branch,
+              toolCallCount: patchedTask.toolCallCount,
+              durationMs: statusPatch.lastActivityAt - patchedTask.createdAt,
+            };
+            void (window.sai as any).swarmEmitCard?.(msg.projectPath, kind, input)
+              .then((r: { id: string } | null) => {
+                if (r?.id) {
+                  (window.sai as any).swarmEmitCardResult?.(msg.projectPath, r.id, { ok: statusPatch.status === 'done' });
+                }
+              })
+              .catch(() => { /* best-effort */ });
+          }
         }
       }
       // Background-task assistant message capture. When a swarm task runs
