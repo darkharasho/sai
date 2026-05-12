@@ -61,7 +61,11 @@ export default function OrchestratorModelPicker({ provider, model, onChange, dis
       ref={wrapperRef}
       className="orch-model-picker"
       data-testid="orch-model-picker"
-      style={{ position: 'relative', display: 'inline-block' }}
+      // Bump z-index when open so the dropdown — which extends down past the
+      // header into the chat-area's DOM order — paints above the chat input.
+      // Neither wrapper creates a stacking context by default; assign one here
+      // when the dropdown is shown so its children win against later siblings.
+      style={{ position: 'relative', display: 'inline-block', zIndex: open ? 5000 : 'auto' }}
     >
       <button
         type="button"
