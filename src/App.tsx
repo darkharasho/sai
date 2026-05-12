@@ -19,13 +19,15 @@ import { basename } from './utils/pathUtils';
 import { createSession, generateSmartTitle } from './sessions';
 import { computeUnmountFlushes } from './workspaceFlush';
 import { dbGetSessions, dbGetMessages, dbGetMessagesTail, dbSaveSession, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
-import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval } from './types';
+import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask } from './types';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, setActiveHighlightTheme, type HighlightThemeId } from './themes';
 import ApprovalBanner from './components/ApprovalBanner';
 import { MessageSquare, TerminalSquare, Code2, ChevronRight, MessageCirclePlus } from 'lucide-react';
 import ChatHistorySidebar from './components/Chat/ChatHistorySidebar';
 import PluginsSidebar from './components/Plugins/PluginsSidebar';
 import McpSidebar from './components/MCP/McpSidebar';
+import SwarmSidebar from './components/Swarm/SwarmSidebar';
+import { swarmGetTasks } from './swarmDb';
 import { isImageFile } from './utils/imageFiles';
 import { getMonacoEditorFor } from './utils/monacoEditorRegistry';
 import * as monaco from 'monaco-editor';
@@ -136,6 +138,9 @@ export default function App() {
   const [geminiConversationMode, setGeminiConversationMode] = useState<GeminiConversationMode>('planning');
   const [geminiLoadingPhrases, setGeminiLoadingPhrases] = useState<'witty' | 'tips' | 'all' | 'off'>('all');
   const [workspaces, setWorkspaces] = useState<Map<string, WorkspaceContext>>(new Map());
+  const [swarmTasksByWs, setSwarmTasksByWs] = useState<Map<string, SwarmTask[]>>(new Map());
+  const [swarmSelected, setSwarmSelected] = useState<'overview' | string>('overview');
+  const [showNewTaskPopover, setShowNewTaskPopover] = useState(false);
   const [messageQueues, setMessageQueues] = useState<Map<string, QueuedMessage[]>>(new Map());
   const [pendingClose, setPendingClose] = useState<string | null>(null);
   // Ref to hold latest messages per workspace without triggering re-renders during streaming
@@ -189,6 +194,22 @@ export default function App() {
     activeProjectPathRef.current = activeProjectPath;
     setActiveWorkspace(activeProjectPath);
     window.sai.workspaceSetActive(activeProjectPath);
+  }, [activeProjectPath]);
+
+  useEffect(() => {
+    if (!activeProjectPath) return;
+    let cancelled = false;
+    (async () => {
+      const tasks = await swarmGetTasks(activeProjectPath);
+      if (cancelled) return;
+      setSwarmTasksByWs(prev => {
+        const m = new Map(prev);
+        m.set(activeProjectPath, tasks);
+        return m;
+      });
+      setSwarmSelected('overview');
+    })();
+    return () => { cancelled = true; };
   }, [activeProjectPath]);
 
   // Track which workspaces are currently mounted in the chat panel render.
@@ -1622,6 +1643,9 @@ export default function App() {
     );
   };
 
+  const swarmApprovalCount = (swarmTasksByWs.get(activeProjectPath) ?? [])
+    .filter(t => t.status === 'awaiting_approval').length;
+
   return (
     <div className="app">
       <TitleBar
@@ -1659,7 +1683,7 @@ export default function App() {
         onSwitchToWorkspace={handleProjectSwitch}
       />
       <div className="app-body">
-        <NavBar activeSidebar={sidebarOpen} onToggle={toggleSidebar} gitChangeCount={gitChangeCount} swarmApprovalCount={0} />
+        <NavBar activeSidebar={sidebarOpen} onToggle={toggleSidebar} gitChangeCount={gitChangeCount} swarmApprovalCount={swarmApprovalCount} />
         <AnimatePresence initial={false}>
           {sidebarOpen === 'files' && (
             <motion.div
@@ -1735,6 +1759,21 @@ export default function App() {
               transition={{ duration: 0.16, ease: 'easeIn' }}
             >
               <McpSidebar />
+            </motion.div>
+          )}
+          {sidebarOpen === 'swarm' && (
+            <motion.div
+              key="sidebar-swarm"
+              className="sidebar-slot"
+              exit={{ opacity: 0, x: -12 }}
+              transition={{ duration: 0.16, ease: 'easeIn' }}
+            >
+              <SwarmSidebar
+                tasks={swarmTasksByWs.get(activeProjectPath) ?? []}
+                selectedId={swarmSelected}
+                onSelect={setSwarmSelected}
+                onNewTask={() => setShowNewTaskPopover(true)}
+              />
             </motion.div>
           )}
         </AnimatePresence>
