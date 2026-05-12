@@ -1,6 +1,6 @@
 import React from 'react';
 import type { ToolCall, SwarmTask, SwarmTaskStatus } from '../../../types';
-import { cardBase, cardHeader, safeJsonParse } from './cardStyles';
+import { cardBase, cardHeader, safeJsonParse, btnBase, btnPrimary, btnDanger } from './cardStyles';
 
 interface DispatchedTask {
   /** Best-effort title parsed from the orchestrator's input. */
@@ -13,7 +13,15 @@ interface Props {
   toolCall: ToolCall;
   /** Live task list — used to resolve status pills + branch for matched tasks. */
   tasks?: SwarmTask[];
+  /** Live diff stats keyed by task id — populated as tasks complete. */
+  diffStats?: Map<string, { additions: number; deletions: number }>;
   onFocusTask?: (taskId: string) => void;
+  onLand?: (taskId: string) => void;
+  onDiscard?: (taskId: string) => void;
+  onDiff?: (taskId: string) => void;
+  onRetry?: (prompt: string) => void;
+  /** Scroll the orchestrator chat to the inline approval card for this task. */
+  onScrollToApproval?: (taskId: string) => void;
 }
 
 const STATUS_COLORS: Record<SwarmTaskStatus, string> = {
@@ -76,7 +84,17 @@ function matchTask(dispatched: DispatchedTask, tasks: SwarmTask[]): SwarmTask | 
   return tasks.find((t) => t.title.startsWith(dispatched.title.slice(0, 40)));
 }
 
-export default function SpawnTaskCard({ toolCall, tasks = [], onFocusTask }: Props) {
+export default function SpawnTaskCard({
+  toolCall,
+  tasks = [],
+  diffStats,
+  onFocusTask,
+  onLand,
+  onDiscard,
+  onDiff,
+  onRetry,
+  onScrollToApproval,
+}: Props) {
   const dispatched = parseDispatched(toolCall);
   const count = dispatched.length;
 
@@ -91,19 +109,17 @@ export default function SpawnTaskCard({ toolCall, tasks = [], onFocusTask }: Pro
       <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
         {dispatched.map((d, i) => {
           const live = matchTask(d, tasks);
-          const interactive = !!live && !!onFocusTask;
+          const status: SwarmTaskStatus = live?.status ?? 'queued';
+          const stats = live ? diffStats?.get(live.id) : undefined;
+          const showDiffStats = !!stats && (status === 'done' || status === 'landed');
+          const toolCount = live?.toolCallCount ?? 0;
+          const stop = (e: React.MouseEvent | React.KeyboardEvent) => e.stopPropagation();
           return (
             <li
               key={i}
-              role={interactive ? 'button' : undefined}
-              tabIndex={interactive ? 0 : undefined}
-              onClick={interactive ? () => onFocusTask!(live!.id) : undefined}
-              onKeyDown={interactive ? (e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  onFocusTask!(live!.id);
-                }
-              } : undefined}
+              data-testid="swarm-spawn-row"
+              data-task-id={live?.id}
+              data-task-status={status}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -112,7 +128,6 @@ export default function SpawnTaskCard({ toolCall, tasks = [], onFocusTask }: Pro
                 borderRadius: 4,
                 background: 'var(--bg-secondary)',
                 border: '1px solid var(--border)',
-                cursor: interactive ? 'pointer' : 'default',
               }}
             >
               <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -125,8 +140,68 @@ export default function SpawnTaskCard({ toolCall, tasks = [], onFocusTask }: Pro
                     {live.branch}
                   </span>
                 )}
+                {live && toolCount > 0 && (
+                  <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--text-muted)' }}>
+                    · {toolCount} tool{toolCount === 1 ? '' : 's'}
+                  </span>
+                )}
+                {showDiffStats && stats && (
+                  <span style={{ marginLeft: 8, fontSize: 11 }}>
+                    <span style={{ color: '#3a8' }}>+{stats.additions}</span>{' '}
+                    <span style={{ color: '#b44' }}>−{stats.deletions}</span>
+                  </span>
+                )}
               </div>
-              <StatusPill status={live?.status ?? 'queued'} />
+              <StatusPill status={status} />
+              <div
+                style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+                onClick={stop}
+                onKeyDown={stop}
+              >
+                {live && onFocusTask && (
+                  <button
+                    type="button"
+                    style={btnBase}
+                    onClick={(e) => { stop(e); onFocusTask(live.id); }}
+                  >
+                    Focus
+                  </button>
+                )}
+                {live && status === 'awaiting_approval' && onScrollToApproval && (
+                  <button
+                    type="button"
+                    style={btnBase}
+                    onClick={(e) => { stop(e); onScrollToApproval(live.id); }}
+                  >
+                    → Approvals
+                  </button>
+                )}
+                {live && status === 'done' && onDiff && (
+                  <button type="button" style={btnBase} onClick={(e) => { stop(e); onDiff(live.id); }}>
+                    Diff
+                  </button>
+                )}
+                {live && status === 'done' && onDiscard && (
+                  <button type="button" style={btnDanger} onClick={(e) => { stop(e); onDiscard(live.id); }}>
+                    Discard
+                  </button>
+                )}
+                {live && status === 'done' && onLand && (
+                  <button type="button" style={btnPrimary} onClick={(e) => { stop(e); onLand(live.id); }}>
+                    Land
+                  </button>
+                )}
+                {live && (status === 'streaming' || status === 'queued') && onDiscard && (
+                  <button type="button" style={btnDanger} onClick={(e) => { stop(e); onDiscard(live.id); }}>
+                    Discard
+                  </button>
+                )}
+                {status === 'failed' && onRetry && d.prompt && (
+                  <button type="button" style={btnPrimary} onClick={(e) => { stop(e); onRetry(d.prompt!); }}>
+                    Retry
+                  </button>
+                )}
+              </div>
             </li>
           );
         })}

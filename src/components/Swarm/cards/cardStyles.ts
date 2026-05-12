@@ -73,6 +73,38 @@ export const primaryBtn: CSSProperties = {
   cursor: 'pointer',
 };
 
+/**
+ * Standard SAI button aesthetic for the swarm chat card actions.
+ * `btnBase` is for secondary actions; `btnPrimary` for the primary action
+ * on a card; `btnDanger` for destructive actions (discard).
+ */
+export const btnBase: CSSProperties = {
+  fontSize: 11,
+  padding: '3px 10px',
+  borderRadius: 4,
+  border: '1px solid var(--border)',
+  background: 'var(--bg-secondary)',
+  color: 'var(--text)',
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+  lineHeight: 1.3,
+  transition: 'background 0.15s, border-color 0.15s',
+};
+
+export const btnPrimary: CSSProperties = {
+  ...btnBase,
+  background: 'var(--accent)',
+  color: '#000',
+  border: '1px solid transparent',
+  fontWeight: 600,
+};
+
+export const btnDanger: CSSProperties = {
+  ...btnBase,
+  color: '#b44',
+  borderColor: 'rgba(180,68,68,0.4)',
+};
+
 export function relativeTime(ts: number): string {
   const diff = Math.max(0, Date.now() - ts);
   const m = Math.floor(diff / 60000);

@@ -20,6 +20,7 @@ export default function InlineApprovalCard({ meta, onApprove, onDeny, onView }: 
     return (
       <div
         data-testid="swarm-inline-approval-card"
+        data-task-id={meta.taskId}
         data-resolved={meta.resolved}
         style={{
           ...cardBase,
@@ -47,6 +48,7 @@ export default function InlineApprovalCard({ meta, onApprove, onDeny, onView }: 
   return (
     <div
       data-testid="swarm-inline-approval-card"
+      data-task-id={meta.taskId}
       data-resolved="pending"
       style={{
         ...cardBase,

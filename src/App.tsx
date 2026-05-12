@@ -221,6 +221,7 @@ export default function App() {
   const workspacesRef = useRef(workspaces);
   const activeProjectPathRef = useRef(activeProjectPath);
   const swarmTasksByWsRef = useRef(swarmTasksByWs);
+  const swarmDiffStatsRef = useRef(swarmDiffStats);
   const orchestratorSessionIdByWsRef = useRef(orchestratorSessionIdByWs);
   // Tracks the last swarm task we routed the active session to, to avoid
   // re-firing the session-switch effect on every state update.
@@ -235,6 +236,7 @@ export default function App() {
 
   useEffect(() => { workspacesRef.current = workspaces; }, [workspaces]);
   useEffect(() => { swarmTasksByWsRef.current = swarmTasksByWs; }, [swarmTasksByWs]);
+  useEffect(() => { swarmDiffStatsRef.current = swarmDiffStats; }, [swarmDiffStats]);
   useEffect(() => { orchestratorSessionIdByWsRef.current = orchestratorSessionIdByWs; }, [orchestratorSessionIdByWs]);
 
   // Task 26: Quit confirmation when swarm tasks are still streaming.
@@ -1360,13 +1362,22 @@ export default function App() {
           if (mirror.patch.kind === 'status' && patchedTask) {
             const statusPatch = mirror.patch;
             const kind = statusPatch.status === 'done' ? 'task_completed' : 'task_failed';
-            const input = {
+            const stats = swarmDiffStatsRef.current.get(patchedTask.id);
+            const input: Record<string, unknown> = {
               taskId: patchedTask.id,
               title: patchedTask.title,
               branch: patchedTask.branch,
               toolCallCount: patchedTask.toolCallCount,
               durationMs: statusPatch.lastActivityAt - patchedTask.createdAt,
             };
+            if (kind === 'task_completed' && stats) {
+              input.additions = stats.additions;
+              input.deletions = stats.deletions;
+            }
+            if (kind === 'task_failed') {
+              input.prompt = patchedTask.prompt;
+              if ((statusPatch as any).reason) input.reason = (statusPatch as any).reason;
+            }
             void (window.sai as any).swarmEmitCard?.(msg.projectPath, kind, input)
               .then((r: { id: string } | null) => {
                 if (r?.id) {
@@ -2589,7 +2600,30 @@ export default function App() {
                           toolCall={tc}
                           tasks={swarmTasksByWs.get(wsPath) ?? []}
                           approvals={swarmApprovalsByWs.get(wsPath) ?? []}
+                          diffStats={swarmDiffStats}
                           onFocusTask={(id) => setSwarmSelected(id)}
+                          onLand={(id) => { void landWithCard(id); }}
+                          onDiscard={(id) => { void discardWithCard(id); }}
+                          onDiff={(id) => setSwarmSelected(id)}
+                          onRetry={(prompt) => {
+                            void spawnSwarmTask({
+                              prompt,
+                              provider: aiProvider,
+                              model: modelChoice,
+                              approvalPolicy: swarmSettingsRef.current.defaultApprovalPolicy ?? 'auto-read',
+                            }).catch(err => console.error('swarm: retry failed', err));
+                          }}
+                          onScrollToApproval={(taskId) => {
+                            // Best-effort: scroll the orchestrator chat to the
+                            // inline approval card for this task. The card has
+                            // data-task-id="<id>" on InlineApprovalCard.
+                            try {
+                              const el = document.querySelector<HTMLElement>(
+                                `[data-testid="swarm-inline-approval-card"][data-task-id="${taskId}"]`
+                              );
+                              el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            } catch { /* noop */ }
+                          }}
                         />
                       )}
                       renderMessage={(message) => {

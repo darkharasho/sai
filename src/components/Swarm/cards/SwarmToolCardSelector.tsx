@@ -14,8 +14,14 @@ interface Props {
   expanded?: boolean;
   tasks?: SwarmTask[];
   approvals?: SwarmApproval[];
+  diffStats?: Map<string, { additions: number; deletions: number }>;
   onFocusTask?: (taskId: string) => void;
   onRebaseRetry?: (taskRef: string) => void;
+  onLand?: (taskId: string) => void;
+  onDiscard?: (taskId: string) => void;
+  onDiff?: (taskId: string) => void;
+  onRetry?: (prompt: string) => void;
+  onScrollToApproval?: (taskId: string) => void;
 }
 
 const SWARM_PREFIX = 'mcp__swarm__';
@@ -27,13 +33,28 @@ const SWARM_PREFIX = 'mcp__swarm__';
  * default `<ToolCallCard>` rendering.
  */
 export default function SwarmToolCardSelector(props: Props): React.ReactElement | null {
-  const { toolCall, tasks, approvals, onFocusTask, onRebaseRetry } = props;
+  const {
+    toolCall, tasks, approvals, diffStats,
+    onFocusTask, onRebaseRetry, onLand, onDiscard, onDiff, onRetry, onScrollToApproval,
+  } = props;
   if (!toolCall.name?.startsWith(SWARM_PREFIX)) return null;
   const baseName = toolCall.name.slice(SWARM_PREFIX.length);
   switch (baseName) {
     case 'spawn_task':
     case 'spawn_tasks':
-      return <SpawnTaskCard toolCall={toolCall} tasks={tasks} onFocusTask={onFocusTask} />;
+      return (
+        <SpawnTaskCard
+          toolCall={toolCall}
+          tasks={tasks}
+          diffStats={diffStats}
+          onFocusTask={onFocusTask}
+          onLand={onLand}
+          onDiscard={onDiscard}
+          onDiff={onDiff}
+          onRetry={onRetry}
+          onScrollToApproval={onScrollToApproval}
+        />
+      );
     case 'query_status':
       return <QueryStatusCard toolCall={toolCall} />;
     case 'land':
@@ -47,9 +68,17 @@ export default function SwarmToolCardSelector(props: Props): React.ReactElement 
     case 'deny_tool_call':
       return <ApprovalActionCard toolCall={toolCall} tasks={tasks} approvals={approvals} />;
     case 'task_completed':
-      return <TaskCompletedCard toolCall={toolCall} />;
+      return (
+        <TaskCompletedCard
+          toolCall={toolCall}
+          diffStats={diffStats}
+          onLand={onLand}
+          onDiscard={onDiscard}
+          onDiff={onDiff}
+        />
+      );
     case 'task_failed':
-      return <TaskFailedCard toolCall={toolCall} />;
+      return <TaskFailedCard toolCall={toolCall} onRetry={onRetry} onDiscard={onDiscard} />;
     default:
       // Unknown swarm tool — fall back to the default renderer so we don't
       // silently swallow new tools the orchestrator might learn.

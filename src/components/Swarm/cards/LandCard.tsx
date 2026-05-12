@@ -1,6 +1,6 @@
 import React from 'react';
 import type { ToolCall } from '../../../types';
-import { cardBase, ghostBtn, safeJsonParse, SWARM_GREEN, SWARM_RED } from './cardStyles';
+import { cardBase, safeJsonParse, SWARM_GREEN, SWARM_RED, btnPrimary } from './cardStyles';
 
 interface Props {
   toolCall: ToolCall;
@@ -35,7 +35,7 @@ export default function LandCard({ toolCall, onRebaseRetry }: Props) {
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <button
             type="button"
-            style={ghostBtn}
+            style={btnPrimary}
             onClick={() => onRebaseRetry?.(taskRef)}
           >
             Rebase + retry

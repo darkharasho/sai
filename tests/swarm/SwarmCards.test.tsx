@@ -55,15 +55,137 @@ describe('SpawnTaskCard', () => {
     />);
     expect(screen.getAllByTestId('swarm-status-pill')[0].textContent).toMatch(/streaming/i);
   });
-  it('fires onFocusTask when matched task row clicked', () => {
+  it('fires onFocusTask when Focus button clicked', () => {
     const onFocus = vi.fn();
     render(<SpawnTaskCard
       toolCall={tc('mcp__swarm__spawn_task', { prompt: 'migrate users to v2', title: 'migrate users' })}
       tasks={[baseTask]}
       onFocusTask={onFocus}
     />);
-    fireEvent.click(screen.getByRole('button', { name: /migrate users/i }));
+    fireEvent.click(screen.getByRole('button', { name: /focus/i }));
     expect(onFocus).toHaveBeenCalledWith('t1');
+  });
+
+  it('renders Land + Discard + Diff actions when status is done with diff stats', () => {
+    const onLand = vi.fn();
+    const onDiscard = vi.fn();
+    const onDiff = vi.fn();
+    const diffStats = new Map([['t1', { additions: 42, deletions: 7 }]]);
+    render(<SpawnTaskCard
+      toolCall={tc('mcp__swarm__spawn_task', { prompt: 'migrate users to v2', title: 'migrate users' })}
+      tasks={[{ ...baseTask, status: 'done', toolCallCount: 12 }]}
+      diffStats={diffStats}
+      onLand={onLand}
+      onDiscard={onDiscard}
+      onDiff={onDiff}
+    />);
+    expect(screen.getByText(/12 tools/)).toBeInTheDocument();
+    expect(screen.getByText('+42')).toBeInTheDocument();
+    expect(screen.getByText('−7')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^diff$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^discard$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^land$/i }));
+    expect(onDiff).toHaveBeenCalledWith('t1');
+    expect(onDiscard).toHaveBeenCalledWith('t1');
+    expect(onLand).toHaveBeenCalledWith('t1');
+  });
+
+  it('shows Discard for streaming/queued and not Land', () => {
+    const onDiscard = vi.fn();
+    const onLand = vi.fn();
+    render(<SpawnTaskCard
+      toolCall={tc('mcp__swarm__spawn_task', { prompt: 'migrate users to v2', title: 'migrate users' })}
+      tasks={[{ ...baseTask, status: 'streaming' }]}
+      onDiscard={onDiscard}
+      onLand={onLand}
+    />);
+    fireEvent.click(screen.getByRole('button', { name: /^discard$/i }));
+    expect(onDiscard).toHaveBeenCalledWith('t1');
+    expect(screen.queryByRole('button', { name: /^land$/i })).not.toBeInTheDocument();
+  });
+
+  it('shows → Approvals when awaiting_approval', () => {
+    const onScrollToApproval = vi.fn();
+    render(<SpawnTaskCard
+      toolCall={tc('mcp__swarm__spawn_task', { prompt: 'migrate users to v2', title: 'migrate users' })}
+      tasks={[{ ...baseTask, status: 'awaiting_approval' }]}
+      onScrollToApproval={onScrollToApproval}
+    />);
+    fireEvent.click(screen.getByRole('button', { name: /approvals/i }));
+    expect(onScrollToApproval).toHaveBeenCalledWith('t1');
+  });
+
+  it('shows Retry when status is failed and fires with prompt', () => {
+    const onRetry = vi.fn();
+    render(<SpawnTaskCard
+      toolCall={tc('mcp__swarm__spawn_task', { prompt: 'migrate users to v2', title: 'migrate users' })}
+      tasks={[{ ...baseTask, status: 'failed' }]}
+      onRetry={onRetry}
+    />);
+    fireEvent.click(screen.getByRole('button', { name: /^retry$/i }));
+    expect(onRetry).toHaveBeenCalledWith('migrate users to v2');
+  });
+});
+
+describe('TaskCompletedCard inline actions', () => {
+  it('renders diff stats from diffStats prop and fires actions', async () => {
+    const TaskCompletedCard = (await import('../../src/components/Swarm/cards/TaskCompletedCard')).default;
+    const onLand = vi.fn();
+    const onDiscard = vi.fn();
+    const onDiff = vi.fn();
+    const diffStats = new Map([['t1', { additions: 9, deletions: 4 }]]);
+    render(<TaskCompletedCard
+      toolCall={tc('mcp__swarm__task_completed', { taskId: 't1', title: 'x', branch: 'sai/t1', toolCallCount: 3, durationMs: 1500 })}
+      diffStats={diffStats}
+      onLand={onLand}
+      onDiscard={onDiscard}
+      onDiff={onDiff}
+    />);
+    expect(screen.getByText('+9')).toBeInTheDocument();
+    expect(screen.getByText('−4')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^land$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^discard$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^diff$/i }));
+    expect(onLand).toHaveBeenCalledWith('t1');
+    expect(onDiscard).toHaveBeenCalledWith('t1');
+    expect(onDiff).toHaveBeenCalledWith('t1');
+  });
+
+  it('falls back to additions/deletions on input when diffStats absent', async () => {
+    const TaskCompletedCard = (await import('../../src/components/Swarm/cards/TaskCompletedCard')).default;
+    render(<TaskCompletedCard
+      toolCall={tc('mcp__swarm__task_completed', { taskId: 't1', title: 'x', additions: 5, deletions: 2 })}
+    />);
+    expect(screen.getByText('+5')).toBeInTheDocument();
+    expect(screen.getByText('−2')).toBeInTheDocument();
+  });
+});
+
+describe('TaskFailedCard inline actions', () => {
+  it('renders Retry + Discard and fires them', async () => {
+    const TaskFailedCard = (await import('../../src/components/Swarm/cards/TaskFailedCard')).default;
+    const onRetry = vi.fn();
+    const onDiscard = vi.fn();
+    render(<TaskFailedCard
+      toolCall={tc('mcp__swarm__task_failed', { taskId: 't1', title: 'x', branch: 'sai/t1', reason: 'boom', prompt: 'original prompt' })}
+      onRetry={onRetry}
+      onDiscard={onDiscard}
+    />);
+    expect(screen.getByText(/boom/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^retry$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^discard$/i }));
+    expect(onRetry).toHaveBeenCalledWith('original prompt');
+    expect(onDiscard).toHaveBeenCalledWith('t1');
+  });
+
+  it('hides Retry when no prompt on input', async () => {
+    const TaskFailedCard = (await import('../../src/components/Swarm/cards/TaskFailedCard')).default;
+    const onRetry = vi.fn();
+    render(<TaskFailedCard
+      toolCall={tc('mcp__swarm__task_failed', { taskId: 't1', title: 'x' })}
+      onRetry={onRetry}
+    />);
+    expect(screen.queryByRole('button', { name: /^retry$/i })).not.toBeInTheDocument();
   });
 });
 
