@@ -134,8 +134,25 @@ export async function gitCanFastForward(repoCwd: string, sourceBranch: string, t
   return await git(repoCwd).raw(['merge-base', '--is-ancestor', targetBranch, sourceBranch]).then(() => true).catch(() => false);
 }
 
-export async function gitFastForwardMerge(repoCwd: string, sourceBranch: string) {
-  await git(repoCwd).raw(['merge', '--ff-only', sourceBranch]);
+/**
+ * Result type for fast-forward merges. Returns ok:false (rather than throwing)
+ * for the diverging-branches case so the IPC handler doesn't log it as an
+ * error — that's an expected outcome the renderer recovers from by rebasing
+ * and retrying. Other git errors still throw.
+ */
+export type FastForwardResult = { ok: true } | { ok: false; reason: 'diverged'; detail: string };
+
+export async function gitFastForwardMerge(repoCwd: string, sourceBranch: string): Promise<FastForwardResult> {
+  try {
+    await git(repoCwd).raw(['merge', '--ff-only', sourceBranch]);
+    return { ok: true };
+  } catch (err: any) {
+    const msg = err?.message ?? String(err);
+    if (/diverging branches|Not possible to fast-forward|fast-forward/i.test(msg)) {
+      return { ok: false, reason: 'diverged', detail: msg };
+    }
+    throw err;
+  }
 }
 
 export async function gitBranchDiff(

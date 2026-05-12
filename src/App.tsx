@@ -703,8 +703,16 @@ export default function App() {
     const landDeps = {
       canFastForward: (cwd: string, src: string, tgt: string) =>
         (window.sai as any).swarm.canFastForward(cwd, src, tgt),
-      ffMerge: (cwd: string, src: string) =>
-        (window.sai as any).swarm.ffMerge(cwd, src),
+      ffMerge: async (cwd: string, src: string) => {
+        // ffMerge IPC now returns { ok, reason } instead of throwing on
+        // diverging branches (so electron doesn't log it as a handler error).
+        // Translate ok:false back into a rejection so landTask's existing
+        // catch + retry-with-rebase path still fires.
+        const r = await (window.sai as any).swarm.ffMerge(cwd, src);
+        if (r && typeof r === 'object' && r.ok === false) {
+          throw new Error(r.detail || 'ff-merge: diverging branches');
+        }
+      },
       worktreeRemove: (cwd: string, wt: string, br: string) =>
         (window.sai as any).swarm.worktreeRemove(cwd, wt, br),
       updateTask: noopUpdateTask,
