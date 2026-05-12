@@ -2787,6 +2787,7 @@ export default function App() {
                       claudeScope={orchSessionId}
                       claudeKind="orchestrator"
                       emptyStateVisual={<SwarmLogoCluster leadSize={96} />}
+                      conversationHeaderVisual={<SwarmLogoCluster leadSize={48} followerCount={6} footprint={220} />}
                       claudeOrchestratorContext={(() => {
                         const wsName = wsPath.split(/[\\/]/).filter(Boolean).pop() || wsPath;
                         const cfg = swarmSettingsRef.current;
