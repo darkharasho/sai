@@ -839,6 +839,10 @@ export default function App() {
   // Keep a ref to swarmHost so the IPC handler installed once (below) always
   // dispatches against the current host instance, not a stale closure.
   const swarmHostRef = useRef(swarmHost);
+  // Serialize land operations across the whole renderer so concurrent clicks
+  // (e.g., user fires Land on three TaskCompletedCards in a row) don't race
+  // git's main checkout. Each landWithCard call chains onto this promise.
+  const landQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   useEffect(() => { swarmHostRef.current = swarmHost; }, [swarmHost]);
 
   // Inline-card emission for user-initiated swarm actions. Orchestrator-driven
@@ -850,35 +854,44 @@ export default function App() {
     const tasks = swarmTasksByWs.get(ws) ?? [];
     const t = tasks.find(x => x.id === taskRef);
     const sai = (window.sai as any) ?? {};
-    let cardId: string | undefined;
-    try {
-      const r = await sai.swarmEmitCard?.(ws, 'land', {
-        taskRef,
-        title: t?.title,
-        branch: t?.branch,
-      });
-      cardId = r?.id;
-    } catch { /* noop */ }
-    try {
-      const result = await swarmHost.land(taskRef);
-      if (cardId) {
-        try {
-          sai.swarmEmitCardResult?.(ws, cardId, {
-            ok: result.ok !== false,
-            reason: (result as any).reason,
-            branch: t?.branch,
-            additions: swarmDiffStats.get(taskRef)?.additions ?? 0,
-            deletions: swarmDiffStats.get(taskRef)?.deletions ?? 0,
-          }, result.ok === false);
-        } catch { /* noop */ }
+    // Chain onto the queue so concurrent callers serialize. The emit-card and
+    // swarmHost.land sit inside the chained closure to keep the per-land work
+    // atomic from git's perspective.
+    const next = landQueueRef.current.then(async () => {
+      let cardId: string | undefined;
+      try {
+        const r = await sai.swarmEmitCard?.(ws, 'land', {
+          taskRef,
+          title: t?.title,
+          branch: t?.branch,
+        });
+        cardId = r?.id;
+      } catch { /* noop */ }
+      try {
+        const result = await swarmHost.land(taskRef);
+        if (cardId) {
+          try {
+            sai.swarmEmitCardResult?.(ws, cardId, {
+              ok: result.ok !== false,
+              reason: (result as any).reason,
+              branch: t?.branch,
+              additions: swarmDiffStats.get(taskRef)?.additions ?? 0,
+              deletions: swarmDiffStats.get(taskRef)?.deletions ?? 0,
+            }, result.ok === false);
+          } catch { /* noop */ }
+        }
+        return result;
+      } catch (err) {
+        if (cardId) {
+          try { sai.swarmEmitCardResult?.(ws, cardId, { ok: false, reason: String(err) }, true); } catch { /* noop */ }
+        }
+        throw err;
       }
-      return result;
-    } catch (err) {
-      if (cardId) {
-        try { sai.swarmEmitCardResult?.(ws, cardId, { ok: false, reason: String(err) }, true); } catch { /* noop */ }
-      }
-      throw err;
-    }
+    });
+    // Always release the queue even if this land throws, so a single failure
+    // doesn't permanently block subsequent lands.
+    landQueueRef.current = next.catch(() => {});
+    return next;
   }, [activeProjectPath, swarmTasksByWs, swarmHost, swarmDiffStats]);
 
   const discardWithCard = useCallback(async (taskRef: string) => {

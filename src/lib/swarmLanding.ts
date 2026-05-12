@@ -19,20 +19,32 @@ export async function landTask(
     await deps.updateTask(task.id, { status: 'landed' });
     return { ok: true };
   }
-  let canFf = await deps.canFastForward(task.workspaceId, task.branch, task.baseBranch);
-  if (!canFf && deps.rebase) {
-    // Diverged: try an auto-rebase against baseBranch in the worktree, then
-    // re-check canFastForward. Common when sibling tasks landed first and
-    // advanced the base branch beyond this task's fork point.
+  // Try the happy path; if either canFastForward returns false OR ffMerge
+  // throws (race with a sibling land that advanced main between our check and
+  // our merge), auto-rebase and retry. Only give up after the rebase + retry
+  // also fails — that indicates a true conflict the user has to resolve.
+  const tryFastForward = async (): Promise<true | { reason: string }> => {
+    const canFf = await deps.canFastForward(task.workspaceId, task.branch, task.baseBranch);
+    if (!canFf) return { reason: 'not-ancestor' };
+    try {
+      await deps.ffMerge(task.workspaceId, task.branch);
+      return true;
+    } catch (err) {
+      return { reason: err instanceof Error ? err.message : String(err) };
+    }
+  };
+
+  let result = await tryFastForward();
+  if (result !== true && deps.rebase) {
     try {
       await deps.rebase(task.worktreePath, task.baseBranch);
-      canFf = await deps.canFastForward(task.workspaceId, task.branch, task.baseBranch);
     } catch (err) {
       return { ok: false, reason: 'rebase-needed', detail: err instanceof Error ? err.message : String(err) };
     }
+    result = await tryFastForward();
   }
-  if (!canFf) return { ok: false, reason: 'rebase-needed' };
-  await deps.ffMerge(task.workspaceId, task.branch);
+  if (result !== true) return { ok: false, reason: 'rebase-needed', detail: result.reason };
+
   await deps.worktreeRemove(task.workspaceId, task.worktreePath, task.branch);
   await deps.updateTask(task.id, { status: 'landed', worktreePath: null });
   return { ok: true };

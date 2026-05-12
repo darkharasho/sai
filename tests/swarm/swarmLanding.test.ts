@@ -20,7 +20,7 @@ describe('swarmLanding', () => {
       canFastForward: () => Promise.resolve(false),
       ffMerge: vi.fn(), worktreeRemove: vi.fn(), updateTask: vi.fn(),
     });
-    expect(r).toEqual({ ok: false, reason: 'rebase-needed' });
+    expect(r).toMatchObject({ ok: false, reason: 'rebase-needed' });
   });
 
   it('discards by removing worktree, branch, and marking discarded', async () => {
