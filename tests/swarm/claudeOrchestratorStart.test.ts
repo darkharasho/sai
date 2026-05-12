@@ -43,12 +43,24 @@ describe('buildArgs (orchestrator vs chat kinds)', () => {
     expect(toolsIdx).toBeGreaterThan(-1);
     // The literal empty string disables all built-in tools.
     expect(args[toolsIdx + 1]).toBe('');
+
+    // Plugin-provided tools (Skill/Task/Agent/TodoWrite) are not part of the
+    // built-in set, so --tools "" alone doesn't suppress them.
+    const disallowedIdx = args.indexOf('--disallowedTools');
+    expect(disallowedIdx).toBeGreaterThan(-1);
+    expect(args[disallowedIdx + 1]).toContain('Skill');
+    expect(args[disallowedIdx + 1]).toContain('Task');
+
+    // /skill-name slash resolution is killed too.
+    expect(args).toContain('--disable-slash-commands');
   });
 
   it('chat kind does NOT include --strict-mcp-config or --tools ""', () => {
     const args = buildArgs({ kind: 'chat', ...baseStubs });
     expect(args).not.toContain('--strict-mcp-config');
     expect(args).not.toContain('--tools');
+    expect(args).not.toContain('--disallowedTools');
+    expect(args).not.toContain('--disable-slash-commands');
   });
 
   it('orchestrator kind injects --system-prompt with the orchestrator prompt', () => {

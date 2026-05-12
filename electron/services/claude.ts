@@ -248,6 +248,11 @@ export function buildArgs(options: BuildArgsOptions = {}): string[] {
     args.push('--strict-mcp-config');
     // Disable all built-in tools — only mcp__swarm__* will be available.
     args.push('--tools', '');
+    // Block plugin-provided tools that aren't part of --tools (Skill/Task/Agent
+    // load via plugin sync, not the built-in set, so --tools "" alone won't
+    // suppress them). Belt-and-suspenders with --disable-slash-commands.
+    args.push('--disallowedTools', 'Skill,Task,Agent,TodoWrite');
+    args.push('--disable-slash-commands');
     // Replace Claude Code's default system prompt with the orchestrator one,
     // which steers the model to dispatch tasks instead of writing code itself.
     const ctx = resolveOrchestratorPromptContext({
