@@ -1,5 +1,5 @@
-import React from 'react';
-import { Info } from 'lucide-react';
+import React, { useState } from 'react';
+import { Info, ChevronDown, ChevronUp } from 'lucide-react';
 import OrchestratorComposer from './OrchestratorComposer';
 import StatStrip from './StatStrip';
 import ActivityRibbon from './ActivityRibbon';
@@ -55,6 +55,10 @@ export default function OrchestratorView({
   const providerLabel = orchestratorProvider
     ? `${orchestratorProvider}${orchestratorModel ? ` ${orchestratorModel}` : ''}`
     : null;
+  // Dashboard (stat strip + activity ribbon) hidden by default so the chat
+  // takes the full viewport. The header keeps inline pill stats for at-a-glance
+  // visibility; the toggle lets the user expand for the richer dashboard view.
+  const [dashboardOpen, setDashboardOpen] = useState(false);
 
   return (
     <div className="orch-view" style={{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0 }}>
@@ -87,26 +91,53 @@ export default function OrchestratorView({
             </span>
           )}
           {providerLabel && <span style={{ opacity: 0.6 }}>{providerLabel} ▾</span>}
+          <button
+            type="button"
+            onClick={() => setDashboardOpen(v => !v)}
+            aria-label={dashboardOpen ? 'Hide dashboard' : 'Show dashboard'}
+            aria-pressed={dashboardOpen}
+            data-testid="orch-dashboard-toggle"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 3,
+              background: 'none',
+              border: '1px solid var(--border)',
+              color: 'var(--text-muted)',
+              padding: '2px 6px',
+              borderRadius: 4,
+              cursor: 'pointer',
+              fontSize: 10,
+              lineHeight: 1,
+            }}
+            title={dashboardOpen ? 'Hide dashboard' : 'Show dashboard'}
+          >
+            {dashboardOpen ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+          </button>
         </div>
       </header>
 
-      <StatStrip
-        active={stats.active}
-        approvals={stats.approvals}
-        ready={stats.ready}
-        queued={stats.queued}
-        cap={stats.cap}
-        cost={stats.cost}
-        runtimeSec={stats.runtimeSec}
-      />
+      {dashboardOpen && (
+        <>
+          <StatStrip
+            active={stats.active}
+            approvals={stats.approvals}
+            ready={stats.ready}
+            queued={stats.queued}
+            cap={stats.cap}
+            cost={stats.cost}
+            runtimeSec={stats.runtimeSec}
+          />
 
-      <ActivityRibbon
-        active={stats.active}
-        ready={stats.ready}
-        approvals={stats.approvals}
-        cost={stats.cost}
-        tokRate={stats.tokRate}
-      />
+          <ActivityRibbon
+            active={stats.active}
+            ready={stats.ready}
+            approvals={stats.approvals}
+            cost={stats.cost}
+            tokRate={stats.tokRate}
+          />
+        </>
+      )}
 
       {orchestratorProvider && orchestratorProvider !== 'claude' && (
         <div className="orch-non-claude-banner" data-testid="orch-non-claude-banner">

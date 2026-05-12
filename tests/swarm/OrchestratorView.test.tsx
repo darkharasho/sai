@@ -28,8 +28,11 @@ describe('OrchestratorView', () => {
     expect(screen.queryByTestId('orch-non-claude-banner')).not.toBeInTheDocument();
   });
 
-  it('renders the stat strip and activity ribbon', () => {
+  it('dashboard is collapsed by default and expands on toggle click', () => {
     render(<OrchestratorView orchestratorSessionId="o1" projectPath="/p" stats={stats} readyTasks={[]} onCommand={vi.fn()}/>);
+    expect(screen.queryByTestId('orch-stat-strip')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('orch-activity-ribbon')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('orch-dashboard-toggle'));
     expect(screen.getByTestId('orch-stat-strip')).toBeInTheDocument();
     expect(screen.getByTestId('orch-activity-ribbon')).toBeInTheDocument();
   });
