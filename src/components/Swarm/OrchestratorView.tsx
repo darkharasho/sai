@@ -3,8 +3,10 @@ import { Info, ChevronDown, ChevronUp } from 'lucide-react';
 import OrchestratorComposer from './OrchestratorComposer';
 import StatStrip from './StatStrip';
 import ActivityRibbon from './ActivityRibbon';
+import OrchestratorModelPicker from './OrchestratorModelPicker';
 import { type ReadyTaskRow } from './ReadyToLandTray';
 import { type RecentTaskRow } from './RecentActivity';
+import type { AIProvider } from '../../types';
 
 export type { ReadyTaskRow };
 export type { RecentTaskRow };
@@ -29,6 +31,7 @@ interface Props {
   onCommand: (cmd: { text: string; splitLines: boolean }) => void;
   orchestratorProvider?: string | null;
   orchestratorModel?: string | null;
+  onProviderModelChange?: (provider: AIProvider, model: string) => void;
   chatSlot?: React.ReactNode;       // App.tsx can pass an embedded ChatPanel here
 }
 
@@ -50,13 +53,16 @@ function formatRuntime(sec?: number): string | null {
 export default function OrchestratorView({
   projectPath, stats, onCommand,
   orchestratorProvider, orchestratorModel,
+  onProviderModelChange,
   chatSlot,
 }: Props) {
   const project = basename(projectPath) || 'project';
   const runtime = formatRuntime(stats.runtimeSec);
-  const providerLabel = orchestratorProvider
-    ? `${orchestratorProvider}${orchestratorModel ? ` ${orchestratorModel}` : ''}`
-    : null;
+  const pickerProvider: AIProvider =
+    orchestratorProvider === 'codex' || orchestratorProvider === 'gemini'
+      ? orchestratorProvider
+      : 'claude';
+  const pickerModel = orchestratorModel || (pickerProvider === 'claude' ? 'opus' : '');
   // Dashboard (stat strip + activity ribbon) hidden by default so the chat
   // takes the full viewport. The header keeps inline pill stats for at-a-glance
   // visibility; the toggle lets the user expand for the richer dashboard view.
@@ -92,7 +98,11 @@ export default function OrchestratorView({
               {runtime ?? ''}
             </span>
           )}
-          {providerLabel && <span style={{ opacity: 0.6 }}>{providerLabel} ▾</span>}
+          <OrchestratorModelPicker
+            provider={pickerProvider}
+            model={pickerModel}
+            onChange={(p, m) => { onProviderModelChange?.(p, m); }}
+          />
           <button
             type="button"
             onClick={() => setDashboardOpen(v => !v)}

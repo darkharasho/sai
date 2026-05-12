@@ -467,6 +467,10 @@ export default function App() {
   }, [swarmTasksByWs]);
 
   const swarmSchedulers = useRef<Map<string, SwarmScheduler>>(new Map());
+  // Bump to force OrchestratorView re-render after mutating swarmSettingsRef
+  // in place (e.g. when the orchestrator model picker writes a new selection).
+  const [swarmSettingsTick, setSwarmSettingsTick] = useState(0);
+  void swarmSettingsTick;
   const swarmSettingsRef = useRef<{
     concurrencyCap: number;
     defaultApprovalPolicy: ApprovalPolicy;
@@ -2926,6 +2930,36 @@ export default function App() {
                     projectPath={wsPath}
                     orchestratorProvider={orchProvider}
                     orchestratorModel={orchModel}
+                    onProviderModelChange={(nextProvider, nextModel) => {
+                      // Persist + update ref so downstream session re-spawns pick
+                      // up the new model. Provider is currently locked to claude
+                      // by the picker (codex/gemini are disabled), but we still
+                      // round-trip it for forward-compat.
+                      try { window.sai.settingsSet('swarm.orchestratorProvider', nextProvider); } catch { /* noop */ }
+                      try { window.sai.settingsSet('swarm.orchestratorModel', nextModel); } catch { /* noop */ }
+                      swarmSettingsRef.current.orchestratorProvider = nextProvider;
+                      swarmSettingsRef.current.orchestratorModel = nextModel;
+                      // Force a re-render so the new label shows immediately.
+                      setSwarmSettingsTick(t => t + 1);
+                      // Restart the orchestrator Claude scope so the new
+                      // --model flag takes effect on the next turn.
+                      try {
+                        (window.sai as any).claudeStop?.(wsPath, orchSessionId);
+                      } catch { /* noop */ }
+                      try {
+                        const wsName = wsPath.split(/[\\/]/).filter(Boolean).pop() || wsPath;
+                        const cfg = swarmSettingsRef.current;
+                        const ctx = {
+                          workspaceName: wsName,
+                          workspacePath: wsPath,
+                          defaultProvider: cfg.defaultTaskProvider ?? aiProvider ?? 'claude',
+                          defaultModel: nextModel,
+                          defaultApprovalPolicy: cfg.defaultApprovalPolicy ?? 'auto-read',
+                          concurrencyCap: cfg.concurrencyCap ?? 5,
+                        };
+                        (window.sai as any).claudeStart?.(wsPath, orchSessionId, 'orchestrator', ctx);
+                      } catch { /* noop */ }
+                    }}
                     stats={{
                       active: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'streaming').length,
                       approvals: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'awaiting_approval').length,
