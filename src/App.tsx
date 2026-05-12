@@ -31,8 +31,7 @@ import NewTaskPopover from './components/Swarm/NewTaskPopover';
 import SwarmTaskHeader from './components/Swarm/SwarmTaskHeader';
 import OrchestratorView, { type ReadyTaskRow } from './components/Swarm/OrchestratorView';
 import QuitSwarmConfirmModal from './components/Swarm/QuitSwarmConfirmModal';
-import { swarmInit, swarmGetTasks, swarmCreateTask, swarmUpdateTask, swarmGetApprovals, swarmResolveApproval } from './swarmDb';
-import { reconcileTasksOnStartup } from './lib/swarmReconcile';
+import { swarmInit, swarmGetApprovals, swarmResolveApproval } from './swarmDb';
 import { SwarmScheduler, isLikelyReadOnlyPrompt } from './lib/swarmScheduler';
 import { runSwarmTask } from './lib/swarmTaskRunner';
 import { landTask, discardTask } from './lib/swarmLanding';
@@ -254,22 +253,15 @@ export default function App() {
     return cleanup;
   }, []);
 
-  // Task 27: On app start, reconcile any swarm task left in `streaming` to
-  // `paused` (the model wasn't running across the relaunch). Runs once before
-  // per-workspace task hydration so the UI sees the demoted state.
+  // Initialize the swarm IndexedDB once. Tasks are now ephemeral session state
+  // (in `swarmTasksByWs`) and never persisted; the DB is still used for
+  // approvals records.
   useEffect(() => {
     (async () => {
       try {
         await swarmInit();
-        const sai = window.sai as any;
-        const wsList: any[] = (await sai?.workspaceGetAll?.()) ?? [];
-        for (const w of wsList) {
-          if (w?.projectPath) {
-            await reconcileTasksOnStartup(w.projectPath);
-          }
-        }
       } catch {
-        /* best-effort: ignore startup reconcile failures */
+        /* best-effort: ignore init failures */
       }
     })();
   }, []);
@@ -280,44 +272,12 @@ export default function App() {
     window.sai.workspaceSetActive(activeProjectPath);
   }, [activeProjectPath]);
 
+  // Reset the swarm sidebar selection to the Overview pin whenever the
+  // active workspace changes. Tasks themselves are ephemeral in-memory state
+  // (`swarmTasksByWs`); there's no longer a load/poll from swarmDb.
   useEffect(() => {
     if (!activeProjectPath) return;
-    let cancelled = false;
-    (async () => {
-      const tasks = await swarmGetTasks(activeProjectPath);
-      if (cancelled) return;
-      setSwarmTasksByWs(prev => {
-        const m = new Map(prev);
-        m.set(activeProjectPath, tasks);
-        return m;
-      });
-      setSwarmSelected('overview');
-    })();
-    return () => { cancelled = true; };
-  }, [activeProjectPath]);
-
-  // Task 13: Poll swarm tasks for the active workspace so out-of-band updates
-  // (scheduler state changes, approvals, etc.) reflect in the sidebar promptly.
-  useEffect(() => {
-    if (!activeProjectPath) return;
-    const id = window.setInterval(async () => {
-      try {
-        const tasks = await swarmGetTasks(activeProjectPath);
-        setSwarmTasksByWs(prev => {
-          const cur = prev.get(activeProjectPath);
-          if (cur && cur.length === tasks.length &&
-              cur.every((t, i) => t.id === tasks[i].id && t.status === tasks[i].status &&
-                                   t.toolCallCount === tasks[i].toolCallCount &&
-                                   t.worktreePath === tasks[i].worktreePath)) {
-            return prev;
-          }
-          const m = new Map(prev);
-          m.set(activeProjectPath, tasks);
-          return m;
-        });
-      } catch { /* ignore */ }
-    }, 1000);
-    return () => window.clearInterval(id);
+    setSwarmSelected('overview');
   }, [activeProjectPath]);
 
   // Refresh approvals whenever tasks change (status transitions to/from awaiting_approval)
@@ -402,7 +362,6 @@ export default function App() {
         cap: swarmSettingsRef.current.concurrencyCap,
         onStart: async (task) => {
           const now = Date.now();
-          await swarmUpdateTask(task.id, { status: 'streaming', lastActivityAt: now });
           setSwarmTasksByWs(prev => {
             const m = new Map(prev);
             const list = (m.get(task.workspaceId) ?? []).map(t =>
@@ -411,13 +370,19 @@ export default function App() {
             m.set(task.workspaceId, list);
             return m;
           });
+          const removeFromList = () => {
+            setSwarmTasksByWs(prev => {
+              const m = new Map(prev);
+              m.set(task.workspaceId, (m.get(task.workspaceId) ?? []).filter(t => t.id !== task.id));
+              return m;
+            });
+          };
           // Eager worktree materialization for likely-write tasks.
           let effectiveWorktreePath: string | null = task.worktreePath;
           if (!isLikelyReadOnlyPrompt(task.prompt) && !task.worktreePath) {
             try {
               const wt = await (window.sai as any).swarm.worktreeAdd(task.workspaceId, task.id, task.branch, task.baseBranch);
               effectiveWorktreePath = wt;
-              await swarmUpdateTask(task.id, { worktreePath: wt });
               setSwarmTasksByWs(prev => {
                 const m = new Map(prev);
                 const list = (m.get(task.workspaceId) ?? []).map(t =>
@@ -428,7 +393,7 @@ export default function App() {
               });
             } catch (err) {
               console.error('swarm: worktree materialization failed', err);
-              await swarmUpdateTask(task.id, { status: 'failed' });
+              removeFromList();
               return;
             }
           }
@@ -445,11 +410,11 @@ export default function App() {
             );
             if (!dispatched) {
               console.warn(`swarm: provider '${task.provider}' is not yet supported for task runner; marking failed`);
-              await swarmUpdateTask(task.id, { status: 'failed' });
+              removeFromList();
             }
           } catch (err) {
             console.error('swarm: provider runner failed to start', err);
-            await swarmUpdateTask(task.id, { status: 'failed' });
+            removeFromList();
           }
         },
       });
@@ -530,7 +495,6 @@ export default function App() {
       costEstimate: 0,
       toolCallCount: 0,
     };
-    await swarmCreateTask(task);
     setSwarmTasksByWs(prev => {
       const m = new Map(prev);
       m.set(activeProjectPath, [task, ...(m.get(activeProjectPath) ?? [])]);
@@ -544,6 +508,10 @@ export default function App() {
 
     const wsTasks = () => swarmTasksByWs.get(ws) ?? [];
 
+    // Tasks are ephemeral in-memory state; the helpers' updateTask dep
+    // (which used to persist to swarmDb) is now a no-op. Local list mutations
+    // happen in the call sites below so terminal tasks are removed from view.
+    const noopUpdateTask = async () => { /* tasks are ephemeral */ };
     const landDeps = {
       canFastForward: (cwd: string, src: string, tgt: string) =>
         (window.sai as any).swarm.canFastForward(cwd, src, tgt),
@@ -551,12 +519,12 @@ export default function App() {
         (window.sai as any).swarm.ffMerge(cwd, src),
       worktreeRemove: (cwd: string, wt: string, br: string) =>
         (window.sai as any).swarm.worktreeRemove(cwd, wt, br),
-      updateTask: swarmUpdateTask,
+      updateTask: noopUpdateTask,
     };
     const discardDeps = {
       worktreeRemove: (cwd: string, wt: string, br: string) =>
         (window.sai as any).swarm.worktreeRemove(cwd, wt, br),
-      updateTask: swarmUpdateTask,
+      updateTask: noopUpdateTask,
     };
 
     function byRef(ref: string) {
@@ -609,7 +577,6 @@ export default function App() {
       pause: async (ref) => {
         const t = byRef(ref);
         await stopProvider(t);
-        await swarmUpdateTask(t.id, { status: 'paused' });
         setSwarmTasksByWs(prev => {
           const m = new Map(prev);
           m.set(ws, (m.get(ws) ?? []).map(x => x.id === t.id ? { ...x, status: 'paused' as const } : x));
@@ -618,7 +585,6 @@ export default function App() {
       },
       resume: async (ref) => {
         const t = byRef(ref);
-        await swarmUpdateTask(t.id, { status: 'queued' });
         setSwarmTasksByWs(prev => {
           const m = new Map(prev);
           m.set(ws, (m.get(ws) ?? []).map(x => x.id === t.id ? { ...x, status: 'queued' as const } : x));
@@ -655,9 +621,11 @@ export default function App() {
         const t = byRef(ref);
         const r = await landTask(t, landDeps);
         if (r.ok) {
+          // Terminal state: drop the card from the sidebar. The underlying
+          // ChatSession remains in chat history.
           setSwarmTasksByWs(prev => {
             const m = new Map(prev);
-            m.set(ws, (m.get(ws) ?? []).map(x => x.id === t.id ? { ...x, status: 'landed' as const, worktreePath: null } : x));
+            m.set(ws, (m.get(ws) ?? []).filter(x => x.id !== t.id));
             return m;
           });
         }
@@ -666,9 +634,10 @@ export default function App() {
       discard: async (ref) => {
         const t = byRef(ref);
         await discardTask(t, discardDeps);
+        // Terminal state: drop the card from the sidebar.
         setSwarmTasksByWs(prev => {
           const m = new Map(prev);
-          m.set(ws, (m.get(ws) ?? []).map(x => x.id === t.id ? { ...x, status: 'discarded' as const, worktreePath: null } : x));
+          m.set(ws, (m.get(ws) ?? []).filter(x => x.id !== t.id));
           return m;
         });
       },
@@ -1330,19 +1299,14 @@ export default function App() {
             } catch {}
           }
           // Approval required: transition the task to awaiting_approval.
-          (async () => {
-            try {
-              await swarmUpdateTask(swarmTask.id, { status: 'awaiting_approval', lastActivityAt: Date.now() });
-              setSwarmTasksByWs(prev => {
-                const next = new Map(prev);
-                const list = (next.get(msg.projectPath) ?? []).map(t =>
-                  t.id === swarmTask.id ? { ...t, status: 'awaiting_approval' as const, lastActivityAt: Date.now() } : t
-                );
-                next.set(msg.projectPath, list);
-                return next;
-              });
-            } catch {}
-          })();
+          setSwarmTasksByWs(prev => {
+            const next = new Map(prev);
+            const list = (next.get(msg.projectPath) ?? []).map(t =>
+              t.id === swarmTask.id ? { ...t, status: 'awaiting_approval' as const, lastActivityAt: Date.now() } : t
+            );
+            next.set(msg.projectPath, list);
+            return next;
+          });
         }
         setApprovalWorkspaces(prev => {
           const next = new Map(prev);
@@ -1369,19 +1333,14 @@ export default function App() {
           ? (swarmTasksByWsRef.current.get(msg.projectPath) ?? []).find(t => t.sessionId === scope)
           : undefined;
         if (swarmTask && swarmTask.status === 'awaiting_approval') {
-          (async () => {
-            try {
-              await swarmUpdateTask(swarmTask.id, { status: 'streaming', lastActivityAt: Date.now() });
-              setSwarmTasksByWs(prev => {
-                const next = new Map(prev);
-                const list = (next.get(msg.projectPath) ?? []).map(t =>
-                  t.id === swarmTask.id ? { ...t, status: 'streaming' as const, lastActivityAt: Date.now() } : t
-                );
-                next.set(msg.projectPath, list);
-                return next;
-              });
-            } catch {}
-          })();
+          setSwarmTasksByWs(prev => {
+            const next = new Map(prev);
+            const list = (next.get(msg.projectPath) ?? []).map(t =>
+              t.id === swarmTask.id ? { ...t, status: 'streaming' as const, lastActivityAt: Date.now() } : t
+            );
+            next.set(msg.projectPath, list);
+            return next;
+          });
         }
         setApprovalWorkspaces(prev => {
           if (!prev.has(msg.projectPath)) return prev;
@@ -2122,7 +2081,6 @@ export default function App() {
                     task={focusedSwarmTask}
                     onPause={() => {
                       const id = focusedSwarmTask.id;
-                      swarmUpdateTask(id, { status: 'paused' });
                       setSwarmTasksByWs(prev => {
                         const m = new Map(prev);
                         const list = (m.get(activeProjectPath) ?? []).map(t =>
@@ -2139,18 +2097,16 @@ export default function App() {
                         canFastForward: (cwd, s, t) => (window as any).sai.swarm.canFastForward(cwd, s, t),
                         ffMerge: (cwd, s) => (window as any).sai.swarm.ffMerge(cwd, s),
                         worktreeRemove: (cwd, wt, br) => (window as any).sai.swarm.worktreeRemove(cwd, wt, br),
-                        updateTask: (id, patch) => swarmUpdateTask(id, patch),
+                        updateTask: async () => { /* tasks are ephemeral */ },
                       });
                       if (!r.ok && r.reason === 'rebase-needed') {
                         window.alert('Cannot fast-forward: rebase needed before landing.');
                         return;
                       }
+                      // Terminal state: drop the card from the sidebar.
                       setSwarmTasksByWs(prev => {
                         const m = new Map(prev);
-                        const list = (m.get(task.workspaceId) ?? []).map(t =>
-                          t.id === task.id ? { ...t, status: 'landed' as const, worktreePath: null } : t
-                        );
-                        m.set(task.workspaceId, list);
+                        m.set(task.workspaceId, (m.get(task.workspaceId) ?? []).filter(t => t.id !== task.id));
                         return m;
                       });
                     }}
@@ -2159,21 +2115,18 @@ export default function App() {
                       const task = focusedSwarmTask;
                       await discardTask(task, {
                         worktreeRemove: (cwd, wt, br) => (window as any).sai.swarm.worktreeRemove(cwd, wt, br),
-                        updateTask: (id, patch) => swarmUpdateTask(id, patch),
+                        updateTask: async () => { /* tasks are ephemeral */ },
                       });
+                      // Terminal state: drop the card from the sidebar.
                       setSwarmTasksByWs(prev => {
                         const m = new Map(prev);
-                        const list = (m.get(task.workspaceId) ?? []).map(t =>
-                          t.id === task.id ? { ...t, status: 'discarded' as const, worktreePath: null } : t
-                        );
-                        m.set(task.workspaceId, list);
+                        m.set(task.workspaceId, (m.get(task.workspaceId) ?? []).filter(t => t.id !== task.id));
                         return m;
                       });
                     }}
                     onOpenDiff={() => { /* TODO(Task 12) */ }}
                     onResume={() => {
                       const id = focusedSwarmTask.id;
-                      swarmUpdateTask(id, { status: 'queued' });
                       setSwarmTasksByWs(prev => {
                         const m = new Map(prev);
                         const list = (m.get(activeProjectPath) ?? []).map(t =>
@@ -2520,21 +2473,14 @@ export default function App() {
                     const activeSess = ws.activeSession;
                     if (activeSess?.kind === 'task' && activeSess.swarmTaskId) {
                       const taskId = activeSess.swarmTaskId;
-                      void (async () => {
-                        try {
-                          await swarmUpdateTask(taskId, { status: 'done', lastActivityAt: Date.now() });
-                          setSwarmTasksByWs(prev => {
-                            const m = new Map(prev);
-                            const list = (m.get(wsPath) ?? []).map(t =>
-                              t.id === taskId ? { ...t, status: 'done' as const, lastActivityAt: Date.now() } : t
-                            );
-                            m.set(wsPath, list);
-                            return m;
-                          });
-                        } catch (err) {
-                          console.error('swarm: onTurnComplete mirror failed', err);
-                        }
-                      })();
+                      setSwarmTasksByWs(prev => {
+                        const m = new Map(prev);
+                        const list = (m.get(wsPath) ?? []).map(t =>
+                          t.id === taskId ? { ...t, status: 'done' as const, lastActivityAt: Date.now() } : t
+                        );
+                        m.set(wsPath, list);
+                        return m;
+                      });
                     }
                   }}
                 />
@@ -2827,9 +2773,6 @@ export default function App() {
           onConfirm={async () => {
             const tasksToPause = quitConfirmTasks;
             setQuitConfirmTasks(null);
-            try {
-              await Promise.all(tasksToPause.map(t => swarmUpdateTask(t.id, { status: 'paused' })));
-            } catch { /* ignore */ }
             // Update local state to reflect the pause across all workspaces.
             setSwarmTasksByWs(prev => {
               const idSet = new Set(tasksToPause.map(t => t.id));
