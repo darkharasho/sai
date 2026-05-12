@@ -264,6 +264,45 @@ function createWindow() {
       emitSyntheticToolResult(pending, String(error ?? 'error'), true);
       pending.reject(new Error(error));
     });
+
+    // Renderer-driven synthetic card emission. Used for user-initiated actions
+    // (Land / Discard clicks) that bypass the MCP onToolCall path but should
+    // still appear inline in the orchestrator chat as activity cards.
+    ipcMain.handle('swarm:emit-card', (_evt, args: { workspace: string; kind: string; input: unknown }) => {
+      if (!args || typeof args.workspace !== 'string' || typeof args.kind !== 'string') return null;
+      const orchSessionId = swarmOrchestratorSessions.get(args.workspace);
+      if (!orchSessionId) return null;
+      const toolUseId = `mcp-tooluse-${crypto.randomUUID()}`;
+      safeSendMcp('claude:message', {
+        type: 'assistant',
+        projectPath: args.workspace,
+        scope: orchSessionId,
+        message: {
+          content: [
+            { type: 'tool_use', id: toolUseId, name: `mcp__swarm__${args.kind}`, input: args.input ?? {} },
+          ],
+        },
+      });
+      return { id: toolUseId };
+    });
+
+    ipcMain.on('swarm:emit-card-result', (_evt, args: { workspace: string; id: string; result: unknown; isError?: boolean }) => {
+      if (!args || typeof args.workspace !== 'string' || typeof args.id !== 'string') return;
+      const orchSessionId = swarmOrchestratorSessions.get(args.workspace);
+      if (!orchSessionId) return;
+      let serialized: string;
+      try { serialized = typeof args.result === 'string' ? args.result : JSON.stringify(args.result); } catch { serialized = String(args.result); }
+      safeSendMcp('claude:message', {
+        type: 'user',
+        projectPath: args.workspace,
+        scope: orchSessionId,
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: args.id, content: serialized, is_error: !!args.isError },
+          ],
+        },
+      });
+    });
   } catch (err) {
     console.error('[swarm-mcp] failed to start host:', err);
   }

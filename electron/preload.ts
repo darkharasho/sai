@@ -224,6 +224,10 @@ contextBridge.exposeInMainWorld('sai', {
   respondSwarmToolError: (id: string, error: string) => ipcRenderer.send('swarm:tool-response-error', id, error),
   swarmSetOrchestratorSession: (workspace: string, sessionId: string) =>
     ipcRenderer.invoke('swarm:set-orchestrator-session', workspace, sessionId),
+  swarmEmitCard: (workspace: string, kind: string, input: any) =>
+    ipcRenderer.invoke('swarm:emit-card', { workspace, kind, input }),
+  swarmEmitCardResult: (workspace: string, id: string, result: any, isError?: boolean) =>
+    ipcRenderer.send('swarm:emit-card-result', { workspace, id, result, isError }),
   swarm: {
     worktreeAdd: (projectPath: string, taskId: string, branch: string, baseBranch: string) =>
       ipcRenderer.invoke('swarm:worktree-add', projectPath, taskId, branch, baseBranch),

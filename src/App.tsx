@@ -664,6 +664,73 @@ export default function App() {
   const swarmHostRef = useRef(swarmHost);
   useEffect(() => { swarmHostRef.current = swarmHost; }, [swarmHost]);
 
+  // Inline-card emission for user-initiated swarm actions. Orchestrator-driven
+  // tool calls (via MCP) already get synthetic cards from main; these wrappers
+  // mirror that behavior for direct UI actions so the orchestrator chat reads
+  // as a unified live activity feed.
+  const landWithCard = useCallback(async (taskRef: string) => {
+    const ws = activeProjectPath ?? '';
+    const tasks = swarmTasksByWs.get(ws) ?? [];
+    const t = tasks.find(x => x.id === taskRef);
+    const sai = (window.sai as any) ?? {};
+    let cardId: string | undefined;
+    try {
+      const r = await sai.swarmEmitCard?.(ws, 'land', {
+        taskRef,
+        title: t?.title,
+        branch: t?.branch,
+      });
+      cardId = r?.id;
+    } catch { /* noop */ }
+    try {
+      const result = await swarmHost.land(taskRef);
+      if (cardId) {
+        try {
+          sai.swarmEmitCardResult?.(ws, cardId, {
+            ok: result.ok !== false,
+            reason: (result as any).reason,
+            branch: t?.branch,
+            additions: swarmDiffStats.get(taskRef)?.additions ?? 0,
+            deletions: swarmDiffStats.get(taskRef)?.deletions ?? 0,
+          }, result.ok === false);
+        } catch { /* noop */ }
+      }
+      return result;
+    } catch (err) {
+      if (cardId) {
+        try { sai.swarmEmitCardResult?.(ws, cardId, { ok: false, reason: String(err) }, true); } catch { /* noop */ }
+      }
+      throw err;
+    }
+  }, [activeProjectPath, swarmTasksByWs, swarmHost, swarmDiffStats]);
+
+  const discardWithCard = useCallback(async (taskRef: string) => {
+    const ws = activeProjectPath ?? '';
+    const tasks = swarmTasksByWs.get(ws) ?? [];
+    const t = tasks.find(x => x.id === taskRef);
+    const sai = (window.sai as any) ?? {};
+    let cardId: string | undefined;
+    try {
+      const r = await sai.swarmEmitCard?.(ws, 'discard', {
+        taskRef,
+        title: t?.title,
+        branch: t?.branch,
+      });
+      cardId = r?.id;
+    } catch { /* noop */ }
+    try {
+      await swarmHost.discard(taskRef);
+      if (cardId) {
+        try { sai.swarmEmitCardResult?.(ws, cardId, { ok: true, branch: t?.branch }, false); } catch { /* noop */ }
+      }
+    } catch (err) {
+      if (cardId) {
+        try { sai.swarmEmitCardResult?.(ws, cardId, { ok: false, reason: String(err) }, true); } catch { /* noop */ }
+      }
+      throw err;
+    }
+  }, [activeProjectPath, swarmTasksByWs, swarmHost]);
+
   // Bridge tool calls from the orchestrator MCP socket (main process) into
   // dispatchSwarmTool here in the renderer, then return the result over IPC.
   //
@@ -2284,12 +2351,33 @@ export default function App() {
                     onLand={async () => {
                       if (!focusedSwarmTask) return;
                       const task = focusedSwarmTask;
+                      const sai = (window.sai as any) ?? {};
+                      let cardId: string | undefined;
+                      try {
+                        const r0 = await sai.swarmEmitCard?.(task.workspaceId, 'land', {
+                          taskRef: task.id,
+                          title: task.title,
+                          branch: task.branch,
+                        });
+                        cardId = r0?.id;
+                      } catch { /* noop */ }
                       const r = await landTask(task, {
                         canFastForward: (cwd, s, t) => (window as any).sai.swarm.canFastForward(cwd, s, t),
                         ffMerge: (cwd, s) => (window as any).sai.swarm.ffMerge(cwd, s),
                         worktreeRemove: (cwd, wt, br) => (window as any).sai.swarm.worktreeRemove(cwd, wt, br),
                         updateTask: async () => { /* tasks are ephemeral */ },
                       });
+                      if (cardId) {
+                        try {
+                          sai.swarmEmitCardResult?.(task.workspaceId, cardId, {
+                            ok: r.ok !== false,
+                            reason: (r as any).reason,
+                            branch: task.branch,
+                            additions: swarmDiffStats.get(task.id)?.additions ?? 0,
+                            deletions: swarmDiffStats.get(task.id)?.deletions ?? 0,
+                          }, r.ok === false);
+                        } catch { /* noop */ }
+                      }
                       if (!r.ok && r.reason === 'rebase-needed') {
                         window.alert('Cannot fast-forward: rebase needed before landing.');
                         return;
@@ -2304,10 +2392,30 @@ export default function App() {
                     onDiscard={async () => {
                       if (!focusedSwarmTask) return;
                       const task = focusedSwarmTask;
-                      await discardTask(task, {
-                        worktreeRemove: (cwd, wt, br) => (window as any).sai.swarm.worktreeRemove(cwd, wt, br),
-                        updateTask: async () => { /* tasks are ephemeral */ },
-                      });
+                      const sai = (window.sai as any) ?? {};
+                      let cardId: string | undefined;
+                      try {
+                        const r0 = await sai.swarmEmitCard?.(task.workspaceId, 'discard', {
+                          taskRef: task.id,
+                          title: task.title,
+                          branch: task.branch,
+                        });
+                        cardId = r0?.id;
+                      } catch { /* noop */ }
+                      try {
+                        await discardTask(task, {
+                          worktreeRemove: (cwd, wt, br) => (window as any).sai.swarm.worktreeRemove(cwd, wt, br),
+                          updateTask: async () => { /* tasks are ephemeral */ },
+                        });
+                        if (cardId) {
+                          try { sai.swarmEmitCardResult?.(task.workspaceId, cardId, { ok: true, branch: task.branch }, false); } catch { /* noop */ }
+                        }
+                      } catch (err) {
+                        if (cardId) {
+                          try { sai.swarmEmitCardResult?.(task.workspaceId, cardId, { ok: false, reason: String(err) }, true); } catch { /* noop */ }
+                        }
+                        throw err;
+                      }
                       // Terminal state: drop the card from the sidebar.
                       setSwarmTasksByWs(prev => {
                         const m = new Map(prev);
@@ -2539,12 +2647,12 @@ export default function App() {
                         deletions: swarmDiffStats.get(t.id)?.deletions ?? 0,
                       }));
                     })()}
-                    onLand={(id) => swarmHost.land(id)}
-                    onDiscard={(id) => swarmHost.discard(id)}
+                    onLand={(id) => landWithCard(id)}
+                    onDiscard={(id) => discardWithCard(id)}
                     onDiff={(id) => { setSwarmSelected(id); }}
                     onLandAll={async () => {
                       const done = (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'done');
-                      for (const task of done) await swarmHost.land(task.id);
+                      for (const task of done) await landWithCard(task.id);
                     }}
                     onCommand={({ text, splitLines }) => {
                       const trimmed = text.trim();
@@ -2909,7 +3017,7 @@ export default function App() {
                 selectedId={swarmSelected}
                 onSelect={setSwarmSelected}
                 onNewTask={() => setShowNewTaskPopover(true)}
-                onDiscard={(task) => swarmHost.discard(task.id)}
+                onDiscard={(task) => discardWithCard(task.id)}
                 streamingTaskIds={(() => {
                   // streamingScopes is keyed by `${projectPath}:${scope}` where
                   // scope = sessionId for swarm tasks. Map back to taskId so
