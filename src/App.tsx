@@ -708,6 +708,8 @@ export default function App() {
       worktreeRemove: (cwd: string, wt: string, br: string) =>
         (window.sai as any).swarm.worktreeRemove(cwd, wt, br),
       updateTask: noopUpdateTask,
+      rebase: (worktreePath: string, baseBranch: string) =>
+        (window.sai as any).gitRebase(worktreePath, baseBranch),
     };
     const discardDeps = {
       worktreeRemove: (cwd: string, wt: string, br: string) =>
@@ -2863,6 +2865,22 @@ export default function App() {
                             }
                           }}
                           onFocusTask={(id) => setSwarmSelected(id)}
+                          onRebaseRetry={async (taskRef) => {
+                            const t = (swarmTasksByWs.get(wsPath) ?? []).find(x => x.id === taskRef);
+                            if (!t || !t.worktreePath) {
+                              console.warn('swarm: rebase-retry skipped, task or worktree missing', taskRef);
+                              return;
+                            }
+                            try {
+                              await (window.sai as any).gitRebase?.(t.worktreePath, t.baseBranch);
+                            } catch (err) {
+                              console.error('swarm: rebase failed', err);
+                              window.alert(`Rebase failed: ${err instanceof Error ? err.message : String(err)}`);
+                              return;
+                            }
+                            try { await landWithCard(taskRef); }
+                            catch (err) { console.error('swarm: post-rebase land failed', err); }
+                          }}
                           onLand={(id) => { void landWithCard(id); }}
                           onDiscard={(id) => { void discardWithCard(id); }}
                           onDiff={(id) => setSwarmSelected(id)}
