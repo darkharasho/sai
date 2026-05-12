@@ -1659,7 +1659,7 @@ export default function App() {
         onSwitchToWorkspace={handleProjectSwitch}
       />
       <div className="app-body">
-        <NavBar activeSidebar={sidebarOpen} onToggle={toggleSidebar} gitChangeCount={gitChangeCount} />
+        <NavBar activeSidebar={sidebarOpen} onToggle={toggleSidebar} gitChangeCount={gitChangeCount} swarmApprovalCount={0} />
         <AnimatePresence initial={false}>
           {sidebarOpen === 'files' && (
             <motion.div
