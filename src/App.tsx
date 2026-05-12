@@ -30,6 +30,7 @@ import SwarmSidebar from './components/Swarm/SwarmSidebar';
 import NewTaskPopover from './components/Swarm/NewTaskPopover';
 import SwarmTaskHeader from './components/Swarm/SwarmTaskHeader';
 import OrchestratorView from './components/Swarm/OrchestratorView';
+import SwarmLogoCluster from './components/Swarm/SwarmLogoCluster';
 import SwarmToolCardSelector from './components/Swarm/cards/SwarmToolCardSelector';
 import InlineApprovalCard from './components/Swarm/cards/InlineApprovalCard';
 import QuitSwarmConfirmModal from './components/Swarm/QuitSwarmConfirmModal';
@@ -2588,6 +2589,7 @@ export default function App() {
                       terminalTabs={ws.terminalTabs ?? []}
                       claudeScope={orchSessionId}
                       claudeKind="orchestrator"
+                      emptyStateVisual={<SwarmLogoCluster />}
                       claudeOrchestratorContext={(() => {
                         const wsName = wsPath.split(/[\\/]/).filter(Boolean).pop() || wsPath;
                         const cfg = swarmSettingsRef.current;

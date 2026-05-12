@@ -349,6 +349,12 @@ interface ChatPanelProps {
    * inline approval cards in place of synthetic system messages.
    */
   renderMessage?: (message: ChatMessageType) => React.ReactNode | null;
+  /**
+   * Optional: replace the default SAI-logo empty state with custom content.
+   * Used by the orchestrator chat to render a swarm-of-logos cluster instead
+   * of the single solo logo.
+   */
+  emptyStateVisual?: React.ReactNode;
 }
 
 const EMPTY_PROMPTS = [
@@ -554,7 +560,7 @@ const FAKE_ERROR_VARIANTS = {
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, renderToolCall, renderMessage }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, renderToolCall, renderMessage, emptyStateVisual }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(initialMessages || []);
   const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);
   const setMessages = useCallback((updater: ChatMessageType[] | ((prev: ChatMessageType[]) => ChatMessageType[])) => {
@@ -1473,9 +1479,13 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         <LayoutGroup id="sai-brand">
           {messages.length === 0 ? (
             <div className="chat-empty">
-              <motion.div layoutId="sai-brand-logo" layout="position" transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}>
-                <SaiLogo mode="idle" size={64} className="chat-empty-logo" ariaLabel="SAI" />
-              </motion.div>
+              {emptyStateVisual ? (
+                emptyStateVisual
+              ) : (
+                <motion.div layoutId="sai-brand-logo" layout="position" transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}>
+                  <SaiLogo mode="idle" size={64} className="chat-empty-logo" ariaLabel="SAI" />
+                </motion.div>
+              )}
               <motion.div layoutId="sai-brand-title" layout="position" transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }} className="chat-empty-title">SAI</motion.div>
               <AnimatePresence>
                 <motion.div
