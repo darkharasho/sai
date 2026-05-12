@@ -28,7 +28,10 @@ import PluginsSidebar from './components/Plugins/PluginsSidebar';
 import McpSidebar from './components/MCP/McpSidebar';
 import SwarmSidebar from './components/Swarm/SwarmSidebar';
 import NewTaskPopover from './components/Swarm/NewTaskPopover';
-import { swarmGetTasks, swarmCreateTask } from './swarmDb';
+import { swarmGetTasks, swarmCreateTask, swarmUpdateTask } from './swarmDb';
+import { SwarmScheduler } from './lib/swarmScheduler';
+
+const SWARM_DEFAULT_CAP = 3;
 import { swarmBranchName } from './lib/swarmSlug';
 import { isImageFile } from './utils/imageFiles';
 import { getMonacoEditorFor } from './utils/monacoEditorRegistry';
@@ -213,6 +216,33 @@ export default function App() {
     })();
     return () => { cancelled = true; };
   }, [activeProjectPath]);
+
+  const swarmSchedulers = useRef<Map<string, SwarmScheduler>>(new Map());
+
+  useEffect(() => {
+    if (!activeProjectPath) return;
+    let s = swarmSchedulers.current.get(activeProjectPath);
+    if (!s) {
+      s = new SwarmScheduler({
+        cap: SWARM_DEFAULT_CAP,
+        onStart: async (task) => {
+          const now = Date.now();
+          await swarmUpdateTask(task.id, { status: 'streaming', lastActivityAt: now });
+          setSwarmTasksByWs(prev => {
+            const m = new Map(prev);
+            const list = (m.get(task.workspaceId) ?? []).map(t =>
+              t.id === task.id ? { ...t, status: 'streaming' as const, lastActivityAt: now } : t
+            );
+            m.set(task.workspaceId, list);
+            return m;
+          });
+          // TODO(Task 13): kick off provider runner for task.sessionId in task.workspaceId or worktreePath.
+        },
+      });
+      swarmSchedulers.current.set(activeProjectPath, s);
+    }
+    s.setTasks(swarmTasksByWs.get(activeProjectPath) ?? []);
+  }, [activeProjectPath, swarmTasksByWs]);
 
   async function spawnSwarmTask(input: { prompt: string; provider: AIProvider; model: string; approvalPolicy: ApprovalPolicy }) {
     if (!activeProjectPath) return;
