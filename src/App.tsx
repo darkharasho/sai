@@ -2480,7 +2480,11 @@ export default function App() {
                   activeFilePath={ws.activeFilePath}
                   onFileOpen={handleFileOpen}
                   isActive={wsPath === activeProjectPath}
-                  isStreaming={chatStreamingWorkspaces.has(wsPath)}
+                  isStreaming={
+                    ws.activeSession.kind === 'task'
+                      ? streamingScopes.has(`${wsPath}:${ws.activeSession.id}`)
+                      : chatStreamingWorkspaces.has(wsPath)
+                  }
                   initialDraft={chatDraftsRef.current.get(wsPath) || ''}
                   onDraftChange={(draft: string) => handleDraftChange(wsPath, draft)}
                   initialContextItems={(chatContextItemsRef.current.get(wsPath) as any) || []}
