@@ -6,10 +6,11 @@ import type { SwarmTask, ApprovalPolicy } from '../types';
  */
 export interface SwarmRunnerDeps {
   claudeStart: (
-    cwd: string,
+    projectPath: string,
     scope?: string,
     kind?: string,
     orchestratorContext?: unknown,
+    scopeCwd?: string,
   ) => Promise<unknown>;
   claudeSend: (
     projectPath: string,
@@ -57,9 +58,14 @@ export async function runSwarmTask(task: SwarmTask, deps: SwarmRunnerDeps): Prom
     // Codex/Gemini parity is deferred; see investigation in PR description.
     return false;
   }
-  const cwd = cwdForTask(task);
+  // Workspace key (projectPath in emitted events) stays the original workspace
+  // root so ChatPanel + listeners can find the task. The scope's working dir
+  // is pinned to the worktree (when materialized) via scopeCwd so Claude reads
+  // and writes inside the isolated worktree.
+  const projectPath = task.workspaceId;
+  const scopeCwd = cwdForTask(task);
   const permMode = permModeForPolicy(task.approvalPolicy);
-  await deps.claudeStart(cwd, task.sessionId, 'task');
-  deps.claudeSend(cwd, task.prompt, undefined, permMode, undefined, task.model, task.sessionId);
+  await deps.claudeStart(projectPath, task.sessionId, 'task', undefined, scopeCwd);
+  deps.claudeSend(projectPath, task.prompt, undefined, permMode, undefined, task.model, task.sessionId);
   return true;
 }

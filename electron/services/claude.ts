@@ -516,15 +516,19 @@ export function registerClaudeHandlers(win: BrowserWindow) {
   // Sends cached slash commands immediately so they're available before the process init.
   ipcMain.handle('claude:start', (
     _event,
-    cwd: string,
+    projectPath: string,
     scope?: string,
     kind?: 'chat' | 'task' | 'orchestrator',
     orchestratorContext?: Partial<OrchestratorPromptContext> | null,
+    scopeCwd?: string,
   ) => {
-    if (!cwd) return;
-    const ws = getOrCreate(cwd);
+    if (!projectPath) return;
+    const ws = getOrCreate(projectPath);
     const claude = getClaude(ws, scope || 'chat', kind);
-    claude.cwd = cwd;
+    // scopeCwd lets a swarm task pin its scope to its worktree dir while keeping
+    // the workspace key (and therefore msg.projectPath in emitted events) as the
+    // original project root — so ChatPanel + listeners match on projectPath.
+    claude.cwd = scopeCwd || projectPath;
     if (kind === 'orchestrator' && orchestratorContext) {
       claude.orchestratorContext = orchestratorContext as Record<string, unknown>;
     }

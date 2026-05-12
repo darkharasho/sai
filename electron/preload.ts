@@ -17,8 +17,8 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.on('terminal:data', listener);
     return () => ipcRenderer.removeListener('terminal:data', listener);
   },
-  claudeStart: (cwd: string, scope?: string, kind?: string, orchestratorContext?: any) =>
-    ipcRenderer.invoke('claude:start', cwd, scope, kind, orchestratorContext),
+  claudeStart: (cwd: string, scope?: string, kind?: string, orchestratorContext?: any, scopeCwd?: string) =>
+    ipcRenderer.invoke('claude:start', cwd, scope, kind, orchestratorContext, scopeCwd),
   claudeSend: (projectPath: string, message: string, imagePaths?: string[], permMode?: string, effort?: string, model?: string, scope?: string) => ipcRenderer.send('claude:send', projectPath, message, imagePaths, permMode, effort, model, scope),
   claudeGenerateCommitMessage: (cwd: string, aiProvider?: string) => ipcRenderer.invoke('claude:generateCommitMessage', cwd, aiProvider),
   claudeGenerateTitle: (cwd: string, userMessage: string, aiProvider?: string) => ipcRenderer.invoke('claude:generateTitle', cwd, userMessage, aiProvider),

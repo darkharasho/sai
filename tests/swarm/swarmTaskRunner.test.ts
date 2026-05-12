@@ -53,17 +53,18 @@ describe('cwdForTask', () => {
 });
 
 describe('runSwarmTask', () => {
-  it('starts claude in the worktree path with the task scope and kind=task', async () => {
+  it('starts claude with workspace key + scopeCwd=worktree so events route to the right workspace', async () => {
     const task = makeTask({ worktreePath: '/tmp/wt' });
     const deps = makeDeps();
 
     const dispatched = await runSwarmTask(task, deps);
 
     expect(dispatched).toBe(true);
-    expect(deps.claudeStart).toHaveBeenCalledWith('/tmp/wt', 'session-1', 'task');
+    // workspace key stays the project root; the scope's cwd is the worktree.
+    expect(deps.claudeStart).toHaveBeenCalledWith('/tmp/project', 'session-1', 'task', undefined, '/tmp/wt');
     expect(deps.claudeSend).toHaveBeenCalledTimes(1);
     expect(deps.claudeSend).toHaveBeenCalledWith(
-      '/tmp/wt',
+      '/tmp/project',
       'create hello.txt with hi',
       undefined,
       'default',
@@ -73,13 +74,13 @@ describe('runSwarmTask', () => {
     );
   });
 
-  it('falls back to workspaceId when no worktree is materialized', async () => {
+  it('falls back to workspaceId for scopeCwd when no worktree is materialized', async () => {
     const task = makeTask({ worktreePath: null });
     const deps = makeDeps();
 
     await runSwarmTask(task, deps);
 
-    expect(deps.claudeStart).toHaveBeenCalledWith('/tmp/project', 'session-1', 'task');
+    expect(deps.claudeStart).toHaveBeenCalledWith('/tmp/project', 'session-1', 'task', undefined, '/tmp/project');
     expect(deps.claudeSend.mock.calls[0][0]).toBe('/tmp/project');
   });
 
