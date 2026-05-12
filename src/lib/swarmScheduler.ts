@@ -1,5 +1,32 @@
 import type { SwarmTask } from '../types';
 
+export const WRITE_TOOLS = new Set(['edit_file', 'write_file', 'apply_patch', 'str_replace', 'create_file', 'bash']);
+export function isWriteTool(name: string): boolean {
+  return WRITE_TOOLS.has(name);
+}
+
+const READ_ONLY_PROMPT_RE = /^(explain|what|why|how|describe|read|show)\b/i;
+export function isLikelyReadOnlyPrompt(prompt: string): boolean {
+  return READ_ONLY_PROMPT_RE.test(prompt.trim());
+}
+
+export interface MaterializeDeps {
+  worktreeAdd: (workspaceId: string, taskId: string, branch: string, baseBranch: string) => Promise<string>;
+  updateTask: (id: string, patch: Partial<SwarmTask>) => Promise<void>;
+}
+
+export async function materializeIfNeeded(
+  task: SwarmTask,
+  toolName: string,
+  deps: MaterializeDeps
+): Promise<string | null> {
+  if (task.worktreePath) return task.worktreePath;
+  if (!isWriteTool(toolName)) return null;
+  const wt = await deps.worktreeAdd(task.workspaceId, task.id, task.branch, task.baseBranch);
+  await deps.updateTask(task.id, { worktreePath: wt });
+  return wt;
+}
+
 export interface SchedulerOptions {
   cap: number;
   onStart: (task: SwarmTask) => void;

@@ -29,7 +29,7 @@ import McpSidebar from './components/MCP/McpSidebar';
 import SwarmSidebar from './components/Swarm/SwarmSidebar';
 import NewTaskPopover from './components/Swarm/NewTaskPopover';
 import { swarmGetTasks, swarmCreateTask, swarmUpdateTask } from './swarmDb';
-import { SwarmScheduler } from './lib/swarmScheduler';
+import { SwarmScheduler, isLikelyReadOnlyPrompt } from './lib/swarmScheduler';
 
 const SWARM_DEFAULT_CAP = 3;
 import { swarmBranchName } from './lib/swarmSlug';
@@ -236,6 +236,24 @@ export default function App() {
             m.set(task.workspaceId, list);
             return m;
           });
+          // Eager worktree materialization for likely-write tasks.
+          if (!isLikelyReadOnlyPrompt(task.prompt) && !task.worktreePath) {
+            try {
+              const wt = await (window.sai as any).swarm.worktreeAdd(task.workspaceId, task.id, task.branch, task.baseBranch);
+              await swarmUpdateTask(task.id, { worktreePath: wt });
+              setSwarmTasksByWs(prev => {
+                const m = new Map(prev);
+                const list = (m.get(task.workspaceId) ?? []).map(t =>
+                  t.id === task.id ? { ...t, worktreePath: wt } : t
+                );
+                m.set(task.workspaceId, list);
+                return m;
+              });
+            } catch (err) {
+              console.error('swarm: worktree materialization failed', err);
+              await swarmUpdateTask(task.id, { status: 'failed' });
+            }
+          }
           // TODO(Task 13): kick off provider runner for task.sessionId in task.workspaceId or worktreePath.
         },
       });
