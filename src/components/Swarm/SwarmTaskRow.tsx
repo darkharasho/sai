@@ -10,6 +10,12 @@ interface Props {
   selected: boolean;
   onClick: () => void;
   onDiscard?: () => void;
+  /**
+   * True when the task is mid-turn (live stream events flowing). Drives the
+   * pulsing dot so users can see which tasks are actively thinking right
+   * now, distinct from the coarser `status === 'streaming'` state.
+   */
+  isStreaming?: boolean;
 }
 
 const STATUS_COLOR: Record<SwarmTaskStatus, string> = {
@@ -26,15 +32,22 @@ const STATUS_ICON: Record<SwarmTaskStatus, string> = {
 export default function SwarmTaskRow(p: Props) {
   return (
     <div
-      className={`swarm-row ${p.selected ? 'selected' : ''}`}
+      className={`swarm-row ${p.selected ? 'selected' : ''} ${p.isStreaming ? 'streaming-live' : ''}`}
       onClick={p.onClick}
+      data-streaming={p.isStreaming ? 'true' : undefined}
       style={{ borderLeft: `3px solid ${STATUS_COLOR[p.status]}` }}
     >
       <div className="row-main">
         <div className="row-title">{p.title}</div>
         <div className="row-sub">{p.status} · {p.toolCallCount} tools</div>
       </div>
-      <span className="row-icon" style={{ color: STATUS_COLOR[p.status] }}>{STATUS_ICON[p.status]}</span>
+      <span
+        className={`row-icon ${p.isStreaming ? 'pulsing' : ''}`}
+        style={{ color: STATUS_COLOR[p.status] }}
+        aria-label={p.isStreaming ? 'thinking' : undefined}
+      >
+        {STATUS_ICON[p.status]}
+      </span>
       {p.onDiscard && (
         <button
           className="row-discard"
@@ -44,6 +57,15 @@ export default function SwarmTaskRow(p: Props) {
           <Trash2 size={12} />
         </button>
       )}
+      <style>{`
+        .swarm-row .row-icon.pulsing {
+          animation: swarm-row-pulse 1.5s ease-in-out infinite;
+        }
+        @keyframes swarm-row-pulse {
+          0%, 100% { opacity: 0.3; }
+          50% { opacity: 1; }
+        }
+      `}</style>
     </div>
   );
 }

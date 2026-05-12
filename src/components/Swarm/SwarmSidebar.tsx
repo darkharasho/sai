@@ -8,9 +8,15 @@ interface Props {
   onSelect: (id: 'overview' | string) => void;
   onNewTask: () => void;
   onDiscard?: (task: SwarmTask) => void;
+  /**
+   * Set of task ids currently mid-turn (live streaming events flowing).
+   * Used to render a per-row pulsing indicator independent of the coarser
+   * `task.status === 'streaming'` flag.
+   */
+  streamingTaskIds?: Set<string>;
 }
 
-export default function SwarmSidebar({ tasks, selectedId, onSelect, onNewTask, onDiscard }: Props) {
+export default function SwarmSidebar({ tasks, selectedId, onSelect, onNewTask, onDiscard, streamingTaskIds }: Props) {
   const activeCount = tasks.filter(t => t.status === 'streaming').length;
   const apprCount = tasks.filter(t => t.status === 'awaiting_approval').length;
   const readyCount = tasks.filter(t => t.status === 'done').length;
@@ -39,6 +45,7 @@ export default function SwarmSidebar({ tasks, selectedId, onSelect, onNewTask, o
             selected={selectedId === t.id}
             onClick={() => onSelect(t.id)}
             onDiscard={onDiscard ? () => onDiscard(t) : undefined}
+            isStreaming={streamingTaskIds?.has(t.id) ?? false}
           />
         ))}
       </div>

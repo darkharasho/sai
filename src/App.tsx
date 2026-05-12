@@ -463,14 +463,23 @@ export default function App() {
     }
 
     const now = Date.now();
+    // Synthesize a user message so the task chat panel shows what's being
+    // worked on the moment the user clicks the task row — without this the
+    // panel renders empty until Claude streams its first reply (~10s).
+    const userMsg: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: input.prompt,
+      timestamp: now,
+    };
     await dbSaveSession(activeProjectPath, {
       id: sessionId,
       title,
-      messages: [],
+      messages: [userMsg],
       aiProvider: input.provider,
       projectPath: activeProjectPath,
       pinned: false,
-      messageCount: 0,
+      messageCount: 1,
       kind: 'task',
       swarmTaskId: id,
       createdAt: now,
@@ -2713,6 +2722,17 @@ export default function App() {
                 onSelect={setSwarmSelected}
                 onNewTask={() => setShowNewTaskPopover(true)}
                 onDiscard={(task) => swarmHost.discard(task.id)}
+                streamingTaskIds={(() => {
+                  // streamingScopes is keyed by `${projectPath}:${scope}` where
+                  // scope = sessionId for swarm tasks. Map back to taskId so
+                  // the row indicator pulses live, independent of `task.status`.
+                  const ids = new Set<string>();
+                  const tasks = swarmTasksByWs.get(activeProjectPath) ?? [];
+                  for (const t of tasks) {
+                    if (streamingScopes.has(`${activeProjectPath}:${t.sessionId}`)) ids.add(t.id);
+                  }
+                  return ids;
+                })()}
               />
             </motion.div>
           )}

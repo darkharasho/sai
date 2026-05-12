@@ -59,4 +59,42 @@ describe('SwarmSidebar', () => {
     );
     expect(screen.queryByLabelText('Discard refactor auth')).toBeNull();
   });
+
+  it('marks rows whose id is in streamingTaskIds with the pulsing indicator', () => {
+    const { container } = render(
+      <SwarmSidebar
+        tasks={tasks as any}
+        selectedId="overview"
+        onSelect={() => {}}
+        onNewTask={() => {}}
+        streamingTaskIds={new Set(['t1'])}
+      />
+    );
+    const liveRows = container.querySelectorAll('.swarm-row[data-streaming="true"]');
+    expect(liveRows.length).toBe(1);
+    expect(container.querySelectorAll('.swarm-row .row-icon.pulsing').length).toBe(1);
+  });
+
+  it('renders no pulsing indicator when streamingTaskIds is empty / omitted', () => {
+    const { container, rerender } = render(
+      <SwarmSidebar
+        tasks={tasks as any}
+        selectedId="overview"
+        onSelect={() => {}}
+        onNewTask={() => {}}
+        streamingTaskIds={new Set()}
+      />
+    );
+    expect(container.querySelectorAll('.swarm-row[data-streaming="true"]').length).toBe(0);
+    expect(container.querySelectorAll('.swarm-row .row-icon.pulsing').length).toBe(0);
+    rerender(
+      <SwarmSidebar
+        tasks={tasks as any}
+        selectedId="overview"
+        onSelect={() => {}}
+        onNewTask={() => {}}
+      />
+    );
+    expect(container.querySelectorAll('.swarm-row[data-streaming="true"]').length).toBe(0);
+  });
 });
