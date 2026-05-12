@@ -34,6 +34,7 @@ import QuitSwarmConfirmModal from './components/Swarm/QuitSwarmConfirmModal';
 import { swarmInit, swarmGetTasks, swarmCreateTask, swarmUpdateTask, swarmGetApprovals, swarmResolveApproval } from './swarmDb';
 import { reconcileTasksOnStartup } from './lib/swarmReconcile';
 import { SwarmScheduler, isLikelyReadOnlyPrompt } from './lib/swarmScheduler';
+import { runSwarmTask } from './lib/swarmTaskRunner';
 import { landTask, discardTask } from './lib/swarmLanding';
 import { ensureOrchestratorSession } from './lib/swarmOrchestratorSession';
 import { handleSwarmToolRequest, type SwarmHost } from './lib/swarmOrchestratorDispatcher';
@@ -411,9 +412,11 @@ export default function App() {
             return m;
           });
           // Eager worktree materialization for likely-write tasks.
+          let effectiveWorktreePath: string | null = task.worktreePath;
           if (!isLikelyReadOnlyPrompt(task.prompt) && !task.worktreePath) {
             try {
               const wt = await (window.sai as any).swarm.worktreeAdd(task.workspaceId, task.id, task.branch, task.baseBranch);
+              effectiveWorktreePath = wt;
               await swarmUpdateTask(task.id, { worktreePath: wt });
               setSwarmTasksByWs(prev => {
                 const m = new Map(prev);
@@ -426,9 +429,28 @@ export default function App() {
             } catch (err) {
               console.error('swarm: worktree materialization failed', err);
               await swarmUpdateTask(task.id, { status: 'failed' });
+              return;
             }
           }
-          // TODO(Task 13): kick off provider runner for task.sessionId in task.workspaceId or worktreePath.
+          // Kick off the provider runner for the task's session.
+          // Today only Claude is supported (codex/gemini IPC don't yet thread scope/kind through start).
+          try {
+            const sai = window.sai as any;
+            const dispatched = await runSwarmTask(
+              { ...task, worktreePath: effectiveWorktreePath },
+              {
+                claudeStart: sai.claudeStart,
+                claudeSend: sai.claudeSend,
+              },
+            );
+            if (!dispatched) {
+              console.warn(`swarm: provider '${task.provider}' is not yet supported for task runner; marking failed`);
+              await swarmUpdateTask(task.id, { status: 'failed' });
+            }
+          } catch (err) {
+            console.error('swarm: provider runner failed to start', err);
+            await swarmUpdateTask(task.id, { status: 'failed' });
+          }
         },
       });
       swarmSchedulers.current.set(activeProjectPath, s);
