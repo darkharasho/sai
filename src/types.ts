@@ -143,6 +143,32 @@ export interface WorkspaceContext {
   lastActivity: number;
 }
 
+export type MetaWorkspaceProjectStatus = 'ok' | 'unavailable';
+
+export interface MetaWorkspaceProject {
+  path: string;            // absolute path on the originating device
+  linkName: string;        // basename used inside the synthetic root
+  description?: string;    // one-line hint fed to the AI system prompt
+}
+
+export interface MetaWorkspace {
+  id: string;                          // stable UUID, also used as ~/.sai/meta/<id>
+  name: string;                        // display name
+  projects: MetaWorkspaceProject[];
+  createdAt: number;
+  lastActivity: number;
+}
+
+export interface MetaWorkspaceRuntimeProject extends MetaWorkspaceProject {
+  status: MetaWorkspaceProjectStatus;  // derived per-device on activation
+}
+
+export interface MetaWorkspaceRuntime {
+  meta: MetaWorkspace;
+  syntheticRoot: string;               // ~/.sai/meta/<id>/, derived per-device
+  projects: MetaWorkspaceRuntimeProject[];
+}
+
 export interface Plugin {
   name: string;
   description: string;
