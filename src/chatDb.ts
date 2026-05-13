@@ -1,7 +1,7 @@
 import type { ChatSession, ChatMessage } from './types';
 
 const DB_NAME = 'sai-chat';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -11,8 +11,9 @@ function openDb(): Promise<IDBDatabase> {
   dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
+      const transaction = request.transaction!;
       if (!db.objectStoreNames.contains('sessions')) {
         const sessions = db.createObjectStore('sessions', { keyPath: 'id' });
         sessions.createIndex('projectPath', 'projectPath', { unique: false });
@@ -20,6 +21,16 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains('messages')) {
         db.createObjectStore('messages', { keyPath: 'sessionId' });
+      }
+      // Add `kind` and `swarmTaskId` indexes to sessions store when upgrading to v2
+      if (event.oldVersion < 2) {
+        const sessions = transaction.objectStore('sessions');
+        if (!sessions.indexNames.contains('kind')) {
+          sessions.createIndex('kind', 'kind', { unique: false });
+        }
+        if (!sessions.indexNames.contains('swarmTaskId')) {
+          sessions.createIndex('swarmTaskId', 'swarmTaskId', { unique: false });
+        }
       }
     };
 

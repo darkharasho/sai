@@ -115,6 +115,73 @@ function resolveHunks(content: string, resolution: 'ours' | 'theirs' | 'both'): 
   return result.join(eol);
 }
 
+export async function gitWorktreeAdd(repoCwd: string, worktreePath: string, branch: string, baseBranch: string) {
+  await fs.promises.mkdir(path.dirname(worktreePath), { recursive: true });
+  // create branch off baseBranch and check it out in the new worktree
+  await git(repoCwd).raw(['worktree', 'add', '-b', branch, worktreePath, baseBranch]);
+}
+
+export async function gitWorktreeRemove(repoCwd: string, worktreePath: string) {
+  await git(repoCwd).raw(['worktree', 'remove', '--force', worktreePath]);
+}
+
+export async function gitDeleteBranch(repoCwd: string, branch: string) {
+  await git(repoCwd).raw(['branch', '-D', branch]).catch(() => {});
+}
+
+export async function gitCanFastForward(repoCwd: string, sourceBranch: string, targetBranch: string): Promise<boolean> {
+  // target is ancestor of source => FF possible
+  return await git(repoCwd).raw(['merge-base', '--is-ancestor', targetBranch, sourceBranch]).then(() => true).catch(() => false);
+}
+
+/**
+ * Result type for fast-forward merges. Returns ok:false (rather than throwing)
+ * for the diverging-branches case so the IPC handler doesn't log it as an
+ * error — that's an expected outcome the renderer recovers from by rebasing
+ * and retrying. Other git errors still throw.
+ */
+export type FastForwardResult = { ok: true } | { ok: false; reason: 'diverged'; detail: string };
+
+export async function gitFastForwardMerge(repoCwd: string, sourceBranch: string): Promise<FastForwardResult> {
+  try {
+    await git(repoCwd).raw(['merge', '--ff-only', sourceBranch]);
+    return { ok: true };
+  } catch (err: any) {
+    const msg = err?.message ?? String(err);
+    if (/diverging branches|Not possible to fast-forward|fast-forward/i.test(msg)) {
+      return { ok: false, reason: 'diverged', detail: msg };
+    }
+    throw err;
+  }
+}
+
+export async function gitBranchDiff(
+  cwd: string,
+  baseBranch: string,
+  branch: string
+): Promise<string> {
+  // `git diff baseBranch..branch` returns the full unified diff between
+  // baseBranch and branch. Returns empty string on failure.
+  return await git(cwd).raw(['diff', `${baseBranch}..${branch}`]).catch(() => '');
+}
+
+export async function gitDiffShortstat(
+  cwd: string,
+  baseBranch: string,
+  branch: string
+): Promise<{ additions: number; deletions: number; files: number }> {
+  // `git diff --shortstat baseBranch..branch` returns e.g. " 3 files changed, 18 insertions(+), 7 deletions(-)"
+  const out = await git(cwd).raw(['diff', '--shortstat', `${baseBranch}..${branch}`]).catch(() => '');
+  const files = /(\d+)\s+files?\s+changed/.exec(out)?.[1];
+  const adds = /(\d+)\s+insertions?\(\+\)/.exec(out)?.[1];
+  const dels = /(\d+)\s+deletions?\(-\)/.exec(out)?.[1];
+  return {
+    files: files ? parseInt(files, 10) : 0,
+    additions: adds ? parseInt(adds, 10) : 0,
+    deletions: dels ? parseInt(dels, 10) : 0,
+  };
+}
+
 export function registerGitHandlers() {
   ipcMain.handle('git:status', async (_event, cwd: string) => {
     const status = await git(cwd).status();

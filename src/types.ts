@@ -15,7 +15,31 @@ export interface ChatMessage {
     details?: string;
     errorType?: string;
   };
+  /**
+   * Optional metadata for non-standard rendering (e.g. inline swarm approval
+   * cards injected into the orchestrator chat). Generic chat panels ignore
+   * this field; the orchestrator's renderToolCall / renderMessage hooks use
+   * it to render purpose-built cards instead of plain text.
+   */
+  meta?: ChatMessageMeta;
 }
+
+export type ChatMessageMeta = ApprovalChatMeta;
+
+export interface ApprovalChatMeta {
+  type: 'approval';
+  approvalId: string;
+  taskId: string;
+  taskTitle: string;
+  toolName: string;
+  command?: string;
+  branch?: string;
+  createdAt: number;
+  /** Set when the approval has been resolved; collapses the card. */
+  resolved?: 'approved' | 'denied';
+}
+
+export type AIProvider = 'claude' | 'codex' | 'gemini';
 
 export interface ChatSession {
   id: string;
@@ -23,7 +47,7 @@ export interface ChatSession {
   messages: ChatMessage[];
   createdAt: number;
   updatedAt: number;
-  aiProvider?: 'claude' | 'codex' | 'gemini';
+  aiProvider?: AIProvider;
   claudeSessionId?: string;
   codexSessionId?: string;
   geminiSessionId?: string;
@@ -31,6 +55,8 @@ export interface ChatSession {
   titleEdited?: boolean;
   messageCount: number;
   projectPath?: string;
+  kind?: SessionKind;        // default 'chat'
+  swarmTaskId?: string;      // populated for task / orchestrator sessions
 }
 
 export interface ToolCall {
@@ -224,6 +250,14 @@ declare global {
     geminiSetSessionId?: (projectPath: string, sessionId: string | undefined, scope?: string) => void;
     searchRun?: SaiSearchApi['searchRun'];
     searchReplaceFile?: SaiSearchApi['searchReplaceFile'];
+    swarm?: {
+      worktreeAdd: (projectPath: string, taskId: string, branch: string, baseBranch: string) => Promise<string>;
+      worktreeRemove: (projectPath: string, worktreePath: string, branch: string) => Promise<void>;
+      canFastForward: (projectPath: string, source: string, target: string) => Promise<boolean>;
+      ffMerge: (projectPath: string, source: string) => Promise<void>;
+      diffStats: (cwd: string, baseBranch: string, branch: string) => Promise<{ additions: number; deletions: number; files: number }>;
+      branchDiff: (cwd: string, baseBranch: string, branch: string) => Promise<string>;
+    };
   }
 
   interface Window {
@@ -259,4 +293,49 @@ export interface SearchResults {
   files: FileMatches[];
   truncated: boolean;
   durationMs: number;
+}
+
+export type SessionKind = 'chat' | 'task' | 'orchestrator';
+
+export type SwarmTaskStatus =
+  | 'queued'
+  | 'streaming'
+  | 'awaiting_approval'
+  | 'paused'
+  | 'done'
+  | 'failed'
+  | 'landed'
+  | 'discarded';
+
+export type ApprovalPolicy = 'auto' | 'auto-read' | 'always-ask';
+
+export interface SwarmTask {
+  id: string;
+  workspaceId: string;        // = projectPath
+  sessionId: string;          // FK to ChatSession.id
+  title: string;
+  prompt: string;
+  provider: AIProvider;
+  model: string;
+  approvalPolicy: ApprovalPolicy;
+  status: SwarmTaskStatus;
+  branch: string;
+  baseBranch: string;         // branch HEAD when task was spawned
+  worktreePath: string | null;
+  createdAt: number;
+  lastActivityAt: number;
+  costEstimate: number;
+  toolCallCount: number;
+}
+
+export interface SwarmApproval {
+  id: string;
+  taskId: string;
+  workspaceId: string;
+  toolName: string;
+  toolUseId: string;
+  command?: string;
+  description?: string;
+  input?: unknown;
+  createdAt: number;
 }

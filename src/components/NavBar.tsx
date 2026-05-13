@@ -1,14 +1,16 @@
-import { FolderClosed, GitBranch, Clock, Puzzle, Server, Search } from 'lucide-react';
+import { FolderClosed, GitBranch, Clock, Puzzle, Server, Search, Zap } from 'lucide-react';
 import { DOT_MASK_URL } from '../lib/assets';
 
 interface NavBarProps {
   activeSidebar: string | null;
   onToggle: (id: string) => void;
   gitChangeCount?: number;
+  swarmApprovalCount?: number;
 }
 
-export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0 }: NavBarProps) {
+export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, swarmApprovalCount = 0 }: NavBarProps) {
   const badgeLabel = gitChangeCount > 100 ? '99+' : `${gitChangeCount}`;
+  const swarmBadgeLabel = swarmApprovalCount > 100 ? '99+' : `${swarmApprovalCount}`;
 
   return (
     <div className="navbar">
@@ -44,6 +46,16 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0 }: 
       >
         <Clock size={18} />
         <span className="nav-label">Chats</span>
+      </button>
+      <button
+        className={`nav-btn ${activeSidebar === 'swarm' ? 'active' : ''}`}
+        onClick={() => onToggle('swarm')}
+        title="Swarm"
+        aria-label="Swarm"
+      >
+        <Zap size={18} />
+        <span className="nav-label">Swarm</span>
+        {swarmApprovalCount > 0 && <span className="nav-badge">{swarmBadgeLabel}</span>}
       </button>
       <div className="nav-divider" />
       <button
@@ -143,6 +155,24 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0 }: 
           -webkit-mask: url("${DOT_MASK_URL}") center / 100% 100% no-repeat;
           mask: url("${DOT_MASK_URL}") center / 100% 100% no-repeat;
           z-index: -1;
+        }
+        .nav-badge {
+          position: absolute;
+          top: 2px;
+          right: 0px;
+          background: var(--accent);
+          color: #000;
+          font-size: 10px;
+          font-weight: 700;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
+          min-width: 16px;
+          height: 16px;
+          padding: 0 4px;
+          border-radius: 8px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          animation: badge-pop var(--dur-base) var(--ease-out-soft);
         }
         @keyframes badge-pop {
           from { transform: scale(0.6); opacity: 0; }

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import NavBar from './components/NavBar';
 import ChatPanel from './components/Chat/ChatPanel';
 import TerminalPanel from './components/Terminal/TerminalPanel';
@@ -19,13 +19,38 @@ import { basename } from './utils/pathUtils';
 import { createSession, generateSmartTitle } from './sessions';
 import { computeUnmountFlushes } from './workspaceFlush';
 import { dbGetSessions, dbGetMessages, dbGetMessagesTail, dbSaveSession, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
-import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval } from './types';
+import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval } from './types';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, setActiveHighlightTheme, type HighlightThemeId } from './themes';
 import ApprovalBanner from './components/ApprovalBanner';
 import { MessageSquare, TerminalSquare, Code2, ChevronRight, MessageCirclePlus } from 'lucide-react';
 import ChatHistorySidebar from './components/Chat/ChatHistorySidebar';
 import PluginsSidebar from './components/Plugins/PluginsSidebar';
 import McpSidebar from './components/MCP/McpSidebar';
+import SwarmSidebar from './components/Swarm/SwarmSidebar';
+import NewTaskPopover from './components/Swarm/NewTaskPopover';
+import SwarmTaskHeader from './components/Swarm/SwarmTaskHeader';
+import SwarmDiffModal from './components/Swarm/SwarmDiffModal';
+import OrchestratorView from './components/Swarm/OrchestratorView';
+import SwarmLogoCluster from './components/Swarm/SwarmLogoCluster';
+import SwarmToolCardSelector from './components/Swarm/cards/SwarmToolCardSelector';
+import { bucketToolCalls, trimEvents, pushRing, type TimedEvent } from './lib/swarmActivityHistory';
+import InlineApprovalCard from './components/Swarm/cards/InlineApprovalCard';
+import QuitSwarmConfirmModal from './components/Swarm/QuitSwarmConfirmModal';
+import { swarmInit, swarmGetApprovals, swarmResolveApproval, swarmCreateApproval } from './swarmDb';
+import { SwarmScheduler, isLikelyReadOnlyPrompt } from './lib/swarmScheduler';
+import { runSwarmTask } from './lib/swarmTaskRunner';
+import { landTask, discardTask } from './lib/swarmLanding';
+import { ensureOrchestratorSession } from './lib/swarmOrchestratorSession';
+import { handleSwarmToolRequest, type SwarmHost } from './lib/swarmOrchestratorDispatcher';
+import { executeSlashCommand } from './lib/orchestratorSlashCommands';
+import { isOrchestratorToolDrift, describeToolDrift } from './lib/orchestratorToolDrift';
+import { resolveTaskRef } from './lib/swarmRef';
+
+const SWARM_DEFAULT_CAP = 5;
+import { swarmBranchName } from './lib/swarmSlug';
+import { shouldRequireApproval } from './lib/swarmApprovalPolicy';
+import { deriveSwarmMirror, applySwarmPatch } from './lib/swarmStatusMirror';
+import { convertAssistantEnvelope, appendAssistantChunk, mergePersistedWithBuffer } from './lib/swarmTaskMessageBuffer';
 import { isImageFile } from './utils/imageFiles';
 import { getMonacoEditorFor } from './utils/monacoEditorRegistry';
 import * as monaco from 'monaco-editor';
@@ -136,10 +161,27 @@ export default function App() {
   const [geminiConversationMode, setGeminiConversationMode] = useState<GeminiConversationMode>('planning');
   const [geminiLoadingPhrases, setGeminiLoadingPhrases] = useState<'witty' | 'tips' | 'all' | 'off'>('all');
   const [workspaces, setWorkspaces] = useState<Map<string, WorkspaceContext>>(new Map());
+  const [swarmTasksByWs, setSwarmTasksByWs] = useState<Map<string, SwarmTask[]>>(new Map());
+  const [swarmApprovalsByWs, setSwarmApprovalsByWs] = useState<Map<string, SwarmApproval[]>>(new Map());
+  const [swarmSelected, setSwarmSelected] = useState<'overview' | string>('overview');
+  const [swarmDiffStats, setSwarmDiffStats] = useState<Map<string, { additions: number; deletions: number }>>(new Map());
+  const [orchestratorSessionIdByWs, setOrchestratorSessionIdByWs] = useState<Map<string, string>>(new Map());
+  const [showNewTaskPopover, setShowNewTaskPopover] = useState(false);
   const [messageQueues, setMessageQueues] = useState<Map<string, QueuedMessage[]>>(new Map());
   const [pendingClose, setPendingClose] = useState<string | null>(null);
   // Ref to hold latest messages per workspace without triggering re-renders during streaming
   const wsMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
+  // Latest orchestrator-session messages, keyed by orchestrator session id, so
+  // the regular wsMessagesRef (keyed by wsPath) doesn't get clobbered by the
+  // orchestrator ChatPanel's onMessagesChange.
+  const orchMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
+  // Mounted-mirror of orchMessagesRef so React re-renders trigger a fresh
+  // initialMessages prop when ChatPanel remounts (e.g. user navigates from
+  // overview → focused task → back). Without this, ChatPanel mounts with
+  // initialMessages=[] because ws.sessions stores messageless rows.
+  const [orchMessagesByWs, setOrchMessagesByWs] = useState<Map<string, ChatMessage[]>>(new Map());
+  // Pending debounced save timer per orchestrator session id.
+  const orchSaveTimerRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   // Absolute index in the full session of messages[0] for the workspace's
   // currently-loaded message window. 0 means the full session is loaded.
   // Saves use this so paginated tails don't clobber older DB messages.
@@ -151,6 +193,10 @@ export default function App() {
   // also counts terminal-scope activity. Lifted out of ChatPanel so the panel's
   // streaming indicator survives remounts (e.g. session/key swaps).
   const [chatStreamingWorkspaces, setChatStreamingWorkspaces] = useState<Set<string>>(new Set());
+  // Tracks streaming state per (workspace, scope) so non-chat scopes (e.g. the
+  // orchestrator's own session id) can drive the ChatPanel thinking animation.
+  // Keys are `${projectPath}:${scope}` — scope defaults to 'chat'.
+  const [streamingScopes, setStreamingScopes] = useState<Set<string>>(new Set());
   // Unsent draft text and attached context per workspace, persisted across
   // workspace switches and session-key remounts so partial messages survive
   // navigation.
@@ -173,9 +219,52 @@ export default function App() {
   const [toast, setToast] = useState<{ message: string; key: number; tone?: 'success' | 'error' } | null>(null);
   const { isOpen: whatsNewOpen, version: whatsNewVersion, releases, fetchStatus, openWhatsNew, closeWhatsNew } = useWhatsNew();
   const [showNewProject, setShowNewProject] = useState(false);
+  const [quitConfirmTasks, setQuitConfirmTasks] = useState<{ id: string; title: string }[] | null>(null);
+  const [swarmDiffModal, setSwarmDiffModal] = useState<
+    | { title: string; branch: string; baseBranch: string; diff: string; loading: boolean; error?: string }
+    | null
+  >(null);
   const slashCommandsRef = useRef<string[]>([]);
   const workspacesRef = useRef(workspaces);
   const activeProjectPathRef = useRef(activeProjectPath);
+  const swarmTasksByWsRef = useRef(swarmTasksByWs);
+  const swarmDiffStatsRef = useRef(swarmDiffStats);
+  // Dedupe synthetic completion/failure card emissions. claude.ts emits both
+  // 'result' and 'done' at end of turn — both hit the status mirror before
+  // the ref re-syncs, so without this guard the same task fires task_completed
+  // twice (visible as duplicate inline cards).
+  const emittedLifecycleRef = useRef<Set<string>>(new Set());
+  // Per-workspace activity ring buffers powering the orchestrator sparklines.
+  // - tools: timed tool_use events (filtered per task for SpawnTaskCard)
+  // - activeBuckets: 12-element ring of `streaming+queued+awaiting_approval`
+  //   counts sampled every 5s for the StatStrip ACTIVE background sparkline.
+  const activityHistoryRef = useRef<Map<string, { tools: TimedEvent[]; activeBuckets: number[] }>>(new Map());
+  // Bumped whenever we want consumers (StatStrip / SpawnTaskCard sparklines)
+  // to pick up the freshest snapshot of activityHistoryRef.
+  const [activityTick, setActivityTick] = useState(0);
+  // Per-workspace batch detection state for end-of-batch wrap-up cards.
+  // - activeCount: previous tick's active count (>0 means an active window is open)
+  // - startedAt: timestamp when the active window opened
+  // - startCount: total tasks observed in this active window
+  // - completionEvents: per-task completion timestamps (for the bar-chart sparkline)
+  // - knownTaskIds: ids we've already counted toward startCount
+  // - landedAtStart / failedAtStart / discardedAtStart: snapshots so we report
+  //   only deltas accumulated within this batch window.
+  const batchStateRef = useRef<Map<string, {
+    activeCount: number;
+    startedAt: number;
+    startCount: number;
+    completionEvents: number[];
+    knownTaskIds: Set<string>;
+    landedAtStart: number;
+    failedAtStart: number;
+    discardedAtStart: number;
+    countersAtStart: { landed: number; failed: number; discarded: number };
+  }>>(new Map());
+  const orchestratorSessionIdByWsRef = useRef(orchestratorSessionIdByWs);
+  // Tracks the last swarm task we routed the active session to, to avoid
+  // re-firing the session-switch effect on every state update.
+  const lastSwarmRoutedRef = useRef<string | null>(null);
 
   // Update taskbar badge count when notifications are pending
   useEffect(() => {
@@ -185,11 +274,693 @@ export default function App() {
   }, [notificationCounts]);
 
   useEffect(() => { workspacesRef.current = workspaces; }, [workspaces]);
+  useEffect(() => { swarmTasksByWsRef.current = swarmTasksByWs; }, [swarmTasksByWs]);
+  useEffect(() => { swarmDiffStatsRef.current = swarmDiffStats; }, [swarmDiffStats]);
+  useEffect(() => { orchestratorSessionIdByWsRef.current = orchestratorSessionIdByWs; }, [orchestratorSessionIdByWs]);
+
+  // Task 26: Quit confirmation when swarm tasks are still streaming.
+  useEffect(() => {
+    const sai = window.sai as any;
+    if (!sai?.onRequestQuit) return;
+    const cleanup = sai.onRequestQuit(() => {
+      const streaming: { id: string; title: string }[] = [];
+      for (const tasks of swarmTasksByWsRef.current.values()) {
+        for (const t of tasks) {
+          if (t.status === 'streaming') streaming.push({ id: t.id, title: t.title });
+        }
+      }
+      if (streaming.length === 0) {
+        sai.confirmQuit?.();
+        return;
+      }
+      setQuitConfirmTasks(streaming);
+    });
+    return cleanup;
+  }, []);
+
+  // Initialize the swarm IndexedDB once. Tasks are now ephemeral session state
+  // (in `swarmTasksByWs`) and never persisted; the DB is still used for
+  // approvals records.
+  useEffect(() => {
+    (async () => {
+      try {
+        await swarmInit();
+      } catch {
+        /* best-effort: ignore init failures */
+      }
+    })();
+  }, []);
+
   useEffect(() => {
     activeProjectPathRef.current = activeProjectPath;
     setActiveWorkspace(activeProjectPath);
     window.sai.workspaceSetActive(activeProjectPath);
   }, [activeProjectPath]);
+
+  // Reset the swarm sidebar selection to the Overview pin whenever the
+  // active workspace changes. Tasks themselves are ephemeral in-memory state
+  // (`swarmTasksByWs`); there's no longer a load/poll from swarmDb.
+  useEffect(() => {
+    if (!activeProjectPath) return;
+    setSwarmSelected('overview');
+  }, [activeProjectPath]);
+
+  // Refresh approvals whenever tasks change (status transitions to/from awaiting_approval)
+  // or when the active workspace changes.
+  useEffect(() => {
+    if (!activeProjectPath) return;
+    let cancelled = false;
+    swarmGetApprovals(activeProjectPath).then(approvals => {
+      if (cancelled) return;
+      setSwarmApprovalsByWs(prev => {
+        const m = new Map(prev);
+        m.set(activeProjectPath, approvals);
+        return m;
+      });
+    }).catch(() => { /* ignore */ });
+    return () => { cancelled = true; };
+  }, [activeProjectPath, swarmTasksByWs]);
+
+  // Poll active task counts every 5s into a 12-element ring buffer per
+  // workspace so the StatStrip ACTIVE card can render a 60s background
+  // sparkline. The poller drives both an "is active now" sample and a
+  // re-render bump for sparkline consumers.
+  useEffect(() => {
+    const tick = () => {
+      let changed = false;
+      for (const [ws, tasks] of swarmTasksByWsRef.current.entries()) {
+        const active = tasks.filter(t =>
+          t.status === 'streaming' || t.status === 'queued' || t.status === 'awaiting_approval'
+        ).length;
+        const entry = activityHistoryRef.current.get(ws) ?? { tools: [], activeBuckets: [] };
+        entry.activeBuckets = pushRing(entry.activeBuckets, active, 12);
+        activityHistoryRef.current.set(ws, entry);
+        changed = true;
+      }
+      if (changed) setActivityTick(t => t + 1);
+    };
+    const id = setInterval(tick, 5000);
+    return () => clearInterval(id);
+  }, []);
+
+  // End-of-batch wrap-up card detection. We watch swarmTasksByWs and, per
+  // workspace, treat the period during which active count (streaming+queued
+  // +awaiting_approval) > 0 as a "batch window". When the window closes
+  // (active returns to 0) AND the batch had >= 2 tasks total, emit a
+  // synthetic batch_complete card summarizing landed/discarded/failed +
+  // a completion-bucket bar chart.
+  useEffect(() => {
+    const now = Date.now();
+    for (const [ws, tasks] of swarmTasksByWs.entries()) {
+      const active = tasks.filter(t =>
+        t.status === 'streaming' || t.status === 'queued' || t.status === 'awaiting_approval'
+      ).length;
+      const landed = tasks.filter(t => t.status === 'landed').length;
+      const failed = tasks.filter(t => t.status === 'failed').length;
+      const discarded = tasks.filter(t => t.status === 'discarded').length;
+      const state = batchStateRef.current.get(ws);
+      if (!state) {
+        batchStateRef.current.set(ws, {
+          activeCount: active,
+          startedAt: active > 0 ? now : 0,
+          startCount: active,
+          completionEvents: [],
+          knownTaskIds: new Set(tasks.filter(t =>
+            t.status === 'streaming' || t.status === 'queued' || t.status === 'awaiting_approval'
+          ).map(t => t.id)),
+          landedAtStart: landed,
+          failedAtStart: failed,
+          discardedAtStart: discarded,
+          countersAtStart: { landed, failed, discarded },
+        });
+        continue;
+      }
+      // Window opens: 0 → 1+
+      if (state.activeCount === 0 && active > 0) {
+        state.startedAt = now;
+        state.startCount = active;
+        state.completionEvents = [];
+        state.knownTaskIds = new Set(tasks.filter(t =>
+          t.status === 'streaming' || t.status === 'queued' || t.status === 'awaiting_approval'
+        ).map(t => t.id));
+        state.countersAtStart = { landed, failed, discarded };
+      } else if (active > 0) {
+        // Window open: discover any newly added active tasks
+        for (const t of tasks) {
+          if ((t.status === 'streaming' || t.status === 'queued' || t.status === 'awaiting_approval')
+              && !state.knownTaskIds.has(t.id)) {
+            state.knownTaskIds.add(t.id);
+            state.startCount += 1;
+          }
+        }
+        // Track completion timestamps for the bar chart sparkline
+        for (const t of tasks) {
+          if ((t.status === 'done' || t.status === 'landed' || t.status === 'failed' || t.status === 'discarded')
+              && state.knownTaskIds.has(t.id)) {
+            // Use lastActivityAt as a proxy for completion time. Dedup by
+            // pushing only once per task — track via knownTaskIds removal.
+            // We piggy-back on the task lifecycle + a separate completed set.
+          }
+        }
+      }
+      // Window closes: > 0 → 0
+      if (state.activeCount > 0 && active === 0) {
+        const totalTasks = state.startCount;
+        if (totalTasks >= 2) {
+          const batchLanded = Math.max(0, landed - state.countersAtStart.landed);
+          const batchFailed = Math.max(0, failed - state.countersAtStart.failed);
+          const batchDiscarded = Math.max(0, discarded - state.countersAtStart.discarded);
+          // Build completion buckets from per-task lastActivityAt within window
+          const completionTimes: number[] = [];
+          for (const t of tasks) {
+            if (state.knownTaskIds.has(t.id)
+                && (t.status === 'done' || t.status === 'landed' || t.status === 'failed' || t.status === 'discarded')) {
+              completionTimes.push(t.lastActivityAt);
+            }
+          }
+          const durationMs = Math.max(0, now - state.startedAt);
+          const bucketMs = Math.max(1000, Math.ceil(durationMs / 12));
+          const buckets = bucketToolCalls(
+            completionTimes.map(ts => ({ ts })),
+            now,
+            12,
+            bucketMs,
+          );
+          const input = {
+            totalTasks,
+            landed: batchLanded,
+            discarded: batchDiscarded,
+            failed: batchFailed,
+            durationMs,
+            completionBuckets: buckets,
+          };
+          void (window.sai as any).swarmEmitCard?.(ws, 'batch_complete', input)
+            .then((r: { id: string } | null) => {
+              if (r?.id) {
+                (window.sai as any).swarmEmitCardResult?.(ws, r.id, { ok: true });
+              }
+            })
+            .catch(() => { /* best-effort */ });
+        }
+        state.startCount = 0;
+        state.startedAt = 0;
+        state.knownTaskIds = new Set();
+        state.completionEvents = [];
+      }
+      state.activeCount = active;
+    }
+  }, [swarmTasksByWs]);
+
+  const swarmSchedulers = useRef<Map<string, SwarmScheduler>>(new Map());
+  // Bump to force OrchestratorView re-render after mutating swarmSettingsRef
+  // in place (e.g. when the orchestrator model picker writes a new selection).
+  const [swarmSettingsTick, setSwarmSettingsTick] = useState(0);
+  void swarmSettingsTick;
+  const swarmSettingsRef = useRef<{
+    concurrencyCap: number;
+    defaultApprovalPolicy: ApprovalPolicy;
+    defaultTaskProvider: AIProvider | null;
+    defaultTaskModel: string;
+    orchestratorProvider: AIProvider | null;
+    orchestratorModel: string | null;
+    worktreeRoot: string;
+    notifyOnComplete: boolean;
+    notifyOnApproval: boolean;
+  }>({
+    concurrencyCap: SWARM_DEFAULT_CAP,
+    defaultApprovalPolicy: 'auto-read',
+    defaultTaskProvider: null,
+    defaultTaskModel: '',
+    orchestratorProvider: null,
+    orchestratorModel: null,
+    worktreeRoot: '',
+    notifyOnComplete: false,
+    notifyOnApproval: false,
+  });
+
+  useEffect(() => {
+    const sai = window.sai as any;
+    if (!sai?.settingsGet) return;
+    Promise.all([
+      sai.settingsGet('swarm.concurrencyCap', SWARM_DEFAULT_CAP),
+      sai.settingsGet('swarm.defaultApprovalPolicy', 'auto-read'),
+      sai.settingsGet('swarm.defaultTaskProvider', null),
+      sai.settingsGet('swarm.defaultTaskModel', ''),
+      sai.settingsGet('swarm.worktreeRoot', ''),
+      sai.settingsGet('swarm.notifyOnComplete', false),
+      sai.settingsGet('swarm.notifyOnApproval', false),
+      sai.settingsGet('swarm.orchestratorProvider', null),
+      sai.settingsGet('swarm.orchestratorModel', null),
+    ]).then(([cap, policy, provider, model, root, notifyComplete, notifyApproval, orchProvider, orchModel]) => {
+      swarmSettingsRef.current = {
+        concurrencyCap: typeof cap === 'number' && cap > 0 ? cap : SWARM_DEFAULT_CAP,
+        defaultApprovalPolicy: (policy === 'auto' || policy === 'auto-read' || policy === 'always-ask') ? policy : 'auto-read',
+        defaultTaskProvider: (provider === 'claude' || provider === 'codex' || provider === 'gemini') ? provider : null,
+        defaultTaskModel: typeof model === 'string' ? model : '',
+        orchestratorProvider: (orchProvider === 'claude' || orchProvider === 'codex' || orchProvider === 'gemini') ? orchProvider : null,
+        orchestratorModel: typeof orchModel === 'string' && orchModel ? orchModel : null,
+        worktreeRoot: typeof root === 'string' ? root : '',
+        notifyOnComplete: !!notifyComplete,
+        notifyOnApproval: !!notifyApproval,
+      };
+      // Propagate cap to any already-created schedulers.
+      swarmSchedulers.current.forEach(s => s.setCap(swarmSettingsRef.current.concurrencyCap));
+      // Request notification permission once if any swarm notification is enabled.
+      if ((swarmSettingsRef.current.notifyOnComplete || swarmSettingsRef.current.notifyOnApproval)
+        && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+        try { Notification.requestPermission().catch(() => {}); } catch {}
+      }
+    }).catch(() => { /* ignore */ });
+  }, []);
+
+  useEffect(() => {
+    if (!activeProjectPath) return;
+    let s = swarmSchedulers.current.get(activeProjectPath);
+    if (!s) {
+      s = new SwarmScheduler({
+        cap: swarmSettingsRef.current.concurrencyCap,
+        onStart: async (task) => {
+          const now = Date.now();
+          setSwarmTasksByWs(prev => {
+            const m = new Map(prev);
+            const list = (m.get(task.workspaceId) ?? []).map(t =>
+              t.id === task.id ? { ...t, status: 'streaming' as const, lastActivityAt: now } : t
+            );
+            m.set(task.workspaceId, list);
+            return m;
+          });
+          const removeFromList = () => {
+            setSwarmTasksByWs(prev => {
+              const m = new Map(prev);
+              m.set(task.workspaceId, (m.get(task.workspaceId) ?? []).filter(t => t.id !== task.id));
+              return m;
+            });
+          };
+          // Eager worktree materialization for likely-write tasks.
+          let effectiveWorktreePath: string | null = task.worktreePath;
+          if (!isLikelyReadOnlyPrompt(task.prompt) && !task.worktreePath) {
+            try {
+              const wt = await (window.sai as any).swarm.worktreeAdd(task.workspaceId, task.id, task.branch, task.baseBranch);
+              effectiveWorktreePath = wt;
+              setSwarmTasksByWs(prev => {
+                const m = new Map(prev);
+                const list = (m.get(task.workspaceId) ?? []).map(t =>
+                  t.id === task.id ? { ...t, worktreePath: wt } : t
+                );
+                m.set(task.workspaceId, list);
+                return m;
+              });
+            } catch (err) {
+              console.error('swarm: worktree materialization failed', err);
+              removeFromList();
+              return;
+            }
+          }
+          // Kick off the provider runner for the task's session.
+          // Today only Claude is supported (codex/gemini IPC don't yet thread scope/kind through start).
+          try {
+            const sai = window.sai as any;
+            const dispatched = await runSwarmTask(
+              { ...task, worktreePath: effectiveWorktreePath },
+              {
+                claudeStart: sai.claudeStart,
+                claudeSend: sai.claudeSend,
+              },
+            );
+            if (!dispatched) {
+              console.warn(`swarm: provider '${task.provider}' is not yet supported for task runner; marking failed`);
+              try {
+                void (window.sai as any).swarmEmitCard?.(task.workspaceId, 'task_failed', {
+                  taskId: task.id,
+                  title: task.title,
+                  branch: task.branch,
+                  prompt: task.prompt,
+                  reason: 'Task runner currently supports Claude only. Codex / Gemini support is a planned follow-up.',
+                });
+              } catch { /* best-effort */ }
+              removeFromList();
+            }
+          } catch (err) {
+            console.error('swarm: provider runner failed to start', err);
+            removeFromList();
+          }
+        },
+      });
+      swarmSchedulers.current.set(activeProjectPath, s);
+    }
+    s.setTasks(swarmTasksByWs.get(activeProjectPath) ?? []);
+  }, [activeProjectPath, swarmTasksByWs]);
+
+  // Fetch diff stats for ready (done) tasks in the active workspace
+  useEffect(() => {
+    if (!activeProjectPath) return;
+    const readyTasks = (swarmTasksByWs.get(activeProjectPath) ?? []).filter(t => t.status === 'done');
+    if (readyTasks.length === 0) return;
+    let cancelled = false;
+    const sai = window.sai as any;
+    for (const task of readyTasks) {
+      if (swarmDiffStats.has(task.id)) continue;
+      if (!sai.swarm?.diffStats) continue;
+      sai.swarm.diffStats(task.workspaceId, task.baseBranch, task.branch)
+        .then((stats: { additions: number; deletions: number }) => {
+          if (cancelled) return;
+          setSwarmDiffStats(prev => {
+            const m = new Map(prev);
+            m.set(task.id, stats);
+            return m;
+          });
+        })
+        .catch(() => { /* ignore fetch errors */ });
+    }
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProjectPath, swarmTasksByWs]);
+
+  async function spawnSwarmTask(input: { prompt: string; provider: AIProvider; model: string; approvalPolicy: ApprovalPolicy }): Promise<SwarmTask> {
+    if (!activeProjectPath) throw new Error('no active workspace');
+    const id = crypto.randomUUID();
+    const sessionId = crypto.randomUUID();
+    const title = input.prompt.split('\n')[0].slice(0, 60) || 'task';
+    const branch = swarmBranchName(title, id);
+    let baseBranch = 'main';
+    try {
+      const branchInfo = await (window.sai as any).gitBranches?.(activeProjectPath);
+      if (branchInfo?.current) baseBranch = branchInfo.current;
+    } catch {
+      // fall back to 'main'
+    }
+
+    const now = Date.now();
+    // Synthesize a user message so the task chat panel shows what's being
+    // worked on the moment the user clicks the task row — without this the
+    // panel renders empty until Claude streams its first reply (~10s).
+    const userMsg: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: input.prompt,
+      timestamp: now,
+    };
+    await dbSaveSession(activeProjectPath, {
+      id: sessionId,
+      title,
+      messages: [userMsg],
+      aiProvider: input.provider,
+      projectPath: activeProjectPath,
+      pinned: false,
+      messageCount: 1,
+      kind: 'task',
+      swarmTaskId: id,
+      createdAt: now,
+      updatedAt: now,
+    } as any);
+
+    const task: SwarmTask = {
+      id,
+      workspaceId: activeProjectPath,
+      sessionId,
+      title,
+      prompt: input.prompt,
+      provider: input.provider,
+      model: input.model,
+      approvalPolicy: input.approvalPolicy,
+      status: 'queued',
+      branch,
+      baseBranch,
+      worktreePath: null,
+      createdAt: now,
+      lastActivityAt: now,
+      costEstimate: 0,
+      toolCallCount: 0,
+    };
+    setSwarmTasksByWs(prev => {
+      const m = new Map(prev);
+      m.set(activeProjectPath, [task, ...(m.get(activeProjectPath) ?? [])]);
+      return m;
+    });
+    return task;
+  }
+
+  const swarmHost = useMemo<SwarmHost>(() => {
+    const ws = activeProjectPath ?? '';
+
+    const wsTasks = () => swarmTasksByWs.get(ws) ?? [];
+
+    // Tasks are ephemeral in-memory state; the helpers' updateTask dep
+    // (which used to persist to swarmDb) is now a no-op. Local list mutations
+    // happen in the call sites below so terminal tasks are removed from view.
+    const noopUpdateTask = async () => { /* tasks are ephemeral */ };
+    const landDeps = {
+      canFastForward: (cwd: string, src: string, tgt: string) =>
+        (window.sai as any).swarm.canFastForward(cwd, src, tgt),
+      ffMerge: async (cwd: string, src: string) => {
+        // ffMerge IPC now returns { ok, reason } instead of throwing on
+        // diverging branches (so electron doesn't log it as a handler error).
+        // Translate ok:false back into a rejection so landTask's existing
+        // catch + retry-with-rebase path still fires.
+        const r = await (window.sai as any).swarm.ffMerge(cwd, src);
+        if (r && typeof r === 'object' && r.ok === false) {
+          throw new Error(r.detail || 'ff-merge: diverging branches');
+        }
+      },
+      worktreeRemove: (cwd: string, wt: string, br: string) =>
+        (window.sai as any).swarm.worktreeRemove(cwd, wt, br),
+      updateTask: noopUpdateTask,
+      rebase: (worktreePath: string, baseBranch: string) =>
+        (window.sai as any).gitRebase(worktreePath, baseBranch),
+    };
+    const discardDeps = {
+      worktreeRemove: (cwd: string, wt: string, br: string) =>
+        (window.sai as any).swarm.worktreeRemove(cwd, wt, br),
+      updateTask: noopUpdateTask,
+    };
+
+    function byRef(ref: string) {
+      const t = resolveTaskRef(wsTasks(), ref);
+      if (!t) throw new Error(`task not found: ${ref}`);
+      return t;
+    }
+
+    function stopProvider(task: SwarmTask) {
+      const p = task.provider;
+      if (p === 'codex') return (window.sai as any).codexStop?.(ws);
+      if (p === 'gemini') return (window.sai as any).geminiStop?.(ws);
+      return (window.sai as any).claudeStop?.(ws);
+    }
+
+    function resolveProviderApproval(task: SwarmTask, toolUseId: string, approved: boolean) {
+      const p = task.provider;
+      // codexApprove/geminiApprove don't exist in the current preload; degrade gracefully.
+      if (p === 'codex') return (window.sai as any).codexApprove?.(ws, toolUseId, approved);
+      if (p === 'gemini') return (window.sai as any).geminiApprove?.(ws, toolUseId, approved);
+      return (window.sai as any).claudeApprove?.(ws, toolUseId, approved);
+    }
+
+    const spawnTask = async (i: { prompt: string; title?: string; provider?: string; model?: string; approvalPolicy?: string }) => {
+      const cfg = swarmSettingsRef.current;
+      const provider = (i.provider as AIProvider) ?? cfg.defaultTaskProvider ?? aiProvider;
+      const model = i.model ?? (cfg.defaultTaskModel || undefined) ?? modelChoice;
+      const approvalPolicy = (i.approvalPolicy as ApprovalPolicy) ?? cfg.defaultApprovalPolicy ?? 'auto-read';
+      const created = await spawnSwarmTask({
+        prompt: i.prompt,
+        provider,
+        model,
+        approvalPolicy,
+      });
+      return { id: created.id, title: created.title };
+    };
+
+    const host: SwarmHost = {
+      spawnTask,
+      spawnTasks: async (prompts) => Promise.all(prompts.map(p => spawnTask({ prompt: p }))),
+      snapshot: async () => {
+        const tasks = wsTasks();
+        return {
+          active: tasks.filter(t => t.status === 'streaming').length,
+          approvals: tasks.filter(t => t.status === 'awaiting_approval').length,
+          ready: tasks.filter(t => t.status === 'done').length,
+          tasks: tasks.map(t => ({ id: t.id, title: t.title, status: t.status })),
+        };
+      },
+      pause: async (ref) => {
+        const t = byRef(ref);
+        await stopProvider(t);
+        setSwarmTasksByWs(prev => {
+          const m = new Map(prev);
+          m.set(ws, (m.get(ws) ?? []).map(x => x.id === t.id ? { ...x, status: 'paused' as const } : x));
+          return m;
+        });
+      },
+      resume: async (ref) => {
+        const t = byRef(ref);
+        setSwarmTasksByWs(prev => {
+          const m = new Map(prev);
+          m.set(ws, (m.get(ws) ?? []).map(x => x.id === t.id ? { ...x, status: 'queued' as const } : x));
+          return m;
+        });
+      },
+      approve: async (approvalId) => {
+        const all = await swarmGetApprovals(ws);
+        const a = all.find(x => x.id === approvalId);
+        if (!a) return;
+        const task = wsTasks().find(t => t.id === a.taskId);
+        if (task) await resolveProviderApproval(task, a.toolUseId, true);
+        await swarmResolveApproval(a.id);
+        setSwarmApprovalsByWs(prev => {
+          const m = new Map(prev);
+          m.set(ws, (m.get(ws) ?? []).filter(x => x.id !== approvalId));
+          return m;
+        });
+      },
+      deny: async (approvalId) => {
+        const all = await swarmGetApprovals(ws);
+        const a = all.find(x => x.id === approvalId);
+        if (!a) return;
+        const task = wsTasks().find(t => t.id === a.taskId);
+        if (task) await resolveProviderApproval(task, a.toolUseId, false);
+        await swarmResolveApproval(a.id);
+        setSwarmApprovalsByWs(prev => {
+          const m = new Map(prev);
+          m.set(ws, (m.get(ws) ?? []).filter(x => x.id !== approvalId));
+          return m;
+        });
+      },
+      land: async (ref) => {
+        const t = byRef(ref);
+        const r = await landTask(t, landDeps);
+        if (r.ok) {
+          // Terminal state: drop the card from the sidebar. The underlying
+          // ChatSession remains in chat history.
+          setSwarmTasksByWs(prev => {
+            const m = new Map(prev);
+            m.set(ws, (m.get(ws) ?? []).filter(x => x.id !== t.id));
+            return m;
+          });
+        }
+        return r;
+      },
+      discard: async (ref) => {
+        const t = byRef(ref);
+        await discardTask(t, discardDeps);
+        // Terminal state: drop the card from the sidebar.
+        setSwarmTasksByWs(prev => {
+          const m = new Map(prev);
+          m.set(ws, (m.get(ws) ?? []).filter(x => x.id !== t.id));
+          return m;
+        });
+      },
+    };
+    return host;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProjectPath, swarmTasksByWs, swarmApprovalsByWs, aiProvider, modelChoice]);
+
+  // Keep a ref to swarmHost so the IPC handler installed once (below) always
+  // dispatches against the current host instance, not a stale closure.
+  const swarmHostRef = useRef(swarmHost);
+  // Serialize land operations across the whole renderer so concurrent clicks
+  // (e.g., user fires Land on three TaskCompletedCards in a row) don't race
+  // git's main checkout. Each landWithCard call chains onto this promise.
+  const landQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+  useEffect(() => { swarmHostRef.current = swarmHost; }, [swarmHost]);
+
+  // Inline-card emission for user-initiated swarm actions. Orchestrator-driven
+  // tool calls (via MCP) already get synthetic cards from main; these wrappers
+  // mirror that behavior for direct UI actions so the orchestrator chat reads
+  // as a unified live activity feed.
+  const landWithCard = useCallback(async (taskRef: string) => {
+    const ws = activeProjectPath ?? '';
+    const tasks = swarmTasksByWs.get(ws) ?? [];
+    const t = tasks.find(x => x.id === taskRef);
+    const sai = (window.sai as any) ?? {};
+    // Chain onto the queue so concurrent callers serialize. The emit-card and
+    // swarmHost.land sit inside the chained closure to keep the per-land work
+    // atomic from git's perspective.
+    const next = landQueueRef.current.then(async () => {
+      let cardId: string | undefined;
+      try {
+        const r = await sai.swarmEmitCard?.(ws, 'land', {
+          taskRef,
+          title: t?.title,
+          branch: t?.branch,
+        });
+        cardId = r?.id;
+      } catch { /* noop */ }
+      try {
+        const result = await swarmHost.land(taskRef);
+        if (cardId) {
+          try {
+            sai.swarmEmitCardResult?.(ws, cardId, {
+              ok: result.ok !== false,
+              reason: (result as any).reason,
+              branch: t?.branch,
+              additions: swarmDiffStats.get(taskRef)?.additions ?? 0,
+              deletions: swarmDiffStats.get(taskRef)?.deletions ?? 0,
+            }, result.ok === false);
+          } catch { /* noop */ }
+        }
+        return result;
+      } catch (err) {
+        if (cardId) {
+          try { sai.swarmEmitCardResult?.(ws, cardId, { ok: false, reason: String(err) }, true); } catch { /* noop */ }
+        }
+        throw err;
+      }
+    });
+    // Always release the queue even if this land throws, so a single failure
+    // doesn't permanently block subsequent lands.
+    landQueueRef.current = next.catch(() => {});
+    return next;
+  }, [activeProjectPath, swarmTasksByWs, swarmHost, swarmDiffStats]);
+
+  const discardWithCard = useCallback(async (taskRef: string) => {
+    const ws = activeProjectPath ?? '';
+    const tasks = swarmTasksByWs.get(ws) ?? [];
+    const t = tasks.find(x => x.id === taskRef);
+    const sai = (window.sai as any) ?? {};
+    let cardId: string | undefined;
+    try {
+      const r = await sai.swarmEmitCard?.(ws, 'discard', {
+        taskRef,
+        title: t?.title,
+        branch: t?.branch,
+      });
+      cardId = r?.id;
+    } catch { /* noop */ }
+    try {
+      await swarmHost.discard(taskRef);
+      if (cardId) {
+        try { sai.swarmEmitCardResult?.(ws, cardId, { ok: true, branch: t?.branch }, false); } catch { /* noop */ }
+      }
+    } catch (err) {
+      if (cardId) {
+        try { sai.swarmEmitCardResult?.(ws, cardId, { ok: false, reason: String(err) }, true); } catch { /* noop */ }
+      }
+      throw err;
+    }
+  }, [activeProjectPath, swarmTasksByWs, swarmHost]);
+
+  // Bridge tool calls from the orchestrator MCP socket (main process) into
+  // dispatchSwarmTool here in the renderer, then return the result over IPC.
+  //
+  // Dispatch MCP swarm tool requests from main to the renderer-side host.
+  // The synthetic tool_use card injection is now handled in the main process,
+  // which emits a synthetic claude:message tagged with the orchestrator's
+  // scope. ChatPanel's existing message handler renders it inline.
+  useEffect(() => {
+    const sai = window.sai as any;
+    if (typeof sai?.onSwarmToolRequest !== 'function') return; // mocks / tests
+
+    const unsub = sai.onSwarmToolRequest((req: { id: string; tool: string; input: any; workspace: string }) => {
+      void handleSwarmToolRequest(req, {
+        activeWorkspace: activeProjectPathRef.current,
+        host: swarmHostRef.current,
+        responder: {
+          respond: (id, result) => sai.respondSwarmTool(id, result),
+          respondError: (id, error) => sai.respondSwarmToolError(id, error),
+        },
+      });
+    });
+    return unsub;
+  }, []);
 
   // Track which workspaces are currently mounted in the chat panel render.
   // When a workspace transitions out of the mounted set (no longer active
@@ -459,6 +1230,11 @@ export default function App() {
   const activeSession = activeWorkspace?.activeSession ?? createSession();
   const openFiles = activeWorkspace?.openFiles ?? [];
   const activeFilePath = activeWorkspace?.activeFilePath ?? null;
+
+  // Currently-focused swarm task (when swarm sidebar is open and a row is selected).
+  const focusedSwarmTask = (sidebarOpen === 'swarm' && swarmSelected !== 'overview')
+    ? (swarmTasksByWs.get(activeProjectPath) ?? []).find(t => t.id === swarmSelected)
+    : undefined;
 
   // Load persisted settings from main process (file-based, works in dev+prod)
   useEffect(() => {
@@ -760,11 +1536,108 @@ export default function App() {
   // Listen for background workspace completions
   // Track busy scope count per workspace so overlapping chat+terminal don't cancel each other
   const busyScopeCountRef = useRef(new Map<string, number>());
+  // Per-task assistant message buffer for background swarm tasks.
+  // Keyed by task sessionId (msg.scope). Flushed to chatDb on done/result so
+  // background tasks (whose ChatPanel isn't mounted) still persist Claude's
+  // reply alongside the injected user prompt.
+  const taskMessagesBufferRef = useRef<Map<string, ChatMessage[]>>(new Map());
   useEffect(() => {
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
       if (!msg.projectPath) return;
       // Use composite key (projectPath:scope) for turnSeq tracking
       const scopeKey = `${msg.projectPath}:${msg.scope || 'chat'}`;
+      // Swarm status mirror — runs for every workspace+scope so background
+      // tasks (whose ChatPanel isn't mounted) still get status/tool-count
+      // updates. See src/lib/swarmStatusMirror.ts.
+      {
+        const tasks = swarmTasksByWsRef.current.get(msg.projectPath) ?? [];
+        const mirror = deriveSwarmMirror(msg, tasks);
+        if (mirror) {
+          const patchedTask = tasks.find(t => t.id === mirror.taskId);
+          // Activity history: track tool_use bursts for the per-task
+          // sparkline ornaments on SpawnTaskCard.
+          if (mirror.patch.kind === 'toolCount') {
+            const ws = msg.projectPath as string;
+            const entry = activityHistoryRef.current.get(ws) ?? { tools: [], activeBuckets: [] };
+            const now = Date.now();
+            for (let i = 0; i < mirror.patch.delta; i++) {
+              entry.tools.push({ taskId: mirror.taskId, ts: now });
+            }
+            entry.tools = trimEvents(entry.tools, now);
+            activityHistoryRef.current.set(ws, entry);
+            setActivityTick(t => t + 1);
+          }
+          setSwarmTasksByWs(prev => {
+            const m = new Map(prev);
+            const list = (m.get(msg.projectPath) ?? []).map(t =>
+              t.id === mirror.taskId ? applySwarmPatch(t, mirror.patch) : t
+            );
+            m.set(msg.projectPath, list);
+            return m;
+          });
+          // Emit a completion / failure card into the orchestrator chat so
+          // background task lifecycle events appear inline as a live feed.
+          if (mirror.patch.kind === 'status' && patchedTask) {
+            const statusPatch = mirror.patch;
+            const dedupeKey = `${patchedTask.id}:${statusPatch.status}`;
+            // claude.ts emits both 'result' and 'done' at end of turn; both pass
+            // through the mirror before the ref re-syncs, so skip the second one.
+            if (!emittedLifecycleRef.current.has(dedupeKey)) {
+              emittedLifecycleRef.current.add(dedupeKey);
+              const kind = statusPatch.status === 'done' ? 'task_completed' : 'task_failed';
+              const stats = swarmDiffStatsRef.current.get(patchedTask.id);
+              const input: Record<string, unknown> = {
+                taskId: patchedTask.id,
+                title: patchedTask.title,
+                branch: patchedTask.branch,
+                toolCallCount: patchedTask.toolCallCount,
+                durationMs: statusPatch.lastActivityAt - patchedTask.createdAt,
+              };
+              if (kind === 'task_completed' && stats) {
+                input.additions = stats.additions;
+                input.deletions = stats.deletions;
+              }
+              if (kind === 'task_failed') {
+                input.prompt = patchedTask.prompt;
+                if ((statusPatch as any).reason) input.reason = (statusPatch as any).reason;
+              }
+              void (window.sai as any).swarmEmitCard?.(msg.projectPath, kind, input)
+                .then((r: { id: string } | null) => {
+                  if (r?.id) {
+                    (window.sai as any).swarmEmitCardResult?.(msg.projectPath, r.id, { ok: statusPatch.status === 'done' });
+                  }
+                })
+                .catch(() => { /* best-effort */ });
+            }
+          }
+        }
+      }
+      // Background-task assistant message capture. When a swarm task runs
+      // while its ChatPanel isn't mounted (user is on overview / another task),
+      // accumulate assistant chunks here so we can flush them to chatDb on
+      // done/result. We skip when the focused workspace's active session IS
+      // this task — in that case ChatPanel's own onTurnComplete handles
+      // persistence and a parallel write would race / duplicate.
+      if (msg.type === 'assistant' && msg.message?.content) {
+        const scope = msg.scope || 'chat';
+        if (scope !== 'chat') {
+          const tasks = swarmTasksByWsRef.current.get(msg.projectPath) ?? [];
+          const swarmTask = tasks.find(t => t.sessionId === scope);
+          if (swarmTask) {
+            const focusedWs = workspacesRef.current.get(msg.projectPath);
+            const isFocusedHere =
+              msg.projectPath === activeProjectPathRef.current
+              && focusedWs?.activeSession.id === scope;
+            if (!isFocusedHere) {
+              const converted = convertAssistantEnvelope(msg);
+              if (converted) {
+                const prev = taskMessagesBufferRef.current.get(scope) ?? [];
+                taskMessagesBufferRef.current.set(scope, appendAssistantChunk(prev, converted));
+              }
+            }
+          }
+        }
+      }
       if (msg.type === 'streaming_start') {
         if (msg.turnSeq != null) wsTurnSeqRef.current.set(scopeKey, msg.turnSeq);
         const count = busyScopeCountRef.current.get(msg.projectPath) || 0;
@@ -773,8 +1646,125 @@ export default function App() {
         if ((msg.scope || 'chat') === 'chat') {
           setChatStreamingWorkspaces(prev => prev.has(msg.projectPath) ? prev : new Set(prev).add(msg.projectPath));
         }
+        setStreamingScopes(prev => prev.has(scopeKey) ? prev : new Set(prev).add(scopeKey));
+      }
+      // Orchestrator tool drift observability (Task 7).
+      // claude.ts forwards assistant messages whose `content` may contain
+      // tool_use blocks. With --tools "" + --strict-mcp-config the orchestrator
+      // shouldn't have access to any non-swarm tool — log if one slips through.
+      if (msg.type === 'assistant' && msg.message?.content && Array.isArray(msg.message.content)) {
+        const orchSessionIds = orchestratorSessionIdByWsRef.current;
+        const isOrchSession = Array.from(orchSessionIds.values()).includes(msg.scope);
+        if (isOrchSession) {
+          for (const block of msg.message.content) {
+            if (block?.type === 'tool_use' && block.name && isOrchestratorToolDrift(block.name)) {
+              // eslint-disable-next-line no-console
+              console.warn('[orch-drift]', describeToolDrift(block.name), {
+                scope: msg.scope,
+                toolName: block.name,
+                input: block.input,
+              });
+            }
+          }
+        }
       }
       if (msg.type === 'approval_needed') {
+        // Swarm-aware interception: if this approval belongs to a swarm task
+        // (msg.scope === task.sessionId), consult the task's approval policy.
+        const scope = msg.scope || 'chat';
+        const swarmTask = scope !== 'chat'
+          ? (swarmTasksByWsRef.current.get(msg.projectPath) ?? []).find(t => t.sessionId === scope)
+          : undefined;
+        if (swarmTask) {
+          if (!shouldRequireApproval(swarmTask.approvalPolicy, msg.toolName)) {
+            // Auto-approve without surfacing UI or transitioning task state.
+            try { (window.sai as any).claudeApprove(msg.projectPath, msg.toolUseId, true, undefined, scope); } catch {}
+            // Emit a subtle inline auto_approved card so the orchestrator chat
+            // surfaces what would otherwise be silent activity.
+            try {
+              void (window.sai as any).swarmEmitCard?.(msg.projectPath, 'auto_approved', {
+                taskTitle: swarmTask.title,
+                toolName: msg.toolName,
+                branch: swarmTask.branch,
+              });
+            } catch { /* best-effort */ }
+            return;
+          }
+          // Fire renderer-side notification (gated by swarm.notifyOnApproval).
+          if (swarmSettingsRef.current.notifyOnApproval
+            && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+            try {
+              new Notification(`SAI · ${swarmTask.title}`, { body: `${msg.toolName} needs approval` });
+            } catch {}
+          }
+          // Approval required: transition the task to awaiting_approval.
+          setSwarmTasksByWs(prev => {
+            const next = new Map(prev);
+            const list = (next.get(msg.projectPath) ?? []).map(t =>
+              t.id === swarmTask.id ? { ...t, status: 'awaiting_approval' as const, lastActivityAt: Date.now() } : t
+            );
+            next.set(msg.projectPath, list);
+            return next;
+          });
+
+          // Persist the approval so swarmHost.approve/deny can resolve it,
+          // then inject an inline approval card into the orchestrator chat
+          // for this workspace so the user can act without leaving the chat.
+          const approvalId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+            ? crypto.randomUUID()
+            : `appr-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          const approvalRecord: SwarmApproval = {
+            id: approvalId,
+            taskId: swarmTask.id,
+            workspaceId: msg.projectPath,
+            toolName: msg.toolName,
+            toolUseId: msg.toolUseId,
+            command: msg.command,
+            description: msg.description,
+            input: msg.input,
+            createdAt: Date.now(),
+          };
+          void swarmCreateApproval(approvalRecord)
+            .then(() => {
+              setSwarmApprovalsByWs(prev => {
+                const m = new Map(prev);
+                const list = m.get(msg.projectPath) ?? [];
+                if (!list.find(a => a.id === approvalId)) {
+                  m.set(msg.projectPath, [...list, approvalRecord]);
+                }
+                return m;
+              });
+            })
+            .catch(() => { /* ignore — fall back to existing flow */ });
+
+          const orchSessionId = orchestratorSessionIdByWsRef.current.get(msg.projectPath);
+          if (orchSessionId) {
+            const cardMsg: ChatMessage = {
+              id: `appr-msg-${approvalId}`,
+              role: 'system',
+              content: '',
+              timestamp: Date.now(),
+              meta: {
+                type: 'approval',
+                approvalId,
+                taskId: swarmTask.id,
+                taskTitle: swarmTask.title,
+                toolName: msg.toolName,
+                command: msg.command,
+                branch: swarmTask.branch,
+                createdAt: Date.now(),
+              },
+            };
+            const existing = orchMessagesRef.current.get(orchSessionId) ?? [];
+            const next = [...existing, cardMsg];
+            orchMessagesRef.current.set(orchSessionId, next);
+            setOrchMessagesByWs(prev => {
+              const m = new Map(prev);
+              m.set(orchSessionId, next);
+              return m;
+            });
+          }
+        }
         setApprovalWorkspaces(prev => {
           const next = new Map(prev);
           next.set(msg.projectPath, {
@@ -795,12 +1785,51 @@ export default function App() {
         }
       }
       if (msg.type === 'approval_resolved') {
+        const scope = msg.scope || 'chat';
+        const swarmTask = scope !== 'chat'
+          ? (swarmTasksByWsRef.current.get(msg.projectPath) ?? []).find(t => t.sessionId === scope)
+          : undefined;
+        if (swarmTask && swarmTask.status === 'awaiting_approval') {
+          setSwarmTasksByWs(prev => {
+            const next = new Map(prev);
+            const list = (next.get(msg.projectPath) ?? []).map(t =>
+              t.id === swarmTask.id ? { ...t, status: 'streaming' as const, lastActivityAt: Date.now() } : t
+            );
+            next.set(msg.projectPath, list);
+            return next;
+          });
+        }
         setApprovalWorkspaces(prev => {
           if (!prev.has(msg.projectPath)) return prev;
           const next = new Map(prev);
           next.delete(msg.projectPath);
           return next;
         });
+        // Collapse any unresolved inline approval cards for this workspace's
+        // orchestrator session. We don't know which specific approval the
+        // event corresponds to (the bridge doesn't echo toolUseId), so we
+        // mark all currently-pending cards as approved — best-effort. The
+        // canonical state lives in swarmDb / swarmApprovalsByWs.
+        const orchId = orchestratorSessionIdByWsRef.current.get(msg.projectPath);
+        if (orchId) {
+          const list = orchMessagesRef.current.get(orchId) ?? [];
+          let touched = false;
+          const next = list.map(m => {
+            if (m.meta?.type === 'approval' && !m.meta.resolved) {
+              touched = true;
+              return { ...m, meta: { ...m.meta, resolved: 'approved' as const } };
+            }
+            return m;
+          });
+          if (touched) {
+            orchMessagesRef.current.set(orchId, next);
+            setOrchMessagesByWs(prev => {
+              const m = new Map(prev);
+              m.set(orchId, next);
+              return m;
+            });
+          }
+        }
       }
       // Treat 'result' as authoritative end-of-turn — clear busy immediately
       // so the titlebar spinner doesn't stay stuck if the 'done' message is lost.
@@ -811,6 +1840,54 @@ export default function App() {
           if (expected != null && msg.turnSeq !== expected) return;
         }
         wsTurnSeqRef.current.set(scopeKey, -1);
+        // Swarm-aware completion notification (gated by swarm.notifyOnComplete).
+        {
+          const scope = msg.scope || 'chat';
+          if (scope !== 'chat' && swarmSettingsRef.current.notifyOnComplete) {
+            const swarmTask = (swarmTasksByWsRef.current.get(msg.projectPath) ?? []).find(t => t.sessionId === scope);
+            if (swarmTask && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+              try {
+                new Notification(`SAI · ${swarmTask.title}`, { body: 'Task complete' });
+              } catch {}
+            }
+          }
+        }
+        // Flush any buffered assistant messages for this background task to
+        // chatDb. Merged with the persisted prefix (the injected user prompt)
+        // so the task's chat panel shows the full exchange when the user
+        // clicks the row. ChatPanel's onTurnComplete handles the focused-task
+        // case; the buffer is only populated when the task wasn't focused.
+        {
+          const scope = msg.scope || 'chat';
+          if (scope !== 'chat') {
+            const buffered = taskMessagesBufferRef.current.get(scope);
+            if (buffered && buffered.length > 0) {
+              taskMessagesBufferRef.current.delete(scope);
+              const wsPath = msg.projectPath;
+              void (async () => {
+                try {
+                  const existing = await dbGetMessages(scope);
+                  const merged = mergePersistedWithBuffer(existing, buffered);
+                  const sessions = await dbGetSessions(wsPath);
+                  const taskSession = sessions.find(s => s.id === scope);
+                  if (!taskSession) return;
+                  await dbSaveSession(wsPath, {
+                    ...taskSession,
+                    messages: merged,
+                    messageCount: merged.length,
+                    updatedAt: Date.now(),
+                  }, 0);
+                  // Refresh sessions list so sidebar message counts update.
+                  const refreshed = await dbGetSessions(wsPath);
+                  updateWorkspace(wsPath, w => ({ ...w, sessions: refreshed }));
+                } catch (err) {
+                  // eslint-disable-next-line no-console
+                  console.error('swarm: persist task messages failed', err);
+                }
+              })();
+            }
+          }
+        }
         if ((msg.scope || 'chat') === 'chat') {
           setChatStreamingWorkspaces(prev => {
             if (!prev.has(msg.projectPath)) return prev;
@@ -819,6 +1896,12 @@ export default function App() {
             return next;
           });
         }
+        setStreamingScopes(prev => {
+          if (!prev.has(scopeKey)) return prev;
+          const next = new Set(prev);
+          next.delete(scopeKey);
+          return next;
+        });
         // Decrement busy scope count
         const count = busyScopeCountRef.current.get(msg.projectPath) || 0;
         const newCount = Math.max(0, count - 1);
@@ -1283,6 +2366,77 @@ export default function App() {
     }
   };
 
+  // Route the workspace's active session to the focused swarm task's sessionId
+  // when a swarm task row is selected. Guarded to avoid loops.
+  useEffect(() => {
+    if (!activeProjectPath) return;
+    if (sidebarOpen !== 'swarm' || swarmSelected === 'overview') {
+      lastSwarmRoutedRef.current = null;
+      return;
+    }
+    const task = (swarmTasksByWs.get(activeProjectPath) ?? []).find(t => t.id === swarmSelected);
+    if (!task) return;
+    if (lastSwarmRoutedRef.current === task.id) return;
+    if (activeSession.id === task.sessionId) {
+      lastSwarmRoutedRef.current = task.id;
+      return;
+    }
+    lastSwarmRoutedRef.current = task.id;
+    const inMemory = sessions.find(s => s.id === task.sessionId);
+    if (inMemory) {
+      handleSelectSession(task.sessionId);
+    } else {
+      // Refresh sessions from db, then select.
+      dbGetSessions(activeProjectPath).then(fresh => {
+        updateWorkspace(activeProjectPath, ws => ({ ...ws, sessions: fresh }));
+        const selected = fresh.find(s => s.id === task.sessionId);
+        if (!selected) return;
+        window.sai.claudeSetSessionId(activeProjectPath, selected.claudeSessionId);
+        (window.sai as any).codexSetSessionId(activeProjectPath, selected.codexSessionId);
+        window.sai.geminiSetSessionId?.(activeProjectPath, selected.geminiSessionId, 'chat');
+        dbGetMessagesTail(selected.id, MESSAGE_TAIL_LIMIT).then(({ messages, totalCount }) => {
+          wsFirstLoadedIdxRef.current.set(activeProjectPath, totalCount - messages.length);
+          updateWorkspace(activeProjectPath, ws => ({
+            ...ws,
+            activeSession: { ...selected, messages },
+          }));
+        });
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sidebarOpen, swarmSelected, activeProjectPath, swarmTasksByWs]);
+
+  // Ensure a singleton orchestrator session exists when the swarm sidebar opens for a workspace
+  useEffect(() => {
+    if (sidebarOpen !== 'swarm' || !activeProjectPath) return;
+    if (orchestratorSessionIdByWs.has(activeProjectPath)) return;
+    ensureOrchestratorSession(activeProjectPath, aiProvider).then(session => {
+      setOrchestratorSessionIdByWs(prev => new Map(prev).set(activeProjectPath, session.id));
+      // Tell main about this orchestrator session so the swarm MCP host can
+      // tag synthetic claude:message events (tool_use cards) with the right
+      // scope. ChatPanel filters by scope, so without this the synthetic
+      // tool_use blocks get dropped.
+      try { (window.sai as any).swarmSetOrchestratorSession?.(activeProjectPath, session.id); } catch { /* noop */ }
+      // ChatPanel mounts with claudeScope={session.id} + claudeKind='orchestrator'
+      // and triggers ensureProcess on its own with the right args.
+      dbGetSessions(activeProjectPath).then(fresh => {
+        updateWorkspace(activeProjectPath, ws => ({ ...ws, sessions: fresh }));
+      });
+      // Load persisted orchestrator messages so ChatPanel mounts with prior
+      // history. dbGetSessions returns sessions WITHOUT messages (the messages
+      // store is separate), so we have to fetch them explicitly.
+      dbGetMessages(session.id).then(msgs => {
+        orchMessagesRef.current.set(session.id, msgs);
+        setOrchMessagesByWs(prev => {
+          const m = new Map(prev);
+          m.set(session.id, msgs);
+          return m;
+        });
+      }).catch(() => {});
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sidebarOpen, activeProjectPath]);
+
   const handleUpdateSessions = useCallback((updated: ChatSession[]) => {
     if (!activeProjectPath) return;
     updateWorkspace(activeProjectPath, ws => ({
@@ -1445,9 +2599,451 @@ export default function App() {
                   overflow: 'hidden',
                 }}
               >
+                {wsPath === activeProjectPath && focusedSwarmTask && (
+                  <SwarmTaskHeader
+                    task={focusedSwarmTask}
+                    onPause={() => {
+                      const id = focusedSwarmTask.id;
+                      const task = focusedSwarmTask;
+                      // Stop the task's Claude scope so streaming actually halts.
+                      try {
+                        (window.sai as any).claudeStop?.(task.workspaceId, task.sessionId);
+                      } catch { /* noop */ }
+                      setSwarmTasksByWs(prev => {
+                        const m = new Map(prev);
+                        const list = (m.get(activeProjectPath) ?? []).map(t =>
+                          t.id === id ? { ...t, status: 'paused' as const } : t
+                        );
+                        m.set(activeProjectPath, list);
+                        return m;
+                      });
+                    }}
+                    onLand={async () => {
+                      if (!focusedSwarmTask) return;
+                      const taskId = focusedSwarmTask.id;
+                      try {
+                        const r = await landWithCard(taskId);
+                        if (r && (r as any).ok === false && (r as any).reason === 'rebase-needed') {
+                          window.alert('Cannot fast-forward: rebase needed before landing.');
+                          return;
+                        }
+                      } catch (err) {
+                        console.error('swarm: land failed', err);
+                        return;
+                      }
+                      // Terminal state: drop the card from the sidebar and
+                      // bounce the user back to the orchestrator overview so
+                      // they aren't staring at a header for a non-existent task.
+                      setSwarmTasksByWs(prev => {
+                        const m = new Map(prev);
+                        m.set(activeProjectPath, (m.get(activeProjectPath) ?? []).filter(t => t.id !== taskId));
+                        return m;
+                      });
+                      setSwarmSelected('overview');
+                    }}
+                    onDiscard={async () => {
+                      if (!focusedSwarmTask) return;
+                      const taskId = focusedSwarmTask.id;
+                      try {
+                        await discardWithCard(taskId);
+                      } catch (err) {
+                        console.error('swarm: discard failed', err);
+                        return;
+                      }
+                      setSwarmTasksByWs(prev => {
+                        const m = new Map(prev);
+                        m.set(activeProjectPath, (m.get(activeProjectPath) ?? []).filter(t => t.id !== taskId));
+                        return m;
+                      });
+                      setSwarmSelected('overview');
+                    }}
+                    onOpenDiff={async () => {
+                      if (!focusedSwarmTask) return;
+                      const task = focusedSwarmTask;
+                      setSwarmDiffModal({
+                        title: task.title,
+                        branch: task.branch,
+                        baseBranch: task.baseBranch,
+                        diff: '',
+                        loading: true,
+                      });
+                      try {
+                        const sai = (window.sai as any) ?? {};
+                        const diff: string = await sai.swarm?.branchDiff?.(task.workspaceId, task.baseBranch, task.branch) ?? '';
+                        setSwarmDiffModal({
+                          title: task.title,
+                          branch: task.branch,
+                          baseBranch: task.baseBranch,
+                          diff,
+                          loading: false,
+                        });
+                      } catch (err) {
+                        setSwarmDiffModal({
+                          title: task.title,
+                          branch: task.branch,
+                          baseBranch: task.baseBranch,
+                          diff: '',
+                          loading: false,
+                          error: err instanceof Error ? err.message : String(err),
+                        });
+                      }
+                    }}
+                    onResume={async () => {
+                      if (!focusedSwarmTask) return;
+                      const task = focusedSwarmTask;
+                      // Note: Claude CLI spawns a fresh process per turn, so a
+                      // true "resume" of the prior process isn't possible —
+                      // "resume" here re-dispatches the original prompt as a
+                      // new turn. If this feels misleading, consider renaming
+                      // the button to "Re-run" in SwarmTaskHeader.
+                      setSwarmTasksByWs(prev => {
+                        const m = new Map(prev);
+                        const list = (m.get(activeProjectPath) ?? []).map(t =>
+                          t.id === task.id ? { ...t, status: 'queued' as const } : t
+                        );
+                        m.set(activeProjectPath, list);
+                        return m;
+                      });
+                      try {
+                        const sai = window.sai as any;
+                        const dispatched = await runSwarmTask(
+                          { ...task, worktreePath: task.worktreePath },
+                          { claudeStart: sai.claudeStart, claudeSend: sai.claudeSend },
+                        );
+                        if (dispatched) {
+                          setSwarmTasksByWs(prev => {
+                            const m = new Map(prev);
+                            const list = (m.get(activeProjectPath) ?? []).map(t =>
+                              t.id === task.id ? { ...t, status: 'streaming' as const } : t
+                            );
+                            m.set(activeProjectPath, list);
+                            return m;
+                          });
+                        }
+                      } catch (err) {
+                        console.error('swarm: resume failed', err);
+                      }
+                    }}
+                  />
+                )}
+                {sidebarOpen === 'swarm' && swarmSelected === 'overview' && orchestratorSessionIdByWs.get(wsPath) ? (() => {
+                  const orchSessionId = orchestratorSessionIdByWs.get(wsPath)!;
+                  const orchSession = ws.sessions.find(s => s.id === orchSessionId);
+                  const orchProvider: AIProvider = swarmSettingsRef.current.orchestratorProvider ?? aiProvider;
+                  const orchModelRaw = swarmSettingsRef.current.orchestratorModel;
+                  const orchModel: ModelChoice = isModelChoice(orchModelRaw) ? orchModelRaw : modelChoice;
+                  // Prefer the live ref (set by onMessagesChange) over the
+                  // mounted-mirror map; fall back to the map for first mount,
+                  // and finally the stored session (which is always empty
+                  // because dbGetSessions strips messages — kept as a safety).
+                  const orchMessages = orchMessagesRef.current.get(orchSessionId)
+                    ?? orchMessagesByWs.get(orchSessionId)
+                    ?? orchSession?.messages
+                    ?? [];
+                  const orchChatSlot = (
+                    <ChatPanel
+                      key={orchSessionId}
+                      projectPath={wsPath}
+                      permissionMode={permissionMode}
+                      onPermissionChange={handlePermissionChange}
+                      effortLevel={effortLevel}
+                      onEffortChange={handleEffortChange}
+                      modelChoice={orchModel}
+                      onModelChange={handleModelChange}
+                      aiProvider={orchProvider}
+                      codexModel={codexModel}
+                      onCodexModelChange={handleCodexModelChange}
+                      codexModels={codexModels}
+                      codexPermission={codexPermission}
+                      onCodexPermissionChange={handleCodexPermissionChange}
+                      geminiModel={geminiModel}
+                      onGeminiModelChange={handleGeminiModelChange}
+                      geminiModels={geminiModels}
+                      geminiApprovalMode={geminiApprovalMode}
+                      onGeminiApprovalModeChange={handleGeminiApprovalModeChange}
+                      geminiConversationMode={geminiConversationMode}
+                      onGeminiConversationModeChange={handleGeminiConversationModeChange}
+                      geminiLoadingPhrases={geminiLoadingPhrases}
+                      initialMessages={orchMessages}
+                      activeFilePath={ws.activeFilePath}
+                      onFileOpen={handleFileOpen}
+                      isActive={wsPath === activeProjectPath}
+                      isStreaming={streamingScopes.has(`${wsPath}:${orchSessionId}`)}
+                      initialDraft={chatDraftsRef.current.get(wsPath) || ''}
+                      onDraftChange={(draft: string) => handleDraftChange(wsPath, draft)}
+                      initialContextItems={(chatContextItemsRef.current.get(wsPath) as any) || []}
+                      onContextItemsChange={(items: any[]) => handleContextItemsChange(wsPath, items)}
+                      messageQueue={messageQueues.get(orchSessionId) || []}
+                      onQueueAdd={handleQueueAdd}
+                      onQueueRemove={handleQueueRemove}
+                      onQueueShift={handleQueueShift}
+                      onQueuePromote={handleQueuePromote}
+                      sessionId={orchSessionId}
+                      onMessagesChange={(messages: ChatMessage[]) => {
+                        orchMessagesRef.current.set(orchSessionId, messages);
+                        // Debounced persist + ws.sessions refresh so a mid-turn
+                        // navigate-away doesn't lose chat history. Also keeps
+                        // the mounted-mirror Map in sync so ChatPanel remounts
+                        // pick up the latest initialMessages.
+                        const existing = orchSaveTimerRef.current.get(orchSessionId);
+                        if (existing) clearTimeout(existing);
+                        orchSaveTimerRef.current.set(orchSessionId, setTimeout(() => {
+                          orchSaveTimerRef.current.delete(orchSessionId);
+                          const latest = orchMessagesRef.current.get(orchSessionId) || [];
+                          if (latest.length === 0) return;
+                          const wsNow = workspacesRef.current.get(wsPath);
+                          const existingSession = wsNow?.sessions.find(s => s.id === orchSessionId);
+                          if (!existingSession) return;
+                          const updated = {
+                            ...existingSession,
+                            messages: latest,
+                            updatedAt: Date.now(),
+                            aiProvider: orchProvider,
+                            messageCount: latest.length,
+                          };
+                          dbSaveSession(wsPath, updated, 0).then(() => {
+                            // Mirror into orchMessagesByWs so a remount reads
+                            // fresh data without an extra DB round-trip.
+                            setOrchMessagesByWs(prev => {
+                              const m = new Map(prev);
+                              m.set(orchSessionId, latest);
+                              return m;
+                            });
+                          }).catch(() => {});
+                        }, 400));
+                      }}
+                      onClaudeSessionId={(sessionId: string) => {
+                        updateWorkspace(wsPath, w => ({
+                          ...w,
+                          sessions: w.sessions.map(s => s.id === orchSessionId ? { ...s, claudeSessionId: sessionId } : s),
+                        }));
+                      }}
+                      onGeminiSessionId={(sessionId: string) => {
+                        updateWorkspace(wsPath, w => ({
+                          ...w,
+                          sessions: w.sessions.map(s => s.id === orchSessionId ? { ...s, geminiSessionId: sessionId } : s),
+                        }));
+                      }}
+                      onCodexSessionId={(sessionId: string) => {
+                        updateWorkspace(wsPath, w => ({
+                          ...w,
+                          sessions: w.sessions.map(s => s.id === orchSessionId ? { ...s, codexSessionId: sessionId } : s),
+                        }));
+                      }}
+                      onSlashCommandsUpdate={(cmds: string[]) => { slashCommandsRef.current = cmds; }}
+                      terminalTabs={ws.terminalTabs ?? []}
+                      claudeScope={orchSessionId}
+                      claudeKind="orchestrator"
+                      emptyStateVisual={<SwarmLogoCluster leadSize={96} />}
+                      conversationHeaderVisual={<SwarmLogoCluster leadSize={48} followerCount={6} footprint={220} />}
+                      claudeOrchestratorContext={(() => {
+                        const wsName = wsPath.split(/[\\/]/).filter(Boolean).pop() || wsPath;
+                        const cfg = swarmSettingsRef.current;
+                        return {
+                          workspaceName: wsName,
+                          workspacePath: wsPath,
+                          defaultProvider: cfg.defaultTaskProvider ?? aiProvider ?? 'claude',
+                          defaultModel: cfg.defaultTaskModel || modelChoice || 'opus',
+                          defaultApprovalPolicy: cfg.defaultApprovalPolicy ?? 'auto-read',
+                          concurrencyCap: cfg.concurrencyCap ?? 5,
+                        };
+                      })()}
+                      onInterceptSend={async (text: string) => {
+                        const outcome = await executeSlashCommand(text, swarmHostRef.current);
+                        return outcome.handled
+                          ? { handled: true, reply: (outcome as { handled: true; reply: string }).reply }
+                          : false;
+                      }}
+                      renderToolCall={(tc) => {
+                        // Derive per-task tool_use bucket counts (last 60s)
+                        // for SpawnTaskCard sparklines. We re-derive on each
+                        // render — activityTick triggers re-renders so the
+                        // map reflects the freshest ring buffer state.
+                        void activityTick;
+                        const wsHist = activityHistoryRef.current.get(wsPath);
+                        const toolHistory = new Map<string, number[]>();
+                        if (wsHist && wsHist.tools.length > 0) {
+                          const now = Date.now();
+                          const byTask = new Map<string, TimedEvent[]>();
+                          for (const ev of wsHist.tools) {
+                            if (!ev.taskId) continue;
+                            const arr = byTask.get(ev.taskId) ?? [];
+                            arr.push(ev);
+                            byTask.set(ev.taskId, arr);
+                          }
+                          for (const [tid, evs] of byTask.entries()) {
+                            toolHistory.set(tid, bucketToolCalls(evs, now));
+                          }
+                        }
+                        return (
+                        <SwarmToolCardSelector
+                          toolCall={tc}
+                          tasks={swarmTasksByWs.get(wsPath) ?? []}
+                          approvals={swarmApprovalsByWs.get(wsPath) ?? []}
+                          diffStats={swarmDiffStats}
+                          toolHistory={toolHistory}
+                          onLandAllGreen={async () => {
+                            // Snapshot the ready ids first; each land mutates state and
+                            // removes the task from the list, so iterating directly off
+                            // the live array would race. Await each to surface failures.
+                            const readyIds = (swarmTasksByWs.get(wsPath) ?? [])
+                              .filter(t => t.status === 'done')
+                              .map(t => t.id);
+                            for (const id of readyIds) {
+                              try { await landWithCard(id); }
+                              catch (err) { console.error('swarm: landAllGreen land failed', id, err); }
+                            }
+                          }}
+                          onFocusTask={(id) => setSwarmSelected(id)}
+                          onRebaseRetry={async (taskRef) => {
+                            const t = (swarmTasksByWs.get(wsPath) ?? []).find(x => x.id === taskRef);
+                            if (!t || !t.worktreePath) {
+                              console.warn('swarm: rebase-retry skipped, task or worktree missing', taskRef);
+                              return;
+                            }
+                            try {
+                              await (window.sai as any).gitRebase?.(t.worktreePath, t.baseBranch);
+                            } catch (err) {
+                              console.error('swarm: rebase failed', err);
+                              window.alert(`Rebase failed: ${err instanceof Error ? err.message : String(err)}`);
+                              return;
+                            }
+                            try { await landWithCard(taskRef); }
+                            catch (err) { console.error('swarm: post-rebase land failed', err); }
+                          }}
+                          onLand={(id) => { void landWithCard(id); }}
+                          onDiscard={(id) => { void discardWithCard(id); }}
+                          onDiff={(id) => setSwarmSelected(id)}
+                          onRetry={(prompt) => {
+                            void spawnSwarmTask({
+                              prompt,
+                              provider: aiProvider,
+                              model: modelChoice,
+                              approvalPolicy: swarmSettingsRef.current.defaultApprovalPolicy ?? 'auto-read',
+                            }).catch(err => console.error('swarm: retry failed', err));
+                          }}
+                          onScrollToApproval={(taskId) => {
+                            // Best-effort: scroll the orchestrator chat to the
+                            // inline approval card for this task. The card has
+                            // data-task-id="<id>" on InlineApprovalCard.
+                            try {
+                              const el = document.querySelector<HTMLElement>(
+                                `[data-testid="swarm-inline-approval-card"][data-task-id="${taskId}"]`
+                              );
+                              el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            } catch { /* noop */ }
+                          }}
+                        />
+                        );
+                      }}
+                      renderMessage={(message) => {
+                        const meta = message.meta;
+                        if (!meta || meta.type !== 'approval') return null;
+                        const resolveLocally = (resolved: 'approved' | 'denied') => {
+                          const list = orchMessagesRef.current.get(orchSessionId) ?? [];
+                          const next = list.map(m =>
+                            m.id === message.id && m.meta?.type === 'approval'
+                              ? { ...m, meta: { ...m.meta, resolved } }
+                              : m
+                          );
+                          orchMessagesRef.current.set(orchSessionId, next);
+                          setOrchMessagesByWs(prev => {
+                            const m = new Map(prev);
+                            m.set(orchSessionId, next);
+                            return m;
+                          });
+                        };
+                        return (
+                          <InlineApprovalCard
+                            meta={meta}
+                            onApprove={(id) => { void swarmHost.approve(id); resolveLocally('approved'); }}
+                            onDeny={(id) => { void swarmHost.deny(id); resolveLocally('denied'); }}
+                            onView={() => setSwarmSelected(meta.taskId)}
+                          />
+                        );
+                      }}
+                      onTurnComplete={() => {
+                        const latestMessages = orchMessagesRef.current.get(orchSessionId) || [];
+                        if (latestMessages.length === 0) return;
+                        const existing = ws.sessions.find(s => s.id === orchSessionId);
+                        if (!existing) return;
+                        const updated = { ...existing, messages: latestMessages, updatedAt: Date.now(), aiProvider: orchProvider, messageCount: latestMessages.length };
+                        if (!updated.title) {
+                          const firstUserMsg = latestMessages.find(m => m.role === 'user');
+                          if (firstUserMsg) updated.title = generateSmartTitle(firstUserMsg.content);
+                        }
+                        // Cancel any pending debounced save — we're flushing now.
+                        const pending = orchSaveTimerRef.current.get(orchSessionId);
+                        if (pending) {
+                          clearTimeout(pending);
+                          orchSaveTimerRef.current.delete(orchSessionId);
+                        }
+                        dbSaveSession(wsPath, updated, 0).then(() => {
+                          setOrchMessagesByWs(prev => {
+                            const m = new Map(prev);
+                            m.set(orchSessionId, latestMessages);
+                            return m;
+                          });
+                          dbGetSessions(wsPath).then(sessions => {
+                            updateWorkspace(wsPath, w2 => ({ ...w2, sessions }));
+                          });
+                        }).catch(() => {});
+                      }}
+                    />
+                  );
+                  return (
+                  <OrchestratorView
+                    chatSlot={orchChatSlot}
+                    orchestratorSessionId={orchSessionId}
+                    projectPath={wsPath}
+                    orchestratorProvider={orchProvider}
+                    orchestratorModel={orchModel}
+                    onProviderModelChange={(nextProvider, nextModel) => {
+                      // Persist + update ref so downstream session re-spawns pick
+                      // up the new model. Provider is currently locked to claude
+                      // by the picker (codex/gemini are disabled), but we still
+                      // round-trip it for forward-compat.
+                      try { window.sai.settingsSet('swarm.orchestratorProvider', nextProvider); } catch { /* noop */ }
+                      try { window.sai.settingsSet('swarm.orchestratorModel', nextModel); } catch { /* noop */ }
+                      swarmSettingsRef.current.orchestratorProvider = nextProvider;
+                      swarmSettingsRef.current.orchestratorModel = nextModel;
+                      // Force a re-render so the new label shows immediately.
+                      setSwarmSettingsTick(t => t + 1);
+                      // Restart the orchestrator Claude scope so the new
+                      // --model flag takes effect on the next turn.
+                      try {
+                        (window.sai as any).claudeStop?.(wsPath, orchSessionId);
+                      } catch { /* noop */ }
+                      try {
+                        const wsName = wsPath.split(/[\\/]/).filter(Boolean).pop() || wsPath;
+                        const cfg = swarmSettingsRef.current;
+                        const ctx = {
+                          workspaceName: wsName,
+                          workspacePath: wsPath,
+                          defaultProvider: cfg.defaultTaskProvider ?? aiProvider ?? 'claude',
+                          defaultModel: nextModel,
+                          defaultApprovalPolicy: cfg.defaultApprovalPolicy ?? 'auto-read',
+                          concurrencyCap: cfg.concurrencyCap ?? 5,
+                        };
+                        (window.sai as any).claudeStart?.(wsPath, orchSessionId, 'orchestrator', ctx);
+                      } catch { /* noop */ }
+                    }}
+                    stats={{
+                      active: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'streaming').length,
+                      approvals: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'awaiting_approval').length,
+                      ready: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'done').length,
+                      queued: (swarmTasksByWs.get(wsPath) ?? []).filter(t => t.status === 'queued').length,
+                      cap: swarmSettingsRef.current.concurrencyCap,
+                      activeHistory: (() => { void activityTick; return activityHistoryRef.current.get(wsPath)?.activeBuckets; })(),
+                    }}
+                  />
+                  );
+                })() : (
                 <ChatPanel
                   key={ws.activeSession.id}
                   projectPath={wsPath}
+                  claudeScope={ws.activeSession.kind === 'task' ? ws.activeSession.id : 'chat'}
+                  claudeKind={ws.activeSession.kind === 'task' ? 'task' : 'chat'}
                   permissionMode={permissionMode}
                   onPermissionChange={handlePermissionChange}
                   effortLevel={effortLevel}
@@ -1472,7 +3068,11 @@ export default function App() {
                   activeFilePath={ws.activeFilePath}
                   onFileOpen={handleFileOpen}
                   isActive={wsPath === activeProjectPath}
-                  isStreaming={chatStreamingWorkspaces.has(wsPath)}
+                  isStreaming={
+                    ws.activeSession.kind === 'task'
+                      ? streamingScopes.has(`${wsPath}:${ws.activeSession.id}`)
+                      : chatStreamingWorkspaces.has(wsPath)
+                  }
                   initialDraft={chatDraftsRef.current.get(wsPath) || ''}
                   onDraftChange={(draft: string) => handleDraftChange(wsPath, draft)}
                   initialContextItems={(chatContextItemsRef.current.get(wsPath) as any) || []}
@@ -1555,8 +3155,12 @@ export default function App() {
 
                       return { ...w, activeSession: updated };
                     });
+                    // Note: SwarmTask status mirror lives in App.tsx's claude:message
+                    // listener (see deriveSwarmMirror) so it fires for every scope,
+                    // including background tasks whose ChatPanel isn't mounted.
                   }}
                 />
+                )}
               </div>
             ))}
             {panel === 'editor' && activeFilePath && (
@@ -1622,6 +3226,9 @@ export default function App() {
     );
   };
 
+  const swarmApprovalCount = (swarmTasksByWs.get(activeProjectPath) ?? [])
+    .filter(t => t.status === 'awaiting_approval').length;
+
   return (
     <div className="app">
       <TitleBar
@@ -1640,6 +3247,38 @@ export default function App() {
           if (key === 'focusedChat') { setFocusedChat(value); if (value) { setExpanded(['chat', 'terminal']); setSplitRatio(0.66); } }
           if (key === 'defaultView') { /* persisted only, applies on next launch */ }
           if (key === 'sidebarWidth') document.documentElement.style.setProperty('--sidebar-width', `${value}px`);
+          if (typeof key === 'string' && key.startsWith('swarm.')) {
+            const cfg = swarmSettingsRef.current;
+            if (key === 'swarm.concurrencyCap') {
+              const n = typeof value === 'number' && value > 0 ? value : SWARM_DEFAULT_CAP;
+              cfg.concurrencyCap = n;
+              swarmSchedulers.current.forEach(s => s.setCap(n));
+            } else if (key === 'swarm.defaultApprovalPolicy') {
+              if (value === 'auto' || value === 'auto-read' || value === 'always-ask') cfg.defaultApprovalPolicy = value;
+            } else if (key === 'swarm.defaultTaskProvider') {
+              if (value === 'claude' || value === 'codex' || value === 'gemini') cfg.defaultTaskProvider = value;
+              else if (value == null || value === '') cfg.defaultTaskProvider = null;
+            } else if (key === 'swarm.defaultTaskModel') {
+              cfg.defaultTaskModel = typeof value === 'string' ? value : '';
+            } else if (key === 'swarm.worktreeRoot') {
+              cfg.worktreeRoot = typeof value === 'string' ? value : '';
+            } else if (key === 'swarm.notifyOnComplete') {
+              cfg.notifyOnComplete = !!value;
+              if (cfg.notifyOnComplete && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+                try { Notification.requestPermission().catch(() => {}); } catch {}
+              }
+            } else if (key === 'swarm.notifyOnApproval') {
+              cfg.notifyOnApproval = !!value;
+              if (cfg.notifyOnApproval && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+                try { Notification.requestPermission().catch(() => {}); } catch {}
+              }
+            } else if (key === 'swarm.orchestratorProvider') {
+              if (value === 'claude' || value === 'codex' || value === 'gemini') cfg.orchestratorProvider = value;
+              else if (value == null || value === '') cfg.orchestratorProvider = null;
+            } else if (key === 'swarm.orchestratorModel') {
+              cfg.orchestratorModel = typeof value === 'string' && value ? value : null;
+            }
+          }
         }}
         onOpenWhatsNew={openWhatsNew}
         onNewProject={() => setShowNewProject(true)}
@@ -1659,7 +3298,7 @@ export default function App() {
         onSwitchToWorkspace={handleProjectSwitch}
       />
       <div className="app-body">
-        <NavBar activeSidebar={sidebarOpen} onToggle={toggleSidebar} gitChangeCount={gitChangeCount} />
+        <NavBar activeSidebar={sidebarOpen} onToggle={toggleSidebar} gitChangeCount={gitChangeCount} swarmApprovalCount={swarmApprovalCount} />
         <AnimatePresence initial={false}>
           {sidebarOpen === 'files' && (
             <motion.div
@@ -1737,7 +3376,41 @@ export default function App() {
               <McpSidebar />
             </motion.div>
           )}
+          {sidebarOpen === 'swarm' && (
+            <motion.div
+              key="sidebar-swarm"
+              className="sidebar-slot"
+              exit={{ opacity: 0, x: -12 }}
+              transition={{ duration: 0.16, ease: 'easeIn' }}
+            >
+              <SwarmSidebar
+                tasks={swarmTasksByWs.get(activeProjectPath) ?? []}
+                selectedId={swarmSelected}
+                onSelect={setSwarmSelected}
+                onNewTask={() => setShowNewTaskPopover(true)}
+                onDiscard={(task) => discardWithCard(task.id)}
+                streamingTaskIds={(() => {
+                  // streamingScopes is keyed by `${projectPath}:${scope}` where
+                  // scope = sessionId for swarm tasks. Map back to taskId so
+                  // the row indicator pulses live, independent of `task.status`.
+                  const ids = new Set<string>();
+                  const tasks = swarmTasksByWs.get(activeProjectPath) ?? [];
+                  for (const t of tasks) {
+                    if (streamingScopes.has(`${activeProjectPath}:${t.sessionId}`)) ids.add(t.id);
+                  }
+                  return ids;
+                })()}
+              />
+            </motion.div>
+          )}
         </AnimatePresence>
+        <NewTaskPopover
+          open={showNewTaskPopover}
+          onClose={() => setShowNewTaskPopover(false)}
+          onSubmit={(input) => { void spawnSwarmTask(input); setShowNewTaskPopover(false); }}
+          defaultProvider={aiProvider}
+          defaultModel=""
+        />
         <div className="tm-views-wrapper">
           <div className="main-content" ref={mainContentRef}>
             {allPanels.map((panel, i) => (
@@ -1780,6 +3453,35 @@ export default function App() {
         );
       })()}
 
+      {quitConfirmTasks && (
+        <QuitSwarmConfirmModal
+          tasks={quitConfirmTasks}
+          onCancel={() => setQuitConfirmTasks(null)}
+          onConfirm={async () => {
+            const tasksToPause = quitConfirmTasks;
+            setQuitConfirmTasks(null);
+            // Update local state to reflect the pause across all workspaces.
+            setSwarmTasksByWs(prev => {
+              const idSet = new Set(tasksToPause.map(t => t.id));
+              const m = new Map(prev);
+              for (const [ws, tasks] of prev) {
+                let changed = false;
+                const updated = tasks.map(t => {
+                  if (idSet.has(t.id) && t.status === 'streaming') {
+                    changed = true;
+                    return { ...t, status: 'paused' as const };
+                  }
+                  return t;
+                });
+                if (changed) m.set(ws, updated);
+              }
+              return m;
+            });
+            (window.sai as any).confirmQuit?.();
+          }}
+        />
+      )}
+
       {showNewProject && (
         <NewProjectModal
           onClose={() => setShowNewProject(false)}
@@ -1797,6 +3499,18 @@ export default function App() {
           releases={releases}
           fetchStatus={fetchStatus}
           onClose={closeWhatsNew}
+        />
+      )}
+
+      {swarmDiffModal && (
+        <SwarmDiffModal
+          title={swarmDiffModal.title}
+          branch={swarmDiffModal.branch}
+          baseBranch={swarmDiffModal.baseBranch}
+          diff={swarmDiffModal.diff}
+          loading={swarmDiffModal.loading}
+          error={swarmDiffModal.error}
+          onClose={() => setSwarmDiffModal(null)}
         />
       )}
 

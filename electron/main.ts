@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, Menu, MenuItem, screen } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { registerTerminalHandlers, destroyAllTerminals } from './services/pty';
 import { registerClaudeHandlers } from './services/claude';
 import { registerGitHandlers } from './services/git';
@@ -17,6 +18,8 @@ import { registerPluginHandlers } from './services/plugins';
 import { registerMcpHandlers } from './services/mcp';
 import { registerScaffoldHandler } from './services/scaffold';
 import { registerSearchHandlers } from './services/search';
+import { registerSwarmHandlers } from './services/swarm';
+import * as swarmMcpHost from './services/swarmMcpHost';
 
 // Allow E2E tests to isolate userData
 if (process.env.SAI_USER_DATA_DIR) {
@@ -29,6 +32,7 @@ if (process.env.SAI_REMOTE_DEBUG) {
 }
 
 let mainWindow: BrowserWindow | null = null;
+let quitConfirmed = false;
 
 const THEME_TITLEBAR: Record<string, { color: string; symbolColor: string; bg: string }> = {
   default:  { color: '#0c0f11', symbolColor: '#bec6d0', bg: '#111418' },
@@ -131,7 +135,12 @@ function createWindow() {
     }
   });
 
-  mainWindow.on('close', () => {
+  mainWindow.on('close', (e) => {
+    if (!quitConfirmed) {
+      e.preventDefault();
+      mainWindow?.webContents.send('swarm:request-quit');
+      return;
+    }
     if (mainWindow) writeSetting('windowBounds', mainWindow.getBounds());
     stopSuspendTimer();
     destroyAllTerminals();
@@ -153,6 +162,150 @@ function createWindow() {
   registerPluginHandlers(readSettings);
   registerSearchHandlers();
   registerMcpHandlers();
+  registerSwarmHandlers();
+  try {
+    const mcpHandle = swarmMcpHost.start();
+    console.log('[swarm-mcp] socket listening at', mcpHandle.socketPath);
+
+    // Bridge MCP tool calls (from socket) into the renderer over IPC.
+    const pendingMcpCalls = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; toolUseId: string; workspace: string; orchSessionId: string | undefined }>();
+    // Per-workspace orchestrator session id, registered by the renderer when
+    // ensureOrchestratorSession resolves. Used to tag synthetic claude:message
+    // events so ChatPanel renders inline tool cards for MCP calls.
+    const swarmOrchestratorSessions = new Map<string, string>();
+
+    const safeSendMcp = (channel: string, payload: unknown) => {
+      try {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send(channel, payload);
+        }
+      } catch { /* noop */ }
+    };
+
+    ipcMain.handle('swarm:set-orchestrator-session', (_evt, workspace: string, sessionId: string) => {
+      if (typeof workspace === 'string' && typeof sessionId === 'string') {
+        swarmOrchestratorSessions.set(workspace, sessionId);
+      }
+    });
+
+    swarmMcpHost.onToolCall(async (req) => {
+      const id = `mcp-${crypto.randomUUID()}`;
+      // Deterministic tool_use id so the later tool_result can be matched.
+      const toolUseId = `mcp-tooluse-${id}`;
+      const orchSessionId = swarmOrchestratorSessions.get(req.workspace);
+
+      // Inject a synthetic assistant tool_use into the orchestrator chat so a
+      // SwarmToolCardSelector card renders inline. Claude CLI's stream-json
+      // output doesn't surface tool_use blocks for MCP tools (they're absorbed
+      // into the MCP exchange), so without this fallback the orchestrator chat
+      // looks like the model "did nothing" even though tasks landed.
+      if (orchSessionId) {
+        safeSendMcp('claude:message', {
+          type: 'assistant',
+          projectPath: req.workspace,
+          scope: orchSessionId,
+          message: {
+            content: [
+              { type: 'tool_use', id: toolUseId, name: `mcp__swarm__${req.tool}`, input: req.input },
+            ],
+          },
+        });
+      }
+
+      return await new Promise<unknown>((resolve, reject) => {
+        pendingMcpCalls.set(id, { resolve, reject, toolUseId, workspace: req.workspace, orchSessionId });
+        safeSendMcp('swarm:tool-request', {
+          id,
+          tool: req.tool,
+          input: req.input,
+          workspace: req.workspace,
+        });
+        setTimeout(() => {
+          if (pendingMcpCalls.has(id)) {
+            pendingMcpCalls.delete(id);
+            reject(new Error(`tool call ${req.tool} timed out after 60s`));
+          }
+        }, 60_000);
+      });
+    });
+
+    const emitSyntheticToolResult = (
+      pending: { toolUseId: string; workspace: string; orchSessionId: string | undefined },
+      content: string,
+      isError: boolean,
+    ) => {
+      if (!pending.orchSessionId) return;
+      safeSendMcp('claude:message', {
+        type: 'user',
+        projectPath: pending.workspace,
+        scope: pending.orchSessionId,
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: pending.toolUseId, content, is_error: isError },
+          ],
+        },
+      });
+    };
+
+    ipcMain.on('swarm:tool-response', (_evt, id: string, result: unknown) => {
+      const pending = pendingMcpCalls.get(id);
+      if (!pending) return;
+      pendingMcpCalls.delete(id);
+      let serialized: string;
+      try { serialized = typeof result === 'string' ? result : JSON.stringify(result); } catch { serialized = String(result); }
+      emitSyntheticToolResult(pending, serialized, false);
+      pending.resolve(result);
+    });
+
+    ipcMain.on('swarm:tool-response-error', (_evt, id: string, error: string) => {
+      const pending = pendingMcpCalls.get(id);
+      if (!pending) return;
+      pendingMcpCalls.delete(id);
+      emitSyntheticToolResult(pending, String(error ?? 'error'), true);
+      pending.reject(new Error(error));
+    });
+
+    // Renderer-driven synthetic card emission. Used for user-initiated actions
+    // (Land / Discard clicks) that bypass the MCP onToolCall path but should
+    // still appear inline in the orchestrator chat as activity cards.
+    ipcMain.handle('swarm:emit-card', (_evt, args: { workspace: string; kind: string; input: unknown }) => {
+      if (!args || typeof args.workspace !== 'string' || typeof args.kind !== 'string') return null;
+      const orchSessionId = swarmOrchestratorSessions.get(args.workspace);
+      if (!orchSessionId) return null;
+      const toolUseId = `mcp-tooluse-${crypto.randomUUID()}`;
+      safeSendMcp('claude:message', {
+        type: 'assistant',
+        projectPath: args.workspace,
+        scope: orchSessionId,
+        message: {
+          content: [
+            { type: 'tool_use', id: toolUseId, name: `mcp__swarm__${args.kind}`, input: args.input ?? {} },
+          ],
+        },
+      });
+      return { id: toolUseId };
+    });
+
+    ipcMain.on('swarm:emit-card-result', (_evt, args: { workspace: string; id: string; result: unknown; isError?: boolean }) => {
+      if (!args || typeof args.workspace !== 'string' || typeof args.id !== 'string') return;
+      const orchSessionId = swarmOrchestratorSessions.get(args.workspace);
+      if (!orchSessionId) return;
+      let serialized: string;
+      try { serialized = typeof args.result === 'string' ? args.result : JSON.stringify(args.result); } catch { serialized = String(args.result); }
+      safeSendMcp('claude:message', {
+        type: 'user',
+        projectPath: args.workspace,
+        scope: orchSessionId,
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: args.id, content: serialized, is_error: !!args.isError },
+          ],
+        },
+      });
+    });
+  } catch (err) {
+    console.error('[swarm-mcp] failed to start host:', err);
+  }
   registerUpdater(mainWindow!);
   registerUsageHandlers(mainWindow!);
   startSuspendTimer(mainWindow, () => {
@@ -238,6 +391,10 @@ function createWindow() {
     else mainWindow.maximize();
   });
   ipcMain.on('window:close', () => mainWindow?.close());
+  ipcMain.on('app:confirmQuit', () => {
+    quitConfirmed = true;
+    mainWindow?.close();
+  });
 
   ipcMain.handle('github:syncNow', async () => {
     const auth = getAuthInfo();
@@ -339,10 +496,14 @@ process.on('uncaughtException', (err) => {
 });
 
 app.whenReady().then(createWindow);
+app.on('before-quit', () => {
+  try { swarmMcpHost.stop(); } catch { /* noop */ }
+});
 app.on('window-all-closed', () => {
   stopSuspendTimer();
   destroyUsagePolling();
   destroyAllTerminals();
   if (mainWindow) destroyAll(mainWindow);
+  try { swarmMcpHost.stop(); } catch { /* noop */ }
   app.quit();
 });

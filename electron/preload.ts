@@ -17,7 +17,8 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.on('terminal:data', listener);
     return () => ipcRenderer.removeListener('terminal:data', listener);
   },
-  claudeStart: (cwd: string, scope?: string) => ipcRenderer.invoke('claude:start', cwd, scope),
+  claudeStart: (cwd: string, scope?: string, kind?: string, orchestratorContext?: any, scopeCwd?: string) =>
+    ipcRenderer.invoke('claude:start', cwd, scope, kind, orchestratorContext, scopeCwd),
   claudeSend: (projectPath: string, message: string, imagePaths?: string[], permMode?: string, effort?: string, model?: string, scope?: string) => ipcRenderer.send('claude:send', projectPath, message, imagePaths, permMode, effort, model, scope),
   claudeGenerateCommitMessage: (cwd: string, aiProvider?: string) => ipcRenderer.invoke('claude:generateCommitMessage', cwd, aiProvider),
   claudeGenerateTitle: (cwd: string, userMessage: string, aiProvider?: string) => ipcRenderer.invoke('claude:generateTitle', cwd, userMessage, aiProvider),
@@ -148,6 +149,12 @@ contextBridge.exposeInMainWorld('sai', {
   windowMinimize: () => ipcRenderer.send('window:minimize'),
   windowMaximizeToggle: () => ipcRenderer.send('window:maximizeToggle'),
   windowClose: () => ipcRenderer.send('window:close'),
+  confirmQuit: () => ipcRenderer.send('app:confirmQuit'),
+  onRequestQuit: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('swarm:request-quit', listener);
+    return () => ipcRenderer.removeListener('swarm:request-quit', listener);
+  },
   windowOnMaximizedChange: (callback: (maximized: boolean) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, maximized: boolean) => callback(maximized);
     ipcRenderer.on('window:maximizedChange', listener);
@@ -208,4 +215,31 @@ contextBridge.exposeInMainWorld('sai', {
   mcpRemove: (name: string) => ipcRenderer.invoke('mcp:remove', name),
   mcpUpdate: (name: string, updates: any) => ipcRenderer.invoke('mcp:update', name, updates),
   mcpRegistryList: () => ipcRenderer.invoke('mcp:registryList'),
+  onSwarmToolRequest: (cb: (req: { id: string; tool: string; input: any; workspace: string }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, req: { id: string; tool: string; input: any; workspace: string }) => cb(req);
+    ipcRenderer.on('swarm:tool-request', listener);
+    return () => ipcRenderer.removeListener('swarm:tool-request', listener);
+  },
+  respondSwarmTool: (id: string, result: unknown) => ipcRenderer.send('swarm:tool-response', id, result),
+  respondSwarmToolError: (id: string, error: string) => ipcRenderer.send('swarm:tool-response-error', id, error),
+  swarmSetOrchestratorSession: (workspace: string, sessionId: string) =>
+    ipcRenderer.invoke('swarm:set-orchestrator-session', workspace, sessionId),
+  swarmEmitCard: (workspace: string, kind: string, input: any) =>
+    ipcRenderer.invoke('swarm:emit-card', { workspace, kind, input }),
+  swarmEmitCardResult: (workspace: string, id: string, result: any, isError?: boolean) =>
+    ipcRenderer.send('swarm:emit-card-result', { workspace, id, result, isError }),
+  swarm: {
+    worktreeAdd: (projectPath: string, taskId: string, branch: string, baseBranch: string) =>
+      ipcRenderer.invoke('swarm:worktree-add', projectPath, taskId, branch, baseBranch),
+    worktreeRemove: (projectPath: string, worktreePath: string, branch: string) =>
+      ipcRenderer.invoke('swarm:worktree-remove', projectPath, worktreePath, branch),
+    canFastForward: (projectPath: string, source: string, target: string) =>
+      ipcRenderer.invoke('swarm:can-ff', projectPath, source, target),
+    ffMerge: (projectPath: string, source: string) =>
+      ipcRenderer.invoke('swarm:ff-merge', projectPath, source),
+    diffStats: (cwd: string, baseBranch: string, branch: string) =>
+      ipcRenderer.invoke('swarm:diff-stats', cwd, baseBranch, branch),
+    branchDiff: (cwd: string, baseBranch: string, branch: string) =>
+      ipcRenderer.invoke('swarm:branch-diff', cwd, baseBranch, branch),
+  },
 });

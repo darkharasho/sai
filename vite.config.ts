@@ -28,6 +28,17 @@ export default defineConfig({
           args.reload();
         },
       },
+      {
+        entry: 'electron/swarm-mcp-server.ts',
+        vite: {
+          build: {
+            rollupOptions: {
+              external: ['electron'],
+              output: { format: 'cjs' },
+            },
+          },
+        },
+      },
     ]),
     renderer(),
   ],
