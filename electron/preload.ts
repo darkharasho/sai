@@ -140,6 +140,11 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.on('workspace:suspended', listener);
     return () => ipcRenderer.removeListener('workspace:suspended', listener);
   },
+  metaWorkspaceList: () => ipcRenderer.invoke('metaWorkspace:list'),
+  metaWorkspaceCreate: (input: any) => ipcRenderer.invoke('metaWorkspace:create', input),
+  metaWorkspaceUpdate: (id: string, patch: any) => ipcRenderer.invoke('metaWorkspace:update', id, patch),
+  metaWorkspaceActivate: (id: string) => ipcRenderer.invoke('metaWorkspace:activate', id),
+  metaWorkspaceDelete: (id: string) => ipcRenderer.invoke('metaWorkspace:delete', id),
   saveImage: (base64Data: string) => ipcRenderer.invoke('project:saveImage', base64Data),
   settingsGet: (key: string, defaultValue?: any) => ipcRenderer.invoke('settings:get', key, defaultValue),
   settingsSet: (key: string, value: any) => ipcRenderer.invoke('settings:set', key, value),

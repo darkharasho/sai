@@ -273,6 +273,11 @@ export interface SaiSearchApi {
 
 declare global {
   interface SaiBridge extends Record<string, any> {
+    metaWorkspaceList?: () => Promise<any[]>;
+    metaWorkspaceCreate?: (input: any) => Promise<any>;
+    metaWorkspaceUpdate?: (id: string, patch: any) => Promise<any>;
+    metaWorkspaceActivate?: (id: string) => Promise<any>;
+    metaWorkspaceDelete?: (id: string) => Promise<boolean>;
     geminiSetSessionId?: (projectPath: string, sessionId: string | undefined, scope?: string) => void;
     searchRun?: SaiSearchApi['searchRun'];
     searchReplaceFile?: SaiSearchApi['searchReplaceFile'];

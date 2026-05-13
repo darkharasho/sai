@@ -20,6 +20,13 @@ import { registerScaffoldHandler } from './services/scaffold';
 import { registerSearchHandlers } from './services/search';
 import { registerSwarmHandlers } from './services/swarm';
 import * as swarmMcpHost from './services/swarmMcpHost';
+import {
+  listMetaWorkspaces, createMetaWorkspace, updateMetaWorkspace,
+  deleteMetaWorkspace, getMetaWorkspace,
+} from './services/metaWorkspace';
+import {
+  syntheticRootFor, materialize, reconcile, deleteSyntheticRoot, resolveLinkName,
+} from './services/metaSyntheticRoot';
 
 // Allow E2E tests to isolate userData
 if (process.env.SAI_USER_DATA_DIR) {
@@ -337,6 +344,52 @@ function createWindow() {
 
   ipcMain.handle('workspace:suspend', (_event, projectPath: string) => {
     suspend(projectPath, mainWindow!);
+  });
+
+  ipcMain.handle('metaWorkspace:list', () => listMetaWorkspaces());
+
+  ipcMain.handle('metaWorkspace:create', (_e, input: {
+    name: string;
+    projects: { path: string; linkName?: string; description?: string }[];
+  }) => {
+    const taken = new Set<string>();
+    const projects = input.projects.map(p => {
+      const base = p.linkName || path.basename(p.path);
+      const name = resolveLinkName(base, taken);
+      taken.add(name);
+      return { path: p.path, linkName: name, description: p.description };
+    });
+    const meta = createMetaWorkspace({ name: input.name, projects });
+    const root = syntheticRootFor(meta.id);
+    const runtime = materialize(meta, root);
+    return { meta, syntheticRoot: root, projects: runtime };
+  });
+
+  ipcMain.handle('metaWorkspace:update', (_e, id: string, patch: any) => {
+    const updated = updateMetaWorkspace(id, patch);
+    if (!updated) return null;
+    const root = syntheticRootFor(updated.id);
+    const runtime = reconcile(updated, root);
+    return { meta: updated, syntheticRoot: root, projects: runtime };
+  });
+
+  ipcMain.handle('metaWorkspace:activate', (_e, id: string) => {
+    const meta = getMetaWorkspace(id);
+    if (!meta) return null;
+    const root = syntheticRootFor(meta.id);
+    const runtime = reconcile(meta, root);
+    updateMetaWorkspace(meta.id, { lastActivity: Date.now() });
+    return { meta, syntheticRoot: root, projects: runtime };
+  });
+
+  ipcMain.handle('metaWorkspace:delete', (_e, id: string) => {
+    const meta = getMetaWorkspace(id);
+    if (meta) {
+      const root = syntheticRootFor(meta.id);
+      try { deleteSyntheticRoot(root); } catch (err) { console.warn('[sai] meta delete failed:', err); }
+    }
+    deleteMetaWorkspace(id);
+    return true;
   });
 
   // Settings persistence (works across dev/prod)
