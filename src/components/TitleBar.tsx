@@ -226,37 +226,43 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                       ))}
                     </>
                   )}
-                  {suspended.length > 0 && (
+                  {(suspended.length > 0 || recent.length > 0) && (
                     <>
                       {active.length > 0 && <div className="dropdown-divider" />}
-                      <div className="dropdown-label">Suspended</div>
-                      {suspended.map(w => (
-                        <button
-                          key={w.projectPath}
-                          className={`dropdown-item workspace-item ${w.projectPath === projectPath ? 'active' : ''}`}
-                          onClick={() => { onProjectChange(w.projectPath); setOpen(false); }}
-                        >
-                          <span className="workspace-status-dot workspace-dot-suspended" />
-                          <span className="dropdown-item-name">{basename(w.projectPath)}</span>
-                          <span className="dropdown-item-path">{w.projectPath}</span>
-                        </button>
-                      ))}
-                    </>
-                  )}
-                  {recent.length > 0 && (
-                    <>
-                      {(active.length > 0 || suspended.length > 0) && <div className="dropdown-divider" />}
-                      <div className="dropdown-label">Recent</div>
-                      {recent.map(w => (
-                        <button
-                          key={w.projectPath}
-                          className={`dropdown-item workspace-item ${w.projectPath === projectPath ? 'active' : ''}`}
-                          onClick={() => { onProjectChange(w.projectPath); setOpen(false); }}
-                        >
-                          <span className="dropdown-item-name">{basename(w.projectPath)}</span>
-                          <span className="dropdown-item-path">{w.projectPath}</span>
-                        </button>
-                      ))}
+                      <div className="dropdown-inactive-scroll">
+                        {suspended.length > 0 && (
+                          <>
+                            <div className="dropdown-label">Suspended</div>
+                            {suspended.map(w => (
+                              <button
+                                key={w.projectPath}
+                                className={`dropdown-item workspace-item ${w.projectPath === projectPath ? 'active' : ''}`}
+                                onClick={() => { onProjectChange(w.projectPath); setOpen(false); }}
+                              >
+                                <span className="workspace-status-dot workspace-dot-suspended" />
+                                <span className="dropdown-item-name">{basename(w.projectPath)}</span>
+                                <span className="dropdown-item-path">{w.projectPath}</span>
+                              </button>
+                            ))}
+                          </>
+                        )}
+                        {recent.length > 0 && (
+                          <>
+                            {suspended.length > 0 && <div className="dropdown-divider" />}
+                            <div className="dropdown-label">Recent</div>
+                            {recent.map(w => (
+                              <button
+                                key={w.projectPath}
+                                className={`dropdown-item workspace-item ${w.projectPath === projectPath ? 'active' : ''}`}
+                                onClick={() => { onProjectChange(w.projectPath); setOpen(false); }}
+                              >
+                                <span className="dropdown-item-name">{basename(w.projectPath)}</span>
+                                <span className="dropdown-item-path">{w.projectPath}</span>
+                              </button>
+                            ))}
+                          </>
+                        )}
+                      </div>
                     </>
                   )}
                   <div className="dropdown-divider" />
@@ -773,6 +779,24 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           height: 1px;
           background: var(--border);
           margin: 4px 0;
+        }
+        .dropdown-inactive-scroll {
+          max-height: 280px;
+          overflow-y: auto;
+          overscroll-behavior: contain;
+        }
+        .dropdown-inactive-scroll::-webkit-scrollbar {
+          width: 8px;
+        }
+        .dropdown-inactive-scroll::-webkit-scrollbar-thumb {
+          background: var(--border);
+          border-radius: 4px;
+        }
+        .dropdown-inactive-scroll::-webkit-scrollbar-thumb:hover {
+          background: var(--text-muted);
+        }
+        .dropdown-inactive-scroll::-webkit-scrollbar-track {
+          background: transparent;
         }
         .workspace-item {
           flex-direction: row !important;

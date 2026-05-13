@@ -433,7 +433,7 @@ function createWindow() {
   function addRecentProject(projectPath: string) {
     const recent = getRecentProjects().filter(p => p !== projectPath);
     recent.unshift(projectPath);
-    fs.writeFileSync(recentProjectsFile, JSON.stringify(recent.slice(0, 10)));
+    fs.writeFileSync(recentProjectsFile, JSON.stringify(recent.slice(0, 50)));
   }
 
   ipcMain.handle('project:saveImage', async (_event, base64Data: string) => {
