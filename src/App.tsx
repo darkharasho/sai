@@ -3093,6 +3093,7 @@ export default function App() {
                     chatSlot={orchChatSlot}
                     orchestratorSessionId={orchSessionId}
                     projectPath={wsPath}
+                    projectLabel={activeMetaRuntime && activeMetaRuntime.syntheticRoot === wsPath ? activeMetaRuntime.meta.name : undefined}
                     orchestratorProvider={orchProvider}
                     orchestratorModel={orchModel}
                     onProviderModelChange={(nextProvider, nextModel) => {

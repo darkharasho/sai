@@ -31,6 +31,8 @@ interface Props {
   orchestratorModel?: string | null;
   onProviderModelChange?: (provider: AIProvider, model: string) => void;
   chatSlot?: React.ReactNode;       // App.tsx can pass an embedded ChatPanel here
+  /** When the active workspace is a meta workspace, its display name replaces the synthetic-root UUID. */
+  projectLabel?: string;
 }
 
 function basename(p: string): string {
@@ -53,8 +55,9 @@ export default function OrchestratorView({
   orchestratorProvider, orchestratorModel,
   onProviderModelChange,
   chatSlot,
+  projectLabel,
 }: Props) {
-  const project = basename(projectPath) || 'project';
+  const project = projectLabel || basename(projectPath) || 'project';
   const runtime = formatRuntime(stats.runtimeSec);
   const pickerProvider: AIProvider =
     orchestratorProvider === 'codex' || orchestratorProvider === 'gemini'
