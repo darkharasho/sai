@@ -76,15 +76,22 @@ export function parseSynthesizeOutput(raw: string): SynthesizeResult {
 export const BRAINSTORM_SYSTEM_PROMPT = [
   'You are helping the user think through a brand-new software project before they create the folder and scaffolding.',
   'Your job is to explore feasibility, surface trade-offs, ask about constraints, and propose options.',
-  'Keep responses concise and conversational. Do NOT produce code or file structures.',
-  'When the user asks you to synthesize, output strict JSON with two fields:',
-  '  - projectName: kebab-case, ≤ 40 chars',
-  '  - context: a 2–4 sentence summary suitable for a CLAUDE.md "Project Context" section',
-  'No other text when synthesizing — just the JSON object.',
+  'Keep responses concise and conversational. Use plain prose — do NOT produce code, file structures, or JSON.',
+  'Even if the user asks you to summarize or wrap up, respond in natural language. Do not emit JSON in this conversation.',
 ].join('\n');
 
-export const SYNTHESIZE_PROMPT =
-  'Synthesize our conversation. Respond with ONLY a JSON object: {"projectName":"...","context":"..."}. No prose, no code fences.';
+// Synthesize prompt is self-contained: it instructs the model on the exact
+// JSON format inline, so the system prompt can stay free of JSON guidance
+// (which would otherwise leak into regular replies whenever the user said
+// anything like "summarize" or "plan it").
+export const SYNTHESIZE_PROMPT = [
+  '[INTERNAL TOOL CALL — not a user message]',
+  'Produce a JSON object summarizing the conversation above. Respond with ONLY the JSON, no prose, no code fences.',
+  'Schema:',
+  '  - projectName: kebab-case, ≤ 40 chars',
+  '  - context: 2–4 sentences suitable for a CLAUDE.md "Project Context" section',
+  'Example: {"projectName":"my-app","context":"A short summary."}',
+].join('\n');
 
 // Build args for a stateless one-shot claude invocation. Each turn carries
 // the full conversation in the prompt rather than relying on claude's

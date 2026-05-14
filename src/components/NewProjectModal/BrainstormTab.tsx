@@ -159,9 +159,11 @@ function Message({ role, text, streaming, showDivider }: { role: 'user' | 'assis
       >
         {isUser ? (
           <div style={{ whiteSpace: 'pre-wrap' }}>{text}</div>
-        ) : (
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
-        )}
+        ) : (() => {
+          const card = tryParseProjectPreview(text);
+          if (card) return <ProjectPreviewCard projectName={card.projectName} context={card.context} />;
+          return <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>;
+        })()}
       </div>
       <style>{`
         .brainstorm-msg p { margin: 0 0 6px 0; }
@@ -205,6 +207,49 @@ function Message({ role, text, streaming, showDivider }: { role: 'user' | 'assis
           color: var(--text-muted);
         }
       `}</style>
+    </div>
+  );
+}
+
+// Detect a stray synthesize-shaped JSON that occasionally leaks into chat
+// (e.g. when the user asks claude to "summarize" mid-conversation).
+function tryParseProjectPreview(text: string): { projectName: string; context: string } | null {
+  const trimmed = text.trim();
+  // Strip code fences if present
+  const fenceMatch = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/);
+  const candidate = fenceMatch ? fenceMatch[1].trim() : trimmed;
+  if (!candidate.startsWith('{') || !candidate.endsWith('}')) return null;
+  try {
+    const parsed = JSON.parse(candidate);
+    if (typeof parsed.projectName !== 'string' || typeof parsed.context !== 'string') return null;
+    if (!parsed.projectName.trim() || !parsed.context.trim()) return null;
+    return { projectName: parsed.projectName.trim(), context: parsed.context.trim() };
+  } catch {
+    return null;
+  }
+}
+
+function ProjectPreviewCard({ projectName, context }: { projectName: string; context: string }) {
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 8,
+      padding: 12,
+      background: 'rgba(199,145,12,0.05)',
+      border: '1px solid rgba(199,145,12,0.25)',
+      borderRadius: 6,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--accent)' }}>
+        <Sparkles size={11} />
+        Project preview
+      </div>
+      <div style={{
+        fontFamily: "'JetBrains Mono', monospace",
+        fontSize: 13, fontWeight: 600, color: 'var(--text)',
+      }}>{projectName}</div>
+      <div style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.55 }}>{context}</div>
+      <div style={{ fontSize: 10.5, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+        Hit <span style={{ color: 'var(--accent)' }}>Use this →</span> below to apply.
+      </div>
     </div>
   );
 }
