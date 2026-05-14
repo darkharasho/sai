@@ -86,22 +86,32 @@ export const BRAINSTORM_SYSTEM_PROMPT = [
 export const SYNTHESIZE_PROMPT =
   'Synthesize our conversation. Respond with ONLY a JSON object: {"projectName":"...","context":"..."}. No prose, no code fences.';
 
-export function buildClaudeArgs(opts: {
-  userMessage: string;
-  claudeSessionId: string | undefined;
-}): string[] {
-  const args: string[] = [
-    '-p', opts.userMessage,
+// Build args for a stateless one-shot claude invocation. Each turn carries
+// the full conversation in the prompt rather than relying on claude's
+// session resume (which is unreliable after `-p` runs in some claude CLI
+// versions — sessions aren't always discoverable by `--resume` afterwards).
+export function buildClaudeArgs(opts: { prompt: string }): string[] {
+  return [
+    '-p', opts.prompt,
     '--output-format', 'stream-json',
     '--verbose',
     '--max-turns', '1',
+    '--append-system-prompt', BRAINSTORM_SYSTEM_PROMPT,
   ];
-  if (opts.claudeSessionId) {
-    args.push('--resume', opts.claudeSessionId);
-  } else {
-    args.push('--append-system-prompt', BRAINSTORM_SYSTEM_PROMPT);
+}
+
+// Compose a single prompt that carries the full prior transcript followed
+// by the new user message. Claude treats the whole thing as the user's
+// turn, but the embedded transcript gives it the context it needs.
+export function composeTurnPrompt(transcript: TranscriptTurn[], userMessage: string): string {
+  if (transcript.length === 0) return userMessage;
+  const lines: string[] = ['Conversation so far:', ''];
+  for (const turn of transcript) {
+    lines.push(turn.role === 'user' ? `User: ${turn.content}` : `You: ${turn.content}`);
+    lines.push('');
   }
-  return args;
+  lines.push(`User's next message: ${userMessage}`);
+  return lines.join('\n');
 }
 
 export interface StreamAccumulator {
@@ -161,10 +171,8 @@ export async function runTurn(args: RunTurnArgs): Promise<RunTurnResult> {
   const session = getSession(args.sessionId);
   if (!session) return { ok: false, error: 'Session not found' };
 
-  const cliArgs = buildClaudeArgs({
-    userMessage: args.userMessage,
-    claudeSessionId: session.claudeSessionId,
-  });
+  const prompt = composeTurnPrompt(session.transcript, args.userMessage);
+  const cliArgs = buildClaudeArgs({ prompt });
 
   return await new Promise<RunTurnResult>((resolve) => {
     let proc;
@@ -202,7 +210,6 @@ export async function runTurn(args: RunTurnArgs): Promise<RunTurnResult> {
         resolve({ ok: false, error: stderrBuf.trim() || `claude exited with code ${code}` });
         return;
       }
-      if (acc.sessionId) session.claudeSessionId = acc.sessionId;
       session.transcript.push({ role: 'user', content: args.userMessage });
       session.transcript.push({ role: 'assistant', content: acc.fullText });
       resolve({ ok: true, text: acc.fullText });
