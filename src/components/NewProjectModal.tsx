@@ -302,27 +302,10 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
             Cancel
           </button>
           {tab === 'brainstorm' ? (
-            <>
-              {pushedBack && (
-                <button
-                  onClick={() => handleUseThis({ force: true })}
-                  disabled={synthesizing}
-                  title="Skip the clarifying question and create the project with what's been said"
-                  style={{
-                    background: 'none',
-                    border: '1px solid var(--border)',
-                    color: 'var(--text-muted)',
-                    borderRadius: 5, padding: '7px 12px', fontSize: 12,
-                    cursor: synthesizing ? 'not-allowed' : 'pointer',
-                    display: 'flex', alignItems: 'center', gap: 6,
-                  }}
-                >
-                  Use anyway →
-                </button>
-              )}
             <button
-              onClick={() => handleUseThis()}
+              onClick={() => handleUseThis(pushedBack ? { force: true } : undefined)}
               disabled={!brainstorm.hasReply || synthesizing}
+              title={pushedBack ? 'Skip the clarifying question and create the project with what we have' : undefined}
               style={{
                 background: 'none',
                 border: `1px solid ${brainstorm.hasReply && !synthesizing ? 'var(--accent)' : 'var(--border)'}`,
@@ -333,9 +316,12 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
               }}
             >
               <Sparkles size={13} />
-              {synthesizing ? 'Synthesizing…' : 'Use this →'}
+              {synthesizing
+                ? 'Synthesizing…'
+                : pushedBack
+                  ? 'Use this anyway →'
+                  : 'Use this →'}
             </button>
-            </>
           ) : (
             createdPath ? (
               <button
