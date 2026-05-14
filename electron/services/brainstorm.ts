@@ -163,6 +163,7 @@ import { ipcMain, BrowserWindow } from 'electron';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
+import { enrichedEnv } from './shellEnv';
 
 const IS_WIN = process.platform === 'win32';
 
@@ -186,6 +187,7 @@ export async function runTurn(args: RunTurnArgs): Promise<RunTurnResult> {
     try {
       proc = spawn('claude', cliArgs, {
         cwd: os.tmpdir(),
+        env: enrichedEnv(),
         stdio: ['pipe', 'pipe', 'pipe'],
         shell: IS_WIN,
       });
@@ -208,13 +210,18 @@ export async function runTurn(args: RunTurnArgs): Promise<RunTurnResult> {
     proc.stderr?.on('data', (data: Buffer) => { stderrBuf += data.toString(); });
 
     proc.on('error', (e) => {
+      console.error('[brainstorm] claude spawn error:', e);
       resolve({ ok: false, error: e.message });
     });
 
     proc.on('exit', (code) => {
       if (buffer.trim()) processStreamLine(buffer, acc, args.onChunk);
       if (code !== 0 && !acc.fullText) {
-        resolve({ ok: false, error: stderrBuf.trim() || `claude exited with code ${code}` });
+        // Log the failure so we have something to look at even when stderr
+        // is empty (intermittent claude CLI exits with no diagnostic output).
+        console.error('[brainstorm] claude exited', code, 'stderr:', stderrBuf || '(empty)');
+        const detail = stderrBuf.trim() || `claude exited with code ${code} (no stderr output)`;
+        resolve({ ok: false, error: detail });
         return;
       }
       session.transcript.push({ role: 'user', content: args.userMessage });
