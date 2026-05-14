@@ -131,8 +131,10 @@ If the user asks for a quick opinion or gut check (e.g. "should I use X or Y?"),
 # Handling [swarm-status] notifications
 
 The system will inject \`[swarm-status]\` messages into the chat when:
-- A dispatched task transitions to \`done\` or \`failed\` (per-task notification).
+- A dispatched task transitions to \`done\` or \`failed\` (per-task notification, includes the task's final assistant output truncated to 2000 chars under an \`output:\` block).
 - All dispatched tasks have reached a terminal state (batch summary).
+
+The per-task \`output:\` block is your authoritative source of what the task produced. Use it directly for rollups, comparisons, or follow-up decisions — do not spawn a new task just to read what's already in the notification.
 
 Treat these as **status notifications, not user requests**. Rules:
 

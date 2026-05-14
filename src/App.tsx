@@ -1673,6 +1673,34 @@ export default function App() {
                 if (kind === 'task_failed' && (statusPatch as any).reason) {
                   lines.push(`  reason: ${(statusPatch as any).reason}`);
                 }
+                // Include the task's final assistant text so the orchestrator
+                // can synthesize rollups across tasks. Prefer the live buffer
+                // (background task) then fall back to the workspace session's
+                // persisted messages (focused task). Truncated to 2000 chars.
+                const TASK_OUTPUT_CAP = 2000;
+                const collectTextFromMessages = (msgs: ChatMessage[] | undefined): string => {
+                  if (!msgs || msgs.length === 0) return '';
+                  for (let i = msgs.length - 1; i >= 0; i--) {
+                    const m = msgs[i];
+                    if (m.role === 'assistant' && typeof m.content === 'string' && m.content.trim()) {
+                      return m.content;
+                    }
+                  }
+                  return '';
+                };
+                let taskOutput = collectTextFromMessages(taskMessagesBufferRef.current.get(patchedTask.sessionId));
+                if (!taskOutput) {
+                  const wsForTask = workspacesRef.current.get(msg.projectPath);
+                  const session = wsForTask?.sessions.find(s => s.id === patchedTask.sessionId);
+                  taskOutput = collectTextFromMessages(session?.messages);
+                }
+                if (taskOutput) {
+                  const trimmed = taskOutput.trim();
+                  const clipped = trimmed.length > TASK_OUTPUT_CAP
+                    ? trimmed.slice(0, TASK_OUTPUT_CAP) + `\n…[truncated, ${trimmed.length - TASK_OUTPUT_CAP} more chars]`
+                    : trimmed;
+                  lines.push(`  output:\n${clipped.split('\n').map(l => `    ${l}`).join('\n')}`);
+                }
                 lines.push('  Reply with a follow-up action if needed, otherwise just say "noted".');
                 try {
                   (window.sai as any).claudeSend?.(
