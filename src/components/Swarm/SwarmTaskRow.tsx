@@ -16,6 +16,8 @@ interface Props {
    * now, distinct from the coarser `status === 'streaming'` state.
    */
   isStreaming?: boolean;
+  /** Meta-workspace project link name; rendered as a chip when set. */
+  projectLinkName?: string;
 }
 
 const STATUS_COLOR: Record<SwarmTaskStatus, string> = {
@@ -39,7 +41,11 @@ export default function SwarmTaskRow(p: Props) {
     >
       <div className="row-main">
         <div className="row-title">{p.title}</div>
-        <div className="row-sub">{p.status} · {p.toolCallCount} tools</div>
+        <div className="row-sub">
+          {p.projectLinkName && <span className="row-project">{p.projectLinkName}</span>}
+          {p.projectLinkName && ' · '}
+          {p.status} · {p.toolCallCount} tools
+        </div>
       </div>
       <span
         className={`row-icon ${p.isStreaming ? 'pulsing' : ''}`}
@@ -58,6 +64,16 @@ export default function SwarmTaskRow(p: Props) {
         </button>
       )}
       <style>{`
+        .swarm-row .row-project {
+          display: inline-block;
+          font-size: 10px;
+          padding: 0 5px;
+          margin-right: 2px;
+          border-radius: 4px;
+          background: var(--bg-elevated);
+          border: 1px solid var(--border);
+          color: var(--text-muted);
+        }
         .swarm-row .row-icon.pulsing {
           animation: swarm-row-pulse 1.5s ease-in-out infinite;
         }

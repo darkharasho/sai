@@ -46,6 +46,7 @@ export default function SwarmSidebar({ tasks, selectedId, onSelect, onNewTask, o
             onClick={() => onSelect(t.id)}
             onDiscard={onDiscard ? () => onDiscard(t) : undefined}
             isStreaming={streamingTaskIds?.has(t.id) ?? false}
+            projectLinkName={t.projectLinkName}
           />
         ))}
       </div>

@@ -17,6 +17,12 @@ export default function SwarmTaskHeader({ task, onPause, onDiscard, onLand, onOp
     <div className="swarm-task-header">
       <div className="title">{task.title}</div>
       <div className="meta">
+        {task.projectLinkName && (
+          <>
+            <span className="project-chip" title={task.projectPath || undefined}>{task.projectLinkName}</span>
+            <span className="dot">·</span>
+          </>
+        )}
         <span className="branch">{task.branch}</span>
         <span className="dot">·</span>
         <span className="muted">{task.provider}/{task.model}</span>
@@ -44,6 +50,14 @@ export default function SwarmTaskHeader({ task, onPause, onDiscard, onLand, onOp
         .swarm-task-header .title { font-weight: 600; color: var(--text); }
         .swarm-task-header .meta { display: flex; align-items: center; gap: 6px; color: var(--text-muted); }
         .swarm-task-header .branch { font-family: 'Geist Mono', monospace; }
+        .swarm-task-header .project-chip {
+          font-size: 10px;
+          padding: 1px 6px;
+          border-radius: 4px;
+          background: var(--bg-elevated);
+          border: 1px solid var(--border);
+          color: var(--text-muted);
+        }
         .swarm-task-header .dot { opacity: 0.5; }
         .swarm-task-header .actions { margin-left: auto; display: flex; gap: 4px; }
         .swarm-task-header .actions button {
