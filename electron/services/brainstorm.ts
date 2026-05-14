@@ -198,10 +198,13 @@ export async function runTurn(args: RunTurnArgs): Promise<RunTurnResult> {
 
     const acc: StreamAccumulator = { fullText: '', sessionId: undefined };
     let buffer = '';
+    let stdoutRaw = '';
     let stderrBuf = '';
 
     proc.stdout?.on('data', (data: Buffer) => {
-      buffer += data.toString();
+      const chunk = data.toString();
+      stdoutRaw += chunk;
+      buffer += chunk;
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
       for (const line of lines) processStreamLine(line, acc, args.onChunk);
@@ -217,10 +220,14 @@ export async function runTurn(args: RunTurnArgs): Promise<RunTurnResult> {
     proc.on('exit', (code) => {
       if (buffer.trim()) processStreamLine(buffer, acc, args.onChunk);
       if (code !== 0 && !acc.fullText) {
-        // Log the failure so we have something to look at even when stderr
-        // is empty (intermittent claude CLI exits with no diagnostic output).
-        console.error('[brainstorm] claude exited', code, 'stderr:', stderrBuf || '(empty)');
-        const detail = stderrBuf.trim() || `claude exited with code ${code} (no stderr output)`;
+        // Dump everything we have so we can actually debug. Claude in -p
+        // mode sometimes prints errors to stdout (not stderr) and the
+        // stream-json line parser silently drops them.
+        console.error('[brainstorm] claude exited', code);
+        console.error('[brainstorm] args:', cliArgs);
+        console.error('[brainstorm] stdout:', stdoutRaw || '(empty)');
+        console.error('[brainstorm] stderr:', stderrBuf || '(empty)');
+        const detail = stderrBuf.trim() || stdoutRaw.trim() || `claude exited with code ${code}`;
         resolve({ ok: false, error: detail });
         return;
       }
