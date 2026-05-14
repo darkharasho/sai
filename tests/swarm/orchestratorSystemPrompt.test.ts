@@ -63,6 +63,11 @@ describe('buildOrchestratorSystemPrompt', () => {
     expect(prompt).toMatch(/Be terse|No apologies|Terse\./);
   });
 
+  it('includes [swarm-status] notification guidance', () => {
+    expect(prompt).toContain('[swarm-status]');
+    expect(prompt).toContain('Handling [swarm-status] notifications');
+  });
+
   it('changes when context changes (workspace name interpolation actually works)', () => {
     const other = buildOrchestratorSystemPrompt({ ...sampleCtx, workspaceName: 'other-repo' });
     expect(other).toContain('"other-repo"');

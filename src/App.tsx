@@ -469,6 +469,25 @@ export default function App() {
               }
             })
             .catch(() => { /* best-effort */ });
+          const orchSessionId2 = orchestratorSessionIdByWsRef.current.get(ws);
+          if (orchSessionId2) {
+            const lines: string[] = [];
+            lines.push(`[swarm-status] batch complete.`);
+            lines.push(`  totals: ${totalTasks} task(s) in ${Math.round(durationMs / 1000)}s`);
+            lines.push(`  landed: ${batchLanded}, discarded: ${batchDiscarded}, failed: ${batchFailed}`);
+            lines.push(`  All dispatched tasks have reached a terminal state. Summarize the outcome for the user, or stay silent if you already reported it.`);
+            try {
+              (window.sai as any).claudeSend?.(
+                ws,
+                lines.join('\n'),
+                undefined,
+                'default',
+                undefined,
+                undefined,
+                orchSessionId2,
+              );
+            } catch { /* best-effort */ }
+          }
         }
         state.startCount = 0;
         state.startedAt = 0;
@@ -1637,6 +1656,36 @@ export default function App() {
                   }
                 })
                 .catch(() => { /* best-effort */ });
+              // Notify the orchestrator AI so it can react (spawn a follow-up,
+              // abandon a chain, summarize, etc). The orchestrator's system
+              // prompt teaches it to reply only when action is required.
+              const orchSessionId = orchestratorSessionIdByWsRef.current.get(msg.projectPath);
+              if (orchSessionId) {
+                const outcome = statusPatch.status === 'done' ? 'completed' : 'failed';
+                const lines: string[] = [];
+                lines.push(`[swarm-status] task ${patchedTask.title.replace(/[\r\n]+/g, ' ').slice(0, 80)} ${outcome}.`);
+                if (patchedTask.projectLinkName) lines.push(`  project: ${patchedTask.projectLinkName}`);
+                lines.push(`  branch: ${patchedTask.branch}`);
+                lines.push(`  duration: ${Math.round((statusPatch.lastActivityAt - patchedTask.createdAt) / 1000)}s, tools: ${patchedTask.toolCallCount}`);
+                if (kind === 'task_completed' && stats) {
+                  lines.push(`  diff: +${stats.additions} -${stats.deletions}`);
+                }
+                if (kind === 'task_failed' && (statusPatch as any).reason) {
+                  lines.push(`  reason: ${(statusPatch as any).reason}`);
+                }
+                lines.push('  Reply with a follow-up action if needed, otherwise just say "noted".');
+                try {
+                  (window.sai as any).claudeSend?.(
+                    msg.projectPath,
+                    lines.join('\n'),
+                    undefined,
+                    'default',
+                    undefined,
+                    undefined,
+                    orchSessionId,
+                  );
+                } catch { /* best-effort */ }
+              }
             }
           }
         }
