@@ -190,7 +190,6 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
       setSynthesizeError("Couldn't summarize — try sending one more message clarifying the goal");
       return;
     }
-    setPushedBack(false);
     const nameAlreadyFilled = projectName.trim().length > 0;
     const contextAlreadyFilled = context.trim().length > 0;
     if (nameAlreadyFilled || contextAlreadyFilled) {
@@ -285,7 +284,7 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
             isStreaming={brainstorm.isStreaming}
             error={brainstorm.error}
             startError={brainstorm.startError}
-            onSend={(text) => { setPushedBack(false); brainstorm.send(text); }}
+            onSend={(text) => brainstorm.send(text)}
           />
         )}
 
