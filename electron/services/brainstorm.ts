@@ -140,3 +140,118 @@ export function processStreamLine(
     }
   }
 }
+
+import { spawn } from 'node:child_process';
+import { ipcMain, BrowserWindow } from 'electron';
+import os from 'node:os';
+
+const IS_WIN = process.platform === 'win32';
+
+interface RunTurnArgs {
+  sessionId: string;
+  userMessage: string;
+  onChunk: (text: string) => void;
+}
+
+type RunTurnResult = { ok: true; text: string } | { ok: false; error: string };
+
+export async function runTurn(args: RunTurnArgs): Promise<RunTurnResult> {
+  const session = getSession(args.sessionId);
+  if (!session) return { ok: false, error: 'Session not found' };
+
+  const cliArgs = buildClaudeArgs({
+    userMessage: args.userMessage,
+    claudeSessionId: session.claudeSessionId,
+  });
+
+  return await new Promise<RunTurnResult>((resolve) => {
+    let proc;
+    try {
+      proc = spawn('claude', cliArgs, {
+        cwd: os.tmpdir(),
+        stdio: ['pipe', 'pipe', 'pipe'],
+        shell: IS_WIN,
+      });
+    } catch (e: any) {
+      resolve({ ok: false, error: e.message || 'spawn failed' });
+      return;
+    }
+
+    const acc: StreamAccumulator = { fullText: '', sessionId: undefined };
+    let buffer = '';
+    let stderrBuf = '';
+
+    proc.stdout?.on('data', (data: Buffer) => {
+      buffer += data.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) processStreamLine(line, acc, args.onChunk);
+    });
+
+    proc.stderr?.on('data', (data: Buffer) => { stderrBuf += data.toString(); });
+
+    proc.on('error', (e) => {
+      resolve({ ok: false, error: e.message });
+    });
+
+    proc.on('exit', (code) => {
+      if (buffer.trim()) processStreamLine(buffer, acc, args.onChunk);
+      if (code !== 0 && !acc.fullText) {
+        resolve({ ok: false, error: stderrBuf.trim() || `claude exited with code ${code}` });
+        return;
+      }
+      if (acc.sessionId) session.claudeSessionId = acc.sessionId;
+      session.transcript.push({ role: 'user', content: args.userMessage });
+      session.transcript.push({ role: 'assistant', content: acc.fullText });
+      resolve({ ok: true, text: acc.fullText });
+    });
+
+    proc.stdin?.end();
+  });
+}
+
+export function serializeTranscript(session: BrainstormSession): string {
+  return session.transcript
+    .map(t => `**${t.role === 'user' ? 'User' : 'Assistant'}:** ${t.content}`)
+    .join('\n\n');
+}
+
+export function registerBrainstormHandlers(win: BrowserWindow): void {
+  ipcMain.handle('brainstorm:start', () => {
+    return createSession();
+  });
+
+  ipcMain.handle('brainstorm:send', async (_e, sessionId: string, message: string) => {
+    const onChunk = (text: string) => {
+      if (!win.isDestroyed()) win.webContents.send(`brainstorm:chunk:${sessionId}`, text);
+    };
+    const result = await runTurn({ sessionId, userMessage: message, onChunk });
+    if (!win.isDestroyed()) {
+      if (result.ok) {
+        win.webContents.send(`brainstorm:done:${sessionId}`, result.text);
+      } else {
+        win.webContents.send(`brainstorm:error:${sessionId}`, result.error);
+      }
+    }
+    return result;
+  });
+
+  ipcMain.handle('brainstorm:synthesize', async (_e, sessionId: string) => {
+    const session = getSession(sessionId);
+    if (!session) return { ok: false, error: 'Session not found' };
+    const noopChunk = () => {};
+    const result = await runTurn({ sessionId, userMessage: SYNTHESIZE_PROMPT, onChunk: noopChunk });
+    if (!result.ok) return result;
+    try {
+      const parsed = parseSynthesizeOutput(result.text);
+      return { ok: true, ...parsed, transcript: serializeTranscript(session) };
+    } catch (e: any) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('brainstorm:end', (_e, sessionId: string) => {
+    deleteSession(sessionId);
+    return { ok: true };
+  });
+}

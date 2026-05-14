@@ -17,6 +17,7 @@ import { registerGeminiHandlers } from './services/gemini';
 import { registerPluginHandlers } from './services/plugins';
 import { registerMcpHandlers } from './services/mcp';
 import { registerScaffoldHandler } from './services/scaffold';
+import { registerBrainstormHandlers } from './services/brainstorm';
 import { registerSearchHandlers } from './services/search';
 import { registerSwarmHandlers } from './services/swarm';
 import * as swarmMcpHost from './services/swarmMcpHost';
@@ -462,6 +463,7 @@ function createWindow() {
   });
 
   registerScaffoldHandler(readSettings);
+  registerBrainstormHandlers(mainWindow);
 
   // Run sync on startup if already authenticated.
   // Delay briefly so the renderer has time to mount and subscribe to IPC events.
