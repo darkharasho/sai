@@ -228,6 +228,13 @@ describe('ChatInput', () => {
       expect(await screen.findByText('@terminal:last')).toBeTruthy();
       expect(screen.queryByText('@terminal')).toBeNull();
     });
+
+    it('opens the @ autocomplete immediately on a bare @', async () => {
+      render(<ChatInput {...defaultProps} slashCommands={STABLE_SLASH_COMMANDS} />);
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: '@' } });
+      expect(await screen.findByText('@terminal')).toBeTruthy();
+    });
   });
 
   describe('terminalTabs prop', () => {
