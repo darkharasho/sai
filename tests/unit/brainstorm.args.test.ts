@@ -11,7 +11,8 @@ describe('buildClaudeArgs', () => {
     expect(args).toContain('-p');
     expect(args).toContain('hello');
     expect(args[args.indexOf('--output-format') + 1]).toBe('stream-json');
-    expect(args[args.indexOf('--max-turns') + 1]).toBe('1');
+    expect(args[args.indexOf('--max-turns') + 1]).toBe('4');
+    expect(args[args.indexOf('--disallowed-tools') + 1]).toBe('Skill,Task');
     expect(args).toContain('--verbose');
     expect(args[args.indexOf('--append-system-prompt') + 1]).toBe(BRAINSTORM_SYSTEM_PROMPT);
     expect(args).not.toContain('--resume');

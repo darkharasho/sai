@@ -96,13 +96,22 @@ export const SYNTHESIZE_PROMPT = [
 // Build args for a stateless one-shot claude invocation. Each turn carries
 // the full conversation in the prompt rather than relying on claude's
 // session resume (which is unreliable after `-p` runs in some claude CLI
-// versions — sessions aren't always discoverable by `--resume` afterwards).
+// versions).
+//
+// Notes on flag choices:
+// - --max-turns 4: claude needs >1 turn when a SessionStart hook (e.g.
+//   the superpowers plugin) makes its first action a tool call. We give
+//   enough headroom for a few tool calls plus the assistant reply.
+// - --disallowed-tools Skill,Task: brainstorm is a plain conversation —
+//   no skills, no subagents. This also prevents the superpowers plugin
+//   from pulling claude into a recursive Skill invocation loop.
 export function buildClaudeArgs(opts: { prompt: string }): string[] {
   return [
     '-p', opts.prompt,
     '--output-format', 'stream-json',
     '--verbose',
-    '--max-turns', '1',
+    '--max-turns', '4',
+    '--disallowed-tools', 'Skill,Task',
     '--append-system-prompt', BRAINSTORM_SYSTEM_PROMPT,
   ];
 }
