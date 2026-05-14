@@ -24,10 +24,11 @@ export async function landTask(
   // our merge), auto-rebase and retry. Only give up after the rebase + retry
   // also fails — that indicates a true conflict the user has to resolve.
   const tryFastForward = async (): Promise<true | { reason: string }> => {
-    const canFf = await deps.canFastForward(task.workspaceId, task.branch, task.baseBranch);
+    const gitCwd = task.projectPath ?? task.workspaceId;
+    const canFf = await deps.canFastForward(gitCwd, task.branch, task.baseBranch);
     if (!canFf) return { reason: 'not-ancestor' };
     try {
-      await deps.ffMerge(task.workspaceId, task.branch);
+      await deps.ffMerge(gitCwd, task.branch);
       return true;
     } catch (err) {
       return { reason: err instanceof Error ? err.message : String(err) };
@@ -45,7 +46,8 @@ export async function landTask(
   }
   if (result !== true) return { ok: false, reason: 'rebase-needed', detail: result.reason };
 
-  await deps.worktreeRemove(task.workspaceId, task.worktreePath, task.branch);
+  const gitCwd = task.projectPath ?? task.workspaceId;
+  await deps.worktreeRemove(gitCwd, task.worktreePath, task.branch);
   await deps.updateTask(task.id, { status: 'landed', worktreePath: null });
   return { ok: true };
 }
@@ -56,6 +58,9 @@ export interface DiscardDeps {
 }
 
 export async function discardTask(task: SwarmTask, deps: DiscardDeps) {
-  if (task.worktreePath) await deps.worktreeRemove(task.workspaceId, task.worktreePath, task.branch);
+  if (task.worktreePath) {
+    const gitCwd = task.projectPath ?? task.workspaceId;
+    await deps.worktreeRemove(gitCwd, task.worktreePath, task.branch);
+  }
   await deps.updateTask(task.id, { status: 'discarded', worktreePath: null });
 }
