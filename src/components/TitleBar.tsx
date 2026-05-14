@@ -165,7 +165,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
       <div className="project-dropdown-wrapper" ref={dropdownRef}>
         <button className="project-selector" onClick={() => setOpen(!open)}>
           {activeMetaRuntime ? (
-            <><span className="titlebar-meta-pill">META</span><span>{projectName}</span></>
+            <><Layers size={12} className="titlebar-meta-icon" /><span>{projectName}</span></>
           ) : projectName} ▾
           {(() => {
             const approvalCount = approvalWorkspaces ? approvalWorkspaces.size : 0;
@@ -621,17 +621,11 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           border-radius: 8px;
           padding: 1px 8px;
         }
-        .titlebar-meta-pill {
-          font-size: 9px;
-          font-weight: 700;
-          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
-          letter-spacing: 0.5px;
-          color: #fff;
-          background: var(--accent);
-          border-radius: 8px;
-          padding: 1px 6px;
+        .titlebar-meta-icon {
+          color: var(--accent);
           margin-right: 5px;
           vertical-align: middle;
+          flex-shrink: 0;
         }
         .gh-login-btn {
           display: flex;
