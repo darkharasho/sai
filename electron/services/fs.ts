@@ -23,16 +23,18 @@ function execFileAsync(cmd: string, args: string[], options: Record<string, unkn
 export function registerFsHandlers(mainWindow: BrowserWindow) {
   ipcMain.handle('fs:readDir', async (_event, dirPath: string) => {
     const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
-    return entries
-      .map(entry => ({
-        name: entry.name,
-        path: path.join(dirPath, entry.name),
-        type: entry.isDirectory() ? 'directory' as const : 'file' as const,
-      }))
-      .sort((a, b) => {
-        if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
-        return a.name.localeCompare(b.name);
-      });
+    const mapped = await Promise.all(entries.map(async entry => {
+      const full = path.join(dirPath, entry.name);
+      let isDir = entry.isDirectory();
+      if (entry.isSymbolicLink()) {
+        try { isDir = (await fs.promises.stat(full)).isDirectory(); } catch { isDir = false; }
+      }
+      return { name: entry.name, path: full, type: isDir ? 'directory' as const : 'file' as const };
+    }));
+    return mapped.sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
   });
 
   ipcMain.handle('fs:readFile', async (_event, filePath: string) => {

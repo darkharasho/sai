@@ -81,7 +81,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
     return () => { unsubSync(); unsubMax?.(); };
   }, []);
 
-  const projectName = activeMetaRuntime ? `Meta: ${activeMetaRuntime.meta.name}` : (projectPath ? basename(projectPath) : 'No Project');
+  const projectName = activeMetaRuntime ? activeMetaRuntime.meta.name : (projectPath ? basename(projectPath) : 'No Project');
 
   useEffect(() => {
     if (open) {
@@ -164,7 +164,9 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
       <div className="titlebar-drag" />
       <div className="project-dropdown-wrapper" ref={dropdownRef}>
         <button className="project-selector" onClick={() => setOpen(!open)}>
-          {projectName} ▾
+          {activeMetaRuntime ? (
+            <><span className="titlebar-meta-pill">META</span><span>{projectName}</span></>
+          ) : projectName} ▾
           {(() => {
             const approvalCount = approvalWorkspaces ? approvalWorkspaces.size : 0;
             const bgBusyCount = busyWorkspaces ? [...busyWorkspaces].filter(p => p !== projectPath).length : 0;
@@ -618,6 +620,18 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           border: 1px solid rgba(199, 145, 12, 0.35);
           border-radius: 8px;
           padding: 1px 8px;
+        }
+        .titlebar-meta-pill {
+          font-size: 9px;
+          font-weight: 700;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
+          letter-spacing: 0.5px;
+          color: #fff;
+          background: var(--accent);
+          border-radius: 8px;
+          padding: 1px 6px;
+          margin-right: 5px;
+          vertical-align: middle;
         }
         .gh-login-btn {
           display: flex;

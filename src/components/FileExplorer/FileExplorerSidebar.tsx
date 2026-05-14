@@ -419,7 +419,7 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen, metaRunti
   };
 
   const rootState = tree.get(projectPath);
-  const projectName = basename(projectPath);
+  const projectName = metaRuntime ? metaRuntime.meta.name : basename(projectPath);
 
   return (
     <div

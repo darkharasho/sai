@@ -128,10 +128,11 @@ async function setup() {
 // Helper to build fake dirent objects
 // ---------------------------------------------------------------------------
 
-function dirent(name: string, isDir: boolean) {
+function dirent(name: string, isDir: boolean, isSymlink = false) {
   return {
     name,
     isDirectory: () => isDir,
+    isSymbolicLink: () => isSymlink,
   };
 }
 
