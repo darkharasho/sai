@@ -868,8 +868,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           background: var(--bg-elevated);
           border: 1px solid var(--border);
           border-radius: 8px;
-          min-width: 300px;
-          max-width: 450px;
+          width: 420px;
           box-shadow: 0 8px 24px rgba(0,0,0,0.4);
           animation: fade-in 0.15s ease-out;
         }
