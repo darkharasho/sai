@@ -1,5 +1,5 @@
 import { useState, useRef, KeyboardEvent, useEffect } from 'react';
-import type { PendingApproval, TerminalTab, ChatMessage as ChatMessageType, QueuedMessage } from '../../types';
+import type { PendingApproval, TerminalTab, ChatMessage as ChatMessageType, QueuedMessage, MetaWorkspaceRuntime } from '../../types';
 import TodoProgress from './TodoProgress';
 import MessageQueue from './MessageQueue';
 import { basename } from '../../utils/pathUtils';
@@ -67,6 +67,8 @@ interface ChatInputProps {
   onDraftChange?: (draft: string) => void;
   initialContextItems?: ContextItem[];
   onContextItemsChange?: (items: ContextItem[]) => void;
+  metaRuntime?: MetaWorkspaceRuntime | null;
+  mentionInsertRef?: React.MutableRefObject<((linkName: string) => void) | null>;
 }
 
 interface AutocompleteItem {
@@ -230,7 +232,7 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommands = [], isStreaming, messages = [], onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, sessionCost, rateLimits, billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange }: ChatInputProps) {
+export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommands = [], isStreaming, messages = [], onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, sessionCost, rateLimits, billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
   const [value, setValue] = useState(initialDraft);
   const [suggestions, setSuggestions] = useState<AutocompleteItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -245,6 +247,30 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
   const sendingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // Expose imperative mention-insert so IncludedProjectsStrip chips can inject text at cursor.
+  // We do this via a stable effect so the ref value is always fresh.
+  useEffect(() => {
+    if (!mentionInsertRef) return;
+    mentionInsertRef.current = (linkName: string) => {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      const pos = ta.selectionStart ?? ta.value.length;
+      const before = ta.value.slice(0, pos);
+      const after = ta.value.slice(pos);
+      const insert = `@${linkName} `;
+      setValue(before + insert + after);
+      // Restore cursor position after the inserted text
+      requestAnimationFrame(() => {
+        ta.focus();
+        ta.setSelectionRange(pos + insert.length, pos + insert.length);
+      });
+    };
+    return () => { mentionInsertRef.current = null; };
+  // mentionInsertRef identity is stable; we only want this to run once
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mentionInsertRef]);
+
   const fireBeforeSend = () => {
     if (!onBeforeSend) return;
     const node = wrapperRef.current;
@@ -362,6 +388,22 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
     if (currentWord.startsWith('@') && currentWord.length > 1) {
       const query = currentWord.slice(1);
       const atItems: AutocompleteItem[] = [];
+
+      // Meta workspace project mentions — appear at top of @ suggestions
+      if (metaRuntime) {
+        for (const p of metaRuntime.projects) {
+          if (p.status === 'unavailable') continue;
+          if (p.linkName.toLowerCase().startsWith(query) || query === '') {
+            atItems.push({
+              label: `@${p.linkName}`,
+              value: `__META_PROJECT_${p.linkName}__`,
+              description: p.path,
+              icon: <AtSign size={14} />,
+            });
+          }
+        }
+      }
+
       if ('terminal'.startsWith(query)) {
         atItems.push({ label: '@terminal', value: '__TERMINAL__', description: 'Attach terminal output', icon: <TerminalIcon size={14} /> });
       }
@@ -445,7 +487,7 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
       setSuggestions([]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, slashCommands, showAddMenu, slashMenuOpen, terminalTabsKey]);
+  }, [value, slashCommands, showAddMenu, slashMenuOpen, terminalTabsKey, metaRuntime]);
 
   const handleAddTerminal = () => {
     const content = getTerminalContent();
@@ -479,6 +521,22 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
   };
 
   const applySuggestion = (item: AutocompleteItem) => {
+    // Meta workspace project mention: replace typed @<partial> with @<linkName><space>
+    if (item.value.startsWith('__META_PROJECT_') && item.value.endsWith('__')) {
+      const linkName = item.value.slice('__META_PROJECT_'.length, -'__'.length);
+      const cursorPos = textareaRef.current?.selectionStart ?? value.length;
+      const textBeforeCursor = value.slice(0, cursorPos);
+      const lastSpace = textBeforeCursor.lastIndexOf(' ');
+      const lastNewline = textBeforeCursor.lastIndexOf('\n');
+      const wordStart = Math.max(lastSpace, lastNewline) + 1;
+      const before = value.slice(0, wordStart);
+      const after = value.slice(cursorPos);
+      setValue(before + `@${linkName} ` + after);
+      setSuggestions([]);
+      setShowAddMenu(false);
+      textareaRef.current?.focus();
+      return;
+    }
     if (item.value === '__TERMINAL__') {
       // Remove the @terminal text the user typed
       if (!showAddMenu) {

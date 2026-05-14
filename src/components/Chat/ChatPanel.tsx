@@ -279,6 +279,7 @@ import type { MetaWorkspaceRuntime } from '../../types';
 import { buildHelpMessage } from './helpText';
 import { parseAiError, looksLikeApiError } from './parseAiError';
 import { buildMetaPreamble } from '../../lib/metaSystemPrompt';
+import { IncludedProjectsStrip } from '../MetaWorkspace/IncludedProjectsStrip';
 
 type CodexPermission = 'auto' | 'read-only' | 'full-access';
 
@@ -620,6 +621,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   });
   const sentinelRef = useRef<HTMLDivElement>(null);
   const pendingComposerRectRef = useRef<DOMRect | null>(null);
+  const mentionInsertRef = useRef<((linkName: string) => void) | null>(null);
 
   // Keep render window pinned to the tail when user is at bottom
   useEffect(() => {
@@ -1608,6 +1610,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       </div>
       <LayoutGroup>
         <div data-testid="chat-bottom-strip" className="chat-bottom-strip">
+          {activeMetaRuntime && (
+            <IncludedProjectsStrip
+              runtime={activeMetaRuntime}
+              onMentionInsert={(linkName) => mentionInsertRef.current?.(linkName)}
+            />
+          )}
           <ChatInput
             onSend={handleSend}
             onBeforeSend={(rect) => { pendingComposerRectRef.current = rect; }}
@@ -1657,6 +1665,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             onDraftChange={onDraftChange}
             initialContextItems={initialContextItems}
             onContextItemsChange={onContextItemsChange}
+            metaRuntime={activeMetaRuntime}
+            mentionInsertRef={mentionInsertRef}
           />
         </div>
       </LayoutGroup>
