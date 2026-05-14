@@ -86,6 +86,9 @@ export interface MockSai {
   fsCreateDir: ReturnType<typeof vi.fn>;
   fsCheckIgnored: ReturnType<typeof vi.fn>;
 
+  // Brainstorm
+  brainstormConsumeSeed: ReturnType<typeof vi.fn>;
+
   // Settings
   settingsGet: ReturnType<typeof vi.fn>;
   settingsSet: ReturnType<typeof vi.fn>;
@@ -222,6 +225,9 @@ export function createMockSai(): MockSai {
     fsCreateFile: vi.fn().mockResolvedValue(undefined),
     fsCreateDir: vi.fn().mockResolvedValue(undefined),
     fsCheckIgnored: vi.fn().mockResolvedValue([]),
+
+    // Brainstorm
+    brainstormConsumeSeed: vi.fn().mockResolvedValue({ ok: false }),
 
     // Settings
     settingsGet: vi.fn().mockResolvedValue(undefined),

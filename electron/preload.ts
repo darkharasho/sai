@@ -173,6 +173,31 @@ contextBridge.exposeInMainWorld('sai', {
   openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
   setBadgeCount: (count: number) => ipcRenderer.send('app:setBadgeCount', count),
   scaffoldProject: (options: any) => ipcRenderer.invoke('project:scaffold', options),
+  brainstormStart: () => ipcRenderer.invoke('brainstorm:start'),
+  brainstormSend: (sessionId: string, message: string) =>
+    ipcRenderer.invoke('brainstorm:send', sessionId, message),
+  brainstormSynthesize: (sessionId: string, opts?: { force?: boolean }) =>
+    ipcRenderer.invoke('brainstorm:synthesize', sessionId, opts),
+  brainstormEnd: (sessionId: string) => ipcRenderer.invoke('brainstorm:end', sessionId),
+  brainstormConsumeSeed: (projectPath: string) => ipcRenderer.invoke('brainstorm:consumeSeed', projectPath),
+  brainstormOnChunk: (sessionId: string, callback: (text: string) => void) => {
+    const channel = `brainstorm:chunk:${sessionId}`;
+    const listener = (_e: Electron.IpcRendererEvent, text: string) => callback(text);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
+  },
+  brainstormOnDone: (sessionId: string, callback: (text: string) => void) => {
+    const channel = `brainstorm:done:${sessionId}`;
+    const listener = (_e: Electron.IpcRendererEvent, text: string) => callback(text);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
+  },
+  brainstormOnError: (sessionId: string, callback: (err: string) => void) => {
+    const channel = `brainstorm:error:${sessionId}`;
+    const listener = (_e: Electron.IpcRendererEvent, err: string) => callback(err);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
+  },
   // Usage API polling
   usageFetch: () => ipcRenderer.invoke('usage:fetch'),
   usageMode: () => ipcRenderer.invoke('usage:mode'),

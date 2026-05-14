@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { FolderPlus } from 'lucide-react';
+import { FolderPlus, Sparkles, Settings2 } from 'lucide-react';
+import SetupTab from './NewProjectModal/SetupTab';
+import BrainstormTab from './NewProjectModal/BrainstormTab';
+import { useBrainstorm } from './NewProjectModal/useBrainstorm';
 
 interface GitHubUser {
   login: string;
@@ -19,7 +22,51 @@ const DEFAULT_HELPERS = {
   githubRepo: false,
 };
 
+type Tab = 'setup' | 'brainstorm';
+
+function TabButton({ active, onClick, label, icon }: { active: boolean; onClick: () => void; label: string; icon?: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className="sai-new-project-tab"
+      data-active={active ? 'true' : 'false'}
+      style={{
+        background: 'none', border: 'none', padding: '9px 14px',
+        fontSize: 12, fontWeight: active ? 600 : 500,
+        letterSpacing: '0.02em',
+        color: active ? 'var(--accent)' : 'var(--text-muted)',
+        borderBottom: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
+        marginBottom: -1, cursor: 'pointer',
+        display: 'flex', alignItems: 'center', gap: 6,
+        transition: 'color 120ms ease',
+      }}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+const replaceBtnStyle: React.CSSProperties = {
+  background: 'var(--bg-secondary)',
+  border: '1px solid var(--border)',
+  color: 'var(--text)',
+  fontSize: 11, padding: '4px 10px', borderRadius: 4, cursor: 'pointer',
+  fontFamily: 'system-ui, sans-serif',
+  transition: 'border-color 120ms ease, color 120ms ease',
+};
+
+const replaceBtnPrimaryStyle: React.CSSProperties = {
+  ...replaceBtnStyle,
+  border: '1px solid var(--accent)',
+  color: 'var(--accent)',
+  background: 'rgba(199,145,12,0.12)',
+};
+
 export default function NewProjectModal({ onClose, onCreated }: NewProjectModalProps) {
+  const [tab, setTab] = useState<Tab>('setup');
+
+  // Existing state — preserved exactly
   const [parentDir, setParentDir] = useState('');
   const [projectName, setProjectName] = useState('');
   const [context, setContext] = useState('');
@@ -33,6 +80,18 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
   const [createdPath, setCreatedPath] = useState('');
   const [repoNameEdited, setRepoNameEdited] = useState(false);
 
+  // Brainstorm state
+  const [brainstormTranscript, setBrainstormTranscript] = useState('');
+  const [nameFromBrainstorm, setNameFromBrainstorm] = useState(false);
+  const [contextFromBrainstorm, setContextFromBrainstorm] = useState(false);
+  const [synthesizing, setSynthesizing] = useState(false);
+  const [synthesizeError, setSynthesizeError] = useState<string | null>(null);
+  const [pushedBack, setPushedBack] = useState(false);
+  const [replacePrompt, setReplacePrompt] = useState<null | { projectName: string; context: string; transcript: string }>(null);
+
+  const brainstorm = useBrainstorm(tab === 'brainstorm' || brainstormTranscript !== '');
+
+  // Existing effects — preserved exactly
   useEffect(() => {
     window.sai.githubGetUser().then((u: GitHubUser | null) => setGithubUser(u));
   }, []);
@@ -60,6 +119,7 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
     return () => document.removeEventListener('keydown', handler);
   }, [onClose]);
 
+  // Existing handlers — preserved exactly
   const handleBrowseParent = useCallback(async () => {
     const folder = await window.sai.selectFolder(parentDir || undefined);
     if (folder) setParentDir(folder);
@@ -89,6 +149,7 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
         context,
         helpers,
         github: helpers.githubRepo ? { repoName, visibility } : undefined,
+        brainstormTranscript: brainstormTranscript || undefined,
       });
     } catch (e: any) {
       setCreating(false);
@@ -110,104 +171,47 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
       return;
     }
     onCreated(computedPath);
-  }, [parentDir, projectName, context, helpers, repoName, visibility, onCreated]);
+  }, [parentDir, projectName, context, helpers, repoName, visibility, onCreated, brainstormTranscript]);
 
-  const inputStyle: React.CSSProperties = {
-    background: 'var(--bg-secondary)',
-    border: '1px solid var(--border)',
-    borderRadius: 5,
-    padding: '7px 10px',
-    fontSize: 13,
-    color: 'var(--text)',
-    fontFamily: "'JetBrains Mono', monospace",
-    width: '100%',
-    boxSizing: 'border-box',
-  };
+  // Brainstorm handlers
+  const handleUseThis = useCallback(async (opts?: { force?: boolean }) => {
+    setSynthesizing(true);
+    setSynthesizeError(null);
+    const r = await brainstorm.synthesize(opts);
+    setSynthesizing(false);
+    if (!r.ok) {
+      if (r.needsClarification) {
+        // The clarifying question was already pushed into the brainstorm
+        // transcript by the hook. Stay on the Brainstorm tab so the user
+        // can answer it — and surface a "Use anyway" escape hatch.
+        setPushedBack(true);
+        return;
+      }
+      setSynthesizeError("Couldn't summarize — try sending one more message clarifying the goal");
+      return;
+    }
+    const nameAlreadyFilled = projectName.trim().length > 0;
+    const contextAlreadyFilled = context.trim().length > 0;
+    if (nameAlreadyFilled || contextAlreadyFilled) {
+      setReplacePrompt({ projectName: r.projectName, context: r.context, transcript: r.transcript });
+      setTab('setup');
+      return;
+    }
+    setProjectName(r.projectName);
+    setContext(r.context);
+    setBrainstormTranscript(r.transcript);
+    setNameFromBrainstorm(true);
+    setContextFromBrainstorm(true);
+    setTab('setup');
+  }, [brainstorm, projectName, context]);
 
-  const checkRow = (
-    key: keyof typeof DEFAULT_HELPERS,
-    label: string,
-    description: string,
-    extra?: React.ReactNode,
-  ) => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--bg-elevated)' }}>
-        <div
-          onClick={() => {
-            if (key === 'githubRepo' && !githubUser) return;
-            toggleHelper(key);
-          }}
-          style={{
-            width: 15, height: 15, borderRadius: 3, flexShrink: 0, marginTop: 1,
-            border: `1.5px solid ${helpers[key] ? 'var(--accent)' : 'var(--border)'}`,
-            background: helpers[key] ? 'var(--accent)' : 'var(--bg-secondary)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: key === 'githubRepo' && !githubUser ? 'not-allowed' : 'pointer',
-            opacity: key === 'githubRepo' && !githubUser ? 0.4 : 1,
-          }}
-        >
-          {helpers[key] && (
-            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-          )}
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 13, color: key === 'githubRepo' && !githubUser ? 'var(--text-muted)' : 'var(--text)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 8 }}>
-            {label}
-            {key === 'githubRepo' && githubUser && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '1px 7px', borderRadius: 3, background: '#0e2018', color: '#4caf80', border: '1px solid #1a3a28' }}>
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4caf80', display: 'inline-block' }} />
-                @{githubUser.login}
-              </span>
-            )}
-            {key === 'githubRepo' && !githubUser && (
-              <span
-                onClick={handleConnectGitHub}
-                style={{ fontSize: 11, color: 'var(--accent)', cursor: 'pointer', textDecoration: 'underline' }}
-              >
-                Connect GitHub
-              </span>
-            )}
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{description}</div>
-        </div>
-      </div>
-      {extra}
-    </div>
-  );
-
-  const githubSubPanel = helpers.githubRepo && githubUser ? (
-    <div style={{ marginLeft: 25, marginBottom: 4, padding: 10, background: 'var(--bg-secondary)', borderRadius: 5, border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)', width: 60, flexShrink: 0 }}>Name</span>
-        <input
-          value={repoName}
-          onChange={e => { setRepoName(e.target.value); setRepoNameEdited(true); }}
-          style={{ ...inputStyle, fontFamily: "'JetBrains Mono', monospace", padding: '5px 8px', fontSize: 12 }}
-        />
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)', width: 60, flexShrink: 0 }}>Visibility</span>
-        <div style={{ display: 'flex', gap: 6 }}>
-          {(['private', 'public'] as const).map(v => (
-            <button
-              key={v}
-              onClick={() => setVisibility(v)}
-              style={{
-                fontSize: 12, padding: '3px 10px', borderRadius: 3, cursor: 'pointer',
-                border: `1px solid ${visibility === v ? 'var(--accent)' : 'var(--border)'}`,
-                color: visibility === v ? 'var(--accent)' : 'var(--text-muted)',
-                background: visibility === v ? 'rgba(199,145,12,0.1)' : 'transparent',
-              }}
-            >
-              {v.charAt(0).toUpperCase() + v.slice(1)}
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  ) : null;
+  const acceptReplace = useCallback((which: 'name' | 'context' | 'both') => {
+    if (!replacePrompt) return;
+    if (which === 'name' || which === 'both') { setProjectName(replacePrompt.projectName); setNameFromBrainstorm(true); }
+    if (which === 'context' || which === 'both') { setContext(replacePrompt.context); setContextFromBrainstorm(true); }
+    setBrainstormTranscript(replacePrompt.transcript);
+    setReplacePrompt(null);
+  }, [replacePrompt]);
 
   return (
     <div
@@ -218,87 +222,74 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
       <div
         className="sai-modal-in"
         onClick={e => e.stopPropagation()}
-        style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10, padding: '24px 28px', width: 460, boxShadow: '0 8px 32px rgba(0,0,0,0.6)', display: 'flex', flexDirection: 'column', gap: 16 }}
+        style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10, padding: '24px 28px', width: 520, boxShadow: '0 8px 32px rgba(0,0,0,0.6)', display: 'flex', flexDirection: 'column', gap: 16 }}
       >
+        {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <FolderPlus size={15} color="var(--accent)" />
           <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>New Project</span>
         </div>
 
-        {/* Parent directory */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Parent directory</span>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input
-              value={parentDir}
-              onChange={e => setParentDir(e.target.value)}
-              placeholder="/home/user/projects"
-              style={{ ...inputStyle, flex: 1 }}
+        {/* Tab bar */}
+        <div style={{ display: 'flex', gap: 2, borderBottom: '1px solid var(--border)', margin: '0 -4px' }}>
+          <TabButton active={tab === 'setup'} onClick={() => setTab('setup')} icon={<Settings2 size={12} />} label="Setup" />
+          <TabButton active={tab === 'brainstorm'} onClick={() => setTab('brainstorm')} icon={<Sparkles size={12} />} label="Brainstorm" />
+        </div>
+
+        {tab === 'setup' ? (
+          <>
+            {replacePrompt && (
+              <div style={{
+                fontSize: 12,
+                background: 'rgba(199,145,12,0.06)',
+                border: '1px solid rgba(199,145,12,0.25)',
+                borderRadius: 6,
+                padding: 12,
+                display: 'flex', flexDirection: 'column', gap: 10,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text)' }}>
+                  <Sparkles size={13} color="var(--accent)" />
+                  <span>Replace your typed values with brainstorm results?</span>
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button onClick={() => acceptReplace('both')} style={replaceBtnPrimaryStyle}>Replace both</button>
+                  <button onClick={() => acceptReplace('name')} style={replaceBtnStyle}>Name only</button>
+                  <button onClick={() => acceptReplace('context')} style={replaceBtnStyle}>Context only</button>
+                  <button onClick={() => setReplacePrompt(null)} style={replaceBtnStyle}>Keep mine</button>
+                </div>
+              </div>
+            )}
+            <SetupTab
+              parentDir={parentDir} setParentDir={setParentDir}
+              projectName={projectName} setProjectName={setProjectName}
+              context={context} setContext={setContext}
+              helpers={helpers} toggleHelper={toggleHelper}
+              githubUser={githubUser}
+              repoName={repoName} setRepoName={setRepoName}
+              setRepoNameEdited={setRepoNameEdited}
+              visibility={visibility} setVisibility={setVisibility}
+              error={error} warnings={warnings}
+              handleBrowseParent={handleBrowseParent}
+              handleConnectGitHub={handleConnectGitHub}
+              nameFromBrainstorm={nameFromBrainstorm}
+              contextFromBrainstorm={contextFromBrainstorm}
+              onClearNameBadge={() => setNameFromBrainstorm(false)}
+              onClearContextBadge={() => setContextFromBrainstorm(false)}
             />
-            <button
-              onClick={handleBrowseParent}
-              style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 5, padding: '7px 12px', fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
-            >
-              Browse
-            </button>
-          </div>
-        </div>
-
-        {/* Project name */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Project name</span>
-          <input
-            value={projectName}
-            onChange={e => setProjectName(e.target.value)}
-            placeholder="my-app"
-            style={inputStyle}
-            autoFocus
+          </>
+        ) : (
+          <BrainstormTab
+            messages={brainstorm.messages}
+            streamingText={brainstorm.streamingText}
+            isStreaming={brainstorm.isStreaming}
+            error={brainstorm.error}
+            startError={brainstorm.startError}
+            onSend={(text) => brainstorm.send(text)}
           />
-          {parentDir && projectName && (
-            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'JetBrains Mono', monospace" }}>
-              → {parentDir.replace(/\/+$/, '')}/{projectName.trim()}
-            </span>
-          )}
-        </div>
-
-        {/* Context */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-            Context <span style={{ textTransform: 'none', letterSpacing: 0, color: 'var(--text-muted)' }}>— optional</span>
-          </span>
-          <textarea
-            value={context}
-            onChange={e => setContext(e.target.value)}
-            placeholder="What is this project for? e.g. 'A CLI tool for processing CSV files.'"
-            rows={3}
-            style={{ ...inputStyle, fontFamily: 'system-ui, sans-serif', resize: 'vertical', lineHeight: 1.5 }}
-          />
-        </div>
-
-        {/* Divider */}
-        <div style={{ height: 1, background: 'var(--border)' }} />
-
-        {/* Helpers */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Setup helpers</span>
-          {checkRow('claudeMd', 'CLAUDE.md', 'Seeds AI memory with your project context')}
-          {checkRow('gitInit', 'Git init', 'Initializes a local repo — enables the git panel immediately')}
-          {checkRow('gitignore', '.gitignore', 'Common ignores: node_modules, .env, .DS_Store, dist, build')}
-          {checkRow('readme', 'README.md', 'One-liner stub using your project context as the description')}
-          {checkRow('claudeSettings', '.claude/settings.json', 'Empty project-level Claude settings, ready to configure')}
-          {checkRow('githubRepo', 'Create GitHub repo', 'Creates a remote repo and sets it as origin', githubSubPanel)}
-        </div>
-
-        {/* Error / warnings */}
-        {error && (
-          <div style={{ fontSize: 12, color: '#f87171', background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.2)', borderRadius: 5, padding: '8px 10px' }}>
-            {error}
-          </div>
         )}
-        {warnings.length > 0 && (
-          <div style={{ fontSize: 12, color: 'var(--accent)', background: 'rgba(199,145,12,0.06)', border: '1px solid rgba(199,145,12,0.2)', borderRadius: 5, padding: '8px 10px' }}>
-            {warnings.map((w, i) => <div key={i}>⚠ {w}</div>)}
-          </div>
+
+        {synthesizeError && tab === 'brainstorm' && (
+          <div style={{ fontSize: 11, color: '#f87171' }}>{synthesizeError}</div>
         )}
 
         {/* Footer */}
@@ -309,28 +300,56 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
           >
             Cancel
           </button>
-          {createdPath ? (
-            <button
-              onClick={() => onCreated(createdPath)}
-              style={{ background: 'none', border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: 5, padding: '7px 16px', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
-            >
-              <FolderPlus size={13} />
-              Open Project
-            </button>
-          ) : (
-            <button
-              onClick={handleCreate}
-              disabled={!parentDir || !projectName.trim() || creating}
-              style={{
-                background: 'none', border: `1px solid ${parentDir && projectName.trim() && !creating ? 'var(--accent)' : 'var(--border)'}`,
-                color: parentDir && projectName.trim() && !creating ? 'var(--accent)' : 'var(--text-muted)',
-                borderRadius: 5, padding: '7px 16px', fontSize: 13, cursor: parentDir && projectName.trim() && !creating ? 'pointer' : 'not-allowed',
-                display: 'flex', alignItems: 'center', gap: 6,
-              }}
-            >
-              <FolderPlus size={13} />
-              {creating ? 'Creating\u2026' : 'Create Project'}
-            </button>
+          {tab === 'brainstorm' ? (() => {
+            const useThisEnabled = brainstorm.hasReply && !synthesizing && !brainstorm.isStreaming;
+            return (
+              <button
+                onClick={() => handleUseThis(pushedBack ? { force: true } : undefined)}
+                disabled={!useThisEnabled}
+                title={pushedBack ? 'Skip the clarifying question and create the project with what we have' : undefined}
+                style={{
+                  background: 'none',
+                  border: `1px solid ${useThisEnabled ? 'var(--accent)' : 'var(--border)'}`,
+                  color: useThisEnabled ? 'var(--accent)' : 'var(--text-muted)',
+                  borderRadius: 5, padding: '7px 16px', fontSize: 13,
+                  cursor: useThisEnabled ? 'pointer' : 'not-allowed',
+                  opacity: useThisEnabled ? 1 : 0.6,
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  transition: 'opacity 120ms ease, color 120ms ease, border-color 120ms ease',
+                }}
+              >
+                <Sparkles size={13} />
+                {synthesizing
+                  ? 'Synthesizing…'
+                  : pushedBack
+                    ? 'Use this anyway →'
+                    : 'Use this →'}
+              </button>
+            );
+          })() : (
+            createdPath ? (
+              <button
+                onClick={() => onCreated(createdPath)}
+                style={{ background: 'none', border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: 5, padding: '7px 16px', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+              >
+                <FolderPlus size={13} />
+                Open Project
+              </button>
+            ) : (
+              <button
+                onClick={handleCreate}
+                disabled={!parentDir || !projectName.trim() || creating}
+                style={{
+                  background: 'none', border: `1px solid ${parentDir && projectName.trim() && !creating ? 'var(--accent)' : 'var(--border)'}`,
+                  color: parentDir && projectName.trim() && !creating ? 'var(--accent)' : 'var(--text-muted)',
+                  borderRadius: 5, padding: '7px 16px', fontSize: 13, cursor: parentDir && projectName.trim() && !creating ? 'pointer' : 'not-allowed',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}
+              >
+                <FolderPlus size={13} />
+                {creating ? 'Creating…' : 'Create Project'}
+              </button>
+            )
           )}
         </div>
       </div>

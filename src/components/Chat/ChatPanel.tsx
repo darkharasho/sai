@@ -7,6 +7,12 @@ import SaiLogo from '../SaiLogo';
 import MotionPresence from './MotionPresence';
 import { SPRING, DISTANCE, EASING, useReducedMotionTransition } from './motion';
 
+// Projects whose brainstorm seed has already been consumed (or attempted) in
+// this renderer process. The seed is one-shot, but the chat start-effect can
+// re-run on config changes (model/scope/permission). Without this guard we'd
+// re-probe (and log a noisy ENOENT) on every re-run.
+const consumedBrainstormSeeds = new Set<string>();
+
 function tweenScrollToBottom(container: HTMLElement, durationMs = 280) {
   if (typeof window === 'undefined') return;
   if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
@@ -695,6 +701,36 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       setReady(true);
       if (result?.slashCommands?.length) {
         setSlashCommands(result.slashCommands);
+      }
+
+      // One-shot brainstorm seed consumption. Server-side read+delete avoids
+      // the renderer ever calling fs:readFile on a missing path (which would
+      // log a noisy ENOENT in the main process). We push the seed into the
+      // chat transcript so the user sees it as their first message — just
+      // calling claudeSend would deliver it to the model invisibly.
+      if (aiProvider === 'claude' && projectPath && !consumedBrainstormSeeds.has(projectPath)) {
+        consumedBrainstormSeeds.add(projectPath);
+        (window.sai as any).brainstormConsumeSeed(projectPath).then((r: { ok: boolean; content?: string }) => {
+          if (!r?.ok || !r.content) return;
+          const seedContent = r.content.trim();
+          if (!seedContent) return;
+          const seedMessageId = `seed-${Date.now()}`;
+          setMessages(prev => [...prev, {
+            id: seedMessageId,
+            role: 'user',
+            content: seedContent,
+            timestamp: Date.now(),
+          }]);
+          window.sai.claudeSend(
+            projectPath,
+            seedContent,
+            undefined,
+            permissionMode,
+            effortLevel,
+            modelChoice,
+            claudeScope,
+          );
+        }).catch(() => { /* ignore */ });
       }
     });
 
