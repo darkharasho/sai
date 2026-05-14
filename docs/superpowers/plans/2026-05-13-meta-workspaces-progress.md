@@ -3,7 +3,7 @@
 **Plan:** `docs/superpowers/plans/2026-05-13-meta-workspaces.md`
 **Spec:** `docs/superpowers/specs/2026-05-13-meta-workspaces-design.md`
 **Branch:** `feat/meta-workspaces` (from `main` at `4de30f5`)
-**Session paused:** 2026-05-13
+**Status:** All tasks complete (1-17). Vitest 1185/1185 pass. `npm run build` clean. E2E smoke (1 passed, 1 skipped).
 
 ## Done (Tasks 1–7) — foundation complete
 
@@ -19,29 +19,34 @@
 
 All test suites green. `npm run build` passes.
 
-## Next (Tasks 8–17)
+## Done (Tasks 8–17)
 
-These are the remaining tasks, all renderer-side UI work:
+| # | Task | Commit |
+|---|------|--------|
+| 8 | Picker Projects/Meta tabs in TitleBar | `2f74b52` |
+| 9 | CreateMetaWorkspaceModal + wiring | `6887b7c` |
+| 10 | Preamble injection into Claude `--append-system-prompt`; stashed for codex/gemini | `890de8f` |
+| 11 | IncludedProjectsStrip + `@`-mention picker (prepended to existing `@terminal` suggestions) | `d8f1500` |
+| 12 | MetaGitSidebar + embedded mode for GitSidebar + synthetic-root guard | `cb97751` + `d09ec1d` (Windows path fix) |
+| 13 | Cross-project DnD block; shared `src/lib/syntheticRoot.ts` (`owningLink`, `isCrossProjectMove`) | `ec31743` |
+| 14 | Multi-project replace confirmation in SearchPanel | `9380be5` |
+| 15 | ManageMetaWorkspaceModal (rename / add / remove / edit / delete) | `530659d` |
+| 16 | E2E picker-tabs smoke test (creation flow `test.skip`d — needs preload harness changes) | `4ef0199` |
+| 17 | Final verification — vitest 1185/1185, build clean, playwright meta-workspace 1 pass 1 skip | — |
 
-- **Task 8:** Picker tabs in `TitleBar.tsx` (Projects / Meta).
-- **Task 9:** `CreateMetaWorkspaceModal.tsx` — new component, multiselect folders, link-name preview, description fields.
-- **Task 10:** Inject `buildMetaPreamble(...)` output into `ChatPanel.tsx` provider start.
-- **Task 11:** `IncludedProjectsStrip.tsx` + `@`-mention picker in `ChatInput.tsx`.
-- **Task 12:** `MetaGitSidebar.tsx` (multi-repo collapsible) + branching in the GitSidebar parent.
-- **Task 13:** Cross-project drag-drop block in `FileExplorerSidebar.tsx`.
-- **Task 14:** Multi-project replace confirmation in `SearchPanel.tsx`; extract `owningLink` helper into `src/lib/syntheticRoot.ts`.
-- **Task 15:** `ManageMetaWorkspaceModal.tsx` — rename / add / remove / edit description / delete.
-- **Task 16:** E2E smoke test in `tests/e2e/meta-workspace.spec.ts`.
-- **Task 17:** Full verification (vitest + integration + playwright + manual end-to-end).
+## Known concerns / follow-ups
 
-Each task body in the plan file is verbatim — fresh session can dispatch directly.
+- **Codex & Gemini preamble:** stashed on workspace state but not yet injected into the providers (no clean injection point in current ACP/JSON-RPC bootstraps). Claude works via `--append-system-prompt`. Future: extend codex.ts / gemini.ts to prepend the preamble at message-send time or via a system-instructions field if the protocols expose one.
+- **E2E creation flow:** `test.skip`d in `tests/e2e/meta-workspace.spec.ts` — requires stubbing `window.sai.selectFolder` + `metaWorkspaceCreate` via the preload harness.
+- **`alert()` for cross-project DnD block:** acceptable v1; should be replaced with a proper toast when a notification system lands.
+- **`aria-disabled` missing on IncludedProjectsStrip chips:** native `disabled` works; explicit `aria-disabled` would improve a11y.
 
-## Resumption instructions for the next session
+## Next steps (post-merge)
 
-1. `git checkout feat/meta-workspaces && git pull` (if syncing across machines).
-2. Re-read this file and the plan section for Task 8.
-3. Use `superpowers:subagent-driven-development` again.
-4. The minimum useful subset to get a usable feature end-to-end is Tasks 8 + 9 + 10 — they enable "create a meta workspace and chat across all included projects." Tasks 11-15 are UI polish; Tasks 16-17 are verification.
+1. Manual smoke as described in Task 17 of the plan (3 sibling folders, 2 with git, etc.).
+2. Wire codex/gemini preamble injection when those protocols expose a system-instructions field.
+3. Replace `alert()` in FileExplorerSidebar DnD block with a proper toast.
+4. Flesh out the e2e creation-flow test once the preload harness supports selectFolder stubs.
 
 ## Notable design decisions made during execution
 
