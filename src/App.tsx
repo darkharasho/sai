@@ -3388,7 +3388,11 @@ export default function App() {
               exit={{ opacity: 0, x: -12 }}
               transition={{ duration: 0.16, ease: 'easeIn' }}
             >
-              <FileExplorerSidebar projectPath={projectPath} onFileOpen={handleFileOpen} />
+              <FileExplorerSidebar
+                projectPath={projectPath}
+                onFileOpen={handleFileOpen}
+                metaRuntime={activeMetaRuntime && activeMetaRuntime.syntheticRoot === projectPath ? activeMetaRuntime : null}
+              />
             </motion.div>
           )}
           {sidebarOpen === 'git' && (

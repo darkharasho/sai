@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Folder, FolderOpen, FileText, FileCode2, Image, ChevronRight, FilePlus, FolderPlus } from 'lucide-react';
-import type { DirEntry } from '../../types';
+import type { DirEntry, MetaWorkspaceRuntime } from '../../types';
 import ContextMenu from './ContextMenu';
 import { basename } from '../../utils/pathUtils';
+import { isCrossProjectMove } from '../../lib/syntheticRoot';
 
 const IMAGE_EXTENSIONS = new Set([
   '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
@@ -51,6 +52,7 @@ interface TreeState {
 interface FileExplorerSidebarProps {
   projectPath: string;
   onFileOpen: (filePath: string) => void;
+  metaRuntime?: MetaWorkspaceRuntime | null;
 }
 
 interface InlineInput {
@@ -110,7 +112,7 @@ const DIRTY_COLORS: Record<GitDirtyStatus, string> = {
   deleted: 'var(--red)',
 };
 
-export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExplorerSidebarProps) {
+export default function FileExplorerSidebar({ projectPath, onFileOpen, metaRuntime }: FileExplorerSidebarProps) {
   const [tree, setTree] = useState<Map<string, TreeState>>(new Map());
   const [ignoredPaths, setIgnoredPaths] = useState<Set<string>>(new Set());
   const [dirtyMap, setDirtyMap] = useState<Map<string, GitDirtyStatus>>(new Map());
@@ -247,6 +249,12 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen }: FileExp
     if (newPath === drag.path || drag.path === targetDirPath) return;
     // Don't drop a folder into itself
     if (targetDirPath.startsWith(drag.path + '/')) return;
+
+    // Block cross-project moves in meta workspaces
+    if (metaRuntime && isCrossProjectMove(drag.path, newPath, metaRuntime.syntheticRoot)) {
+      alert('Cross-project moves are blocked in meta workspaces.');
+      return;
+    }
 
     try {
       await window.sai.fsRename(drag.path, newPath);
