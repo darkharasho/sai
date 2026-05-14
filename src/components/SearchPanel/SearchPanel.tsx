@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { Search, CaseSensitive, WholeWord, Regex, ChevronRight, ChevronDown, Replace, RotateCw, X } from 'lucide-react';
 import { useSearch } from '../../hooks/useSearch';
-import type { SearchQuery } from '../../types';
+import type { SearchQuery, MetaWorkspaceRuntime } from '../../types';
 import SearchResult from './SearchResult';
 import SaiLogo from '../SaiLogo';
+import { owningLink } from '../../lib/syntheticRoot';
 import './SearchPanel.css';
 
 export interface SearchPanelProps {
@@ -11,9 +12,19 @@ export interface SearchPanelProps {
   getOpenBuffers: () => { path: string; content: string }[];
   applyMonacoEdits?: (path: string, edits: { line: number; column: number; length: number; replacement: string }[]) => void;
   onOpenFile?: (filePath: string, line?: number) => void;
+  metaRuntime?: MetaWorkspaceRuntime | null;
 }
 
-export default function SearchPanel({ projectPath, getOpenBuffers, applyMonacoEdits, onOpenFile }: SearchPanelProps) {
+function groupByProject(files: string[], root: string): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const f of files) {
+    const k = owningLink(f, root) ?? '<unknown>';
+    (out[k] ??= []).push(f);
+  }
+  return out;
+}
+
+export default function SearchPanel({ projectPath, getOpenBuffers, applyMonacoEdits, onOpenFile, metaRuntime }: SearchPanelProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [pattern, setPattern] = useState('');
   const [replacement, setReplacement] = useState('');
@@ -241,7 +252,25 @@ export default function SearchPanel({ projectPath, getOpenBuffers, applyMonacoEd
       {confirmOpen && (
         <div className="search-confirm-overlay sai-overlay-in" onClick={() => setConfirmOpen(false)}>
           <div className="search-confirm-dialog sai-modal-in" onClick={e => e.stopPropagation()}>
-            <p>About to replace {totalMatches} match{totalMatches === 1 ? '' : 'es'} in {totalFiles} file{totalFiles === 1 ? '' : 's'}. Continue?</p>
+            {metaRuntime && search.results && search.results.files.length > 0 ? (() => {
+              const groups = groupByProject(search.results.files.map(f => f.path), metaRuntime.syntheticRoot);
+              const projectKeys = Object.keys(groups);
+              if (projectKeys.length >= 2) {
+                return (
+                  <div>
+                    <p>About to replace {totalMatches} match{totalMatches === 1 ? '' : 'es'} across projects:</p>
+                    <pre style={{ margin: '0.5rem 0', fontSize: '0.9rem', whiteSpace: 'pre-wrap' }}>
+                      {projectKeys.map(k => `${k}: ${groups[k].length} file${groups[k].length === 1 ? '' : 's'}`).join('\n')}
+                    </pre>
+                    <p>Continue?</p>
+                  </div>
+                );
+              } else {
+                return <p>About to replace {totalMatches} match{totalMatches === 1 ? '' : 'es'} in {totalFiles} file{totalFiles === 1 ? '' : 's'}. Continue?</p>;
+              }
+            })() : (
+              <p>About to replace {totalMatches} match{totalMatches === 1 ? '' : 'es'} in {totalFiles} file{totalFiles === 1 ? '' : 's'}. Continue?</p>
+            )}
             <div className="search-confirm-buttons">
               <button onClick={() => setConfirmOpen(false)}>Cancel</button>
               <button className="primary" onClick={handleReplaceAllConfirm}>Replace All</button>

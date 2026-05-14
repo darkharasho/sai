@@ -3421,6 +3421,7 @@ export default function App() {
                   .map(f => ({ path: f.path, content: f.content as string }))}
                 applyMonacoEdits={(p, edits) => applySearchEditsToMonaco(p, edits)}
                 onOpenFile={handleFileOpen}
+                metaRuntime={activeMetaRuntime && activeMetaRuntime.syntheticRoot === projectPath ? activeMetaRuntime : null}
               />
             </motion.div>
           )}
