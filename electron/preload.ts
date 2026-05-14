@@ -179,6 +179,7 @@ contextBridge.exposeInMainWorld('sai', {
   brainstormSynthesize: (sessionId: string) =>
     ipcRenderer.invoke('brainstorm:synthesize', sessionId),
   brainstormEnd: (sessionId: string) => ipcRenderer.invoke('brainstorm:end', sessionId),
+  brainstormConsumeSeed: (projectPath: string) => ipcRenderer.invoke('brainstorm:consumeSeed', projectPath),
   brainstormOnChunk: (sessionId: string, callback: (text: string) => void) => {
     const channel = `brainstorm:chunk:${sessionId}`;
     const listener = (_e: Electron.IpcRendererEvent, text: string) => callback(text);

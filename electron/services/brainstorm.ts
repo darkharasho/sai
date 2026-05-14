@@ -144,6 +144,8 @@ export function processStreamLine(
 import { spawn } from 'node:child_process';
 import { ipcMain, BrowserWindow } from 'electron';
 import os from 'node:os';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const IS_WIN = process.platform === 'win32';
 
@@ -253,5 +255,26 @@ export function registerBrainstormHandlers(win: BrowserWindow): void {
   ipcMain.handle('brainstorm:end', (_e, sessionId: string) => {
     deleteSession(sessionId);
     return { ok: true };
+  });
+
+  // Read-and-delete a project's brainstorm-seed.md if present.
+  // Returns { ok: true, content } when a seed was consumed, or { ok: false }.
+  // Quietly returns { ok: false } when no seed exists — no log spam for the
+  // common case of opening a project that was never brainstormed.
+  ipcMain.handle('brainstorm:consumeSeed', async (_e, projectPath: string) => {
+    if (!projectPath) return { ok: false };
+    const seedPath = path.join(projectPath.replace(/[/\\]+$/, ''), '.sai', 'brainstorm-seed.md');
+    let content: string;
+    try {
+      content = await fs.promises.readFile(seedPath, 'utf8');
+    } catch {
+      return { ok: false };
+    }
+    try {
+      await fs.promises.unlink(seedPath);
+    } catch {
+      // ignore — content was read, that's what matters
+    }
+    return { ok: true, content };
   });
 }

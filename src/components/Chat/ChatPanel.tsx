@@ -7,6 +7,12 @@ import SaiLogo from '../SaiLogo';
 import MotionPresence from './MotionPresence';
 import { SPRING, DISTANCE, EASING, useReducedMotionTransition } from './motion';
 
+// Projects whose brainstorm seed has already been consumed (or attempted) in
+// this renderer process. The seed is one-shot, but the chat start-effect can
+// re-run on config changes (model/scope/permission). Without this guard we'd
+// re-probe (and log a noisy ENOENT) on every re-run.
+const consumedBrainstormSeeds = new Set<string>();
+
 function tweenScrollToBottom(container: HTMLElement, durationMs = 280) {
   if (typeof window === 'undefined') return;
   if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
@@ -697,22 +703,23 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         setSlashCommands(result.slashCommands);
       }
 
-      // One-shot brainstorm seed consumption
-      if (aiProvider === 'claude' && projectPath) {
-        const seedPath = `${projectPath.replace(/\/+$/, '')}/.sai/brainstorm-seed.md`;
-        window.sai.fsReadFile(seedPath).then((content: string) => {
-          if (!content) return;
-          window.sai.fsDelete(seedPath).catch(() => {});
+      // One-shot brainstorm seed consumption. Server-side read+delete avoids
+      // the renderer ever calling fs:readFile on a missing path (which would
+      // log a noisy ENOENT in the main process).
+      if (aiProvider === 'claude' && projectPath && !consumedBrainstormSeeds.has(projectPath)) {
+        consumedBrainstormSeeds.add(projectPath);
+        (window.sai as any).brainstormConsumeSeed(projectPath).then((r: { ok: boolean; content?: string }) => {
+          if (!r?.ok || !r.content) return;
           window.sai.claudeSend(
             projectPath,
-            content,
+            r.content,
             undefined,
             permissionMode,
             effortLevel,
             modelChoice,
             claudeScope,
           );
-        }).catch(() => { /* no seed file — normal case */ });
+        }).catch(() => { /* ignore */ });
       }
     });
 
