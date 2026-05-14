@@ -2948,6 +2948,11 @@ export default function App() {
                       terminalTabs={ws.terminalTabs ?? []}
                       claudeScope={orchSessionId}
                       claudeKind="orchestrator"
+                      activeMetaRuntime={
+                        activeMetaRuntime && activeMetaRuntime.syntheticRoot === wsPath
+                          ? activeMetaRuntime
+                          : null
+                      }
                       emptyStateVisual={<SwarmLogoCluster leadSize={96} />}
                       conversationHeaderVisual={<SwarmLogoCluster leadSize={48} followerCount={6} footprint={220} />}
                       claudeOrchestratorContext={(() => {
