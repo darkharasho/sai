@@ -72,3 +72,34 @@ export function parseSynthesizeOutput(raw: string): SynthesizeResult {
 
   return { projectName, context };
 }
+
+export const BRAINSTORM_SYSTEM_PROMPT = [
+  'You are helping the user think through a brand-new software project before they create the folder and scaffolding.',
+  'Your job is to explore feasibility, surface trade-offs, ask about constraints, and propose options.',
+  'Keep responses concise and conversational. Do NOT produce code or file structures.',
+  'When the user asks you to synthesize, output strict JSON with two fields:',
+  '  - projectName: kebab-case, ≤ 40 chars',
+  '  - context: a 2–4 sentence summary suitable for a CLAUDE.md "Project Context" section',
+  'No other text when synthesizing — just the JSON object.',
+].join('\n');
+
+export const SYNTHESIZE_PROMPT =
+  'Synthesize our conversation. Respond with ONLY a JSON object: {"projectName":"...","context":"..."}. No prose, no code fences.';
+
+export function buildClaudeArgs(opts: {
+  userMessage: string;
+  claudeSessionId: string | undefined;
+}): string[] {
+  const args: string[] = [
+    '-p', opts.userMessage,
+    '--output-format', 'stream-json',
+    '--verbose',
+    '--max-turns', '1',
+  ];
+  if (opts.claudeSessionId) {
+    args.push('--resume', opts.claudeSessionId);
+  } else {
+    args.push('--append-system-prompt', BRAINSTORM_SYSTEM_PROMPT);
+  }
+  return args;
+}
