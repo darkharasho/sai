@@ -300,28 +300,33 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
           >
             Cancel
           </button>
-          {tab === 'brainstorm' ? (
-            <button
-              onClick={() => handleUseThis(pushedBack ? { force: true } : undefined)}
-              disabled={!brainstorm.hasReply || synthesizing}
-              title={pushedBack ? 'Skip the clarifying question and create the project with what we have' : undefined}
-              style={{
-                background: 'none',
-                border: `1px solid ${brainstorm.hasReply && !synthesizing ? 'var(--accent)' : 'var(--border)'}`,
-                color: brainstorm.hasReply && !synthesizing ? 'var(--accent)' : 'var(--text-muted)',
-                borderRadius: 5, padding: '7px 16px', fontSize: 13,
-                cursor: brainstorm.hasReply && !synthesizing ? 'pointer' : 'not-allowed',
-                display: 'flex', alignItems: 'center', gap: 6,
-              }}
-            >
-              <Sparkles size={13} />
-              {synthesizing
-                ? 'Synthesizing…'
-                : pushedBack
-                  ? 'Use this anyway →'
-                  : 'Use this →'}
-            </button>
-          ) : (
+          {tab === 'brainstorm' ? (() => {
+            const useThisEnabled = brainstorm.hasReply && !synthesizing && !brainstorm.isStreaming;
+            return (
+              <button
+                onClick={() => handleUseThis(pushedBack ? { force: true } : undefined)}
+                disabled={!useThisEnabled}
+                title={pushedBack ? 'Skip the clarifying question and create the project with what we have' : undefined}
+                style={{
+                  background: 'none',
+                  border: `1px solid ${useThisEnabled ? 'var(--accent)' : 'var(--border)'}`,
+                  color: useThisEnabled ? 'var(--accent)' : 'var(--text-muted)',
+                  borderRadius: 5, padding: '7px 16px', fontSize: 13,
+                  cursor: useThisEnabled ? 'pointer' : 'not-allowed',
+                  opacity: useThisEnabled ? 1 : 0.6,
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  transition: 'opacity 120ms ease, color 120ms ease, border-color 120ms ease',
+                }}
+              >
+                <Sparkles size={13} />
+                {synthesizing
+                  ? 'Synthesizing…'
+                  : pushedBack
+                    ? 'Use this anyway →'
+                    : 'Use this →'}
+              </button>
+            );
+          })() : (
             createdPath ? (
               <button
                 onClick={() => onCreated(createdPath)}
