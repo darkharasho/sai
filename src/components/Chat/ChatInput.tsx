@@ -248,7 +248,7 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
-  // Expose imperative mention-insert so IncludedProjectsStrip chips can inject text at cursor.
+  // Expose imperative mention-insert so IncludedProjectsControl chips can inject text at cursor.
   // We do this via a stable effect so the ref value is always fresh.
   useEffect(() => {
     if (!mentionInsertRef) return;

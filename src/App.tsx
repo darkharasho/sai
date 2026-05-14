@@ -25,6 +25,7 @@ import type { MetaWorkspace, MetaWorkspaceRuntime } from './types';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, setActiveHighlightTheme, type HighlightThemeId } from './themes';
 import ApprovalBanner from './components/ApprovalBanner';
 import { MessageSquare, TerminalSquare, Code2, ChevronRight, MessageCirclePlus } from 'lucide-react';
+import { IncludedProjectsControl } from './components/MetaWorkspace/IncludedProjectsControl';
 import ChatHistorySidebar from './components/Chat/ChatHistorySidebar';
 import PluginsSidebar from './components/Plugins/PluginsSidebar';
 import McpSidebar from './components/MCP/McpSidebar';
@@ -229,6 +230,9 @@ export default function App() {
     | null
   >(null);
   const slashCommandsRef = useRef<string[]>([]);
+  // Shared mention-insert ref: populated by ChatInput, consumed by the
+  // accordion-bar IncludedProjectsControl so both share the same callback.
+  const mentionInsertRef = useRef<((linkName: string) => void) | null>(null);
   const workspacesRef = useRef(workspaces);
   const activeProjectPathRef = useRef(activeProjectPath);
   const swarmTasksByWsRef = useRef(swarmTasksByWs);
@@ -2646,6 +2650,12 @@ export default function App() {
           )}
           {panel === 'chat' && (
             <div className="accordion-bar-actions">
+              {activeMetaRuntime && activeMetaRuntime.syntheticRoot === activeProjectPath && (
+                <IncludedProjectsControl
+                  runtime={activeMetaRuntime}
+                  onMentionInsert={(linkName) => mentionInsertRef.current?.(linkName)}
+                />
+              )}
               <button
                 className="accordion-bar-btn"
                 onClick={(e) => { e.stopPropagation(); handleNewChat(); }}
@@ -3251,6 +3261,7 @@ export default function App() {
                       ? activeMetaRuntime
                       : null
                   }
+                  mentionInsertRef={wsPath === activeProjectPath ? mentionInsertRef : undefined}
                 />
                 )}
               </div>

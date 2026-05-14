@@ -279,7 +279,6 @@ import type { MetaWorkspaceRuntime } from '../../types';
 import { buildHelpMessage } from './helpText';
 import { parseAiError, looksLikeApiError } from './parseAiError';
 import { buildMetaPreamble } from '../../lib/metaSystemPrompt';
-import { IncludedProjectsStrip } from '../MetaWorkspace/IncludedProjectsStrip';
 
 type CodexPermission = 'auto' | 'read-only' | 'full-access';
 
@@ -371,6 +370,12 @@ interface ChatPanelProps {
    * transition (e.g., a smaller version of the swarm cluster).
    */
   conversationHeaderVisual?: React.ReactNode;
+  /**
+   * Optional: ref that will be populated with a mention-insert callback by
+   * ChatInput. Pass this from App.tsx so the accordion bar can trigger
+   * mention insertion without going through ChatPanel's internal state.
+   */
+  mentionInsertRef?: React.MutableRefObject<((linkName: string) => void) | null>;
 }
 
 const EMPTY_PROMPTS = [
@@ -576,7 +581,7 @@ const FAKE_ERROR_VARIANTS = {
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(initialMessages || []);
   const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);
   const setMessages = useCallback((updater: ChatMessageType[] | ((prev: ChatMessageType[]) => ChatMessageType[])) => {
@@ -621,7 +626,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   });
   const sentinelRef = useRef<HTMLDivElement>(null);
   const pendingComposerRectRef = useRef<DOMRect | null>(null);
-  const mentionInsertRef = useRef<((linkName: string) => void) | null>(null);
+  const localMentionInsertRef = useRef<((linkName: string) => void) | null>(null);
+  const mentionInsertRef = mentionInsertRefProp ?? localMentionInsertRef;
 
   // Keep render window pinned to the tail when user is at bottom
   useEffect(() => {
@@ -1610,12 +1616,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       </div>
       <LayoutGroup>
         <div data-testid="chat-bottom-strip" className="chat-bottom-strip">
-          {activeMetaRuntime && (
-            <IncludedProjectsStrip
-              runtime={activeMetaRuntime}
-              onMentionInsert={(linkName) => mentionInsertRef.current?.(linkName)}
-            />
-          )}
           <ChatInput
             onSend={handleSend}
             onBeforeSend={(rect) => { pendingComposerRectRef.current = rect; }}
