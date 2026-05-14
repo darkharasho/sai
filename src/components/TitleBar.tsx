@@ -6,7 +6,8 @@ import GitHubAuthModal from './GitHubAuthModal';
 import GitHubCloneModal from './GitHubCloneModal';
 import SettingsModal from './SettingsModal';
 import { CreateMetaWorkspaceModal } from './MetaWorkspace/CreateMetaWorkspaceModal';
-import { LogOut, Settings, ChevronDown, FolderOpen, FolderPlus, Layers } from 'lucide-react';
+import { ManageMetaWorkspaceModal } from './MetaWorkspace/ManageMetaWorkspaceModal';
+import { LogOut, Settings, ChevronDown, FolderOpen, FolderPlus, Layers, Pencil } from 'lucide-react';
 import { basename } from '../utils/pathUtils';
 import SaiLogo from './SaiLogo';
 import { DOT_MASK_URL } from '../lib/assets';
@@ -37,9 +38,11 @@ interface TitleBarProps {
   activeMetaRuntime?: MetaWorkspaceRuntime | null;
   onActivateMeta?: (id: string) => Promise<void>;
   onMetaCreated?: (runtime: MetaWorkspaceRuntime) => void;
+  onMetaUpdated?: (runtime: MetaWorkspaceRuntime) => void;
+  onMetaDeleted?: (id: string) => void;
 }
 
-export default function TitleBar({ projectPath, onProjectChange, completedWorkspaces, busyWorkspaces, approvalWorkspaces, onSettingChange, onOpenWhatsNew, onHistoryRetentionChange, onNewProject, metaWorkspaces, activeMetaRuntime, onActivateMeta, onMetaCreated }: TitleBarProps) {
+export default function TitleBar({ projectPath, onProjectChange, completedWorkspaces, busyWorkspaces, approvalWorkspaces, onSettingChange, onOpenWhatsNew, onHistoryRetentionChange, onNewProject, metaWorkspaces, activeMetaRuntime, onActivateMeta, onMetaCreated, onMetaUpdated, onMetaDeleted }: TitleBarProps) {
   const [open, setOpen] = useState(false);
   const [pickerTab, setPickerTab] = useState<'projects' | 'meta'>('projects');
   const [workspaceList, setWorkspaceList] = useState<WorkspaceInfo[]>([]);
@@ -57,6 +60,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
   const [maximized, setMaximized] = useState(false);
   const ghDropRef = useRef<HTMLDivElement>(null);
   const [showCreateMeta, setShowCreateMeta] = useState(false);
+  const [manageMeta, setManageMeta] = useState<MetaWorkspace | null>(null);
   const [recentProjects, setRecentProjects] = useState<string[]>([]);
 
   useEffect(() => {
@@ -327,17 +331,25 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                     <>
                       <div className="dropdown-label">Active</div>
                       {activeMeta.map(meta => (
-                        <button
-                          key={meta.id}
-                          className="dropdown-item meta-workspace-item active"
-                          onClick={() => { onActivateMeta?.(meta.id); setOpen(false); }}
-                        >
-                          <Layers size={13} className="meta-workspace-icon" />
-                          <div className="meta-workspace-text">
-                            <span className="dropdown-item-name">{meta.name}</span>
-                            <span className="dropdown-item-path">{meta.projects.length} project{meta.projects.length === 1 ? '' : 's'}</span>
-                          </div>
-                        </button>
+                        <div key={meta.id} className="meta-workspace-row">
+                          <button
+                            className="dropdown-item meta-workspace-item active"
+                            onClick={() => { onActivateMeta?.(meta.id); setOpen(false); }}
+                          >
+                            <Layers size={13} className="meta-workspace-icon" />
+                            <div className="meta-workspace-text">
+                              <span className="dropdown-item-name">{meta.name}</span>
+                              <span className="dropdown-item-path">{meta.projects.length} project{meta.projects.length === 1 ? '' : 's'}</span>
+                            </div>
+                          </button>
+                          <button
+                            className="meta-workspace-manage-btn"
+                            onClick={e => { e.stopPropagation(); setManageMeta(meta); }}
+                            title="Manage"
+                          >
+                            <Pencil size={11} />
+                          </button>
+                        </div>
                       ))}
                     </>
                   )}
@@ -347,17 +359,25 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                       <div className="dropdown-label">Recent</div>
                       <div className="dropdown-inactive-scroll">
                         {recentMeta.map(meta => (
-                          <button
-                            key={meta.id}
-                            className="dropdown-item meta-workspace-item"
-                            onClick={() => { onActivateMeta?.(meta.id); setOpen(false); }}
-                          >
-                            <Layers size={13} className="meta-workspace-icon" />
-                            <div className="meta-workspace-text">
-                              <span className="dropdown-item-name">{meta.name}</span>
-                              <span className="dropdown-item-path">{meta.projects.length} project{meta.projects.length === 1 ? '' : 's'}</span>
-                            </div>
-                          </button>
+                          <div key={meta.id} className="meta-workspace-row">
+                            <button
+                              className="dropdown-item meta-workspace-item"
+                              onClick={() => { onActivateMeta?.(meta.id); setOpen(false); }}
+                            >
+                              <Layers size={13} className="meta-workspace-icon" />
+                              <div className="meta-workspace-text">
+                                <span className="dropdown-item-name">{meta.name}</span>
+                                <span className="dropdown-item-path">{meta.projects.length} project{meta.projects.length === 1 ? '' : 's'}</span>
+                              </div>
+                            </button>
+                            <button
+                              className="meta-workspace-manage-btn"
+                              onClick={e => { e.stopPropagation(); setManageMeta(meta); }}
+                              title="Manage"
+                            >
+                              <Pencil size={11} />
+                            </button>
+                          </div>
                         ))}
                       </div>
                     </>
@@ -478,6 +498,22 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
             setShowCreateMeta(false);
             setOpen(false);
             onMetaCreated?.(runtime);
+          }}
+        />
+      )}
+      {manageMeta && (
+        <ManageMetaWorkspaceModal
+          meta={manageMeta}
+          onClose={() => setManageMeta(null)}
+          onUpdated={(runtime) => {
+            setManageMeta(null);
+            setOpen(false);
+            onMetaUpdated?.(runtime);
+          }}
+          onDeleted={(id) => {
+            setManageMeta(null);
+            setOpen(false);
+            onMetaDeleted?.(id);
           }}
         />
       )}
@@ -1021,6 +1057,35 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           color: var(--accent);
           border-bottom-color: var(--accent);
           background: transparent;
+        }
+        .meta-workspace-row {
+          display: flex;
+          align-items: center;
+          gap: 0;
+        }
+        .meta-workspace-row .meta-workspace-item {
+          flex: 1;
+          min-width: 0;
+        }
+        .meta-workspace-manage-btn {
+          flex-shrink: 0;
+          background: none;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          padding: 4px 6px;
+          border-radius: 4px;
+          display: flex;
+          align-items: center;
+          opacity: 0;
+          transition: opacity 0.12s, color 0.12s;
+        }
+        .meta-workspace-row:hover .meta-workspace-manage-btn {
+          opacity: 1;
+        }
+        .meta-workspace-manage-btn:hover {
+          color: var(--text);
+          background: var(--bg-hover);
         }
         .meta-workspace-item {
           flex-direction: row !important;

@@ -2272,6 +2272,21 @@ export default function App() {
     }
   }, [activeProjectPath]);
 
+  const handleMetaWorkspaceUpdated = useCallback((runtime: MetaWorkspaceRuntime) => {
+    setMetaWorkspaces(prev => prev.map(m => m.id === runtime.meta.id ? runtime.meta : m));
+    setActiveMetaRuntime(prev => prev?.meta.id === runtime.meta.id ? runtime : prev);
+  }, []);
+
+  const handleMetaWorkspaceDeleted = useCallback((id: string) => {
+    setMetaWorkspaces(prev => prev.filter(m => m.id !== id));
+    setActiveMetaRuntime(prev => {
+      if (prev?.meta.id !== id) return prev;
+      // Switch away from the synthetic root
+      setActiveProjectPath('');
+      return null;
+    });
+  }, []);
+
   const handlePaletteCommand = useCallback((command: string) => {
     if (command === 'clear' && activeProjectPath) {
       updateWorkspace(activeProjectPath, ws => ({
@@ -3318,6 +3333,8 @@ export default function App() {
         activeMetaRuntime={activeMetaRuntime}
         onActivateMeta={handleMetaWorkspaceActivate}
         onMetaCreated={handleMetaWorkspaceCreated}
+        onMetaUpdated={handleMetaWorkspaceUpdated}
+        onMetaDeleted={handleMetaWorkspaceDeleted}
         onSettingChange={(key, value) => {
           if (key === 'editorFontSize') setEditorFontSize(value);
           if (key === 'editorMinimap') setEditorMinimap(value);
