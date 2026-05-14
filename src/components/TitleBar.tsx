@@ -623,8 +623,6 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         }
         .titlebar-meta-icon {
           color: var(--accent);
-          margin-right: 5px;
-          vertical-align: middle;
           flex-shrink: 0;
         }
         .gh-login-btn {
@@ -755,6 +753,10 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           padding: 4px 12px;
           border-radius: 4px;
           position: relative;
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          line-height: 1;
         }
         .workspace-done-dot {
           display: inline-block;
