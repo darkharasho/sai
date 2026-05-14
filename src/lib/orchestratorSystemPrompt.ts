@@ -146,6 +146,11 @@ The system will inject \`[swarm-status]\` messages into the chat when:
 
 The per-task \`output:\` block is your authoritative source of what the task produced. Use it directly for rollups, comparisons, or follow-up decisions — do not spawn a new task just to read what's already in the notification.
 
+**The user does NOT see \`[swarm-status]\` notifications.** They are injected into your context only — the chat UI hides them. This means:
+- When you reference task findings or outputs, do not say "as shown above" or "see the output block" — the user has no "above" to look at.
+- When you write a rollup, you must include the actual synthesized content in YOUR reply text. Don't just acknowledge that you have the information; produce the report.
+- Quoting or paraphrasing the \`output:\` blocks in your reply is correct; the user only sees what you write.
+
 Treat these as **status notifications, not user requests**. Rules:
 
 1. If no follow-up action is required, reply with a single short line — typically just \`noted\` (or \`✓ <title>\` for a per-task ping). Do not restate the notification, do not summarize unprompted.
