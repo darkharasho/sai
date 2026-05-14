@@ -273,6 +273,11 @@ export default function App() {
   // Tracks the last swarm task we routed the active session to, to avoid
   // re-firing the session-switch effect on every state update.
   const lastSwarmRoutedRef = useRef<string | null>(null);
+  // Per-workspace memory of the regular (non-task) session that was active
+  // before the user clicked into a swarm task row. Restored when leaving
+  // swarm (sidebar change or back to overview) so the chat panel doesn't
+  // keep showing the task's chat outside the swarm view.
+  const preSwarmSessionByWsRef = useRef<Map<string, string>>(new Map());
 
   // Update taskbar badge count when notifications are pending
   useEffect(() => {
@@ -2557,6 +2562,14 @@ export default function App() {
     if (!activeProjectPath) return;
     if (sidebarOpen !== 'swarm' || swarmSelected === 'overview') {
       lastSwarmRoutedRef.current = null;
+      // Leaving the swarm view: if we previously swapped to a task session,
+      // restore the pre-swarm regular session so the chat panel reverts.
+      const saved = preSwarmSessionByWsRef.current.get(activeProjectPath);
+      if (saved && activeSession.kind === 'task' && saved !== activeSession.id) {
+        const inMemorySaved = sessions.find(s => s.id === saved);
+        if (inMemorySaved) handleSelectSession(saved);
+      }
+      preSwarmSessionByWsRef.current.delete(activeProjectPath);
       return;
     }
     const task = (swarmTasksByWs.get(activeProjectPath) ?? []).find(t => t.id === swarmSelected);
@@ -2565,6 +2578,10 @@ export default function App() {
     if (activeSession.id === task.sessionId) {
       lastSwarmRoutedRef.current = task.id;
       return;
+    }
+    // Remember the regular session we're leaving so we can restore it later.
+    if (activeSession.kind !== 'task' && !preSwarmSessionByWsRef.current.has(activeProjectPath)) {
+      preSwarmSessionByWsRef.current.set(activeProjectPath, activeSession.id);
     }
     lastSwarmRoutedRef.current = task.id;
     const inMemory = sessions.find(s => s.id === task.sessionId);
