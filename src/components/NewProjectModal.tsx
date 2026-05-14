@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { FolderPlus, Brain } from 'lucide-react';
+import { FolderPlus, Sparkles, Settings2 } from 'lucide-react';
 import SetupTab from './NewProjectModal/SetupTab';
 import BrainstormTab from './NewProjectModal/BrainstormTab';
 import { useBrainstorm } from './NewProjectModal/useBrainstorm';
@@ -26,13 +26,21 @@ type Tab = 'setup' | 'brainstorm';
 
 function TabButton({ active, onClick, label, icon }: { active: boolean; onClick: () => void; label: string; icon?: React.ReactNode }) {
   return (
-    <button onClick={onClick} style={{
-      background: 'none', border: 'none', padding: '8px 12px',
-      fontSize: 12, color: active ? 'var(--accent)' : 'var(--text-muted)',
-      borderBottom: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
-      marginBottom: -1, cursor: 'pointer',
-      display: 'flex', alignItems: 'center', gap: 6,
-    }}>
+    <button
+      onClick={onClick}
+      className="sai-new-project-tab"
+      data-active={active ? 'true' : 'false'}
+      style={{
+        background: 'none', border: 'none', padding: '9px 14px',
+        fontSize: 12, fontWeight: active ? 600 : 500,
+        letterSpacing: '0.02em',
+        color: active ? 'var(--accent)' : 'var(--text-muted)',
+        borderBottom: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
+        marginBottom: -1, cursor: 'pointer',
+        display: 'flex', alignItems: 'center', gap: 6,
+        transition: 'color 120ms ease',
+      }}
+    >
       {icon}
       {label}
     </button>
@@ -40,8 +48,19 @@ function TabButton({ active, onClick, label, icon }: { active: boolean; onClick:
 }
 
 const replaceBtnStyle: React.CSSProperties = {
-  background: 'none', border: '1px solid var(--border)', color: 'var(--text)',
-  fontSize: 11, padding: '3px 10px', borderRadius: 4, cursor: 'pointer',
+  background: 'var(--bg-secondary)',
+  border: '1px solid var(--border)',
+  color: 'var(--text)',
+  fontSize: 11, padding: '4px 10px', borderRadius: 4, cursor: 'pointer',
+  fontFamily: 'system-ui, sans-serif',
+  transition: 'border-color 120ms ease, color 120ms ease',
+};
+
+const replaceBtnPrimaryStyle: React.CSSProperties = {
+  ...replaceBtnStyle,
+  border: '1px solid var(--accent)',
+  color: 'var(--accent)',
+  background: 'rgba(199,145,12,0.12)',
 };
 
 export default function NewProjectModal({ onClose, onCreated }: NewProjectModalProps) {
@@ -204,18 +223,28 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
         </div>
 
         {/* Tab bar */}
-        <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)' }}>
-          <TabButton active={tab === 'setup'} onClick={() => setTab('setup')} label="Setup" />
-          <TabButton active={tab === 'brainstorm'} onClick={() => setTab('brainstorm')} icon={<Brain size={12} />} label="Brainstorm" />
+        <div style={{ display: 'flex', gap: 2, borderBottom: '1px solid var(--border)', margin: '0 -4px' }}>
+          <TabButton active={tab === 'setup'} onClick={() => setTab('setup')} icon={<Settings2 size={12} />} label="Setup" />
+          <TabButton active={tab === 'brainstorm'} onClick={() => setTab('brainstorm')} icon={<Sparkles size={12} />} label="Brainstorm" />
         </div>
 
         {tab === 'setup' ? (
           <>
             {replacePrompt && (
-              <div style={{ fontSize: 12, background: 'rgba(199,145,12,0.08)', border: '1px solid rgba(199,145,12,0.3)', borderRadius: 5, padding: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <div>Replace your typed values with brainstorm results?</div>
+              <div style={{
+                fontSize: 12,
+                background: 'rgba(199,145,12,0.06)',
+                border: '1px solid rgba(199,145,12,0.25)',
+                borderRadius: 6,
+                padding: 12,
+                display: 'flex', flexDirection: 'column', gap: 10,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text)' }}>
+                  <Sparkles size={13} color="var(--accent)" />
+                  <span>Replace your typed values with brainstorm results?</span>
+                </div>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  <button onClick={() => acceptReplace('both')} style={replaceBtnStyle}>Replace both</button>
+                  <button onClick={() => acceptReplace('both')} style={replaceBtnPrimaryStyle}>Replace both</button>
                   <button onClick={() => acceptReplace('name')} style={replaceBtnStyle}>Name only</button>
                   <button onClick={() => acceptReplace('context')} style={replaceBtnStyle}>Context only</button>
                   <button onClick={() => setReplacePrompt(null)} style={replaceBtnStyle}>Keep mine</button>
@@ -273,8 +302,10 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
                 color: brainstorm.hasReply && !synthesizing ? 'var(--accent)' : 'var(--text-muted)',
                 borderRadius: 5, padding: '7px 16px', fontSize: 13,
                 cursor: brainstorm.hasReply && !synthesizing ? 'pointer' : 'not-allowed',
+                display: 'flex', alignItems: 'center', gap: 6,
               }}
             >
+              <Sparkles size={13} />
               {synthesizing ? 'Synthesizing…' : 'Use this →'}
             </button>
           ) : (

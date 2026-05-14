@@ -1,5 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Brain } from 'lucide-react';
+import { Send, Terminal, Sparkles } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import SaiLogo from '../SaiLogo';
 import type { BrainstormMessage } from './useBrainstorm';
 
 interface Props {
@@ -15,6 +18,7 @@ export default function BrainstormTab({
   messages, streamingText, isStreaming, error, startError, onSend,
 }: Props) {
   const [draft, setDraft] = useState('');
+  const [inputFocused, setInputFocused] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -32,44 +36,68 @@ export default function BrainstormTab({
 
   if (startError) {
     return (
-      <div style={{ padding: 16, fontSize: 12, color: '#f87171' }}>
+      <div style={{ padding: 16, fontSize: 12, color: '#f87171', background: 'rgba(248,113,113,0.06)', border: '1px solid rgba(248,113,113,0.2)', borderRadius: 6 }}>
         AI brainstorm unavailable — {startError}. You can still fill out the Setup tab manually.
       </div>
     );
   }
 
+  const canSend = !!draft.trim() && !isStreaming;
+  const showEmptyState = messages.length === 0 && !isStreaming;
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, height: 360 }}>
+    <div className="brainstorm-tab" style={{ display: 'flex', flexDirection: 'column', gap: 10, height: 380 }}>
       <div
         ref={scrollRef}
+        className="brainstorm-transcript"
         style={{
-          flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8,
-          padding: 10, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 5,
+          flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14,
+          padding: '14px 12px',
+          background: 'var(--bg-secondary)',
+          border: '1px solid var(--border)',
+          borderRadius: 6,
         }}
       >
-        {messages.length === 0 && !isStreaming && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-muted)', fontSize: 12 }}>
-            <Brain size={14} />
-            <span>Talk through what you want to build before we scaffold anything.</span>
+        {showEmptyState && (
+          <div style={{
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            gap: 8, color: 'var(--text-muted)', fontSize: 12, padding: '24px 16px', textAlign: 'center',
+            margin: 'auto',
+          }}>
+            <Sparkles size={18} color="var(--accent)" style={{ opacity: 0.7 }} />
+            <div style={{ fontSize: 12.5, color: 'var(--text)', fontWeight: 500 }}>Think it through first</div>
+            <div style={{ fontSize: 11, lineHeight: 1.5, maxWidth: 320 }}>
+              Talk through feasibility, trade-offs, and options before we create the folder, scaffolding, and repo. When you're ready, hit <span style={{ color: 'var(--accent)' }}>Use this →</span>.
+            </div>
           </div>
         )}
         {messages.map((m, i) => (
-          <Bubble key={i} role={m.role} text={m.content} />
+          <Message key={i} role={m.role} text={m.content} />
         ))}
-        {isStreaming && streamingText && <Bubble role="assistant" text={streamingText} />}
-        {isStreaming && !streamingText && (
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>thinking…</div>
-        )}
+        {isStreaming && streamingText && <Message role="assistant" text={streamingText} streaming />}
+        {isStreaming && !streamingText && <ThinkingIndicator />}
         {error && (
-          <div style={{ fontSize: 11, color: '#f87171' }}>{error}</div>
+          <div style={{ fontSize: 11, color: '#f87171', padding: '4px 8px' }}>{error}</div>
         )}
       </div>
-      <div style={{ display: 'flex', gap: 6 }}>
+      <div
+        className="brainstorm-input"
+        style={{
+          display: 'flex', gap: 6, alignItems: 'stretch',
+          background: 'var(--bg-secondary)',
+          border: `1px solid ${inputFocused ? 'var(--accent)' : 'var(--border)'}`,
+          borderRadius: 6,
+          padding: 4,
+          transition: 'border-color 120ms ease',
+        }}
+      >
         <textarea
           value={draft}
           onChange={e => setDraft(e.target.value)}
+          onFocus={() => setInputFocused(true)}
+          onBlur={() => setInputFocused(false)}
           onKeyDown={e => {
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+            if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
               handleSend();
             }
@@ -78,20 +106,25 @@ export default function BrainstormTab({
           rows={2}
           style={{
             flex: 1,
-            background: 'var(--bg-secondary)', border: '1px solid var(--border)',
-            borderRadius: 5, padding: '7px 10px', fontSize: 13, color: 'var(--text)',
-            fontFamily: 'system-ui, sans-serif', resize: 'none',
+            background: 'transparent', border: 'none', outline: 'none',
+            padding: '6px 8px', fontSize: 13, color: 'var(--text)',
+            fontFamily: 'system-ui, sans-serif', resize: 'none', lineHeight: 1.45,
           }}
         />
         <button
           onClick={handleSend}
-          disabled={!draft.trim() || isStreaming}
+          disabled={!canSend}
           aria-label="Send"
+          title="Send (Enter)"
           style={{
-            background: 'none',
-            border: `1px solid ${draft.trim() && !isStreaming ? 'var(--accent)' : 'var(--border)'}`,
-            color: draft.trim() && !isStreaming ? 'var(--accent)' : 'var(--text-muted)',
-            borderRadius: 5, padding: '0 12px', cursor: draft.trim() && !isStreaming ? 'pointer' : 'not-allowed',
+            background: canSend ? 'rgba(199,145,12,0.12)' : 'transparent',
+            border: `1px solid ${canSend ? 'var(--accent)' : 'transparent'}`,
+            color: canSend ? 'var(--accent)' : 'var(--text-muted)',
+            borderRadius: 4, padding: '0 12px',
+            cursor: canSend ? 'pointer' : 'not-allowed',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            transition: 'background 120ms ease, color 120ms ease, border-color 120ms ease',
+            alignSelf: 'stretch',
           }}
         >
           <Send size={14} />
@@ -101,20 +134,81 @@ export default function BrainstormTab({
   );
 }
 
-function Bubble({ role, text }: { role: 'user' | 'assistant'; text: string }) {
+function Message({ role, text, streaming }: { role: 'user' | 'assistant'; text: string; streaming?: boolean }) {
   const isUser = role === 'user';
   return (
-    <div
-      style={{
-        alignSelf: isUser ? 'flex-end' : 'flex-start',
-        maxWidth: '85%',
-        background: isUser ? 'rgba(199,145,12,0.1)' : 'var(--bg-elevated)',
-        border: `1px solid ${isUser ? 'rgba(199,145,12,0.3)' : 'var(--border)'}`,
-        borderRadius: 6, padding: '6px 10px',
-        fontSize: 12.5, color: 'var(--text)', whiteSpace: 'pre-wrap', lineHeight: 1.45,
-      }}
-    >
-      {text}
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+      <div style={{ flexShrink: 0, width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 1 }}>
+        {isUser
+          ? <Terminal size={13} color="var(--green, #4caf80)" strokeWidth={2.5} />
+          : <SaiLogo mode="static" size={16} />}
+      </div>
+      <div
+        className={`brainstorm-msg brainstorm-msg-${role}${streaming ? ' brainstorm-msg-streaming' : ''}`}
+        style={{
+          flex: 1, minWidth: 0,
+          fontSize: 12.5, color: 'var(--text)', lineHeight: 1.55,
+        }}
+      >
+        {isUser ? (
+          <div style={{ whiteSpace: 'pre-wrap' }}>{text}</div>
+        ) : (
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+        )}
+      </div>
+      <style>{`
+        .brainstorm-msg p { margin: 0 0 6px 0; }
+        .brainstorm-msg p:last-child { margin-bottom: 0; }
+        .brainstorm-msg ul, .brainstorm-msg ol { margin: 4px 0 6px 0; padding-left: 20px; }
+        .brainstorm-msg li { margin: 2px 0; }
+        .brainstorm-msg li > p { margin: 0; }
+        .brainstorm-msg code {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 11.5px;
+          background: var(--bg-elevated);
+          border: 1px solid var(--border);
+          border-radius: 3px;
+          padding: 0 4px;
+        }
+        .brainstorm-msg pre {
+          background: var(--bg-elevated);
+          border: 1px solid var(--border);
+          border-radius: 5px;
+          padding: 8px 10px;
+          overflow-x: auto;
+          margin: 6px 0;
+        }
+        .brainstorm-msg pre code {
+          background: transparent;
+          border: none;
+          padding: 0;
+        }
+        .brainstorm-msg h1, .brainstorm-msg h2, .brainstorm-msg h3 {
+          font-size: 13px;
+          font-weight: 600;
+          margin: 8px 0 4px 0;
+          color: var(--text);
+        }
+        .brainstorm-msg a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+        .brainstorm-msg strong { color: var(--text); font-weight: 600; }
+        .brainstorm-msg blockquote {
+          margin: 6px 0;
+          padding: 2px 0 2px 10px;
+          border-left: 2px solid var(--border);
+          color: var(--text-muted);
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function ThinkingIndicator() {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div style={{ flexShrink: 0, width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <SaiLogo mode="pulse" size={16} />
+      </div>
+      <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontStyle: 'italic' }}>thinking…</span>
     </div>
   );
 }
