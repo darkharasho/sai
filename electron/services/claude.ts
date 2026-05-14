@@ -4,6 +4,7 @@ import { getOrCreate, get, getClaude, touchActivity } from './workspace';
 import type { PendingToolUse } from './workspace';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { enrichedEnv } from './shellEnv';
 import { notifyCompletion, notifyApproval } from './notify';
 import { extractCodexCommitMessage } from './commit-message-parser';
 import { ensureGeminiCommitSession, ensureGeminiTransport, promptGeminiText } from './gemini';
@@ -21,115 +22,6 @@ const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-
 // typically shipped as `.cmd`/`.ps1` shims. Node's spawn won't resolve those
 // without shell: true, so requests fail with ENOENT.
 const IS_WIN = process.platform === 'win32';
-
-/**
- * Cached shell environment captured from the user's login shell.
- * Populated once at module load so MCP servers, npx, uvx, etc. are on PATH.
- */
-let cachedShellEnv: NodeJS.ProcessEnv | null = null;
-
-/**
- * Spawn the user's login shell, run `env`, and parse the full environment.
- * Falls back gracefully if the shell hangs or fails.
- */
-function captureShellEnv(): Promise<NodeJS.ProcessEnv> {
-  return new Promise((resolve) => {
-    const fallback = () => resolve(heuristicEnv());
-
-    let proc: ReturnType<typeof spawn>;
-    try {
-      const userShell = process.env.SHELL || '/bin/zsh';
-      proc = spawn(userShell, ['-ilc', 'env'], {
-        stdio: ['ignore', 'pipe', 'ignore'],
-        env: { ...process.env, TERM: 'dumb' },
-        timeout: 5000,
-      });
-      if (!proc || !proc.on) { fallback(); return; }
-    } catch {
-      fallback();
-      return;
-    }
-
-    let output = '';
-    proc.stdout?.on('data', (d: Buffer) => { output += d.toString(); });
-
-    proc.on('error', fallback);
-    proc.on('exit', () => {
-      if (!output.trim()) { fallback(); return; }
-      const env: Record<string, string> = {};
-      let currentKey = '';
-      let currentVal = '';
-      for (const line of output.split('\n')) {
-        const eqIdx = line.indexOf('=');
-        if (eqIdx > 0 && /^[A-Za-z_][A-Za-z0-9_]*$/.test(line.slice(0, eqIdx))) {
-          // Flush previous key
-          if (currentKey) env[currentKey] = currentVal;
-          currentKey = line.slice(0, eqIdx);
-          currentVal = line.slice(eqIdx + 1);
-        } else if (currentKey) {
-          // Continuation of a multi-line value
-          currentVal += '\n' + line;
-        }
-      }
-      if (currentKey) env[currentKey] = currentVal;
-
-      // Remove shell-specific vars that should not be inherited
-      for (const k of ['SHLVL', '_', 'PWD', 'OLDPWD']) delete env[k];
-
-      if (env.PATH) {
-        cachedShellEnv = env;
-        resolve(env);
-      } else {
-        fallback();
-      }
-    });
-
-    // Safety timeout in case the shell hangs
-    setTimeout(() => { try { proc.kill(); } catch {} }, 5000);
-  });
-}
-
-/**
- * Heuristic fallback: prepend common tool paths to PATH.
- * Used when shell env capture fails.
- */
-function heuristicEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  if (process.platform === 'win32') {
-    // Windows PATH is managed via the installer/registry and uses ';' as
-    // the separator. Unix-style prefixes like /usr/local/bin would corrupt it.
-    return env;
-  }
-  const home = require('node:os').homedir();
-  const extraPaths: string[] = [];
-  const nvmDir = path.join(home, '.nvm', 'versions', 'node');
-  if (fs.existsSync(nvmDir)) {
-    try { for (const v of fs.readdirSync(nvmDir)) extraPaths.push(path.join(nvmDir, v, 'bin')); } catch {}
-  }
-  extraPaths.push(
-    path.join(home, '.local', 'bin'),
-    path.join(home, '.volta', 'bin'),
-    '/usr/local/bin',
-    '/opt/homebrew/bin',
-  );
-  env.PATH = [...extraPaths, env.PATH || ''].join(path.delimiter);
-  return env;
-}
-
-// Kick off shell env capture at module load time (POSIX only — on Windows
-// there's no login-shell `env` equivalent and process.env is already correct).
-if (process.platform !== 'win32') captureShellEnv();
-
-/**
- * Return the best available environment for spawning CLI processes.
- * Prefers the captured shell env; falls back to heuristic.
- */
-function enrichedEnv(): NodeJS.ProcessEnv {
-  if (cachedShellEnv) {
-    return { ...cachedShellEnv };
-  }
-  return heuristicEnv();
-}
 
 function readCachedSlashCommands(): string[] {
   try {

@@ -52,7 +52,10 @@ function captureShellEnv(): Promise<NodeJS.ProcessEnv> {
       }
       if (currentKey) env[currentKey] = currentVal;
 
-      if (Object.keys(env).length > 0) {
+      // Strip shell-specific vars that shouldn't be inherited by spawned tools.
+      for (const k of ['SHLVL', '_', 'PWD', 'OLDPWD']) delete env[k];
+
+      if (env.PATH) {
         cachedShellEnv = env;
         resolve(env);
       } else {
