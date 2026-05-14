@@ -696,6 +696,24 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       if (result?.slashCommands?.length) {
         setSlashCommands(result.slashCommands);
       }
+
+      // One-shot brainstorm seed consumption
+      if (aiProvider === 'claude' && projectPath) {
+        const seedPath = `${projectPath.replace(/\/+$/, '')}/.sai/brainstorm-seed.md`;
+        window.sai.fsReadFile(seedPath).then((content: string) => {
+          if (!content) return;
+          window.sai.fsDelete(seedPath).catch(() => {});
+          window.sai.claudeSend(
+            projectPath,
+            content,
+            undefined,
+            permissionMode,
+            effortLevel,
+            modelChoice,
+            claudeScope,
+          );
+        }).catch(() => { /* no seed file — normal case */ });
+      }
     });
 
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
