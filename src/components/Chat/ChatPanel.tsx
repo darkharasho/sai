@@ -705,14 +705,25 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
       // One-shot brainstorm seed consumption. Server-side read+delete avoids
       // the renderer ever calling fs:readFile on a missing path (which would
-      // log a noisy ENOENT in the main process).
+      // log a noisy ENOENT in the main process). We push the seed into the
+      // chat transcript so the user sees it as their first message — just
+      // calling claudeSend would deliver it to the model invisibly.
       if (aiProvider === 'claude' && projectPath && !consumedBrainstormSeeds.has(projectPath)) {
         consumedBrainstormSeeds.add(projectPath);
         (window.sai as any).brainstormConsumeSeed(projectPath).then((r: { ok: boolean; content?: string }) => {
           if (!r?.ok || !r.content) return;
+          const seedContent = r.content.trim();
+          if (!seedContent) return;
+          const seedMessageId = `seed-${Date.now()}`;
+          setMessages(prev => [...prev, {
+            id: seedMessageId,
+            role: 'user',
+            content: seedContent,
+            timestamp: Date.now(),
+          }]);
           window.sai.claudeSend(
             projectPath,
-            r.content,
+            seedContent,
             undefined,
             permissionMode,
             effortLevel,

@@ -206,6 +206,28 @@ function Message({ role, text, streaming, showDivider }: { role: 'user' | 'assis
           border-left: 2px solid var(--border);
           color: var(--text-muted);
         }
+        /* Always-visible scrollbar — the default chrome blends into the
+           transcript background. Firefox uses scrollbar-color; WebKit/Chromium
+           uses the ::-webkit-scrollbar pseudo-elements. */
+        .brainstorm-transcript {
+          scrollbar-width: thin;
+          scrollbar-color: var(--text-muted) transparent;
+        }
+        .brainstorm-transcript::-webkit-scrollbar {
+          width: 10px;
+          height: 10px;
+        }
+        .brainstorm-transcript::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .brainstorm-transcript::-webkit-scrollbar-thumb {
+          background: var(--text-muted);
+          border-radius: 5px;
+          border: 2px solid var(--bg-secondary);
+        }
+        .brainstorm-transcript::-webkit-scrollbar-thumb:hover {
+          background: var(--accent);
+        }
       `}</style>
     </div>
   );
