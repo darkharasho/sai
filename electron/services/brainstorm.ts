@@ -103,3 +103,40 @@ export function buildClaudeArgs(opts: {
   }
   return args;
 }
+
+export interface StreamAccumulator {
+  fullText: string;
+  sessionId: string | undefined;
+}
+
+export function processStreamLine(
+  line: string,
+  acc: StreamAccumulator,
+  onChunk: (text: string) => void,
+): void {
+  const trimmed = line.trim();
+  if (!trimmed) return;
+  let msg: any;
+  try {
+    msg = JSON.parse(trimmed);
+  } catch {
+    return;
+  }
+
+  if (msg.type === 'system' && msg.subtype === 'init' && msg.session_id) {
+    acc.sessionId = msg.session_id;
+    return;
+  }
+  if (msg.session_id && !acc.sessionId) {
+    acc.sessionId = msg.session_id;
+  }
+
+  if (msg.type === 'assistant' && msg.message?.content) {
+    for (const block of msg.message.content) {
+      if (block.type === 'text' && typeof block.text === 'string') {
+        acc.fullText += block.text;
+        onChunk(block.text);
+      }
+    }
+  }
+}
