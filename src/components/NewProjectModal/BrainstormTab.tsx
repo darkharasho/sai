@@ -72,9 +72,11 @@ export default function BrainstormTab({
           </div>
         )}
         {messages.map((m, i) => (
-          <Message key={i} role={m.role} text={m.content} />
+          <Message key={i} role={m.role} text={m.content} showDivider={i > 0} />
         ))}
-        {isStreaming && streamingText && <Message role="assistant" text={streamingText} streaming />}
+        {isStreaming && streamingText && (
+          <Message role="assistant" text={streamingText} streaming showDivider={messages.length > 0} />
+        )}
         {isStreaming && !streamingText && <ThinkingIndicator />}
         {error && (
           <div style={{ fontSize: 11, color: '#f87171', padding: '4px 8px' }}>{error}</div>
@@ -134,10 +136,15 @@ export default function BrainstormTab({
   );
 }
 
-function Message({ role, text, streaming }: { role: 'user' | 'assistant'; text: string; streaming?: boolean }) {
+function Message({ role, text, streaming, showDivider }: { role: 'user' | 'assistant'; text: string; streaming?: boolean; showDivider?: boolean }) {
   const isUser = role === 'user';
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+    <div style={{
+      display: 'flex', alignItems: 'flex-start', gap: 10,
+      paddingTop: showDivider ? 12 : 0,
+      borderTop: showDivider ? '1px dashed var(--border)' : 'none',
+      opacity: showDivider ? 1 : 1,
+    }}>
       <div style={{ flexShrink: 0, width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 1 }}>
         {isUser
           ? <Terminal size={13} color="var(--green, #4caf80)" strokeWidth={2.5} />

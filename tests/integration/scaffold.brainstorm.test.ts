@@ -26,9 +26,7 @@ describe('scaffoldProject — brainstorm seed', () => {
     const seedPath = path.join(target, '.sai', 'brainstorm-seed.md');
     expect(fs.existsSync(seedPath)).toBe(true);
     const seed = fs.readFileSync(seedPath, 'utf8');
-    expect(seed).toContain('A summary.');
-    expect(seed).toContain('<brainstorm-transcript>');
-    expect(seed).toContain('**User:** hello');
+    expect(seed.trim()).toBe('A summary.');
   });
 
   it('does NOT write seed file when transcript is absent', async () => {

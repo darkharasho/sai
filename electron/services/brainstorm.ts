@@ -248,8 +248,13 @@ export function registerBrainstormHandlers(win: BrowserWindow): void {
   ipcMain.handle('brainstorm:synthesize', async (_e, sessionId: string) => {
     const session = getSession(sessionId);
     if (!session) return { ok: false, error: 'Session not found' };
+    // Snapshot the transcript so we can roll back the synthesize turn after.
+    // The synthesize prompt + JSON reply aren't real conversation content and
+    // shouldn't pollute the in-memory history (or any seed derived from it).
+    const beforeLen = session.transcript.length;
     const noopChunk = () => {};
     const result = await runTurn({ sessionId, userMessage: SYNTHESIZE_PROMPT, onChunk: noopChunk });
+    session.transcript.length = beforeLen;
     if (!result.ok) return result;
     try {
       const parsed = parseSynthesizeOutput(result.text);

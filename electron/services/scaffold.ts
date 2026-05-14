@@ -202,9 +202,10 @@ export async function scaffoldProject(
     try {
       const saiDir = path.join(resolved, '.sai');
       fs.mkdirSync(saiDir, { recursive: true });
-      const seed =
-        `# Seed message (synthesized)\n\n${options.context || ''}\n\n` +
-        `<brainstorm-transcript>\n${options.brainstormTranscript}\n</brainstorm-transcript>\n`;
+      // Seed = the synthesized context only. This becomes the first user
+      // message in the new project's chat, so it should read naturally —
+      // no headers, no transcript dump.
+      const seed = (options.context || '').trim() + '\n';
       fs.writeFileSync(path.join(saiDir, 'brainstorm-seed.md'), seed, 'utf8');
 
       // If .gitignore exists but does not include .sai/, append it
