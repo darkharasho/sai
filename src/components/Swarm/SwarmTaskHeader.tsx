@@ -52,11 +52,14 @@ export default function SwarmTaskHeader({ task, onPause, onDiscard, onLand, onOp
         .swarm-task-header .branch { font-family: 'Geist Mono', monospace; }
         .swarm-task-header .project-chip {
           font-size: 10px;
-          padding: 1px 6px;
+          padding: 2px 7px;
           border-radius: 4px;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
-          color: var(--text-muted);
+          background: color-mix(in srgb, var(--accent) 18%, transparent);
+          border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+          color: var(--accent);
+          font-weight: 600;
+          letter-spacing: 0.3px;
+          text-transform: uppercase;
         }
         .swarm-task-header .dot { opacity: 0.5; }
         .swarm-task-header .actions { margin-left: auto; display: flex; gap: 4px; }

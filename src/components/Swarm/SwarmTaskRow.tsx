@@ -66,13 +66,16 @@ export default function SwarmTaskRow(p: Props) {
       <style>{`
         .swarm-row .row-project {
           display: inline-block;
-          font-size: 10px;
-          padding: 0 5px;
-          margin-right: 2px;
+          font-size: 9px;
+          padding: 1px 6px;
+          margin-right: 4px;
           border-radius: 4px;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
-          color: var(--text-muted);
+          background: color-mix(in srgb, var(--accent) 18%, transparent);
+          border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+          color: var(--accent);
+          font-weight: 600;
+          letter-spacing: 0.3px;
+          text-transform: uppercase;
         }
         .swarm-row .row-icon.pulsing {
           animation: swarm-row-pulse 1.5s ease-in-out infinite;

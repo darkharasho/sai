@@ -579,12 +579,15 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             white-space: nowrap;
           }
           .tool-call-project-chip {
-            font-size: 10px;
-            padding: 2px 6px;
+            font-size: 9px;
+            padding: 2px 7px;
             border-radius: 4px;
-            background: var(--bg-elevated);
-            color: var(--text-muted);
-            border: 1px solid var(--border);
+            background: color-mix(in srgb, var(--accent) 18%, transparent);
+            color: var(--accent);
+            border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
             flex-shrink: 0;
           }
           .tool-call-duration {

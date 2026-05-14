@@ -163,7 +163,7 @@ export default function SpawnTaskCard({
               <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 <span style={{ fontWeight: 600 }}>{d.title}</span>
                 {(d.project || live?.projectLinkName) && (
-                  <span style={{ marginLeft: 8, fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+                  <span style={{ marginLeft: 8, fontSize: 10, padding: '2px 7px', borderRadius: 4, background: 'color-mix(in srgb, var(--accent) 18%, transparent)', border: '1px solid color-mix(in srgb, var(--accent) 55%, transparent)', color: 'var(--accent)', fontWeight: 600, letterSpacing: 0.3, textTransform: 'uppercase' }}>
                     {d.project ?? live!.projectLinkName}
                   </span>
                 )}
