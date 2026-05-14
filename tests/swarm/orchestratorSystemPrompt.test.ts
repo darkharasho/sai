@@ -27,8 +27,12 @@ describe('buildOrchestratorSystemPrompt', () => {
     expect(prompt).toContain('MUST NOT use any tool other than mcp__swarm__*');
   });
 
-  it('forbids the model from doing the work itself', () => {
-    expect(prompt).toContain('MUST NOT do the work yourself');
+  it('forbids the model from doing code work itself', () => {
+    expect(prompt).toContain('MUST NOT do **code work** yourself');
+  });
+
+  it('requires the model to produce reports and rollups directly', () => {
+    expect(prompt).toContain('You DO produce reports, rollups, summaries');
   });
 
   it('names every swarm tool at least once', () => {
