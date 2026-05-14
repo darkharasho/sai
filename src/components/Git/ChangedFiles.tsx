@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Plus, Minus, FileText, FilePlus, FileX, FileSymlink, ChevronDown, ChevronRight } from 'lucide-react';
 import { GitFile } from '../../types';
 import InlineDiff from './InlineDiff';
@@ -233,7 +234,7 @@ export default function ChangedFiles({ title, files, onAction, actionLabel, onFi
         );
       })}
 
-      {contextMenu && (
+      {contextMenu && createPortal(
         <div
           ref={menuRef}
           style={{
@@ -268,7 +269,8 @@ export default function ChangedFiles({ title, files, onAction, actionLabel, onFi
           >
             Discard Changes
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

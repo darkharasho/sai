@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import type { DirEntry } from '../../types';
 
 interface ContextMenuProps {
@@ -7,6 +8,7 @@ interface ContextMenuProps {
   entry: DirEntry | null;
   onAction: (action: string) => void;
   onClose: () => void;
+  allowCreate?: boolean;
 }
 
 interface MenuItem {
@@ -16,7 +18,7 @@ interface MenuItem {
   condition?: boolean;
 }
 
-export default function ContextMenu({ x, y, entry, onAction, onClose }: ContextMenuProps) {
+export default function ContextMenu({ x, y, entry, onAction, onClose, allowCreate = true }: ContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -48,8 +50,8 @@ export default function ContextMenu({ x, y, entry, onAction, onClose }: ContextM
   const items: (MenuItem | 'separator')[] = [
     { label: 'Open', action: 'open', condition: entry?.type === 'file' },
     ...(entry?.type === 'file' ? ['separator' as const] : []),
-    { label: 'New File...', action: 'newFile' },
-    { label: 'New Folder...', action: 'newFolder' },
+    { label: 'New File...', action: 'newFile', condition: allowCreate },
+    { label: 'New Folder...', action: 'newFolder', condition: allowCreate },
     'separator',
     { label: 'Rename...', action: 'rename', condition: entry !== null },
     { label: 'Delete', action: 'delete', danger: true, condition: entry !== null },
@@ -74,7 +76,9 @@ export default function ContextMenu({ x, y, entry, onAction, onClose }: ContextM
     cleaned.push(item);
   }
 
-  return (
+  if (cleaned.length === 0 || cleaned.every(item => item === 'separator')) return null;
+
+  return createPortal(
     <div
       ref={ref}
       style={{
@@ -112,6 +116,7 @@ export default function ContextMenu({ x, y, entry, onAction, onClose }: ContextM
           </div>
         );
       })}
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -279,20 +279,26 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen, metaRunti
       case 'open':
         if (entry && entry.type === 'file') onFileOpen(entry.path);
         break;
-      case 'newFile':
-        setInlineInput({ parentPath: entry?.type === 'directory' ? entry.path : parentPath, type: 'file', initialValue: '' });
+      case 'newFile': {
+        const target = entry?.type === 'directory' ? entry.path : parentPath;
+        if (metaRuntime && target === metaRuntime.syntheticRoot) break;
+        setInlineInput({ parentPath: target, type: 'file', initialValue: '' });
         if (entry?.type === 'directory') {
           const state = tree.get(entry.path);
           if (!state?.expanded) loadDir(entry.path);
         }
         break;
-      case 'newFolder':
-        setInlineInput({ parentPath: entry?.type === 'directory' ? entry.path : parentPath, type: 'directory', initialValue: '' });
+      }
+      case 'newFolder': {
+        const target = entry?.type === 'directory' ? entry.path : parentPath;
+        if (metaRuntime && target === metaRuntime.syntheticRoot) break;
+        setInlineInput({ parentPath: target, type: 'directory', initialValue: '' });
         if (entry?.type === 'directory') {
           const state = tree.get(entry.path);
           if (!state?.expanded) loadDir(entry.path);
         }
         break;
+      }
       case 'rename':
         if (entry) {
           setInlineInput({ parentPath, type: entry.type, initialValue: entry.name, renamePath: entry.path });
@@ -420,6 +426,7 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen, metaRunti
 
   const rootState = tree.get(projectPath);
   const projectName = metaRuntime ? metaRuntime.meta.name : basename(projectPath);
+  const isMetaRoot = !!metaRuntime;
 
   return (
     <div
@@ -475,28 +482,30 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen, metaRunti
           onDrop={e => handleDrop(e, projectPath)}
         >
           <span className="tree-name">{projectName}</span>
-          <div className="project-actions">
-            <button
-              className="project-action-btn"
-              title="New File"
-              onClick={e => {
-                e.stopPropagation();
-                setInlineInput({ parentPath: projectPath, type: 'file', initialValue: '' });
-              }}
-            >
-              <FilePlus size={14} />
-            </button>
-            <button
-              className="project-action-btn"
-              title="New Folder"
-              onClick={e => {
-                e.stopPropagation();
-                setInlineInput({ parentPath: projectPath, type: 'directory', initialValue: '' });
-              }}
-            >
-              <FolderPlus size={14} />
-            </button>
-          </div>
+          {!isMetaRoot && (
+            <div className="project-actions">
+              <button
+                className="project-action-btn"
+                title="New File"
+                onClick={e => {
+                  e.stopPropagation();
+                  setInlineInput({ parentPath: projectPath, type: 'file', initialValue: '' });
+                }}
+              >
+                <FilePlus size={14} />
+              </button>
+              <button
+                className="project-action-btn"
+                title="New Folder"
+                onClick={e => {
+                  e.stopPropagation();
+                  setInlineInput({ parentPath: projectPath, type: 'directory', initialValue: '' });
+                }}
+              >
+                <FolderPlus size={14} />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -505,15 +514,22 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen, metaRunti
         {rootState?.entries.map(entry => renderEntry(entry, 0, projectPath))}
       </div>
 
-      {contextMenu && (
-        <ContextMenu
-          x={contextMenu.x}
-          y={contextMenu.y}
-          entry={contextMenu.entry}
-          onAction={handleContextAction}
-          onClose={() => setContextMenu(null)}
-        />
-      )}
+      {contextMenu && (() => {
+        const target = contextMenu.entry?.type === 'directory'
+          ? contextMenu.entry.path
+          : contextMenu.parentPath;
+        const allowCreate = !(metaRuntime && target === metaRuntime.syntheticRoot);
+        return (
+          <ContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            entry={contextMenu.entry}
+            onAction={handleContextAction}
+            onClose={() => setContextMenu(null)}
+            allowCreate={allowCreate}
+          />
+        );
+      })()}
 
       <style>{`
         .tree-row {

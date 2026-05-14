@@ -2,6 +2,13 @@ import { ipcMain, dialog, BrowserWindow } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
+import { listMetaWorkspaces } from './metaWorkspace';
+import { syntheticRootFor } from './metaSyntheticRoot';
+
+function isMetaSyntheticRoot(dir: string): boolean {
+  const normalized = path.resolve(dir);
+  return listMetaWorkspaces().some(m => path.resolve(syntheticRootFor(m.id)) === normalized);
+}
 
 function execFileAsync(cmd: string, args: string[], options: Record<string, unknown> = {}): Promise<{ stdout: string; stderr: string; status: number }> {
   const { input, ...execOpts } = options;
@@ -62,10 +69,16 @@ export function registerFsHandlers(mainWindow: BrowserWindow) {
   });
 
   ipcMain.handle('fs:writeFile', async (_event, filePath: string, content: string) => {
+    if (isMetaSyntheticRoot(path.dirname(filePath))) {
+      throw new Error('Cannot write files directly in a meta workspace root — write them inside an individual project.');
+    }
     await fs.promises.writeFile(filePath, content, 'utf-8');
   });
 
   ipcMain.handle('fs:rename', async (_event, oldPath: string, newPath: string) => {
+    if (isMetaSyntheticRoot(path.dirname(newPath))) {
+      throw new Error('Cannot move entries into a meta workspace root — keep them inside an individual project.');
+    }
     await fs.promises.rename(oldPath, newPath);
   });
 
@@ -86,11 +99,17 @@ export function registerFsHandlers(mainWindow: BrowserWindow) {
   });
 
   ipcMain.handle('fs:createFile', async (_event, filePath: string) => {
+    if (isMetaSyntheticRoot(path.dirname(filePath))) {
+      throw new Error('Cannot create files directly in a meta workspace root — create them inside an individual project.');
+    }
     await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
     await fs.promises.writeFile(filePath, '', 'utf-8');
   });
 
   ipcMain.handle('fs:createDir', async (_event, dirPath: string) => {
+    if (isMetaSyntheticRoot(path.dirname(dirPath)) || isMetaSyntheticRoot(dirPath)) {
+      throw new Error('Cannot create folders directly in a meta workspace root — create them inside an individual project.');
+    }
     await fs.promises.mkdir(dirPath, { recursive: true });
   });
 
