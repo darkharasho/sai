@@ -20,6 +20,7 @@ import { createSession, generateSmartTitle } from './sessions';
 import { computeUnmountFlushes } from './workspaceFlush';
 import { dbGetSessions, dbGetMessages, dbGetMessagesTail, dbSaveSession, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval } from './types';
+import type { MetaWorkspace, MetaWorkspaceRuntime } from './types';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, setActiveHighlightTheme, type HighlightThemeId } from './themes';
 import ApprovalBanner from './components/ApprovalBanner';
 import { MessageSquare, TerminalSquare, Code2, ChevronRight, MessageCirclePlus } from 'lucide-react';
@@ -143,6 +144,8 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState<string | null>(null);
 
   const [activeProjectPath, setActiveProjectPath] = useState<string>('');
+  const [metaWorkspaces, setMetaWorkspaces] = useState<MetaWorkspace[]>([]);
+  const [activeMetaRuntime, setActiveMetaRuntime] = useState<MetaWorkspaceRuntime | null>(null);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
   const [effortLevel, setEffortLevel] = useState<EffortLevel>('high');
   const [modelChoice, setModelChoice] = useState<ModelChoice>('sonnet');
@@ -1022,6 +1025,10 @@ export default function App() {
   }, [activeProjectPath]);
 
   const [paletteWorkspaces, setPaletteWorkspaces] = useState<{ projectPath: string; status?: string; lastActivity?: number }[]>([]);
+
+  useEffect(() => {
+    window.sai.metaWorkspaceList?.().then(list => setMetaWorkspaces(list ?? [])).catch(() => setMetaWorkspaces([]));
+  }, []);
 
   useEffect(() => {
     if (!commandPaletteOpen) return;
@@ -2163,6 +2170,7 @@ export default function App() {
   }, [activeProjectPath, workspaces, handleToggleMdPreview]));
 
   const handleProjectSwitch = useCallback((newPath: string) => {
+    setActiveMetaRuntime(null);
     if (newPath === activeProjectPath) return;
     window.sai.openRecentProject(newPath);
     setWorkspaces(prev => {
@@ -2199,6 +2207,37 @@ export default function App() {
       return next;
     });
   }, [activeProjectPath, workspaces]);
+
+  const handleMetaWorkspaceActivate = useCallback(async (id: string) => {
+    const runtime = await window.sai.metaWorkspaceActivate?.(id);
+    if (!runtime) return;
+    setActiveMetaRuntime(runtime);
+    // Inline the workspace switch logic to avoid handleProjectSwitch clearing activeMetaRuntime
+    if (runtime.syntheticRoot !== activeProjectPath) {
+      setWorkspaces(prev => {
+        const next = new Map(prev);
+        if (!next.has(runtime.syntheticRoot)) {
+          next.set(runtime.syntheticRoot, {
+            projectPath: runtime.syntheticRoot,
+            sessions: [],
+            activeSession: createSession(),
+            openFiles: [],
+            activeFilePath: null,
+            terminalIds: [],
+            terminalTabs: [],
+            activeTerminalId: null,
+            status: 'active',
+            lastActivity: Date.now(),
+          });
+        } else {
+          const ws = next.get(runtime.syntheticRoot)!;
+          next.set(runtime.syntheticRoot, { ...ws, status: 'active', lastActivity: Date.now() });
+        }
+        return next;
+      });
+      setActiveProjectPath(runtime.syntheticRoot);
+    }
+  }, [activeProjectPath]);
 
   const handlePaletteCommand = useCallback((command: string) => {
     if (command === 'clear' && activeProjectPath) {
@@ -3237,6 +3276,9 @@ export default function App() {
         completedWorkspaces={completedWorkspaces}
         busyWorkspaces={busyWorkspaces}
         approvalWorkspaces={new Set(approvalWorkspaces.keys())}
+        metaWorkspaces={metaWorkspaces}
+        activeMetaRuntime={activeMetaRuntime}
+        onActivateMeta={handleMetaWorkspaceActivate}
         onSettingChange={(key, value) => {
           if (key === 'editorFontSize') setEditorFontSize(value);
           if (key === 'editorMinimap') setEditorMinimap(value);

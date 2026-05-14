@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import type { MetaWorkspace, MetaWorkspaceRuntime } from '../types';
 import UpdateNotification from './UpdateNotification';
 import CloseWorkspaceModal from './CloseWorkspaceModal';
 import GitHubAuthModal from './GitHubAuthModal';
@@ -31,9 +32,12 @@ interface TitleBarProps {
   onOpenWhatsNew?: () => void;
   onHistoryRetentionChange?: (days: number | null) => void;
   onNewProject?: () => void;
+  metaWorkspaces?: MetaWorkspace[];
+  activeMetaRuntime?: MetaWorkspaceRuntime | null;
+  onActivateMeta?: (id: string) => Promise<void>;
 }
 
-export default function TitleBar({ projectPath, onProjectChange, completedWorkspaces, busyWorkspaces, approvalWorkspaces, onSettingChange, onOpenWhatsNew, onHistoryRetentionChange, onNewProject }: TitleBarProps) {
+export default function TitleBar({ projectPath, onProjectChange, completedWorkspaces, busyWorkspaces, approvalWorkspaces, onSettingChange, onOpenWhatsNew, onHistoryRetentionChange, onNewProject, metaWorkspaces, activeMetaRuntime, onActivateMeta }: TitleBarProps) {
   const [open, setOpen] = useState(false);
   const [workspaceList, setWorkspaceList] = useState<WorkspaceInfo[]>([]);
   const [version, setVersion] = useState('');
