@@ -385,7 +385,7 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
     const wordStart = Math.max(lastSpace, lastNewline) + 1;
     const currentWord = textBeforeCursor.slice(wordStart).toLowerCase();
 
-    if (currentWord.startsWith('@') && currentWord.length > 1) {
+    if (currentWord.startsWith('@')) {
       const query = currentWord.slice(1);
       const atItems: AutocompleteItem[] = [];
 
