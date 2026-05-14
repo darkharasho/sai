@@ -223,7 +223,11 @@ export function buildArgs(options: BuildArgsOptions = {}): string[] {
     '--include-partial-messages',
   ];
 
-  if (permMode === 'bypass') {
+  // Orchestrator runs in bypassPermissions because its only tools are
+  // mcp__swarm__* (built-ins blocked via --tools '' and --strict-mcp-config),
+  // so prompting for approval adds friction with no safety benefit. The
+  // swarm tools themselves don't touch files directly.
+  if (kind === 'orchestrator' || permMode === 'bypass') {
     args.push('--permission-mode', 'bypassPermissions');
   } else {
     args.push('--permission-mode', 'acceptEdits');
