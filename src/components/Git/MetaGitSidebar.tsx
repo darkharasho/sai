@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import type { MetaWorkspaceRuntime } from '../../types';
+import type { MetaWorkspaceRuntime, GitFile } from '../../types';
 import GitSidebar from './GitSidebar';
 
 interface Props {
   runtime: MetaWorkspaceRuntime;
-  onFileClick: (file: any) => void;
+  onFileClick: (file: GitFile) => void;
   commitMessageProvider?: 'claude' | 'codex' | 'gemini';
 }
 

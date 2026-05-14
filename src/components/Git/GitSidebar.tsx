@@ -185,7 +185,7 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
 
   // Synthetic-root guard: if projectPath points to a meta workspace synthetic root,
   // show a message directing the user to the multi-repo view instead.
-  if (projectPath && projectPath.includes('/.sai/meta/')) {
+  if (projectPath && /[\\/]\.sai[\\/]meta[\\/]/.test(projectPath)) {
     return (
       <div
         className="sidebar-mount"
