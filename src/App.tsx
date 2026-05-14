@@ -2239,6 +2239,38 @@ export default function App() {
     }
   }, [activeProjectPath]);
 
+  const handleMetaWorkspaceCreated = useCallback((runtime: MetaWorkspaceRuntime) => {
+    setMetaWorkspaces(prev => {
+      if (prev.some(m => m.id === runtime.meta.id)) return prev;
+      return [...prev, runtime.meta];
+    });
+    setActiveMetaRuntime(runtime);
+    if (runtime.syntheticRoot !== activeProjectPath) {
+      setWorkspaces(prev => {
+        const next = new Map(prev);
+        if (!next.has(runtime.syntheticRoot)) {
+          next.set(runtime.syntheticRoot, {
+            projectPath: runtime.syntheticRoot,
+            sessions: [],
+            activeSession: createSession(),
+            openFiles: [],
+            activeFilePath: null,
+            terminalIds: [],
+            terminalTabs: [],
+            activeTerminalId: null,
+            status: 'active',
+            lastActivity: Date.now(),
+          });
+        } else {
+          const ws = next.get(runtime.syntheticRoot)!;
+          next.set(runtime.syntheticRoot, { ...ws, status: 'active', lastActivity: Date.now() });
+        }
+        return next;
+      });
+      setActiveProjectPath(runtime.syntheticRoot);
+    }
+  }, [activeProjectPath]);
+
   const handlePaletteCommand = useCallback((command: string) => {
     if (command === 'clear' && activeProjectPath) {
       updateWorkspace(activeProjectPath, ws => ({
@@ -3279,6 +3311,7 @@ export default function App() {
         metaWorkspaces={metaWorkspaces}
         activeMetaRuntime={activeMetaRuntime}
         onActivateMeta={handleMetaWorkspaceActivate}
+        onMetaCreated={handleMetaWorkspaceCreated}
         onSettingChange={(key, value) => {
           if (key === 'editorFontSize') setEditorFontSize(value);
           if (key === 'editorMinimap') setEditorMinimap(value);

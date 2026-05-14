@@ -5,6 +5,7 @@ import CloseWorkspaceModal from './CloseWorkspaceModal';
 import GitHubAuthModal from './GitHubAuthModal';
 import GitHubCloneModal from './GitHubCloneModal';
 import SettingsModal from './SettingsModal';
+import { CreateMetaWorkspaceModal } from './MetaWorkspace/CreateMetaWorkspaceModal';
 import { LogOut, Settings, ChevronDown, FolderOpen, FolderPlus, Layers } from 'lucide-react';
 import { basename } from '../utils/pathUtils';
 import SaiLogo from './SaiLogo';
@@ -35,10 +36,10 @@ interface TitleBarProps {
   metaWorkspaces?: MetaWorkspace[];
   activeMetaRuntime?: MetaWorkspaceRuntime | null;
   onActivateMeta?: (id: string) => Promise<void>;
-  onCreateMeta?: () => void;
+  onMetaCreated?: (runtime: MetaWorkspaceRuntime) => void;
 }
 
-export default function TitleBar({ projectPath, onProjectChange, completedWorkspaces, busyWorkspaces, approvalWorkspaces, onSettingChange, onOpenWhatsNew, onHistoryRetentionChange, onNewProject, metaWorkspaces, activeMetaRuntime, onActivateMeta, onCreateMeta }: TitleBarProps) {
+export default function TitleBar({ projectPath, onProjectChange, completedWorkspaces, busyWorkspaces, approvalWorkspaces, onSettingChange, onOpenWhatsNew, onHistoryRetentionChange, onNewProject, metaWorkspaces, activeMetaRuntime, onActivateMeta, onMetaCreated }: TitleBarProps) {
   const [open, setOpen] = useState(false);
   const [pickerTab, setPickerTab] = useState<'projects' | 'meta'>('projects');
   const [workspaceList, setWorkspaceList] = useState<WorkspaceInfo[]>([]);
@@ -55,6 +56,8 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
   const [framelessRounded, setFramelessRounded] = useState(false);
   const [maximized, setMaximized] = useState(false);
   const ghDropRef = useRef<HTMLDivElement>(null);
+  const [showCreateMeta, setShowCreateMeta] = useState(false);
+  const [recentProjects, setRecentProjects] = useState<string[]>([]);
 
   useEffect(() => {
     window.sai.updateGetVersion().then((v: string) => setVersion(v));
@@ -362,9 +365,10 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                   <div className="dropdown-divider" />
                   <button
                     className="dropdown-item"
-                    onClick={() => {
-                      // TODO: wire to CreateMetaWorkspaceModal in Task 9
-                      onCreateMeta?.();
+                    onClick={async () => {
+                      const recent = await window.sai.getRecentProjects().catch(() => []);
+                      setRecentProjects(recent || []);
+                      setShowCreateMeta(true);
                     }}
                     style={{
                       display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
@@ -466,6 +470,17 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
       {showAuthModal && <GitHubAuthModal onSuccess={handleAuthSuccess} onClose={() => setShowAuthModal(false)} />}
       {showClone && <GitHubCloneModal onCloned={(p) => { onProjectChange(p); }} onClose={() => setShowClone(false)} />}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} onSettingChange={onSettingChange} onOpenWhatsNew={onOpenWhatsNew} onHistoryRetentionChange={onHistoryRetentionChange} />}
+      {showCreateMeta && (
+        <CreateMetaWorkspaceModal
+          recentProjects={recentProjects}
+          onClose={() => setShowCreateMeta(false)}
+          onCreated={(runtime) => {
+            setShowCreateMeta(false);
+            setOpen(false);
+            onMetaCreated?.(runtime);
+          }}
+        />
+      )}
       {closeTarget && (
         <CloseWorkspaceModal
           projectPath={closeTarget}
