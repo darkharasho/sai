@@ -129,6 +129,7 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
         context,
         helpers,
         github: helpers.githubRepo ? { repoName, visibility } : undefined,
+        brainstormTranscript: brainstormTranscript || undefined,
       });
     } catch (e: any) {
       setCreating(false);
@@ -150,7 +151,7 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
       return;
     }
     onCreated(computedPath);
-  }, [parentDir, projectName, context, helpers, repoName, visibility, onCreated]);
+  }, [parentDir, projectName, context, helpers, repoName, visibility, onCreated, brainstormTranscript]);
 
   // Brainstorm handlers
   const handleUseThis = useCallback(async () => {
