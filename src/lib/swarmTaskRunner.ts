@@ -40,8 +40,8 @@ export function permModeForPolicy(policy: ApprovalPolicy): 'bypass' | 'default' 
  * worktree path when available, otherwise falls back to the project root —
  * appropriate for read-only tasks that haven't materialized a worktree yet.
  */
-export function cwdForTask(task: Pick<SwarmTask, 'worktreePath' | 'workspaceId'>): string {
-  return task.worktreePath || task.workspaceId;
+export function cwdForTask(task: Pick<SwarmTask, 'worktreePath' | 'workspaceId' | 'projectPath'>): string {
+  return task.worktreePath || task.projectPath || task.workspaceId;
 }
 
 /**

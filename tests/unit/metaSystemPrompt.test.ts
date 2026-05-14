@@ -19,6 +19,9 @@ describe('buildMetaPreamble', () => {
     expect(out).toContain('/home/u/.sai/meta/abc');
     expect(out).toContain('axi-foo -> /work/axi-foo (storefront)');
     expect(out).toContain('axi-bar -> /work/axi-bar');
+    expect(out).toContain('mcp__swarm__spawn_task');
+    expect(out).toContain('"project"');
+    expect(out).toContain('axi-foo, axi-bar');
   });
 
   it('omits unavailable projects', () => {

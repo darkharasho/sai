@@ -140,6 +140,11 @@ export default function SpawnTaskCard({
             >
               <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 <span style={{ fontWeight: 600 }}>{d.title}</span>
+                {live?.projectLinkName && (
+                  <span style={{ marginLeft: 8, fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+                    {live.projectLinkName}
+                  </span>
+                )}
                 {live?.branch && (
                   <span style={{
                     marginLeft: 8, opacity: 0.7,

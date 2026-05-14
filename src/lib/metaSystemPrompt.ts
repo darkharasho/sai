@@ -20,5 +20,6 @@ export function buildMetaPreamble(meta: MetaPreambleInput | null): string {
     lines.push(`- ${p.linkName} -> ${p.path}${suffix}`);
   }
   lines.push(`When the user request is ambiguous about which project to change, ask before making cross-project edits.`);
+  lines.push(`When spawning swarm tasks via mcp__swarm__spawn_task, set the "project" argument to one of: ${available.map(p => p.linkName).join(', ')}. Each task runs inside that project's real git repo.`);
   return lines.join('\n');
 }

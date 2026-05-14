@@ -568,7 +568,7 @@ export default function App() {
           let effectiveWorktreePath: string | null = task.worktreePath;
           if (!isLikelyReadOnlyPrompt(task.prompt) && !task.worktreePath) {
             try {
-              const wt = await (window.sai as any).swarm.worktreeAdd(task.workspaceId, task.id, task.branch, task.baseBranch);
+              const wt = await (window.sai as any).swarm.worktreeAdd(task.projectPath ?? task.workspaceId, task.id, task.branch, task.baseBranch);
               effectiveWorktreePath = wt;
               setSwarmTasksByWs(prev => {
                 const m = new Map(prev);
@@ -629,7 +629,7 @@ export default function App() {
     for (const task of readyTasks) {
       if (swarmDiffStats.has(task.id)) continue;
       if (!sai.swarm?.diffStats) continue;
-      sai.swarm.diffStats(task.workspaceId, task.baseBranch, task.branch)
+      sai.swarm.diffStats(task.projectPath ?? task.workspaceId, task.baseBranch, task.branch)
         .then((stats: { additions: number; deletions: number }) => {
           if (cancelled) return;
           setSwarmDiffStats(prev => {
@@ -644,7 +644,7 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProjectPath, swarmTasksByWs]);
 
-  async function spawnSwarmTask(input: { prompt: string; provider: AIProvider; model: string; approvalPolicy: ApprovalPolicy }): Promise<SwarmTask> {
+  async function spawnSwarmTask(input: { prompt: string; provider: AIProvider; model: string; approvalPolicy: ApprovalPolicy; projectPath?: string; projectLinkName?: string }): Promise<SwarmTask> {
     if (!activeProjectPath) throw new Error('no active workspace');
     const id = crypto.randomUUID();
     const sessionId = crypto.randomUUID();
@@ -652,7 +652,7 @@ export default function App() {
     const branch = swarmBranchName(title, id);
     let baseBranch = 'main';
     try {
-      const branchInfo = await (window.sai as any).gitBranches?.(activeProjectPath);
+      const branchInfo = await (window.sai as any).gitBranches?.(input.projectPath ?? activeProjectPath);
       if (branchInfo?.current) baseBranch = branchInfo.current;
     } catch {
       // fall back to 'main'
@@ -695,6 +695,8 @@ export default function App() {
       branch,
       baseBranch,
       worktreePath: null,
+      projectPath: input.projectPath,
+      projectLinkName: input.projectLinkName,
       createdAt: now,
       lastActivityAt: now,
       costEstimate: 0,
@@ -763,23 +765,38 @@ export default function App() {
       return (window.sai as any).claudeApprove?.(ws, toolUseId, approved);
     }
 
-    const spawnTask = async (i: { prompt: string; title?: string; provider?: string; model?: string; approvalPolicy?: string }) => {
+    const spawnTask = async (i: { prompt: string; title?: string; provider?: string; model?: string; approvalPolicy?: string; project?: string }) => {
       const cfg = swarmSettingsRef.current;
       const provider = (i.provider as AIProvider) ?? cfg.defaultTaskProvider ?? aiProvider;
       const model = i.model ?? (cfg.defaultTaskModel || undefined) ?? modelChoice;
       const approvalPolicy = (i.approvalPolicy as ApprovalPolicy) ?? cfg.defaultApprovalPolicy ?? 'auto-read';
+      let projectPath: string | undefined;
+      let projectLinkName: string | undefined;
+      if (activeMetaRuntime) {
+        if (!i.project) {
+          throw new Error(`Meta workspace "${activeMetaRuntime.meta.name}" requires a project. Available: ${activeMetaRuntime.projects.filter(p => p.status === 'ok').map(p => p.linkName).join(', ')}`);
+        }
+        const match = activeMetaRuntime.projects.find(p => p.linkName === i.project && p.status === 'ok');
+        if (!match) {
+          throw new Error(`Unknown or unavailable project "${i.project}". Available: ${activeMetaRuntime.projects.filter(p => p.status === 'ok').map(p => p.linkName).join(', ')}`);
+        }
+        projectPath = match.path;
+        projectLinkName = match.linkName;
+      }
       const created = await spawnSwarmTask({
         prompt: i.prompt,
         provider,
         model,
         approvalPolicy,
+        projectPath,
+        projectLinkName,
       });
       return { id: created.id, title: created.title };
     };
 
     const host: SwarmHost = {
       spawnTask,
-      spawnTasks: async (prompts) => Promise.all(prompts.map(p => spawnTask({ prompt: p }))),
+      spawnTasks: async (prompts, projects) => Promise.all(prompts.map((p, idx) => spawnTask({ prompt: p, project: projects?.[idx] }))),
       snapshot: async () => {
         const tasks = wsTasks();
         return {
@@ -859,7 +876,7 @@ export default function App() {
     };
     return host;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeProjectPath, swarmTasksByWs, swarmApprovalsByWs, aiProvider, modelChoice]);
+  }, [activeProjectPath, activeMetaRuntime, swarmTasksByWs, swarmApprovalsByWs, aiProvider, modelChoice]);
 
   // Keep a ref to swarmHost so the IPC handler installed once (below) always
   // dispatches against the current host instance, not a stale closure.
@@ -2766,7 +2783,7 @@ export default function App() {
                       });
                       try {
                         const sai = (window.sai as any) ?? {};
-                        const diff: string = await sai.swarm?.branchDiff?.(task.workspaceId, task.baseBranch, task.branch) ?? '';
+                        const diff: string = await sai.swarm?.branchDiff?.(task.projectPath ?? task.workspaceId, task.baseBranch, task.branch) ?? '';
                         setSwarmDiffModal({
                           title: task.title,
                           branch: task.branch,

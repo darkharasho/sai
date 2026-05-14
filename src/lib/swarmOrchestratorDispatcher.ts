@@ -1,6 +1,6 @@
 export interface SwarmHost {
-  spawnTask(input: { prompt: string; title?: string; provider?: string; model?: string; approvalPolicy?: string }): Promise<{ id: string; title: string }>;
-  spawnTasks(prompts: string[]): Promise<Array<{ id: string; title: string }>>;
+  spawnTask(input: { prompt: string; title?: string; provider?: string; model?: string; approvalPolicy?: string; project?: string }): Promise<{ id: string; title: string }>;
+  spawnTasks(prompts: string[], projects?: string[]): Promise<Array<{ id: string; title: string }>>;
   snapshot(filter?: string): Promise<unknown>;
   pause(taskRef: string): Promise<void>;
   resume(taskRef: string): Promise<void>;
@@ -13,7 +13,7 @@ export interface SwarmHost {
 export async function dispatchSwarmTool(name: string, input: any, host: SwarmHost) {
   switch (name) {
     case 'spawn_task': return { ok: true, task: await host.spawnTask(input) };
-    case 'spawn_tasks': return { ok: true, tasks: await host.spawnTasks(input.prompts) };
+    case 'spawn_tasks': return { ok: true, tasks: await host.spawnTasks(input.prompts, input.projects) };
     case 'query_status': return { ok: true, snapshot: await host.snapshot(input.filter) };
     case 'pause_task': await host.pause(input.taskRef); return { ok: true };
     case 'resume_task': await host.resume(input.taskRef); return { ok: true };

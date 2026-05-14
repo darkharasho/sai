@@ -22,7 +22,8 @@ export async function materializeIfNeeded(
 ): Promise<string | null> {
   if (task.worktreePath) return task.worktreePath;
   if (!isWriteTool(toolName)) return null;
-  const wt = await deps.worktreeAdd(task.workspaceId, task.id, task.branch, task.baseBranch);
+  const targetPath = task.projectPath || task.workspaceId;
+  const wt = await deps.worktreeAdd(targetPath, task.id, task.branch, task.baseBranch);
   await deps.updateTask(task.id, { worktreePath: wt });
   return wt;
 }

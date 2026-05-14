@@ -10,6 +10,7 @@ export const SWARM_TOOL_SCHEMA = [
         provider: { type: 'string', enum: ['claude','codex','gemini'] },
         model: { type: 'string' },
         approvalPolicy: { type: 'string', enum: ['auto','auto-read','always-ask'] },
+        project: { type: 'string', description: 'For meta workspaces, set to one of the link names listed in the system prompt to target that project\'s git repo. Required in meta workspaces; omit otherwise.' },
       },
       required: ['prompt'],
     },
@@ -19,7 +20,10 @@ export const SWARM_TOOL_SCHEMA = [
     description: 'Spawn multiple SwarmTasks at once.',
     input_schema: {
       type: 'object',
-      properties: { prompts: { type: 'array', items: { type: 'string' } } },
+      properties: {
+        prompts: { type: 'array', items: { type: 'string' } },
+        projects: { type: 'array', items: { type: 'string' }, description: 'For meta workspaces, parallel array of link names (one per prompt) to target each task\'s git repo. Required in meta workspaces; omit otherwise.' },
+      },
       required: ['prompts'],
     },
   },

@@ -353,6 +353,11 @@ export interface SwarmTask {
   branch: string;
   baseBranch: string;         // branch HEAD when task was spawned
   worktreePath: string | null;
+  /** For meta workspaces: the real project root that owns this task's git worktree and cwd.
+   *  For normal workspaces: undefined (equivalent to workspaceId). */
+  projectPath?: string;
+  /** For meta workspaces: the human-readable link name shown in cards. */
+  projectLinkName?: string;
   createdAt: number;
   lastActivityAt: number;
   costEstimate: number;
