@@ -7,7 +7,8 @@ export interface BrainstormMessage {
 
 export type SynthesizeResponse =
   | { ok: true; projectName: string; context: string; transcript: string }
-  | { ok: false; error: string };
+  | { ok: false; needsClarification: true; question: string }
+  | { ok: false; needsClarification?: false; error: string };
 
 export interface UseBrainstorm {
   messages: BrainstormMessage[];
@@ -105,7 +106,13 @@ export function useBrainstorm(enabled: boolean): UseBrainstorm {
   const synthesize = useCallback(async (): Promise<SynthesizeResponse> => {
     const sid = sessionIdRef.current;
     if (!sid) return { ok: false, error: 'No active brainstorm session' };
-    return await (window as any).sai.brainstormSynthesize(sid);
+    const r: SynthesizeResponse = await (window as any).sai.brainstormSynthesize(sid);
+    // If the model pushed back with a clarification, fold it into the
+    // visible transcript as an organic assistant turn.
+    if (!r.ok && r.needsClarification) {
+      setMessages(prev => [...prev, { role: 'assistant', content: r.question }]);
+    }
+    return r;
   }, []);
 
   const end = useCallback(async () => {

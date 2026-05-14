@@ -179,6 +179,12 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
     const r = await brainstorm.synthesize();
     setSynthesizing(false);
     if (!r.ok) {
+      if (r.needsClarification) {
+        // The clarifying question was already pushed into the brainstorm
+        // transcript by the hook. Stay on the Brainstorm tab so the user
+        // can answer it before trying again — no error banner needed.
+        return;
+      }
       setSynthesizeError("Couldn't summarize — try sending one more message clarifying the goal");
       return;
     }

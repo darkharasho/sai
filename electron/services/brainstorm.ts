@@ -84,13 +84,27 @@ export const BRAINSTORM_SYSTEM_PROMPT = [
 // JSON format inline, so the system prompt can stay free of JSON guidance
 // (which would otherwise leak into regular replies whenever the user said
 // anything like "summarize" or "plan it").
+//
+// The prompt allows ONE pushback path: if the conversation lacks enough
+// substance to confidently summarize, the model can respond with a single
+// `NEED_MORE: <question>` line instead of JSON. The handler treats that as
+// a clarification request, surfaces the question in the chat, and lets the
+// user respond before they try synthesizing again.
 export const SYNTHESIZE_PROMPT = [
   '[INTERNAL TOOL CALL — not a user message]',
-  'Produce a JSON object summarizing the conversation above. Respond with ONLY the JSON, no prose, no code fences.',
-  'Schema:',
-  '  - projectName: kebab-case, ≤ 40 chars',
-  '  - context: 2–4 sentences suitable for a CLAUDE.md "Project Context" section',
-  'Example: {"projectName":"my-app","context":"A short summary."}',
+  'The user is trying to create a project from this conversation.',
+  '',
+  'If the conversation contains enough substance to describe a real project,',
+  'respond with ONLY a JSON object (no prose, no code fences, no other text):',
+  '  {"projectName":"kebab-case-name","context":"2–4 sentence summary suitable for a CLAUDE.md \'Project Context\' section."}',
+  '  - projectName must be ≤ 40 chars',
+  '',
+  'If the conversation is too thin, vague, off-topic, or otherwise lacks',
+  'enough information to confidently name and describe the project,',
+  'respond with EXACTLY this single-line format instead (and nothing else):',
+  '  NEED_MORE: <one short clarifying question to ask the user>',
+  '',
+  'Pick exactly one of those two formats. Do not mix them.',
 ].join('\n');
 
 // Build args for a stateless one-shot claude invocation. Each turn carries
@@ -278,16 +292,29 @@ export function registerBrainstormHandlers(win: BrowserWindow): void {
   ipcMain.handle('brainstorm:synthesize', async (_e, sessionId: string) => {
     const session = getSession(sessionId);
     if (!session) return { ok: false, error: 'Session not found' };
-    // Snapshot the transcript so we can roll back the synthesize turn after.
-    // The synthesize prompt + JSON reply aren't real conversation content and
-    // shouldn't pollute the in-memory history (or any seed derived from it).
+    // Snapshot the transcript so we can roll back the synthesize prompt
+    // turn — it's not real conversation content.
     const beforeLen = session.transcript.length;
     const noopChunk = () => {};
     const result = await runTurn({ sessionId, userMessage: SYNTHESIZE_PROMPT, onChunk: noopChunk });
     session.transcript.length = beforeLen;
     if (!result.ok) return result;
+
+    const text = result.text.trim();
+
+    // Clarification path: model decided the conversation is too thin to
+    // summarize and is asking the user one question. Keep the question in
+    // the transcript so it shows up as an organic assistant turn in the
+    // brainstorm, but skip the synthesize prompt itself.
+    const needMoreMatch = text.match(/^NEED_MORE:\s*(.+)$/s);
+    if (needMoreMatch) {
+      const question = needMoreMatch[1].trim();
+      session.transcript.push({ role: 'assistant', content: question });
+      return { ok: false, needsClarification: true, question };
+    }
+
     try {
-      const parsed = parseSynthesizeOutput(result.text);
+      const parsed = parseSynthesizeOutput(text);
       return { ok: true, ...parsed, transcript: serializeTranscript(session) };
     } catch (e: any) {
       return { ok: false, error: e.message };
