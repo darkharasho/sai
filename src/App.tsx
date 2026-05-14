@@ -3,6 +3,7 @@ import NavBar from './components/NavBar';
 import ChatPanel from './components/Chat/ChatPanel';
 import TerminalPanel from './components/Terminal/TerminalPanel';
 import GitSidebar from './components/Git/GitSidebar';
+import { MetaGitSidebar } from './components/Git/MetaGitSidebar';
 import FileExplorerSidebar from './components/FileExplorer/FileExplorerSidebar';
 import SearchPanel from './components/SearchPanel/SearchPanel';
 import TitleBar from './components/TitleBar';
@@ -3397,7 +3398,9 @@ export default function App() {
               exit={{ opacity: 0, x: -12 }}
               transition={{ duration: 0.16, ease: 'easeIn' }}
             >
-              <GitSidebar projectPath={projectPath} onFileClick={handleFileClick} commitMessageProvider={commitMessageProvider} />
+              {activeMetaRuntime && activeMetaRuntime.syntheticRoot === projectPath
+                ? <MetaGitSidebar runtime={activeMetaRuntime} onFileClick={handleFileClick} commitMessageProvider={commitMessageProvider} />
+                : <GitSidebar projectPath={projectPath} onFileClick={handleFileClick} commitMessageProvider={commitMessageProvider} />}
             </motion.div>
           )}
           {sidebarOpen === 'search' && (

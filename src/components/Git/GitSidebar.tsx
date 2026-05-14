@@ -31,6 +31,7 @@ interface GitSidebarProps {
   projectPath: string;
   onFileClick: (file: GitFile) => void;
   commitMessageProvider?: 'claude' | 'codex' | 'gemini';
+  embedded?: boolean;
 }
 
 function getPath(item: GitStatusItem | string): string {
@@ -65,7 +66,7 @@ function parseStatus(status: GitStatus): { staged: GitFile[]; unstaged: GitFile[
   return { staged, unstaged };
 }
 
-export default function GitSidebar({ projectPath, onFileClick, commitMessageProvider }: GitSidebarProps) {
+export default function GitSidebar({ projectPath, onFileClick, commitMessageProvider, embedded }: GitSidebarProps) {
   const [branch, setBranch] = useState('');
   const [ahead, setAhead] = useState(0);
   const [behind, setBehind] = useState(0);
@@ -182,6 +183,169 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
 
   const totalChanges = stagedFiles.length + unstagedFiles.length;
 
+  // Synthetic-root guard: if projectPath points to a meta workspace synthetic root,
+  // show a message directing the user to the multi-repo view instead.
+  if (projectPath && projectPath.includes('/.sai/meta/')) {
+    return (
+      <div
+        className="sidebar-mount"
+        style={{
+          width: 'var(--sidebar-width)',
+          minWidth: 'var(--sidebar-width)',
+          background: 'var(--bg-secondary)',
+          borderRight: '1px solid var(--border)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          overflow: 'hidden',
+          padding: '24px 12px',
+          textAlign: 'center',
+        }}
+      >
+        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          Open this meta workspace&apos;s git through the multi-repo view.
+        </div>
+      </div>
+    );
+  }
+
+  // Shared scrollable content (used in both normal and embedded modes)
+  const scrollableContent = (
+    <div style={{ flex: 1, overflowY: 'auto', paddingTop: view === 'history' ? 0 : 8 }}>
+      {view === 'history' && !gitNotRepo && !error && (
+        <GitHistory projectPath={projectPath} />
+      )}
+      {view === 'history' && gitNotRepo && (
+        <div style={{ padding: '24px 12px', textAlign: 'center' as const }}>
+          <div style={{ marginBottom: 6, display: 'flex', justifyContent: 'center' }}><Ban size={20} color="var(--text-muted)" /></div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Not a git repo</div>
+        </div>
+      )}
+      {view === 'changes' && (
+      <>
+      {rebaseStatus.inProgress && (
+        <RebaseInProgressBanner
+          projectPath={projectPath}
+          onto={rebaseStatus.onto}
+          onRefresh={refresh}
+        />
+      )}
+
+      <ConflictSection
+        projectPath={projectPath}
+        conflictFiles={conflictFiles}
+        onRefresh={refresh}
+        onOpenEditor={onFileClick}
+      />
+
+      {error && (
+        <div style={{ margin: '8px 12px', padding: '12px', background: 'var(--bg-input)', borderLeft: '2px solid var(--red)', borderRadius: 3, textAlign: 'center' as const }}>
+          <div style={{ marginBottom: 4, display: 'flex', justifyContent: 'center' }}><AlertTriangle size={18} color="var(--red)" /></div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--red)', marginBottom: 4 }}>Git unavailable</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>{error}</div>
+          <button onClick={refresh} style={{ background: 'var(--bg-hover)', border: '1px solid var(--border)', borderRadius: 3, padding: '3px 10px', fontSize: 11, color: 'var(--text-secondary)', cursor: 'pointer' }}>Retry</button>
+        </div>
+      )}
+
+      {!error && gitNotRepo && (
+        <div style={{ padding: '24px 12px', textAlign: 'center' as const }}>
+          <div style={{ marginBottom: 6, display: 'flex', justifyContent: 'center' }}><Ban size={20} color="var(--text-muted)" /></div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>Not a git repo</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Open a folder tracked by git</div>
+        </div>
+      )}
+
+      {!error && !gitNotRepo && totalChanges === 0 && (
+        <div style={{ padding: '24px 12px', textAlign: 'center' as const }}>
+          <div style={{ marginBottom: 6, display: 'flex', justifyContent: 'center' }}><CheckCircle2 size={20} color="var(--green)" /></div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>No changes</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Working tree is clean</div>
+        </div>
+      )}
+
+      {(totalChanges >= 10 || fileSearch) && (
+        <FileSearch
+          value={fileSearch}
+          onChange={setFileSearch}
+          matchCount={fileSearch ? [
+            ...stagedFiles.filter(f => f.path.toLowerCase().includes(fileSearch.toLowerCase())),
+            ...unstagedFiles.filter(f => f.path.toLowerCase().includes(fileSearch.toLowerCase())),
+          ].length : undefined}
+        />
+      )}
+
+      <ChangedFiles
+        title="Staged"
+        files={fileSearch
+          ? stagedFiles.filter(f => f.path.toLowerCase().includes(fileSearch.toLowerCase()))
+          : stagedFiles}
+        onAction={handleUnstage}
+        actionLabel="-"
+        onFileClick={onFileClick}
+        onDiscard={setDiscardTarget}
+        staged
+        projectPath={projectPath}
+      />
+
+      <ChangedFiles
+        title="Changes"
+        files={fileSearch
+          ? unstagedFiles.filter(f => f.path.toLowerCase().includes(fileSearch.toLowerCase()))
+          : unstagedFiles}
+        onAction={handleStage}
+        actionLabel="+"
+        onFileClick={onFileClick}
+        onStageAll={handleStageAll}
+        onDiscard={setDiscardTarget}
+        projectPath={projectPath}
+      />
+
+      <GitActivity commits={commits} />
+      </>
+      )}
+    </div>
+  );
+
+  // Commit / push / pull controls (shared between normal and embedded modes)
+  const commitControls = (
+    <CommitBox
+      key={projectPath}
+      branch={branch}
+      ahead={ahead}
+      behind={behind}
+      onCommit={handleCommit}
+      onPush={handlePush}
+      onPull={handlePull}
+      onGenerateMessage={() => window.sai.claudeGenerateCommitMessage(projectPath, commitMessageProvider)}
+      onListBranches={() => window.sai.gitBranches(projectPath)}
+      onCheckout={async (b: string) => { await window.sai.gitCheckout(projectPath, b); await refresh(); }}
+      onCreateBranch={async (name: string) => { await window.sai.gitCreateBranch(projectPath, name); await refresh(); }}
+      projectPath={projectPath}
+      onRefresh={refresh}
+      rebaseInProgress={rebaseStatus.inProgress}
+    />
+  );
+
+  // Embedded mode: render only the file lists + commit area, without the outer chrome
+  // (no sidebar-mount wrapper, no fixed width/border, no "Source Control" header bar).
+  // This is used when rendered inside MetaGitSidebar which provides its own container.
+  if (embedded) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {scrollableContent}
+        {commitControls}
+        {discardTarget && (
+          <DiscardChangesModal
+            filePath={discardTarget.path}
+            onConfirm={handleDiscard}
+            onCancel={() => setDiscardTarget(null)}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
       className="sidebar-mount"
@@ -247,118 +411,9 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
         </button>
       </div>
 
-      {/* Scrollable content */}
-      <div style={{ flex: 1, overflowY: 'auto', paddingTop: view === 'history' ? 0 : 8 }}>
-        {view === 'history' && !gitNotRepo && !error && (
-          <GitHistory projectPath={projectPath} />
-        )}
-        {view === 'history' && gitNotRepo && (
-          <div style={{ padding: '24px 12px', textAlign: 'center' as const }}>
-            <div style={{ marginBottom: 6, display: 'flex', justifyContent: 'center' }}><Ban size={20} color="var(--text-muted)" /></div>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Not a git repo</div>
-          </div>
-        )}
-        {view === 'changes' && (
-        <>
-        {rebaseStatus.inProgress && (
-          <RebaseInProgressBanner
-            projectPath={projectPath}
-            onto={rebaseStatus.onto}
-            onRefresh={refresh}
-          />
-        )}
+      {scrollableContent}
 
-        <ConflictSection
-          projectPath={projectPath}
-          conflictFiles={conflictFiles}
-          onRefresh={refresh}
-          onOpenEditor={onFileClick}
-        />
-
-        {error && (
-          <div style={{ margin: '8px 12px', padding: '12px', background: 'var(--bg-input)', borderLeft: '2px solid var(--red)', borderRadius: 3, textAlign: 'center' as const }}>
-            <div style={{ marginBottom: 4, display: 'flex', justifyContent: 'center' }}><AlertTriangle size={18} color="var(--red)" /></div>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--red)', marginBottom: 4 }}>Git unavailable</div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>{error}</div>
-            <button onClick={refresh} style={{ background: 'var(--bg-hover)', border: '1px solid var(--border)', borderRadius: 3, padding: '3px 10px', fontSize: 11, color: 'var(--text-secondary)', cursor: 'pointer' }}>Retry</button>
-          </div>
-        )}
-
-        {!error && gitNotRepo && (
-          <div style={{ padding: '24px 12px', textAlign: 'center' as const }}>
-            <div style={{ marginBottom: 6, display: 'flex', justifyContent: 'center' }}><Ban size={20} color="var(--text-muted)" /></div>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>Not a git repo</div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Open a folder tracked by git</div>
-          </div>
-        )}
-
-        {!error && !gitNotRepo && totalChanges === 0 && (
-          <div style={{ padding: '24px 12px', textAlign: 'center' as const }}>
-            <div style={{ marginBottom: 6, display: 'flex', justifyContent: 'center' }}><CheckCircle2 size={20} color="var(--green)" /></div>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>No changes</div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Working tree is clean</div>
-          </div>
-        )}
-
-        {(totalChanges >= 10 || fileSearch) && (
-          <FileSearch
-            value={fileSearch}
-            onChange={setFileSearch}
-            matchCount={fileSearch ? [
-              ...stagedFiles.filter(f => f.path.toLowerCase().includes(fileSearch.toLowerCase())),
-              ...unstagedFiles.filter(f => f.path.toLowerCase().includes(fileSearch.toLowerCase())),
-            ].length : undefined}
-          />
-        )}
-
-        <ChangedFiles
-          title="Staged"
-          files={fileSearch
-            ? stagedFiles.filter(f => f.path.toLowerCase().includes(fileSearch.toLowerCase()))
-            : stagedFiles}
-          onAction={handleUnstage}
-          actionLabel="-"
-          onFileClick={onFileClick}
-          onDiscard={setDiscardTarget}
-          staged
-          projectPath={projectPath}
-        />
-
-        <ChangedFiles
-          title="Changes"
-          files={fileSearch
-            ? unstagedFiles.filter(f => f.path.toLowerCase().includes(fileSearch.toLowerCase()))
-            : unstagedFiles}
-          onAction={handleStage}
-          actionLabel="+"
-          onFileClick={onFileClick}
-          onStageAll={handleStageAll}
-          onDiscard={setDiscardTarget}
-          projectPath={projectPath}
-        />
-
-        <GitActivity commits={commits} />
-        </>
-        )}
-      </div>
-
-      {/* Commit / push / pull controls */}
-      <CommitBox
-        key={projectPath}
-        branch={branch}
-        ahead={ahead}
-        behind={behind}
-        onCommit={handleCommit}
-        onPush={handlePush}
-        onPull={handlePull}
-        onGenerateMessage={() => window.sai.claudeGenerateCommitMessage(projectPath, commitMessageProvider)}
-        onListBranches={() => window.sai.gitBranches(projectPath)}
-        onCheckout={async (b: string) => { await window.sai.gitCheckout(projectPath, b); await refresh(); }}
-        onCreateBranch={async (name: string) => { await window.sai.gitCreateBranch(projectPath, name); await refresh(); }}
-        projectPath={projectPath}
-        onRefresh={refresh}
-        rebaseInProgress={rebaseStatus.inProgress}
-      />
+      {commitControls}
 
       {discardTarget && (
         <DiscardChangesModal
