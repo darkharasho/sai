@@ -5,7 +5,7 @@ import CloseWorkspaceModal from './CloseWorkspaceModal';
 import GitHubAuthModal from './GitHubAuthModal';
 import GitHubCloneModal from './GitHubCloneModal';
 import SettingsModal from './SettingsModal';
-import { LogOut, Settings, ChevronDown, FolderOpen, FolderPlus } from 'lucide-react';
+import { LogOut, Settings, ChevronDown, FolderOpen, FolderPlus, Layers } from 'lucide-react';
 import { basename } from '../utils/pathUtils';
 import SaiLogo from './SaiLogo';
 import { DOT_MASK_URL } from '../lib/assets';
@@ -35,10 +35,12 @@ interface TitleBarProps {
   metaWorkspaces?: MetaWorkspace[];
   activeMetaRuntime?: MetaWorkspaceRuntime | null;
   onActivateMeta?: (id: string) => Promise<void>;
+  onCreateMeta?: () => void;
 }
 
-export default function TitleBar({ projectPath, onProjectChange, completedWorkspaces, busyWorkspaces, approvalWorkspaces, onSettingChange, onOpenWhatsNew, onHistoryRetentionChange, onNewProject, metaWorkspaces, activeMetaRuntime, onActivateMeta }: TitleBarProps) {
+export default function TitleBar({ projectPath, onProjectChange, completedWorkspaces, busyWorkspaces, approvalWorkspaces, onSettingChange, onOpenWhatsNew, onHistoryRetentionChange, onNewProject, metaWorkspaces, activeMetaRuntime, onActivateMeta, onCreateMeta }: TitleBarProps) {
   const [open, setOpen] = useState(false);
+  const [pickerTab, setPickerTab] = useState<'projects' | 'meta'>('projects');
   const [workspaceList, setWorkspaceList] = useState<WorkspaceInfo[]>([]);
   const [version, setVersion] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -72,7 +74,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
     return () => { unsubSync(); unsubMax?.(); };
   }, []);
 
-  const projectName = projectPath ? basename(projectPath) : 'No Project';
+  const projectName = activeMetaRuntime ? `Meta: ${activeMetaRuntime.meta.name}` : (projectPath ? basename(projectPath) : 'No Project');
 
   useEffect(() => {
     if (open) {
@@ -177,7 +179,11 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
               setOverflowOpen(null);
             }
           }}>
-            {(() => {
+            <div className="picker-tabs">
+              <button className={pickerTab === 'projects' ? 'active' : ''} onClick={() => setPickerTab('projects')}>Projects</button>
+              <button className={pickerTab === 'meta' ? 'active' : ''} onClick={() => setPickerTab('meta')}>Meta</button>
+            </div>
+            {pickerTab === 'projects' && (() => {
               const active = workspaceList.filter(w => w.status === 'active');
               const suspended = workspaceList.filter(w => w.status === 'suspended');
               const recent = workspaceList.filter(w => w.status === 'recent');
@@ -299,6 +305,77 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                       New Project
                     </button>
                   </div>
+                </>
+              );
+            })()}
+            {pickerTab === 'meta' && (() => {
+              const activeMeta = (metaWorkspaces || []).filter(m => m.id === activeMetaRuntime?.meta.id);
+              const recentMeta = (metaWorkspaces || [])
+                .filter(m => m.id !== activeMetaRuntime?.meta.id)
+                .sort((a, b) => b.lastActivity - a.lastActivity);
+              const isEmpty = (metaWorkspaces || []).length === 0;
+
+              return (
+                <>
+                  {isEmpty && (
+                    <div className="meta-empty-state">No meta workspaces yet — create one below.</div>
+                  )}
+                  {!isEmpty && activeMeta.length > 0 && (
+                    <>
+                      <div className="dropdown-label">Active</div>
+                      {activeMeta.map(meta => (
+                        <button
+                          key={meta.id}
+                          className="dropdown-item meta-workspace-item active"
+                          onClick={() => { onActivateMeta?.(meta.id); setOpen(false); }}
+                        >
+                          <Layers size={13} className="meta-workspace-icon" />
+                          <div className="meta-workspace-text">
+                            <span className="dropdown-item-name">{meta.name}</span>
+                            <span className="dropdown-item-path">{meta.projects.length} project{meta.projects.length === 1 ? '' : 's'}</span>
+                          </div>
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  {!isEmpty && recentMeta.length > 0 && (
+                    <>
+                      {activeMeta.length > 0 && <div className="dropdown-divider" />}
+                      <div className="dropdown-label">Recent</div>
+                      <div className="dropdown-inactive-scroll">
+                        {recentMeta.map(meta => (
+                          <button
+                            key={meta.id}
+                            className="dropdown-item meta-workspace-item"
+                            onClick={() => { onActivateMeta?.(meta.id); setOpen(false); }}
+                          >
+                            <Layers size={13} className="meta-workspace-icon" />
+                            <div className="meta-workspace-text">
+                              <span className="dropdown-item-name">{meta.name}</span>
+                              <span className="dropdown-item-path">{meta.projects.length} project{meta.projects.length === 1 ? '' : 's'}</span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                  <div className="dropdown-divider" />
+                  <button
+                    className="dropdown-item"
+                    onClick={() => {
+                      // TODO: wire to CreateMetaWorkspaceModal in Task 9
+                      onCreateMeta?.();
+                    }}
+                    style={{
+                      display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                      gap: 5, color: 'var(--accent)', fontSize: 13,
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent-hover)'; e.currentTarget.style.background = 'var(--bg-elevated)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <Layers size={13} />
+                    + New Meta Workspace
+                  </button>
                 </>
               );
             })()}
@@ -901,6 +978,60 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         }
         .workspace-submenu-item.danger:hover {
           background: rgba(248,113,113,0.08);
+        }
+        .picker-tabs {
+          display: flex;
+          border-bottom: 1px solid var(--border);
+          padding: 4px 8px 0;
+          gap: 2px;
+        }
+        .picker-tabs button {
+          flex: 1;
+          background: none;
+          border: none;
+          border-bottom: 2px solid transparent;
+          color: var(--text-muted);
+          font-size: 12px;
+          padding: 6px 8px;
+          cursor: pointer;
+          margin-bottom: -1px;
+          border-radius: 4px 4px 0 0;
+          transition: color 0.12s, background 0.12s;
+        }
+        .picker-tabs button:hover {
+          color: var(--text);
+          background: var(--bg-hover);
+        }
+        .picker-tabs button.active {
+          color: var(--accent);
+          border-bottom-color: var(--accent);
+          background: transparent;
+        }
+        .meta-workspace-item {
+          flex-direction: row !important;
+          align-items: center;
+          gap: 8px;
+        }
+        .meta-workspace-icon {
+          flex-shrink: 0;
+          color: var(--text-muted);
+        }
+        .meta-workspace-item.active .meta-workspace-icon {
+          color: #000;
+        }
+        .meta-workspace-text {
+          display: flex;
+          flex-direction: column;
+          min-width: 0;
+        }
+        .meta-workspace-item .dropdown-item-path {
+          margin-top: 1px;
+        }
+        .meta-empty-state {
+          padding: 16px 12px;
+          font-size: 12px;
+          color: var(--text-muted);
+          text-align: center;
         }
       `}</style>
     </div>
