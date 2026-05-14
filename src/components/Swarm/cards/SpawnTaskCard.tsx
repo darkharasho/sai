@@ -8,6 +8,8 @@ interface DispatchedTask {
   title: string;
   /** Optional explicit prompt for the task (for dedupe / matching). */
   prompt?: string;
+  /** linkName of the project this task was dispatched to (meta workspaces). */
+  project?: string;
 }
 
 interface Props {
@@ -69,24 +71,44 @@ function parseDispatched(toolCall: ToolCall): DispatchedTask[] {
   const baseName = toolCall.name.replace(/^mcp__swarm__/, '');
   if (baseName === 'spawn_task') {
     const title: string = input.title || input.prompt?.slice(0, 60) || 'task';
-    return [{ title, prompt: input.prompt }];
+    return [{ title, prompt: input.prompt, project: input.project ?? undefined }];
   }
   if (baseName === 'spawn_tasks') {
     const prompts: string[] = Array.isArray(input.prompts) ? input.prompts : [];
-    return prompts.map((p) => ({ title: p.slice(0, 60), prompt: p }));
+    const projects: string[] = Array.isArray(input.projects) ? input.projects : [];
+    return prompts.map((p, i) => ({ title: p.slice(0, 60), prompt: p, project: projects[i] ?? undefined }));
   }
   return [];
 }
 
 /**
  * Best-effort match: prefer tasks whose prompt matches verbatim, else fall
- * back to title prefix match. We accept that the orchestrator might not have
- * surfaced a task ID yet; matched live state is purely an enrichment.
+ * back to title prefix match. When a project linkName is available we first
+ * try project-scoped matches so two tasks with identical prompts but different
+ * projects resolve to distinct SwarmTasks.
+ *
+ * Priority order:
+ *   1. exact prompt + same project (if project given)
+ *   2. title prefix + same project (if project given)
+ *   3. exact prompt (fallback — non-meta workspaces)
+ *   4. title prefix
  */
 function matchTask(dispatched: DispatchedTask, tasks: SwarmTask[]): SwarmTask | undefined {
+  const proj = dispatched.project;
   if (dispatched.prompt) {
+    if (proj) {
+      const hit = tasks.find((t) => t.prompt === dispatched.prompt && t.projectLinkName === proj);
+      if (hit) return hit;
+    }
+    const prefixWithProj = proj
+      ? tasks.find((t) => t.title.startsWith(dispatched.title.slice(0, 40)) && t.projectLinkName === proj)
+      : undefined;
+    if (prefixWithProj) return prefixWithProj;
     const exact = tasks.find((t) => t.prompt === dispatched.prompt);
     if (exact) return exact;
+  } else if (proj) {
+    const hit = tasks.find((t) => t.title.startsWith(dispatched.title.slice(0, 40)) && t.projectLinkName === proj);
+    if (hit) return hit;
   }
   return tasks.find((t) => t.title.startsWith(dispatched.title.slice(0, 40)));
 }
@@ -140,9 +162,9 @@ export default function SpawnTaskCard({
             >
               <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 <span style={{ fontWeight: 600 }}>{d.title}</span>
-                {live?.projectLinkName && (
+                {(d.project || live?.projectLinkName) && (
                   <span style={{ marginLeft: 8, fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
-                    {live.projectLinkName}
+                    {d.project ?? live!.projectLinkName}
                   </span>
                 )}
                 {live?.branch && (

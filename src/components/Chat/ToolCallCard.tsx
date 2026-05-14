@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { FileEdit, Terminal, FileText, Wrench, ChevronRight, Globe, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import type { ToolCall } from '../../types';
+import type { ToolCall, MetaWorkspaceRuntime } from '../../types';
 import { SPRING, useReducedMotionTransition } from './motion';
 import { getShikiHighlighter, getActiveHighlightTheme } from '../../themes';
 import { DOT_MASK_URL } from '../../lib/assets';
+import { owningLink } from '../../lib/syntheticRoot';
 
 function formatMs(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -358,7 +359,31 @@ function BashInOut({ output, showAll, onToggleShowAll }: {
   );
 }
 
-export default function ToolCallCard({ toolCall, defaultExpanded = true }: { toolCall: ToolCall; defaultExpanded?: boolean }) {
+function extractToolPath(toolCall: ToolCall): string | null {
+  try {
+    const input = JSON.parse(toolCall.input || '{}');
+    if (typeof input.file_path === 'string') return input.file_path;
+    if (typeof input.path === 'string') return input.path;
+    if (typeof input.notebook_path === 'string') return input.notebook_path;
+    if (typeof input.command === 'string') {
+      const m = input.command.match(/^\s*cd\s+(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/);
+      if (m) return m[1] || m[2] || m[3];
+    }
+  } catch {}
+  return null;
+}
+
+function toolProjectLinkName(toolCall: ToolCall, runtime: MetaWorkspaceRuntime | null | undefined): string | null {
+  if (!runtime) return null;
+  const p = extractToolPath(toolCall);
+  if (!p) return null;
+  const isAbs = /^([a-zA-Z]:[\\/]|[\\/])/.test(p);
+  if (isAbs) return owningLink(p, runtime.syntheticRoot);
+  const seg = p.replace(/^[\\/]+/, '').split(/[\\/]/)[0];
+  return runtime.projects.some(pp => pp.linkName === seg) ? seg : null;
+}
+
+export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRuntime }: { toolCall: ToolCall; defaultExpanded?: boolean; metaRuntime?: MetaWorkspaceRuntime | null }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [showAllCode, setShowAllCode] = useState(false);
   const [showAllOutput, setShowAllOutput] = useState(false);
@@ -417,6 +442,13 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
           </AnimatePresence>
           <Icon size={14} className="tool-call-icon" />
           <span className={`tool-call-name${sigClass ? ` ${sigClass}` : ''}`}>{toolCall.name}</span>
+          {(() => {
+            const linkName = toolProjectLinkName(toolCall, metaRuntime);
+            if (!linkName) return null;
+            return (
+              <span className="tool-call-project-chip" title={`Project: ${linkName}`}>{linkName}</span>
+            );
+          })()}
           {!isBash && !isTodo && label && <span className="tool-call-label">{label}</span>}
           {isBash && code && <span className="tool-call-label">{code}</span>}
           {typeof toolCall.durationMs === 'number' && (
@@ -545,6 +577,15 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true }: { too
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+          }
+          .tool-call-project-chip {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: var(--bg-elevated);
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+            flex-shrink: 0;
           }
           .tool-call-duration {
             font-family: 'Geist Mono', 'JetBrains Mono', monospace;

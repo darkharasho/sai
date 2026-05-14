@@ -1569,10 +1569,11 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
                       isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId}
                       renderToolCall={renderToolCall}
                       renderMessage={renderMessage}
+                      metaRuntime={activeMetaRuntime}
                     />
                   </div>
                 )
-                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId} renderToolCall={renderToolCall} renderMessage={renderMessage} />
+                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId} renderToolCall={renderToolCall} renderMessage={renderMessage} metaRuntime={activeMetaRuntime} />
               )}
           </>
         )}

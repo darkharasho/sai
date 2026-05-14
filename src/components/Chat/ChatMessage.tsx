@@ -10,7 +10,7 @@ import ToolCallCard from './ToolCallCard';
 import Stagger from './Stagger';
 import { readFlipRect, hasFlipRect } from './flipRegistry';
 import { SPRING, DISTANCE, useReducedMotionTransition } from './motion';
-import type { ChatMessage as ChatMessageType } from '../../types';
+import type { ChatMessage as ChatMessageType, MetaWorkspaceRuntime } from '../../types';
 import { getActiveTerminalId } from '../../terminalBuffer';
 import SaiLogo from '../SaiLogo';
 
@@ -283,6 +283,7 @@ function ChatMessage({
   pinnedLayoutId,
   renderToolCall,
   renderMessage,
+  metaRuntime,
 }: {
   message: ChatMessageType;
   projectPath?: string;
@@ -298,6 +299,8 @@ function ChatMessage({
   renderToolCall?: (tc: import('../../types').ToolCall, defaultExpanded: boolean) => React.ReactNode | null;
   /** Optional whole-message override (e.g. for inline approval cards). Return `null` to use the default renderer. */
   renderMessage?: (message: ChatMessageType) => React.ReactNode | null;
+  /** Active meta-workspace runtime; when set, tool-call cards show a project chip. */
+  metaRuntime?: MetaWorkspaceRuntime | null;
 }) {
   // Allow callers to substitute the entire message render for special meta
   // types (e.g. inline approval cards). Done before any of the normal layout
@@ -882,7 +885,7 @@ function ChatMessage({
               const custom = renderToolCall(tc, toolCallsExpanded);
               if (custom != null) return <React.Fragment key={i}>{custom}</React.Fragment>;
             }
-            return <ToolCallCard key={i} toolCall={tc} defaultExpanded={toolCallsExpanded} />;
+            return <ToolCallCard key={i} toolCall={tc} defaultExpanded={toolCallsExpanded} metaRuntime={metaRuntime} />;
           })}
         </Stagger>
       )}
@@ -1213,5 +1216,6 @@ export default memo(ChatMessage, (prev, next) =>
   Boolean(prev.onRetry) === Boolean(next.onRetry) &&
   prev.onClearContext === next.onClearContext &&
   prev.renderToolCall === next.renderToolCall &&
-  prev.renderMessage === next.renderMessage
+  prev.renderMessage === next.renderMessage &&
+  prev.metaRuntime === next.metaRuntime
 );
