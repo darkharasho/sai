@@ -159,6 +159,10 @@ export interface MetaWorkspace {
   lastActivity: number;
 }
 
+export interface MetaWorkspaceListItem extends MetaWorkspace {
+  syntheticRoot: string;               // derived per-device, populated by IPC list
+}
+
 export interface MetaWorkspaceRuntimeProject extends MetaWorkspaceProject {
   status: MetaWorkspaceProjectStatus;  // derived per-device on activation
 }

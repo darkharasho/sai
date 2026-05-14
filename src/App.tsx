@@ -21,7 +21,7 @@ import { createSession, generateSmartTitle } from './sessions';
 import { computeUnmountFlushes } from './workspaceFlush';
 import { dbGetSessions, dbGetMessages, dbGetMessagesTail, dbSaveSession, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval } from './types';
-import type { MetaWorkspace, MetaWorkspaceRuntime } from './types';
+import type { MetaWorkspaceListItem, MetaWorkspaceRuntime } from './types';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, setActiveHighlightTheme, type HighlightThemeId } from './themes';
 import ApprovalBanner from './components/ApprovalBanner';
 import { MessageSquare, TerminalSquare, Code2, ChevronRight, MessageCirclePlus } from 'lucide-react';
@@ -146,7 +146,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState<string | null>(null);
 
   const [activeProjectPath, setActiveProjectPath] = useState<string>('');
-  const [metaWorkspaces, setMetaWorkspaces] = useState<MetaWorkspace[]>([]);
+  const [metaWorkspaces, setMetaWorkspaces] = useState<MetaWorkspaceListItem[]>([]);
   const [activeMetaRuntime, setActiveMetaRuntime] = useState<MetaWorkspaceRuntime | null>(null);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
   const [effortLevel, setEffortLevel] = useState<EffortLevel>('high');
@@ -2341,12 +2341,24 @@ export default function App() {
       });
       setActiveProjectPath(runtime.syntheticRoot);
     }
+    setCompletedWorkspaces(prev => {
+      if (!prev.has(runtime.syntheticRoot)) return prev;
+      const next = new Set(prev);
+      next.delete(runtime.syntheticRoot);
+      return next;
+    });
+    setNotificationCounts(prev => {
+      if (!prev.has(runtime.syntheticRoot)) return prev;
+      const next = new Map(prev);
+      next.delete(runtime.syntheticRoot);
+      return next;
+    });
   }, [activeProjectPath]);
 
   const handleMetaWorkspaceCreated = useCallback((runtime: MetaWorkspaceRuntime) => {
     setMetaWorkspaces(prev => {
       if (prev.some(m => m.id === runtime.meta.id)) return prev;
-      return [...prev, runtime.meta];
+      return [...prev, { ...runtime.meta, syntheticRoot: runtime.syntheticRoot }];
     });
     setActiveMetaRuntime(runtime);
     if (runtime.syntheticRoot !== activeProjectPath) {
@@ -2376,7 +2388,7 @@ export default function App() {
   }, [activeProjectPath]);
 
   const handleMetaWorkspaceUpdated = useCallback((runtime: MetaWorkspaceRuntime) => {
-    setMetaWorkspaces(prev => prev.map(m => m.id === runtime.meta.id ? runtime.meta : m));
+    setMetaWorkspaces(prev => prev.map(m => m.id === runtime.meta.id ? { ...runtime.meta, syntheticRoot: runtime.syntheticRoot } : m));
     setActiveMetaRuntime(prev => prev?.meta.id === runtime.meta.id ? runtime : prev);
   }, []);
 

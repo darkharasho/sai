@@ -121,16 +121,23 @@ export async function initialSync(
     await ensureRepo(token, login);
 
     const remote = await fetchRemote(token, login);
+    const local = readSettings();
 
     if (remote && Object.keys(remote).length > 0) {
-      // Remote exists — apply remote values, keep local for keys not in remote
+      // Merge: local wins for shared keys (avoids clobbering changes made on
+      // this device since the last push), remote fills in keys that local
+      // doesn't have. Then push the merged result so remote catches up.
+      const applied: Record<string, any> = {};
       for (const [key, value] of Object.entries(remote)) {
-        if (!EXCLUDE_KEYS.has(key)) {
-          writeSetting(key, value);
-        }
+        if (EXCLUDE_KEYS.has(key)) continue;
+        if (Object.prototype.hasOwnProperty.call(local, key)) continue;
+        writeSetting(key, value);
+        applied[key] = value;
       }
-      // Notify renderer to reload settings
-      win.webContents.send('github:settingsApplied', remote);
+      if (Object.keys(applied).length > 0) {
+        win.webContents.send('github:settingsApplied', applied);
+      }
+      await pushRemote(token, login, readSettings());
     } else {
       // No remote settings yet — push current local settings
       await pushRemote(token, login, readSettings());

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import type { MetaWorkspace, MetaWorkspaceRuntime } from '../types';
+import type { MetaWorkspaceListItem, MetaWorkspaceRuntime } from '../types';
 import UpdateNotification from './UpdateNotification';
 import CloseWorkspaceModal from './CloseWorkspaceModal';
 import GitHubAuthModal from './GitHubAuthModal';
@@ -34,7 +34,7 @@ interface TitleBarProps {
   onOpenWhatsNew?: () => void;
   onHistoryRetentionChange?: (days: number | null) => void;
   onNewProject?: () => void;
-  metaWorkspaces?: MetaWorkspace[];
+  metaWorkspaces?: MetaWorkspaceListItem[];
   activeMetaRuntime?: MetaWorkspaceRuntime | null;
   onActivateMeta?: (id: string) => Promise<void>;
   onMetaCreated?: (runtime: MetaWorkspaceRuntime) => void;
@@ -60,7 +60,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
   const [maximized, setMaximized] = useState(false);
   const ghDropRef = useRef<HTMLDivElement>(null);
   const [showCreateMeta, setShowCreateMeta] = useState(false);
-  const [manageMeta, setManageMeta] = useState<MetaWorkspace | null>(null);
+  const [manageMeta, setManageMeta] = useState<MetaWorkspaceListItem | null>(null);
   const [recentProjects, setRecentProjects] = useState<string[]>([]);
 
   useEffect(() => {
@@ -168,17 +168,38 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
             <><Layers size={12} className="titlebar-meta-icon" /><span>{projectName}</span></>
           ) : projectName} ▾
           {(() => {
-            const approvalCount = approvalWorkspaces ? approvalWorkspaces.size : 0;
-            const bgBusyCount = busyWorkspaces ? [...busyWorkspaces].filter(p => p !== projectPath).length : 0;
-            if (approvalCount > 0) return <span className="titlebar-approval-dot" />;
-            if (completedWorkspaces && completedWorkspaces.size > 0) return <span className="workspace-done-dot" />;
-            if (bgBusyCount > 0) return (
-              <span className="titlebar-busy-indicator">
-                <span className="titlebar-busy-spinner" />
-                {bgBusyCount > 1 && <span className="titlebar-busy-count">{bgBusyCount}</span>}
-              </span>
-            );
-            return null;
+            const metaRoots = new Set((metaWorkspaces || []).map(m => m.syntheticRoot));
+            const scope = (set: Set<string> | undefined, want: 'meta' | 'project') =>
+              set ? [...set].filter(p => want === 'meta' ? metaRoots.has(p) : !metaRoots.has(p)) : [];
+            const projApproval = scope(approvalWorkspaces, 'project').length;
+            const projCompleted = scope(completedWorkspaces, 'project').length;
+            const projBusy = scope(busyWorkspaces, 'project').filter(p => p !== projectPath).length;
+            const metaApproval = scope(approvalWorkspaces, 'meta').length;
+            const metaCompleted = scope(completedWorkspaces, 'meta').length;
+            const metaBusy = scope(busyWorkspaces, 'meta').filter(p => p !== projectPath).length;
+
+            const projectIndicator = projApproval > 0
+              ? <span className="titlebar-approval-dot" />
+              : projCompleted > 0
+                ? <span className="workspace-done-dot" />
+                : projBusy > 0
+                  ? <span className="titlebar-busy-indicator">
+                      <span className="titlebar-busy-spinner" />
+                      {projBusy > 1 && <span className="titlebar-busy-count">{projBusy}</span>}
+                    </span>
+                  : null;
+
+            const metaCls = metaApproval > 0 ? 'approval'
+              : metaCompleted > 0 ? 'completed'
+              : metaBusy > 0 ? 'busy' : '';
+            const metaTitle = metaApproval > 0 ? 'Meta: approval needed'
+              : metaCompleted > 0 ? 'Meta: response complete'
+              : metaBusy > 0 ? 'Meta: working...' : '';
+            const metaIndicator = metaCls
+              ? <Layers size={12} className={`titlebar-meta-indicator ${metaCls}`} aria-label={metaTitle} />
+              : null;
+
+            return <>{projectIndicator}{metaIndicator}</>;
           })()}
         </button>
         {open && (
@@ -188,14 +209,43 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
               setOverflowOpen(null);
             }
           }}>
-            <div className="picker-tabs">
-              <button className={pickerTab === 'projects' ? 'active' : ''} onClick={() => setPickerTab('projects')}>Projects</button>
-              <button className={pickerTab === 'meta' ? 'active' : ''} onClick={() => setPickerTab('meta')}>Meta</button>
-            </div>
+            {(() => {
+              const metaRoots = new Set((metaWorkspaces || []).map(m => m.syntheticRoot));
+              const filter = (set: Set<string> | undefined, want: 'meta' | 'project') =>
+                set ? [...set].filter(p => want === 'meta' ? metaRoots.has(p) : !metaRoots.has(p)) : [];
+              const tabIndicator = (kind: 'meta' | 'project') => {
+                const approval = filter(approvalWorkspaces, kind).length;
+                const completed = filter(completedWorkspaces, kind).length;
+                const busy = filter(busyWorkspaces, kind).length;
+                if (approval === 0 && completed === 0 && busy === 0) return null;
+                const cls = approval > 0
+                  ? 'picker-tab-meta-icon approval'
+                  : completed > 0
+                    ? 'picker-tab-meta-icon completed'
+                    : 'picker-tab-meta-icon busy';
+                const title = approval > 0 ? 'Approval needed' : completed > 0 ? 'Response complete' : 'Working...';
+                if (kind === 'meta') return <Layers size={12} className={cls} aria-label={title} />;
+                if (approval > 0) return <span className="picker-tab-dot picker-tab-approval" title={title} />;
+                if (completed > 0) return <span className="picker-tab-dot picker-tab-completed" title={title} />;
+                return <span className="picker-tab-spinner" title={title} />;
+              };
+              return (
+                <div className="picker-tabs">
+                  <button className={pickerTab === 'projects' ? 'active' : ''} onClick={() => setPickerTab('projects')}>
+                    <span className="picker-tab-label">Projects</span>{tabIndicator('project')}
+                  </button>
+                  <button className={pickerTab === 'meta' ? 'active' : ''} onClick={() => setPickerTab('meta')}>
+                    <span className="picker-tab-label">Meta</span>{tabIndicator('meta')}
+                  </button>
+                </div>
+              );
+            })()}
             {pickerTab === 'projects' && (() => {
-              const active = workspaceList.filter(w => w.status === 'active');
-              const suspended = workspaceList.filter(w => w.status === 'suspended');
-              const recent = workspaceList.filter(w => w.status === 'recent');
+              const metaRoots = new Set((metaWorkspaces || []).map(m => m.syntheticRoot));
+              const projectList = workspaceList.filter(w => !metaRoots.has(w.projectPath));
+              const active = projectList.filter(w => w.status === 'active');
+              const suspended = projectList.filter(w => w.status === 'suspended');
+              const recent = projectList.filter(w => w.status === 'recent');
 
               return (
                 <>
@@ -338,11 +388,26 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                             className="dropdown-item meta-workspace-item active"
                             onClick={() => { onActivateMeta?.(meta.id); setOpen(false); }}
                           >
-                            <Layers size={13} className="meta-workspace-icon" />
+                            <Layers
+                              size={13}
+                              className={`meta-workspace-icon ${
+                                approvalWorkspaces?.has(meta.syntheticRoot) ? 'approval'
+                                : busyWorkspaces?.has(meta.syntheticRoot) ? 'busy'
+                                : completedWorkspaces?.has(meta.syntheticRoot) ? 'completed' : ''
+                              }`}
+                              aria-label={
+                                approvalWorkspaces?.has(meta.syntheticRoot) ? 'Approval needed'
+                                : busyWorkspaces?.has(meta.syntheticRoot) ? 'Working...'
+                                : completedWorkspaces?.has(meta.syntheticRoot) ? 'Response complete' : undefined
+                              }
+                            />
                             <div className="meta-workspace-text">
                               <span className="dropdown-item-name">{meta.name}</span>
                               <span className="dropdown-item-path">{meta.projects.length} project{meta.projects.length === 1 ? '' : 's'}</span>
                             </div>
+                            {approvalWorkspaces?.has(meta.syntheticRoot)
+                              ? <span className="workspace-approval-label">Approval needed</span>
+                              : completedWorkspaces?.has(meta.syntheticRoot) && <span className="workspace-completed-icon" title="Response complete">!</span>}
                           </button>
                           <button
                             className="meta-workspace-manage-btn"
@@ -366,11 +431,26 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                               className="dropdown-item meta-workspace-item"
                               onClick={() => { onActivateMeta?.(meta.id); setOpen(false); }}
                             >
-                              <Layers size={13} className="meta-workspace-icon" />
+                              <Layers
+                                size={13}
+                                className={`meta-workspace-icon ${
+                                  approvalWorkspaces?.has(meta.syntheticRoot) ? 'approval'
+                                  : busyWorkspaces?.has(meta.syntheticRoot) ? 'busy'
+                                  : completedWorkspaces?.has(meta.syntheticRoot) ? 'completed' : ''
+                                }`}
+                                aria-label={
+                                  approvalWorkspaces?.has(meta.syntheticRoot) ? 'Approval needed'
+                                  : busyWorkspaces?.has(meta.syntheticRoot) ? 'Working...'
+                                  : completedWorkspaces?.has(meta.syntheticRoot) ? 'Response complete' : undefined
+                                }
+                              />
                               <div className="meta-workspace-text">
                                 <span className="dropdown-item-name">{meta.name}</span>
                                 <span className="dropdown-item-path">{meta.projects.length} project{meta.projects.length === 1 ? '' : 's'}</span>
                               </div>
+                              {approvalWorkspaces?.has(meta.syntheticRoot)
+                                ? <span className="workspace-approval-label">Approval needed</span>
+                                : completedWorkspaces?.has(meta.syntheticRoot) && <span className="workspace-completed-icon" title="Response complete">!</span>}
                             </button>
                             <button
                               className="meta-workspace-manage-btn"
@@ -625,6 +705,13 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           color: var(--accent);
           flex-shrink: 0;
         }
+        .titlebar-meta-indicator {
+          flex-shrink: 0;
+          margin-left: 2px;
+        }
+        .titlebar-meta-indicator.approval { color: #f87171; animation: approval-blink 1.2s ease-in-out infinite; }
+        .titlebar-meta-indicator.completed { color: #4ade80; animation: done-pulse 2s ease-in-out infinite; }
+        .titlebar-meta-indicator.busy { color: var(--accent); animation: dot-spinner-pulse 2.2s ease-in-out infinite; }
         .gh-login-btn {
           display: flex;
           align-items: center;
@@ -1067,6 +1154,36 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           border-bottom-color: var(--accent);
           background: transparent;
         }
+        .picker-tabs button {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+        }
+        .picker-tab-label { line-height: 1; }
+        .picker-tab-dot {
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          display: inline-block;
+          flex-shrink: 0;
+        }
+        .picker-tab-approval { background: #f87171; }
+        .picker-tab-completed { background: #4ade80; }
+        .picker-tab-spinner {
+          width: 9px;
+          height: 9px;
+          background: var(--accent);
+          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+          display: inline-block;
+          flex-shrink: 0;
+          animation: dot-spinner-pulse 2.2s ease-in-out infinite;
+        }
+        .picker-tab-meta-icon { flex-shrink: 0; }
+        .picker-tab-meta-icon.approval { color: #f87171; animation: approval-blink 1.2s ease-in-out infinite; }
+        .picker-tab-meta-icon.completed { color: #4ade80; }
+        .picker-tab-meta-icon.busy { color: var(--accent); animation: dot-spinner-pulse 2.2s ease-in-out infinite; }
         .meta-workspace-row {
           display: flex;
           align-items: center;
@@ -1108,6 +1225,9 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         .meta-workspace-item.active .meta-workspace-icon {
           color: #000;
         }
+        .meta-workspace-icon.approval { color: #f87171 !important; animation: approval-blink 1.2s ease-in-out infinite; }
+        .meta-workspace-icon.busy { color: var(--accent) !important; animation: dot-spinner-pulse 2.2s ease-in-out infinite; }
+        .meta-workspace-icon.completed { color: #4ade80 !important; }
         .meta-workspace-text {
           display: flex;
           flex-direction: column;

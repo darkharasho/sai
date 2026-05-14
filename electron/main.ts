@@ -347,7 +347,9 @@ function createWindow() {
     suspend(projectPath, mainWindow!);
   });
 
-  ipcMain.handle('metaWorkspace:list', () => listMetaWorkspaces());
+  ipcMain.handle('metaWorkspace:list', () =>
+    listMetaWorkspaces().map(m => ({ ...m, syntheticRoot: syntheticRootFor(m.id) }))
+  );
 
   ipcMain.handle('metaWorkspace:create', (_e, input: {
     name: string;
