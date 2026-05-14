@@ -107,6 +107,21 @@ export const SYNTHESIZE_PROMPT = [
   'Pick exactly one of those two formats. Do not mix them.',
 ].join('\n');
 
+// Force variant: the user explicitly asked to proceed despite a prior
+// pushback. Don't offer NEED_MORE — make a best-guess JSON regardless.
+export const SYNTHESIZE_PROMPT_FORCE = [
+  '[INTERNAL TOOL CALL — not a user message]',
+  'The user is creating a project from this conversation and has explicitly',
+  'asked to proceed even though the conversation may be sparse.',
+  '',
+  'Respond with ONLY a JSON object (no prose, no code fences, no other text):',
+  '  {"projectName":"kebab-case-name","context":"2–4 sentence summary suitable for a CLAUDE.md \'Project Context\' section."}',
+  '  - projectName must be ≤ 40 chars',
+  '',
+  'Do your best with what is here. Do NOT ask clarifying questions.',
+  'Do NOT use the NEED_MORE format — output the JSON.',
+].join('\n');
+
 // Build args for a stateless one-shot claude invocation. Each turn carries
 // the full conversation in the prompt rather than relying on claude's
 // session resume (which is unreliable after `-p` runs in some claude CLI
@@ -289,14 +304,15 @@ export function registerBrainstormHandlers(win: BrowserWindow): void {
     return result;
   });
 
-  ipcMain.handle('brainstorm:synthesize', async (_e, sessionId: string) => {
+  ipcMain.handle('brainstorm:synthesize', async (_e, sessionId: string, opts?: { force?: boolean }) => {
     const session = getSession(sessionId);
     if (!session) return { ok: false, error: 'Session not found' };
     // Snapshot the transcript so we can roll back the synthesize prompt
     // turn — it's not real conversation content.
     const beforeLen = session.transcript.length;
     const noopChunk = () => {};
-    const result = await runTurn({ sessionId, userMessage: SYNTHESIZE_PROMPT, onChunk: noopChunk });
+    const prompt = opts?.force ? SYNTHESIZE_PROMPT_FORCE : SYNTHESIZE_PROMPT;
+    const result = await runTurn({ sessionId, userMessage: prompt, onChunk: noopChunk });
     session.transcript.length = beforeLen;
     if (!result.ok) return result;
 
@@ -306,11 +322,15 @@ export function registerBrainstormHandlers(win: BrowserWindow): void {
     // summarize and is asking the user one question. Keep the question in
     // the transcript so it shows up as an organic assistant turn in the
     // brainstorm, but skip the synthesize prompt itself.
-    const needMoreMatch = text.match(/^NEED_MORE:\s*(.+)$/s);
-    if (needMoreMatch) {
-      const question = needMoreMatch[1].trim();
-      session.transcript.push({ role: 'assistant', content: question });
-      return { ok: false, needsClarification: true, question };
+    // (Skip this check when force is set — the model was told not to use
+    // NEED_MORE, but if it does anyway, treat the output as a parse error.)
+    if (!opts?.force) {
+      const needMoreMatch = text.match(/^NEED_MORE:\s*(.+)$/s);
+      if (needMoreMatch) {
+        const question = needMoreMatch[1].trim();
+        session.transcript.push({ role: 'assistant', content: question });
+        return { ok: false, needsClarification: true, question };
+      }
     }
 
     try {

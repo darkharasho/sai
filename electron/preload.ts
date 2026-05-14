@@ -176,8 +176,8 @@ contextBridge.exposeInMainWorld('sai', {
   brainstormStart: () => ipcRenderer.invoke('brainstorm:start'),
   brainstormSend: (sessionId: string, message: string) =>
     ipcRenderer.invoke('brainstorm:send', sessionId, message),
-  brainstormSynthesize: (sessionId: string) =>
-    ipcRenderer.invoke('brainstorm:synthesize', sessionId),
+  brainstormSynthesize: (sessionId: string, opts?: { force?: boolean }) =>
+    ipcRenderer.invoke('brainstorm:synthesize', sessionId, opts),
   brainstormEnd: (sessionId: string) => ipcRenderer.invoke('brainstorm:end', sessionId),
   brainstormConsumeSeed: (projectPath: string) => ipcRenderer.invoke('brainstorm:consumeSeed', projectPath),
   brainstormOnChunk: (sessionId: string, callback: (text: string) => void) => {

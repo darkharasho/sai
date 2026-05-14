@@ -17,7 +17,7 @@ export interface UseBrainstorm {
   error: string | null;
   startError: string | null;
   send: (message: string) => Promise<void>;
-  synthesize: () => Promise<SynthesizeResponse>;
+  synthesize: (opts?: { force?: boolean }) => Promise<SynthesizeResponse>;
   end: () => Promise<void>;
   hasReply: boolean;
 }
@@ -103,10 +103,10 @@ export function useBrainstorm(enabled: boolean): UseBrainstorm {
     }
   }, [enabled, ensureSession]);
 
-  const synthesize = useCallback(async (): Promise<SynthesizeResponse> => {
+  const synthesize = useCallback(async (opts?: { force?: boolean }): Promise<SynthesizeResponse> => {
     const sid = sessionIdRef.current;
     if (!sid) return { ok: false, error: 'No active brainstorm session' };
-    const r: SynthesizeResponse = await (window as any).sai.brainstormSynthesize(sid);
+    const r: SynthesizeResponse = await (window as any).sai.brainstormSynthesize(sid, opts);
     // If the model pushed back with a clarification, fold it into the
     // visible transcript as an organic assistant turn.
     if (!r.ok && r.needsClarification) {

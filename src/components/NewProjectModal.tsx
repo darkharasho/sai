@@ -86,6 +86,7 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
   const [contextFromBrainstorm, setContextFromBrainstorm] = useState(false);
   const [synthesizing, setSynthesizing] = useState(false);
   const [synthesizeError, setSynthesizeError] = useState<string | null>(null);
+  const [pushedBack, setPushedBack] = useState(false);
   const [replacePrompt, setReplacePrompt] = useState<null | { projectName: string; context: string; transcript: string }>(null);
 
   const brainstorm = useBrainstorm(tab === 'brainstorm' || brainstormTranscript !== '');
@@ -173,21 +174,23 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
   }, [parentDir, projectName, context, helpers, repoName, visibility, onCreated, brainstormTranscript]);
 
   // Brainstorm handlers
-  const handleUseThis = useCallback(async () => {
+  const handleUseThis = useCallback(async (opts?: { force?: boolean }) => {
     setSynthesizing(true);
     setSynthesizeError(null);
-    const r = await brainstorm.synthesize();
+    const r = await brainstorm.synthesize(opts);
     setSynthesizing(false);
     if (!r.ok) {
       if (r.needsClarification) {
         // The clarifying question was already pushed into the brainstorm
         // transcript by the hook. Stay on the Brainstorm tab so the user
-        // can answer it before trying again — no error banner needed.
+        // can answer it — and surface a "Use anyway" escape hatch.
+        setPushedBack(true);
         return;
       }
       setSynthesizeError("Couldn't summarize — try sending one more message clarifying the goal");
       return;
     }
+    setPushedBack(false);
     const nameAlreadyFilled = projectName.trim().length > 0;
     const contextAlreadyFilled = context.trim().length > 0;
     if (nameAlreadyFilled || contextAlreadyFilled) {
@@ -282,7 +285,7 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
             isStreaming={brainstorm.isStreaming}
             error={brainstorm.error}
             startError={brainstorm.startError}
-            onSend={brainstorm.send}
+            onSend={(text) => { setPushedBack(false); brainstorm.send(text); }}
           />
         )}
 
@@ -299,8 +302,26 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
             Cancel
           </button>
           {tab === 'brainstorm' ? (
+            <>
+              {pushedBack && (
+                <button
+                  onClick={() => handleUseThis({ force: true })}
+                  disabled={synthesizing}
+                  title="Skip the clarifying question and create the project with what's been said"
+                  style={{
+                    background: 'none',
+                    border: '1px solid var(--border)',
+                    color: 'var(--text-muted)',
+                    borderRadius: 5, padding: '7px 12px', fontSize: 12,
+                    cursor: synthesizing ? 'not-allowed' : 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 6,
+                  }}
+                >
+                  Use anyway →
+                </button>
+              )}
             <button
-              onClick={handleUseThis}
+              onClick={() => handleUseThis()}
               disabled={!brainstorm.hasReply || synthesizing}
               style={{
                 background: 'none',
@@ -314,6 +335,7 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
               <Sparkles size={13} />
               {synthesizing ? 'Synthesizing…' : 'Use this →'}
             </button>
+            </>
           ) : (
             createdPath ? (
               <button
