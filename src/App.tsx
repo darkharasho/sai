@@ -3230,6 +3230,11 @@ export default function App() {
                     // listener (see deriveSwarmMirror) so it fires for every scope,
                     // including background tasks whose ChatPanel isn't mounted.
                   }}
+                  activeMetaRuntime={
+                    activeMetaRuntime && activeMetaRuntime.syntheticRoot === wsPath
+                      ? activeMetaRuntime
+                      : null
+                  }
                 />
                 )}
               </div>

@@ -20,6 +20,7 @@ export interface WorkspaceClaude {
     permMode: string;
     effort: string;
     model: string;
+    metaPreamble: string;
   } | null;
   busy: boolean;           // true while a turn is in progress
   turnSeq: number;         // monotonic counter — incremented each turn, tags streaming_start/done
@@ -35,6 +36,8 @@ export interface WorkspaceClaude {
   /** For orchestrator-kind scopes: context used to build the --system-prompt.
    *  Set by claude:start; consumed by ensureProcess at spawn time. */
   orchestratorContext?: Record<string, unknown> | null;
+  /** Meta-workspace preamble to inject via --append-system-prompt at spawn time. */
+  metaPreamble?: string;
 }
 
 export interface WorkspaceCodex {
@@ -44,6 +47,8 @@ export interface WorkspaceCodex {
   cwd: string;
   busy: boolean;
   turnSeq: number;
+  /** Meta-workspace preamble — stashed for future injection if codex gains a system-prompt hook. */
+  metaPreamble?: string;
 }
 
 export interface WorkspaceGemini {
@@ -69,6 +74,8 @@ export interface WorkspaceGemini {
     description?: string;
     scope: string;
   } | null;
+  /** Meta-workspace preamble — stashed for future injection if gemini gains a system-prompt hook. */
+  metaPreamble?: string;
 }
 
 export interface Workspace {

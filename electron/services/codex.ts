@@ -250,10 +250,14 @@ function fetchCodexModels(): Promise<{ models: { id: string; name: string }[]; d
 export function registerCodexHandlers(win: BrowserWindow) {
   ipcMain.handle('codex:models', () => fetchCodexModels());
 
-  ipcMain.handle('codex:start', (_event, cwd: string) => {
+  ipcMain.handle('codex:start', (_event, cwd: string, metaPreamble?: string) => {
     if (!cwd) return;
     const ws = getOrCreate(cwd);
     ws.codex.cwd = cwd;
+    // Stash the meta-workspace preamble. Codex communicates via JSON-RPC clientInfo
+    // and does not expose a system-prompt field at startup; the preamble is stored
+    // here for future use if a clean injection point becomes available.
+    ws.codex.metaPreamble = metaPreamble || '';
     safeSend(win, 'claude:message', { type: 'ready', projectPath: ws.projectPath });
   });
 

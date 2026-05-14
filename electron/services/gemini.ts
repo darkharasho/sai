@@ -504,10 +504,14 @@ export function registerGeminiHandlers(win: BrowserWindow) {
     defaultModel: GEMINI_DEFAULT_MODEL,
   }));
 
-  ipcMain.handle('gemini:start', async (_event, cwd: string) => {
+  ipcMain.handle('gemini:start', async (_event, cwd: string, metaPreamble?: string) => {
     if (!cwd) return;
     const ws = getOrCreate(cwd);
     ws.gemini.cwd = cwd;
+    // Stash the meta-workspace preamble. Gemini uses an ACP transport and does not
+    // expose a system-prompt override at the gemini:start level; the preamble is
+    // stored here for future use if a clean injection point becomes available.
+    ws.gemini.metaPreamble = metaPreamble || '';
     if (ws.gemini.availability === 'disabled') {
       ws.gemini.transport?.dispose();
       ws.gemini.transport = null;

@@ -177,6 +177,8 @@ export interface BuildArgsOptions {
   workspace?: string;
   /** Optional orchestrator system-prompt context. Falls back to defaults. */
   orchestratorContext?: Partial<OrchestratorPromptContext> | null;
+  /** Meta-workspace preamble to append to the system prompt via --append-system-prompt. */
+  metaPreamble?: string;
   /** Override hooks for tests. */
   getMcpHandle?: () => { socketPath: string; secret: string };
   resolveMcpServerScriptPath?: () => string;
@@ -205,6 +207,7 @@ export function buildArgs(options: BuildArgsOptions = {}): string[] {
     kind = 'chat',
     workspace,
     orchestratorContext,
+    metaPreamble,
     getMcpHandle = () => swarmMcpHost.start(),
     resolveMcpServerScriptPath = defaultMcpServerScriptPath,
     resolveElectronExecPath = () => process.execPath,
@@ -276,6 +279,11 @@ export function buildArgs(options: BuildArgsOptions = {}): string[] {
     }
   }
 
+  // Append meta-workspace preamble to the system prompt when provided.
+  if (metaPreamble && metaPreamble.trim()) {
+    args.push('--append-system-prompt', metaPreamble);
+  }
+
   return args;
 }
 
@@ -293,13 +301,14 @@ function ensureProcess(
 ): ChildProcess {
   const ws = getOrCreate(projectPath);
   const claude = getClaude(ws, scope);
-  const currentConfig = { permMode: permMode || 'default', effort: effort || '', model: model || '' };
+  const currentConfig = { permMode: permMode || 'default', effort: effort || '', model: model || '', metaPreamble: claude.metaPreamble || '' };
 
   // If process exists and config hasn't changed, reuse it
   if (claude.process && claude.processConfig &&
       claude.processConfig.permMode === currentConfig.permMode &&
       claude.processConfig.effort === currentConfig.effort &&
-      claude.processConfig.model === currentConfig.model) {
+      claude.processConfig.model === currentConfig.model &&
+      claude.processConfig.metaPreamble === currentConfig.metaPreamble) {
     return claude.process;
   }
 
@@ -316,6 +325,7 @@ function ensureProcess(
     kind: claude.kind,
     workspace: ws.projectPath,
     orchestratorContext: (claude.orchestratorContext as Partial<OrchestratorPromptContext> | null) || null,
+    metaPreamble: claude.metaPreamble,
   });
 
   // Resume existing session if we have one
@@ -521,6 +531,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
     kind?: 'chat' | 'task' | 'orchestrator',
     orchestratorContext?: Partial<OrchestratorPromptContext> | null,
     scopeCwd?: string,
+    metaPreamble?: string,
   ) => {
     if (!projectPath) return;
     const ws = getOrCreate(projectPath);
@@ -532,6 +543,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
     if (kind === 'orchestrator' && orchestratorContext) {
       claude.orchestratorContext = orchestratorContext as Record<string, unknown>;
     }
+    claude.metaPreamble = metaPreamble || '';
 
     safeSend(win, 'claude:message', { type: 'ready', projectPath: ws.projectPath, scope: scope || 'chat' });
 

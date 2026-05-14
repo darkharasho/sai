@@ -17,8 +17,8 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.on('terminal:data', listener);
     return () => ipcRenderer.removeListener('terminal:data', listener);
   },
-  claudeStart: (cwd: string, scope?: string, kind?: string, orchestratorContext?: any, scopeCwd?: string) =>
-    ipcRenderer.invoke('claude:start', cwd, scope, kind, orchestratorContext, scopeCwd),
+  claudeStart: (cwd: string, scope?: string, kind?: string, orchestratorContext?: any, scopeCwd?: string, metaPreamble?: string) =>
+    ipcRenderer.invoke('claude:start', cwd, scope, kind, orchestratorContext, scopeCwd, metaPreamble),
   claudeSend: (projectPath: string, message: string, imagePaths?: string[], permMode?: string, effort?: string, model?: string, scope?: string) => ipcRenderer.send('claude:send', projectPath, message, imagePaths, permMode, effort, model, scope),
   claudeGenerateCommitMessage: (cwd: string, aiProvider?: string) => ipcRenderer.invoke('claude:generateCommitMessage', cwd, aiProvider),
   claudeGenerateTitle: (cwd: string, userMessage: string, aiProvider?: string) => ipcRenderer.invoke('claude:generateTitle', cwd, userMessage, aiProvider),
@@ -31,13 +31,13 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.invoke('claude:alwaysAllow', projectPath, toolPattern),
   // Codex CLI
   codexModels: () => ipcRenderer.invoke('codex:models'),
-  codexStart: (cwd: string) => ipcRenderer.invoke('codex:start', cwd),
+  codexStart: (cwd: string, metaPreamble?: string) => ipcRenderer.invoke('codex:start', cwd, metaPreamble),
   codexSend: (projectPath: string, message: string, imagePaths?: string[], permMode?: string, model?: string) => ipcRenderer.send('codex:send', projectPath, message, imagePaths, permMode, model),
   codexStop: (projectPath: string) => ipcRenderer.send('codex:stop', projectPath),
   codexSetSessionId: (projectPath: string, sessionId: string | undefined) => ipcRenderer.send('codex:setSessionId', projectPath, sessionId),
   // Gemini CLI
   geminiModels: () => ipcRenderer.invoke('gemini:models'),
-  geminiStart: (cwd: string) => ipcRenderer.invoke('gemini:start', cwd),
+  geminiStart: (cwd: string, metaPreamble?: string) => ipcRenderer.invoke('gemini:start', cwd, metaPreamble),
   geminiSend: (projectPath: string, message: string, imagePaths?: string[], approvalMode?: string, conversationMode?: string, model?: string, scope?: string) =>
     ipcRenderer.send('gemini:send', projectPath, message, imagePaths, approvalMode, conversationMode, model, scope),
   geminiStop: (projectPath: string, scope?: string) => ipcRenderer.send('gemini:stop', projectPath, scope),

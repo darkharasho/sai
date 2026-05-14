@@ -275,8 +275,10 @@ function GeminiThinkingAnimation({ loadingPhrases = 'all' }: { loadingPhrases?: 
 import ChatMessage from './ChatMessage';
 import ChatInput, { type ContextItem } from './ChatInput';
 import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, QueuedMessage, TerminalTab } from '../../types';
+import type { MetaWorkspaceRuntime } from '../../types';
 import { buildHelpMessage } from './helpText';
 import { parseAiError, looksLikeApiError } from './parseAiError';
+import { buildMetaPreamble } from '../../lib/metaSystemPrompt';
 
 type CodexPermission = 'auto' | 'read-only' | 'full-access';
 
@@ -349,6 +351,12 @@ interface ChatPanelProps {
    * inline approval cards in place of synthetic system messages.
    */
   renderMessage?: (message: ChatMessageType) => React.ReactNode | null;
+  /**
+   * Optional: active meta-workspace runtime. When set (and its syntheticRoot
+   * matches projectPath), the meta-workspace preamble is injected into the
+   * AI system prompt on start.
+   */
+  activeMetaRuntime?: MetaWorkspaceRuntime | null;
   /**
    * Optional: replace the default SAI-logo empty state with custom content.
    * Used by the orchestrator chat to render a swarm-of-logos cluster instead
@@ -567,7 +575,7 @@ const FAKE_ERROR_VARIANTS = {
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, renderToolCall, renderMessage, emptyStateVisual, conversationHeaderVisual }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(initialMessages || []);
   const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);
   const setMessages = useCallback((updater: ChatMessageType[] | ((prev: ChatMessageType[]) => ChatMessageType[])) => {
@@ -667,9 +675,14 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   useEffect(() => {
     setReady(false);
     const startFn = aiProvider === 'gemini' ? (window.sai as any).geminiStart : aiProvider === 'codex' ? window.sai.codexStart : window.sai.claudeStart;
+    const metaPreamble = buildMetaPreamble(activeMetaRuntime ? {
+      name: activeMetaRuntime.meta.name,
+      syntheticRoot: activeMetaRuntime.syntheticRoot,
+      projects: activeMetaRuntime.projects,
+    } : null);
     const startArgs: any[] = aiProvider === 'claude'
-      ? [projectPath || '', claudeScope, claudeKind, claudeOrchestratorContext]
-      : [projectPath || ''];
+      ? [projectPath || '', claudeScope, claudeKind, claudeOrchestratorContext, undefined /* scopeCwd */, metaPreamble]
+      : [projectPath || '', metaPreamble];
     startFn(...startArgs).then((result: any) => {
       setReady(true);
       if (result?.slashCommands?.length) {
@@ -1004,7 +1017,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     return () => {
       cleanup();
     };
-  }, [projectPath, aiProvider]);
+  }, [projectPath, aiProvider, activeMetaRuntime]);
 
   // Poll the Anthropic usage API for real utilization percentages
   useEffect(() => {
