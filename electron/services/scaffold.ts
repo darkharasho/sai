@@ -20,6 +20,7 @@ export interface ScaffoldOptions {
     repoName: string;
     visibility: 'private' | 'public';
   };
+  brainstormTranscript?: string;
 }
 
 export interface ScaffoldResult {
@@ -108,7 +109,7 @@ export async function scaffoldProject(
   // Step 4 — .gitignore
   if (options.helpers.gitignore) {
     try {
-      const content = [
+      const ignores = [
         'node_modules',
         '.env',
         '.env.*',
@@ -117,7 +118,9 @@ export async function scaffoldProject(
         'build',
         '*.log',
         '.superpowers',
-      ].join('\n') + '\n';
+      ];
+      if (options.brainstormTranscript) ignores.push('.sai/');
+      const content = ignores.join('\n') + '\n';
       fs.writeFileSync(path.join(resolved, '.gitignore'), content, 'utf8');
     } catch (e: any) {
       warnings.push(`.gitignore: ${e.message}`);
@@ -191,6 +194,31 @@ export async function scaffoldProject(
       } catch (e: any) {
         warnings.push(`GitHub repo: ${e.message}`);
       }
+    }
+  }
+
+  // Step 8 — brainstorm seed file
+  if (options.brainstormTranscript) {
+    try {
+      const saiDir = path.join(resolved, '.sai');
+      fs.mkdirSync(saiDir, { recursive: true });
+      const seed =
+        `# Seed message (synthesized)\n\n${options.context || ''}\n\n` +
+        `<brainstorm-transcript>\n${options.brainstormTranscript}\n</brainstorm-transcript>\n`;
+      fs.writeFileSync(path.join(saiDir, 'brainstorm-seed.md'), seed, 'utf8');
+
+      // If .gitignore exists but does not include .sai/, append it
+      const giPath = path.join(resolved, '.gitignore');
+      if (fs.existsSync(giPath)) {
+        const existing = fs.readFileSync(giPath, 'utf8');
+        const lines = existing.split('\n');
+        if (!lines.includes('.sai/')) {
+          const sep = existing.endsWith('\n') ? '' : '\n';
+          fs.writeFileSync(giPath, existing + sep + '.sai/\n', 'utf8');
+        }
+      }
+    } catch (e: any) {
+      warnings.push(`brainstorm seed: ${e.message}`);
     }
   }
 
