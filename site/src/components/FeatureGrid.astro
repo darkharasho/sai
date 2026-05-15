@@ -35,10 +35,10 @@ const rest = features.filter(f => !f.flagship);
 
     <p class="legend">
       <span>LEGEND ·</span>
-      <span><span class="sw d"></span> D-series · flagship</span>
-      <span><span class="sw a"></span> A-series · agent loop</span>
-      <span><span class="sw b"></span> B-series · workspace</span>
-      <span><span class="sw c"></span> C-series · extensibility</span>
+      <span><span class="sw a"></span> A-series · flagship</span>
+      <span><span class="sw b"></span> B-series · agent loop</span>
+      <span><span class="sw c"></span> C-series · workspace</span>
+      <span><span class="sw d"></span> D-series · extensibility</span>
     </p>
   </div>
 </section>
@@ -86,10 +86,10 @@ const rest = features.filter(f => !f.flagship);
     color: var(--phosphor-dim);
   }
   .legend .sw { display: inline-block; width: 10px; height: 10px; margin-right: 8px; vertical-align: -1px; border: 1px solid var(--phosphor-dim); }
-  .legend .sw.a { background: var(--phosphor); border-color: var(--phosphor); }
-  .legend .sw.b { background: var(--green); border-color: var(--green); }
-  .legend .sw.c { background: var(--blue); border-color: var(--blue); }
-  .legend .sw.d { background: var(--phosphor); border-color: var(--phosphor); box-shadow: 0 0 0 2px var(--ink-2), 0 0 0 3px var(--phosphor); margin-right: 12px; }
+  .legend .sw.a { background: var(--phosphor); border-color: var(--phosphor); box-shadow: 0 0 0 2px var(--ink-2), 0 0 0 3px var(--phosphor); margin-right: 12px; }
+  .legend .sw.b { background: var(--phosphor); border-color: var(--phosphor); }
+  .legend .sw.c { background: var(--green); border-color: var(--green); }
+  .legend .sw.d { background: var(--blue); border-color: var(--blue); }
 
   @media (max-width: 1100px) {
     .grid { grid-template-columns: repeat(2, 1fr); }
