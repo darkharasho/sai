@@ -15,6 +15,17 @@ const base = import.meta.env.BASE_URL;
       </p>
     </div>
 
+    <div class="caption">
+      <p class="cap-eyebrow">// signal · 01 · the cockpit</p>
+      <h3 class="cap-title">Chat, editor, terminal, Git — one window.</h3>
+      <p class="cap-body">
+        The SAI desktop with a project loaded. Chat sits beside a full Monaco
+        editor, an integrated PTY terminal runs below, and Git status lives in
+        the sidebar. Everything you need for the prompt → review → ship loop is
+        on screen at once.
+      </p>
+    </div>
+
     <figure class="screen brackets">
       <span class="br-tr"></span><span class="br-bl"></span>
       <header class="screen-bar">
@@ -39,6 +50,17 @@ const base = import.meta.env.BASE_URL;
         <span class="ml">CAM · 01/A</span>
       </footer>
     </figure>
+
+    <div class="caption">
+      <p class="cap-eyebrow">// signal · 02 · the agent loop</p>
+      <h3 class="cap-title">Streaming output, queued prompts, inline approvals.</h3>
+      <p class="cap-body">
+        Another angle on the cockpit. Token meters and a turn timer keep the
+        agent honest, the composer queues follow-up prompts behind the
+        streaming turn, and tool calls land in an approval panel — no flipping
+        tabs to stay in control.
+      </p>
+    </div>
 
     <figure class="screen brackets alt">
       <span class="br-tr"></span><span class="br-bl"></span>
@@ -65,6 +87,18 @@ const base = import.meta.env.BASE_URL;
       </footer>
     </figure>
 
+    <div class="caption">
+      <p class="cap-eyebrow">// signal · 03 · swarm mode</p>
+      <h3 class="cap-title">Five tasks dispatched. All green. Land the batch.</h3>
+      <p class="cap-body">
+        The Swarm sidebar after a 5-task burst. Each task ran in its own git
+        worktree on a <code>swarm/…</code> branch, streamed live, and reported
+        diff stats when it finished. Hit <strong>Land all green</strong> to
+        fast-forward every clean task into the base branch — or open any row to
+        review its diff one at a time.
+      </p>
+    </div>
+
     <figure class="screen brackets">
       <span class="br-tr"></span><span class="br-bl"></span>
       <header class="screen-bar">
@@ -89,6 +123,19 @@ const base = import.meta.env.BASE_URL;
         <span class="ml">CAM · 03/SWARM</span>
       </footer>
     </figure>
+
+    <div class="caption">
+      <p class="cap-eyebrow">// signal · 04 · meta workspaces</p>
+      <h3 class="cap-title">One workspace. Many repos. One conversation.</h3>
+      <p class="cap-body">
+        A meta workspace named <em>AI Dev Tools</em> with two repos
+        (<code>sai</code>, <code>tai</code>) wired in. The chat, terminal, and
+        editor all span every included project; the Git panel renders
+        independent stage / commit / push / pull controls per repo so
+        cross-cutting changes happen in one place — without sharing one
+        branch.
+      </p>
+    </div>
 
     <figure class="screen brackets">
       <span class="br-tr"></span><span class="br-bl"></span>
@@ -153,6 +200,45 @@ const base = import.meta.env.BASE_URL;
       0 50px 120px -40px rgba(255,180,84,0.25);
   }
   .screen + .screen { margin-top: 48px; }
+
+  .caption { max-width: 760px; margin: 64px 0 24px; }
+  .caption:first-of-type { margin-top: 0; }
+  .cap-eyebrow {
+    margin: 0 0 14px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--phosphor-dim);
+  }
+  .cap-title {
+    margin: 0 0 14px;
+    font-family: var(--mono);
+    font-size: clamp(1.05rem, 1.8vw, 1.35rem);
+    font-weight: 700;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    color: var(--phosphor);
+  }
+  .cap-body {
+    margin: 0;
+    max-width: 60ch;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--phosphor-2);
+    opacity: 0.82;
+  }
+  .cap-body code {
+    font-family: var(--mono);
+    font-size: 0.95em;
+    padding: 1px 6px;
+    border: 1px solid var(--rule-2);
+    color: var(--phosphor);
+    background: rgba(255,180,84,0.04);
+  }
+  .cap-body strong { color: var(--phosphor); font-weight: 700; }
+  .cap-body em { color: var(--phosphor); font-style: italic; }
   .screen-bar, .screen-foot {
     display: flex; gap: 28px; align-items: center;
     padding: 12px 18px;
