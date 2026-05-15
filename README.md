@@ -32,6 +32,16 @@ Open a project, pick your provider, ask it to build a feature, and watch it happ
 
 ## Features
 
+### Swarm mode — parallel agents in one chat
+Spin up multiple Claude tasks from a single orchestrator chat and watch them stream side-by-side. Each writing task runs in its own git worktree on a `swarm/<slug>` branch; reads share the workspace root. Live tool counts, diff stats, and a completion timeline land in the sidebar as tasks finish — review each diff and **Land** individually, or **Land all green** to fast-forward the whole batch into your base branch. Configurable concurrency, approval policy, and a `/spawn` · `/burst` · `/land` slash-command escape hatch when you'd rather drive directly.
+
+<img src="public/img/swarm.png" alt="SAI Swarm: orchestrator chat showing a 5-task batch complete with a completion timeline and a 'Land all green' button" width="1400" />
+
+### Meta workspaces — one chat, many repos
+Group N projects into a single named workspace that behaves like a regular project: one chat, one terminal, one editor, one Git panel — spanning every included repo. The AI sees each project as a top-level folder under a clean curated root, so cross-cutting changes ("add the same CI workflow to all six services") happen in one conversation. Per-project chips appear on tool calls, swarm tasks, and the sidebar; the Git panel renders per-repo stage / commit / push / pull controls so you can ship changes to each repo independently from the same surface.
+
+<img src="public/img/meta.png" alt="SAI Meta workspace 'AI Dev Tools' with two repos (sai, tai) in the Git sidebar, each with their own commit/push/pull controls" width="1400" />
+
 ### Bring your preferred AI CLI
 Use Claude, Codex CLI, or Gemini CLI in the chat panel and switch providers from Settings at any time. SAI keeps provider-specific models, approval controls, and conversation preferences separate, so swapping backends does not mean rebuilding your setup.
 
