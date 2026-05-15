@@ -64,10 +64,60 @@ const base = import.meta.env.BASE_URL;
         <span class="ml">CAM · 02/B</span>
       </footer>
     </figure>
+
+    <figure class="screen brackets">
+      <span class="br-tr"></span><span class="br-bl"></span>
+      <header class="screen-bar">
+        <span class="lbl">CHANNEL · 03</span>
+        <span class="lbl">RES · 1400×900</span>
+        <span class="lbl ok">● LIVE</span>
+        <span class="lbl mar" data-time-c>--:--:--</span>
+      </header>
+      <div class="img-wrap">
+        <img src={`${base}img/swarm.png`} alt="SAI Swarm mode: orchestrator chat with a 5-task batch complete and a 'Land all green' button" width="1400" height="900" loading="lazy" />
+        <span class="aberration" aria-hidden="true"></span>
+        <span class="scanlines" aria-hidden="true"></span>
+        <span class="reticle reticle-tl" aria-hidden="true">+</span>
+        <span class="reticle reticle-tr" aria-hidden="true">+</span>
+        <span class="reticle reticle-bl" aria-hidden="true">+</span>
+        <span class="reticle reticle-br" aria-hidden="true">+</span>
+      </div>
+      <footer class="screen-foot">
+        <span>FRAME · 00:04:12:03</span>
+        <span>EXPOSURE · AUTO</span>
+        <span>GAIN · +0db</span>
+        <span class="ml">CAM · 03/SWARM</span>
+      </footer>
+    </figure>
+
+    <figure class="screen brackets">
+      <span class="br-tr"></span><span class="br-bl"></span>
+      <header class="screen-bar">
+        <span class="lbl">CHANNEL · 04</span>
+        <span class="lbl">RES · 1400×900</span>
+        <span class="lbl ok">● LIVE</span>
+        <span class="lbl mar" data-time-d>--:--:--</span>
+      </header>
+      <div class="img-wrap">
+        <img src={`${base}img/meta.png`} alt="SAI Meta workspace 'AI Dev Tools' with two repos in the Git sidebar, each with their own commit/push/pull controls" width="1400" height="900" loading="lazy" />
+        <span class="aberration" aria-hidden="true"></span>
+        <span class="scanlines" aria-hidden="true"></span>
+        <span class="reticle reticle-tl" aria-hidden="true">+</span>
+        <span class="reticle reticle-tr" aria-hidden="true">+</span>
+        <span class="reticle reticle-bl" aria-hidden="true">+</span>
+        <span class="reticle reticle-br" aria-hidden="true">+</span>
+      </div>
+      <footer class="screen-foot">
+        <span>FRAME · 00:05:36:17</span>
+        <span>EXPOSURE · AUTO</span>
+        <span>GAIN · +0db</span>
+        <span class="ml">CAM · 04/META</span>
+      </footer>
+    </figure>
   </div>
 
   <script is:inline>
-    const targets = document.querySelectorAll('[data-time], [data-time-b]');
+    const targets = document.querySelectorAll('[data-time], [data-time-b], [data-time-c], [data-time-d]');
     if (targets.length) {
       const upd = () => {
         const d = new Date();
