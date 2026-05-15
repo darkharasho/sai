@@ -1,14 +1,17 @@
 ---
 import FeatureCard from './FeatureCard.astro';
 import { features } from '../data/features';
+
+const flagships = features.filter(f => f.flagship);
+const rest = features.filter(f => !f.flagship);
 ---
 <section class="sec sec--console feat" aria-labelledby="feat-title">
   <div class="container">
     <div class="head">
       <p class="eyebrow">Schedule 04 · MODULE INVENTORY</p>
       <h2 id="feat-title" class="head-title">
-        <span class="mono">Eight modules.</span>
-        <span class="display">One control surface.</span>
+        <span class="mono">Two flagships.</span>
+        <span class="display">Eight supporting modules.</span>
       </h2>
       <p class="head-lede">
         Every part of the SAI cockpit is built for the agent loop — prompt,
@@ -16,14 +19,23 @@ import { features } from '../data/features';
       </p>
     </div>
 
+    {flagships.length > 0 && (
+      <div class="grid grid--flagship">
+        {flagships.map((f, i) => (
+          <FeatureCard coord={f.coord} title={f.title} blurb={f.blurb} meta={f.meta} icon={f.icon} index={i} flagship={true} />
+        ))}
+      </div>
+    )}
+
     <div class="grid">
-      {features.map((f, i) => (
-        <FeatureCard coord={f.coord} title={f.title} blurb={f.blurb} meta={f.meta} icon={f.icon} index={i} />
+      {rest.map((f, i) => (
+        <FeatureCard coord={f.coord} title={f.title} blurb={f.blurb} meta={f.meta} icon={f.icon} index={i + flagships.length} />
       ))}
     </div>
 
     <p class="legend">
       <span>LEGEND ·</span>
+      <span><span class="sw d"></span> D-series · flagship</span>
       <span><span class="sw a"></span> A-series · agent loop</span>
       <span><span class="sw b"></span> B-series · workspace</span>
       <span><span class="sw c"></span> C-series · extensibility</span>
@@ -38,6 +50,23 @@ import { features } from '../data/features';
   .head-title .mono { font-family: var(--mono); font-weight: 700; color: var(--phosphor); letter-spacing: -0.02em; }
   .head-title .display { font-family: var(--display); font-style: italic; color: var(--phosphor-2); font-weight: 400; letter-spacing: -0.015em; }
   .head-lede { margin-top: 22px; max-width: 60ch; color: var(--phosphor-2); font-size: 14px; line-height: 1.7; }
+
+  .grid--flagship {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0;
+    border: 1px solid var(--rule-2);
+    margin-bottom: 0;
+  }
+  .grid--flagship > :global(.card) { border: none; border-right: 1px solid var(--rule-2); }
+  .grid--flagship > :global(.card:last-child) { border-right: none; }
+  .grid--flagship + .grid { border-top: none; }
+
+  @media (max-width: 640px) {
+    .grid--flagship { grid-template-columns: 1fr; }
+    .grid--flagship > :global(.card) { border-right: none !important; border-bottom: 1px solid var(--rule-2) !important; }
+    .grid--flagship > :global(.card:last-child) { border-bottom: none !important; }
+  }
 
   .grid {
     display: grid;
@@ -60,6 +89,7 @@ import { features } from '../data/features';
   .legend .sw.a { background: var(--phosphor); border-color: var(--phosphor); }
   .legend .sw.b { background: var(--green); border-color: var(--green); }
   .legend .sw.c { background: var(--blue); border-color: var(--blue); }
+  .legend .sw.d { background: var(--phosphor); border-color: var(--phosphor); }
 
   @media (max-width: 1100px) {
     .grid { grid-template-columns: repeat(2, 1fr); }

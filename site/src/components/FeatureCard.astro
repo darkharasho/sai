@@ -8,11 +8,12 @@ interface Props {
   meta: string;
   icon: string;
   index: number;
+  flagship?: boolean;
 }
-const { coord, title, blurb, meta, icon, index } = Astro.props;
+const { coord, title, blurb, meta, icon, index, flagship = false } = Astro.props;
 const n = String(index + 1).padStart(2, '0');
 ---
-<article class="card" style={`--n: ${index}`}>
+<article class={`card${flagship ? ' card--flagship' : ''}`} style={`--n: ${index}`}>
   <header class="hdr">
     <span class="coord">{coord}</span>
     <span class="n">№ {n}</span>
@@ -105,4 +106,10 @@ const n = String(index + 1).padStart(2, '0');
     color: var(--phosphor-dim);
   }
   .dot { color: var(--phosphor); font-size: 10px; }
+
+  .card--flagship { background: linear-gradient(180deg, rgba(255,180,84,0.06), transparent 40%), var(--ink-2); }
+  .card--flagship::before { transform: scaleX(1); height: 3px; }
+  .card--flagship .coord { background: var(--phosphor); color: var(--ink); border-color: var(--phosphor); }
+  .card--flagship .ic { color: var(--phosphor); }
+  .card--flagship .t { font-size: 19px; }
 </style>

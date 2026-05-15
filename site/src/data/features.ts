@@ -4,9 +4,26 @@ export interface Feature {
   blurb: string;
   meta: string;
   icon: string; // lucide icon name (without prefix)
+  flagship?: boolean;
 }
 
 export const features: Feature[] = [
+  {
+    coord: 'D-01',
+    title: 'Swarm mode',
+    blurb: 'Spawn parallel Claude tasks from one orchestrator chat. Each writing task gets its own git worktree; review diffs and land individually, or "land all green" in one go. Slash-command escape hatch included.',
+    meta: 'mod · swarm · parallel',
+    icon: 'zap',
+    flagship: true,
+  },
+  {
+    coord: 'D-02',
+    title: 'Meta workspaces',
+    blurb: 'Group many projects into one workspace. One chat, one terminal, one editor, one Git panel — spanning every included repo. Per-project chips on tool calls; per-repo stage / commit / push controls.',
+    meta: 'mod · meta · multi-repo',
+    icon: 'layers',
+    flagship: true,
+  },
   {
     coord: 'A-01',
     title: 'Project-context chat',
@@ -17,7 +34,7 @@ export const features: Feature[] = [
   {
     coord: 'A-02',
     title: 'Composer queue',
-    blurb: 'Queue follow-up prompts behind a streaming turn, promote any item to “next,” or bypass with Enter. Todo-ring and queue badge live in the toolbar.',
+    blurb: 'Queue follow-up prompts behind a streaming turn, promote any item to "next," or bypass with Enter. Todo-ring and queue badge live in the toolbar.',
     meta: 'mod · composer · queue',
     icon: 'list-checks',
   },
