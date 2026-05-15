@@ -107,9 +107,59 @@ const n = String(index + 1).padStart(2, '0');
   }
   .dot { color: var(--phosphor); font-size: 10px; }
 
-  .card--flagship { background: linear-gradient(180deg, rgba(255,180,84,0.06), transparent 40%), var(--ink-2); }
+  .card--flagship {
+    background: linear-gradient(180deg, rgba(255,180,84,0.06), transparent 40%), var(--ink-2);
+    padding: 32px 32px 24px;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-areas:
+      "hdr hdr"
+      "ic  t"
+      "ic  b"
+      "ft  ft";
+    column-gap: 28px;
+    row-gap: 10px;
+  }
   .card--flagship::before { transform: scaleX(1); height: 3px; }
   .card--flagship .coord { background: var(--phosphor); color: var(--ink); border-color: var(--phosphor); }
-  .card--flagship .ic { color: var(--phosphor); }
-  .card--flagship .t { font-size: 19px; }
+  .card--flagship .hdr { grid-area: hdr; margin-bottom: 4px; }
+  .card--flagship .ic {
+    grid-area: ic;
+    width: 76px; height: 76px;
+    margin: 0;
+    align-self: start;
+    color: var(--phosphor);
+    border: 1px solid var(--phosphor-dim);
+    background: rgba(255,180,84,0.04);
+  }
+  .card--flagship .ic :global(svg) { width: 44px; height: 44px; }
+  .card--flagship .t {
+    grid-area: t;
+    font-size: clamp(20px, 1.6vw, 24px);
+    margin: 0;
+    align-self: end;
+  }
+  .card--flagship .b {
+    grid-area: b;
+    font-size: 14px;
+    line-height: 1.7;
+    opacity: 0.88;
+    margin: 0;
+    max-width: 60ch;
+  }
+  .card--flagship .ft { grid-area: ft; margin-top: 18px; }
+
+  @media (max-width: 640px) {
+    .card--flagship {
+      grid-template-columns: 1fr;
+      grid-template-areas:
+        "hdr"
+        "ic"
+        "t"
+        "b"
+        "ft";
+      column-gap: 0;
+    }
+    .card--flagship .ic { width: 64px; height: 64px; }
+  }
 </style>
