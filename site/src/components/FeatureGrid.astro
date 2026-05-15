@@ -20,7 +20,7 @@ const rest = features.filter(f => !f.flagship);
     </div>
 
     {flagships.length > 0 && (
-      <div class="grid grid--flagship">
+      <div class="grid--flagship">
         {flagships.map((f, i) => (
           <FeatureCard coord={f.coord} title={f.title} blurb={f.blurb} meta={f.meta} icon={f.icon} index={i} flagship={true} />
         ))}
