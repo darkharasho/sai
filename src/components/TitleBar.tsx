@@ -762,7 +762,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         @keyframes sync-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
         .gh-username {
           font-size: 11px;
-          max-width: 80px;
+          max-width: 140px;
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
