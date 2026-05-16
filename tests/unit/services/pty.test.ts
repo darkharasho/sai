@@ -199,7 +199,9 @@ describe('Regression 08cabed: paste does not corrupt prompt', () => {
 // '/bin/bash' instead of passing undefined to pty.spawn().
 // ===========================================================================
 
-describe('Regression 62618bd: node-pty spawn handles missing SHELL gracefully', () => {
+// On Windows the shell spawn path uses cmd.exe/PowerShell and ignores the
+// SHELL env var entirely, so these Linux/macOS regression checks don't apply.
+describe.skipIf(process.platform === 'win32')('Regression 62618bd: node-pty spawn handles missing SHELL gracefully', () => {
   it('falls back to /bin/bash when SHELL env is not set', async () => {
     const savedShell = process.env.SHELL;
     delete process.env.SHELL;
@@ -374,7 +376,7 @@ describe('terminal:create', () => {
     expect(id1).not.toBe(id2);
   });
 
-  it('spawns with stty -echoctl init and --login via exec', async () => {
+  it.skipIf(process.platform === 'win32')('spawns with stty -echoctl init and --login via exec', async () => {
     await setupWithTerminal('/tmp');
     const ptyModule = await import('node-pty');
     expect(ptyModule.spawn).toHaveBeenCalledWith(
@@ -397,7 +399,7 @@ describe('terminal:create', () => {
     );
   });
 
-  it('falls back to HOME when cwd is empty string', async () => {
+  it.skipIf(process.platform === 'win32')('falls back to HOME when cwd is empty string', async () => {
     const savedHome = process.env.HOME;
     process.env.HOME = '/root';
     const win = createMockBrowserWindow();
@@ -439,7 +441,9 @@ async function spawnEnvFor(envSetup: () => void, envTeardown: () => void): Promi
   return spawnEnv;
 }
 
-describe('environment variable stripping', () => {
+// These tests strip Linux desktop-launcher env vars from the spawned PTY's
+// environment — they have no analog on Windows, which uses a separate spawn path.
+describe.skipIf(process.platform === 'win32')('environment variable stripping', () => {
   it('strips GIO_LAUNCHED_DESKTOP_FILE from child env', async () => {
     const spawnEnv = await spawnEnvFor(
       () => { process.env.GIO_LAUNCHED_DESKTOP_FILE = '/usr/share/applications/sai.desktop'; },
@@ -620,7 +624,7 @@ describe('terminal:resize IPC handler', () => {
 // systemd-run --user --scope: cgroup isolation on Linux
 // ---------------------------------------------------------------------------
 
-describe('systemd scope isolation (Linux cgroup ungrouping)', () => {
+describe.skipIf(process.platform !== 'linux')('systemd scope isolation (Linux cgroup ungrouping)', () => {
   /** Helper to capture the spawn command and args from the pty.spawn mock. */
   async function spawnArgsFor(enableScope: boolean) {
     const win = createMockBrowserWindow();

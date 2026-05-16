@@ -7,6 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as path from 'node:path';
 
 // ---------------------------------------------------------------------------
 // vi.hoisted
@@ -193,7 +194,9 @@ async function flushAsync(): Promise<void> {
 // ---------------------------------------------------------------------------
 let win: ReturnType<typeof createMockBrowserWindow>;
 const PROJECT = '/test/slash-project';
-const CACHE_PATH = '/tmp/sai-slash-test/slash-commands-cache.json';
+// Use path.join so this matches what claude.ts produces on the current platform
+// (forward slashes on POSIX, backslashes on Windows).
+const CACHE_PATH = path.join('/tmp/sai-slash-test', 'slash-commands-cache.json');
 
 beforeEach(() => {
   workspaceState.clear();
