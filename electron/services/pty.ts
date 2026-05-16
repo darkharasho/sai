@@ -1,4 +1,5 @@
 import * as pty from 'node-pty';
+import * as fs from 'node:fs';
 import { BrowserWindow, ipcMain } from 'electron';
 import { get, touchActivity } from './workspace';
 
@@ -59,10 +60,33 @@ export function registerTerminalHandlers(win: BrowserWindow) {
     let fallbackCwd: string;
 
     if (process.platform === 'win32') {
-      // Windows: use the user's ComSpec (cmd.exe) or PowerShell. None of the
-      // Linux desktop/systemd env scrubbing below applies here.
-      spawnCmd = process.env.ComSpec || 'cmd.exe';
-      spawnArgs = [];
+      // Windows: prefer PowerShell (modern pwsh first, then bundled
+      // Windows PowerShell) over cmd.exe. None of the Linux desktop /
+      // systemd env scrubbing below applies here.
+      const pwshCandidates = [
+        process.env.PWSH_PATH,
+        'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+        'C:\\Program Files (x86)\\PowerShell\\7\\pwsh.exe',
+        'pwsh.exe',
+      ].filter((p): p is string => typeof p === 'string' && p.length > 0);
+      const winPwsh = process.env.SystemRoot
+        ? `${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
+        : 'powershell.exe';
+      let resolved: string | null = null;
+      for (const candidate of pwshCandidates) {
+        try {
+          // Absolute paths are checked for existence; bare names are
+          // resolved later by spawn (we accept them as the fallback).
+          if (candidate.includes('\\') || candidate.includes('/')) {
+            if (fs.existsSync(candidate)) { resolved = candidate; break; }
+          } else {
+            resolved = candidate;
+            break;
+          }
+        } catch { /* ignore */ }
+      }
+      spawnCmd = resolved || (fs.existsSync(winPwsh) ? winPwsh : (process.env.ComSpec || 'cmd.exe'));
+      spawnArgs = spawnCmd.toLowerCase().endsWith('cmd.exe') ? [] : ['-NoLogo'];
       ptyName = 'xterm-256color';
       fallbackCwd = process.env.USERPROFILE || process.env.HOMEDRIVE || 'C:\\';
     } else {
