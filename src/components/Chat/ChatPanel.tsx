@@ -859,6 +859,28 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         return;
       }
 
+      // AskUserQuestion answered — merge answers into the matching tool call's input JSON
+      if (msg.type === 'question_answered') {
+        const { toolUseId, answers } = msg;
+        setMessages(prev => prev.map(m => {
+          if (m.role !== 'assistant' || !m.toolCalls) return m;
+          let touched = false;
+          const newToolCalls = m.toolCalls.map(tc => {
+            if (tc.id !== toolUseId) return tc;
+            try {
+              const parsed = JSON.parse(tc.input || '{}');
+              const merged = { ...parsed, answers };
+              touched = true;
+              return { ...tc, input: JSON.stringify(merged, null, 2) };
+            } catch {
+              return tc;
+            }
+          });
+          return touched ? { ...m, toolCalls: newToolCalls } : m;
+        }));
+        return;
+      }
+
       // Tool approval request from main process
       if (msg.type === 'approval_needed') {
         setPendingApproval({
@@ -1461,6 +1483,11 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     pendingComposerRectRef.current = null;
   }, [setMessages]);
 
+  const handleAnswerQuestion = useCallback((toolUseId: string, answers: Record<string, string | string[]>) => {
+    if (aiProvider !== 'claude' || !projectPath) return Promise.resolve();
+    return window.sai.claudeAnswerQuestion(projectPath, toolUseId, answers, claudeScope).then(() => undefined);
+  }, [aiProvider, projectPath, claudeScope]);
+
   const handleQueue = (text: string, fullText: string, images?: string[], attachments?: { images: number; files: number; terminal: boolean }) => {
     if (sessionId && onQueueAdd) {
       onQueueAdd(sessionId, text, fullText, images, attachments);
@@ -1606,10 +1633,11 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
                       renderToolCall={renderToolCall}
                       renderMessage={renderMessage}
                       metaRuntime={activeMetaRuntime}
+                      onAnswerQuestion={handleAnswerQuestion}
                     />
                   </div>
                 )
-                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId} renderToolCall={renderToolCall} renderMessage={renderMessage} metaRuntime={activeMetaRuntime} />
+                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId} renderToolCall={renderToolCall} renderMessage={renderMessage} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} />
               )}
           </>
         )}

@@ -30,6 +30,9 @@ export interface WorkspaceClaude {
   pendingToolUse: PendingToolUse | null;
   approvalBuffered: any[];
   awaitingApproval: boolean;
+  // AskUserQuestion flow state — buffer CLI output between the tool_use and the user's answer
+  awaitingQuestionAnswer: boolean;
+  pendingQuestionId: string | null;
   /** What kind of session this scope is. Determines CLI args (e.g. orchestrator
    *  gets --strict-mcp-config + --tools "" for swarm-only tooling). */
   kind: 'chat' | 'task' | 'orchestrator';
@@ -103,6 +106,8 @@ function newClaudeScope(cwd: string): WorkspaceClaude {
     pendingToolUse: null,
     approvalBuffered: [],
     awaitingApproval: false,
+    awaitingQuestionAnswer: false,
+    pendingQuestionId: null,
     kind: 'chat',
     orchestratorContext: null,
   };
@@ -209,6 +214,8 @@ export function suspend(projectPath: string, win: BrowserWindow): void {
     claude.pendingToolUse = null;
     claude.approvalBuffered = [];
     claude.awaitingApproval = false;
+    claude.awaitingQuestionAnswer = false;
+    claude.pendingQuestionId = null;
   }
 
   // Kill Codex process

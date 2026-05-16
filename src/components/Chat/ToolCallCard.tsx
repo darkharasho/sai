@@ -291,6 +291,214 @@ function TodoListView({ input }: { input: string }) {
   );
 }
 
+interface AskQuestionOption {
+  label: string;
+  description?: string;
+}
+
+interface AskQuestion {
+  question: string;
+  header?: string;
+  multiSelect?: boolean;
+  options: AskQuestionOption[];
+}
+
+interface AskQuestionInput {
+  questions: AskQuestion[];
+  answers?: Record<string, string | string[]>;
+}
+
+function parseAskQuestionInput(input: string): AskQuestionInput | null {
+  try {
+    const parsed = JSON.parse(input);
+    if (!Array.isArray(parsed.questions)) return null;
+    return parsed as AskQuestionInput;
+  } catch { return null; }
+}
+
+const OTHER_OPTION = '__other__';
+
+function AskUserQuestionView({
+  toolUseId,
+  input,
+  onAnswerQuestion,
+}: {
+  toolUseId?: string;
+  input: string;
+  onAnswerQuestion?: (toolUseId: string, answers: Record<string, string | string[]>) => Promise<void> | void;
+}) {
+  const parsed = parseAskQuestionInput(input);
+  const recordedAnswers = parsed?.answers || {};
+  const isAnswered = Object.keys(recordedAnswers).length > 0;
+
+  // picks holds option-label selections; otherText holds the freeform "Other" text per question.
+  const [picks, setPicks] = useState<Record<string, string | string[]>>({});
+  const [otherText, setOtherText] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!parsed) {
+    return (
+      <div className="tool-call-body askq-body">
+        <div className="askq-empty">Could not parse questions.</div>
+      </div>
+    );
+  }
+
+  const togglePick = (q: AskQuestion, optionLabel: string) => {
+    if (isAnswered || submitting) return;
+    setPicks(prev => {
+      const next = { ...prev };
+      if (q.multiSelect) {
+        const arr = Array.isArray(next[q.question]) ? [...(next[q.question] as string[])] : [];
+        const i = arr.indexOf(optionLabel);
+        if (i >= 0) arr.splice(i, 1); else arr.push(optionLabel);
+        next[q.question] = arr;
+      } else {
+        next[q.question] = optionLabel;
+      }
+      return next;
+    });
+  };
+
+  const isSelected = (q: AskQuestion, optionLabel: string): boolean => {
+    if (isAnswered) {
+      // For recorded answers, an "Other" selection looks like a plain string that
+      // doesn't match any of the original option labels.
+      const v = recordedAnswers[q.question];
+      if (optionLabel === OTHER_OPTION) {
+        const known = new Set(q.options.map(o => o.label));
+        if (q.multiSelect) return Array.isArray(v) && v.some(x => !known.has(x));
+        return typeof v === 'string' && !known.has(v);
+      }
+      if (q.multiSelect) return Array.isArray(v) && v.includes(optionLabel);
+      return v === optionLabel;
+    }
+    const v = picks[q.question];
+    if (q.multiSelect) return Array.isArray(v) && v.includes(optionLabel);
+    return v === optionLabel;
+  };
+
+  const recordedOtherText = (q: AskQuestion): string => {
+    const v = recordedAnswers[q.question];
+    const known = new Set(q.options.map(o => o.label));
+    if (q.multiSelect && Array.isArray(v)) return v.filter(x => !known.has(x)).join(', ');
+    if (typeof v === 'string' && !known.has(v)) return v;
+    return '';
+  };
+
+  const canSubmit = !isAnswered && !submitting && parsed.questions.every(q => {
+    const v = picks[q.question];
+    const text = otherText[q.question]?.trim() || '';
+    if (q.multiSelect) {
+      const arr = Array.isArray(v) ? v : [];
+      if (arr.includes(OTHER_OPTION) && !text) return false;
+      return arr.length > 0;
+    }
+    if (v === OTHER_OPTION) return text.length > 0;
+    return typeof v === 'string' && v.length > 0;
+  });
+
+  const submit = async () => {
+    if (!canSubmit || !toolUseId || !onAnswerQuestion) return;
+    // Resolve picks → final answers: replace OTHER_OPTION sentinel with the typed text.
+    const resolved: Record<string, string | string[]> = {};
+    for (const q of parsed.questions) {
+      const v = picks[q.question];
+      const text = otherText[q.question]?.trim() || '';
+      if (q.multiSelect) {
+        const arr = Array.isArray(v) ? v.slice() : [];
+        const idx = arr.indexOf(OTHER_OPTION);
+        if (idx >= 0) arr.splice(idx, 1, text);
+        resolved[q.question] = arr;
+      } else {
+        resolved[q.question] = v === OTHER_OPTION ? text : (v as string);
+      }
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onAnswerQuestion(toolUseId, resolved);
+    } catch (e: any) {
+      setError(e?.message || 'Failed to submit answers');
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="tool-call-body askq-body">
+      {parsed.questions.map((q, qi) => {
+        const otherSelected = isSelected(q, OTHER_OPTION);
+        const otherTextValue = isAnswered ? recordedOtherText(q) : (otherText[q.question] || '');
+        return (
+          <div key={qi} className="askq-question">
+            {q.header && <div className="askq-header">{q.header}</div>}
+            <div className="askq-prompt">{q.question}</div>
+            <div className="askq-options">
+              {q.options.map((opt, oi) => {
+                const selected = isSelected(q, opt.label);
+                return (
+                  <button
+                    key={oi}
+                    type="button"
+                    className={`askq-option${selected ? ' askq-option-selected' : ''}${isAnswered ? ' askq-option-locked' : ''}`}
+                    onClick={() => togglePick(q, opt.label)}
+                    disabled={isAnswered || submitting}
+                  >
+                    <span className={`askq-radio${q.multiSelect ? ' askq-radio-check' : ''}${selected ? ' askq-radio-on' : ''}`} aria-hidden />
+                    <span className="askq-option-text">
+                      <span className="askq-option-label">{opt.label}</span>
+                      {opt.description && <span className="askq-option-desc">{opt.description}</span>}
+                    </span>
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                className={`askq-option${otherSelected ? ' askq-option-selected' : ''}${isAnswered ? ' askq-option-locked' : ''}`}
+                onClick={() => togglePick(q, OTHER_OPTION)}
+                disabled={isAnswered || submitting}
+              >
+                <span className={`askq-radio${q.multiSelect ? ' askq-radio-check' : ''}${otherSelected ? ' askq-radio-on' : ''}`} aria-hidden />
+                <span className="askq-option-text">
+                  <span className="askq-option-label">Other</span>
+                  <span className="askq-option-desc">Type your own response</span>
+                </span>
+              </button>
+              {otherSelected && (
+                <input
+                  type="text"
+                  className="askq-other-input"
+                  placeholder="Type your response…"
+                  value={otherTextValue}
+                  onChange={e => setOtherText(prev => ({ ...prev, [q.question]: e.target.value }))}
+                  disabled={isAnswered || submitting}
+                  autoFocus
+                  onKeyDown={e => { if (e.key === 'Enter' && canSubmit) submit(); }}
+                />
+              )}
+            </div>
+          </div>
+        );
+      })}
+      {!isAnswered && (
+        <div className="askq-actions">
+          <button
+            type="button"
+            className="askq-submit"
+            onClick={submit}
+            disabled={!canSubmit}
+          >
+            {submitting ? 'Sending…' : 'Submit answers'}
+          </button>
+          {error && <span className="askq-error">{error}</span>}
+        </div>
+      )}
+      {isAnswered && <div className="askq-answered">Answered</div>}
+    </div>
+  );
+}
+
 /** Detect and strip <tool_error>, <error>, or tool_use_error wrapper tags from output */
 function parseToolError(output: string): { isToolError: boolean; message: string } {
   const stripped = output.trim();
@@ -383,7 +591,7 @@ function toolProjectLinkName(toolCall: ToolCall, runtime: MetaWorkspaceRuntime |
   return runtime.projects.some(pp => pp.linkName === seg) ? seg : null;
 }
 
-export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRuntime }: { toolCall: ToolCall; defaultExpanded?: boolean; metaRuntime?: MetaWorkspaceRuntime | null }) {
+export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRuntime, onAnswerQuestion }: { toolCall: ToolCall; defaultExpanded?: boolean; metaRuntime?: MetaWorkspaceRuntime | null; onAnswerQuestion?: (toolUseId: string, answers: Record<string, string | string[]>) => Promise<void> | void }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [showAllCode, setShowAllCode] = useState(false);
   const [showAllOutput, setShowAllOutput] = useState(false);
@@ -398,12 +606,17 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
 
   const isBash = toolCall.type === 'terminal_command';
   const isTodo = toolCall.name === 'TodoWrite';
+  const isAskUserQuestion = toolCall.name === 'AskUserQuestion';
+  const askAnswered = isAskUserQuestion && (() => {
+    try { return Object.keys(JSON.parse(toolCall.input || '{}').answers || {}).length > 0; } catch { return false; }
+  })();
 
   const status: 'running' | 'done' | 'error' =
+    isAskUserQuestion ? (askAnswered ? 'done' : 'running') :
     toolCall.output && parseToolError(toolCall.output).isToolError ? 'error' :
     toolCall.output ? 'done' : 'running';
 
-  const hasBody = isBash ? !!toolCall.output : isTodo ? true : !!code;
+  const hasBody = isAskUserQuestion ? true : isBash ? !!toolCall.output : isTodo ? true : !!code;
 
   const sigClass =
     toolCall.type === 'file_edit'        ? 'tool-sig-wipe' :
@@ -449,7 +662,8 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
               <span className="tool-call-project-chip" title={`Project: ${linkName}`}>{linkName}</span>
             );
           })()}
-          {!isBash && !isTodo && label && <span className="tool-call-label">{label}</span>}
+          {!isBash && !isTodo && !isAskUserQuestion && label && <span className="tool-call-label">{label}</span>}
+          {isAskUserQuestion && <span className="tool-call-label">{askAnswered ? 'Answered' : 'Waiting for answer…'}</span>}
           {isBash && code && <span className="tool-call-label">{code}</span>}
           {typeof toolCall.durationMs === 'number' && (
             <span className="tool-call-duration" data-testid="tool-call-duration">
@@ -485,7 +699,14 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
               />
             )}
             {isTodo && <TodoListView input={toolCall.input || ''} />}
-            {!isBash && !isTodo && code && (
+            {isAskUserQuestion && (
+              <AskUserQuestionView
+                toolUseId={toolCall.id}
+                input={toolCall.input || ''}
+                onAnswerQuestion={onAnswerQuestion}
+              />
+            )}
+            {!isBash && !isTodo && !isAskUserQuestion && code && (
               <div className="tool-call-body">
                 {diff ? (
                   <DiffHighlightedCode oldString={diff.oldString} newString={diff.newString} lang={diff.fileLang} />
@@ -872,6 +1093,161 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
               background-repeat: no-repeat;
               animation: tool-sig-shimmer 700ms ease-out 1;
             }
+          }
+          .askq-body {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            padding: 12px 14px;
+          }
+          .askq-empty {
+            color: var(--text-muted);
+            font-size: 12px;
+            font-style: italic;
+          }
+          .askq-question {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+          }
+          .askq-header {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-muted);
+            font-weight: 600;
+          }
+          .askq-prompt {
+            font-size: 13px;
+            color: var(--text);
+            line-height: 1.4;
+          }
+          .askq-options {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-top: 4px;
+          }
+          .askq-option {
+            display: flex;
+            align-items: flex-start;
+            gap: 9px;
+            padding: 8px 10px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+            cursor: pointer;
+            text-align: left;
+            font-size: 12px;
+            transition: background 120ms ease, border-color 120ms ease;
+          }
+          .askq-option:hover:not(:disabled) {
+            background: var(--bg-hover);
+            border-color: var(--accent);
+          }
+          .askq-option:disabled {
+            cursor: default;
+          }
+          .askq-option-selected {
+            border-color: var(--accent);
+            background: color-mix(in srgb, var(--accent) 12%, var(--bg-secondary));
+          }
+          .askq-option-locked.askq-option-selected {
+            opacity: 1;
+          }
+          .askq-option-locked:not(.askq-option-selected) {
+            opacity: 0.55;
+          }
+          .askq-radio {
+            flex-shrink: 0;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            border: 1.5px solid var(--border);
+            margin-top: 1px;
+            position: relative;
+            background: var(--bg-primary);
+          }
+          .askq-radio-check {
+            border-radius: 3px;
+          }
+          .askq-option-selected .askq-radio {
+            border-color: var(--accent);
+          }
+          .askq-option-selected .askq-radio::after {
+            content: '';
+            position: absolute;
+            inset: 2px;
+            background: var(--accent);
+            border-radius: inherit;
+          }
+          .askq-option-text {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+          }
+          .askq-option-label {
+            font-weight: 500;
+            color: var(--text);
+          }
+          .askq-option-desc {
+            font-size: 11px;
+            color: var(--text-muted);
+            line-height: 1.4;
+          }
+          .askq-other-input {
+            margin-top: 2px;
+            padding: 8px 10px;
+            background: var(--bg-primary);
+            border: 1px solid var(--accent);
+            border-radius: 6px;
+            color: var(--text);
+            font-size: 12px;
+            font-family: inherit;
+            outline: none;
+          }
+          .askq-other-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+          }
+          .askq-other-input:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+          }
+          .askq-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 2px;
+          }
+          .askq-submit {
+            padding: 6px 14px;
+            background: var(--accent);
+            color: #000;
+            border: none;
+            border-radius: 5px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 120ms ease;
+          }
+          .askq-submit:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+          }
+          .askq-submit:not(:disabled):hover {
+            background: var(--accent-hover);
+          }
+          .askq-error {
+            font-size: 11px;
+            color: #f87171;
+          }
+          .askq-answered {
+            font-size: 11px;
+            color: var(--text-muted);
+            font-style: italic;
           }
         `}</style>
       </motion.div>

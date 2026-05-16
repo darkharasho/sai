@@ -288,7 +288,16 @@ function ensureProcess(
           continue;
         }
 
+        // --- AskUserQuestion flow: drop the CLI's placeholder tool_result and
+        // any follow-up assistant chatter until the user answers in the UI. We
+        // forward the assistant message that contains the tool_use itself (so
+        // the card shows), then start buffering from the very next message. ---
+        if (claude.awaitingQuestionAnswer) {
+          continue;
+        }
+
         // --- Track the latest tool_use from assistant messages ---
+        let askUserQuestionId: string | null = null;
         if (msg.type === 'assistant' && msg.message?.content) {
           const content = Array.isArray(msg.message.content) ? msg.message.content : [];
           for (const block of content) {
@@ -298,6 +307,9 @@ function ensureProcess(
                 toolUseId: block.id,
                 input: block.input || {},
               };
+              if (block.name === 'AskUserQuestion') {
+                askUserQuestionId = block.id;
+              }
             }
           }
         }
@@ -357,6 +369,15 @@ function ensureProcess(
         }
 
         safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath, scope });
+
+        // After forwarding the assistant message that introduced an
+        // AskUserQuestion tool_use, start buffering subsequent CLI output
+        // (placeholder tool_result + any cancellation acknowledgment) until
+        // the user answers in the UI.
+        if (askUserQuestionId) {
+          claude.awaitingQuestionAnswer = true;
+          claude.pendingQuestionId = askUserQuestionId;
+        }
       } catch {
         if (line.includes('"type":"result"') || line.includes('"type": "result"')) {
           const responseTurnSeq = claude.activeTurnSeq;
@@ -394,6 +415,8 @@ function ensureProcess(
     claude.pendingToolUse = null;
     claude.approvalBuffered = [];
     claude.awaitingApproval = false;
+    claude.awaitingQuestionAnswer = false;
+    claude.pendingQuestionId = null;
     if (wasBusy) {
       safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope, turnSeq: claude.turnSeq });
     }
@@ -408,6 +431,8 @@ function ensureProcess(
     claude.pendingToolUse = null;
     claude.approvalBuffered = [];
     claude.awaitingApproval = false;
+    claude.awaitingQuestionAnswer = false;
+    claude.pendingQuestionId = null;
     safeSend(win, 'claude:message', {
       type: 'error', text: `Claude process error: ${err.message}`, projectPath: ws.projectPath, scope
     });
@@ -799,6 +824,48 @@ export function registerClaudeHandlers(win: BrowserWindow) {
     }
 
     return { result, isError };
+  });
+
+  // claude:answer-question — user answered an AskUserQuestion tool call in the UI.
+  // We send the user's answers back to the CLI as a follow-up user message so the
+  // agent receives the real answer (the CLI's auto-generated headless placeholder
+  // tool_result still passes through, but this corrective message is authoritative).
+  // We also emit `question_answered` so the renderer can paint the answered state
+  // by merging answers into the tool call's input JSON.
+  ipcMain.handle('claude:answer-question', async (_event, projectPath: string, toolUseId: string, answers: Record<string, string | string[]>, scope?: string) => {
+    const ws = get(projectPath);
+    if (!ws) return false;
+    const effectiveScope = scope || 'chat';
+    const claude = getClaude(ws, effectiveScope);
+
+    // Stop buffering CLI output now that the user has answered. The buffered
+    // messages (placeholder tool_result + cancellation acknowledgment) are
+    // dropped — the corrective user message below replaces them.
+    if (claude.awaitingQuestionAnswer && claude.pendingQuestionId === toolUseId) {
+      claude.awaitingQuestionAnswer = false;
+      claude.pendingQuestionId = null;
+    }
+
+    safeSend(win, 'claude:message', {
+      type: 'question_answered',
+      projectPath: ws.projectPath,
+      scope: effectiveScope,
+      toolUseId,
+      answers,
+    });
+
+    const proc = claude.process;
+    if (proc?.stdin && !proc.stdin.destroyed) {
+      const followUp = JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: `[AskUserQuestion answers for tool call ${toolUseId}]\nThe user picked the following answers (the earlier placeholder tool_result for this tool call should be disregarded):\n${JSON.stringify(answers, null, 2)}`,
+        },
+      });
+      proc.stdin.write(followUp + '\n');
+    }
+    return true;
   });
 
   // claude:alwaysAllow — add a tool pattern to the project's .claude/settings.local.json

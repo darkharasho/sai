@@ -284,6 +284,7 @@ function ChatMessage({
   renderToolCall,
   renderMessage,
   metaRuntime,
+  onAnswerQuestion,
 }: {
   message: ChatMessageType;
   projectPath?: string;
@@ -301,6 +302,8 @@ function ChatMessage({
   renderMessage?: (message: ChatMessageType) => React.ReactNode | null;
   /** Active meta-workspace runtime; when set, tool-call cards show a project chip. */
   metaRuntime?: MetaWorkspaceRuntime | null;
+  /** Submit answers for an AskUserQuestion tool call. */
+  onAnswerQuestion?: (toolUseId: string, answers: Record<string, string | string[]>) => Promise<void> | void;
 }) {
   // Allow callers to substitute the entire message render for special meta
   // types (e.g. inline approval cards). Done before any of the normal layout
@@ -885,7 +888,7 @@ function ChatMessage({
               const custom = renderToolCall(tc, toolCallsExpanded);
               if (custom != null) return <React.Fragment key={i}>{custom}</React.Fragment>;
             }
-            return <ToolCallCard key={i} toolCall={tc} defaultExpanded={toolCallsExpanded} metaRuntime={metaRuntime} />;
+            return <ToolCallCard key={i} toolCall={tc} defaultExpanded={toolCallsExpanded} metaRuntime={metaRuntime} onAnswerQuestion={onAnswerQuestion} />;
           })}
         </Stagger>
       )}
