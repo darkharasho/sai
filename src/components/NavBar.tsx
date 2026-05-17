@@ -138,9 +138,9 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, sw
           font-size: 10px;
           font-weight: 700;
           font-family: 'Geist Mono', 'JetBrains Mono', monospace;
-          min-width: 16px;
+          min-width: 18px;
           height: 16px;
-          padding: 0 2px;
+          padding: 0 5px;
           display: inline-flex;
           align-items: center;
           justify-content: center;
@@ -150,7 +150,7 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, sw
         .git-badge::before {
           content: '';
           position: absolute;
-          inset: 2px;
+          inset: 0;
           background: var(--accent);
           -webkit-mask: url("${DOT_MASK_URL}") center / 100% 100% no-repeat;
           mask: url("${DOT_MASK_URL}") center / 100% 100% no-repeat;
