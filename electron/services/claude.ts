@@ -5,7 +5,7 @@ import type { PendingToolUse } from './workspace';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { enrichedEnv } from './shellEnv';
-import { notifyCompletion, notifyApproval } from './notify';
+import { notifyCompletion, notifyApproval, notifyQuestion } from './notify';
 import { extractCodexCommitMessage } from './commit-message-parser';
 import { ensureGeminiCommitSession, ensureGeminiTransport, promptGeminiText } from './gemini';
 import * as swarmMcpHost from './swarmMcpHost';
@@ -377,6 +377,19 @@ function ensureProcess(
         if (askUserQuestionId) {
           claude.awaitingQuestionAnswer = true;
           claude.pendingQuestionId = askUserQuestionId;
+          const wsName = ws.projectPath.split('/').pop() || ws.projectPath;
+          const questions = claude.pendingToolUse?.input?.questions;
+          const firstQuestion = Array.isArray(questions) && questions[0]?.question
+            ? String(questions[0].question)
+            : 'The agent is waiting for your answer.';
+          notifyQuestion(win, wsName, firstQuestion);
+          safeSend(win, 'claude:message', {
+            type: 'question_needed',
+            projectPath: ws.projectPath,
+            scope,
+            toolUseId: askUserQuestionId,
+            question: firstQuestion,
+          });
         }
       } catch {
         if (line.includes('"type":"result"') || line.includes('"type": "result"')) {

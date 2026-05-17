@@ -1895,6 +1895,15 @@ export default function App() {
           });
         }
       }
+      if (msg.type === 'question_needed') {
+        if (msg.projectPath !== activeProjectPathRef.current) {
+          setNotificationCounts(p => {
+            const next = new Map(p);
+            next.set(msg.projectPath, (next.get(msg.projectPath) || 0) + 1);
+            return next;
+          });
+        }
+      }
       if (msg.type === 'approval_resolved') {
         const scope = msg.scope || 'chat';
         const swarmTask = scope !== 'chat'

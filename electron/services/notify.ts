@@ -102,3 +102,23 @@ export function notifyApproval(win: BrowserWindow, workspaceName: string, toolNa
     }).show();
   }
 }
+
+/**
+ * Fire an immediate system notification when the agent asks the user a
+ * question via the AskUserQuestion tool. Always fires regardless of focus
+ * — the agent is blocked until the user answers.
+ */
+export function notifyQuestion(win: BrowserWindow, workspaceName: string, question: string) {
+  if (win.isDestroyed()) return;
+  if (!isEnabled()) return;
+
+  win.flashFrame(true);
+
+  if (Notification.isSupported()) {
+    const snippet = question.length > 140 ? question.slice(0, 140) + '…' : question;
+    new Notification({
+      title: `Question — ${workspaceName}`,
+      body: snippet,
+    }).show();
+  }
+}
