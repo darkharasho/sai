@@ -49,6 +49,8 @@ const { mockIpcMain, mockSimpleGit, mockGitInstance, mockFsPromises } = vi.hoist
     branch: vi.fn(),
     checkout: vi.fn(),
     checkoutLocalBranch: vi.fn(),
+    branchLocal: vi.fn(),
+    getRemotes: vi.fn(),
     diff: vi.fn(),
     show: vi.fn(),
     env: vi.fn(function (this: unknown) { return this; }),
@@ -438,10 +440,33 @@ describe('git:checkout', () => {
   it('checks out the specified branch', async () => {
     await setup();
     mockGitInstance.checkout.mockResolvedValue(undefined);
+    mockGitInstance.getRemotes.mockResolvedValue([{ name: 'origin' }]);
 
     await mockIpcMain._invoke('git:checkout', '/repo', 'feature/new');
 
     expect(mockGitInstance.checkout).toHaveBeenCalledWith('feature/new');
+  });
+
+  it('switches to existing local branch when a remote-tracking ref is given', async () => {
+    await setup();
+    mockGitInstance.checkout.mockResolvedValue(undefined);
+    mockGitInstance.getRemotes.mockResolvedValue([{ name: 'origin' }]);
+    mockGitInstance.branchLocal.mockResolvedValue({ all: ['main', 'feature-x'] });
+
+    await mockIpcMain._invoke('git:checkout', '/repo', 'origin/feature-x');
+
+    expect(mockGitInstance.checkout).toHaveBeenCalledWith('feature-x');
+  });
+
+  it('creates a tracking branch when checking out a remote-only branch', async () => {
+    await setup();
+    mockGitInstance.checkout.mockResolvedValue(undefined);
+    mockGitInstance.getRemotes.mockResolvedValue([{ name: 'origin' }]);
+    mockGitInstance.branchLocal.mockResolvedValue({ all: ['main'] });
+
+    await mockIpcMain._invoke('git:checkout', '/repo', 'origin/feature-y');
+
+    expect(mockGitInstance.checkout).toHaveBeenCalledWith(['-b', 'feature-y', '--track', 'origin/feature-y']);
   });
 });
 

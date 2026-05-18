@@ -284,7 +284,26 @@ export function registerGitHandlers() {
   });
 
   ipcMain.handle('git:checkout', async (_event, cwd: string, branchName: string) => {
-    await git(cwd).checkout(branchName);
+    const g = git(cwd);
+    // The branch dropdown lists remote branches as "<remote>/<branch>" (e.g. "origin/main").
+    // Checking those out directly leaves the repo in detached HEAD. Detect that case and
+    // switch to (or create) a local tracking branch instead.
+    const slashIdx = branchName.indexOf('/');
+    if (slashIdx > 0) {
+      const maybeRemote = branchName.slice(0, slashIdx);
+      const remotes = await g.getRemotes(false);
+      if (remotes.some(r => r.name === maybeRemote)) {
+        const localName = branchName.slice(slashIdx + 1);
+        const localBranches = await g.branchLocal();
+        if (localBranches.all.includes(localName)) {
+          await g.checkout(localName);
+        } else {
+          await g.checkout(['-b', localName, '--track', branchName]);
+        }
+        return;
+      }
+    }
+    await g.checkout(branchName);
   });
 
   ipcMain.handle('git:createBranch', async (_event, cwd: string, branchName: string) => {
