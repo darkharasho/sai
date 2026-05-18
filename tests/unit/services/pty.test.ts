@@ -74,6 +74,18 @@ vi.mock('node-pty', () => ({
   }),
 }));
 
+// Mock node:fs so tests can control which Windows shell paths "exist". The
+// production code only uses fs.existsSync on the Windows shell-resolution
+// path; non-Windows tests are unaffected.
+const { mockExistsSync } = vi.hoisted(() => ({
+  mockExistsSync: vi.fn((_p: unknown) => true),
+}));
+
+vi.mock('node:fs', async () => {
+  const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+  return { ...actual, existsSync: mockExistsSync };
+});
+
 
 // ---------------------------------------------------------------------------
 // Mutable ipcMain reference so we can replace it per-test
@@ -126,6 +138,9 @@ beforeEach(() => {
   mockPtyInstances.length = 0;
   mockWorkspaceGet.mockReturnValue(undefined);
   mockTouchActivity.mockReset();
+  // Default: pretend every path exists so existing tests are unaffected. Tests
+  // that exercise Windows shell resolution override this per-test.
+  mockExistsSync.mockReset().mockReturnValue(true);
   // Reset modules so nextId and the Maps start fresh (also resets hasSystemdRun cache)
   vi.resetModules();
 });
@@ -658,5 +673,62 @@ describe.skipIf(process.platform !== 'linux')('systemd scope isolation (Linux cg
     expect(args[0]).toBe('-c');
     expect(args[1]).toContain('stty -echoctl');
     expect(args[1]).toContain('--login');
+  });
+});
+
+// ===========================================================================
+// REGRESSION: Windows PowerShell terminal renders blank when pwsh.exe is not
+// installed and not on PATH.
+//
+// Root cause: the candidate list included a bare 'pwsh.exe' fallback that was
+// accepted without an fs.existsSync check. pty.spawn('pwsh.exe', ...) under
+// ConPTY does not resolve bare names against PATH and throws "File not found"
+// synchronously, leaving the renderer with an unresolved create promise — so
+// no prompt ever appears and keystrokes go nowhere.
+//
+// The fix only accepts candidates whose absolute path exists on disk, then
+// falls back to Windows PowerShell 5.1 (always present on supported Windows
+// builds) and finally to cmd.exe via ComSpec.
+// ===========================================================================
+
+describe.skipIf(process.platform !== 'win32')('Windows shell resolution: never spawns a non-existent shell', () => {
+  it('falls back to Windows PowerShell 5.1 when PowerShell 7 is not installed', async () => {
+    const winPwsh = `${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+    mockExistsSync.mockImplementation((p: unknown) => p === winPwsh);
+
+    await setupWithTerminal('C:\\Users\\me\\project');
+    const ptyModule = await import('node-pty');
+    const lastCall = (ptyModule.spawn as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+    expect(lastCall[0]).toBe(winPwsh);
+    expect(lastCall[1]).toEqual(['-NoLogo']);
+  });
+
+  it('falls back to cmd.exe (ComSpec) when no PowerShell is found anywhere', async () => {
+    mockExistsSync.mockReturnValue(false);
+    const savedComSpec = process.env.ComSpec;
+    process.env.ComSpec = 'C:\\Windows\\system32\\cmd.exe';
+
+    try {
+      await setupWithTerminal('C:\\Users\\me\\project');
+      const ptyModule = await import('node-pty');
+      const lastCall = (ptyModule.spawn as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+      expect(lastCall[0]).toBe('C:\\Windows\\system32\\cmd.exe');
+      // cmd.exe takes no startup args
+      expect(lastCall[1]).toEqual([]);
+    } finally {
+      if (savedComSpec !== undefined) process.env.ComSpec = savedComSpec;
+      else delete process.env.ComSpec;
+    }
+  });
+
+  it('prefers PowerShell 7 (pwsh.exe) over Windows PowerShell 5.1 when both exist', async () => {
+    const pwsh7 = 'C:\\Program Files\\PowerShell\\7\\pwsh.exe';
+    mockExistsSync.mockImplementation((p: unknown) => p === pwsh7);
+
+    await setupWithTerminal('C:\\Users\\me\\project');
+    const ptyModule = await import('node-pty');
+    const lastCall = (ptyModule.spawn as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+    expect(lastCall[0]).toBe(pwsh7);
+    expect(lastCall[1]).toEqual(['-NoLogo']);
   });
 });

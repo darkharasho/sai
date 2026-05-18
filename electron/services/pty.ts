@@ -60,33 +60,31 @@ export function registerTerminalHandlers(win: BrowserWindow) {
     let fallbackCwd: string;
 
     if (process.platform === 'win32') {
-      // Windows: prefer PowerShell (modern pwsh first, then bundled
-      // Windows PowerShell) over cmd.exe. None of the Linux desktop /
-      // systemd env scrubbing below applies here.
-      const pwshCandidates = [
+      // Windows: prefer PowerShell 7 (pwsh.exe) when present, fall back to
+      // Windows PowerShell 5.1 which ships with every supported Windows
+      // build, then cmd.exe as a last resort. node-pty under ConPTY doesn't
+      // resolve bare executable names via PATH, so every candidate must be
+      // an absolute path we've confirmed exists.
+      const pwsh7Candidates = [
         process.env.PWSH_PATH,
         'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
         'C:\\Program Files (x86)\\PowerShell\\7\\pwsh.exe',
-        'pwsh.exe',
       ].filter((p): p is string => typeof p === 'string' && p.length > 0);
       const winPwsh = process.env.SystemRoot
         ? `${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
-        : 'powershell.exe';
+        : '';
       let resolved: string | null = null;
-      for (const candidate of pwshCandidates) {
+      for (const candidate of pwsh7Candidates) {
         try {
-          // Absolute paths are checked for existence; bare names are
-          // resolved later by spawn (we accept them as the fallback).
-          if (candidate.includes('\\') || candidate.includes('/')) {
-            if (fs.existsSync(candidate)) { resolved = candidate; break; }
-          } else {
-            resolved = candidate;
-            break;
-          }
+          if (fs.existsSync(candidate)) { resolved = candidate; break; }
         } catch { /* ignore */ }
       }
-      spawnCmd = resolved || (fs.existsSync(winPwsh) ? winPwsh : (process.env.ComSpec || 'cmd.exe'));
-      spawnArgs = spawnCmd.toLowerCase().endsWith('cmd.exe') ? [] : ['-NoLogo'];
+      if (!resolved && winPwsh) {
+        try { if (fs.existsSync(winPwsh)) resolved = winPwsh; } catch { /* ignore */ }
+      }
+      spawnCmd = resolved || process.env.ComSpec || 'cmd.exe';
+      const isCmd = spawnCmd.toLowerCase().endsWith('cmd.exe');
+      spawnArgs = isCmd ? [] : ['-NoLogo'];
       ptyName = 'xterm-256color';
       fallbackCwd = process.env.USERPROFILE || process.env.HOMEDRIVE || 'C:\\';
     } else {
