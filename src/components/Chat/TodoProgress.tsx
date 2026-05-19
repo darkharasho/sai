@@ -17,6 +17,18 @@ interface TodoProgressProps {
   isStreaming: boolean;
 }
 
+function extractTaskCreateId(output: string | undefined, fallback: string): string {
+  if (!output) return fallback;
+  // Output format from TaskCreate: "Task #1 created successfully: ..."
+  const m = /Task\s*#?\s*([0-9a-zA-Z_-]+)\b/i.exec(output);
+  if (m) return m[1];
+  try {
+    const parsed = JSON.parse(output);
+    if (parsed && (parsed.id || parsed.taskId)) return String(parsed.id || parsed.taskId);
+  } catch { /* ignore */ }
+  return fallback;
+}
+
 function findLatestTodos(messages: ChatMessage[]): Todo[] | null {
   // Only search messages belonging to the current turn (after the last user
   // message). This prevents stale todos from a previous turn from showing up
@@ -27,6 +39,7 @@ function findLatestTodos(messages: ChatMessage[]): Todo[] | null {
     if (messages[i].role === 'user') { turnStart = i; break; }
   }
 
+  // Legacy: a single TodoWrite call emits the whole plan as `{ todos: [...] }`.
   // Find the most recent assistant message in the current turn that has any
   // TodoWrite calls. Within that message, return the last write with the
   // maximum todo count — this avoids jumping to a transient sub-task write
@@ -41,8 +54,6 @@ function findLatestTodos(messages: ChatMessage[]): Todo[] | null {
         const parsed = JSON.parse(tc.input);
         if (Array.isArray(parsed.todos) && parsed.todos.length > 0) {
           const todos = parsed.todos as Todo[];
-          // Use >= so we always advance to the last write of the same size,
-          // ensuring the most recent update wins when the plan is rewritten.
           if (!best || todos.length >= best.length) {
             best = todos;
           }
@@ -50,6 +61,55 @@ function findLatestTodos(messages: ChatMessage[]): Todo[] | null {
       } catch { /* ignore malformed input */ }
     }
     if (best) return best;
+  }
+
+  // New: TaskCreate / TaskUpdate are atomic per-task calls. Replay them in
+  // order across the current turn to reconstruct the live task list.
+  const tasks = new Map<string, Todo>();
+  const order: string[] = [];
+  let createSeq = 0;
+  for (let i = turnStart + 1; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role !== 'assistant' || !m.toolCalls?.length) continue;
+    for (const tc of m.toolCalls) {
+      if (tc.name === 'TaskCreate') {
+        try {
+          const input = JSON.parse(tc.input || '{}');
+          createSeq += 1;
+          const id = extractTaskCreateId(tc.output, String(createSeq));
+          if (tasks.has(id)) continue;
+          tasks.set(id, {
+            id,
+            content: input.subject || input.description || 'Task',
+            activeForm: input.activeForm,
+            status: 'pending',
+          });
+          order.push(id);
+        } catch { /* ignore malformed input */ }
+      } else if (tc.name === 'TaskUpdate') {
+        try {
+          const input = JSON.parse(tc.input || '{}');
+          const id = input.taskId != null ? String(input.taskId) : '';
+          if (!id) continue;
+          if (input.status === 'deleted') {
+            tasks.delete(id);
+            const ix = order.indexOf(id);
+            if (ix >= 0) order.splice(ix, 1);
+            continue;
+          }
+          const existing = tasks.get(id);
+          if (!existing) continue;
+          if (input.status === 'pending' || input.status === 'in_progress' || input.status === 'completed') {
+            existing.status = input.status;
+          }
+          if (typeof input.subject === 'string') existing.content = input.subject;
+          if (typeof input.activeForm === 'string') existing.activeForm = input.activeForm;
+        } catch { /* ignore malformed input */ }
+      }
+    }
+  }
+  if (order.length > 0) {
+    return order.map((id) => tasks.get(id)!).filter(Boolean);
   }
   return null;
 }

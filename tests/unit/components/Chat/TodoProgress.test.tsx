@@ -84,6 +84,51 @@ describe('TodoProgress (ring + popover)', () => {
     expect(container.querySelector('[data-testid="todo-ring"]')).toBeNull();
   });
 
+  it('reconstructs the task list from TaskCreate / TaskUpdate calls', () => {
+    const messages = [
+      { id: 'u1', role: 'user' as const, content: 'go', timestamp: 0 },
+      {
+        id: 'a1',
+        role: 'assistant' as const,
+        content: '',
+        timestamp: 1,
+        toolCalls: [
+          { id: 'c1', name: 'TaskCreate', input: JSON.stringify({ subject: 'first task', description: 'd' }), output: 'Task #1 created successfully: first task' },
+          { id: 'c2', name: 'TaskCreate', input: JSON.stringify({ subject: 'second task', description: 'd' }), output: 'Task #2 created successfully: second task' },
+          { id: 'u1', name: 'TaskUpdate', input: JSON.stringify({ taskId: '1', status: 'in_progress' }), output: 'ok' },
+          { id: 'u2', name: 'TaskUpdate', input: JSON.stringify({ taskId: '1', status: 'completed' }), output: 'ok' },
+        ],
+      },
+    ];
+    const { container, getByText } = render(<TodoProgress messages={messages as any} isStreaming={true} />);
+    expect(container.querySelector('[data-testid="todo-ring"]')).toBeTruthy();
+    expect(getByText('1/2')).toBeTruthy();
+    fireEvent.click(container.querySelector('[data-testid="todo-ring"]') as HTMLElement);
+    const items = container.querySelectorAll('[data-testid="todo-ring-item"]');
+    expect(items[0].className).toContain('todo-ring-item--done');
+    expect(items[1].className).toContain('todo-ring-item--pending');
+  });
+
+  it('drops tasks whose TaskUpdate sets status to deleted', () => {
+    const messages = [
+      { id: 'u1', role: 'user' as const, content: 'go', timestamp: 0 },
+      {
+        id: 'a1',
+        role: 'assistant' as const,
+        content: '',
+        timestamp: 1,
+        toolCalls: [
+          { id: 'c1', name: 'TaskCreate', input: JSON.stringify({ subject: 'a' }), output: 'Task #1 created successfully: a' },
+          { id: 'c2', name: 'TaskCreate', input: JSON.stringify({ subject: 'b' }), output: 'Task #2 created successfully: b' },
+          { id: 'd1', name: 'TaskUpdate', input: JSON.stringify({ taskId: '2', status: 'deleted' }), output: 'ok' },
+          { id: 'u1', name: 'TaskUpdate', input: JSON.stringify({ taskId: '1', status: 'in_progress' }), output: 'ok' },
+        ],
+      },
+    ];
+    const { getByText } = render(<TodoProgress messages={messages as any} isStreaming={true} />);
+    expect(getByText('0/1')).toBeTruthy();
+  });
+
   it('renders status indicators with correct classes', () => {
     const messages = [buildTodosMsg([
       { content: 'done one', status: 'completed' },
