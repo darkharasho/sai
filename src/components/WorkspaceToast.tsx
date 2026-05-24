@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
 
-export type ToastTone = 'success' | 'error';
+export type ToastTone = 'success' | 'error' | 'attention';
 
 interface WorkspaceToastProps {
   message: string;
   onDismiss: () => void;
   tone?: ToastTone;
+  onClick?: () => void;
 }
 
-export default function WorkspaceToast({ message, onDismiss, tone = 'success' }: WorkspaceToastProps) {
+export default function WorkspaceToast({ message, onDismiss, tone = 'success', onClick }: WorkspaceToastProps) {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -20,11 +21,22 @@ export default function WorkspaceToast({ message, onDismiss, tone = 'success' }:
     return () => clearTimeout(timer);
   }, [onDismiss]);
 
-  const accentVar = tone === 'error' ? 'var(--red)' : 'var(--accent)';
-  const glyph = tone === 'error' ? '⚠' : '✓';
+  const accentVar =
+    tone === 'error' ? 'var(--red)' :
+    tone === 'attention' ? 'var(--orange)' :
+    'var(--accent)';
+  const glyph =
+    tone === 'error' ? '⚠' :
+    tone === 'attention' ? '!' :
+    '✓';
+
+  const handleClick = onClick
+    ? () => { onClick(); setVisible(false); setTimeout(onDismiss, 100); }
+    : undefined;
 
   return (
     <div
+      onClick={handleClick}
       style={{
         position: 'fixed',
         bottom: 16,
@@ -44,6 +56,7 @@ export default function WorkspaceToast({ message, onDismiss, tone = 'success' }:
         opacity: visible ? 1 : 0,
         transition: 'transform 0.3s ease, opacity 0.3s ease',
         pointerEvents: 'auto',
+        cursor: onClick ? 'pointer' : 'default',
       }}
     >
       <span style={{ color: accentVar, fontSize: 14 }}>{glyph}</span>

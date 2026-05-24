@@ -52,6 +52,7 @@ export interface ChatSession {
   codexSessionId?: string;
   geminiSessionId?: string;
   pinned?: boolean;
+  lastViewedAt?: number;
   titleEdited?: boolean;
   messageCount: number;
   projectPath?: string;
