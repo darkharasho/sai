@@ -126,4 +126,34 @@ describe('ChatHistorySidebar', () => {
     fireEvent.contextMenu(getByText('Right-click me'));
     expect(getByText('Rename')).toBeTruthy();
   });
+
+  it('renders running state on a streaming session', () => {
+    const s = makeSession({ id: 'a' });
+    const { getByTestId } = render(<ChatHistorySidebar
+      {...defaultProps}
+      sessions={[s]}
+      streamingSessionIds={new Set(['a'])}
+    />);
+    expect(getByTestId('provider-chip-a').className).toMatch(/chip-running/);
+  });
+
+  it('renders awaiting state on an approval-pending session', () => {
+    const s = makeSession({ id: 'b' });
+    const { getByTestId } = render(<ChatHistorySidebar
+      {...defaultProps}
+      sessions={[s]}
+      awaitingSessionIds={new Set(['b'])}
+    />);
+    expect(getByTestId('provider-chip-b').className).toMatch(/chip-awaiting/);
+  });
+
+  it('renders error state on an errored session', () => {
+    const s = makeSession({ id: 'c' });
+    const { getByTestId } = render(<ChatHistorySidebar
+      {...defaultProps}
+      sessions={[s]}
+      errorSessionIds={new Set(['c'])}
+    />);
+    expect(getByTestId('provider-chip-c').className).toMatch(/chip-error/);
+  });
 });

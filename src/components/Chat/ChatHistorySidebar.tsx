@@ -335,10 +335,22 @@ export default function ChatHistorySidebar({
                   ) : (
                     <>
                       <div className="chat-history-card-header">
-                        <span
-                          className="chat-history-provider-dot"
-                          style={{ background: PROVIDER_COLORS[session.aiProvider || aiProvider] || providerColor }}
-                        />
+                        {(() => {
+                          const isRunning = streamingSessionIds.has(session.id);
+                          const isAwaiting = awaitingSessionIds.has(session.id);
+                          const isError = errorSessionIds.has(session.id);
+                          const stateClass =
+                            isError ? 'chip-error' :
+                            isAwaiting ? 'chip-awaiting' :
+                            isRunning ? 'chip-running' : '';
+                          return (
+                            <span
+                              data-testid={`provider-chip-${session.id}`}
+                              className={`chat-history-provider-dot ${stateClass}`.trim()}
+                              style={{ background: PROVIDER_COLORS[session.aiProvider || aiProvider] || providerColor }}
+                            />
+                          );
+                        })()}
                         <span className="chat-history-card-title">{session.title || 'Untitled'}</span>
                         {titleGeneratingIds?.has(session.id) && (
                           <SaiLogo mode="scanner" size={12} className="chat-history-title-spinner" ariaLabel="Generating title" />
@@ -506,6 +518,20 @@ export default function ChatHistorySidebar({
           border-radius: 50%;
           flex-shrink: 0;
           opacity: 0.7;
+        }
+        .chat-history-provider-dot.chip-running {
+          box-shadow: 0 0 0 2px var(--accent);
+          animation: chip-pulse 1.4s ease-in-out infinite;
+        }
+        .chat-history-provider-dot.chip-awaiting {
+          box-shadow: 0 0 0 2px var(--orange);
+        }
+        .chat-history-provider-dot.chip-error {
+          box-shadow: 0 0 0 2px var(--red);
+        }
+        @keyframes chip-pulse {
+          0%, 100% { box-shadow: 0 0 0 2px var(--accent); opacity: 1; }
+          50%      { box-shadow: 0 0 0 4px var(--accent); opacity: 0.6; }
         }
         .chat-history-card-title {
           font-weight: 500;
