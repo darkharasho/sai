@@ -334,53 +334,70 @@ export default function ChatHistorySidebar({
                     />
                   ) : (
                     <>
-                      <div className="chat-history-card-header">
-                        {(() => {
-                          const isRunning = streamingSessionIds.has(session.id);
-                          const isAwaiting = awaitingSessionIds.has(session.id);
-                          const isError = errorSessionIds.has(session.id);
-                          const stateClass =
-                            isError ? 'chip-error' :
-                            isAwaiting ? 'chip-awaiting' :
-                            isRunning ? 'chip-running' : '';
-                          return (
-                            <span
-                              data-testid={`provider-chip-${session.id}`}
-                              className={`chat-history-provider-dot ${stateClass}`.trim()}
-                              style={{ background: PROVIDER_COLORS[session.aiProvider || aiProvider] || providerColor }}
-                            />
-                          );
-                        })()}
-                        <span className="chat-history-card-title">{session.title || 'Untitled'}</span>
-                        {titleGeneratingIds?.has(session.id) && (
-                          <SaiLogo mode="scanner" size={12} className="chat-history-title-spinner" ariaLabel="Generating title" />
-                        )}
-                        {session.id === activeSessionId && (
-                          <span className="chat-history-active-badge">ACTIVE</span>
-                        )}
-                      </div>
-                      {debouncedQuery.trim() ? (
-                        (() => {
-                          const snippet = getSearchSnippet(session.id);
-                          if (!snippet) return null;
-                          return (
-                            <div className="chat-history-card-preview">
-                              {snippet.before}<mark className="chat-history-match">{snippet.match}</mark>{snippet.after}
+                      {(() => {
+                        const isUnread = session.id !== activeSessionId
+                          && session.updatedAt > (session.lastViewedAt ?? session.updatedAt);
+                        return (
+                          <>
+                            <div className="chat-history-card-header">
+                              {(() => {
+                                const isRunning = streamingSessionIds.has(session.id);
+                                const isAwaiting = awaitingSessionIds.has(session.id);
+                                const isError = errorSessionIds.has(session.id);
+                                const stateClass =
+                                  isError ? 'chip-error' :
+                                  isAwaiting ? 'chip-awaiting' :
+                                  isRunning ? 'chip-running' : '';
+                                return (
+                                  <span
+                                    data-testid={`provider-chip-${session.id}`}
+                                    className={`chat-history-provider-dot ${stateClass}`.trim()}
+                                    style={{ background: PROVIDER_COLORS[session.aiProvider || aiProvider] || providerColor }}
+                                  />
+                                );
+                              })()}
+                              <span
+                                className="chat-history-card-title"
+                                style={{ fontWeight: isUnread ? 600 : undefined }}
+                              >{session.title || 'Untitled'}</span>
+                              {titleGeneratingIds?.has(session.id) && (
+                                <SaiLogo mode="scanner" size={12} className="chat-history-title-spinner" ariaLabel="Generating title" />
+                              )}
+                              {session.id === activeSessionId && (
+                                <span className="chat-history-active-badge">ACTIVE</span>
+                              )}
                             </div>
-                          );
-                        })()
-                      ) : (
-                        getSessionPreview(session) && (
-                          <div className="chat-history-card-preview">
-                            {getSessionPreview(session)}
-                          </div>
-                        )
-                      )}
-                      <div className="chat-history-card-meta">
-                        <span>{getMessageCount(session)} msgs</span>
-                        <span className="chat-history-meta-dot">&middot;</span>
-                        <span>{formatRelativeTime(session.updatedAt)}</span>
-                      </div>
+                            {debouncedQuery.trim() ? (
+                              (() => {
+                                const snippet = getSearchSnippet(session.id);
+                                if (!snippet) return null;
+                                return (
+                                  <div className="chat-history-card-preview">
+                                    {snippet.before}<mark className="chat-history-match">{snippet.match}</mark>{snippet.after}
+                                  </div>
+                                );
+                              })()
+                            ) : (
+                              getSessionPreview(session) && (
+                                <div className="chat-history-card-preview">
+                                  {getSessionPreview(session)}
+                                </div>
+                              )
+                            )}
+                            <div className="chat-history-card-meta">
+                              <span>{getMessageCount(session)} msgs</span>
+                              <span className="chat-history-meta-dot">&middot;</span>
+                              <span>{formatRelativeTime(session.updatedAt)}</span>
+                              {isUnread && (
+                                <span
+                                  data-testid={`unread-dot-${session.id}`}
+                                  className="chat-history-unread-dot"
+                                />
+                              )}
+                            </div>
+                          </>
+                        );
+                      })()}
                     </>
                   )}
                 </div>
@@ -592,6 +609,14 @@ export default function ChatHistorySidebar({
           color: var(--accent);
           border-radius: 2px;
           padding: 0 1px;
+        }
+        .chat-history-unread-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: var(--accent);
+          display: inline-block;
+          margin-left: 4px;
         }
       `}</style>
     </div>

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, fireEvent, act } from '@testing-library/react';
+import { render, fireEvent, act, screen } from '@testing-library/react';
 import ChatHistorySidebar from '../../../../src/components/Chat/ChatHistorySidebar';
 import type { ChatSession } from '../../../../src/types';
 
@@ -155,5 +155,37 @@ describe('ChatHistorySidebar', () => {
       errorSessionIds={new Set(['c'])}
     />);
     expect(getByTestId('provider-chip-c').className).toMatch(/chip-error/);
+  });
+
+  const baseProps = defaultProps;
+
+  it('marks a non-active session as unread when updatedAt > lastViewedAt', () => {
+    const unread = makeSession({ id: 'u', updatedAt: 2000, lastViewedAt: 1000 });
+    render(<ChatHistorySidebar
+      {...baseProps}
+      activeSessionId="other"
+      sessions={[unread]}
+    />);
+    expect(screen.getByTestId('unread-dot-u')).toBeInTheDocument();
+  });
+
+  it('does not mark the active session as unread', () => {
+    const unread = makeSession({ id: 'u', updatedAt: 2000, lastViewedAt: 1000 });
+    render(<ChatHistorySidebar
+      {...baseProps}
+      activeSessionId="u"
+      sessions={[unread]}
+    />);
+    expect(screen.queryByTestId('unread-dot-u')).not.toBeInTheDocument();
+  });
+
+  it('does not mark a viewed session as unread', () => {
+    const viewed = makeSession({ id: 'v', updatedAt: 1000, lastViewedAt: 2000 });
+    render(<ChatHistorySidebar
+      {...baseProps}
+      activeSessionId="other"
+      sessions={[viewed]}
+    />);
+    expect(screen.queryByTestId('unread-dot-v')).not.toBeInTheDocument();
   });
 });
