@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export type ToastTone = 'success' | 'error' | 'attention';
 
@@ -11,6 +11,7 @@ interface WorkspaceToastProps {
 
 export default function WorkspaceToast({ message, onDismiss, tone = 'success', onClick }: WorkspaceToastProps) {
   const [visible, setVisible] = useState(false);
+  const clickDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     requestAnimationFrame(() => setVisible(true));
@@ -18,7 +19,12 @@ export default function WorkspaceToast({ message, onDismiss, tone = 'success', o
       setVisible(false);
       setTimeout(onDismiss, 300);
     }, 4000);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      if (clickDismissTimerRef.current !== null) {
+        clearTimeout(clickDismissTimerRef.current);
+      }
+    };
   }, [onDismiss]);
 
   const accentVar =
@@ -31,7 +37,7 @@ export default function WorkspaceToast({ message, onDismiss, tone = 'success', o
     '✓';
 
   const handleClick = onClick
-    ? () => { onClick(); setVisible(false); setTimeout(onDismiss, 100); }
+    ? () => { onClick(); setVisible(false); clickDismissTimerRef.current = setTimeout(onDismiss, 100); }
     : undefined;
 
   return (
