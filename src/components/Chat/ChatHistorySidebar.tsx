@@ -241,6 +241,7 @@ export default function ChatHistorySidebar({
       case 'delete': {
         const updated = sessions.filter(s => s.id !== sessionId);
         onUpdateSessions(updated);
+        try { window.sai.claudeStop?.(projectPath, sessionId); } catch {}
         dbDeleteSession(sessionId).catch(() => {});
         break;
       }
