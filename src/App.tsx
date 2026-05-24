@@ -9,7 +9,8 @@ import SearchPanel from './components/SearchPanel/SearchPanel';
 import TitleBar from './components/TitleBar';
 import CodePanel from './components/CodePanel/CodePanel';
 import UnsavedChangesModal from './components/UnsavedChangesModal';
-import WorkspaceToast from './components/WorkspaceToast';
+import WorkspaceToast, { type ToastTone } from './components/WorkspaceToast';
+import { computeChatToasts } from './lib/chatToasts';
 import CommandPalette from './components/CommandPalette';
 import { useWhatsNew } from './hooks/useWhatsNew';
 import { useKeybinding } from './hooks/useKeybinding';
@@ -222,6 +223,16 @@ export default function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [fileIndex, setFileIndex] = useState<string[]>([]);
   const [toast, setToast] = useState<{ message: string; key: number; tone?: 'success' | 'error' } | null>(null);
+  interface ChatToastEntry {
+    id: string;
+    sessionId: string;
+    message: string;
+    tone: ToastTone;
+  }
+  const [chatToasts, setChatToasts] = useState<ChatToastEntry[]>([]);
+  const dismissChatToast = useCallback((id: string) => {
+    setChatToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
   const { isOpen: whatsNewOpen, version: whatsNewVersion, releases, fetchStatus, openWhatsNew, closeWhatsNew } = useWhatsNew();
   const [showNewProject, setShowNewProject] = useState(false);
   const [quitConfirmTasks, setQuitConfirmTasks] = useState<{ id: string; title: string }[] | null>(null);
@@ -3498,6 +3509,26 @@ export default function App() {
     return ids;
   }, [sessions]);
 
+  const prevStreamingRef = useRef<Set<string>>(new Set());
+  const prevAwaitingRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const seeds = computeChatToasts(
+      prevStreamingRef.current,
+      streamingSessionIds,
+      prevAwaitingRef.current,
+      awaitingSessionIds,
+      sessions,
+      activeSession?.id,
+      Date.now(),
+    );
+    if (seeds.length) {
+      setChatToasts(prev => [...prev, ...seeds].slice(-3));
+    }
+    prevStreamingRef.current = streamingSessionIds;
+    prevAwaitingRef.current = awaitingSessionIds;
+  }, [streamingSessionIds, awaitingSessionIds, sessions, activeSession?.id]);
+
   return (
     <div className="app">
       <TitleBar
@@ -3804,6 +3835,31 @@ export default function App() {
 
       {toast && (
         <WorkspaceToast key={toast.key} message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} />
+      )}
+
+      {chatToasts.length > 0 && (
+        <div style={{
+          position: 'fixed',
+          bottom: 16,
+          right: 16,
+          display: 'flex',
+          flexDirection: 'column-reverse',
+          gap: 8,
+          zIndex: 901,
+          pointerEvents: 'none',
+        }}>
+          {chatToasts.map(t => (
+            <div key={t.id} style={{ position: 'relative', pointerEvents: 'auto' }}>
+              <WorkspaceToast
+                message={t.message}
+                tone={t.tone}
+                onClick={() => handleSelectSession(t.sessionId)}
+                onDismiss={() => dismissChatToast(t.id)}
+                inline
+              />
+            </div>
+          ))}
+        </div>
       )}
 
       {projectPath && <CommandPalette

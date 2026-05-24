@@ -7,9 +7,10 @@ interface WorkspaceToastProps {
   onDismiss: () => void;
   tone?: ToastTone;
   onClick?: () => void;
+  inline?: boolean;
 }
 
-export default function WorkspaceToast({ message, onDismiss, tone = 'success', onClick }: WorkspaceToastProps) {
+export default function WorkspaceToast({ message, onDismiss, tone = 'success', onClick, inline = false }: WorkspaceToastProps) {
   const [visible, setVisible] = useState(false);
   const clickDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -44,9 +45,9 @@ export default function WorkspaceToast({ message, onDismiss, tone = 'success', o
     <div
       onClick={handleClick}
       style={{
-        position: 'fixed',
-        bottom: 16,
-        right: 16,
+        position: inline ? 'relative' : 'fixed',
+        bottom: inline ? 'auto' : 16,
+        right: inline ? 'auto' : 16,
         background: 'var(--bg-elevated)',
         border: '1px solid var(--border)',
         borderRadius: 8,
