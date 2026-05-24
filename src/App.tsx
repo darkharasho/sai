@@ -2555,7 +2555,6 @@ export default function App() {
     if (!activeProjectPath) return;
     flushAndPersist(activeProjectPath);
     // Clear backend sessions so next message starts fresh
-    window.sai.claudeSetSessionId(activeProjectPath, undefined);
     (window.sai as any).codexSetSessionId(activeProjectPath, undefined);
     window.sai.geminiSetSessionId?.(activeProjectPath, undefined, 'chat');
     updateWorkspace(activeProjectPath, ws => ({
@@ -2568,21 +2567,19 @@ export default function App() {
     if (!activeProjectPath) return;
     flushAndPersist(activeProjectPath);
     const selected = sessions.find(s => s.id === id);
-    if (selected) {
-      // Tell backend to switch to the selected session's provider session IDs
-      window.sai.claudeSetSessionId(activeProjectPath, selected.claudeSessionId);
-      (window.sai as any).codexSetSessionId(activeProjectPath, selected.codexSessionId);
-      window.sai.geminiSetSessionId?.(activeProjectPath, selected.geminiSessionId, 'chat');
-      // Load only the tail (last N) on demand; older messages are paginated
-      // in by ChatPanel via the top-of-list IntersectionObserver.
-      dbGetMessagesTail(selected.id, MESSAGE_TAIL_LIMIT).then(({ messages, totalCount }) => {
-        wsFirstLoadedIdxRef.current.set(activeProjectPath, totalCount - messages.length);
-        updateWorkspace(activeProjectPath, ws => ({
-          ...ws,
-          activeSession: { ...selected, messages },
-        }));
-      });
-    }
+    if (!selected) return;
+    // Claude scopes per-session now (no rebind needed). Codex and Gemini are
+    // still workspace-scoped, so we still tell them which session to resume.
+    (window.sai as any).codexSetSessionId(activeProjectPath, selected.codexSessionId);
+    window.sai.geminiSetSessionId?.(activeProjectPath, selected.geminiSessionId, 'chat');
+    // Stamp lastViewedAt for unread tracking and persist.
+    const stamped: ChatSession = { ...selected, lastViewedAt: Date.now() };
+    updateWorkspace(activeProjectPath, ws => ({
+      ...ws,
+      activeSession: stamped,
+      sessions: ws.sessions.map(s => s.id === id ? stamped : s),
+    }));
+    dbSaveSession(activeProjectPath, stamped, wsFirstLoadedIdxRef.current.get(activeProjectPath) ?? 0).catch(() => {});
   };
 
   // Route the workspace's active session to the focused swarm task's sessionId
@@ -2622,7 +2619,6 @@ export default function App() {
         updateWorkspace(activeProjectPath, ws => ({ ...ws, sessions: fresh }));
         const selected = fresh.find(s => s.id === task.sessionId);
         if (!selected) return;
-        window.sai.claudeSetSessionId(activeProjectPath, selected.claudeSessionId);
         (window.sai as any).codexSetSessionId(activeProjectPath, selected.codexSessionId);
         window.sai.geminiSetSessionId?.(activeProjectPath, selected.geminiSessionId, 'chat');
         dbGetMessagesTail(selected.id, MESSAGE_TAIL_LIMIT).then(({ messages, totalCount }) => {
