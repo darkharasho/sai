@@ -15,6 +15,9 @@ interface ChatHistorySidebarProps {
   onUpdateSessions: (sessions: ChatSession[]) => void;
   projectPath: string;
   titleGeneratingIds?: Set<string>;
+  streamingSessionIds?: Set<string>;
+  awaitingSessionIds?: Set<string>;
+  errorSessionIds?: Set<string>;
 }
 
 const PROVIDER_COLORS: Record<string, string> = {
@@ -79,6 +82,9 @@ export default function ChatHistorySidebar({
   onUpdateSessions,
   projectPath,
   titleGeneratingIds,
+  streamingSessionIds = new Set<string>(),
+  awaitingSessionIds = new Set<string>(),
+  errorSessionIds = new Set<string>(),
 }: ChatHistorySidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');

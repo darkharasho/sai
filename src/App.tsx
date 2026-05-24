@@ -3474,6 +3474,30 @@ export default function App() {
   const swarmApprovalCount = (swarmTasksByWs.get(activeProjectPath) ?? [])
     .filter(t => t.status === 'awaiting_approval').length;
 
+  const streamingSessionIds = useMemo(() => {
+    if (!activeProjectPath) return new Set<string>();
+    const prefix = `${activeProjectPath}:`;
+    const ids = new Set<string>();
+    for (const k of streamingScopes) {
+      if (k.startsWith(prefix)) ids.add(k.slice(prefix.length));
+    }
+    return ids;
+  }, [streamingScopes, activeProjectPath]);
+
+  const awaitingSessionIds = useMemo(() => {
+    if (!activeProjectPath) return new Set<string>();
+    return new Set(approvalSessions.get(activeProjectPath)?.keys() ?? []);
+  }, [approvalSessions, activeProjectPath]);
+
+  const errorSessionIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const s of sessions) {
+      const tail = s.messages?.[s.messages.length - 1];
+      if (tail?.error) ids.add(s.id);
+    }
+    return ids;
+  }, [sessions]);
+
   return (
     <div className="app">
       <TitleBar
@@ -3614,6 +3638,9 @@ export default function App() {
                 onUpdateSessions={handleUpdateSessions}
                 projectPath={projectPath}
                 titleGeneratingIds={titleGeneratingIds}
+                streamingSessionIds={streamingSessionIds}
+                awaitingSessionIds={awaitingSessionIds}
+                errorSessionIds={errorSessionIds}
               />
             </motion.div>
           )}
