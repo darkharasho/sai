@@ -129,32 +129,32 @@ describe('ChatHistorySidebar', () => {
 
   it('renders running state on a streaming session', () => {
     const s = makeSession({ id: 'a' });
-    const { getByTestId } = render(<ChatHistorySidebar
+    render(<ChatHistorySidebar
       {...defaultProps}
       sessions={[s]}
       streamingSessionIds={new Set(['a'])}
     />);
-    expect(getByTestId('provider-chip-a').className).toMatch(/chip-running/);
+    expect(screen.getByTestId('sidebar-status-a-busy')).toBeInTheDocument();
   });
 
   it('renders awaiting state on an approval-pending session', () => {
     const s = makeSession({ id: 'b' });
-    const { getByTestId } = render(<ChatHistorySidebar
+    render(<ChatHistorySidebar
       {...defaultProps}
       sessions={[s]}
       awaitingSessionIds={new Set(['b'])}
     />);
-    expect(getByTestId('provider-chip-b').className).toMatch(/chip-awaiting/);
+    expect(screen.getByTestId('sidebar-status-b-awaiting')).toBeInTheDocument();
   });
 
   it('renders error state on an errored session', () => {
     const s = makeSession({ id: 'c' });
-    const { getByTestId } = render(<ChatHistorySidebar
+    render(<ChatHistorySidebar
       {...defaultProps}
       sessions={[s]}
       errorSessionIds={new Set(['c'])}
     />);
-    expect(getByTestId('provider-chip-c').className).toMatch(/chip-error/);
+    expect(screen.getByTestId('sidebar-status-c-error')).toBeInTheDocument();
   });
 
   const baseProps = defaultProps;
@@ -166,7 +166,7 @@ describe('ChatHistorySidebar', () => {
       activeSessionId="other"
       sessions={[unread]}
     />);
-    expect(screen.getByTestId('unread-dot-u')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-status-u-done')).toBeInTheDocument();
   });
 
   it('does not mark the active session as unread', () => {
@@ -176,7 +176,7 @@ describe('ChatHistorySidebar', () => {
       activeSessionId="u"
       sessions={[unread]}
     />);
-    expect(screen.queryByTestId('unread-dot-u')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sidebar-status-u-done')).not.toBeInTheDocument();
   });
 
   it('does not mark a viewed session as unread', () => {
@@ -186,6 +186,6 @@ describe('ChatHistorySidebar', () => {
       activeSessionId="other"
       sessions={[viewed]}
     />);
-    expect(screen.queryByTestId('unread-dot-v')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sidebar-status-v-done')).not.toBeInTheDocument();
   });
 });

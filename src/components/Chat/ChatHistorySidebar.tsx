@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { DOT_MASK_URL } from '../../lib/assets';
 import { Search, X, Plus, Pin } from 'lucide-react';
 import SaiLogo from '../SaiLogo';
 import { formatSessionDate, formatSessionTime, exportSessionAsMarkdown } from '../../sessions';
@@ -340,29 +341,52 @@ export default function ChatHistorySidebar({
                         return (
                           <>
                             <div className="chat-history-card-header">
-                              {(() => {
-                                const isRunning = streamingSessionIds.has(session.id);
-                                const isAwaiting = awaitingSessionIds.has(session.id);
-                                const isError = errorSessionIds.has(session.id);
-                                const stateClass =
-                                  isError ? 'chip-error' :
-                                  isAwaiting ? 'chip-awaiting' :
-                                  isRunning ? 'chip-running' : '';
-                                return (
-                                  <span
-                                    data-testid={`provider-chip-${session.id}`}
-                                    className={`chat-history-provider-dot ${stateClass}`.trim()}
-                                    style={{ background: PROVIDER_COLORS[session.aiProvider || aiProvider] || providerColor }}
-                                  />
-                                );
-                              })()}
+                              <span
+                                data-testid={`provider-chip-${session.id}`}
+                                className="chat-history-provider-dot"
+                                style={{ background: PROVIDER_COLORS[session.aiProvider || aiProvider] || providerColor }}
+                              />
                               <span
                                 className="chat-history-card-title"
-                                style={{ fontWeight: isUnread ? 600 : undefined }}
                               >{session.title || 'Untitled'}</span>
                               {titleGeneratingIds?.has(session.id) && (
                                 <SaiLogo mode="scanner" size={12} className="chat-history-title-spinner" ariaLabel="Generating title" />
                               )}
+                              {(() => {
+                                const isRunning = streamingSessionIds.has(session.id);
+                                const isAwaiting = awaitingSessionIds.has(session.id);
+                                const isError = errorSessionIds.has(session.id);
+                                if (isAwaiting) return (
+                                  <span
+                                    className="workspace-approval-icon"
+                                    data-testid={`sidebar-status-${session.id}-awaiting`}
+                                    title="Approval needed"
+                                  >!</span>
+                                );
+                                if (isError) return (
+                                  <span
+                                    className="workspace-approval-icon"
+                                    style={{ background: 'var(--red)' }}
+                                    data-testid={`sidebar-status-${session.id}-error`}
+                                    title="Error"
+                                  >!</span>
+                                );
+                                if (isRunning) return (
+                                  <span
+                                    className="titlebar-busy-spinner"
+                                    data-testid={`sidebar-status-${session.id}-busy`}
+                                    title="Working..."
+                                  />
+                                );
+                                if (isUnread) return (
+                                  <span
+                                    className="workspace-done-dot"
+                                    data-testid={`sidebar-status-${session.id}-done`}
+                                    title="Response complete"
+                                  />
+                                );
+                                return null;
+                              })()}
                               {session.id === activeSessionId && (
                                 <span className="chat-history-active-badge">ACTIVE</span>
                               )}
@@ -388,12 +412,6 @@ export default function ChatHistorySidebar({
                               <span>{getMessageCount(session)} msgs</span>
                               <span className="chat-history-meta-dot">&middot;</span>
                               <span>{formatRelativeTime(session.updatedAt)}</span>
-                              {isUnread && (
-                                <span
-                                  data-testid={`unread-dot-${session.id}`}
-                                  className="chat-history-unread-dot"
-                                />
-                              )}
                             </div>
                           </>
                         );
@@ -536,19 +554,51 @@ export default function ChatHistorySidebar({
           flex-shrink: 0;
           opacity: 0.7;
         }
-        .chat-history-provider-dot.chip-running {
-          box-shadow: 0 0 0 2px var(--accent);
-          animation: chip-pulse 1.4s ease-in-out infinite;
+        .workspace-approval-icon {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 14px;
+          height: 14px;
+          border-radius: 50%;
+          background: #f59e0b;
+          color: #000;
+          font-size: 10px;
+          font-weight: 800;
+          flex-shrink: 0;
+          animation: approval-blink 1s ease-in-out infinite;
         }
-        .chat-history-provider-dot.chip-awaiting {
-          box-shadow: 0 0 0 2px var(--orange);
+        @keyframes approval-blink {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.2; }
         }
-        .chat-history-provider-dot.chip-error {
-          box-shadow: 0 0 0 2px var(--red);
+        .titlebar-busy-spinner {
+          display: inline-block;
+          width: 9px;
+          height: 9px;
+          background: var(--accent);
+          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+          animation: dot-spinner-pulse 2.2s ease-in-out infinite;
+          flex-shrink: 0;
         }
-        @keyframes chip-pulse {
-          0%, 100% { box-shadow: 0 0 0 2px var(--accent); opacity: 1; }
-          50%      { box-shadow: 0 0 0 4px var(--accent); opacity: 0.6; }
+        @keyframes dot-spinner-pulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50%      { opacity: 0.35; transform: scale(0.75); }
+        }
+        .workspace-done-dot {
+          display: inline-block;
+          width: 9px;
+          height: 9px;
+          background: var(--green);
+          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+          flex-shrink: 0;
+          animation: done-pulse 2s ease-in-out infinite;
+        }
+        @keyframes done-pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
         }
         .chat-history-card-title {
           font-weight: 500;
@@ -609,14 +659,6 @@ export default function ChatHistorySidebar({
           color: var(--accent);
           border-radius: 2px;
           padding: 0 1px;
-        }
-        .chat-history-unread-dot {
-          width: 6px;
-          height: 6px;
-          border-radius: 50%;
-          background: var(--accent);
-          display: inline-block;
-          margin-left: 4px;
         }
       `}</style>
     </div>

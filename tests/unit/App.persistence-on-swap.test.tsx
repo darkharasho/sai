@@ -2,13 +2,15 @@
  * Regression test: handleSelectSession must call flushAndPersist (which writes
  * the outgoing session to the DB) before swapping activeSession to the target.
  *
- * Behaviour under test (App.tsx ~line 2577-2593):
+ * Behaviour under test (App.tsx handleSelectSession):
  *
  *   const handleSelectSession = (id: string) => {
- *     flushAndPersist(activeProjectPath);   // ← must happen FIRST
+ *     flushAndPersist(activeProjectPath);   // ← must happen FIRST (saves outgoing session)
  *     ...
- *     updateWorkspace(...activeSession = selected...);  // swap
- *     dbSaveSession(...stamped...);          // stamp lastViewedAt on target
+ *     dbGetMessagesTail(selected.id, ...).then(({ messages, totalCount }) => {
+ *       updateWorkspace(...activeSession = { ...selected, messages, lastViewedAt }...);
+ *     });
+ *     // lastViewedAt is NOT saved immediately — it persists on next natural save.
  *   };
  *
  * flushAndPersist calls dbSaveSession only when the outgoing session has
@@ -110,10 +112,17 @@ function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
 // ---------------------------------------------------------------------------
 const saveOrder: string[] = [];
 
+// messagesBySessionId is populated in beforeEach so dbGetMessagesTail can
+// return the correct messages for each session.
+const messagesBySessionId: Map<string, ChatMessage[]> = new Map();
+
 vi.mock('../../src/chatDb', () => ({
   dbGetSessions: vi.fn(),
   dbGetMessages: vi.fn().mockResolvedValue([]),
-  dbGetMessagesTail: vi.fn().mockResolvedValue({ messages: [], totalCount: 0 }),
+  dbGetMessagesTail: vi.fn((sessionId: string) => {
+    const msgs = messagesBySessionId.get(sessionId) ?? [];
+    return Promise.resolve({ messages: msgs, totalCount: msgs.length });
+  }),
   dbSaveSession: vi.fn((_path: string, session: ChatSession) => {
     saveOrder.push(session.id);
     return Promise.resolve();
@@ -140,12 +149,14 @@ describe('App: persistence on session swap', () => {
 
   beforeEach(async () => {
     saveOrder.length = 0;
+    messagesBySessionId.clear();
 
+    const msgA = makeMsg();
     sessionA = makeSession({
       id: 'session-A',
       title: 'Chat A',
       // Give A a message so flushAndPersist will write it to the DB
-      messages: [makeMsg()],
+      messages: [msgA],
       messageCount: 1,
       updatedAt: 1000,
     });
@@ -156,6 +167,9 @@ describe('App: persistence on session swap', () => {
       messageCount: 0,
       updatedAt: 2000,
     });
+
+    // Seed dbGetMessagesTail so clicking A populates activeSession.messages
+    messagesBySessionId.set('session-A', [msgA]);
 
     // Import chatDb mock to configure return value per test
     const { dbGetSessions } = await import('../../src/chatDb');
@@ -211,15 +225,11 @@ describe('App: persistence on session swap', () => {
       await new Promise(r => setTimeout(r, 0));
     });
 
-    // Session A must appear in saveOrder: flushAndPersist saved the outgoing session
+    // Session A must appear in saveOrder: flushAndPersist saved the outgoing session.
     expect(saveOrder).toContain('session-A');
 
-    // Session B must also appear: handleSelectSession stamps lastViewedAt and saves
-    expect(saveOrder).toContain('session-B');
-
-    // Most importantly: A was flushed BEFORE B was activated (ordering guarantee)
-    const idxA = saveOrder.indexOf('session-A');
-    const idxB = saveOrder.indexOf('session-B');
-    expect(idxA).toBeLessThan(idxB);
+    // Session B is NOT saved immediately on swap — lastViewedAt persists on next
+    // natural save to avoid clobbering messages that live only in the DB.
+    expect(saveOrder).not.toContain('session-B');
   });
 });

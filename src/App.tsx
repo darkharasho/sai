@@ -2583,14 +2583,14 @@ export default function App() {
     // still workspace-scoped, so we still tell them which session to resume.
     (window.sai as any).codexSetSessionId(activeProjectPath, selected.codexSessionId);
     window.sai.geminiSetSessionId?.(activeProjectPath, selected.geminiSessionId, 'chat');
-    // Stamp lastViewedAt for unread tracking and persist.
-    const stamped: ChatSession = { ...selected, lastViewedAt: Date.now() };
-    updateWorkspace(activeProjectPath, ws => ({
-      ...ws,
-      activeSession: stamped,
-      sessions: ws.sessions.map(s => s.id === id ? stamped : s),
-    }));
-    dbSaveSession(activeProjectPath, stamped, wsFirstLoadedIdxRef.current.get(activeProjectPath) ?? 0).catch(() => {});
+    // Load the tail from IndexedDB (full messages live there, not in the sessions list).
+    dbGetMessagesTail(selected.id, MESSAGE_TAIL_LIMIT).then(({ messages, totalCount }) => {
+      wsFirstLoadedIdxRef.current.set(activeProjectPath!, totalCount - messages.length);
+      updateWorkspace(activeProjectPath!, ws => ({
+        ...ws,
+        activeSession: { ...selected, messages, lastViewedAt: Date.now() },
+      }));
+    });
   };
 
   // Route the workspace's active session to the focused swarm task's sessionId
@@ -3318,11 +3318,7 @@ export default function App() {
                   activeFilePath={ws.activeFilePath}
                   onFileOpen={handleFileOpen}
                   isActive={wsPath === activeProjectPath}
-                  isStreaming={
-                    ws.activeSession.kind === 'task'
-                      ? streamingScopes.has(`${wsPath}:${ws.activeSession.id}`)
-                      : chatStreamingWorkspaces.has(wsPath)
-                  }
+                  isStreaming={streamingScopes.has(`${wsPath}:${ws.activeSession.id}`)}
                   initialDraft={chatDraftsRef.current.get(wsPath) || ''}
                   onDraftChange={(draft: string) => handleDraftChange(wsPath, draft)}
                   initialContextItems={(chatContextItemsRef.current.get(wsPath) as any) || []}
