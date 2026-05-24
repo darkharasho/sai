@@ -215,7 +215,7 @@ export default function App() {
     if (items.length) chatContextItemsRef.current.set(wsPath, items);
     else chatContextItemsRef.current.delete(wsPath);
   }, []);
-  const [approvalWorkspaces, setApprovalWorkspaces] = useState<Map<string, PendingApproval>>(new Map());
+  const [approvalSessions, setApprovalSessions] = useState<Map<string, Map<string, PendingApproval>>>(new Map());
   const [notificationCounts, setNotificationCounts] = useState<Map<string, number>>(new Map());
   const wsTurnSeqRef = useRef<Map<string, number>>(new Map());
   const [focusedChat, setFocusedChat] = useState(false);
@@ -1876,15 +1876,18 @@ export default function App() {
             });
           }
         }
-        setApprovalWorkspaces(prev => {
+        const scopeForApproval = msg.scope || 'chat';
+        setApprovalSessions(prev => {
           const next = new Map(prev);
-          next.set(msg.projectPath, {
+          const inner = new Map(next.get(msg.projectPath) ?? new Map<string, PendingApproval>());
+          inner.set(scopeForApproval, {
             toolName: msg.toolName,
             toolUseId: msg.toolUseId,
             command: msg.command,
             description: msg.description,
             input: msg.input,
           });
+          next.set(msg.projectPath, inner);
           return next;
         });
         if (msg.projectPath !== activeProjectPathRef.current) {
@@ -1919,10 +1922,15 @@ export default function App() {
             return next;
           });
         }
-        setApprovalWorkspaces(prev => {
-          if (!prev.has(msg.projectPath)) return prev;
+        const resolvedScope = msg.scope || 'chat';
+        setApprovalSessions(prev => {
+          const inner = prev.get(msg.projectPath);
+          if (!inner || !inner.has(resolvedScope)) return prev;
           const next = new Map(prev);
-          next.delete(msg.projectPath);
+          const innerNext = new Map(inner);
+          innerNext.delete(resolvedScope);
+          if (innerNext.size === 0) next.delete(msg.projectPath);
+          else next.set(msg.projectPath, innerNext);
           return next;
         });
         // Collapse any unresolved inline approval cards for this workspace's
@@ -3477,7 +3485,7 @@ export default function App() {
         onProjectChange={handleProjectSwitch}
         completedWorkspaces={completedWorkspaces}
         busyWorkspaces={busyWorkspaces}
-        approvalWorkspaces={new Set(approvalWorkspaces.keys())}
+        approvalWorkspaces={new Set(approvalSessions.keys())}
         metaWorkspaces={metaWorkspaces}
         activeMetaRuntime={activeMetaRuntime}
         onActivateMeta={handleMetaWorkspaceActivate}
@@ -3540,7 +3548,10 @@ export default function App() {
         }}
       />
       <ApprovalBanner
-        approvalWorkspaces={approvalWorkspaces}
+        approvalWorkspaces={new Map(Array.from(approvalSessions.entries()).flatMap(([k, inner]) => {
+          const first = inner.values().next().value;
+          return first ? [[k, first] as [string, PendingApproval]] : [];
+        }))}
         currentProjectPath={projectPath}
         onSwitchToWorkspace={handleProjectSwitch}
       />
