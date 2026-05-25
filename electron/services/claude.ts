@@ -16,6 +16,7 @@ import {
   type OrchestratorPromptContext,
 } from '../../src/lib/orchestratorSystemPrompt';
 import type { SessionBus } from './remote/session-bus';
+import { clamp, type PermMode } from './remote/clamp';
 
 const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
 
@@ -43,6 +44,11 @@ let mainWin: BrowserWindow | null = null;
 let remoteBus: SessionBus | null = null;
 export function setRemoteBus(bus: SessionBus | null): void {
   remoteBus = bus;
+}
+
+let remoteCeiling: PermMode | null = null;
+export function setRemoteCeiling(ceiling: PermMode | null): void {
+  remoteCeiling = ceiling;
 }
 
 function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
@@ -485,6 +491,11 @@ export function sendImpl(
   const effectiveScope = scope || 'chat';
   const claude = getClaude(ws, effectiveScope);
 
+  let effectivePermMode = permMode as PermMode | undefined;
+  if (origin === 'remote') {
+    effectivePermMode = clamp(effectivePermMode, remoteCeiling);
+  }
+
   touchActivity(projectPath);
 
   let prompt = message;
@@ -493,7 +504,7 @@ export function sendImpl(
     prompt = `${imageRefs}\n\n${message}`;
   }
 
-  const proc = ensureProcess(mainWin, projectPath, effectiveScope, permMode, effort, model);
+  const proc = ensureProcess(mainWin, projectPath, effectiveScope, effectivePermMode, effort, model);
 
   claude.suppressForward = false;
 
@@ -544,6 +555,14 @@ export function sendImpl(
     return;
   }
   proc.stdin.write(msg + '\n');
+  emitChatMessage({
+    type: 'user_message',
+    projectPath,
+    scope: effectiveScope,
+    text: message,
+    origin,
+    turnSeq: claude.turnSeq,
+  });
 }
 
 export function interruptImpl(projectPath: string, scope?: string): void {
