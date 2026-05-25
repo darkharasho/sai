@@ -1,0 +1,177 @@
+import { useEffect, useState } from 'react';
+import { Folder, FileText, ChevronRight, ChevronDown } from 'lucide-react';
+import type { WireClient } from '../wire';
+import FileViewer from './FileViewer';
+import { langFromPath } from './lang';
+
+interface Entry { name: string; kind: 'file' | 'dir'; size?: number }
+
+interface Props {
+  client: WireClient;
+  cwd: string;
+}
+
+interface OpenFile {
+  path: string;
+  content?: string;
+  signedUrl?: string;
+  encoding: 'text' | 'binary';
+  size: number;
+  lang?: string;
+  mime?: string;
+}
+
+function Row({
+  client, cwd, entry, parent, depth, onPickFile,
+}: {
+  client: WireClient;
+  cwd: string;
+  entry: Entry;
+  parent: string;
+  depth: number;
+  onPickFile: (path: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [children, setChildren] = useState<Entry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const childPath = parent ? `${parent}/${entry.name}` : entry.name;
+
+  useEffect(() => {
+    if (!expanded || entry.kind !== 'dir' || children.length > 0) return;
+    setLoading(true);
+    client.listFiles(cwd, childPath)
+      .then((e) => setChildren(e as Entry[]))
+      .finally(() => setLoading(false));
+  }, [expanded, entry.kind, client, cwd, childPath]);
+
+  const Icon = entry.kind === 'dir' ? Folder : FileText;
+  const Chevron = entry.kind === 'dir' ? (expanded ? ChevronDown : ChevronRight) : null;
+
+  return (
+    <>
+      <button
+        onClick={() => {
+          if (entry.kind === 'dir') setExpanded((v) => !v);
+          else onPickFile(childPath);
+        }}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          width: '100%',
+          padding: `6px 14px 6px ${10 + depth * 14}px`,
+          background: 'transparent',
+          color: 'var(--text)',
+          border: 'none',
+          cursor: 'pointer',
+          fontFamily: 'inherit',
+          textAlign: 'left',
+        }}
+      >
+        <span style={{ width: 14, display: 'inline-flex', justifyContent: 'center', flexShrink: 0 }}>
+          {Chevron && <Chevron size={12} color="var(--text-muted)" />}
+        </span>
+        <Icon size={13} color="var(--text-muted)" strokeWidth={2} style={{ flexShrink: 0 }} />
+        <span style={{
+          fontSize: 13,
+          fontFamily: '"Geist Mono", ui-monospace, monospace',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}>
+          {entry.name}
+        </span>
+      </button>
+      {expanded && entry.kind === 'dir' && (
+        <>
+          {loading && <div style={{ padding: `4px 14px 4px ${24 + depth * 14}px`, fontSize: 11, color: 'var(--text-muted)' }}>Loading…</div>}
+          {children.map((c) => (
+            <Row
+              key={c.name}
+              client={client}
+              cwd={cwd}
+              entry={c}
+              parent={childPath}
+              depth={depth + 1}
+              onPickFile={onPickFile}
+            />
+          ))}
+        </>
+      )}
+    </>
+  );
+}
+
+export default function BrowseView({ client, cwd }: Props) {
+  const [rootEntries, setRootEntries] = useState<Entry[]>([]);
+  const [open, setOpen] = useState<OpenFile | null>(null);
+  const [loadingRoot, setLoadingRoot] = useState(true);
+  const [loadingFile, setLoadingFile] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoadingRoot(true); setErr(null); setOpen(null);
+    client.listFiles(cwd, '')
+      .then((e) => setRootEntries(e as Entry[]))
+      .catch((e: Error) => setErr(e.message))
+      .finally(() => setLoadingRoot(false));
+  }, [client, cwd]);
+
+  const pickFile = (path: string) => {
+    setLoadingFile(true);
+    client.readFile(cwd, path)
+      .then((r: any) => setOpen({ path, ...r }))
+      .finally(() => setLoadingFile(false));
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+      <div style={{ flex: '0 0 auto', maxHeight: '40%', overflowY: 'auto', borderBottom: '1px solid var(--border)' }}>
+        {loadingRoot && <div style={{ padding: '10px 14px', fontSize: 12, color: 'var(--text-muted)' }}>Loading…</div>}
+        {err && <div style={{ padding: '10px 14px', fontSize: 12, color: 'var(--red)' }}>{err}</div>}
+        {!loadingRoot && rootEntries.map((e) => (
+          <Row
+            key={e.name}
+            client={client}
+            cwd={cwd}
+            entry={e}
+            parent=""
+            depth={1}
+            onPickFile={pickFile}
+          />
+        ))}
+      </div>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+        {loadingFile && <div style={{ padding: 16, fontSize: 12, color: 'var(--text-muted)' }}>Loading…</div>}
+        {!loadingFile && !open && (
+          <div style={{ padding: 16, fontSize: 12, color: 'var(--text-muted)' }}>
+            Select a file to view.
+          </div>
+        )}
+        {!loadingFile && open && (
+          <>
+            <div style={{
+              padding: '6px 12px',
+              fontFamily: '"Geist Mono", ui-monospace, monospace',
+              fontSize: 11,
+              color: 'var(--text-muted)',
+              borderBottom: '1px solid var(--border)',
+            }}>
+              {open.path}
+            </div>
+            <FileViewer
+              cwd={cwd}
+              path={open.path}
+              content={open.content}
+              signedUrl={open.signedUrl}
+              encoding={open.encoding}
+              size={open.size}
+              lang={open.lang ?? langFromPath(open.path) ?? undefined}
+              mime={open.mime}
+            />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
