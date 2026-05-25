@@ -48,45 +48,51 @@ export default function Chat({ client, initialActive }: Props) {
       }
       if (t === 'streaming_start') { setStreaming(true); return; }
       if (t === 'assistant') {
-        // SDK message shape: { type:'assistant', message: { content: Block[] }, ... }
+        // SDK shape: { type:'assistant', message: { content: Block[] } }
         // Blocks: { type:'text', text } | { type:'tool_use', id, name, input }
+        // Process blocks IN ORDER so text+tool+text sequences interleave correctly.
         const content = (msg as any).message?.content;
-        let textChunk = '';
-        const toolBlocks: { id: string; name: string; input?: Record<string, unknown> }[] = [];
+        const blocks: Array<
+          | { kind: 'text'; text: string }
+          | { kind: 'tool'; id: string; name: string; input?: Record<string, unknown> }
+        > = [];
         if (Array.isArray(content)) {
           for (const b of content) {
-            if (b?.type === 'text' && typeof b.text === 'string') textChunk += b.text;
-            else if (b?.type === 'tool_use' && typeof b.id === 'string') {
-              toolBlocks.push({ id: b.id, name: b.name ?? 'tool', input: b.input });
+            if (b?.type === 'text' && typeof b.text === 'string' && b.text.length) {
+              blocks.push({ kind: 'text', text: b.text });
+            } else if (b?.type === 'tool_use' && typeof b.id === 'string') {
+              blocks.push({ kind: 'tool', id: b.id, name: b.name ?? 'tool', input: b.input });
             }
           }
-        } else if (typeof (msg as any).text === 'string') {
-          textChunk = (msg as any).text;
+        } else if (typeof (msg as any).text === 'string' && (msg as any).text.length) {
+          blocks.push({ kind: 'text', text: (msg as any).text });
         }
-        if (textChunk) {
-          setMessages((arr) => {
-            const last = arr[arr.length - 1];
-            if (last && last.role === 'assistant' && last.streaming) {
-              return [...arr.slice(0, -1), { ...last, text: (last.text ?? '') + textChunk }];
+        if (!blocks.length) return;
+        setMessages((arr) => {
+          let next = arr.slice();
+          for (const blk of blocks) {
+            if (blk.kind === 'text') {
+              const last = next[next.length - 1];
+              if (last && last.role === 'assistant' && last.streaming) {
+                next[next.length - 1] = { ...last, text: (last.text ?? '') + blk.text };
+              } else {
+                next.push({ id: `a-${Date.now()}-${next.length}`, role: 'assistant', text: blk.text, streaming: true });
+              }
+            } else {
+              if (next.some((m) => m.id === `tool-${blk.id}`)) continue;
+              // Finalize any open assistant bubble so the next text starts fresh below.
+              next = next.map((m) => m.streaming && m.role === 'assistant' ? { ...m, streaming: false } : m);
+              next.push({
+                id: `tool-${blk.id}`,
+                role: 'tool',
+                toolName: blk.name,
+                toolInput: blk.input,
+                toolStatus: 'running',
+              });
             }
-            return [...arr, { id: `a-${Date.now()}`, role: 'assistant', text: textChunk, streaming: true }];
-          });
-        }
-        for (const tb of toolBlocks) {
-          setMessages((arr) => {
-            if (arr.some((m) => m.id === `tool-${tb.id}`)) return arr;
-            // Stop streaming on the previous assistant bubble so the next text
-            // delta starts a fresh bubble below this tool card.
-            const next = arr.map((m) => m.streaming && m.role === 'assistant' ? { ...m, streaming: false } : m);
-            return [...next, {
-              id: `tool-${tb.id}`,
-              role: 'tool',
-              toolName: tb.name,
-              toolInput: tb.input,
-              toolStatus: 'running',
-            }];
-          });
-        }
+          }
+          return next;
+        });
         return;
       }
       // Tool results arrive in a `user` SDK message with tool_result blocks
