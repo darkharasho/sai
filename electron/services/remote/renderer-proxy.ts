@@ -1,6 +1,13 @@
 import type { BrowserWindow } from 'electron';
 
-type Kind = 'listSessions' | 'loadHistory' | 'getActiveSession';
+type Kind = 'listSessions' | 'loadHistory' | 'getActiveSession' | 'listWorkspaces' | 'setActiveWorkspace';
+
+export interface RemoteWorkspace {
+  projectPath: string;
+  name: string;
+  kind: 'project' | 'meta';
+  members?: { projectPath: string; name: string }[];
+}
 interface Pending {
   resolve: (v: unknown) => void;
   reject: (e: Error) => void;
@@ -41,6 +48,14 @@ export class RendererProxy {
    */
   getActiveSession(): Promise<{ projectPath: string; scope: string; sessionId: string } | null> {
     return this.request('getActiveSession', {}) as Promise<{ projectPath: string; scope: string; sessionId: string } | null>;
+  }
+
+  listWorkspaces(): Promise<RemoteWorkspace[]> {
+    return this.request('listWorkspaces', {}) as Promise<RemoteWorkspace[]>;
+  }
+
+  setActiveWorkspace(projectPath: string): Promise<void> {
+    return this.request('setActiveWorkspace', { projectPath }) as Promise<void>;
   }
 
   handleReply(reply: ProxyReply): void {
