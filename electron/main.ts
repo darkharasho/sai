@@ -8,7 +8,7 @@ import { PairingStore } from './services/remote/pairing-store';
 import { SessionBus } from './services/remote/session-bus';
 import { resolveTailnetEndpoint } from './services/remote/tailnet';
 import { registerTerminalHandlers, destroyAllTerminals } from './services/pty';
-import { registerClaudeHandlers } from './services/claude';
+import { registerClaudeHandlers, setRemoteCeiling } from './services/claude';
 import { registerGitHandlers } from './services/git';
 import { registerFsHandlers } from './services/fs';
 import { registerUpdater } from './services/updater';
@@ -63,7 +63,7 @@ let bus: SessionBus | null = null;
 let remoteKvPath: string | null = null;
 const REMOTE_PORT = 17829;
 
-interface RemoteKv { screenshotSecret?: string; enabled?: boolean }
+interface RemoteKv { screenshotSecret?: string; enabled?: boolean; remoteCeiling?: 'auto' | 'auto-read' | 'always-ask' | null }
 
 function readRemoteKv(): RemoteKv {
   if (!remoteKvPath) return {};
@@ -90,6 +90,7 @@ async function getOrInitRemote(): Promise<RemoteModule> {
     writeRemoteKv(kv);
   }
   const screenshotSecret = kv.screenshotSecret!;
+  setRemoteCeiling(kv.remoteCeiling ?? null);
 
   const pwaDir = app.isPackaged
     ? path.join(process.resourcesPath, 'app', 'dist', 'renderer-remote')
@@ -642,6 +643,17 @@ function createWindow() {
     await getOrInitRemote();
     pairing!.revoke(deviceId);
     remote!.closeDeviceConnections(deviceId);
+  });
+
+  ipcMain.handle('remote:setCeiling', async (_e, ceiling: 'auto' | 'auto-read' | 'always-ask' | null) => {
+    await getOrInitRemote();
+    writeRemoteKv({ remoteCeiling: ceiling });
+    setRemoteCeiling(ceiling);
+  });
+
+  ipcMain.handle('remote:getCeiling', async () => {
+    await getOrInitRemote();
+    return readRemoteKv().remoteCeiling ?? null;
   });
 }
 

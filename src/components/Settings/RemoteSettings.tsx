@@ -43,6 +43,7 @@ const codeStyle: React.CSSProperties = {
 
 export default function RemoteSettings() {
   const [enabled, setEnabled] = useState<boolean>(false);
+  const [ceiling, setCeiling] = useState<'auto' | 'auto-read' | 'always-ask' | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
   const [pairUrl, setPairUrl] = useState<string | null>(null);
@@ -59,6 +60,15 @@ export default function RemoteSettings() {
   useEffect(() => {
     void window.sai.remote.status().then((s: Status) => setEnabled(Boolean(s.enabled)));
   }, []);
+
+  useEffect(() => {
+    void window.sai.remote.getCeiling().then(setCeiling);
+  }, []);
+
+  const handleCeiling = async (next: 'auto' | 'auto-read' | 'always-ask' | null) => {
+    setCeiling(next);
+    await window.sai.remote.setCeiling(next);
+  };
 
   useEffect(() => {
     void refresh();
@@ -109,6 +119,29 @@ export default function RemoteSettings() {
         >
           <span className="settings-toggle-thumb" />
         </button>
+      </div>
+
+      <div className="settings-row settings-row-spaced">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Remote autonomy ceiling</div>
+          <div className="settings-row-desc">
+            Cap the approval mode for prompts sent from the phone. Clamped against your desktop setting; never more permissive.
+          </div>
+        </div>
+        <select
+          value={ceiling ?? ''}
+          onChange={(e) => void handleCeiling((e.target.value || null) as any)}
+          style={{
+            fontSize: 12, padding: '4px 8px',
+            background: 'var(--bg-secondary)', color: 'var(--text)',
+            border: '1px solid var(--border)', borderRadius: 6,
+          }}
+        >
+          <option value="">No clamp (use desktop)</option>
+          <option value="always-ask">Always ask</option>
+          <option value="auto-read">Auto for reads, ask for writes</option>
+          <option value="auto">Auto (allow all)</option>
+        </select>
       </div>
 
       <div className="settings-divider" />

@@ -280,5 +280,8 @@ contextBridge.exposeInMainWorld('sai', {
     mintPairCode: () => ipcRenderer.invoke('remote:mintPairCode'),
     listDevices:  () => ipcRenderer.invoke('remote:listDevices'),
     revoke:       (deviceId: string) => ipcRenderer.invoke('remote:revoke', deviceId),
+    setCeiling: (ceiling: 'auto' | 'auto-read' | 'always-ask' | null) =>
+      ipcRenderer.invoke('remote:setCeiling', ceiling),
+    getCeiling: () => ipcRenderer.invoke('remote:getCeiling'),
   },
 });
