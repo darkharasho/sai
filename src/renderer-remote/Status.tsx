@@ -48,21 +48,39 @@ export default function Status({ deviceLabel, serverUrl, wsState, onDisconnect }
         <span style={{ color: 'var(--text-muted)' }}>·</span>
         <span style={{ color: 'var(--text-muted)' }}>{serverUrl}</span>
       </div>
-      <button
-        onClick={onDisconnect}
-        style={{
-          marginTop: 16,
-          padding: '10px 18px',
-          fontSize: 13,
-          background: 'var(--bg-elevated)',
-          color: 'var(--text)',
-          border: '1px solid var(--border)',
-          borderRadius: 8,
-          cursor: 'pointer',
-        }}
-      >
-        Disconnect
-      </button>
+      <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+        <button
+          onClick={() => location.reload()}
+          style={{
+            padding: '10px 18px',
+            fontSize: 13,
+            background: 'var(--accent)',
+            color: '#000',
+            border: '1px solid var(--accent)',
+            borderRadius: 8,
+            cursor: 'pointer',
+            fontWeight: 500,
+            fontFamily: 'inherit',
+          }}
+        >
+          Reload
+        </button>
+        <button
+          onClick={onDisconnect}
+          style={{
+            padding: '10px 18px',
+            fontSize: 13,
+            background: 'var(--bg-elevated)',
+            color: 'var(--text)',
+            border: '1px solid var(--border)',
+            borderRadius: 8,
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+          }}
+        >
+          Disconnect
+        </button>
+      </div>
     </div>
   );
 }
