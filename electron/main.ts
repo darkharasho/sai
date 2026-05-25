@@ -7,8 +7,29 @@ import { BridgeServer } from './services/remote/bridge-server';
 import { PairingStore } from './services/remote/pairing-store';
 import { SessionBus } from './services/remote/session-bus';
 import { resolveTailnetEndpoint } from './services/remote/tailnet';
+import { enrichedEnv } from './services/shellEnv';
+import { execFile as _execFile } from 'node:child_process';
+import { promisify as _promisify } from 'node:util';
+const _execFileP = _promisify(_execFile);
+
+// Wrap `tailscale` shell calls with SAI's enrichedEnv (login-shell PATH).
+// Without this, Electron's stripped PATH may not find `/usr/bin/tailscale`.
+async function _resolveTailnetEndpointWithEnv() {
+  return resolveTailnetEndpoint({
+    exec: async () => {
+      try {
+        const r = await _execFileP('tailscale', ['status', '--json'], { env: enrichedEnv() });
+        return { stdout: r.stdout, stderr: r.stderr, code: 0 };
+      } catch (err) {
+        const e = err as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
+        return { stdout: e.stdout ?? '', stderr: e.stderr ?? '', code: typeof e.code === 'number' ? e.code : 1 };
+      }
+    },
+  });
+}
 import { registerTerminalHandlers, destroyAllTerminals } from './services/pty';
-import { registerClaudeHandlers } from './services/claude';
+import { registerClaudeHandlers, setRemoteCeiling, setRemoteBus, sendImpl, approveImpl, interruptImpl } from './services/claude';
+import { RendererProxy } from './services/remote/renderer-proxy';
 import { registerGitHandlers } from './services/git';
 import { registerFsHandlers } from './services/fs';
 import { registerUpdater } from './services/updater';
@@ -60,10 +81,22 @@ let useFramelessRounded = false;
 let remote: RemoteModule | null = null;
 let pairing: PairingStore | null = null;
 let bus: SessionBus | null = null;
+let rendererProxy: RendererProxy | null = null;
 let remoteKvPath: string | null = null;
-const REMOTE_PORT = 17829;
+let activeSessionBroadcast: ((payload: { projectPath: string; scope: string; sessionId: string }) => void) | null = null;
+let lastActiveSession: { projectPath: string; scope: string; sessionId: string } | null = null;
+// Otto uses 17829; pick a distinct port so both can run side by side.
+const REMOTE_PORT = 17830;
 
-interface RemoteKv { screenshotSecret?: string; enabled?: boolean }
+// Register the active-session IPC handler at module load — the renderer fires this
+// on every session change regardless of whether the mobile bridge is enabled. The
+// handler stays a no-op until BridgeServer wires up `activeSessionBroadcast`.
+ipcMain.handle('remote:setActiveSession', (_e, payload) => {
+  lastActiveSession = payload;
+  activeSessionBroadcast?.(payload);
+});
+
+interface RemoteKv { screenshotSecret?: string; enabled?: boolean; remoteCeiling?: 'auto' | 'auto-read' | 'always-ask' | null }
 
 function readRemoteKv(): RemoteKv {
   if (!remoteKvPath) return {};
@@ -83,6 +116,9 @@ async function getOrInitRemote(): Promise<RemoteModule> {
   remoteKvPath = path.join(userDataDir, 'sai-remote-kv.json');
   pairing = new PairingStore(pairingPath);
   bus = new SessionBus();
+  setRemoteBus(bus);
+  rendererProxy = new RendererProxy({ getWindow: () => mainWindow });
+  ipcMain.handle('remote:proxy:reply', (_e, reply) => rendererProxy?.handleReply(reply));
 
   let kv = readRemoteKv();
   if (!kv.screenshotSecret) {
@@ -90,6 +126,7 @@ async function getOrInitRemote(): Promise<RemoteModule> {
     writeRemoteKv(kv);
   }
   const screenshotSecret = kv.screenshotSecret!;
+  setRemoteCeiling(kv.remoteCeiling ?? null);
 
   const pwaDir = app.isPackaged
     ? path.join(process.resourcesPath, 'app', 'dist', 'renderer-remote')
@@ -98,7 +135,7 @@ async function getOrInitRemote(): Promise<RemoteModule> {
   remote = new RemoteModule({
     pairing,
     bus,
-    resolveTailnetEndpoint: () => resolveTailnetEndpoint(),
+    resolveTailnetEndpoint: () => _resolveTailnetEndpointWithEnv(),
     makeBridge: (tailnetIp) => new BridgeServer({
       tailnetIp,
       pairing: pairing!,
@@ -107,6 +144,28 @@ async function getOrInitRemote(): Promise<RemoteModule> {
       screenshotSecret,
       loadScreenshot: async () => null, // Phase 3+ wires this
       port: REMOTE_PORT,
+      sendPrompt: (args) => sendImpl(
+        args.projectPath, args.text, undefined,
+        args.permMode, args.effort, args.model,
+        args.scope, 'remote',
+      ),
+      resolveApproval: async (args) => {
+        await approveImpl(args.projectPath, args.toolUseId, args.decision === 'approve', args.modifiedCommand, args.scope);
+      },
+      interruptTurn: (path, scope) => interruptImpl(path, scope),
+      listSessions: async (path) => (await rendererProxy!.listSessions(path)) as any,
+      loadHistory: async (sid) => (await rendererProxy!.loadHistory(sid)) as any,
+      registerActiveSessionBroadcast: (broadcast) => {
+        activeSessionBroadcast = broadcast;
+      },
+      getInitialActiveSession: () => lastActiveSession,
+      getActiveSessionFromRenderer: async () => {
+        try {
+          const v = await rendererProxy!.getActiveSession();
+          if (v) lastActiveSession = v as any;
+          return v as any;
+        } catch { return null; }
+      },
     }),
   });
   return remote;
@@ -233,6 +292,16 @@ function createWindow() {
 
   registerTerminalHandlers(mainWindow);
   registerClaudeHandlers(mainWindow);
+
+  // Auto-start the mobile remote bridge if it was enabled before the last quit.
+  void (async () => {
+    const r = await getOrInitRemote();
+    if (readRemoteKv().enabled) {
+      try { await r.start(); } catch (err) {
+        console.warn('[remote] auto-start failed:', err);
+      }
+    }
+  })();
   registerCodexHandlers(mainWindow);
   registerGeminiHandlers(mainWindow);
   registerGitHandlers();
@@ -643,6 +712,17 @@ function createWindow() {
     pairing!.revoke(deviceId);
     remote!.closeDeviceConnections(deviceId);
   });
+
+  ipcMain.handle('remote:setCeiling', async (_e, ceiling: 'auto' | 'auto-read' | 'always-ask' | null) => {
+    await getOrInitRemote();
+    writeRemoteKv({ remoteCeiling: ceiling });
+    setRemoteCeiling(ceiling);
+  });
+
+  ipcMain.handle('remote:getCeiling', async () => {
+    await getOrInitRemote();
+    return readRemoteKv().remoteCeiling ?? null;
+  });
 }
 
 // Suppress EPIPE errors from writing to closed streams (e.g. killed child processes)
@@ -652,9 +732,17 @@ process.on('uncaughtException', (err) => {
 });
 
 app.whenReady().then(createWindow);
-app.on('before-quit', () => {
+let _quitInProgress = false;
+app.on('before-quit', (e) => {
   try { swarmMcpHost.stop(); } catch { /* noop */ }
-  void remote?.stop();
+  // Synchronously release the remote bridge port before Electron exits.
+  if (remote && !_quitInProgress) {
+    _quitInProgress = true;
+    e.preventDefault();
+    // Cap the await — never block Electron exit on a hung socket close.
+    const timer = setTimeout(() => app.exit(0), 2000);
+    void remote.stop().finally(() => { clearTimeout(timer); app.exit(0); });
+  }
 });
 app.on('window-all-closed', () => {
   stopSuspendTimer();

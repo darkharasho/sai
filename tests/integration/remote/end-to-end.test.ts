@@ -53,9 +53,11 @@ describe('mobile remote end-to-end', () => {
         if (m.type === 'noop') { ws.off('message', on); resolve(m); }
       });
     });
-    bus.publish('t1', { type: 'noop', n: 42 });
+    ws.send(JSON.stringify({ type: 'session.attach', projectPath: '/p', scope: 'chat', sessionId: 's1' }));
+    await new Promise((r) => setTimeout(r, 30));
+    bus.publish('chat:/p:chat', { type: 'noop', n: 42 });
     const frame = await got;
-    expect(frame.topic).toBe('t1');
+    expect(frame.topic).toBe('chat:/p:chat');
     expect(frame.n).toBe(42);
 
     // 4. Revoke → WS closes

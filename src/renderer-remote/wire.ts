@@ -17,11 +17,34 @@ export async function pair(code: string, deviceLabel: string): Promise<PairResul
 
 export type WireMsg = { type: string; [k: string]: unknown };
 
+export interface ChatPromptArgs {
+  text: string;
+  projectPath: string;
+  scope?: string;
+  model?: string;
+  effort?: string;
+  permMode?: string;
+}
+
+export interface ChatApprovalArgs {
+  toolUseId: string;
+  decision: 'approve' | 'deny';
+  modifiedCommand?: string;
+  projectPath: string;
+  scope?: string;
+}
+
 export interface WireClient {
   send(msg: WireMsg): void;
   close(): void;
   on(handler: (msg: WireMsg) => void): () => void;
   onState(handler: (s: 'opening' | 'open' | 'closed') => void): () => void;
+  attach(args: { projectPath: string; scope?: string; sessionId: string }): void;
+  setFollow(enabled: boolean): void;
+  listSessions(projectPath: string): Promise<unknown[]>;
+  sendPrompt(args: ChatPromptArgs): void;
+  approve(args: ChatApprovalArgs): void;
+  interrupt(projectPath: string, scope?: string): void;
 }
 
 export function connect(token: string): WireClient {
@@ -61,10 +84,38 @@ export function connect(token: string): WireClient {
   };
   open();
 
+  let reqCounter = 0;
+  const pendingReq = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void }>();
+  handlers.add((msg) => {
+    const reqId = (msg as any).reqId;
+    if (typeof reqId === 'string' && pendingReq.has(reqId)) {
+      const { resolve, reject } = pendingReq.get(reqId)!;
+      pendingReq.delete(reqId);
+      if ((msg as any).type === 'error') {
+        reject(new Error(String((msg as any).message ?? 'error')));
+      } else {
+        resolve((msg as any).sessions ?? msg);
+      }
+    }
+  });
+
+  const sendFrame = (m: WireMsg) => ws?.send(JSON.stringify(m));
+
   return {
-    send: (msg) => ws?.send(JSON.stringify(msg)),
+    send: sendFrame,
     close: () => { closed = true; ws?.close(); },
     on: (h) => { handlers.add(h); return () => { handlers.delete(h); }; },
     onState: (h) => { stateHandlers.add(h); return () => { stateHandlers.delete(h); }; },
+    attach: (a) => sendFrame({ type: 'session.attach', projectPath: a.projectPath, scope: a.scope ?? 'chat', sessionId: a.sessionId }),
+    setFollow: (enabled) => sendFrame({ type: 'session.follow', enabled }),
+    listSessions: (projectPath) => new Promise((resolve, reject) => {
+      const reqId = `r${++reqCounter}`;
+      pendingReq.set(reqId, { resolve, reject });
+      setTimeout(() => { if (pendingReq.delete(reqId)) reject(new Error('sessions.list timeout')); }, 5000);
+      sendFrame({ type: 'sessions.list', projectPath, reqId });
+    }),
+    sendPrompt: (a) => sendFrame({ type: 'prompt', text: a.text, projectPath: a.projectPath, scope: a.scope ?? 'chat', model: a.model, effort: a.effort, permMode: a.permMode }),
+    approve: (a) => sendFrame({ type: 'approval', toolUseId: a.toolUseId, decision: a.decision, modifiedCommand: a.modifiedCommand, projectPath: a.projectPath, scope: a.scope ?? 'chat' }),
+    interrupt: (projectPath, scope) => sendFrame({ type: 'interrupt', projectPath, scope: scope ?? 'chat' }),
   };
 }

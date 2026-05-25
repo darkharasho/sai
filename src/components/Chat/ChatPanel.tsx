@@ -765,6 +765,19 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         return;
       }
 
+      // Mobile remote: append the user bubble for phone-originated prompts.
+      // Desktop-originated prompts already do an optimistic add in the send path,
+      // so only echo when origin === 'remote'.
+      if (msg.type === 'user_message' && msg.origin === 'remote') {
+        setMessages(prev => [...prev, {
+          id: crypto.randomUUID(),
+          role: 'user',
+          content: msg.text ?? '',
+          timestamp: Date.now(),
+        }]);
+        return;
+      }
+
       // End-of-turn: clear streaming immediately for both 'result' and 'done',
       // matching App.tsx's workspace busy indicator pattern.
       if (msg.type === 'result' || msg.type === 'done') {

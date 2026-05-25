@@ -48,6 +48,7 @@ import { handleSwarmToolRequest, type SwarmHost } from './lib/swarmOrchestratorD
 import { executeSlashCommand } from './lib/orchestratorSlashCommands';
 import { isOrchestratorToolDrift, describeToolDrift } from './lib/orchestratorToolDrift';
 import { resolveTaskRef } from './lib/swarmRef';
+import { installRemoteProxyHandler } from './lib/remoteProxyClient';
 
 const SWARM_DEFAULT_CAP = 5;
 import { swarmBranchName } from './lib/swarmSlug';
@@ -285,6 +286,17 @@ export default function App() {
     for (const count of notificationCounts.values()) total += count;
     window.sai.setBadgeCount(total);
   }, [notificationCounts]);
+
+  // Always-current snapshot of the active workspace+session for the proxy.
+  const activeSessionRef = useRef<{ projectPath: string; scope: string; sessionId: string } | null>(null);
+
+  // Remote proxy: handle chatDb read requests forwarded from paired devices
+  useEffect(() => {
+    const off = installRemoteProxyHandler({
+      getActiveSession: () => activeSessionRef.current,
+    });
+    return off;
+  }, []);
 
   useEffect(() => { workspacesRef.current = workspaces; }, [workspaces]);
   useEffect(() => { swarmTasksByWsRef.current = swarmTasksByWs; }, [swarmTasksByWs]);
@@ -1101,6 +1113,21 @@ export default function App() {
   }, [workspaces]);
 
   const activeWorkspace = activeProjectPath ? getWorkspace(activeProjectPath) : null;
+
+  // Broadcast active session changes to paired follower devices
+  useEffect(() => {
+    if (!activeWorkspace || !activeWorkspace.activeSession) {
+      activeSessionRef.current = null;
+      return;
+    }
+    const snapshot = {
+      projectPath: activeWorkspace.projectPath,
+      scope: 'chat',
+      sessionId: activeWorkspace.activeSession.id,
+    };
+    activeSessionRef.current = snapshot;
+    void (window as any).sai?.remote?.setActiveSession?.(snapshot);
+  }, [activeWorkspace?.projectPath, activeWorkspace?.activeSession?.id]);
 
   const updateWorkspace = useCallback((path: string, updater: (ws: WorkspaceContext) => WorkspaceContext) => {
     setWorkspaces(prev => {

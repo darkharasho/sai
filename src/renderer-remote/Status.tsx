@@ -1,3 +1,5 @@
+import SaiLogo from './branding/SaiLogo';
+
 interface Props {
   deviceLabel: string;
   serverUrl: string;
@@ -6,21 +8,58 @@ interface Props {
 }
 
 export default function Status({ deviceLabel, serverUrl, wsState, onDisconnect }: Props) {
-  const dot = wsState === 'open' ? 'bg-green-500' : wsState === 'opening' ? 'bg-amber-500' : 'bg-red-500';
+  const dotColor = wsState === 'open' ? 'var(--green)' : wsState === 'opening' ? 'var(--accent)' : 'var(--red)';
+  const wsLabel = wsState === 'open' ? 'connected' : wsState === 'opening' ? 'connecting…' : 'disconnected';
+
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-6 gap-4">
-      <div className="text-4xl">✓</div>
-      <h1 className="text-2xl font-semibold">Paired</h1>
-      <p className="text-sm text-neutral-400">{deviceLabel}</p>
-      <div className="flex items-center gap-2 text-sm">
-        <span className={`inline-block w-2 h-2 rounded-full ${dot}`} />
-        <span>{wsState}</span>
-        <span className="text-neutral-500">·</span>
-        <span className="text-neutral-400">{serverUrl}</span>
+    <div style={{
+      minHeight: '100svh',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 24,
+      gap: 20,
+      background: 'var(--bg-primary)',
+      color: 'var(--text)',
+    }}>
+      <SaiLogo
+        mode={wsState === 'open' ? 'pulse' : wsState === 'opening' ? 'scanner' : 'static'}
+        size={72}
+        color="var(--accent)"
+      />
+      <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, letterSpacing: '-0.01em' }}>
+        SAI Remote
+      </h1>
+      {deviceLabel && (
+        <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)', fontFamily: '"Geist Mono", ui-monospace, monospace' }}>
+          {deviceLabel}
+        </p>
+      )}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        fontSize: 12,
+        fontFamily: '"Geist Mono", ui-monospace, monospace',
+      }}>
+        <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: dotColor }} />
+        <span style={{ color: 'var(--text)' }}>{wsLabel}</span>
+        <span style={{ color: 'var(--text-muted)' }}>·</span>
+        <span style={{ color: 'var(--text-muted)' }}>{serverUrl}</span>
       </div>
       <button
         onClick={onDisconnect}
-        className="mt-8 px-4 py-2 rounded bg-neutral-800 hover:bg-neutral-700 text-sm"
+        style={{
+          marginTop: 16,
+          padding: '10px 18px',
+          fontSize: 13,
+          background: 'var(--bg-elevated)',
+          color: 'var(--text)',
+          border: '1px solid var(--border)',
+          borderRadius: 8,
+          cursor: 'pointer',
+        }}
       >
         Disconnect
       </button>

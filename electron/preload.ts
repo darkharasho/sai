@@ -280,5 +280,17 @@ contextBridge.exposeInMainWorld('sai', {
     mintPairCode: () => ipcRenderer.invoke('remote:mintPairCode'),
     listDevices:  () => ipcRenderer.invoke('remote:listDevices'),
     revoke:       (deviceId: string) => ipcRenderer.invoke('remote:revoke', deviceId),
+    setCeiling: (ceiling: 'auto' | 'auto-read' | 'always-ask' | null) =>
+      ipcRenderer.invoke('remote:setCeiling', ceiling),
+    getCeiling: () => ipcRenderer.invoke('remote:getCeiling'),
+    setActiveSession: (payload: { projectPath: string; scope: string; sessionId: string }) =>
+      ipcRenderer.invoke('remote:setActiveSession', payload),
+    onProxyRequest: (cb: (payload: { reqId: number; kind: string; args: any }) => void) => {
+      const listener = (_e: any, payload: any) => cb(payload);
+      ipcRenderer.on('remote:proxy:request', listener);
+      return () => ipcRenderer.removeListener('remote:proxy:request', listener);
+    },
+    sendProxyReply: (payload: { reqId: number; result?: unknown; error?: string }) =>
+      ipcRenderer.invoke('remote:proxy:reply', payload),
   },
 });

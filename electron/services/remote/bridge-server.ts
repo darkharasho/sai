@@ -8,6 +8,39 @@ import type { PairingStore } from './pairing-store';
 import type { SessionBus } from './session-bus';
 import { ScreenshotUrlSigner } from './screenshot-urls';
 
+export interface PromptArgs {
+  text: string;
+  projectPath: string;
+  scope: string;
+  model?: string;
+  effort?: string;
+  permMode?: string;
+}
+
+export interface ApprovalArgs {
+  toolUseId: string;
+  decision: 'approve' | 'deny';
+  modifiedCommand?: string;
+  projectPath: string;
+  scope: string;
+}
+
+export interface SessionMeta {
+  id: string;
+  projectPath: string;
+  title?: string;
+  updatedAt: number;
+  kind?: string;
+}
+
+export interface ChatMsg { [k: string]: unknown }
+
+export interface SessionActivePayload {
+  projectPath: string;
+  scope: string;
+  sessionId: string;
+}
+
 export interface BridgeServerOpts {
   tailnetIp: string | null;
   pairing: PairingStore;
@@ -17,6 +50,16 @@ export interface BridgeServerOpts {
   loadScreenshot: (id: string) => Promise<Buffer | null>;
   /** Preferred TCP port. Defaults to ephemeral inside the class; the production caller pins 17829. */
   port?: number;
+  sendPrompt?: (args: PromptArgs) => void;
+  resolveApproval?: (args: ApprovalArgs) => Promise<void | unknown>;
+  interruptTurn?: (projectPath: string, scope: string) => void;
+  listSessions?: (projectPath: string) => Promise<SessionMeta[]>;
+  loadHistory?: (sessionId: string) => Promise<ChatMsg[]>;
+  registerActiveSessionBroadcast?: (broadcast: (payload: SessionActivePayload) => void) => void;
+  /** Returns the desktop's current active session payload, or null. */
+  getInitialActiveSession?: () => SessionActivePayload | null;
+  /** Async fallback that asks the renderer right now when cache is empty. */
+  getActiveSessionFromRenderer?: () => Promise<SessionActivePayload | null>;
 }
 
 interface PairingCode { code: string; expiresAt: number }
@@ -49,32 +92,68 @@ export class BridgeServer {
     if (!this.opts.tailnetIp) {
       throw new Error('tailnet IP not available; refusing to bind to 0.0.0.0 or 127.0.0.1');
     }
-    const server = http.createServer((req, res) => { void this.handle(req, res); });
     const desired = this.opts.port ?? BridgeServer.DEFAULT_PORT;
-    const tryListen = (p: number) => new Promise<void>((resolve, reject) => {
-      const onErr = (err: Error) => { server.removeListener('error', onErr); reject(err); };
-      server.once('error', onErr);
-      server.listen(p, this.opts.tailnetIp!, () => { server.removeListener('error', onErr); resolve(); });
+    // Build a fresh http.Server per attempt — reusing the same instance
+    // across listen() calls leaks internal listeners.
+    const tryListen = (p: number): Promise<http.Server> => new Promise((resolve, reject) => {
+      const s = http.createServer((req, res) => { void this.handle(req, res); });
+      const onErr = (err: Error) => { s.removeListener('error', onErr); s.close(); reject(err); };
+      s.once('error', onErr);
+      s.listen(p, this.opts.tailnetIp!, () => { s.removeListener('error', onErr); resolve(s); });
     });
-    try {
-      await tryListen(desired);
-    } catch (err) {
-      const e = err as NodeJS.ErrnoException;
-      if (e.code === 'EADDRINUSE' && desired !== 0) {
-        await tryListen(0);
-      } else throw err;
+    // Pin the stable port; retry on EADDRINUSE to ride out hot-restart
+    // races where the previous socket is still releasing. Fall back to
+    // ephemeral only if the port stays held by something else.
+    let server: http.Server | null = null;
+    if (desired !== 0) {
+      for (let i = 0; i < 10; i++) {
+        try {
+          server = await tryListen(desired);
+          break;
+        } catch (err) {
+          const e = err as NodeJS.ErrnoException;
+          if (e.code !== 'EADDRINUSE') throw err;
+          await new Promise((r) => setTimeout(r, 300));
+        }
+      }
+    }
+    if (!server) {
+      console.warn(`[remote] port ${desired} held by another process; falling back to ephemeral`);
+      server = await tryListen(0);
     }
     this.server = server;
     const { port } = server.address() as AddressInfo;
+    console.log(`[remote] bridge listening on http://${this.opts.tailnetIp}:${port}`);
     this.wss = new WebSocketServer({ server, path: '/ws' });
     this.wss.on('connection', (ws, req) => this.handleWs(ws, req));
+    this.opts.registerActiveSessionBroadcast?.((payload) => {
+      if (!this.wss) return;
+      for (const client of this.wss.clients) {
+        if (!(client as any).__followEnabled) continue;
+        try {
+          client.send(JSON.stringify({ v: 1, type: 'session.active', ...payload }));
+        } catch { /* ignore */ }
+      }
+    });
     return { port };
   }
 
   async stop(): Promise<void> {
     const s = this.server; this.server = null;
-    if (this.wss) { this.wss.close(); this.wss = null; }
+    if (this.wss) {
+      // Terminate active clients first; server.close() otherwise waits forever
+      // for them to drain on their own (the phone WS will hold the process open).
+      for (const client of this.wss.clients) {
+        try { client.terminate(); } catch { /* already dead */ }
+      }
+      this.wss.close();
+      this.wss = null;
+    }
+    this.liveSockets.clear();
     if (!s) return;
+    // Force-close any lingering HTTP connections too (Node 18.2+).
+    const sAny = s as unknown as { closeAllConnections?: () => void };
+    try { sAny.closeAllConnections?.(); } catch { /* method unavailable */ }
     await new Promise<void>((resolve) => s.close(() => resolve()));
   }
 
@@ -196,14 +275,105 @@ export class BridgeServer {
         if (!set) { set = new Set(); this.liveSockets.set(found.id, set); }
         set.add(ws);
         ws.send(JSON.stringify({ v: 1, type: 'auth_ok', deviceId: found.id, deviceLabel: found.label }));
+        (ws as any).__attachedTopic = null;
+        (ws as any).__followEnabled = false;
         unsub = this.opts.bus.subscribeAll((topic, e) => {
+          if ((ws as any).__attachedTopic !== topic) return; // gate by attachment
           try { ws.send(JSON.stringify({ v: 1, topic, ...e })); } catch { /* ws may be closed */ }
         });
         return;
       }
 
       if (msg.type === 'ping') { ws.send(JSON.stringify({ v: 1, type: 'pong' })); return; }
-      // Phase 0 has no other inbound messages. Future phases add prompt/interrupt/approval/etc.
+
+      if (msg.type === 'session.attach' && typeof msg.projectPath === 'string') {
+        const scope = (typeof msg.scope === 'string' ? msg.scope : 'chat');
+        const topic = `chat:${msg.projectPath}:${scope}`;
+        (ws as any).__attachedTopic = topic;
+        if (typeof msg.sessionId === 'string') {
+          try {
+            const messages = (await this.opts.loadHistory?.(msg.sessionId)) ?? [];
+            ws.send(JSON.stringify({
+              v: 1, type: 'session.history',
+              projectPath: msg.projectPath, scope, sessionId: msg.sessionId, messages,
+            }));
+          } catch (err) {
+            ws.send(JSON.stringify({ v: 1, type: 'error', code: 'history_unavailable', message: (err as Error).message }));
+          }
+        }
+        return;
+      }
+
+      if (msg.type === 'session.follow' && typeof msg.enabled === 'boolean') {
+        (ws as any).__followEnabled = msg.enabled;
+        if (msg.enabled) {
+          const send = (payload: SessionActivePayload) => {
+            try { ws.send(JSON.stringify({ v: 1, type: 'session.active', ...payload })); }
+            catch { /* ws may be closed */ }
+          };
+          const cached = this.opts.getInitialActiveSession?.();
+          if (cached) send(cached);
+          else if (this.opts.getActiveSessionFromRenderer) {
+            void this.opts.getActiveSessionFromRenderer().then((v) => { if (v) send(v); });
+          }
+        }
+        return;
+      }
+
+      if (msg.type === 'sessions.list' && typeof msg.projectPath === 'string') {
+        const reqId = msg.reqId;
+        try {
+          const sessions = (await this.opts.listSessions?.(msg.projectPath)) ?? [];
+          ws.send(JSON.stringify({ v: 1, type: 'sessions.list.result', reqId, sessions }));
+        } catch (err) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'list_failed', message: (err as Error).message }));
+        }
+        return;
+      }
+
+      if (msg.type === 'prompt' && typeof msg.text === 'string' && typeof msg.projectPath === 'string') {
+        this.opts.sendPrompt?.({
+          text: msg.text,
+          projectPath: msg.projectPath,
+          scope: (typeof msg.scope === 'string' ? msg.scope : 'chat'),
+          model: typeof msg.model === 'string' ? msg.model : undefined,
+          effort: typeof msg.effort === 'string' ? msg.effort : undefined,
+          permMode: typeof msg.permMode === 'string' ? msg.permMode : undefined,
+        });
+        return;
+      }
+
+      if (msg.type === 'approval' && typeof msg.toolUseId === 'string' &&
+          (msg.decision === 'approve' || msg.decision === 'deny') &&
+          typeof msg.projectPath === 'string') {
+        try {
+          await this.opts.resolveApproval?.({
+            toolUseId: msg.toolUseId,
+            decision: msg.decision,
+            modifiedCommand: typeof msg.modifiedCommand === 'string' ? msg.modifiedCommand : undefined,
+            projectPath: msg.projectPath,
+            scope: (typeof msg.scope === 'string' ? msg.scope : 'chat'),
+          });
+        } catch (err) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', code: 'approval_failed', message: (err as Error).message }));
+        }
+        return;
+      }
+
+      if (msg.type === 'interrupt' && typeof msg.projectPath === 'string') {
+        this.opts.interruptTurn?.(msg.projectPath, (typeof msg.scope === 'string' ? msg.scope : 'chat'));
+        return;
+      }
+
+      if (msg.type === 'session.new' && typeof msg.projectPath === 'string') {
+        ws.send(JSON.stringify({
+          v: 1, type: 'session.active',
+          projectPath: msg.projectPath,
+          scope: (typeof msg.scope === 'string' ? msg.scope : 'chat'),
+          sessionId: '',
+        }));
+        return;
+      }
     });
 
     ws.on('close', () => {

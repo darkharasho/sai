@@ -6,6 +6,11 @@ interface SaiRemoteApi {
   mintPairCode: () => Promise<{ code: string; url: string; expiresAt: number }>;
   listDevices: () => Promise<Array<{ id: string; label: string; pairedAt: number; lastSeenAt: number | null; revokedAt: number | null }>>;
   revoke: (deviceId: string) => Promise<void>;
+  setCeiling: (ceiling: 'auto' | 'auto-read' | 'always-ask' | null) => Promise<void>;
+  getCeiling: () => Promise<'auto' | 'auto-read' | 'always-ask' | null>;
+  setActiveSession: (payload: { projectPath: string; scope: string; sessionId: string }) => Promise<void>;
+  onProxyRequest: (cb: (payload: { reqId: number; kind: string; args: any }) => void) => (() => void);
+  sendProxyReply: (payload: { reqId: number; result?: unknown; error?: string }) => Promise<void>;
 }
 
 declare global {

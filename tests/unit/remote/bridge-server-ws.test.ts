@@ -68,9 +68,12 @@ describe('BridgeServer WS', () => {
     await new Promise((r) => ws.once('open', r));
     ws.send(JSON.stringify({ type: 'auth', token }));
     await once(ws, 'auth_ok');
-    setTimeout(() => bus.publish('topic-1', { type: 'noop', payload: 1 }), 10);
+    ws.send(JSON.stringify({ type: 'session.attach', projectPath: '/p', scope: 'chat', sessionId: 's1' }));
+    // Wait for the attach to register (history may or may not arrive — that depends on whether loadHistory was provided)
+    await new Promise((r) => setTimeout(r, 30));
+    setTimeout(() => bus.publish('chat:/p:chat', { type: 'noop', payload: 1 }), 10);
     const m = await once(ws, 'noop');
-    expect(m.topic).toBe('topic-1');
+    expect(m.topic).toBe('chat:/p:chat');
     expect(m.payload).toBe(1);
     ws.close();
   });
