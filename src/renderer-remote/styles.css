@@ -1,1 +1,9 @@
 @import "tailwindcss";
+
+/* Tailwind v4 auto-detects sources, but be explicit so the chat/ subdir
+   and any nested components are definitely scanned. */
+@source "./**/*.{ts,tsx,html}";
+
+/* Reset any default browser margin that fights the 100svh chat layout */
+html, body { margin: 0; padding: 0; }
+body { overscroll-behavior: none; }

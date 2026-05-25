@@ -116,7 +116,7 @@ export default function Chat({ client, initialActive }: Props) {
     <div
       className="flex flex-col"
       style={{
-        height: '100dvh',
+        height: '100svh',
         paddingTop: 'env(safe-area-inset-top)',
         paddingBottom: 'env(safe-area-inset-bottom)',
       }}
