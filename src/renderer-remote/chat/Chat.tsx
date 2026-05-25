@@ -47,13 +47,24 @@ export default function Chat({ client, initialActive }: Props) {
       }
       if (t === 'streaming_start') { setStreaming(true); return; }
       if (t === 'assistant') {
-        const text = (msg as any).text ?? '';
+        // claude.ts emits the full SDK message shape: { type, message: { content: Block[] }, ... }
+        // where Block is { type: 'text', text } | { type: 'tool_use', name, input, ... }
+        const content = (msg as any).message?.content;
+        let textChunk = '';
+        if (Array.isArray(content)) {
+          for (const b of content) {
+            if (b?.type === 'text' && typeof b.text === 'string') textChunk += b.text;
+          }
+        } else if (typeof (msg as any).text === 'string') {
+          textChunk = (msg as any).text;
+        }
+        if (!textChunk) return;
         setMessages((arr) => {
           const last = arr[arr.length - 1];
           if (last && last.role === 'assistant' && last.streaming) {
-            return [...arr.slice(0, -1), { ...last, text: (last.text ?? '') + text }];
+            return [...arr.slice(0, -1), { ...last, text: (last.text ?? '') + textChunk }];
           }
-          return [...arr, { id: `a-${Date.now()}`, role: 'assistant', text, streaming: true }];
+          return [...arr, { id: `a-${Date.now()}`, role: 'assistant', text: textChunk, streaming: true }];
         });
         return;
       }
@@ -61,8 +72,15 @@ export default function Chat({ client, initialActive }: Props) {
         const text = (msg as any).text ?? '';
         const origin = (msg as any).origin;
         setMessages((arr) => {
-          const last = arr[arr.length - 1];
-          if (last && last.role === 'user' && last.text === text && origin === 'remote') return arr;
+          // Dedup remote-origin echoes against the optimistic user bubble we
+          // added in onSend. The optimistic add is followed by a pending
+          // assistant bubble, so search a small window from the tail, not just `last`.
+          if (origin === 'remote') {
+            for (let i = arr.length - 1; i >= Math.max(0, arr.length - 4); i--) {
+              const m = arr[i];
+              if (m.role === 'user' && m.text === text) return arr;
+            }
+          }
           return [...arr, { id: `u-${Date.now()}`, role: 'user', text }];
         });
         return;

@@ -31,7 +31,8 @@ export default function Composer({ streaming, onSend, onInterrupt }: Props) {
         onKeyDown={onKey}
         placeholder={streaming ? 'Responding…' : 'Message'}
         rows={1}
-        className="flex-1 min-w-0 resize-none bg-neutral-900 border border-neutral-800 rounded px-3 py-2 text-sm focus:outline-none focus:border-neutral-600"
+        className="flex-1 min-w-0 resize-none bg-neutral-900 border border-neutral-800 rounded px-3 py-2 focus:outline-none focus:border-neutral-600"
+        style={{ fontSize: '16px' }}
       />
       {streaming ? (
         <button
