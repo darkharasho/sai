@@ -60,6 +60,8 @@ export interface BridgeServerOpts {
   getInitialActiveSession?: () => SessionActivePayload | null;
   /** Async fallback that asks the renderer right now when cache is empty. */
   getActiveSessionFromRenderer?: () => Promise<SessionActivePayload | null>;
+  listWorkspaces?: () => Promise<import('./renderer-proxy').RemoteWorkspace[]>;
+  setActiveWorkspace?: (projectPath: string) => Promise<void>;
 }
 
 interface PairingCode { code: string; expiresAt: number }
@@ -327,6 +329,25 @@ export class BridgeServer {
           ws.send(JSON.stringify({ v: 1, type: 'sessions.list.result', reqId, sessions }));
         } catch (err) {
           ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'list_failed', message: (err as Error).message }));
+        }
+        return;
+      }
+
+      if (msg.type === 'workspaces.list') {
+        const reqId = msg.reqId;
+        try {
+          const workspaces = (await this.opts.listWorkspaces?.()) ?? [];
+          ws.send(JSON.stringify({ v: 1, type: 'workspaces.list.result', reqId, workspaces }));
+        } catch (err) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'list_failed', message: (err as Error).message }));
+        }
+        return;
+      }
+
+      if (msg.type === 'workspace.set' && typeof msg.projectPath === 'string') {
+        try { await this.opts.setActiveWorkspace?.(msg.projectPath); }
+        catch (err) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', code: 'switch_failed', message: (err as Error).message }));
         }
         return;
       }
