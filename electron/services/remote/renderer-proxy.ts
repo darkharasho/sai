@@ -1,6 +1,6 @@
 import type { BrowserWindow } from 'electron';
 
-type Kind = 'listSessions' | 'loadHistory';
+type Kind = 'listSessions' | 'loadHistory' | 'getActiveSession';
 interface Pending {
   resolve: (v: unknown) => void;
   reject: (e: Error) => void;
@@ -33,6 +33,14 @@ export class RendererProxy {
 
   loadHistory(sessionId: string): Promise<unknown[]> {
     return this.request('loadHistory', { sessionId }) as Promise<unknown[]>;
+  }
+
+  /**
+   * Asks the renderer for its current active workspace + session.
+   * Returns null when no workspace is open or it has no session yet.
+   */
+  getActiveSession(): Promise<{ projectPath: string; scope: string; sessionId: string } | null> {
+    return this.request('getActiveSession', {}) as Promise<{ projectPath: string; scope: string; sessionId: string } | null>;
   }
 
   handleReply(reply: ProxyReply): void {

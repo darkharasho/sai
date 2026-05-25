@@ -58,6 +58,8 @@ export interface BridgeServerOpts {
   registerActiveSessionBroadcast?: (broadcast: (payload: SessionActivePayload) => void) => void;
   /** Returns the desktop's current active session payload, or null. */
   getInitialActiveSession?: () => SessionActivePayload | null;
+  /** Async fallback that asks the renderer right now when cache is empty. */
+  getActiveSessionFromRenderer?: () => Promise<SessionActivePayload | null>;
 }
 
 interface PairingCode { code: string; expiresAt: number }
@@ -291,10 +293,14 @@ export class BridgeServer {
       if (msg.type === 'session.follow' && typeof msg.enabled === 'boolean') {
         (ws as any).__followEnabled = msg.enabled;
         if (msg.enabled) {
-          const initial = this.opts.getInitialActiveSession?.();
-          if (initial) {
-            try { ws.send(JSON.stringify({ v: 1, type: 'session.active', ...initial })); }
+          const send = (payload: SessionActivePayload) => {
+            try { ws.send(JSON.stringify({ v: 1, type: 'session.active', ...payload })); }
             catch { /* ws may be closed */ }
+          };
+          const cached = this.opts.getInitialActiveSession?.();
+          if (cached) send(cached);
+          else if (this.opts.getActiveSessionFromRenderer) {
+            void this.opts.getActiveSessionFromRenderer().then((v) => { if (v) send(v); });
           }
         }
         return;

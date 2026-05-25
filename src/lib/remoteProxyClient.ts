@@ -1,6 +1,16 @@
 import { dbGetSessions, dbGetMessages } from '../chatDb';
 
-export function installRemoteProxyHandler(): () => void {
+export interface ActiveSessionSnapshot {
+  projectPath: string;
+  scope: string;
+  sessionId: string;
+}
+
+export interface RemoteProxyDeps {
+  getActiveSession: () => ActiveSessionSnapshot | null;
+}
+
+export function installRemoteProxyHandler(deps: RemoteProxyDeps): () => void {
   const sai = (window as any).sai;
   if (!sai?.remote?.onProxyRequest) return () => {};
 
@@ -12,6 +22,8 @@ export function installRemoteProxyHandler(): () => void {
         result = await dbGetSessions(args.projectPath);
       } else if (kind === 'loadHistory') {
         result = await dbGetMessages(args.sessionId);
+      } else if (kind === 'getActiveSession') {
+        result = deps.getActiveSession();
       } else {
         throw new Error(`unknown proxy kind: ${kind}`);
       }

@@ -158,6 +158,13 @@ async function getOrInitRemote(): Promise<RemoteModule> {
         activeSessionBroadcast = broadcast;
       },
       getInitialActiveSession: () => lastActiveSession,
+      getActiveSessionFromRenderer: async () => {
+        try {
+          const v = await rendererProxy!.getActiveSession();
+          if (v) lastActiveSession = v as any;
+          return v as any;
+        } catch { return null; }
+      },
     }),
   });
   return remote;
