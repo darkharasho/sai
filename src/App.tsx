@@ -235,6 +235,9 @@ export default function App() {
   // accordion-bar IncludedProjectsControl so both share the same callback.
   const mentionInsertRef = useRef<((linkName: string) => void) | null>(null);
   const workspacesRef = useRef(workspaces);
+  const workspaceStatusRef = useRef<{ busy: Set<string>; streaming: Set<string>; completed: Set<string>; approval: Set<string> }>({
+    busy: new Set(), streaming: new Set(), completed: new Set(), approval: new Set(),
+  });
   const activeProjectPathRef = useRef(activeProjectPath);
   const swarmTasksByWsRef = useRef(swarmTasksByWs);
   const swarmDiffStatsRef = useRef(swarmDiffStats);
@@ -295,11 +298,19 @@ export default function App() {
     const off = installRemoteProxyHandler({
       getActiveSession: () => activeSessionRef.current,
       listWorkspaces: () => {
-        const out: { projectPath: string; name: string; kind: 'project' | 'meta'; members?: { projectPath: string; name: string }[] }[] = [];
+        const out: { projectPath: string; name: string; kind: 'project' | 'meta'; members?: { projectPath: string; name: string }[]; status?: { busy?: boolean; streaming?: boolean; completed?: boolean; approval?: boolean } }[] = [];
         const metaByPath = new Map<string, MetaWorkspaceListItem>();
         for (const m of metaWorkspaces) {
           if (m.syntheticRoot) metaByPath.set(m.syntheticRoot, m);
         }
+        const statusFor = (projectPath: string) => {
+          const busy = workspaceStatusRef.current.busy.has(projectPath);
+          const streaming = workspaceStatusRef.current.streaming.has(projectPath);
+          const completed = workspaceStatusRef.current.completed.has(projectPath);
+          const approval = workspaceStatusRef.current.approval.has(projectPath);
+          if (!busy && !streaming && !completed && !approval) return undefined;
+          return { busy, streaming, completed, approval };
+        };
         workspacesRef.current.forEach((_, projectPath) => {
           const meta = metaByPath.get(projectPath);
           if (meta) {
@@ -308,10 +319,11 @@ export default function App() {
               name: meta.name,
               kind: 'meta',
               members: meta.projects.map((p) => ({ projectPath: p.path, name: p.linkName })),
+              status: statusFor(projectPath),
             });
           } else {
             const base = projectPath.split('/').filter(Boolean).pop() ?? projectPath;
-            out.push({ projectPath, name: base, kind: 'project' });
+            out.push({ projectPath, name: base, kind: 'project', status: statusFor(projectPath) });
           }
         });
         return out;
@@ -322,6 +334,14 @@ export default function App() {
   }, [metaWorkspaces]);
 
   useEffect(() => { workspacesRef.current = workspaces; }, [workspaces]);
+  useEffect(() => {
+    workspaceStatusRef.current = {
+      busy: new Set(busyWorkspaces),
+      streaming: new Set(chatStreamingWorkspaces),
+      completed: new Set(completedWorkspaces),
+      approval: new Set(approvalWorkspaces.keys()),
+    };
+  }, [busyWorkspaces, chatStreamingWorkspaces, completedWorkspaces, approvalWorkspaces]);
   useEffect(() => { swarmTasksByWsRef.current = swarmTasksByWs; }, [swarmTasksByWs]);
   useEffect(() => { swarmDiffStatsRef.current = swarmDiffStats; }, [swarmDiffStats]);
   useEffect(() => { orchestratorSessionIdByWsRef.current = orchestratorSessionIdByWs; }, [orchestratorSessionIdByWs]);

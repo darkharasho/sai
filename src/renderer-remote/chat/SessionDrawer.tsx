@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { WireClient } from '../wire';
 import SaiLogo from '../branding/SaiLogo';
-import WorkspacePicker from './WorkspacePicker';
 
 interface SessionMeta {
   id: string;
@@ -19,11 +18,10 @@ interface Props {
   currentProjectPath: string | null;
   open: boolean;
   onClose: () => void;
-  onPickWorkspace: (projectPath: string) => void;
 }
 
 export default function SessionDrawer({
-  client, followEnabled, onFollowChange, onAttach, currentProjectPath, open, onClose, onPickWorkspace,
+  client, followEnabled, onFollowChange, onAttach, currentProjectPath, open, onClose,
 }: Props) {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [loading, setLoading] = useState(false);
@@ -100,12 +98,6 @@ export default function SessionDrawer({
         </label>
 
         <div style={{ flex: 1, overflowY: 'auto' }}>
-          <WorkspacePicker
-            client={client}
-            currentProjectPath={currentProjectPath}
-            onPick={(path) => { onPickWorkspace(path); onClose(); }}
-          />
-          <div style={{ borderTop: '1px solid var(--border)' }} />
           {loading && <div style={{ padding: '12px 14px', fontSize: 12, color: 'var(--text-muted)' }}>Loading…</div>}
           {err && <div style={{ padding: '12px 14px', fontSize: 12, color: 'var(--red)' }}>{err}</div>}
           {!loading && sessions.length === 0 && !err && (

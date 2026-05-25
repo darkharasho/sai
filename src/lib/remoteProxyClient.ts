@@ -6,11 +6,19 @@ export interface ActiveSessionSnapshot {
   sessionId: string;
 }
 
+export interface RemoteWorkspaceStatusMeta {
+  busy?: boolean;
+  streaming?: boolean;
+  completed?: boolean;
+  approval?: boolean;
+}
+
 export interface RemoteWorkspaceMeta {
   projectPath: string;
   name: string;
   kind: 'project' | 'meta';
   members?: { projectPath: string; name: string }[];
+  status?: RemoteWorkspaceStatusMeta;
 }
 
 export interface RemoteProxyDeps {

@@ -6,6 +6,7 @@ import Approval from './Approval';
 import SessionDrawer from './SessionDrawer';
 import SaiLogo from '../branding/SaiLogo';
 import { useVisualViewportHeight } from '../lib/useVisualViewport';
+import WorkspaceHeader from './WorkspaceHeader';
 import OverridesBar from './OverridesBar';
 import { getOverrides, setOverrides as persistOverrides, clearOverrides, type SessionOverrides } from '../lib/overrides';
 
@@ -287,19 +288,16 @@ export default function Chat({ client, initialActive }: Props) {
           ≡
         </button>
         <SaiLogo mode="idle" size={20} color="var(--accent)" />
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-          <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>SAI</div>
-          <div style={{
-            fontSize: 11,
-            color: 'var(--text-muted)',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            fontFamily: '"Geist Mono", ui-monospace, monospace',
-          }}>
-            {active ? active.projectPath.split('/').pop() : 'no session attached'}
-          </div>
-        </div>
+        <WorkspaceHeader
+          client={client}
+          currentProjectPath={active?.projectPath ?? null}
+          onPick={(projectPath) => {
+            client.setActiveWorkspace(projectPath);
+            if (!follow) {
+              setActive({ projectPath, scope: 'chat', sessionId: '' });
+            }
+          }}
+        />
       </div>
       <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <Transcript messages={messages} />
@@ -326,14 +324,6 @@ export default function Chat({ client, initialActive }: Props) {
         currentProjectPath={active?.projectPath ?? null}
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        onPickWorkspace={(projectPath) => {
-          client.setActiveWorkspace(projectPath);
-          if (!follow) {
-            // Optimistically attach when follow-mode is off; the first event from
-            // the new topic populates the rest.
-            setActive({ projectPath, scope: 'chat', sessionId: '' });
-          }
-        }}
       />
     </div>
   );

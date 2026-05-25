@@ -2,11 +2,19 @@ import type { BrowserWindow } from 'electron';
 
 type Kind = 'listSessions' | 'loadHistory' | 'getActiveSession' | 'listWorkspaces' | 'setActiveWorkspace';
 
+export interface RemoteWorkspaceStatus {
+  busy?: boolean;        // any in-flight activity
+  streaming?: boolean;   // chat turn currently streaming
+  completed?: boolean;   // recently completed turn waiting to be acknowledged
+  approval?: boolean;    // pending tool-approval banner
+}
+
 export interface RemoteWorkspace {
   projectPath: string;
   name: string;
   kind: 'project' | 'meta';
   members?: { projectPath: string; name: string }[];
+  status?: RemoteWorkspaceStatus;
 }
 interface Pending {
   resolve: (v: unknown) => void;
