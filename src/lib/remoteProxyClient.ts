@@ -6,8 +6,17 @@ export interface ActiveSessionSnapshot {
   sessionId: string;
 }
 
+export interface RemoteWorkspaceMeta {
+  projectPath: string;
+  name: string;
+  kind: 'project' | 'meta';
+  members?: { projectPath: string; name: string }[];
+}
+
 export interface RemoteProxyDeps {
   getActiveSession: () => ActiveSessionSnapshot | null;
+  listWorkspaces: () => RemoteWorkspaceMeta[];
+  setActiveWorkspace: (projectPath: string) => void;
 }
 
 export function installRemoteProxyHandler(deps: RemoteProxyDeps): () => void {
@@ -26,6 +35,11 @@ export function installRemoteProxyHandler(deps: RemoteProxyDeps): () => void {
         result = await dbGetMessages(args.sessionId);
       } else if (kind === 'getActiveSession') {
         result = deps.getActiveSession();
+      } else if (kind === 'listWorkspaces') {
+        result = deps.listWorkspaces();
+      } else if (kind === 'setActiveWorkspace') {
+        deps.setActiveWorkspace(args.projectPath);
+        result = null;
       } else {
         throw new Error(`unknown proxy kind: ${kind}`);
       }

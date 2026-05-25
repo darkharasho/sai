@@ -294,9 +294,32 @@ export default function App() {
   useEffect(() => {
     const off = installRemoteProxyHandler({
       getActiveSession: () => activeSessionRef.current,
+      listWorkspaces: () => {
+        const out: { projectPath: string; name: string; kind: 'project' | 'meta'; members?: { projectPath: string; name: string }[] }[] = [];
+        const metaByPath = new Map<string, MetaWorkspaceListItem>();
+        for (const m of metaWorkspaces) {
+          if (m.syntheticRoot) metaByPath.set(m.syntheticRoot, m);
+        }
+        workspacesRef.current.forEach((_, projectPath) => {
+          const meta = metaByPath.get(projectPath);
+          if (meta) {
+            out.push({
+              projectPath,
+              name: meta.name,
+              kind: 'meta',
+              members: meta.projects.map((p) => ({ projectPath: p.path, name: p.linkName })),
+            });
+          } else {
+            const base = projectPath.split('/').filter(Boolean).pop() ?? projectPath;
+            out.push({ projectPath, name: base, kind: 'project' });
+          }
+        });
+        return out;
+      },
+      setActiveWorkspace: (path) => setActiveProjectPath(path),
     });
     return off;
-  }, []);
+  }, [metaWorkspaces]);
 
   useEffect(() => { workspacesRef.current = workspaces; }, [workspaces]);
   useEffect(() => { swarmTasksByWsRef.current = swarmTasksByWs; }, [swarmTasksByWs]);
