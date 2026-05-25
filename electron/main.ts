@@ -7,6 +7,11 @@ import { BridgeServer } from './services/remote/bridge-server';
 import { PairingStore } from './services/remote/pairing-store';
 import { SessionBus } from './services/remote/session-bus';
 import { resolveTailnetEndpoint } from './services/remote/tailnet';
+import { BlobStore } from './services/remote/blob-store';
+import { safeJoin } from './services/remote/safe-join';
+import { langFromPath, isTextLike, mimeFromPath } from './services/remote/lang';
+import { readDirImpl, readFileImpl, readFileBufImpl, statFileImpl } from './services/fs';
+import { gitStatusImpl, gitDiffImpl } from './services/git';
 import { enrichedEnv } from './services/shellEnv';
 import { execFile as _execFile } from 'node:child_process';
 import { promisify as _promisify } from 'node:util';
@@ -82,6 +87,8 @@ let remote: RemoteModule | null = null;
 let pairing: PairingStore | null = null;
 let bus: SessionBus | null = null;
 let rendererProxy: RendererProxy | null = null;
+let blobStore: BlobStore | null = null;
+let bridge: BridgeServer | null = null;
 let remoteKvPath: string | null = null;
 let activeSessionBroadcast: ((payload: { projectPath: string; scope: string; sessionId: string }) => void) | null = null;
 let lastActiveSession: { projectPath: string; scope: string; sessionId: string } | null = null;
@@ -117,6 +124,7 @@ async function getOrInitRemote(): Promise<RemoteModule> {
   pairing = new PairingStore(pairingPath);
   bus = new SessionBus();
   setRemoteBus(bus);
+  blobStore = new BlobStore();
   rendererProxy = new RendererProxy({ getWindow: () => mainWindow });
   ipcMain.handle('remote:proxy:reply', (_e, reply) => rendererProxy?.handleReply(reply));
 
@@ -136,39 +144,78 @@ async function getOrInitRemote(): Promise<RemoteModule> {
     pairing,
     bus,
     resolveTailnetEndpoint: () => _resolveTailnetEndpointWithEnv(),
-    makeBridge: (tailnetIp) => new BridgeServer({
-      tailnetIp,
-      pairing: pairing!,
-      bus: bus!,
-      pwaDir,
-      screenshotSecret,
-      loadScreenshot: async () => null, // Phase 3+ wires this
-      port: REMOTE_PORT,
-      sendPrompt: (args) => sendImpl(
-        args.projectPath, args.text, undefined,
-        args.permMode, args.effort, args.model,
-        args.scope, 'remote',
-      ),
-      resolveApproval: async (args) => {
-        await approveImpl(args.projectPath, args.toolUseId, args.decision === 'approve', args.modifiedCommand, args.scope);
-      },
-      interruptTurn: (path, scope) => interruptImpl(path, scope),
-      listSessions: async (path) => (await rendererProxy!.listSessions(path)) as any,
-      loadHistory: async (sid) => (await rendererProxy!.loadHistory(sid)) as any,
-      listWorkspaces: () => rendererProxy!.listWorkspaces(),
-      setActiveWorkspace: (path) => rendererProxy!.setActiveWorkspace(path),
-      registerActiveSessionBroadcast: (broadcast) => {
-        activeSessionBroadcast = broadcast;
-      },
-      getInitialActiveSession: () => lastActiveSession,
-      getActiveSessionFromRenderer: async () => {
-        try {
-          const v = await rendererProxy!.getActiveSession();
-          if (v) lastActiveSession = v as any;
-          return v as any;
-        } catch { return null; }
-      },
-    }),
+    makeBridge: (tailnetIp) => {
+      const b: BridgeServer = new BridgeServer({
+        tailnetIp,
+        pairing: pairing!,
+        bus: bus!,
+        pwaDir,
+        screenshotSecret,
+        loadScreenshot: async () => null, // Phase 3+ wires this
+        port: REMOTE_PORT,
+        sendPrompt: (args) => sendImpl(
+          args.projectPath, args.text, undefined,
+          args.permMode, args.effort, args.model,
+          args.scope, 'remote',
+        ),
+        resolveApproval: async (args) => {
+          await approveImpl(args.projectPath, args.toolUseId, args.decision === 'approve', args.modifiedCommand, args.scope);
+        },
+        interruptTurn: (path, scope) => interruptImpl(path, scope),
+        listSessions: async (path) => (await rendererProxy!.listSessions(path)) as any,
+        loadHistory: async (sid) => (await rendererProxy!.loadHistory(sid)) as any,
+        listWorkspaces: () => rendererProxy!.listWorkspaces(),
+        setActiveWorkspace: (path) => rendererProxy!.setActiveWorkspace(path),
+        registerActiveSessionBroadcast: (broadcast) => {
+          activeSessionBroadcast = broadcast;
+        },
+        getInitialActiveSession: () => lastActiveSession,
+        getActiveSessionFromRenderer: async () => {
+          try {
+            const v = await rendererProxy!.getActiveSession();
+            if (v) lastActiveSession = v as any;
+            return v as any;
+          } catch { return null; }
+        },
+        listFiles: async (cwd, path) => {
+          const full = safeJoin(cwd, path);
+          const stat = await statFileImpl(full);
+          if (!stat.isDir) throw new Error(`not a directory: ${path}`);
+          const entries = await readDirImpl(full);
+          return entries.map((e) => ({ name: e.name, kind: e.type === 'directory' ? 'dir' as const : 'file' as const }));
+        },
+        readFile: async (cwd, path) => {
+          const full = safeJoin(cwd, path);
+          const stat = await statFileImpl(full);
+          const lang = langFromPath(path) ?? undefined;
+          const inline = isTextLike(path) && stat.size <= 64 * 1024;
+          if (inline) {
+            const content = await readFileImpl(full);
+            return { content, encoding: 'text' as const, size: stat.size, lang };
+          }
+          const id = blobStore!.register(cwd, path);
+          const signedUrl = b.signBlobUrl(id);
+          return { signedUrl, encoding: 'binary' as const, size: stat.size, mime: mimeFromPath(path) };
+        },
+        statusFiles: async (cwd) => {
+          const { entries } = await gitStatusImpl(cwd);
+          return entries;
+        },
+        diffFile: async (cwd, path, staged) => {
+          const diff = await gitDiffImpl(cwd, path, staged);
+          return { diff, lang: langFromPath(path) ?? undefined };
+        },
+        loadBlob: async (id) => {
+          const entry = blobStore!.consume(id);
+          if (!entry) return null;
+          const full = safeJoin(entry.cwd, entry.path);
+          const buffer = await readFileBufImpl(full);
+          return { buffer, mime: mimeFromPath(entry.path) };
+        },
+      });
+      bridge = b;
+      return b;
+    },
   });
   return remote;
 }
