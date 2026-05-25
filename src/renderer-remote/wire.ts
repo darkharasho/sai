@@ -47,6 +47,17 @@ export interface WireClient {
   sendPrompt(args: ChatPromptArgs): void;
   approve(args: ChatApprovalArgs): void;
   interrupt(projectPath: string, scope?: string): void;
+  listFiles(cwd: string, path: string): Promise<unknown[]>;
+  readFile(cwd: string, path: string): Promise<{
+    content?: string;
+    signedUrl?: string;
+    encoding: 'text' | 'binary';
+    size: number;
+    lang?: string;
+    mime?: string;
+  }>;
+  statusFiles(cwd: string): Promise<unknown[]>;
+  diffFile(cwd: string, path: string, staged?: boolean): Promise<{ diff: string; lang?: string }>;
 }
 
 export function connect(token: string): WireClient {
@@ -100,6 +111,14 @@ export function connect(token: string): WireClient {
         entry.resolve((msg as any).sessions ?? []);
       } else if (t === 'workspaces.list.result') {
         entry.resolve((msg as any).workspaces ?? []);
+      } else if (t === 'files.list.result') {
+        entry.resolve((msg as any).entries ?? []);
+      } else if (t === 'files.read.result') {
+        entry.resolve(msg);
+      } else if (t === 'files.status.result') {
+        entry.resolve((msg as any).entries ?? []);
+      } else if (t === 'files.diff.result') {
+        entry.resolve({ diff: (msg as any).diff ?? '', lang: (msg as any).lang });
       } else {
         entry.resolve(msg);
       }
@@ -131,5 +150,29 @@ export function connect(token: string): WireClient {
     sendPrompt: (a) => sendFrame({ type: 'prompt', text: a.text, projectPath: a.projectPath, scope: a.scope ?? 'chat', model: a.model, effort: a.effort, permMode: a.permMode }),
     approve: (a) => sendFrame({ type: 'approval', toolUseId: a.toolUseId, decision: a.decision, modifiedCommand: a.modifiedCommand, projectPath: a.projectPath, scope: a.scope ?? 'chat' }),
     interrupt: (projectPath, scope) => sendFrame({ type: 'interrupt', projectPath, scope: scope ?? 'chat' }),
+    listFiles: (cwd, path) => new Promise((resolve, reject) => {
+      const reqId = `r${++reqCounter}`;
+      pendingReq.set(reqId, { resolve, reject });
+      setTimeout(() => { if (pendingReq.delete(reqId)) reject(new Error('files.list timeout')); }, 5000);
+      sendFrame({ type: 'files.list', cwd, path, reqId });
+    }),
+    readFile: (cwd, path) => new Promise((resolve, reject) => {
+      const reqId = `r${++reqCounter}`;
+      pendingReq.set(reqId, { resolve, reject });
+      setTimeout(() => { if (pendingReq.delete(reqId)) reject(new Error('files.read timeout')); }, 10_000);
+      sendFrame({ type: 'files.read', cwd, path, reqId });
+    }),
+    statusFiles: (cwd) => new Promise((resolve, reject) => {
+      const reqId = `r${++reqCounter}`;
+      pendingReq.set(reqId, { resolve, reject });
+      setTimeout(() => { if (pendingReq.delete(reqId)) reject(new Error('files.status timeout')); }, 5000);
+      sendFrame({ type: 'files.status', cwd, reqId });
+    }),
+    diffFile: (cwd, path, staged) => new Promise((resolve, reject) => {
+      const reqId = `r${++reqCounter}`;
+      pendingReq.set(reqId, { resolve, reject });
+      setTimeout(() => { if (pendingReq.delete(reqId)) reject(new Error('files.diff timeout')); }, 5000);
+      sendFrame({ type: 'files.diff', cwd, path, staged: !!staged, reqId });
+    }),
   };
 }
