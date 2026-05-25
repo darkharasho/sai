@@ -37,6 +37,8 @@ function writeCachedSlashCommands(commands: string[]) {
   } catch { /* ignore write errors */ }
 }
 
+let mainWin: BrowserWindow | null = null;
+
 function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
   try {
     if (!win.isDestroyed()) {
@@ -455,7 +457,85 @@ function ensureProcess(
   return proc;
 }
 
+export function sendImpl(
+  projectPath: string,
+  message: string,
+  imagePaths?: string[],
+  permMode?: string,
+  effort?: string,
+  model?: string,
+  scope?: string,
+  origin: 'desktop' | 'remote' = 'desktop',
+): void {
+  if (!mainWin) return;
+  const ws = get(projectPath);
+  if (!ws) return;
+  const effectiveScope = scope || 'chat';
+  const claude = getClaude(ws, effectiveScope);
+
+  touchActivity(projectPath);
+
+  let prompt = message;
+  if (imagePaths && imagePaths.length > 0) {
+    const imageRefs = imagePaths.map(p => `[Attached image: ${p}]`).join('\n');
+    prompt = `${imageRefs}\n\n${message}`;
+  }
+
+  const proc = ensureProcess(mainWin, projectPath, effectiveScope, permMode, effort, model);
+
+  claude.suppressForward = false;
+
+  if (claude.awaitingApproval) {
+    claude.awaitingApproval = false;
+    claude.approvalBuffered = [];
+    claude.pendingToolUse = null;
+  }
+
+  if (claude.buffer.trim()) {
+    try {
+      const stale = JSON.parse(claude.buffer);
+      if (stale.type === 'result') {
+        const responseTurnSeq = claude.activeTurnSeq;
+        claude.busy = false;
+        claude.activeTurnSeq = claude.turnSeq; // will be updated again below after turnSeq++
+        safeSend(mainWin, 'claude:message', { ...stale, projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
+        safeSend(mainWin, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
+      }
+    } catch { /* partial/malformed — discard */ }
+    claude.buffer = '';
+  }
+
+  const wasInterrupt = claude.busy; // true if we're interrupting an in-progress response
+  if (wasInterrupt) {
+    // Tell the renderer the old turn is being interrupted. Use the CURRENT turnSeq
+    // so the renderer's stale check can dismiss old done/result from the CLI.
+    safeSend(mainWin, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
+  }
+
+  claude.turnSeq++;
+  claude.busy = true;
+  if (!wasInterrupt) {
+    // Normal (non-interrupt) start: the CLI will immediately respond to this new turn.
+    claude.activeTurnSeq = claude.turnSeq;
+  }
+  // Interrupt case: activeTurnSeq stays at the old value until the CLI finishes the
+  // old response and the stdout handler updates it to claude.turnSeq.
+  safeSend(mainWin, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
+
+  const msg = JSON.stringify({
+    type: 'user',
+    message: { role: 'user', content: prompt },
+  });
+  if (!proc.stdin || proc.stdin.destroyed) {
+    claude.busy = false;
+    safeSend(mainWin, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
+    return;
+  }
+  proc.stdin.write(msg + '\n');
+}
+
 export function registerClaudeHandlers(win: BrowserWindow) {
+  mainWin = win;
   // claude:start — no longer spawns a probe. Just signals ready.
   // Sends cached slash commands immediately so they're available before the process init.
   ipcMain.handle('claude:start', (
@@ -518,70 +598,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 
   // claude:send — write message to persistent process stdin
   ipcMain.on('claude:send', (_event, projectPath: string, message: string, imagePaths?: string[], permMode?: string, effort?: string, model?: string, scope?: string) => {
-    const ws = get(projectPath);
-    if (!ws) return;
-    const effectiveScope = scope || 'chat';
-    const claude = getClaude(ws, effectiveScope);
-
-    touchActivity(projectPath);
-
-    let prompt = message;
-    if (imagePaths && imagePaths.length > 0) {
-      const imageRefs = imagePaths.map(p => `[Attached image: ${p}]`).join('\n');
-      prompt = `${imageRefs}\n\n${message}`;
-    }
-
-    const proc = ensureProcess(win, projectPath, effectiveScope, permMode, effort, model);
-
-    claude.suppressForward = false;
-
-    if (claude.awaitingApproval) {
-      claude.awaitingApproval = false;
-      claude.approvalBuffered = [];
-      claude.pendingToolUse = null;
-    }
-
-    if (claude.buffer.trim()) {
-      try {
-        const stale = JSON.parse(claude.buffer);
-        if (stale.type === 'result') {
-          const responseTurnSeq = claude.activeTurnSeq;
-          claude.busy = false;
-          claude.activeTurnSeq = claude.turnSeq; // will be updated again below after turnSeq++
-          safeSend(win, 'claude:message', { ...stale, projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
-          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
-        }
-      } catch { /* partial/malformed — discard */ }
-      claude.buffer = '';
-    }
-
-    const wasInterrupt = claude.busy; // true if we're interrupting an in-progress response
-    if (wasInterrupt) {
-      // Tell the renderer the old turn is being interrupted. Use the CURRENT turnSeq
-      // so the renderer's stale check can dismiss old done/result from the CLI.
-      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
-    }
-
-    claude.turnSeq++;
-    claude.busy = true;
-    if (!wasInterrupt) {
-      // Normal (non-interrupt) start: the CLI will immediately respond to this new turn.
-      claude.activeTurnSeq = claude.turnSeq;
-    }
-    // Interrupt case: activeTurnSeq stays at the old value until the CLI finishes the
-    // old response and the stdout handler updates it to claude.turnSeq.
-    safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
-
-    const msg = JSON.stringify({
-      type: 'user',
-      message: { role: 'user', content: prompt },
-    });
-    if (!proc.stdin || proc.stdin.destroyed) {
-      claude.busy = false;
-      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
-      return;
-    }
-    proc.stdin.write(msg + '\n');
+    sendImpl(projectPath, message, imagePaths, permMode, effort, model, scope);
   });
 
   // claude:compact — silently write /compact to stdin without starting a turn.
