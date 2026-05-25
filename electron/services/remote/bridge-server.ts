@@ -118,10 +118,12 @@ export class BridgeServer {
       }
     }
     if (!server) {
+      console.warn(`[remote] port ${desired} held by another process; falling back to ephemeral`);
       server = await tryListen(0);
     }
     this.server = server;
     const { port } = server.address() as AddressInfo;
+    console.log(`[remote] bridge listening on http://${this.opts.tailnetIp}:${port}`);
     this.wss = new WebSocketServer({ server, path: '/ws' });
     this.wss.on('connection', (ws, req) => this.handleWs(ws, req));
     this.opts.registerActiveSessionBroadcast?.((payload) => {

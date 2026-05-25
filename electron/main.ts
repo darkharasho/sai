@@ -85,7 +85,8 @@ let rendererProxy: RendererProxy | null = null;
 let remoteKvPath: string | null = null;
 let activeSessionBroadcast: ((payload: { projectPath: string; scope: string; sessionId: string }) => void) | null = null;
 let lastActiveSession: { projectPath: string; scope: string; sessionId: string } | null = null;
-const REMOTE_PORT = 17829;
+// Otto uses 17829; pick a distinct port so both can run side by side.
+const REMOTE_PORT = 17830;
 
 // Register the active-session IPC handler at module load — the renderer fires this
 // on every session change regardless of whether the mobile bridge is enabled. The
