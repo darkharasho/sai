@@ -95,13 +95,26 @@ export class BridgeServer {
       server.once('error', onErr);
       server.listen(p, this.opts.tailnetIp!, () => { server.removeListener('error', onErr); resolve(); });
     });
-    try {
-      await tryListen(desired);
-    } catch (err) {
-      const e = err as NodeJS.ErrnoException;
-      if (e.code === 'EADDRINUSE' && desired !== 0) {
-        await tryListen(0);
-      } else throw err;
+    // Pin the stable port — retry a few times with delays to handle
+    // hot-reload / fast-restart races where the previous process is
+    // still releasing the socket. Fall back to ephemeral only if the
+    // port stays held (e.g., another app actually owns it).
+    let bound = false;
+    if (desired !== 0) {
+      for (let i = 0; i < 10; i++) {
+        try {
+          await tryListen(desired);
+          bound = true;
+          break;
+        } catch (err) {
+          const e = err as NodeJS.ErrnoException;
+          if (e.code !== 'EADDRINUSE') throw err;
+          await new Promise((r) => setTimeout(r, 300));
+        }
+      }
+    }
+    if (!bound) {
+      await tryListen(0);
     }
     this.server = server;
     const { port } = server.address() as AddressInfo;

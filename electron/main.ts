@@ -711,9 +711,17 @@ process.on('uncaughtException', (err) => {
 });
 
 app.whenReady().then(createWindow);
-app.on('before-quit', () => {
+let _quitInProgress = false;
+app.on('before-quit', (e) => {
   try { swarmMcpHost.stop(); } catch { /* noop */ }
-  void remote?.stop();
+  // Synchronously release the remote bridge port before Electron exits.
+  // Without preventDefault + exit, the async stop is killed mid-flight
+  // and the port lingers, forcing the next process onto an ephemeral port.
+  if (remote && !_quitInProgress) {
+    _quitInProgress = true;
+    e.preventDefault();
+    void remote.stop().finally(() => app.exit(0));
+  }
 });
 app.on('window-all-closed', () => {
   stopSuspendTimer();
