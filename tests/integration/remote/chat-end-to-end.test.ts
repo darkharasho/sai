@@ -45,7 +45,11 @@ describe('mobile remote chat end-to-end', () => {
     ws.on('message', (d) => inbox.push(JSON.parse(d.toString())));
     await new Promise((r) => ws.once('open', r));
     ws.send(JSON.stringify({ type: 'auth', token }));
-    await new Promise((r) => setTimeout(r, 50));
+    // Poll for auth_ok — scrypt verify can take 50-200ms on cold start.
+    const deadline = Date.now() + 3000;
+    while (!inbox.find((m) => m.type === 'auth_ok') && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
     expect(inbox.find((m) => m.type === 'auth_ok')).toBeTruthy();
 
     // attach
