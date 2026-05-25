@@ -5,7 +5,6 @@ import Composer from './Composer';
 import Approval from './Approval';
 import SessionDrawer from './SessionDrawer';
 import SaiLogo from '../branding/SaiLogo';
-import { useVisualViewport } from '../lib/useVisualViewport';
 import WorkspaceHeader from './WorkspaceHeader';
 import OverridesBar from './OverridesBar';
 import { getOverrides, setOverrides as persistOverrides, clearOverrides, type SessionOverrides } from '../lib/overrides';
@@ -18,7 +17,6 @@ interface Props {
 interface PendingApproval { toolUseId: string; toolName: string; command?: string; input?: Record<string, unknown> }
 
 export default function Chat({ client, initialActive }: Props) {
-  const vv = useVisualViewport();
   const [active, setActive] = useState<{ projectPath: string; scope: string; sessionId: string } | null>(initialActive ?? null);
   const [follow, setFollow] = useState(true);
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
@@ -246,14 +244,14 @@ export default function Chat({ client, initialActive }: Props) {
         flexDirection: 'column',
         overflow: 'hidden',
         position: 'fixed',
-        top: vv.offsetTop,
+        top: 0,
         left: 0,
         right: 0,
         width: '100vw',
-        // iOS keyboard shrinks the visual viewport and offsets its top to
-        // keep the focused input visible; pin the chat container to follow
-        // both, so the header stays at the top of the visible area.
-        height: vv.height ? `${vv.height}px` : '100svh',
+        // interactive-widget=resizes-content (viewport meta) makes Safari
+        // shrink the layout viewport when the keyboard opens, so 100dvh
+        // tracks the actual visible area without per-frame JS updates.
+        height: '100dvh',
         background: 'var(--bg-primary)',
         paddingTop: 'env(safe-area-inset-top)',
         paddingBottom: 'env(safe-area-inset-bottom)',
