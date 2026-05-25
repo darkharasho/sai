@@ -48,6 +48,7 @@ import { handleSwarmToolRequest, type SwarmHost } from './lib/swarmOrchestratorD
 import { executeSlashCommand } from './lib/orchestratorSlashCommands';
 import { isOrchestratorToolDrift, describeToolDrift } from './lib/orchestratorToolDrift';
 import { resolveTaskRef } from './lib/swarmRef';
+import { installRemoteProxyHandler } from './lib/remoteProxyClient';
 
 const SWARM_DEFAULT_CAP = 5;
 import { swarmBranchName } from './lib/swarmSlug';
@@ -285,6 +286,12 @@ export default function App() {
     for (const count of notificationCounts.values()) total += count;
     window.sai.setBadgeCount(total);
   }, [notificationCounts]);
+
+  // Remote proxy: handle chatDb read requests forwarded from paired devices
+  useEffect(() => {
+    const off = installRemoteProxyHandler();
+    return off;
+  }, []);
 
   useEffect(() => { workspacesRef.current = workspaces; }, [workspaces]);
   useEffect(() => { swarmTasksByWsRef.current = swarmTasksByWs; }, [swarmTasksByWs]);
