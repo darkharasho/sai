@@ -15,6 +15,7 @@ import {
   resolveOrchestratorPromptContext,
   type OrchestratorPromptContext,
 } from '../../src/lib/orchestratorSystemPrompt';
+import type { SessionBus } from './remote/session-bus';
 
 const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
 
@@ -39,6 +40,11 @@ function writeCachedSlashCommands(commands: string[]) {
 
 let mainWin: BrowserWindow | null = null;
 
+let remoteBus: SessionBus | null = null;
+export function setRemoteBus(bus: SessionBus | null): void {
+  remoteBus = bus;
+}
+
 function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
   try {
     if (!win.isDestroyed()) {
@@ -47,6 +53,12 @@ function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
   } catch {
     // Window already destroyed
   }
+}
+
+function emitChatMessage(msg: Record<string, unknown>): void {
+  if (mainWin) safeSend(mainWin, 'claude:message', msg);
+  const topic = `chat:${msg.projectPath}:${msg.scope ?? 'chat'}`;
+  remoteBus?.publish(topic, msg);
 }
 
 /**
@@ -259,7 +271,7 @@ function ensureProcess(
         // Capture session ID and forward to renderer
         if (msg.session_id && !claude.sessionId) {
           claude.sessionId = msg.session_id;
-          safeSend(win, 'claude:message', { type: 'session_id', sessionId: msg.session_id, projectPath: ws.projectPath, scope });
+          emitChatMessage({ type: 'session_id', sessionId: msg.session_id, projectPath: ws.projectPath, scope });
         }
 
         // Capture slash commands from init (replaces the probe)
@@ -267,7 +279,7 @@ function ensureProcess(
           if (msg.slash_commands) {
             writeCachedSlashCommands(msg.slash_commands);
           }
-          safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath, scope });
+          emitChatMessage({ ...msg, projectPath: ws.projectPath, scope });
           continue;
         }
 
@@ -332,7 +344,7 @@ function ensureProcess(
             const tu = claude.pendingToolUse;
             const command = tu.input.command || tu.input.file_path || JSON.stringify(tu.input);
             const description = tu.input.description || '';
-            safeSend(win, 'claude:message', {
+            emitChatMessage({
               type: 'approval_needed',
               projectPath: ws.projectPath,
               scope,
@@ -358,8 +370,8 @@ function ensureProcess(
           const responseTurnSeq = claude.activeTurnSeq;
           claude.busy = false;
           claude.activeTurnSeq = claude.turnSeq; // CLI will now respond to the next queued turn
-          safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq });
-          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq });
+          emitChatMessage({ ...msg, projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq });
+          emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq });
           if (wasBusy) setTimeout(() => notifyCompletion(win, ws.projectPath, {
             provider: 'Claude',
             duration: msg.duration_ms,
@@ -370,7 +382,7 @@ function ensureProcess(
           continue;
         }
 
-        safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath, scope });
+        emitChatMessage({ ...msg, projectPath: ws.projectPath, scope });
 
         // After forwarding the assistant message that introduced an
         // AskUserQuestion tool_use, start buffering subsequent CLI output
@@ -385,7 +397,7 @@ function ensureProcess(
             ? String(questions[0].question)
             : 'The agent is waiting for your answer.';
           notifyQuestion(win, wsName, firstQuestion);
-          safeSend(win, 'claude:message', {
+          emitChatMessage({
             type: 'question_needed',
             projectPath: ws.projectPath,
             scope,
@@ -398,7 +410,7 @@ function ensureProcess(
           const responseTurnSeq = claude.activeTurnSeq;
           claude.busy = false;
           claude.activeTurnSeq = claude.turnSeq;
-          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq });
+          emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq });
         }
       }
     }
@@ -408,7 +420,7 @@ function ensureProcess(
     if (claude.process !== proc) return;
     const text = data.toString().trim();
     if (text) {
-      safeSend(win, 'claude:message', { type: 'error', text, projectPath: ws.projectPath, scope });
+      emitChatMessage({ type: 'error', text, projectPath: ws.projectPath, scope });
     }
   });
 
@@ -418,7 +430,7 @@ function ensureProcess(
     if (claude.buffer.trim()) {
       try {
         const msg = JSON.parse(claude.buffer);
-        safeSend(win, 'claude:message', { ...msg, projectPath: ws.projectPath, scope });
+        emitChatMessage({ ...msg, projectPath: ws.projectPath, scope });
       } catch { /* ignore */ }
     }
     const wasBusy = claude.busy;
@@ -433,7 +445,7 @@ function ensureProcess(
     claude.awaitingQuestionAnswer = false;
     claude.pendingQuestionId = null;
     if (wasBusy) {
-      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope, turnSeq: claude.turnSeq });
+      emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope, turnSeq: claude.turnSeq });
     }
   });
 
@@ -448,10 +460,10 @@ function ensureProcess(
     claude.awaitingApproval = false;
     claude.awaitingQuestionAnswer = false;
     claude.pendingQuestionId = null;
-    safeSend(win, 'claude:message', {
+    emitChatMessage({
       type: 'error', text: `Claude process error: ${err.message}`, projectPath: ws.projectPath, scope
     });
-    safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope, turnSeq: claude.turnSeq });
+    emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope, turnSeq: claude.turnSeq });
   });
 
   return proc;
@@ -498,8 +510,8 @@ export function sendImpl(
         const responseTurnSeq = claude.activeTurnSeq;
         claude.busy = false;
         claude.activeTurnSeq = claude.turnSeq; // will be updated again below after turnSeq++
-        safeSend(mainWin, 'claude:message', { ...stale, projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
-        safeSend(mainWin, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
+        emitChatMessage({ ...stale, projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
+        emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
       }
     } catch { /* partial/malformed — discard */ }
     claude.buffer = '';
@@ -509,7 +521,7 @@ export function sendImpl(
   if (wasInterrupt) {
     // Tell the renderer the old turn is being interrupted. Use the CURRENT turnSeq
     // so the renderer's stale check can dismiss old done/result from the CLI.
-    safeSend(mainWin, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
+    emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
   }
 
   claude.turnSeq++;
@@ -520,7 +532,7 @@ export function sendImpl(
   }
   // Interrupt case: activeTurnSeq stays at the old value until the CLI finishes the
   // old response and the stdout handler updates it to claude.turnSeq.
-  safeSend(mainWin, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
+  emitChatMessage({ type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
 
   const msg = JSON.stringify({
     type: 'user',
@@ -528,7 +540,7 @@ export function sendImpl(
   });
   if (!proc.stdin || proc.stdin.destroyed) {
     claude.busy = false;
-    safeSend(mainWin, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
+    emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
     return;
   }
   proc.stdin.write(msg + '\n');
@@ -548,7 +560,7 @@ export function interruptImpl(projectPath: string, scope?: string): void {
     claude.approvalBuffered = [];
     claude.awaitingApproval = false;
     proc.kill();
-    safeSend(mainWin, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: scope || 'chat', turnSeq: claude.turnSeq });
+    emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope: scope || 'chat', turnSeq: claude.turnSeq });
   }
 }
 
@@ -578,17 +590,17 @@ export async function approveImpl(
         modifiedCommand,
       });
       if (ws.gemini) ws.gemini.pendingApproval = null;
-      safeSend(mainWin, 'claude:message', { type: 'approval_resolved', projectPath: ws.projectPath, scope: effectiveScope });
+      emitChatMessage({ type: 'approval_resolved', projectPath: ws.projectPath, scope: effectiveScope });
       return true;
     } catch (error: any) {
       if (ws.gemini) ws.gemini.pendingApproval = null;
-      safeSend(mainWin, 'claude:message', {
+      emitChatMessage({
         type: 'error',
         text: `Gemini approval failed: ${error?.message || 'Unknown error'}`,
         projectPath: ws.projectPath,
         scope: effectiveScope,
       });
-      safeSend(mainWin, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: ws.gemini?.turnSeq });
+      emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: ws.gemini?.turnSeq });
       return false;
     }
   }
@@ -605,16 +617,16 @@ export async function approveImpl(
         const responseTurnSeq = claude.activeTurnSeq;
         claude.busy = false;
         claude.activeTurnSeq = claude.turnSeq;
-        safeSend(mainWin, 'claude:message', { ...buffered, projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
-        safeSend(mainWin, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
+        emitChatMessage({ ...buffered, projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
+        emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
       } else {
-        safeSend(mainWin, 'claude:message', { ...buffered, projectPath: ws.projectPath, scope: effectiveScope });
+        emitChatMessage({ ...buffered, projectPath: ws.projectPath, scope: effectiveScope });
       }
     }
     claude.approvalBuffered = [];
     claude.awaitingApproval = false;
     claude.pendingToolUse = null;
-    safeSend(mainWin, 'claude:message', { type: 'approval_resolved', projectPath: ws.projectPath, scope: effectiveScope });
+    emitChatMessage({ type: 'approval_resolved', projectPath: ws.projectPath, scope: effectiveScope });
     return;
   }
 
@@ -657,24 +669,24 @@ export async function approveImpl(
         const responseTurnSeq = claude.activeTurnSeq;
         claude.busy = false;
         claude.activeTurnSeq = claude.turnSeq;
-        safeSend(mainWin, 'claude:message', { ...buffered, projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
-        safeSend(mainWin, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
+        emitChatMessage({ ...buffered, projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
+        emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
       } else {
-        safeSend(mainWin, 'claude:message', { ...buffered, projectPath: ws.projectPath, scope: effectiveScope });
+        emitChatMessage({ ...buffered, projectPath: ws.projectPath, scope: effectiveScope });
       }
     }
 
     claude.approvalBuffered = [];
     claude.awaitingApproval = false;
     claude.pendingToolUse = null;
-    safeSend(mainWin, 'claude:message', { type: 'approval_resolved', projectPath: ws.projectPath, scope: effectiveScope });
+    emitChatMessage({ type: 'approval_resolved', projectPath: ws.projectPath, scope: effectiveScope });
 
     // Tell the CLI to retry — the permission is now in the allow list
     const proc = claude.process;
     if (proc?.stdin && !proc.stdin.destroyed) {
       claude.turnSeq++;
       claude.busy = true;
-      safeSend(mainWin, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
+      emitChatMessage({ type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
       const retryMsg = JSON.stringify({
         type: 'user',
         message: {
@@ -757,7 +769,7 @@ export async function approveImpl(
   }
 
   // Send the real tool result to the renderer as if the CLI produced it
-  safeSend(mainWin, 'claude:message', {
+  emitChatMessage({
     type: 'user',
     projectPath: ws.projectPath,
     scope: effectiveScope,
@@ -775,7 +787,7 @@ export async function approveImpl(
   claude.approvalBuffered = [];
   claude.awaitingApproval = false;
   claude.pendingToolUse = null;
-  safeSend(mainWin, 'claude:message', { type: 'approval_resolved', projectPath: ws.projectPath, scope: effectiveScope });
+  emitChatMessage({ type: 'approval_resolved', projectPath: ws.projectPath, scope: effectiveScope });
 
   const proc = claude.process;
   if (proc?.stdin && !proc.stdin.destroyed) {
@@ -822,7 +834,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
     }
     claude.metaPreamble = metaPreamble || '';
 
-    safeSend(win, 'claude:message', { type: 'ready', projectPath: ws.projectPath, scope: scope || 'chat' });
+    emitChatMessage({ type: 'ready', projectPath: ws.projectPath, scope: scope || 'chat' });
 
     return { slashCommands: readCachedSlashCommands() };
   });
@@ -892,7 +904,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
       claude.pendingQuestionId = null;
     }
 
-    safeSend(win, 'claude:message', {
+    emitChatMessage({
       type: 'question_answered',
       projectPath: ws.projectPath,
       scope: effectiveScope,
