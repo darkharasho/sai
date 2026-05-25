@@ -107,8 +107,17 @@ export default function Chat({ client, initialActive }: Props) {
               }
             } else {
               if (next.some((m) => m.id === `tool-${blk.id}`)) continue;
-              // Finalize any open assistant bubble so the next text starts fresh below.
-              next = next.map((m) => m.streaming && m.role === 'assistant' ? { ...m, streaming: false } : m);
+              // Finalize any open assistant bubble; drop it entirely if empty
+              // (e.g. optimistic pending bubble before the first tool_use).
+              next = next.reduce<TranscriptMessage[]>((acc, m) => {
+                if (m.streaming && m.role === 'assistant') {
+                  if (!m.text) return acc; // drop empty placeholder
+                  acc.push({ ...m, streaming: false });
+                  return acc;
+                }
+                acc.push(m);
+                return acc;
+              }, []);
               next.push({
                 id: `tool-${blk.id}`,
                 role: 'tool',
