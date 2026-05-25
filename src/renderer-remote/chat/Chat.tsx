@@ -41,9 +41,36 @@ export default function Chat({ client, initialActive }: Props) {
       }
       if (t === 'session.history') {
         const raw = (msg as any).messages ?? [];
-        setMessages(raw.map((m: any, i: number) => ({
-          id: `h-${i}`, role: m.role ?? 'assistant', text: m.text ?? m.content ?? '',
-        })));
+        // ChatMessage in chatDb stores text in `content` and tool calls in
+        // `toolCalls` (each with stringified input + output). Expand each
+        // message into [text-bubble?, tool-card*] so history matches live.
+        const out: TranscriptMessage[] = [];
+        raw.forEach((m: any, i: number) => {
+          const text = typeof m.content === 'string' ? m.content : (typeof m.text === 'string' ? m.text : '');
+          if (text) {
+            out.push({ id: `h-${i}-t`, role: m.role ?? 'assistant', text });
+          }
+          if (Array.isArray(m.toolCalls)) {
+            m.toolCalls.forEach((tc: any, j: number) => {
+              let parsedInput: Record<string, unknown> | undefined;
+              if (typeof tc.input === 'string' && tc.input.trim()) {
+                try { parsedInput = JSON.parse(tc.input); }
+                catch { parsedInput = { command: tc.input }; }
+              } else if (tc.input && typeof tc.input === 'object') {
+                parsedInput = tc.input;
+              }
+              out.push({
+                id: `h-${i}-tc-${j}-${tc.id ?? j}`,
+                role: 'tool',
+                toolName: tc.name ?? tc.type ?? 'tool',
+                toolInput: parsedInput,
+                toolResult: typeof tc.output === 'string' ? tc.output : undefined,
+                toolStatus: tc.output !== undefined ? 'done' : 'running',
+              });
+            });
+          }
+        });
+        setMessages(out);
         return;
       }
       if (t === 'streaming_start') { setStreaming(true); return; }

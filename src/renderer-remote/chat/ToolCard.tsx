@@ -87,8 +87,8 @@ export default function ToolCard({ name, input, result, status }: Props) {
   return (
     <div
       style={{
-        alignSelf: 'flex-start',
-        maxWidth: '92%',
+        alignSelf: 'stretch',
+        width: '100%',
         minWidth: 0,
         border: '1px solid var(--border)',
         background: 'var(--bg-mid)',
