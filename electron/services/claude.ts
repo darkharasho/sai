@@ -534,6 +534,269 @@ export function sendImpl(
   proc.stdin.write(msg + '\n');
 }
 
+export function interruptImpl(projectPath: string, scope?: string): void {
+  const ws = get(projectPath);
+  if (!ws) return;
+  const claude = getClaude(ws, scope || 'chat');
+  if (claude.process) {
+    const proc = claude.process;
+    claude.process = null;
+    claude.processConfig = null;
+    claude.busy = false;
+    claude.suppressForward = false;
+    claude.pendingToolUse = null;
+    claude.approvalBuffered = [];
+    claude.awaitingApproval = false;
+    proc.kill();
+    safeSend(mainWin, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: scope || 'chat', turnSeq: claude.turnSeq });
+  }
+}
+
+export async function approveImpl(
+  projectPath: string,
+  toolUseId: string,
+  approved: boolean,
+  modifiedCommand?: string,
+  scope?: string,
+): Promise<void | boolean | { result: string; isError: boolean }> {
+  const ws = get(projectPath);
+  if (!ws) return;
+  const effectiveScope = scope || 'chat';
+
+  const pendingGemini = ws.gemini?.pendingApproval;
+  if (pendingGemini && pendingGemini.toolUseId === toolUseId && pendingGemini.scope === effectiveScope) {
+    const sessionId = effectiveScope === 'chat'
+      ? ws.gemini?.chatSessionId
+      : ws.gemini?.terminalSessions.get(effectiveScope);
+
+    try {
+      await ws.gemini?.transport?.request('tool/approve', {
+        sessionId,
+        scope: effectiveScope,
+        toolUseId,
+        approved,
+        modifiedCommand,
+      });
+      if (ws.gemini) ws.gemini.pendingApproval = null;
+      safeSend(mainWin, 'claude:message', { type: 'approval_resolved', projectPath: ws.projectPath, scope: effectiveScope });
+      return true;
+    } catch (error: any) {
+      if (ws.gemini) ws.gemini.pendingApproval = null;
+      safeSend(mainWin, 'claude:message', {
+        type: 'error',
+        text: `Gemini approval failed: ${error?.message || 'Unknown error'}`,
+        projectPath: ws.projectPath,
+        scope: effectiveScope,
+      });
+      safeSend(mainWin, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: ws.gemini?.turnSeq });
+      return false;
+    }
+  }
+
+  const claude = getClaude(ws, effectiveScope);
+  // Idempotency guard: if there is no pending approval, this is either an
+  // unknown toolUseId or a second-resolver call — return silently.
+  if (!claude.pendingToolUse || !claude.awaitingApproval) return;
+
+  // --- Deny path ---
+  if (!approved) {
+    for (const buffered of claude.approvalBuffered) {
+      if (buffered.type === 'result') {
+        const responseTurnSeq = claude.activeTurnSeq;
+        claude.busy = false;
+        claude.activeTurnSeq = claude.turnSeq;
+        safeSend(mainWin, 'claude:message', { ...buffered, projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
+        safeSend(mainWin, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
+      } else {
+        safeSend(mainWin, 'claude:message', { ...buffered, projectPath: ws.projectPath, scope: effectiveScope });
+      }
+    }
+    claude.approvalBuffered = [];
+    claude.awaitingApproval = false;
+    claude.pendingToolUse = null;
+    safeSend(mainWin, 'claude:message', { type: 'approval_resolved', projectPath: ws.projectPath, scope: effectiveScope });
+    return;
+  }
+
+  // --- Approve path ---
+  const pending = claude.pendingToolUse;
+  const cwd = claude.cwd || projectPath;
+
+  // Known tools that SAI can execute locally
+  const localTools = new Set(['Bash', 'bash', 'Write', 'Edit', 'Read']);
+
+  // --- MCP / unknown tools: delegate back to the CLI ---
+  if (!localTools.has(pending.toolName)) {
+    // Add to allow list so the CLI won't deny it again
+    const claudeDir = path.join(projectPath, '.claude');
+    const settingsPath = path.join(claudeDir, 'settings.local.json');
+    let settings: Record<string, any> = {};
+    let canWriteSettings = true;
+    if (fs.existsSync(settingsPath)) {
+      try {
+        settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      } catch (err) {
+        // Don't clobber a malformed user-edited file. Surface the error and skip the write.
+        canWriteSettings = false;
+        console.warn(`[sai] Refusing to overwrite malformed ${settingsPath}:`, err);
+      }
+    }
+    if (canWriteSettings) {
+      if (!settings.permissions) settings.permissions = {};
+      if (!Array.isArray(settings.permissions.allow)) settings.permissions.allow = [];
+      if (!settings.permissions.allow.includes(pending.toolName)) {
+        settings.permissions.allow.push(pending.toolName);
+        try { fs.mkdirSync(claudeDir, { recursive: true }); } catch {}
+        fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+      }
+    }
+
+    // Flush any buffered messages to the renderer
+    for (const buffered of claude.approvalBuffered) {
+      if (buffered.type === 'result') {
+        const responseTurnSeq = claude.activeTurnSeq;
+        claude.busy = false;
+        claude.activeTurnSeq = claude.turnSeq;
+        safeSend(mainWin, 'claude:message', { ...buffered, projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
+        safeSend(mainWin, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
+      } else {
+        safeSend(mainWin, 'claude:message', { ...buffered, projectPath: ws.projectPath, scope: effectiveScope });
+      }
+    }
+
+    claude.approvalBuffered = [];
+    claude.awaitingApproval = false;
+    claude.pendingToolUse = null;
+    safeSend(mainWin, 'claude:message', { type: 'approval_resolved', projectPath: ws.projectPath, scope: effectiveScope });
+
+    // Tell the CLI to retry — the permission is now in the allow list
+    const proc = claude.process;
+    if (proc?.stdin && !proc.stdin.destroyed) {
+      claude.turnSeq++;
+      claude.busy = true;
+      safeSend(mainWin, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
+      const retryMsg = JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: `The user has approved the use of the "${pending.toolName}" tool. Please proceed with the same tool call you just attempted.`,
+        },
+      });
+      proc.stdin.write(retryMsg + '\n');
+    }
+
+    return { result: 'Tool approved — CLI is re-executing via MCP', isError: false };
+  }
+
+  // --- Local tool execution (Bash, Write, Edit, Read) ---
+  let result = '';
+  let isError = false;
+
+  try {
+    if (pending.toolName === 'Bash' || pending.toolName === 'bash') {
+      // Use modified command if user edited it, otherwise use original
+      const command = modifiedCommand || pending.input.command || '';
+      const execResult = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+        const shellBin = IS_WIN ? (process.env.ComSpec || 'cmd.exe') : 'bash';
+        const shellArgs = IS_WIN ? ['/d', '/s', '/c', command] : ['-c', command];
+        execFile(shellBin, shellArgs, {
+          cwd,
+          timeout: 120_000,
+          maxBuffer: 10 * 1024 * 1024,
+          env: enrichedEnv(),
+          windowsVerbatimArguments: IS_WIN,
+        }, (err, stdout, stderr) => {
+          if (err && !stdout && !stderr) {
+            reject(err);
+          } else {
+            resolve({ stdout: stdout || '', stderr: stderr || '' });
+          }
+        });
+      });
+      result = execResult.stdout;
+      if (execResult.stderr) {
+        result += (result ? '\n' : '') + execResult.stderr;
+      }
+    } else if (pending.toolName === 'Write') {
+      const filePath = pending.input.file_path;
+      const content = pending.input.content || '';
+      const dir = path.dirname(filePath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(filePath, content, 'utf-8');
+      result = `Successfully wrote to ${filePath}`;
+    } else if (pending.toolName === 'Edit') {
+      const filePath = pending.input.file_path;
+      const oldStr = pending.input.old_string;
+      const newStr = pending.input.new_string;
+      if (!fs.existsSync(filePath)) {
+        result = `File not found: ${filePath}`;
+        isError = true;
+      } else {
+        let fileContent = fs.readFileSync(filePath, 'utf-8');
+        if (!fileContent.includes(oldStr)) {
+          result = `old_string not found in ${filePath}`;
+          isError = true;
+        } else {
+          fileContent = fileContent.replace(oldStr, newStr);
+          fs.writeFileSync(filePath, fileContent, 'utf-8');
+          result = `Successfully edited ${filePath}`;
+        }
+      }
+    } else if (pending.toolName === 'Read') {
+      const filePath = pending.input.file_path;
+      if (!fs.existsSync(filePath)) {
+        result = `File not found: ${filePath}`;
+        isError = true;
+      } else {
+        result = fs.readFileSync(filePath, 'utf-8');
+      }
+    }
+  } catch (err: any) {
+    result = err.message || 'Command execution failed';
+    isError = true;
+  }
+
+  // Send the real tool result to the renderer as if the CLI produced it
+  safeSend(mainWin, 'claude:message', {
+    type: 'user',
+    projectPath: ws.projectPath,
+    scope: effectiveScope,
+    message: {
+      role: 'user',
+      content: [{
+        type: 'tool_result',
+        tool_use_id: pending.toolUseId,
+        content: result,
+        is_error: isError,
+      }],
+    },
+  });
+
+  claude.approvalBuffered = [];
+  claude.awaitingApproval = false;
+  claude.pendingToolUse = null;
+  safeSend(mainWin, 'claude:message', { type: 'approval_resolved', projectPath: ws.projectPath, scope: effectiveScope });
+
+  const proc = claude.process;
+  if (proc?.stdin && !proc.stdin.destroyed) {
+    // Truncate large results to avoid inflating context
+    const maxLen = 8000;
+    const truncated = result.length > maxLen
+      ? result.slice(0, maxLen) + `\n... (truncated ${result.length - maxLen} chars)`
+      : result;
+    const followUp = JSON.stringify({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: `[${pending.toolName} output]\n${truncated}`,
+      },
+    });
+    proc.stdin.write(followUp + '\n');
+  }
+
+  return { result, isError };
+}
+
 export function registerClaudeHandlers(win: BrowserWindow) {
   mainWin = win;
   // claude:start — no longer spawns a probe. Just signals ready.
@@ -566,21 +829,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 
   // claude:stop — kill the persistent process for a scope
   ipcMain.on('claude:stop', (_event, projectPath: string, scope?: string) => {
-    const ws = get(projectPath);
-    if (!ws) return;
-    const claude = getClaude(ws, scope || 'chat');
-    if (claude.process) {
-      const proc = claude.process;
-      claude.process = null;
-      claude.processConfig = null;
-      claude.busy = false;
-      claude.suppressForward = false;
-      claude.pendingToolUse = null;
-      claude.approvalBuffered = [];
-      claude.awaitingApproval = false;
-      proc.kill();
-      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: scope || 'chat', turnSeq: claude.turnSeq });
-    }
+    interruptImpl(projectPath, scope);
   });
 
   // claude:setSessionId — switch to a different Claude session (for history resumption)
@@ -619,241 +868,8 @@ export function registerClaudeHandlers(win: BrowserWindow) {
   });
 
   // claude:approve — user approved or denied a tool that was denied by the CLI
-  ipcMain.handle('claude:approve', async (_event, projectPath: string, toolUseId: string, approved: boolean, modifiedCommand?: string, scope?: string) => {
-    const ws = get(projectPath);
-    if (!ws) return;
-    const effectiveScope = scope || 'chat';
-
-    const pendingGemini = ws.gemini?.pendingApproval;
-    if (pendingGemini && pendingGemini.toolUseId === toolUseId && pendingGemini.scope === effectiveScope) {
-      const sessionId = effectiveScope === 'chat'
-        ? ws.gemini?.chatSessionId
-        : ws.gemini?.terminalSessions.get(effectiveScope);
-
-      try {
-        await ws.gemini?.transport?.request('tool/approve', {
-          sessionId,
-          scope: effectiveScope,
-          toolUseId,
-          approved,
-          modifiedCommand,
-        });
-        if (ws.gemini) ws.gemini.pendingApproval = null;
-        safeSend(win, 'claude:message', { type: 'approval_resolved', projectPath: ws.projectPath, scope: effectiveScope });
-        return true;
-      } catch (error: any) {
-        if (ws.gemini) ws.gemini.pendingApproval = null;
-        safeSend(win, 'claude:message', {
-          type: 'error',
-          text: `Gemini approval failed: ${error?.message || 'Unknown error'}`,
-          projectPath: ws.projectPath,
-          scope: effectiveScope,
-        });
-        safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: ws.gemini?.turnSeq });
-        return false;
-      }
-    }
-
-    const claude = getClaude(ws, effectiveScope);
-    if (!claude.pendingToolUse || !claude.awaitingApproval) return;
-
-    // --- Deny path ---
-    if (!approved) {
-      for (const buffered of claude.approvalBuffered) {
-        if (buffered.type === 'result') {
-          const responseTurnSeq = claude.activeTurnSeq;
-          claude.busy = false;
-          claude.activeTurnSeq = claude.turnSeq;
-          safeSend(win, 'claude:message', { ...buffered, projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
-          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
-        } else {
-          safeSend(win, 'claude:message', { ...buffered, projectPath: ws.projectPath, scope: effectiveScope });
-        }
-      }
-      claude.approvalBuffered = [];
-      claude.awaitingApproval = false;
-      claude.pendingToolUse = null;
-      safeSend(win, 'claude:message', { type: 'approval_resolved', projectPath: ws.projectPath, scope: effectiveScope });
-      return;
-    }
-
-    // --- Approve path ---
-    const pending = claude.pendingToolUse;
-    const cwd = claude.cwd || projectPath;
-
-    // Known tools that SAI can execute locally
-    const localTools = new Set(['Bash', 'bash', 'Write', 'Edit', 'Read']);
-
-    // --- MCP / unknown tools: delegate back to the CLI ---
-    if (!localTools.has(pending.toolName)) {
-      // Add to allow list so the CLI won't deny it again
-      const claudeDir = path.join(projectPath, '.claude');
-      const settingsPath = path.join(claudeDir, 'settings.local.json');
-      let settings: Record<string, any> = {};
-      let canWriteSettings = true;
-      if (fs.existsSync(settingsPath)) {
-        try {
-          settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
-        } catch (err) {
-          // Don't clobber a malformed user-edited file. Surface the error and skip the write.
-          canWriteSettings = false;
-          console.warn(`[sai] Refusing to overwrite malformed ${settingsPath}:`, err);
-        }
-      }
-      if (canWriteSettings) {
-        if (!settings.permissions) settings.permissions = {};
-        if (!Array.isArray(settings.permissions.allow)) settings.permissions.allow = [];
-        if (!settings.permissions.allow.includes(pending.toolName)) {
-          settings.permissions.allow.push(pending.toolName);
-          try { fs.mkdirSync(claudeDir, { recursive: true }); } catch {}
-          fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-        }
-      }
-
-      // Flush any buffered messages to the renderer
-      for (const buffered of claude.approvalBuffered) {
-        if (buffered.type === 'result') {
-          const responseTurnSeq = claude.activeTurnSeq;
-          claude.busy = false;
-          claude.activeTurnSeq = claude.turnSeq;
-          safeSend(win, 'claude:message', { ...buffered, projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
-          safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
-        } else {
-          safeSend(win, 'claude:message', { ...buffered, projectPath: ws.projectPath, scope: effectiveScope });
-        }
-      }
-
-      claude.approvalBuffered = [];
-      claude.awaitingApproval = false;
-      claude.pendingToolUse = null;
-      safeSend(win, 'claude:message', { type: 'approval_resolved', projectPath: ws.projectPath, scope: effectiveScope });
-
-      // Tell the CLI to retry — the permission is now in the allow list
-      const proc = claude.process;
-      if (proc?.stdin && !proc.stdin.destroyed) {
-        claude.turnSeq++;
-        claude.busy = true;
-        safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
-        const retryMsg = JSON.stringify({
-          type: 'user',
-          message: {
-            role: 'user',
-            content: `The user has approved the use of the "${pending.toolName}" tool. Please proceed with the same tool call you just attempted.`,
-          },
-        });
-        proc.stdin.write(retryMsg + '\n');
-      }
-
-      return { result: 'Tool approved — CLI is re-executing via MCP', isError: false };
-    }
-
-    // --- Local tool execution (Bash, Write, Edit, Read) ---
-    let result = '';
-    let isError = false;
-
-    try {
-      if (pending.toolName === 'Bash' || pending.toolName === 'bash') {
-        // Use modified command if user edited it, otherwise use original
-        const command = modifiedCommand || pending.input.command || '';
-        const execResult = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-          const shellBin = IS_WIN ? (process.env.ComSpec || 'cmd.exe') : 'bash';
-          const shellArgs = IS_WIN ? ['/d', '/s', '/c', command] : ['-c', command];
-          execFile(shellBin, shellArgs, {
-            cwd,
-            timeout: 120_000,
-            maxBuffer: 10 * 1024 * 1024,
-            env: enrichedEnv(),
-            windowsVerbatimArguments: IS_WIN,
-          }, (err, stdout, stderr) => {
-            if (err && !stdout && !stderr) {
-              reject(err);
-            } else {
-              resolve({ stdout: stdout || '', stderr: stderr || '' });
-            }
-          });
-        });
-        result = execResult.stdout;
-        if (execResult.stderr) {
-          result += (result ? '\n' : '') + execResult.stderr;
-        }
-      } else if (pending.toolName === 'Write') {
-        const filePath = pending.input.file_path;
-        const content = pending.input.content || '';
-        const dir = path.dirname(filePath);
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        fs.writeFileSync(filePath, content, 'utf-8');
-        result = `Successfully wrote to ${filePath}`;
-      } else if (pending.toolName === 'Edit') {
-        const filePath = pending.input.file_path;
-        const oldStr = pending.input.old_string;
-        const newStr = pending.input.new_string;
-        if (!fs.existsSync(filePath)) {
-          result = `File not found: ${filePath}`;
-          isError = true;
-        } else {
-          let fileContent = fs.readFileSync(filePath, 'utf-8');
-          if (!fileContent.includes(oldStr)) {
-            result = `old_string not found in ${filePath}`;
-            isError = true;
-          } else {
-            fileContent = fileContent.replace(oldStr, newStr);
-            fs.writeFileSync(filePath, fileContent, 'utf-8');
-            result = `Successfully edited ${filePath}`;
-          }
-        }
-      } else if (pending.toolName === 'Read') {
-        const filePath = pending.input.file_path;
-        if (!fs.existsSync(filePath)) {
-          result = `File not found: ${filePath}`;
-          isError = true;
-        } else {
-          result = fs.readFileSync(filePath, 'utf-8');
-        }
-      }
-    } catch (err: any) {
-      result = err.message || 'Command execution failed';
-      isError = true;
-    }
-
-    // Send the real tool result to the renderer as if the CLI produced it
-    safeSend(win, 'claude:message', {
-      type: 'user',
-      projectPath: ws.projectPath,
-      scope: effectiveScope,
-      message: {
-        role: 'user',
-        content: [{
-          type: 'tool_result',
-          tool_use_id: pending.toolUseId,
-          content: result,
-          is_error: isError,
-        }],
-      },
-    });
-
-    claude.approvalBuffered = [];
-    claude.awaitingApproval = false;
-    claude.pendingToolUse = null;
-    safeSend(win, 'claude:message', { type: 'approval_resolved', projectPath: ws.projectPath, scope: effectiveScope });
-
-    const proc = claude.process;
-    if (proc?.stdin && !proc.stdin.destroyed) {
-      // Truncate large results to avoid inflating context
-      const maxLen = 8000;
-      const truncated = result.length > maxLen
-        ? result.slice(0, maxLen) + `\n... (truncated ${result.length - maxLen} chars)`
-        : result;
-      const followUp = JSON.stringify({
-        type: 'user',
-        message: {
-          role: 'user',
-          content: `[${pending.toolName} output]\n${truncated}`,
-        },
-      });
-      proc.stdin.write(followUp + '\n');
-    }
-
-    return { result, isError };
+  ipcMain.handle('claude:approve', (_event, projectPath: string, toolUseId: string, approved: boolean, modifiedCommand?: string, scope?: string) => {
+    return approveImpl(projectPath, toolUseId, approved, modifiedCommand, scope);
   });
 
   // claude:answer-question — user answered an AskUserQuestion tool call in the UI.
