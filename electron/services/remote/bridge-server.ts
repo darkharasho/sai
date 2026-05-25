@@ -175,8 +175,43 @@ export class BridgeServer {
     }
   }
 
-  // WS handler — fleshed out in Task 8. For now, immediately closes any connection.
   private handleWs(ws: WebSocket, _req: http.IncomingMessage): void {
-    ws.close(1011, 'not implemented yet');
+    let authed = false;
+    let deviceId: string | null = null;
+    let unsub: null | (() => void) = null;
+
+    const close = (code: number, reason: string) => { try { ws.close(code, reason); } catch { /* already closed */ } };
+
+    ws.on('message', async (data) => {
+      let msg: { type?: string; [k: string]: unknown };
+      try { msg = JSON.parse(data.toString()); } catch { return close(1003, 'bad json'); }
+
+      if (!authed) {
+        if (msg.type !== 'auth' || typeof msg.token !== 'string') return close(4001, 'auth_failed');
+        const found = await this.opts.pairing.verify(msg.token);
+        if (!found) return close(4001, 'auth_failed');
+        authed = true;
+        deviceId = found.id;
+        let set = this.liveSockets.get(found.id);
+        if (!set) { set = new Set(); this.liveSockets.set(found.id, set); }
+        set.add(ws);
+        ws.send(JSON.stringify({ v: 1, type: 'auth_ok', deviceId: found.id, deviceLabel: found.label }));
+        unsub = this.opts.bus.subscribeAll((topic, e) => {
+          try { ws.send(JSON.stringify({ v: 1, topic, ...e })); } catch { /* ws may be closed */ }
+        });
+        return;
+      }
+
+      if (msg.type === 'ping') { ws.send(JSON.stringify({ v: 1, type: 'pong' })); return; }
+      // Phase 0 has no other inbound messages. Future phases add prompt/interrupt/approval/etc.
+    });
+
+    ws.on('close', () => {
+      if (unsub) unsub();
+      if (deviceId) {
+        const set = this.liveSockets.get(deviceId);
+        if (set) { set.delete(ws); if (set.size === 0) this.liveSockets.delete(deviceId); }
+      }
+    });
   }
 }
