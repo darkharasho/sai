@@ -5,6 +5,8 @@ import Composer from './Composer';
 import Approval from './Approval';
 import SessionDrawer from './SessionDrawer';
 import SaiLogo from '../branding/SaiLogo';
+import OverridesBar from './OverridesBar';
+import { getOverrides, setOverrides as persistOverrides, clearOverrides, type SessionOverrides } from '../lib/overrides';
 
 interface Props {
   client: WireClient;
@@ -20,6 +22,21 @@ export default function Chat({ client, initialActive }: Props) {
   const [streaming, setStreaming] = useState(false);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [overrides, setOverridesState] = useState<SessionOverrides>({});
+
+  // Load overrides for the new session whenever attached session changes.
+  useEffect(() => {
+    if (!active?.sessionId) { setOverridesState({}); return; }
+    setOverridesState(getOverrides(active.sessionId));
+  }, [active?.sessionId]);
+
+  const updateOverrides = (next: SessionOverrides) => {
+    setOverridesState(next);
+    if (active?.sessionId) {
+      if (!next.model && !next.effort && !next.permMode) clearOverrides(active.sessionId);
+      else persistOverrides(active.sessionId, next);
+    }
+  };
 
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
@@ -195,7 +212,14 @@ export default function Chat({ client, initialActive }: Props) {
     setMessages((arr) => [...arr, { id: `u-opt-${Date.now()}`, role: 'user', text }]);
     setMessages((arr) => [...arr, { id: `a-pending-${Date.now()}`, role: 'assistant', text: '', streaming: true }]);
     setStreaming(true);
-    client.sendPrompt({ text, projectPath: active.projectPath, scope: active.scope });
+    client.sendPrompt({
+      text,
+      projectPath: active.projectPath,
+      scope: active.scope,
+      model: overrides.model,
+      effort: overrides.effort,
+      permMode: overrides.permMode,
+    });
   };
 
   const onInterrupt = () => { if (active) client.interrupt(active.projectPath, active.scope); };
@@ -282,6 +306,7 @@ export default function Chat({ client, initialActive }: Props) {
           />
         </div>
       )}
+      <OverridesBar overrides={overrides} onChange={updateOverrides} />
       <div className="shrink-0">
         <Composer streaming={streaming} onSend={onSend} onInterrupt={onInterrupt} />
       </div>
@@ -293,6 +318,14 @@ export default function Chat({ client, initialActive }: Props) {
         currentProjectPath={active?.projectPath ?? null}
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
+        onPickWorkspace={(projectPath) => {
+          client.setActiveWorkspace(projectPath);
+          if (!follow) {
+            // Optimistically attach when follow-mode is off; the first event from
+            // the new topic populates the rest.
+            setActive({ projectPath, scope: 'chat', sessionId: '' });
+          }
+        }}
       />
     </div>
   );
