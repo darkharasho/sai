@@ -2,7 +2,58 @@ import { useEffect, useState } from 'react';
 import { BEARER_KEY, connect, extractPairCode, pair, type WireClient } from './wire';
 import Status from './Status';
 import Chat from './chat/Chat';
+import Tabs from './chat/Tabs';
+import Files from './files/Files';
 import SaiLogo from './branding/SaiLogo';
+
+function ConnectedShell({ client }: { client: WireClient }) {
+  const [tab, setTab] = useState<'chat' | 'files'>(() => {
+    try { return (localStorage.getItem('sai-remote-tab') as 'chat' | 'files') ?? 'chat'; } catch { return 'chat'; }
+  });
+  const [workspacePath, setWorkspacePath] = useState<string>('');
+  const [metaMembers, setMetaMembers] = useState<{ projectPath: string; name: string }[] | undefined>(undefined);
+
+  // Track active workspace via session.active push
+  useEffect(() => {
+    return client.on((msg) => {
+      const t = (msg as any).type;
+      if (t === 'session.active') {
+        const p = (msg as any).projectPath ?? '';
+        setWorkspacePath(p);
+      }
+    });
+  }, [client]);
+
+  // When the active workspace changes, look up meta-member list (if any)
+  useEffect(() => {
+    if (!workspacePath) { setMetaMembers(undefined); return; }
+    client.listWorkspaces()
+      .then((ws) => {
+        const me = (ws as any[]).find((w) => w.projectPath === workspacePath);
+        if (me && me.kind === 'meta' && Array.isArray(me.members)) setMetaMembers(me.members);
+        else setMetaMembers(undefined);
+      })
+      .catch(() => setMetaMembers(undefined));
+  }, [client, workspacePath]);
+
+  const onTab = (v: 'chat' | 'files') => {
+    setTab(v);
+    try { localStorage.setItem('sai-remote-tab', v); } catch { /* quota */ }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
+      <Tabs value={tab} onChange={onTab} />
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        {tab === 'chat'
+          ? <Chat client={client} />
+          : workspacePath
+            ? <Files client={client} workspacePath={workspacePath} metaMembers={metaMembers} />
+            : <div style={{ padding: 16, color: 'var(--text-muted)' }}>No workspace attached.</div>}
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const [phase, setPhase] = useState<'init' | 'pairing' | 'connected' | 'needs-pair' | 'error'>('init');
@@ -46,7 +97,7 @@ export default function App() {
     if (wsState !== 'open') {
       return <Status deviceLabel="" serverUrl={location.origin} wsState={wsState} onDisconnect={disconnect} />;
     }
-    return <Chat client={client} />;
+    return <ConnectedShell client={client} />;
   }
 
   const mode = phase === 'init' || phase === 'pairing' ? 'scanner' : phase === 'error' ? 'static' : 'idle';
