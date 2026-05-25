@@ -208,6 +208,7 @@ export class BridgeServer {
         return;
       }
       if (req.method === 'POST' && req.url === '/pair') return await this.handlePair(req, res);
+      if (req.method === 'GET' && req.url?.startsWith('/blob/')) return await this.handleBlob(req, res);
       if (req.method === 'GET' && req.url?.startsWith('/screenshot/')) return await this.handleScreenshot(req, res);
       if (req.method === 'GET' && this.opts.pwaDir) return await this.handleStatic(req, res);
       res.statusCode = 404; res.end('not found');
@@ -237,6 +238,21 @@ export class BridgeServer {
     res.statusCode = 200;
     res.setHeader('content-type', 'image/png');
     res.end(buf);
+  }
+
+  private async handleBlob(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const result = this.signer.verify(req.url!);
+    if (!result.ok || !result.id) { res.statusCode = 401; res.end('bad url'); return; }
+    const blob = await this.opts.loadBlob?.(result.id);
+    if (!blob) { res.statusCode = 404; res.end('not found'); return; }
+    res.statusCode = 200;
+    res.setHeader('content-type', blob.mime);
+    res.setHeader('content-length', blob.buffer.length.toString());
+    res.end(blob.buffer);
+  }
+
+  signBlobUrl(id: string): string {
+    return this.signer.sign(id).replace('/screenshot/', '/blob/');
   }
 
   private static readonly MIME: Record<string, string> = {

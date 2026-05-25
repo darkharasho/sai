@@ -68,4 +68,23 @@ describe('BridgeServer HTTP', () => {
     });
     expect(r2.status).toBe(401);
   });
+
+  it('GET /blob/<id> serves bytes via the same signer + loadBlob', async () => {
+    let loaded: string | null = null;
+    const server2 = new BridgeServer({
+      tailnetIp: '127.0.0.1', pairing: buildPairingStore(), bus: new SessionBus(),
+      pwaDir: null, screenshotSecret: 'sek', loadScreenshot: async () => null,
+      loadBlob: async (id) => { loaded = id; return { buffer: Buffer.from('hello'), mime: 'text/plain' }; },
+    });
+    const { port: p2 } = await server2.start();
+    const url = server2.signBlobUrl('blob-123');
+    const r = await fetch(`http://127.0.0.1:${p2}${url}`);
+    expect(r.status).toBe(200);
+    expect(await r.text()).toBe('hello');
+    expect(loaded).toBe('blob-123');
+    // Second fetch: signer enforces single-use, returns 401
+    const r2 = await fetch(`http://127.0.0.1:${p2}${url}`);
+    expect(r2.status).toBe(401);
+    await server2.stop();
+  });
 });
