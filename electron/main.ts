@@ -2,6 +2,12 @@ import { app, BrowserWindow, ipcMain, dialog, shell, Menu, MenuItem, screen } fr
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
+import Database from 'better-sqlite3';
+import { RemoteModule } from './services/remote';
+import { BridgeServer } from './services/remote/bridge-server';
+import { PairingStore } from './services/remote/pairing-store';
+import { SessionBus } from './services/remote/session-bus';
+import { resolveTailnetEndpoint } from './services/remote/tailnet';
 import { registerTerminalHandlers, destroyAllTerminals } from './services/pty';
 import { registerClaudeHandlers } from './services/claude';
 import { registerGitHandlers } from './services/git';
@@ -50,6 +56,57 @@ const THEME_TITLEBAR: Record<string, { color: string; symbolColor: string; bg: s
 
 const isMac = process.platform === 'darwin';
 let useFramelessRounded = false;
+
+// Remote module singletons
+let remote: RemoteModule | null = null;
+let pairing: PairingStore | null = null;
+let remoteDb: Database.Database | null = null;
+let bus: SessionBus | null = null;
+const REMOTE_PORT = 17829;
+
+async function getOrInitRemote(): Promise<RemoteModule> {
+  if (remote) return remote;
+  const userDataDir = app.getPath('userData');
+  const dbPath = path.join(userDataDir, 'sai-remote.db');
+  remoteDb = new Database(dbPath);
+  remoteDb.exec(`
+    CREATE TABLE IF NOT EXISTS paired_devices (
+      id TEXT PRIMARY KEY, label TEXT NOT NULL, token_hash TEXT NOT NULL,
+      paired_at INTEGER NOT NULL, last_seen_at INTEGER, revoked_at INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+  `);
+  pairing = new PairingStore(remoteDb);
+  bus = new SessionBus();
+
+  // Persistent HMAC secret for signed screenshot URLs (used in Phase 3+).
+  let secret = (remoteDb.prepare('SELECT v FROM kv WHERE k = ?').get('screenshot_secret') as { v?: string } | undefined)?.v;
+  if (!secret) {
+    secret = crypto.randomBytes(32).toString('base64url');
+    remoteDb.prepare('INSERT INTO kv (k, v) VALUES (?, ?)').run('screenshot_secret', secret);
+  }
+  const screenshotSecret = secret;
+
+  const pwaDir = app.isPackaged
+    ? path.join(process.resourcesPath, 'app', 'dist', 'renderer-remote')
+    : path.join(__dirname, '..', 'dist', 'renderer-remote');
+
+  remote = new RemoteModule({
+    pairing,
+    bus,
+    resolveTailnetEndpoint: () => resolveTailnetEndpoint(),
+    makeBridge: (tailnetIp) => new BridgeServer({
+      tailnetIp,
+      pairing: pairing!,
+      bus: bus!,
+      pwaDir,
+      screenshotSecret,
+      loadScreenshot: async () => null, // Phase 3+ wires this
+      port: REMOTE_PORT,
+    }),
+  });
+  return remote;
+}
 
 function createWindow() {
   let tb = THEME_TITLEBAR.default;
@@ -555,6 +612,7 @@ process.on('uncaughtException', (err) => {
 app.whenReady().then(createWindow);
 app.on('before-quit', () => {
   try { swarmMcpHost.stop(); } catch { /* noop */ }
+  void remote?.stop();
 });
 app.on('window-all-closed', () => {
   stopSuspendTimer();
