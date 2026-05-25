@@ -6,7 +6,6 @@ import Approval from './Approval';
 import SessionDrawer from './SessionDrawer';
 import SaiLogo from '../branding/SaiLogo';
 import WorkspaceHeader from './WorkspaceHeader';
-import OverridesBar from './OverridesBar';
 import { getOverrides, setOverrides as persistOverrides, clearOverrides, type SessionOverrides } from '../lib/overrides';
 
 interface Props {
@@ -307,9 +306,14 @@ export default function Chat({ client, initialActive }: Props) {
           />
         </div>
       )}
-      <OverridesBar overrides={overrides} onChange={updateOverrides} />
-      <div className="shrink-0">
-        <Composer streaming={streaming} onSend={onSend} onInterrupt={onInterrupt} />
+      <div style={{ flexShrink: 0 }}>
+        <Composer
+          streaming={streaming}
+          onSend={onSend}
+          onInterrupt={onInterrupt}
+          overrides={overrides}
+          onOverridesChange={updateOverrides}
+        />
       </div>
       <SessionDrawer
         client={client}
