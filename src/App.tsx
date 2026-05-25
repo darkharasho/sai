@@ -297,8 +297,16 @@ export default function App() {
   useEffect(() => {
     const off = installRemoteProxyHandler({
       getActiveSession: () => activeSessionRef.current,
-      listWorkspaces: () => {
-        const out: { projectPath: string; name: string; kind: 'project' | 'meta'; members?: { projectPath: string; name: string }[]; status?: { busy?: boolean; streaming?: boolean; completed?: boolean; approval?: boolean } }[] = [];
+      listWorkspaces: async () => {
+        type Row = {
+          projectPath: string;
+          name: string;
+          kind: 'project' | 'meta';
+          members?: { projectPath: string; name: string }[];
+          status?: { busy?: boolean; streaming?: boolean; completed?: boolean; approval?: boolean };
+          state?: 'active' | 'open' | 'suspended' | 'recent';
+        };
+        const sai = (window as any).sai;
         const metaByPath = new Map<string, MetaWorkspaceListItem>();
         for (const m of metaWorkspaces) {
           if (m.syntheticRoot) metaByPath.set(m.syntheticRoot, m);
@@ -311,21 +319,59 @@ export default function App() {
           if (!busy && !streaming && !completed && !approval) return undefined;
           return { busy, streaming, completed, approval };
         };
-        workspacesRef.current.forEach((_, projectPath) => {
-          const meta = metaByPath.get(projectPath);
+        const out: Row[] = [];
+        const seen = new Set<string>();
+
+        // 1. Active + suspended workspaces from the SAI workspace registry
+        const allWorkspaces: Array<{ projectPath: string; status: 'active' | 'suspended' | 'recent' }> =
+          (await sai?.workspaceGetAll?.()) ?? [];
+        const activePath = activeProjectPathRef.current;
+        for (const w of allWorkspaces) {
+          if (seen.has(w.projectPath)) continue;
+          seen.add(w.projectPath);
+          const meta = metaByPath.get(w.projectPath);
+          const state: Row['state'] = w.projectPath === activePath
+            ? 'active'
+            : w.status === 'suspended'
+            ? 'suspended'
+            : w.status === 'recent'
+            ? 'recent'
+            : 'open';
           if (meta) {
             out.push({
-              projectPath,
+              projectPath: w.projectPath,
               name: meta.name,
               kind: 'meta',
               members: meta.projects.map((p) => ({ projectPath: p.path, name: p.linkName })),
-              status: statusFor(projectPath),
+              status: statusFor(w.projectPath),
+              state,
             });
           } else {
-            const base = projectPath.split('/').filter(Boolean).pop() ?? projectPath;
-            out.push({ projectPath, name: base, kind: 'project', status: statusFor(projectPath) });
+            const base = w.projectPath.split('/').filter(Boolean).pop() ?? w.projectPath;
+            out.push({ projectPath: w.projectPath, name: base, kind: 'project', status: statusFor(w.projectPath), state });
           }
-        });
+        }
+
+        // 2. Recent projects (paths only) not already represented
+        const recentPaths: string[] = (await sai?.getRecentProjects?.()) ?? [];
+        for (const p of recentPaths) {
+          if (seen.has(p)) continue;
+          seen.add(p);
+          const meta = metaByPath.get(p);
+          if (meta) {
+            out.push({
+              projectPath: p,
+              name: meta.name,
+              kind: 'meta',
+              members: meta.projects.map((mp) => ({ projectPath: mp.path, name: mp.linkName })),
+              state: 'recent',
+            });
+          } else {
+            const base = p.split('/').filter(Boolean).pop() ?? p;
+            out.push({ projectPath: p, name: base, kind: 'project', state: 'recent' });
+          }
+        }
+
         return out;
       },
       setActiveWorkspace: (path) => setActiveProjectPath(path),

@@ -19,11 +19,12 @@ export interface RemoteWorkspaceMeta {
   kind: 'project' | 'meta';
   members?: { projectPath: string; name: string }[];
   status?: RemoteWorkspaceStatusMeta;
+  state?: 'active' | 'open' | 'suspended' | 'recent';
 }
 
 export interface RemoteProxyDeps {
   getActiveSession: () => ActiveSessionSnapshot | null;
-  listWorkspaces: () => RemoteWorkspaceMeta[];
+  listWorkspaces: () => Promise<RemoteWorkspaceMeta[]> | RemoteWorkspaceMeta[];
   setActiveWorkspace: (projectPath: string) => void;
 }
 
@@ -44,7 +45,7 @@ export function installRemoteProxyHandler(deps: RemoteProxyDeps): () => void {
       } else if (kind === 'getActiveSession') {
         result = deps.getActiveSession();
       } else if (kind === 'listWorkspaces') {
-        result = deps.listWorkspaces();
+        result = await deps.listWorkspaces();
       } else if (kind === 'setActiveWorkspace') {
         deps.setActiveWorkspace(args.projectPath);
         result = null;

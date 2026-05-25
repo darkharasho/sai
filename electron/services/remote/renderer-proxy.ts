@@ -15,6 +15,8 @@ export interface RemoteWorkspace {
   kind: 'project' | 'meta';
   members?: { projectPath: string; name: string }[];
   status?: RemoteWorkspaceStatus;
+  /** State for sorting / dimming in the picker. */
+  state?: 'active' | 'open' | 'suspended' | 'recent';
 }
 interface Pending {
   resolve: (v: unknown) => void;
