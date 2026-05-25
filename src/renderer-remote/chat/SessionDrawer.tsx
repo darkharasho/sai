@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { WireClient } from '../wire';
+import SaiLogo from '../branding/SaiLogo';
 
 interface SessionMeta {
   id: string;
@@ -19,7 +20,9 @@ interface Props {
   onClose: () => void;
 }
 
-export default function SessionDrawer({ client, followEnabled, onFollowChange, onAttach, currentProjectPath, open, onClose }: Props) {
+export default function SessionDrawer({
+  client, followEnabled, onFollowChange, onAttach, currentProjectPath, open, onClose,
+}: Props) {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -36,35 +39,106 @@ export default function SessionDrawer({ client, followEnabled, onFollowChange, o
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex">
-      <div className="w-72 bg-neutral-950 border-r border-neutral-800 flex flex-col">
-        <div className="p-3 border-b border-neutral-800 flex items-center justify-between">
-          <div className="text-sm font-semibold">Sessions</div>
-          <button onClick={onClose} className="text-neutral-400 text-xl leading-none">×</button>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex' }}>
+      <div
+        style={{
+          width: 290,
+          maxWidth: '85%',
+          display: 'flex',
+          flexDirection: 'column',
+          background: 'var(--bg-secondary)',
+          borderRight: '1px solid var(--border)',
+          paddingTop: 'env(safe-area-inset-top)',
+          paddingBottom: 'env(safe-area-inset-bottom)',
+        }}
+      >
+        <div style={{
+          padding: '12px 14px',
+          borderBottom: '1px solid var(--border)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+        }}>
+          <SaiLogo mode="idle" size={20} color="var(--accent)" />
+          <div style={{ flex: 1, fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Sessions</div>
+          <button
+            onClick={onClose}
+            aria-label="Close drawer"
+            style={{
+              background: 'transparent',
+              color: 'var(--text-muted)',
+              border: 'none',
+              fontSize: 22,
+              lineHeight: 1,
+              cursor: 'pointer',
+              padding: 4,
+            }}
+          >×</button>
         </div>
-        <label className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-neutral-900">
-          <input type="checkbox" checked={followEnabled} onChange={(e) => onFollowChange(e.target.checked)} />
+
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '12px 14px',
+            fontSize: 13,
+            color: 'var(--text)',
+            cursor: 'pointer',
+            borderBottom: '1px solid var(--border)',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={followEnabled}
+            onChange={(e) => onFollowChange(e.target.checked)}
+            style={{ accentColor: 'var(--accent)', width: 16, height: 16 }}
+          />
           Follow desktop
         </label>
-        <div className="flex-1 overflow-y-auto">
-          {loading && <div className="px-3 py-2 text-xs text-neutral-500">Loading…</div>}
-          {err && <div className="px-3 py-2 text-xs text-red-400">{err}</div>}
-          {!loading && sessions.length === 0 && (
-            <div className="px-3 py-2 text-xs text-neutral-500">No sessions for this workspace.</div>
+
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {loading && <div style={{ padding: '12px 14px', fontSize: 12, color: 'var(--text-muted)' }}>Loading…</div>}
+          {err && <div style={{ padding: '12px 14px', fontSize: 12, color: 'var(--red)' }}>{err}</div>}
+          {!loading && sessions.length === 0 && !err && (
+            <div style={{ padding: '12px 14px', fontSize: 12, color: 'var(--text-muted)' }}>
+              No sessions yet.
+            </div>
           )}
           {sessions.map((s) => (
             <button
               key={s.id}
               onClick={() => { onAttach(s.projectPath, s.id); onClose(); }}
-              className="block w-full text-left px-3 py-2 text-sm hover:bg-neutral-900 border-b border-neutral-900"
+              style={{
+                display: 'block',
+                width: '100%',
+                textAlign: 'left',
+                padding: '10px 14px',
+                background: 'transparent',
+                color: 'var(--text)',
+                border: 'none',
+                borderBottom: '1px solid var(--border)',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
             >
-              <div className="truncate">{s.title ?? `Session ${s.id.slice(0, 6)}`}</div>
-              <div className="text-xs text-neutral-500">{new Date(s.updatedAt).toLocaleString()}</div>
+              <div style={{
+                fontSize: 13,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                color: 'var(--text)',
+              }}>
+                {s.title ?? `Session ${s.id.slice(0, 6)}`}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                {new Date(s.updatedAt).toLocaleString()}
+              </div>
             </button>
           ))}
         </div>
       </div>
-      <div className="flex-1 bg-black/40" onClick={onClose} />
+      <div onClick={onClose} style={{ flex: 1, background: 'rgba(0,0,0,0.55)' }} />
     </div>
   );
 }

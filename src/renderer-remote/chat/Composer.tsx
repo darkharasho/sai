@@ -22,8 +22,29 @@ export default function Composer({ streaming, onSend, onInterrupt }: Props) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
   };
 
+  const buttonBase: React.CSSProperties = {
+    flexShrink: 0,
+    padding: '10px 16px',
+    fontSize: 14,
+    fontWeight: 500,
+    borderRadius: 8,
+    border: '1px solid transparent',
+    cursor: 'pointer',
+    transition: 'background-color var(--dur-fast) var(--ease-out-soft), border-color var(--dur-fast)',
+  };
+
   return (
-    <div className="border-t border-neutral-800 p-2 flex gap-2 items-end min-w-0">
+    <div
+      style={{
+        display: 'flex',
+        gap: 8,
+        alignItems: 'flex-end',
+        padding: 10,
+        borderTop: '1px solid var(--border)',
+        background: 'var(--bg-secondary)',
+        minWidth: 0,
+      }}
+    >
       <textarea
         ref={ref}
         value={text}
@@ -31,20 +52,48 @@ export default function Composer({ streaming, onSend, onInterrupt }: Props) {
         onKeyDown={onKey}
         placeholder={streaming ? 'Responding…' : 'Message'}
         rows={1}
-        className="flex-1 min-w-0 resize-none bg-neutral-900 border border-neutral-800 rounded px-3 py-2 focus:outline-none focus:border-neutral-600"
-        style={{ fontSize: '16px' }}
+        style={{
+          flex: 1,
+          minWidth: 0,
+          resize: 'none',
+          fontFamily: 'inherit',
+          fontSize: 16, // prevents iOS auto-zoom
+          lineHeight: 1.4,
+          padding: '10px 12px',
+          background: 'var(--bg-input)',
+          color: 'var(--text)',
+          border: '1px solid var(--border)',
+          borderRadius: 8,
+          outline: 'none',
+        }}
+        onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; }}
+        onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; }}
       />
       {streaming ? (
         <button
           onClick={onInterrupt}
-          className="shrink-0 px-3 py-2 rounded bg-red-700 hover:bg-red-600 text-sm"
-        >Stop</button>
+          style={{
+            ...buttonBase,
+            background: 'var(--bg-elevated)',
+            color: 'var(--red)',
+            borderColor: 'var(--border)',
+          }}
+        >
+          Stop
+        </button>
       ) : (
         <button
           onClick={submit}
           disabled={!text.trim()}
-          className="shrink-0 px-3 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-sm"
-        >Send</button>
+          style={{
+            ...buttonBase,
+            background: text.trim() ? 'var(--accent)' : 'var(--bg-elevated)',
+            color: text.trim() ? '#000' : 'var(--text-muted)',
+            opacity: text.trim() ? 1 : 0.7,
+          }}
+        >
+          Send
+        </button>
       )}
     </div>
   );

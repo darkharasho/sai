@@ -4,6 +4,7 @@ import Transcript, { type TranscriptMessage } from './Transcript';
 import Composer from './Composer';
 import Approval from './Approval';
 import SessionDrawer from './SessionDrawer';
+import SaiLogo from '../branding/SaiLogo';
 
 interface Props {
   client: WireClient;
@@ -132,24 +133,66 @@ export default function Chat({ client, initialActive }: Props) {
 
   return (
     <div
-      className="flex flex-col overflow-hidden w-screen"
       style={{
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        width: '100vw',
         height: '100svh',
+        background: 'var(--bg-primary)',
         paddingTop: 'env(safe-area-inset-top)',
         paddingBottom: 'env(safe-area-inset-bottom)',
       }}
     >
-      <div className="shrink-0 border-b border-neutral-800 px-3 py-2 flex items-center gap-2 min-w-0">
-        <button onClick={() => setDrawerOpen(true)} aria-label="Open sessions" className="shrink-0 text-2xl leading-none">≡</button>
-        <div className="text-sm truncate flex-1 min-w-0">
-          {active ? <span className="text-neutral-500">{active.projectPath}</span> : <span className="text-neutral-500">No session attached</span>}
+      <div
+        style={{
+          flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '10px 14px',
+          background: 'var(--bg-secondary)',
+          borderBottom: '1px solid var(--border)',
+          minWidth: 0,
+        }}
+      >
+        <button
+          onClick={() => setDrawerOpen(true)}
+          aria-label="Open sessions"
+          style={{
+            flexShrink: 0,
+            width: 32, height: 32,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            background: 'transparent',
+            color: 'var(--text)',
+            border: '1px solid var(--border)',
+            borderRadius: 8,
+            cursor: 'pointer',
+            fontSize: 18,
+          }}
+        >
+          ≡
+        </button>
+        <SaiLogo mode="idle" size={20} color="var(--accent)" />
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>SAI</div>
+          <div style={{
+            fontSize: 11,
+            color: 'var(--text-muted)',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            fontFamily: '"Geist Mono", ui-monospace, monospace',
+          }}>
+            {active ? active.projectPath.split('/').pop() : 'no session attached'}
+          </div>
         </div>
       </div>
-      <div className="flex-1 min-h-0 overflow-hidden">
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <Transcript messages={messages} />
       </div>
       {pendingApproval && (
-        <div className="shrink-0 px-3">
+        <div style={{ flexShrink: 0, padding: '0 14px' }}>
           <Approval
             toolName={pendingApproval.toolName}
             command={pendingApproval.command}

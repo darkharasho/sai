@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { BEARER_KEY, connect, extractPairCode, pair, type WireClient } from './wire';
 import Status from './Status';
 import Chat from './chat/Chat';
+import SaiLogo from './branding/SaiLogo';
 
 export default function App() {
   const [phase, setPhase] = useState<'init' | 'pairing' | 'connected' | 'needs-pair' | 'error'>('init');
@@ -48,19 +49,38 @@ export default function App() {
     return <Chat client={client} />;
   }
 
+  const mode = phase === 'init' || phase === 'pairing' ? 'scanner' : phase === 'error' ? 'static' : 'idle';
+
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-6 gap-3 text-center">
-      {phase === 'init' && <p>Connecting…</p>}
-      {phase === 'pairing' && <p>Pairing…</p>}
+    <div style={{
+      minHeight: '100svh',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 32,
+      gap: 18,
+      textAlign: 'center',
+      background: 'var(--bg-primary)',
+      color: 'var(--text)',
+    }}>
+      <SaiLogo mode={mode} size={64} color="var(--accent)" />
+      <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, letterSpacing: '-0.01em' }}>SAI Remote</h1>
+      {phase === 'init' && <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', fontFamily: '"Geist Mono", ui-monospace, monospace' }}>connecting…</p>}
+      {phase === 'pairing' && <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', fontFamily: '"Geist Mono", ui-monospace, monospace' }}>pairing…</p>}
       {phase === 'needs-pair' && (
-        <>
-          <h1 className="text-xl font-semibold">Re-pair required</h1>
-          <p className="text-sm text-neutral-400 max-w-xs">
-            Open the SAI app on your computer, go to Settings → Mobile Remote → Pair a new device, and scan the QR code with your phone camera.
+        <div style={{ maxWidth: 320 }}>
+          <p style={{ margin: 0, fontSize: 14, color: 'var(--text)', marginBottom: 8 }}>Re-pair required</p>
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+            Open SAI on your computer, go to Settings → Mobile Remote → Pair a new device, and scan the QR code with your phone camera.
           </p>
-        </>
+        </div>
       )}
-      {phase === 'error' && <p className="text-red-400">Error: {error}</p>}
+      {phase === 'error' && (
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--red)', fontFamily: '"Geist Mono", ui-monospace, monospace' }}>
+          {error}
+        </p>
+      )}
     </div>
   );
 }
