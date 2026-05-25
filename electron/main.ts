@@ -2,6 +2,11 @@ import { app, BrowserWindow, ipcMain, dialog, shell, Menu, MenuItem, screen } fr
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
+import { RemoteModule } from './services/remote';
+import { BridgeServer } from './services/remote/bridge-server';
+import { PairingStore } from './services/remote/pairing-store';
+import { SessionBus } from './services/remote/session-bus';
+import { resolveTailnetEndpoint } from './services/remote/tailnet';
 import { registerTerminalHandlers, destroyAllTerminals } from './services/pty';
 import { registerClaudeHandlers } from './services/claude';
 import { registerGitHandlers } from './services/git';
@@ -50,6 +55,71 @@ const THEME_TITLEBAR: Record<string, { color: string; symbolColor: string; bg: s
 
 const isMac = process.platform === 'darwin';
 let useFramelessRounded = false;
+
+// Remote module singletons
+let remote: RemoteModule | null = null;
+let pairing: PairingStore | null = null;
+let bus: SessionBus | null = null;
+let remoteKvPath: string | null = null;
+const REMOTE_PORT = 17829;
+
+interface RemoteKv { screenshotSecret?: string; enabled?: boolean }
+
+function readRemoteKv(): RemoteKv {
+  if (!remoteKvPath) return {};
+  try { return JSON.parse(fs.readFileSync(remoteKvPath, 'utf8')); } catch { return {}; }
+}
+function writeRemoteKv(patch: RemoteKv): void {
+  if (!remoteKvPath) return;
+  const merged = { ...readRemoteKv(), ...patch };
+  fs.mkdirSync(path.dirname(remoteKvPath), { recursive: true });
+  fs.writeFileSync(remoteKvPath, JSON.stringify(merged, null, 2), 'utf8');
+}
+
+async function getOrInitRemote(): Promise<RemoteModule> {
+  if (remote) return remote;
+  const userDataDir = app.getPath('userData');
+  const pairingPath = path.join(userDataDir, 'sai-remote-pairings.json');
+  remoteKvPath = path.join(userDataDir, 'sai-remote-kv.json');
+  pairing = new PairingStore(pairingPath);
+  bus = new SessionBus();
+
+  let kv = readRemoteKv();
+  if (!kv.screenshotSecret) {
+    kv = { ...kv, screenshotSecret: crypto.randomBytes(32).toString('base64url') };
+    writeRemoteKv(kv);
+  }
+  const screenshotSecret = kv.screenshotSecret!;
+
+  const pwaDir = app.isPackaged
+    ? path.join(process.resourcesPath, 'app', 'dist', 'renderer-remote')
+    : path.join(__dirname, '..', 'dist', 'renderer-remote');
+
+  remote = new RemoteModule({
+    pairing,
+    bus,
+    resolveTailnetEndpoint: () => resolveTailnetEndpoint(),
+    makeBridge: (tailnetIp) => new BridgeServer({
+      tailnetIp,
+      pairing: pairing!,
+      bus: bus!,
+      pwaDir,
+      screenshotSecret,
+      loadScreenshot: async () => null, // Phase 3+ wires this
+      port: REMOTE_PORT,
+    }),
+  });
+  return remote;
+}
+
+async function getEnabledFlag(): Promise<boolean> {
+  await getOrInitRemote();
+  return Boolean(readRemoteKv().enabled);
+}
+async function setEnabledFlag(value: boolean): Promise<void> {
+  await getOrInitRemote();
+  writeRemoteKv({ enabled: value });
+}
 
 function createWindow() {
   let tb = THEME_TITLEBAR.default;
@@ -544,6 +614,35 @@ function createWindow() {
       return shell.openExternal(url);
     }
   });
+
+  ipcMain.handle('remote:setEnabled', async (_e, enabled: boolean) => {
+    const r = await getOrInitRemote();
+    await setEnabledFlag(enabled);
+    if (enabled) await r.start();
+    else await r.stop();
+  });
+
+  ipcMain.handle('remote:status', async () => {
+    const enabled = await getEnabledFlag();
+    if (!remote) return { running: false, url: null, reason: 'disabled', pairedCount: 0, enabled };
+    return { ...remote.status(), enabled };
+  });
+
+  ipcMain.handle('remote:mintPairCode', async () => {
+    const r = await getOrInitRemote();
+    return r.mintPairingCode();
+  });
+
+  ipcMain.handle('remote:listDevices', async () => {
+    await getOrInitRemote();
+    return pairing!.list();
+  });
+
+  ipcMain.handle('remote:revoke', async (_e, deviceId: string) => {
+    await getOrInitRemote();
+    pairing!.revoke(deviceId);
+    remote!.closeDeviceConnections(deviceId);
+  });
 }
 
 // Suppress EPIPE errors from writing to closed streams (e.g. killed child processes)
@@ -555,6 +654,7 @@ process.on('uncaughtException', (err) => {
 app.whenReady().then(createWindow);
 app.on('before-quit', () => {
   try { swarmMcpHost.stop(); } catch { /* noop */ }
+  void remote?.stop();
 });
 app.on('window-all-closed', () => {
   stopSuspendTimer();
