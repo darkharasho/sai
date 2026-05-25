@@ -17,7 +17,7 @@ export default defineConfig({
         vite: {
           build: {
             rollupOptions: {
-              external: ['electron', 'node-pty', 'simple-git', 'electron-updater', 'better-sqlite3', 'argon2'],
+              external: ['electron', 'node-pty', 'simple-git', 'electron-updater', 'better-sqlite3', 'argon2', 'ws'],
             },
           },
         },
