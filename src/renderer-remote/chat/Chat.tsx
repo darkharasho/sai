@@ -243,15 +243,11 @@ export default function Chat({ client, initialActive }: Props) {
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        width: '100vw',
-        // interactive-widget=resizes-content (viewport meta) makes Safari
-        // shrink the layout viewport when the keyboard opens, so 100dvh
-        // tracks the actual visible area without per-frame JS updates.
-        height: '100dvh',
+        // Body is position: fixed + inset: 0 (theme.css), so we just fill it.
+        // interactive-widget=resizes-content shrinks the layout viewport when
+        // the keyboard opens; 100% of the locked body tracks that.
+        width: '100%',
+        height: '100%',
         background: 'var(--bg-primary)',
         paddingTop: 'env(safe-area-inset-top)',
         paddingBottom: 'env(safe-area-inset-bottom)',
