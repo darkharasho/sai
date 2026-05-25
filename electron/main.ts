@@ -155,6 +155,8 @@ async function getOrInitRemote(): Promise<RemoteModule> {
       interruptTurn: (path, scope) => interruptImpl(path, scope),
       listSessions: async (path) => (await rendererProxy!.listSessions(path)) as any,
       loadHistory: async (sid) => (await rendererProxy!.loadHistory(sid)) as any,
+      listWorkspaces: () => rendererProxy!.listWorkspaces(),
+      setActiveWorkspace: (path) => rendererProxy!.setActiveWorkspace(path),
       registerActiveSessionBroadcast: (broadcast) => {
         activeSessionBroadcast = broadcast;
       },
