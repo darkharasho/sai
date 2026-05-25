@@ -1,13 +1,10 @@
-import Database from 'better-sqlite3';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { BridgeServer } from '@electron/services/remote/bridge-server';
 import { PairingStore } from '@electron/services/remote/pairing-store';
 import { SessionBus } from '@electron/services/remote/session-bus';
 
 function buildPairingStore() {
-  const db = new Database(':memory:');
-  db.exec(`CREATE TABLE paired_devices (id TEXT PRIMARY KEY, label TEXT NOT NULL, token_hash TEXT NOT NULL, paired_at INTEGER NOT NULL, last_seen_at INTEGER, revoked_at INTEGER);`);
-  return new PairingStore(db);
+  return new PairingStore(':memory:');
 }
 
 describe('BridgeServer HTTP', () => {

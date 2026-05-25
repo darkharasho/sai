@@ -1,4 +1,3 @@
-import Database from 'better-sqlite3';
 import { describe, it, expect } from 'vitest';
 import WebSocket from 'ws';
 import { RemoteModule } from '@electron/services/remote';
@@ -6,15 +5,9 @@ import { BridgeServer } from '@electron/services/remote/bridge-server';
 import { PairingStore } from '@electron/services/remote/pairing-store';
 import { SessionBus } from '@electron/services/remote/session-bus';
 
-function freshDb() {
-  const db = new Database(':memory:');
-  db.exec(`CREATE TABLE paired_devices (id TEXT PRIMARY KEY, label TEXT NOT NULL, token_hash TEXT NOT NULL, paired_at INTEGER NOT NULL, last_seen_at INTEGER, revoked_at INTEGER);`);
-  return db;
-}
-
 describe('mobile remote end-to-end', () => {
   it('pair → auth → event → revoke → reconnect fails', async () => {
-    const pairing = new PairingStore(freshDb());
+    const pairing = new PairingStore(':memory:');
     const bus = new SessionBus();
     const remote = new RemoteModule({
       pairing,

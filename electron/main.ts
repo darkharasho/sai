@@ -2,7 +2,6 @@ import { app, BrowserWindow, ipcMain, dialog, shell, Menu, MenuItem, screen } fr
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import Database from 'better-sqlite3';
 import { RemoteModule } from './services/remote';
 import { BridgeServer } from './services/remote/bridge-server';
 import { PairingStore } from './services/remote/pairing-store';
@@ -60,32 +59,37 @@ let useFramelessRounded = false;
 // Remote module singletons
 let remote: RemoteModule | null = null;
 let pairing: PairingStore | null = null;
-let remoteDb: Database.Database | null = null;
 let bus: SessionBus | null = null;
+let remoteKvPath: string | null = null;
 const REMOTE_PORT = 17829;
+
+interface RemoteKv { screenshotSecret?: string; enabled?: boolean }
+
+function readRemoteKv(): RemoteKv {
+  if (!remoteKvPath) return {};
+  try { return JSON.parse(fs.readFileSync(remoteKvPath, 'utf8')); } catch { return {}; }
+}
+function writeRemoteKv(patch: RemoteKv): void {
+  if (!remoteKvPath) return;
+  const merged = { ...readRemoteKv(), ...patch };
+  fs.mkdirSync(path.dirname(remoteKvPath), { recursive: true });
+  fs.writeFileSync(remoteKvPath, JSON.stringify(merged, null, 2), 'utf8');
+}
 
 async function getOrInitRemote(): Promise<RemoteModule> {
   if (remote) return remote;
   const userDataDir = app.getPath('userData');
-  const dbPath = path.join(userDataDir, 'sai-remote.db');
-  remoteDb = new Database(dbPath);
-  remoteDb.exec(`
-    CREATE TABLE IF NOT EXISTS paired_devices (
-      id TEXT PRIMARY KEY, label TEXT NOT NULL, token_hash TEXT NOT NULL,
-      paired_at INTEGER NOT NULL, last_seen_at INTEGER, revoked_at INTEGER
-    );
-    CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
-  `);
-  pairing = new PairingStore(remoteDb);
+  const pairingPath = path.join(userDataDir, 'sai-remote-pairings.json');
+  remoteKvPath = path.join(userDataDir, 'sai-remote-kv.json');
+  pairing = new PairingStore(pairingPath);
   bus = new SessionBus();
 
-  // Persistent HMAC secret for signed screenshot URLs (used in Phase 3+).
-  let secret = (remoteDb.prepare('SELECT v FROM kv WHERE k = ?').get('screenshot_secret') as { v?: string } | undefined)?.v;
-  if (!secret) {
-    secret = crypto.randomBytes(32).toString('base64url');
-    remoteDb.prepare('INSERT INTO kv (k, v) VALUES (?, ?)').run('screenshot_secret', secret);
+  let kv = readRemoteKv();
+  if (!kv.screenshotSecret) {
+    kv = { ...kv, screenshotSecret: crypto.randomBytes(32).toString('base64url') };
+    writeRemoteKv(kv);
   }
-  const screenshotSecret = secret;
+  const screenshotSecret = kv.screenshotSecret!;
 
   const pwaDir = app.isPackaged
     ? path.join(process.resourcesPath, 'app', 'dist', 'renderer-remote')
@@ -110,12 +114,11 @@ async function getOrInitRemote(): Promise<RemoteModule> {
 
 async function getEnabledFlag(): Promise<boolean> {
   await getOrInitRemote();
-  const row = remoteDb?.prepare('SELECT v FROM kv WHERE k = ?').get('enabled') as { v?: string } | undefined;
-  return row?.v === '1';
+  return Boolean(readRemoteKv().enabled);
 }
 async function setEnabledFlag(value: boolean): Promise<void> {
   await getOrInitRemote();
-  remoteDb?.prepare('INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)').run('enabled', value ? '1' : '0');
+  writeRemoteKv({ enabled: value });
 }
 
 function createWindow() {
