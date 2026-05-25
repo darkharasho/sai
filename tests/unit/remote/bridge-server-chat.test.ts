@@ -108,3 +108,41 @@ describe('BridgeServer chat routing', () => {
     ws.close();
   });
 });
+
+describe('BridgeServer workspace routing', () => {
+  it('workspaces.list calls callback and replies with reqId', async () => {
+    const bus = new SessionBus();
+    const listWorkspaces = vi.fn().mockResolvedValue([{ projectPath: '/p', name: 'p', kind: 'project' }]);
+    const server = new BridgeServer({
+      tailnetIp: '127.0.0.1', pairing: new PairingStore(':memory:'), bus,
+      pwaDir: null, screenshotSecret: 'x', loadScreenshot: async () => null,
+      listWorkspaces,
+    });
+    const { port } = await server.start();
+    const ws = await pairedSocket(server, port);
+    ws.send(JSON.stringify({ type: 'workspaces.list', reqId: 'w1' }));
+    const m = await once(ws, (m) => m.type === 'workspaces.list.result');
+    expect(m.reqId).toBe('w1');
+    expect(m.workspaces).toEqual([{ projectPath: '/p', name: 'p', kind: 'project' }]);
+    expect(listWorkspaces).toHaveBeenCalledOnce();
+    ws.close();
+    await server.stop();
+  });
+
+  it('workspace.set calls setActiveWorkspace', async () => {
+    const bus = new SessionBus();
+    const setActiveWorkspace = vi.fn().mockResolvedValue(undefined);
+    const server = new BridgeServer({
+      tailnetIp: '127.0.0.1', pairing: new PairingStore(':memory:'), bus,
+      pwaDir: null, screenshotSecret: 'x', loadScreenshot: async () => null,
+      setActiveWorkspace,
+    });
+    const { port } = await server.start();
+    const ws = await pairedSocket(server, port);
+    ws.send(JSON.stringify({ type: 'workspace.set', projectPath: '/p/other' }));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(setActiveWorkspace).toHaveBeenCalledWith('/p/other');
+    ws.close();
+    await server.stop();
+  });
+});

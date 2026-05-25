@@ -42,6 +42,8 @@ export interface WireClient {
   attach(args: { projectPath: string; scope?: string; sessionId: string }): void;
   setFollow(enabled: boolean): void;
   listSessions(projectPath: string): Promise<unknown[]>;
+  listWorkspaces(): Promise<unknown[]>;
+  setActiveWorkspace(projectPath: string): void;
   sendPrompt(args: ChatPromptArgs): void;
   approve(args: ChatApprovalArgs): void;
   interrupt(projectPath: string, scope?: string): void;
@@ -89,12 +91,17 @@ export function connect(token: string): WireClient {
   handlers.add((msg) => {
     const reqId = (msg as any).reqId;
     if (typeof reqId === 'string' && pendingReq.has(reqId)) {
-      const { resolve, reject } = pendingReq.get(reqId)!;
+      const entry = pendingReq.get(reqId)!;
       pendingReq.delete(reqId);
-      if ((msg as any).type === 'error') {
-        reject(new Error(String((msg as any).message ?? 'error')));
+      const t = (msg as any).type;
+      if (t === 'error') {
+        entry.reject(new Error(String((msg as any).message ?? 'error')));
+      } else if (t === 'sessions.list.result') {
+        entry.resolve((msg as any).sessions ?? []);
+      } else if (t === 'workspaces.list.result') {
+        entry.resolve((msg as any).workspaces ?? []);
       } else {
-        resolve((msg as any).sessions ?? msg);
+        entry.resolve(msg);
       }
     }
   });
@@ -114,6 +121,13 @@ export function connect(token: string): WireClient {
       setTimeout(() => { if (pendingReq.delete(reqId)) reject(new Error('sessions.list timeout')); }, 5000);
       sendFrame({ type: 'sessions.list', projectPath, reqId });
     }),
+    listWorkspaces: () => new Promise((resolve, reject) => {
+      const reqId = `r${++reqCounter}`;
+      pendingReq.set(reqId, { resolve, reject });
+      setTimeout(() => { if (pendingReq.delete(reqId)) reject(new Error('workspaces.list timeout')); }, 5000);
+      sendFrame({ type: 'workspaces.list', reqId });
+    }),
+    setActiveWorkspace: (projectPath) => sendFrame({ type: 'workspace.set', projectPath }),
     sendPrompt: (a) => sendFrame({ type: 'prompt', text: a.text, projectPath: a.projectPath, scope: a.scope ?? 'chat', model: a.model, effort: a.effort, permMode: a.permMode }),
     approve: (a) => sendFrame({ type: 'approval', toolUseId: a.toolUseId, decision: a.decision, modifiedCommand: a.modifiedCommand, projectPath: a.projectPath, scope: a.scope ?? 'chat' }),
     interrupt: (projectPath, scope) => sendFrame({ type: 'interrupt', projectPath, scope: scope ?? 'chat' }),

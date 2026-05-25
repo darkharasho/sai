@@ -57,4 +57,26 @@ describe('RendererProxy', () => {
     expect(await a).toEqual(['A']);
     expect(await b).toEqual(['B']);
   });
+
+  it('listWorkspaces sends correct request and resolves with reply', async () => {
+    const win = fakeWindow();
+    const proxy = new RendererProxy({ getWindow: () => win as any, timeoutMs: 100 });
+    const promise = proxy.listWorkspaces();
+    const [, payload] = win.webContents.send.mock.calls[0];
+    expect(payload.kind).toBe('listWorkspaces');
+    expect(payload.args).toEqual({});
+    proxy.handleReply({ reqId: payload.reqId, result: [{ projectPath: '/p', name: 'p', kind: 'project' }] });
+    expect(await promise).toEqual([{ projectPath: '/p', name: 'p', kind: 'project' }]);
+  });
+
+  it('setActiveWorkspace sends path and resolves', async () => {
+    const win = fakeWindow();
+    const proxy = new RendererProxy({ getWindow: () => win as any, timeoutMs: 100 });
+    const promise = proxy.setActiveWorkspace('/p');
+    const [, payload] = win.webContents.send.mock.calls[0];
+    expect(payload.kind).toBe('setActiveWorkspace');
+    expect(payload.args).toEqual({ projectPath: '/p' });
+    proxy.handleReply({ reqId: payload.reqId, result: null });
+    await expect(promise).resolves.toBeNull();
+  });
 });

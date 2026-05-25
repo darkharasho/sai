@@ -1,6 +1,23 @@
 import type { BrowserWindow } from 'electron';
 
-type Kind = 'listSessions' | 'loadHistory' | 'getActiveSession';
+type Kind = 'listSessions' | 'loadHistory' | 'getActiveSession' | 'listWorkspaces' | 'setActiveWorkspace';
+
+export interface RemoteWorkspaceStatus {
+  busy?: boolean;        // any in-flight activity
+  streaming?: boolean;   // chat turn currently streaming
+  completed?: boolean;   // recently completed turn waiting to be acknowledged
+  approval?: boolean;    // pending tool-approval banner
+}
+
+export interface RemoteWorkspace {
+  projectPath: string;
+  name: string;
+  kind: 'project' | 'meta';
+  members?: { projectPath: string; name: string }[];
+  status?: RemoteWorkspaceStatus;
+  /** State for sorting / dimming in the picker. */
+  state?: 'active' | 'open' | 'suspended' | 'recent';
+}
 interface Pending {
   resolve: (v: unknown) => void;
   reject: (e: Error) => void;
@@ -41,6 +58,14 @@ export class RendererProxy {
    */
   getActiveSession(): Promise<{ projectPath: string; scope: string; sessionId: string } | null> {
     return this.request('getActiveSession', {}) as Promise<{ projectPath: string; scope: string; sessionId: string } | null>;
+  }
+
+  listWorkspaces(): Promise<RemoteWorkspace[]> {
+    return this.request('listWorkspaces', {}) as Promise<RemoteWorkspace[]>;
+  }
+
+  setActiveWorkspace(projectPath: string): Promise<void> {
+    return this.request('setActiveWorkspace', { projectPath }) as Promise<void>;
   }
 
   handleReply(reply: ProxyReply): void {
