@@ -15,7 +15,9 @@ export default function Composer({ streaming, onSend, onInterrupt }: Props) {
     if (!t) return;
     onSend(t);
     setText('');
-    ref.current?.focus();
+    // Dismiss the iOS keyboard so the assistant response is visible without
+    // a manual tap-out. Re-focuses naturally when the user taps the input again.
+    ref.current?.blur();
   };
 
   const onKey = (e: React.KeyboardEvent) => {

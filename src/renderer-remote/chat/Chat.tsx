@@ -48,25 +48,64 @@ export default function Chat({ client, initialActive }: Props) {
       }
       if (t === 'streaming_start') { setStreaming(true); return; }
       if (t === 'assistant') {
-        // claude.ts emits the full SDK message shape: { type, message: { content: Block[] }, ... }
-        // where Block is { type: 'text', text } | { type: 'tool_use', name, input, ... }
+        // SDK message shape: { type:'assistant', message: { content: Block[] }, ... }
+        // Blocks: { type:'text', text } | { type:'tool_use', id, name, input }
         const content = (msg as any).message?.content;
         let textChunk = '';
+        const toolBlocks: { id: string; name: string; input?: Record<string, unknown> }[] = [];
         if (Array.isArray(content)) {
           for (const b of content) {
             if (b?.type === 'text' && typeof b.text === 'string') textChunk += b.text;
+            else if (b?.type === 'tool_use' && typeof b.id === 'string') {
+              toolBlocks.push({ id: b.id, name: b.name ?? 'tool', input: b.input });
+            }
           }
         } else if (typeof (msg as any).text === 'string') {
           textChunk = (msg as any).text;
         }
-        if (!textChunk) return;
-        setMessages((arr) => {
-          const last = arr[arr.length - 1];
-          if (last && last.role === 'assistant' && last.streaming) {
-            return [...arr.slice(0, -1), { ...last, text: (last.text ?? '') + textChunk }];
+        if (textChunk) {
+          setMessages((arr) => {
+            const last = arr[arr.length - 1];
+            if (last && last.role === 'assistant' && last.streaming) {
+              return [...arr.slice(0, -1), { ...last, text: (last.text ?? '') + textChunk }];
+            }
+            return [...arr, { id: `a-${Date.now()}`, role: 'assistant', text: textChunk, streaming: true }];
+          });
+        }
+        for (const tb of toolBlocks) {
+          setMessages((arr) => {
+            if (arr.some((m) => m.id === `tool-${tb.id}`)) return arr;
+            // Stop streaming on the previous assistant bubble so the next text
+            // delta starts a fresh bubble below this tool card.
+            const next = arr.map((m) => m.streaming && m.role === 'assistant' ? { ...m, streaming: false } : m);
+            return [...next, {
+              id: `tool-${tb.id}`,
+              role: 'tool',
+              toolName: tb.name,
+              toolInput: tb.input,
+              toolStatus: 'running',
+            }];
+          });
+        }
+        return;
+      }
+      // Tool results arrive in a `user` SDK message with tool_result blocks
+      if (t === 'user') {
+        const content = (msg as any).message?.content;
+        if (!Array.isArray(content)) return;
+        for (const b of content) {
+          if (b?.type === 'tool_result' && typeof b.tool_use_id === 'string') {
+            const resultText = typeof b.content === 'string'
+              ? b.content
+              : Array.isArray(b.content)
+              ? b.content.map((c: any) => (c?.type === 'text' ? c.text : JSON.stringify(c))).join('\n')
+              : JSON.stringify(b.content);
+            const status: 'done' | 'error' = b.is_error ? 'error' : 'done';
+            setMessages((arr) => arr.map((m) =>
+              m.id === `tool-${b.tool_use_id}` ? { ...m, toolResult: resultText, toolStatus: status } : m
+            ));
           }
-          return [...arr, { id: `a-${Date.now()}`, role: 'assistant', text: textChunk, streaming: true }];
-        });
+        }
         return;
       }
       if (t === 'user_message') {
