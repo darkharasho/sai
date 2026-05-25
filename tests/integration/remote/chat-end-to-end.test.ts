@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import WebSocket from 'ws';
 import { RemoteModule } from '@electron/services/remote';
 import { BridgeServer } from '@electron/services/remote/bridge-server';
@@ -80,6 +80,57 @@ describe('mobile remote chat end-to-end', () => {
     ws.send(JSON.stringify({ type: 'interrupt', projectPath: '/p', scope: 'chat' }));
     await new Promise((r) => setTimeout(r, 30));
     expect(interruptCalls).toBe(1);
+
+    ws.close();
+    await remote.stop();
+  });
+
+  it('workspaces.list + workspace.set', async () => {
+    const pairing = new PairingStore(':memory:');
+    const bus = new SessionBus();
+    const listWorkspaces = vi.fn().mockResolvedValue([
+      { projectPath: '/p', name: 'p', kind: 'project' },
+      { projectPath: '/q', name: 'q', kind: 'project' },
+    ]);
+    const setActiveWorkspace = vi.fn().mockResolvedValue(undefined);
+    const remote = new RemoteModule({
+      pairing, bus,
+      resolveTailnetEndpoint: async () => ({ ip: '127.0.0.1', host: null }),
+      makeBridge: (ip) => new BridgeServer({
+        tailnetIp: ip, pairing, bus, pwaDir: null,
+        screenshotSecret: 'e2e', loadScreenshot: async () => null, port: 0,
+        listWorkspaces, setActiveWorkspace,
+      }),
+      pollMs: 0,
+    });
+    await remote.start();
+    const { url } = remote.status();
+    const { code } = remote.mintPairingCode();
+    const pairRes = await fetch(`${url}/pair`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code, deviceLabel: 'E2E' }),
+    });
+    const { token } = await pairRes.json();
+    const ws = new WebSocket(`${url!.replace(/^http/, 'ws')}/ws`);
+    const inbox: any[] = [];
+    ws.on('message', (d) => inbox.push(JSON.parse(d.toString())));
+    await new Promise((r) => ws.once('open', r));
+    ws.send(JSON.stringify({ type: 'auth', token }));
+    const deadline = Date.now() + 3000;
+    while (!inbox.find((m) => m.type === 'auth_ok') && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(inbox.find((m) => m.type === 'auth_ok')).toBeTruthy();
+
+    ws.send(JSON.stringify({ type: 'workspaces.list', reqId: 'w1' }));
+    await new Promise((r) => setTimeout(r, 50));
+    const listReply = inbox.find((m) => m.type === 'workspaces.list.result');
+    expect(listReply?.reqId).toBe('w1');
+    expect(listReply?.workspaces).toHaveLength(2);
+
+    ws.send(JSON.stringify({ type: 'workspace.set', projectPath: '/q' }));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(setActiveWorkspace).toHaveBeenCalledWith('/q');
 
     ws.close();
     await remote.stop();
