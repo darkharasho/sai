@@ -39,7 +39,7 @@ npm install --save-dev @types/ws @types/qrcode @types/better-sqlite3
 Update the `postinstall` script in `package.json`:
 
 ```json
-"postinstall": "electron-rebuild -w node-pty -w better-sqlite3 -w argon2"
+"postinstall": "electron-rebuild -w node-pty,better-sqlite3,argon2"
 ```
 
 - [ ] **Step 3: Run postinstall to rebuild**
