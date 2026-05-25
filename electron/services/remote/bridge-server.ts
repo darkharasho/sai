@@ -56,6 +56,8 @@ export interface BridgeServerOpts {
   listSessions?: (projectPath: string) => Promise<SessionMeta[]>;
   loadHistory?: (sessionId: string) => Promise<ChatMsg[]>;
   registerActiveSessionBroadcast?: (broadcast: (payload: SessionActivePayload) => void) => void;
+  /** Returns the desktop's current active session payload, or null. */
+  getInitialActiveSession?: () => SessionActivePayload | null;
 }
 
 interface PairingCode { code: string; expiresAt: number }
@@ -288,6 +290,13 @@ export class BridgeServer {
 
       if (msg.type === 'session.follow' && typeof msg.enabled === 'boolean') {
         (ws as any).__followEnabled = msg.enabled;
+        if (msg.enabled) {
+          const initial = this.opts.getInitialActiveSession?.();
+          if (initial) {
+            try { ws.send(JSON.stringify({ v: 1, type: 'session.active', ...initial })); }
+            catch { /* ws may be closed */ }
+          }
+        }
         return;
       }
 

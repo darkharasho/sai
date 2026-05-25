@@ -84,12 +84,14 @@ let bus: SessionBus | null = null;
 let rendererProxy: RendererProxy | null = null;
 let remoteKvPath: string | null = null;
 let activeSessionBroadcast: ((payload: { projectPath: string; scope: string; sessionId: string }) => void) | null = null;
+let lastActiveSession: { projectPath: string; scope: string; sessionId: string } | null = null;
 const REMOTE_PORT = 17829;
 
 // Register the active-session IPC handler at module load — the renderer fires this
 // on every session change regardless of whether the mobile bridge is enabled. The
 // handler stays a no-op until BridgeServer wires up `activeSessionBroadcast`.
 ipcMain.handle('remote:setActiveSession', (_e, payload) => {
+  lastActiveSession = payload;
   activeSessionBroadcast?.(payload);
 });
 
@@ -155,6 +157,7 @@ async function getOrInitRemote(): Promise<RemoteModule> {
       registerActiveSessionBroadcast: (broadcast) => {
         activeSessionBroadcast = broadcast;
       },
+      getInitialActiveSession: () => lastActiveSession,
     }),
   });
   return remote;

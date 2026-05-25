@@ -113,7 +113,14 @@ export default function Chat({ client, initialActive }: Props) {
   };
 
   return (
-    <div className="flex flex-col h-screen">
+    <div
+      className="flex flex-col"
+      style={{
+        height: '100dvh',
+        paddingTop: 'env(safe-area-inset-top)',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}
+    >
       <div className="border-b border-neutral-800 px-3 py-2 flex items-center gap-2">
         <button onClick={() => setDrawerOpen(true)} aria-label="Open sessions" className="text-2xl leading-none">≡</button>
         <div className="text-sm truncate flex-1">
