@@ -8,6 +8,39 @@ import type { PairingStore } from './pairing-store';
 import type { SessionBus } from './session-bus';
 import { ScreenshotUrlSigner } from './screenshot-urls';
 
+export interface PromptArgs {
+  text: string;
+  projectPath: string;
+  scope: string;
+  model?: string;
+  effort?: string;
+  permMode?: string;
+}
+
+export interface ApprovalArgs {
+  toolUseId: string;
+  decision: 'approve' | 'deny';
+  modifiedCommand?: string;
+  projectPath: string;
+  scope: string;
+}
+
+export interface SessionMeta {
+  id: string;
+  projectPath: string;
+  title?: string;
+  updatedAt: number;
+  kind?: string;
+}
+
+export interface ChatMsg { [k: string]: unknown }
+
+export interface SessionActivePayload {
+  projectPath: string;
+  scope: string;
+  sessionId: string;
+}
+
 export interface BridgeServerOpts {
   tailnetIp: string | null;
   pairing: PairingStore;
@@ -17,6 +50,12 @@ export interface BridgeServerOpts {
   loadScreenshot: (id: string) => Promise<Buffer | null>;
   /** Preferred TCP port. Defaults to ephemeral inside the class; the production caller pins 17829. */
   port?: number;
+  sendPrompt?: (args: PromptArgs) => void;
+  resolveApproval?: (args: ApprovalArgs) => Promise<void | unknown>;
+  interruptTurn?: (projectPath: string, scope: string) => void;
+  listSessions?: (projectPath: string) => Promise<SessionMeta[]>;
+  loadHistory?: (sessionId: string) => Promise<ChatMsg[]>;
+  registerActiveSessionBroadcast?: (broadcast: (payload: SessionActivePayload) => void) => void;
 }
 
 interface PairingCode { code: string; expiresAt: number }
@@ -68,6 +107,15 @@ export class BridgeServer {
     const { port } = server.address() as AddressInfo;
     this.wss = new WebSocketServer({ server, path: '/ws' });
     this.wss.on('connection', (ws, req) => this.handleWs(ws, req));
+    this.opts.registerActiveSessionBroadcast?.((payload) => {
+      if (!this.wss) return;
+      for (const client of this.wss.clients) {
+        if (!(client as any).__followEnabled) continue;
+        try {
+          client.send(JSON.stringify({ v: 1, type: 'session.active', ...payload }));
+        } catch { /* ignore */ }
+      }
+    });
     return { port };
   }
 
@@ -196,7 +244,10 @@ export class BridgeServer {
         if (!set) { set = new Set(); this.liveSockets.set(found.id, set); }
         set.add(ws);
         ws.send(JSON.stringify({ v: 1, type: 'auth_ok', deviceId: found.id, deviceLabel: found.label }));
+        (ws as any).__attachedTopic = null;
+        (ws as any).__followEnabled = false;
         unsub = this.opts.bus.subscribeAll((topic, e) => {
+          if ((ws as any).__attachedTopic !== topic) return; // gate by attachment
           try { ws.send(JSON.stringify({ v: 1, topic, ...e })); } catch { /* ws may be closed */ }
         });
         return;
