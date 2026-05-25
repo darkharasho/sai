@@ -27,26 +27,41 @@ function execFileAsync(cmd: string, args: string[], options: Record<string, unkn
   });
 }
 
-export function registerFsHandlers(mainWindow: BrowserWindow) {
-  ipcMain.handle('fs:readDir', async (_event, dirPath: string) => {
-    const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
-    const mapped = await Promise.all(entries.map(async entry => {
-      const full = path.join(dirPath, entry.name);
-      let isDir = entry.isDirectory();
-      if (entry.isSymbolicLink()) {
-        try { isDir = (await fs.promises.stat(full)).isDirectory(); } catch { isDir = false; }
-      }
-      return { name: entry.name, path: full, type: isDir ? 'directory' as const : 'file' as const };
-    }));
-    return mapped.sort((a, b) => {
-      if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
-  });
+export interface FileEntry { name: string; path: string; type: 'file' | 'directory' }
 
-  ipcMain.handle('fs:readFile', async (_event, filePath: string) => {
-    return fs.promises.readFile(filePath, 'utf-8');
+export async function readDirImpl(dirPath: string): Promise<FileEntry[]> {
+  const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+  const mapped = await Promise.all(entries.map(async (entry) => {
+    const full = path.join(dirPath, entry.name);
+    let isDir = entry.isDirectory();
+    if (entry.isSymbolicLink()) {
+      try { isDir = (await fs.promises.stat(full)).isDirectory(); } catch { isDir = false; }
+    }
+    return { name: entry.name, path: full, type: isDir ? 'directory' as const : 'file' as const };
+  }));
+  return mapped.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+    return a.name.localeCompare(b.name);
   });
+}
+
+export async function readFileImpl(filePath: string): Promise<string> {
+  return fs.promises.readFile(filePath, 'utf-8');
+}
+
+export async function readFileBufImpl(filePath: string): Promise<Buffer> {
+  return fs.promises.readFile(filePath);
+}
+
+export async function statFileImpl(filePath: string): Promise<{ size: number; isDir: boolean; mtime: number }> {
+  const s = await fs.promises.stat(filePath);
+  return { size: s.size, isDir: s.isDirectory(), mtime: s.mtimeMs };
+}
+
+export function registerFsHandlers(mainWindow: BrowserWindow) {
+  ipcMain.handle('fs:readDir', (_e, dirPath: string) => readDirImpl(dirPath));
+
+  ipcMain.handle('fs:readFile', (_e, filePath: string) => readFileImpl(filePath));
 
   ipcMain.handle('fs:readFileBase64', async (_event, filePath: string) => {
     const buffer = await fs.promises.readFile(filePath);
@@ -63,9 +78,9 @@ export function registerFsHandlers(mainWindow: BrowserWindow) {
     return `data:${mime};base64,${buffer.toString('base64')}`;
   });
 
-  ipcMain.handle('fs:mtime', async (_event, filePath: string) => {
-    const stat = await fs.promises.stat(filePath);
-    return { mtime: stat.mtimeMs };
+  ipcMain.handle('fs:mtime', async (_e, filePath: string) => {
+    const s = await statFileImpl(filePath);
+    return { mtime: s.mtime };
   });
 
   ipcMain.handle('fs:writeFile', async (_event, filePath: string, content: string) => {
