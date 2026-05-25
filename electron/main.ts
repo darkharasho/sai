@@ -281,6 +281,16 @@ function createWindow() {
 
   registerTerminalHandlers(mainWindow);
   registerClaudeHandlers(mainWindow);
+
+  // Auto-start the mobile remote bridge if it was enabled before the last quit.
+  void (async () => {
+    const r = await getOrInitRemote();
+    if (readRemoteKv().enabled) {
+      try { await r.start(); } catch (err) {
+        console.warn('[remote] auto-start failed:', err);
+      }
+    }
+  })();
   registerCodexHandlers(mainWindow);
   registerGeminiHandlers(mainWindow);
   registerGitHandlers();

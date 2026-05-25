@@ -88,23 +88,23 @@ export class BridgeServer {
     if (!this.opts.tailnetIp) {
       throw new Error('tailnet IP not available; refusing to bind to 0.0.0.0 or 127.0.0.1');
     }
-    const server = http.createServer((req, res) => { void this.handle(req, res); });
     const desired = this.opts.port ?? BridgeServer.DEFAULT_PORT;
-    const tryListen = (p: number) => new Promise<void>((resolve, reject) => {
-      const onErr = (err: Error) => { server.removeListener('error', onErr); reject(err); };
-      server.once('error', onErr);
-      server.listen(p, this.opts.tailnetIp!, () => { server.removeListener('error', onErr); resolve(); });
+    // Build a fresh http.Server per attempt — reusing the same instance
+    // across listen() calls leaks internal listeners.
+    const tryListen = (p: number): Promise<http.Server> => new Promise((resolve, reject) => {
+      const s = http.createServer((req, res) => { void this.handle(req, res); });
+      const onErr = (err: Error) => { s.removeListener('error', onErr); s.close(); reject(err); };
+      s.once('error', onErr);
+      s.listen(p, this.opts.tailnetIp!, () => { s.removeListener('error', onErr); resolve(s); });
     });
-    // Pin the stable port — retry a few times with delays to handle
-    // hot-reload / fast-restart races where the previous process is
-    // still releasing the socket. Fall back to ephemeral only if the
-    // port stays held (e.g., another app actually owns it).
-    let bound = false;
+    // Pin the stable port; retry on EADDRINUSE to ride out hot-restart
+    // races where the previous socket is still releasing. Fall back to
+    // ephemeral only if the port stays held by something else.
+    let server: http.Server | null = null;
     if (desired !== 0) {
       for (let i = 0; i < 10; i++) {
         try {
-          await tryListen(desired);
-          bound = true;
+          server = await tryListen(desired);
           break;
         } catch (err) {
           const e = err as NodeJS.ErrnoException;
@@ -113,8 +113,8 @@ export class BridgeServer {
         }
       }
     }
-    if (!bound) {
-      await tryListen(0);
+    if (!server) {
+      server = await tryListen(0);
     }
     this.server = server;
     const { port } = server.address() as AddressInfo;
