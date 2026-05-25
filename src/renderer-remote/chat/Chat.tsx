@@ -114,22 +114,24 @@ export default function Chat({ client, initialActive }: Props) {
 
   return (
     <div
-      className="flex flex-col"
+      className="flex flex-col overflow-hidden w-screen"
       style={{
         height: '100svh',
         paddingTop: 'env(safe-area-inset-top)',
         paddingBottom: 'env(safe-area-inset-bottom)',
       }}
     >
-      <div className="border-b border-neutral-800 px-3 py-2 flex items-center gap-2">
-        <button onClick={() => setDrawerOpen(true)} aria-label="Open sessions" className="text-2xl leading-none">≡</button>
-        <div className="text-sm truncate flex-1">
+      <div className="shrink-0 border-b border-neutral-800 px-3 py-2 flex items-center gap-2 min-w-0">
+        <button onClick={() => setDrawerOpen(true)} aria-label="Open sessions" className="shrink-0 text-2xl leading-none">≡</button>
+        <div className="text-sm truncate flex-1 min-w-0">
           {active ? <span className="text-neutral-500">{active.projectPath}</span> : <span className="text-neutral-500">No session attached</span>}
         </div>
       </div>
-      <Transcript messages={messages} />
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <Transcript messages={messages} />
+      </div>
       {pendingApproval && (
-        <div className="px-3">
+        <div className="shrink-0 px-3">
           <Approval
             toolName={pendingApproval.toolName}
             command={pendingApproval.command}
@@ -138,7 +140,9 @@ export default function Chat({ client, initialActive }: Props) {
           />
         </div>
       )}
-      <Composer streaming={streaming} onSend={onSend} onInterrupt={onInterrupt} />
+      <div className="shrink-0">
+        <Composer streaming={streaming} onSend={onSend} onInterrupt={onInterrupt} />
+      </div>
       <SessionDrawer
         client={client}
         followEnabled={follow}

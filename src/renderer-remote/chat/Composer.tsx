@@ -23,7 +23,7 @@ export default function Composer({ streaming, onSend, onInterrupt }: Props) {
   };
 
   return (
-    <div className="border-t border-neutral-800 p-2 flex gap-2 items-end">
+    <div className="border-t border-neutral-800 p-2 flex gap-2 items-end min-w-0">
       <textarea
         ref={ref}
         value={text}
@@ -31,18 +31,18 @@ export default function Composer({ streaming, onSend, onInterrupt }: Props) {
         onKeyDown={onKey}
         placeholder={streaming ? 'Responding…' : 'Message'}
         rows={1}
-        className="flex-1 resize-none bg-neutral-900 border border-neutral-800 rounded px-3 py-2 text-sm focus:outline-none focus:border-neutral-600"
+        className="flex-1 min-w-0 resize-none bg-neutral-900 border border-neutral-800 rounded px-3 py-2 text-sm focus:outline-none focus:border-neutral-600"
       />
       {streaming ? (
         <button
           onClick={onInterrupt}
-          className="px-3 py-2 rounded bg-red-700 hover:bg-red-600 text-sm"
+          className="shrink-0 px-3 py-2 rounded bg-red-700 hover:bg-red-600 text-sm"
         >Stop</button>
       ) : (
         <button
           onClick={submit}
           disabled={!text.trim()}
-          className="px-3 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-sm"
+          className="shrink-0 px-3 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-sm"
         >Send</button>
       )}
     </div>
