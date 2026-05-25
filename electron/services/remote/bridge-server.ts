@@ -254,7 +254,84 @@ export class BridgeServer {
       }
 
       if (msg.type === 'ping') { ws.send(JSON.stringify({ v: 1, type: 'pong' })); return; }
-      // Phase 0 has no other inbound messages. Future phases add prompt/interrupt/approval/etc.
+
+      if (msg.type === 'session.attach' && typeof msg.projectPath === 'string') {
+        const scope = (typeof msg.scope === 'string' ? msg.scope : 'chat');
+        const topic = `chat:${msg.projectPath}:${scope}`;
+        (ws as any).__attachedTopic = topic;
+        if (typeof msg.sessionId === 'string') {
+          try {
+            const messages = (await this.opts.loadHistory?.(msg.sessionId)) ?? [];
+            ws.send(JSON.stringify({
+              v: 1, type: 'session.history',
+              projectPath: msg.projectPath, scope, sessionId: msg.sessionId, messages,
+            }));
+          } catch (err) {
+            ws.send(JSON.stringify({ v: 1, type: 'error', code: 'history_unavailable', message: (err as Error).message }));
+          }
+        }
+        return;
+      }
+
+      if (msg.type === 'session.follow' && typeof msg.enabled === 'boolean') {
+        (ws as any).__followEnabled = msg.enabled;
+        return;
+      }
+
+      if (msg.type === 'sessions.list' && typeof msg.projectPath === 'string') {
+        const reqId = msg.reqId;
+        try {
+          const sessions = (await this.opts.listSessions?.(msg.projectPath)) ?? [];
+          ws.send(JSON.stringify({ v: 1, type: 'sessions.list.result', reqId, sessions }));
+        } catch (err) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'list_failed', message: (err as Error).message }));
+        }
+        return;
+      }
+
+      if (msg.type === 'prompt' && typeof msg.text === 'string' && typeof msg.projectPath === 'string') {
+        this.opts.sendPrompt?.({
+          text: msg.text,
+          projectPath: msg.projectPath,
+          scope: (typeof msg.scope === 'string' ? msg.scope : 'chat'),
+          model: typeof msg.model === 'string' ? msg.model : undefined,
+          effort: typeof msg.effort === 'string' ? msg.effort : undefined,
+          permMode: typeof msg.permMode === 'string' ? msg.permMode : undefined,
+        });
+        return;
+      }
+
+      if (msg.type === 'approval' && typeof msg.toolUseId === 'string' &&
+          (msg.decision === 'approve' || msg.decision === 'deny') &&
+          typeof msg.projectPath === 'string') {
+        try {
+          await this.opts.resolveApproval?.({
+            toolUseId: msg.toolUseId,
+            decision: msg.decision,
+            modifiedCommand: typeof msg.modifiedCommand === 'string' ? msg.modifiedCommand : undefined,
+            projectPath: msg.projectPath,
+            scope: (typeof msg.scope === 'string' ? msg.scope : 'chat'),
+          });
+        } catch (err) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', code: 'approval_failed', message: (err as Error).message }));
+        }
+        return;
+      }
+
+      if (msg.type === 'interrupt' && typeof msg.projectPath === 'string') {
+        this.opts.interruptTurn?.(msg.projectPath, (typeof msg.scope === 'string' ? msg.scope : 'chat'));
+        return;
+      }
+
+      if (msg.type === 'session.new' && typeof msg.projectPath === 'string') {
+        ws.send(JSON.stringify({
+          v: 1, type: 'session.active',
+          projectPath: msg.projectPath,
+          scope: (typeof msg.scope === 'string' ? msg.scope : 'chat'),
+          sessionId: '',
+        }));
+        return;
+      }
     });
 
     ws.on('close', () => {
