@@ -736,12 +736,12 @@ let _quitInProgress = false;
 app.on('before-quit', (e) => {
   try { swarmMcpHost.stop(); } catch { /* noop */ }
   // Synchronously release the remote bridge port before Electron exits.
-  // Without preventDefault + exit, the async stop is killed mid-flight
-  // and the port lingers, forcing the next process onto an ephemeral port.
   if (remote && !_quitInProgress) {
     _quitInProgress = true;
     e.preventDefault();
-    void remote.stop().finally(() => app.exit(0));
+    // Cap the await — never block Electron exit on a hung socket close.
+    const timer = setTimeout(() => app.exit(0), 2000);
+    void remote.stop().finally(() => { clearTimeout(timer); app.exit(0); });
   }
 });
 app.on('window-all-closed', () => {

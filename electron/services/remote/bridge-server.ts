@@ -140,8 +140,20 @@ export class BridgeServer {
 
   async stop(): Promise<void> {
     const s = this.server; this.server = null;
-    if (this.wss) { this.wss.close(); this.wss = null; }
+    if (this.wss) {
+      // Terminate active clients first; server.close() otherwise waits forever
+      // for them to drain on their own (the phone WS will hold the process open).
+      for (const client of this.wss.clients) {
+        try { client.terminate(); } catch { /* already dead */ }
+      }
+      this.wss.close();
+      this.wss = null;
+    }
+    this.liveSockets.clear();
     if (!s) return;
+    // Force-close any lingering HTTP connections too (Node 18.2+).
+    const sAny = s as unknown as { closeAllConnections?: () => void };
+    try { sAny.closeAllConnections?.(); } catch { /* method unavailable */ }
     await new Promise<void>((resolve) => s.close(() => resolve()));
   }
 
