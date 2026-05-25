@@ -7,6 +7,26 @@ import { BridgeServer } from './services/remote/bridge-server';
 import { PairingStore } from './services/remote/pairing-store';
 import { SessionBus } from './services/remote/session-bus';
 import { resolveTailnetEndpoint } from './services/remote/tailnet';
+import { enrichedEnv } from './services/shellEnv';
+import { execFile as _execFile } from 'node:child_process';
+import { promisify as _promisify } from 'node:util';
+const _execFileP = _promisify(_execFile);
+
+// Wrap `tailscale` shell calls with SAI's enrichedEnv (login-shell PATH).
+// Without this, Electron's stripped PATH may not find `/usr/bin/tailscale`.
+async function _resolveTailnetEndpointWithEnv() {
+  return resolveTailnetEndpoint({
+    exec: async () => {
+      try {
+        const r = await _execFileP('tailscale', ['status', '--json'], { env: enrichedEnv() });
+        return { stdout: r.stdout, stderr: r.stderr, code: 0 };
+      } catch (err) {
+        const e = err as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
+        return { stdout: e.stdout ?? '', stderr: e.stderr ?? '', code: typeof e.code === 'number' ? e.code : 1 };
+      }
+    },
+  });
+}
 import { registerTerminalHandlers, destroyAllTerminals } from './services/pty';
 import { registerClaudeHandlers, setRemoteCeiling, setRemoteBus, sendImpl, approveImpl, interruptImpl } from './services/claude';
 import { RendererProxy } from './services/remote/renderer-proxy';
@@ -112,7 +132,7 @@ async function getOrInitRemote(): Promise<RemoteModule> {
   remote = new RemoteModule({
     pairing,
     bus,
-    resolveTailnetEndpoint: () => resolveTailnetEndpoint(),
+    resolveTailnetEndpoint: () => _resolveTailnetEndpointWithEnv(),
     makeBridge: (tailnetIp) => new BridgeServer({
       tailnetIp,
       pairing: pairing!,
