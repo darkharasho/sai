@@ -64,14 +64,16 @@ export interface TranscriptMessage {
 
 interface Props {
   messages: TranscriptMessage[];
+  /** Whether the assistant is currently working (between user send and turn done). */
+  streaming?: boolean;
 }
 
-export default function Transcript({ messages }: Props) {
+export default function Transcript({ messages, streaming = false }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!ref.current) return;
     ref.current.scrollTop = ref.current.scrollHeight;
-  }, [messages.length, messages[messages.length - 1]?.text?.length]);
+  }, [messages.length, messages[messages.length - 1]?.text?.length, streaming]);
 
   return (
     <div
@@ -138,9 +140,7 @@ export default function Transcript({ messages }: Props) {
 
         return (
           <div key={m.id} style={bubbleStyle}>
-            {m.streaming && !m.text ? (
-              <ThinkingAnimation size={18} />
-            ) : isUser ? (
+            {isUser ? (
               <pre
                 style={{
                   margin: 0,
@@ -160,6 +160,17 @@ export default function Transcript({ messages }: Props) {
           </div>
         );
       })}
+      {streaming && (
+        <div
+          aria-live="polite"
+          style={{
+            alignSelf: 'flex-start',
+            paddingLeft: 4,
+          }}
+        >
+          <ThinkingAnimation size={18} />
+        </div>
+      )}
     </div>
   );
 }

@@ -210,7 +210,6 @@ export default function Chat({ client, initialActive }: Props) {
   const onSend = (text: string) => {
     if (!active) return;
     setMessages((arr) => [...arr, { id: `u-opt-${Date.now()}`, role: 'user', text }]);
-    setMessages((arr) => [...arr, { id: `a-pending-${Date.now()}`, role: 'assistant', text: '', streaming: true }]);
     setStreaming(true);
     client.sendPrompt({
       text,
@@ -294,7 +293,7 @@ export default function Chat({ client, initialActive }: Props) {
         />
       </div>
       <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        <Transcript messages={messages} />
+        <Transcript messages={messages} streaming={streaming} />
       </div>
       {pendingApproval && (
         <div style={{ flexShrink: 0, padding: '0 14px' }}>
