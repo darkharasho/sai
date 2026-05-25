@@ -5,6 +5,7 @@ import Composer from './Composer';
 import Approval from './Approval';
 import SessionDrawer from './SessionDrawer';
 import SaiLogo from '../branding/SaiLogo';
+import { useVisualViewportHeight } from '../lib/useVisualViewport';
 import OverridesBar from './OverridesBar';
 import { getOverrides, setOverrides as persistOverrides, clearOverrides, type SessionOverrides } from '../lib/overrides';
 
@@ -16,6 +17,7 @@ interface Props {
 interface PendingApproval { toolUseId: string; toolName: string; command?: string; input?: Record<string, unknown> }
 
 export default function Chat({ client, initialActive }: Props) {
+  const visualHeight = useVisualViewportHeight();
   const [active, setActive] = useState<{ projectPath: string; scope: string; sessionId: string } | null>(initialActive ?? null);
   const [follow, setFollow] = useState(true);
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
@@ -242,8 +244,14 @@ export default function Chat({ client, initialActive }: Props) {
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
         width: '100vw',
-        height: '100svh',
+        // Use the visualViewport-tracked height so iOS keyboard
+        // shrinks the chat area instead of pushing the header off-screen.
+        height: visualHeight ? `${visualHeight}px` : '100svh',
         background: 'var(--bg-primary)',
         paddingTop: 'env(safe-area-inset-top)',
         paddingBottom: 'env(safe-area-inset-bottom)',

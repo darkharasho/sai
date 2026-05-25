@@ -1137,16 +1137,19 @@ export default function App() {
 
   const activeWorkspace = activeProjectPath ? getWorkspace(activeProjectPath) : null;
 
-  // Broadcast active session changes to paired follower devices
+  // Broadcast active workspace+session changes to paired follower devices.
+  // Broadcasts even when activeSession is null (empty sessionId) so the phone
+  // can re-attach to the workspace as soon as the desktop switches, even
+  // before a chat session is loaded.
   useEffect(() => {
-    if (!activeWorkspace || !activeWorkspace.activeSession) {
+    if (!activeWorkspace) {
       activeSessionRef.current = null;
       return;
     }
     const snapshot = {
       projectPath: activeWorkspace.projectPath,
       scope: 'chat',
-      sessionId: activeWorkspace.activeSession.id,
+      sessionId: activeWorkspace.activeSession?.id ?? '',
     };
     activeSessionRef.current = snapshot;
     void (window as any).sai?.remote?.setActiveSession?.(snapshot);
