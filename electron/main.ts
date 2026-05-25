@@ -108,6 +108,16 @@ async function getOrInitRemote(): Promise<RemoteModule> {
   return remote;
 }
 
+async function getEnabledFlag(): Promise<boolean> {
+  await getOrInitRemote();
+  const row = remoteDb?.prepare('SELECT v FROM kv WHERE k = ?').get('enabled') as { v?: string } | undefined;
+  return row?.v === '1';
+}
+async function setEnabledFlag(value: boolean): Promise<void> {
+  await getOrInitRemote();
+  remoteDb?.prepare('INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)').run('enabled', value ? '1' : '0');
+}
+
 function createWindow() {
   let tb = THEME_TITLEBAR.default;
   let rounded = false;
@@ -600,6 +610,35 @@ function createWindow() {
     if (/^https?:\/\//i.test(url)) {
       return shell.openExternal(url);
     }
+  });
+
+  ipcMain.handle('remote:setEnabled', async (_e, enabled: boolean) => {
+    const r = await getOrInitRemote();
+    await setEnabledFlag(enabled);
+    if (enabled) await r.start();
+    else await r.stop();
+  });
+
+  ipcMain.handle('remote:status', async () => {
+    const enabled = await getEnabledFlag();
+    if (!remote) return { running: false, url: null, reason: 'disabled', pairedCount: 0, enabled };
+    return { ...remote.status(), enabled };
+  });
+
+  ipcMain.handle('remote:mintPairCode', async () => {
+    const r = await getOrInitRemote();
+    return r.mintPairingCode();
+  });
+
+  ipcMain.handle('remote:listDevices', async () => {
+    await getOrInitRemote();
+    return pairing!.list();
+  });
+
+  ipcMain.handle('remote:revoke', async (_e, deviceId: string) => {
+    await getOrInitRemote();
+    pairing!.revoke(deviceId);
+    remote!.closeDeviceConnections(deviceId);
   });
 }
 

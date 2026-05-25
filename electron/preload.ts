@@ -274,4 +274,11 @@ contextBridge.exposeInMainWorld('sai', {
     branchDiff: (cwd: string, baseBranch: string, branch: string) =>
       ipcRenderer.invoke('swarm:branch-diff', cwd, baseBranch, branch),
   },
+  remote: {
+    setEnabled: (enabled: boolean) => ipcRenderer.invoke('remote:setEnabled', enabled),
+    status:     () => ipcRenderer.invoke('remote:status'),
+    mintPairCode: () => ipcRenderer.invoke('remote:mintPairCode'),
+    listDevices:  () => ipcRenderer.invoke('remote:listDevices'),
+    revoke:       (deviceId: string) => ipcRenderer.invoke('remote:revoke', deviceId),
+  },
 });
