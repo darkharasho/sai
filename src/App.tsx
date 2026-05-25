@@ -1109,6 +1109,16 @@ export default function App() {
 
   const activeWorkspace = activeProjectPath ? getWorkspace(activeProjectPath) : null;
 
+  // Broadcast active session changes to paired follower devices
+  useEffect(() => {
+    if (!activeWorkspace || !activeWorkspace.activeSession) return;
+    void (window as any).sai?.remote?.setActiveSession?.({
+      projectPath: activeWorkspace.projectPath,
+      scope: 'chat',
+      sessionId: activeWorkspace.activeSession.id,
+    });
+  }, [activeWorkspace?.projectPath, activeWorkspace?.activeSession?.id]);
+
   const updateWorkspace = useCallback((path: string, updater: (ws: WorkspaceContext) => WorkspaceContext) => {
     setWorkspaces(prev => {
       const next = new Map(prev);
