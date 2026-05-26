@@ -462,12 +462,26 @@ export function listDesktopTerminals(): Array<{
   termId: number; cwd: string; cols: number; rows: number; alive: boolean;
 }> {
   const out: Array<{ termId: number; cwd: string; cols: number; rows: number; alive: boolean }> = [];
-  for (const [termId, term] of allTerminals.entries()) {
+  for (const [termId, term] of [...allTerminals.entries()]) {
     // Skip phone-owned: phone terms live in PhoneTerminalRegistry, but they also
     // pass through createTerminalImpl → allTerminals. We tag desktop ownership
     // by the presence of a terminalOwner entry (set only inside the IPC handler).
     const cwd = terminalOwner.get(termId);
     if (cwd === undefined) continue;
+    // Verify the underlying process is still alive. If onExit didn't fire
+    // (e.g. shell crashed before listener attached, or hot-reload state leak),
+    // we get phantom entries here. Probe with signal 0 and prune.
+    const pid = (term as unknown as { pid?: number }).pid;
+    if (typeof pid === 'number') {
+      try { process.kill(pid, 0); }
+      catch {
+        allTerminals.delete(termId);
+        terminalOwner.delete(termId);
+        ringByTerm.delete(termId);
+        subscribersByTerm.delete(termId);
+        continue;
+      }
+    }
     const t = term as unknown as { cols?: number; rows?: number };
     out.push({
       termId, cwd,
