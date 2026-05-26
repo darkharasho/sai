@@ -138,6 +138,85 @@ describe('mobile remote terminal end-to-end', () => {
     terminalStore.destroyAll();
     await remote.stop();
   }, 15_000);
+
+  it.skipIf(process.platform === 'win32')('desktop terminal — list/attach/replay/allow-list/SIGINT', async () => {
+    const pairing = new PairingStore(':memory:');
+    const bus = new SessionBus();
+    const terminalStore = new PhoneTerminalRegistry();
+
+    const remote = new RemoteModule({
+      pairing, bus,
+      resolveTailnetEndpoint: async () => ({ ip: '127.0.0.1', host: null }),
+      makeBridge: (ip) => new BridgeServer({
+        tailnetIp: ip, pairing, bus, pwaDir: null,
+        screenshotSecret: 'e2e-d', loadScreenshot: async () => null, port: 0,
+        terminalStore,
+      }),
+      pollMs: 0,
+    });
+    await remote.start();
+    const { url } = remote.status();
+    const { code } = remote.mintPairingCode();
+    const pairRes = await fetch(`${url}/pair`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code, deviceLabel: 'E2E' }),
+    });
+    const { token } = await pairRes.json();
+
+    // Seed a fake desktop terminal via pty.ts test hooks.
+    const { _seedDesktopTerminalForTest, _drainDesktopTestWrites } =
+      await import('@electron/services/pty');
+    const harness = _seedDesktopTerminalForTest(424242, process.cwd(), 132, 50);
+
+    const wsUrl = url!.replace(/^http/, 'ws') + '/ws';
+    const ws = new WebSocket(wsUrl);
+    const inbox: any[] = [];
+    ws.on('message', (d) => inbox.push(JSON.parse(d.toString())));
+    await new Promise((r) => ws.once('open', r));
+    ws.send(JSON.stringify({ type: 'auth', token }));
+    await waitFor(inbox, (m) => m.type === 'auth_ok', 3000);
+
+    // 1. listTerminals shows the desktop term with origin='desktop'.
+    ws.send(JSON.stringify({ type: 'terminal.list', cwd: process.cwd(), reqId: 'L1' }));
+    const list = await waitFor(inbox, (m) => m.type === 'terminal.list.result' && m.reqId === 'L1', 3000);
+    const found = (list.terms as any[]).find((t) => t.termId === 424242);
+    expect(found).toBeDefined();
+    expect(found.origin).toBe('desktop');
+    expect(found.cols).toBe(132);
+
+    // 2. Pre-seed the ring then attach → expect replay (sent as terminal.output frame).
+    harness.fireData('before-attach-output\n');
+    ws.send(JSON.stringify({ type: 'terminal.attach', termId: 424242, cols: 80, rows: 24, reqId: 'A1' }));
+    const attached = await waitFor(inbox, (m) => m.type === 'terminal.attached' && m.reqId === 'A1', 3000);
+    expect(attached.cols).toBe(132); // desktop dims stand
+    expect(attached.rows).toBe(50);
+    const replay = await waitFor(inbox, (m) =>
+      m.type === 'terminal.output' && m.termId === 424242 && String(m.data).includes('before-attach-output'),
+      3000);
+    expect(String(replay.data)).toContain('before-attach-output');
+
+    // 3. Live data flows.
+    harness.fireData('live-byte\n');
+    await waitFor(inbox, (m) =>
+      m.type === 'terminal.output' && m.termId === 424242 && String(m.data).includes('live-byte'),
+      3000);
+
+    // 4. Disallowed input is dropped silently (no write captured).
+    _drainDesktopTestWrites(); // reset
+    ws.send(JSON.stringify({ type: 'terminal.input', termId: 424242, data: 'hello' }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(_drainDesktopTestWrites().filter((w) => w.termId === 424242)).toHaveLength(0);
+
+    // 5. Allowed input (Ctrl-C) passes through.
+    ws.send(JSON.stringify({ type: 'terminal.input', termId: 424242, data: '\x03' }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(_drainDesktopTestWrites().some((w) => w.termId === 424242 && w.data === '\x03')).toBe(true);
+
+    ws.close();
+    harness.fireExit();
+    terminalStore.destroyAll();
+    await remote.stop();
+  }, 30_000);
 });
 
 async function waitFor(inbox: any[], pred: (m: any) => boolean, timeoutMs: number): Promise<any> {

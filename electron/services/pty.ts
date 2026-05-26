@@ -138,6 +138,10 @@ export function createTerminalImpl(opts: {
 }
 
 export function writeTerminalImpl(termId: number, data: string): void {
+  if (desktopTestSidecar.has(termId)) {
+    desktopTestWrites.push({ termId, data });
+    return;
+  }
   allTerminals.get(termId)?.write(data);
 }
 
@@ -472,15 +476,43 @@ export function listDesktopTerminals(): Array<{
       alive: true,
     });
   }
+  for (const [termId, t] of desktopTestSidecar.entries()) {
+    out.push({ termId, cwd: t.cwd, cols: t.cols, rows: t.rows, alive: t.alive });
+  }
   return out;
 }
 
-/** Test hook: seed desktop state without spawning a real PTY. */
-export function _seedDesktopTerminalForTest(termId: number, cwd: string, cols = 80, rows = 24): void {
-  // Used by integration test to simulate a desktop term. We can't fake
-  // allTerminals (it needs a real IPty), so we only populate the ancillary
-  // maps; listDesktopTerminals reads allTerminals → use this in unit tests via
-  // the vi.hoisted stub instead. (Kept here as an explicit no-op anchor so
-  // test code can document its intent; integration tests use the real path.)
-  void termId; void cwd; void cols; void rows;
+// Test-only sidecar so integration tests can simulate a desktop terminal
+// without spawning a real IPty. Only consulted by listDesktopTerminals when
+// the sidecar map is non-empty.
+const desktopTestSidecar = new Map<number, { cwd: string; cols: number; rows: number; alive: boolean }>();
+const desktopTestWrites: Array<{ termId: number; data: string }> = [];
+
+export function _seedDesktopTerminalForTest(termId: number, cwd: string, cols = 80, rows = 24): {
+  fireData: (data: string) => void;
+  fireExit: () => void;
+  writes: Array<{ termId: number; data: string }>;
+} {
+  desktopTestSidecar.set(termId, { cwd, cols, rows, alive: true });
+  // Seed ring so snapshotTerminal returns something useful.
+  if (!ringByTerm.get(termId)) ringByTerm.set(termId, new RingBuffer(DESKTOP_RING_CAP_BYTES));
+  return {
+    fireData: (data: string) => {
+      ringByTerm.get(termId)!.push(data);
+      const subs = subscribersByTerm.get(termId);
+      if (subs) for (const cb of subs) { try { cb(data); } catch { /* isolate */ } }
+    },
+    fireExit: () => {
+      desktopTestSidecar.delete(termId);
+      ringByTerm.delete(termId);
+      subscribersByTerm.delete(termId);
+    },
+    writes: desktopTestWrites,
+  };
+}
+
+export function _drainDesktopTestWrites(): Array<{ termId: number; data: string }> {
+  const copy = [...desktopTestWrites];
+  desktopTestWrites.length = 0;
+  return copy;
 }
