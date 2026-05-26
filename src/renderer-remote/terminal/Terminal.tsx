@@ -21,6 +21,18 @@ export default function Terminal({ client, termId, cwd: _cwd, onBack, onExit }: 
   const fitRef = useRef<FitAddonInstance | null>(null);
   const [exited, setExited] = useState<number | null>(null);
   const [ctrlSticky, setCtrlSticky] = useState(false);
+  // iOS PWA: track visualViewport so the terminal shrinks when the keyboard
+  // appears, instead of being clipped under it.
+  const [viewportH, setViewportH] = useState<number | null>(() =>
+    typeof window !== 'undefined' && (window as any).visualViewport ? (window as any).visualViewport.height : null,
+  );
+  useEffect(() => {
+    const vv = (window as any).visualViewport as VisualViewport | undefined;
+    if (!vv) return;
+    const onResize = () => setViewportH(vv.height);
+    vv.addEventListener('resize', onResize);
+    return () => vv.removeEventListener('resize', onResize);
+  }, []);
 
   // Mount xterm.js lazily on first render
   useEffect(() => {
@@ -180,7 +192,8 @@ export default function Terminal({ client, termId, cwd: _cwd, onBack, onExit }: 
     <div style={{
       display: 'flex',
       flexDirection: 'column',
-      height: '100%',
+      height: viewportH ? `${viewportH}px` : '100%',
+      maxHeight: viewportH ? `${viewportH}px` : '100%',
       minHeight: 0,
       background: '#000',
     }}>
