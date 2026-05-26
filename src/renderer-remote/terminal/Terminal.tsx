@@ -196,6 +196,9 @@ export default function Terminal({ client, termId, cwd: _cwd, onBack, onExit }: 
       maxHeight: viewportH ? `${viewportH}px` : '100%',
       minHeight: 0,
       background: '#000',
+      overflow: 'hidden',
+      overscrollBehavior: 'contain',
+      touchAction: 'none',
     }}>
       <div
         ref={containerRef}
