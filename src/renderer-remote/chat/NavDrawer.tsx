@@ -51,16 +51,16 @@ export default function NavDrawer({
 }: Props) {
   const [active, setActive] = useState<NavItem>('files');
   const [gitChangeCount, setGitChangeCount] = useState(0);
-  const [activeTermId, setActiveTermId] = useState<number | null>(null);
+  const [activeTerm, setActiveTerm] = useState<{ termId: number; origin: 'phone' | 'desktop' } | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const gitCwd = metaMembers && metaMembers.length > 0 ? metaMembers[0].projectPath : workspacePath;
 
   // When the user clicks the Terminal rail item, open the picker (unless a term is already active).
   useEffect(() => {
-    if (active === 'terminal' && activeTermId === null) setPickerOpen(true);
+    if (active === 'terminal' && activeTerm === null) setPickerOpen(true);
     if (active !== 'terminal') setPickerOpen(false);
-  }, [active, activeTermId]);
+  }, [active, activeTerm]);
 
   useEffect(() => {
     if (!open || !gitCwd) return;
@@ -90,7 +90,7 @@ export default function NavDrawer({
   if (!open) return null;
 
   const badgeLabel = gitChangeCount > 100 ? '99+' : `${gitChangeCount}`;
-  const terminalActive = active === 'terminal' && activeTermId !== null;
+  const terminalActive = active === 'terminal' && activeTerm !== null;
   const gitCwdLocal = gitCwd;
 
   return (
@@ -243,13 +243,14 @@ export default function NavDrawer({
             onAttach={(p, s) => { onAttach(p, s); onClose(); }}
           />
         )}
-        {active === 'terminal' && activeTermId !== null && (
+        {active === 'terminal' && activeTerm !== null && (
           <Terminal
             client={client}
-            termId={activeTermId}
+            termId={activeTerm.termId}
             cwd={gitCwdLocal}
-            onBack={() => { setActiveTermId(null); setActive('files'); }}
-            onExit={() => { setActiveTermId(null); }}
+            origin={activeTerm.origin}
+            onBack={() => { setActiveTerm(null); setActive('files'); }}
+            onExit={() => { setActiveTerm(null); }}
           />
         )}
       </div>
@@ -274,11 +275,11 @@ export default function NavDrawer({
         <TerminalPicker
           client={client}
           cwd={gitCwdLocal}
-          onPick={(termId) => { setActiveTermId(termId); setPickerOpen(false); }}
+          onPick={(termId, origin) => { setActiveTerm({ termId, origin }); setPickerOpen(false); }}
           onClose={() => {
             setPickerOpen(false);
             // If no terminal was picked, drop back to files
-            if (activeTermId === null) setActive('files');
+            if (activeTerm === null) setActive('files');
           }}
         />
       )}
