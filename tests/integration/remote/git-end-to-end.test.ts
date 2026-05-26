@@ -18,7 +18,11 @@ describe('mobile remote git end-to-end', () => {
   beforeAll(() => {
     tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sai-git-e2e-'));
     fs.writeFileSync(path.join(tmpRoot, 'a.txt'), 'one\n');
-    execSync('git init -q && git add a.txt && git -c user.email=t@t -c user.name=T commit -q -m init', { cwd: tmpRoot });
+    execSync('git init -q', { cwd: tmpRoot });
+    // CI runners (ubuntu-latest) have no global git identity, so the later
+    // commit-via-simple-git would silently fail. Pin identity at the repo level.
+    execSync('git config user.email t@t && git config user.name T', { cwd: tmpRoot });
+    execSync('git add a.txt && git commit -q -m init', { cwd: tmpRoot });
     fs.writeFileSync(path.join(tmpRoot, 'a.txt'), 'two\n');
   });
   afterAll(() => { fs.rmSync(tmpRoot, { recursive: true, force: true }); });
