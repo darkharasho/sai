@@ -63,7 +63,14 @@ export interface WireClient {
   commit(cwd: string, message: string): Promise<{ hash?: string }>;
   push(cwd: string): Promise<void>;
   pull(cwd: string): Promise<void>;
-  listTerminals(cwd: string): Promise<Array<{ termId: number; cwd: string; cols: number; rows: number; alive: boolean }>>;
+  listTerminals(cwd: string): Promise<Array<{
+    termId: number;
+    cwd: string;
+    cols: number;
+    rows: number;
+    alive: boolean;
+    origin: 'phone' | 'desktop';
+  }>>;
   openTerminal(cwd: string, cols: number, rows: number): Promise<{ termId: number; cols: number; rows: number }>;
   attachTerminal(termId: number, cols: number, rows: number): Promise<{ termId: number; cols: number; rows: number }>;
   detachTerminal(termId: number): void;
