@@ -58,6 +58,11 @@ export interface WireClient {
   }>;
   statusFiles(cwd: string): Promise<unknown[]>;
   diffFile(cwd: string, path: string, staged?: boolean): Promise<{ diff: string; lang?: string }>;
+  stageFile(cwd: string, path: string): Promise<void>;
+  unstageFile(cwd: string, path: string): Promise<void>;
+  commit(cwd: string, message: string): Promise<{ hash?: string }>;
+  push(cwd: string): Promise<void>;
+  pull(cwd: string): Promise<void>;
 }
 
 export function connect(token: string): WireClient {
@@ -119,6 +124,10 @@ export function connect(token: string): WireClient {
         entry.resolve((msg as any).entries ?? []);
       } else if (t === 'files.diff.result') {
         entry.resolve({ diff: (msg as any).diff ?? '', lang: (msg as any).lang });
+      } else if (t === 'git.stage.result' || t === 'git.unstage.result' || t === 'git.push.result' || t === 'git.pull.result') {
+        entry.resolve(undefined);
+      } else if (t === 'git.commit.result') {
+        entry.resolve({ hash: (msg as any).hash });
       } else {
         entry.resolve(msg);
       }
@@ -173,6 +182,36 @@ export function connect(token: string): WireClient {
       pendingReq.set(reqId, { resolve, reject });
       setTimeout(() => { if (pendingReq.delete(reqId)) reject(new Error('files.diff timeout')); }, 5000);
       sendFrame({ type: 'files.diff', cwd, path, staged: !!staged, reqId });
+    }),
+    stageFile: (cwd, path) => new Promise((resolve, reject) => {
+      const reqId = `r${++reqCounter}`;
+      pendingReq.set(reqId, { resolve, reject });
+      setTimeout(() => { if (pendingReq.delete(reqId)) reject(new Error('git.stage timeout')); }, 10_000);
+      sendFrame({ type: 'git.stage', cwd, path, reqId });
+    }),
+    unstageFile: (cwd, path) => new Promise((resolve, reject) => {
+      const reqId = `r${++reqCounter}`;
+      pendingReq.set(reqId, { resolve, reject });
+      setTimeout(() => { if (pendingReq.delete(reqId)) reject(new Error('git.unstage timeout')); }, 10_000);
+      sendFrame({ type: 'git.unstage', cwd, path, reqId });
+    }),
+    commit: (cwd, message) => new Promise((resolve, reject) => {
+      const reqId = `r${++reqCounter}`;
+      pendingReq.set(reqId, { resolve, reject });
+      setTimeout(() => { if (pendingReq.delete(reqId)) reject(new Error('git.commit timeout')); }, 20_000);
+      sendFrame({ type: 'git.commit', cwd, message, reqId });
+    }),
+    push: (cwd) => new Promise((resolve, reject) => {
+      const reqId = `r${++reqCounter}`;
+      pendingReq.set(reqId, { resolve, reject });
+      setTimeout(() => { if (pendingReq.delete(reqId)) reject(new Error('git.push timeout')); }, 60_000);
+      sendFrame({ type: 'git.push', cwd, reqId });
+    }),
+    pull: (cwd) => new Promise((resolve, reject) => {
+      const reqId = `r${++reqCounter}`;
+      pendingReq.set(reqId, { resolve, reject });
+      setTimeout(() => { if (pendingReq.delete(reqId)) reject(new Error('git.pull timeout')); }, 60_000);
+      sendFrame({ type: 'git.pull', cwd, reqId });
     }),
   };
 }
