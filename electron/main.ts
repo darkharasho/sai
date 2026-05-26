@@ -11,7 +11,7 @@ import { BlobStore } from './services/remote/blob-store';
 import { safeJoin } from './services/remote/safe-join';
 import { langFromPath, isTextLike, mimeFromPath } from './services/remote/lang';
 import { readDirImpl, readFileImpl, readFileBufImpl, statFileImpl } from './services/fs';
-import { gitStatusImpl, gitDiffImpl } from './services/git';
+import { gitStatusImpl, gitDiffImpl, gitStageImpl, gitUnstageImpl, gitCommitImpl, gitPushImpl, gitPullImpl } from './services/git';
 import { enrichedEnv } from './services/shellEnv';
 import { execFile as _execFile } from 'node:child_process';
 import { promisify as _promisify } from 'node:util';
@@ -198,8 +198,8 @@ async function getOrInitRemote(): Promise<RemoteModule> {
           return { signedUrl, encoding: 'binary' as const, size: stat.size, mime: mimeFromPath(path) };
         },
         statusFiles: async (cwd) => {
-          const { entries } = await gitStatusImpl(cwd);
-          return entries;
+          const { branch, ahead, behind, entries } = await gitStatusImpl(cwd);
+          return { entries, branch, ahead, behind };
         },
         diffFile: async (cwd, path, staged) => {
           const diff = await gitDiffImpl(cwd, path, staged);
@@ -212,6 +212,11 @@ async function getOrInitRemote(): Promise<RemoteModule> {
           const buffer = await readFileBufImpl(full);
           return { buffer, mime: mimeFromPath(entry.path) };
         },
+        stageFile:   (cwd, path) => gitStageImpl(cwd, path),
+        unstageFile: (cwd, path) => gitUnstageImpl(cwd, path),
+        commit:      (cwd, msg) => gitCommitImpl(cwd, msg),
+        push:        (cwd) => gitPushImpl(cwd),
+        pull:        (cwd) => gitPullImpl(cwd),
       });
       bridge = b;
       return b;

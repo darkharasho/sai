@@ -76,8 +76,18 @@ export interface BridgeServerOpts {
   setActiveWorkspace?: (projectPath: string) => Promise<void>;
   listFiles?: (cwd: string, path: string) => Promise<FileEntry[]>;
   readFile?: (cwd: string, path: string) => Promise<FileReadResult>;
-  statusFiles?: (cwd: string) => Promise<FileStatusEntry[]>;
+  statusFiles?: (cwd: string) => Promise<{
+    entries: FileStatusEntry[];
+    branch?: string | null;
+    ahead?: number;
+    behind?: number;
+  }>;
   diffFile?: (cwd: string, path: string, staged: boolean) => Promise<FileDiffResult>;
+  stageFile?:   (cwd: string, path: string) => Promise<void>;
+  unstageFile?: (cwd: string, path: string) => Promise<void>;
+  commit?:      (cwd: string, message: string) => Promise<{ hash?: string }>;
+  push?:        (cwd: string) => Promise<void>;
+  pull?:        (cwd: string) => Promise<void>;
   loadBlob?: (id: string) => Promise<{ buffer: Buffer; mime: string } | null>;
 }
 
@@ -278,12 +288,20 @@ export class BridgeServer {
       const ext = nodePath.extname(resolved).toLowerCase();
       res.statusCode = 200;
       res.setHeader('content-type', BridgeServer.MIME[ext] ?? 'application/octet-stream');
+      // index.html must always be re-fetched so a fresh deploy picks up new
+      // bundle filenames; hashed assets (JS/CSS) are immutable and cacheable.
+      if (ext === '.html' || ext === '') {
+        res.setHeader('cache-control', 'no-cache, no-store, must-revalidate');
+      } else if (ext === '.js' || ext === '.mjs' || ext === '.css' || ext === '.woff2' || ext === '.woff') {
+        res.setHeader('cache-control', 'public, max-age=31536000, immutable');
+      }
       res.end(buf);
     } catch {
       try {
         const buf = await fsp.readFile(nodePath.join(root, 'index.html'));
         res.statusCode = 200;
         res.setHeader('content-type', 'text/html; charset=utf-8');
+        res.setHeader('cache-control', 'no-cache, no-store, must-revalidate');
         res.end(buf);
       } catch { res.statusCode = 404; res.end('not found'); }
     }
@@ -414,8 +432,14 @@ export class BridgeServer {
       if (msg.type === 'files.status' && typeof msg.cwd === 'string') {
         const reqId = msg.reqId;
         try {
-          const entries = (await this.opts.statusFiles?.(msg.cwd)) ?? [];
-          ws.send(JSON.stringify({ v: 1, type: 'files.status.result', reqId, entries }));
+          const result = (await this.opts.statusFiles?.(msg.cwd)) ?? { entries: [] };
+          ws.send(JSON.stringify({
+            v: 1, type: 'files.status.result', reqId,
+            entries: result.entries,
+            branch: result.branch ?? null,
+            ahead: result.ahead ?? 0,
+            behind: result.behind ?? 0,
+          }));
         } catch (err) {
           ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'status_failed', message: (err as Error).message }));
         }
@@ -433,6 +457,61 @@ export class BridgeServer {
           ws.send(JSON.stringify({ v: 1, type: 'files.diff.result', reqId, diff: result.diff, lang: result.lang }));
         } catch (err) {
           ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'diff_failed', message: (err as Error).message }));
+        }
+        return;
+      }
+
+      if (msg.type === 'git.stage' && typeof msg.cwd === 'string' && typeof msg.path === 'string') {
+        const reqId = msg.reqId;
+        try {
+          await this.opts.stageFile?.(msg.cwd, msg.path);
+          ws.send(JSON.stringify({ v: 1, type: 'git.stage.result', reqId }));
+        } catch (err) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'stage_failed', message: (err as Error).message }));
+        }
+        return;
+      }
+
+      if (msg.type === 'git.unstage' && typeof msg.cwd === 'string' && typeof msg.path === 'string') {
+        const reqId = msg.reqId;
+        try {
+          await this.opts.unstageFile?.(msg.cwd, msg.path);
+          ws.send(JSON.stringify({ v: 1, type: 'git.unstage.result', reqId }));
+        } catch (err) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'unstage_failed', message: (err as Error).message }));
+        }
+        return;
+      }
+
+      if (msg.type === 'git.commit' && typeof msg.cwd === 'string' && typeof msg.message === 'string') {
+        const reqId = msg.reqId;
+        try {
+          const result = await this.opts.commit?.(msg.cwd, msg.message);
+          ws.send(JSON.stringify({ v: 1, type: 'git.commit.result', reqId, hash: result?.hash }));
+        } catch (err) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'commit_failed', message: (err as Error).message }));
+        }
+        return;
+      }
+
+      if (msg.type === 'git.push' && typeof msg.cwd === 'string') {
+        const reqId = msg.reqId;
+        try {
+          await this.opts.push?.(msg.cwd);
+          ws.send(JSON.stringify({ v: 1, type: 'git.push.result', reqId }));
+        } catch (err) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'push_failed', message: (err as Error).message }));
+        }
+        return;
+      }
+
+      if (msg.type === 'git.pull' && typeof msg.cwd === 'string') {
+        const reqId = msg.reqId;
+        try {
+          await this.opts.pull?.(msg.cwd);
+          ws.send(JSON.stringify({ v: 1, type: 'git.pull.result', reqId }));
+        } catch (err) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'pull_failed', message: (err as Error).message }));
         }
         return;
       }

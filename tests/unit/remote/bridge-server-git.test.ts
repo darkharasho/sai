@@ -29,89 +29,93 @@ async function pairedSocket(server: BridgeServer, port: number): Promise<WebSock
   return ws;
 }
 
-describe('BridgeServer files routing', () => {
+describe('BridgeServer git write ops', () => {
   let server: BridgeServer; let port: number;
-
   afterEach(async () => { await server.stop(); });
 
-  it('files.list returns entries with reqId', async () => {
-    const listFiles = vi.fn().mockResolvedValue([{ name: 'a.txt', kind: 'file', size: 4 }]);
+  it('git.stage calls stageFile with cwd+path', async () => {
+    const stageFile = vi.fn().mockResolvedValue(undefined);
     server = new BridgeServer({
       tailnetIp: '127.0.0.1', pairing: new PairingStore(':memory:'), bus: new SessionBus(),
       pwaDir: null, screenshotSecret: 'x', loadScreenshot: async () => null,
-      listFiles,
+      stageFile,
     });
     ({ port } = await server.start());
     const ws = await pairedSocket(server, port);
-    ws.send(JSON.stringify({ type: 'files.list', cwd: '/repo', path: 'src', reqId: 'l1' }));
-    const m = await once(ws, (m) => m.type === 'files.list.result');
-    expect(m.reqId).toBe('l1');
-    expect(m.entries).toEqual([{ name: 'a.txt', kind: 'file', size: 4 }]);
-    expect(listFiles).toHaveBeenCalledWith('/repo', 'src');
+    ws.send(JSON.stringify({ type: 'git.stage', cwd: '/repo', path: 'a.ts', reqId: 'g1' }));
+    const m = await once(ws, (m) => m.type === 'git.stage.result');
+    expect(m.reqId).toBe('g1');
+    expect(stageFile).toHaveBeenCalledWith('/repo', 'a.ts');
     ws.close();
   });
 
-  it('files.read returns content', async () => {
-    const readFile = vi.fn().mockResolvedValue({ content: 'hi', encoding: 'text', size: 2, lang: 'tsx' });
+  it('git.unstage calls unstageFile', async () => {
+    const unstageFile = vi.fn().mockResolvedValue(undefined);
     server = new BridgeServer({
       tailnetIp: '127.0.0.1', pairing: new PairingStore(':memory:'), bus: new SessionBus(),
       pwaDir: null, screenshotSecret: 'x', loadScreenshot: async () => null,
-      readFile,
+      unstageFile,
     });
     ({ port } = await server.start());
     const ws = await pairedSocket(server, port);
-    ws.send(JSON.stringify({ type: 'files.read', cwd: '/repo', path: 'a.tsx', reqId: 'r1' }));
-    const m = await once(ws, (m) => m.type === 'files.read.result');
-    expect(m.reqId).toBe('r1');
-    expect(m.content).toBe('hi');
-    expect(m.lang).toBe('tsx');
+    ws.send(JSON.stringify({ type: 'git.unstage', cwd: '/r', path: 'a.ts', reqId: 'u1' }));
+    const m = await once(ws, (m) => m.type === 'git.unstage.result');
+    expect(m.reqId).toBe('u1');
+    expect(unstageFile).toHaveBeenCalledWith('/r', 'a.ts');
     ws.close();
   });
 
-  it('files.status returns entries', async () => {
-    const statusFiles = vi.fn().mockResolvedValue({ entries: [{ path: 'a.txt', status: 'modified', staged: false }], branch: 'main', ahead: 0, behind: 0 });
+  it('git.commit returns hash', async () => {
+    const commit = vi.fn().mockResolvedValue({ hash: 'abc1234' });
     server = new BridgeServer({
       tailnetIp: '127.0.0.1', pairing: new PairingStore(':memory:'), bus: new SessionBus(),
       pwaDir: null, screenshotSecret: 'x', loadScreenshot: async () => null,
-      statusFiles,
+      commit,
     });
     ({ port } = await server.start());
     const ws = await pairedSocket(server, port);
-    ws.send(JSON.stringify({ type: 'files.status', cwd: '/repo', reqId: 's1' }));
-    const m = await once(ws, (m) => m.type === 'files.status.result');
-    expect(m.entries).toHaveLength(1);
+    ws.send(JSON.stringify({ type: 'git.commit', cwd: '/r', message: 'feat: x', reqId: 'c1' }));
+    const m = await once(ws, (m) => m.type === 'git.commit.result');
+    expect(m.reqId).toBe('c1');
+    expect(m.hash).toBe('abc1234');
+    expect(commit).toHaveBeenCalledWith('/r', 'feat: x');
     ws.close();
   });
 
-  it('files.diff returns diff string', async () => {
-    const diffFile = vi.fn().mockResolvedValue({ diff: '@@ ...', lang: 'tsx' });
+  it('git.push and git.pull call callbacks', async () => {
+    const push = vi.fn().mockResolvedValue(undefined);
+    const pull = vi.fn().mockResolvedValue(undefined);
     server = new BridgeServer({
       tailnetIp: '127.0.0.1', pairing: new PairingStore(':memory:'), bus: new SessionBus(),
       pwaDir: null, screenshotSecret: 'x', loadScreenshot: async () => null,
-      diffFile,
+      push, pull,
     });
     ({ port } = await server.start());
     const ws = await pairedSocket(server, port);
-    ws.send(JSON.stringify({ type: 'files.diff', cwd: '/repo', path: 'a.tsx', staged: false, reqId: 'd1' }));
-    const m = await once(ws, (m) => m.type === 'files.diff.result');
-    expect(m.diff).toBe('@@ ...');
-    expect(m.lang).toBe('tsx');
+    ws.send(JSON.stringify({ type: 'git.push', cwd: '/r', reqId: 'p1' }));
+    const pushResp = await once(ws, (m) => m.type === 'git.push.result');
+    expect(pushResp.reqId).toBe('p1');
+    ws.send(JSON.stringify({ type: 'git.pull', cwd: '/r', reqId: 'p2' }));
+    const pullResp = await once(ws, (m) => m.type === 'git.pull.result');
+    expect(pullResp.reqId).toBe('p2');
+    expect(push).toHaveBeenCalledWith('/r');
+    expect(pull).toHaveBeenCalledWith('/r');
     ws.close();
   });
 
   it('errors are returned with reqId', async () => {
-    const listFiles = vi.fn().mockRejectedValue(new Error('boom'));
+    const commit = vi.fn().mockRejectedValue(new Error('hook rejected'));
     server = new BridgeServer({
       tailnetIp: '127.0.0.1', pairing: new PairingStore(':memory:'), bus: new SessionBus(),
       pwaDir: null, screenshotSecret: 'x', loadScreenshot: async () => null,
-      listFiles,
+      commit,
     });
     ({ port } = await server.start());
     const ws = await pairedSocket(server, port);
-    ws.send(JSON.stringify({ type: 'files.list', cwd: '/repo', path: 'src', reqId: 'err' }));
+    ws.send(JSON.stringify({ type: 'git.commit', cwd: '/r', message: 'x', reqId: 'err' }));
     const m = await once(ws, (m) => m.type === 'error');
     expect(m.reqId).toBe('err');
-    expect(m.message).toMatch(/boom/);
+    expect(m.message).toMatch(/hook rejected/);
     ws.close();
   });
 });

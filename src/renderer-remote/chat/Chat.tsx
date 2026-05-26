@@ -123,7 +123,19 @@ export default function Chat({ client, initialActive, follow, onFollowChange, on
                 next.push({ id: `a-${Date.now()}-${next.length}`, role: 'assistant', text: blk.text, streaming: true });
               }
             } else {
-              if (next.some((m) => m.id === `tool-${blk.id}`)) continue;
+              const existingIdx = next.findIndex((m) => m.id === `tool-${blk.id}`);
+              if (existingIdx >= 0) {
+                // SDK streams cumulative state: same tool_use id arrives
+                // repeatedly with progressively richer name/input. Merge the
+                // latest fields onto the existing card instead of skipping.
+                const cur = next[existingIdx];
+                next[existingIdx] = {
+                  ...cur,
+                  toolName: blk.name && blk.name.length > 0 ? blk.name : cur.toolName,
+                  toolInput: blk.input ?? cur.toolInput,
+                };
+                continue;
+              }
               // Finalize any open assistant bubble; drop it entirely if empty
               // (e.g. optimistic pending bubble before the first tool_use).
               next = next.reduce<TranscriptMessage[]>((acc, m) => {
@@ -138,7 +150,7 @@ export default function Chat({ client, initialActive, follow, onFollowChange, on
               next.push({
                 id: `tool-${blk.id}`,
                 role: 'tool',
-                toolName: blk.name,
+                toolName: blk.name && blk.name.length > 0 ? blk.name : 'tool',
                 toolInput: blk.input,
                 toolStatus: 'running',
               });

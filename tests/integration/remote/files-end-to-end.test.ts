@@ -53,7 +53,7 @@ describe('mobile remote files end-to-end', () => {
             const signedUrl = b.signBlobUrl(id);
             return { signedUrl, encoding: 'binary' as const, size: stat.size, mime: mimeFromPath(p) };
           },
-          statusFiles: async (cwd) => (await gitStatusImpl(cwd)).entries,
+          statusFiles: async (cwd) => gitStatusImpl(cwd),
           diffFile: async (cwd, p, staged) => ({ diff: await gitDiffImpl(cwd, p, staged), lang: langFromPath(p) ?? undefined }),
           loadBlob: async (id) => {
             const e = blobStore.consume(id);

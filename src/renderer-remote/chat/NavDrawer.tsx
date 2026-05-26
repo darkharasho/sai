@@ -47,8 +47,38 @@ export default function NavDrawer({
   currentSessionProjectPath, followEnabled, onFollowChange, onAttach,
 }: Props) {
   const [active, setActive] = useState<NavItem>('files');
+  const [gitChangeCount, setGitChangeCount] = useState(0);
+
+  const gitCwd = metaMembers && metaMembers.length > 0 ? metaMembers[0].projectPath : workspacePath;
+
+  useEffect(() => {
+    if (!open || !gitCwd) return;
+    let cancelled = false;
+    const poll = () => {
+      const reqId = `gb${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const off = client.on((m: any) => {
+        if (m && m.reqId === reqId) {
+          off();
+          if (cancelled) return;
+          if (m.type === 'files.status.result') {
+            const entries = (m.entries ?? []) as { path: string }[];
+            const paths = new Set<string>();
+            for (const e of entries) paths.add(e.path);
+            setGitChangeCount(paths.size);
+          }
+        }
+      });
+      client.send({ type: 'files.status', cwd: gitCwd, reqId });
+      setTimeout(() => off(), 5000);
+    };
+    poll();
+    const id = setInterval(poll, 5000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [client, gitCwd, open]);
 
   if (!open) return null;
+
+  const badgeLabel = gitChangeCount > 100 ? '99+' : `${gitChangeCount}`;
 
   return (
     <div
@@ -107,6 +137,26 @@ export default function NavDrawer({
               }}
             >
               <Icon size={18} strokeWidth={2} />
+              {it.id === 'git' && gitChangeCount > 0 && (
+                <span style={{
+                  position: 'absolute',
+                  top: 2,
+                  right: 2,
+                  minWidth: 16,
+                  height: 14,
+                  padding: '0 4px',
+                  borderRadius: 7,
+                  background: 'var(--accent)',
+                  color: '#000',
+                  fontSize: 9,
+                  fontWeight: 700,
+                  fontFamily: "'Geist Mono', 'JetBrains Mono', monospace",
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  lineHeight: 1,
+                }}>{badgeLabel}</span>
+              )}
               {isActive && (
                 <span style={{
                   position: 'absolute',
