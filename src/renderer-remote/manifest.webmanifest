@@ -1,0 +1,11 @@
+{
+  "name": "SAI Remote",
+  "short_name": "SAI",
+  "display": "standalone",
+  "background_color": "#0c0f11",
+  "theme_color": "#0c0f11",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "./apple-touch-icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
