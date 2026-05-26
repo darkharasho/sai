@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Folder, FileText, ChevronRight, ChevronDown } from 'lucide-react';
+import { Folder, FileText, ChevronRight, ChevronDown, ArrowLeft } from 'lucide-react';
 import type { WireClient } from '../wire';
 import FileViewer from './FileViewer';
 import { langFromPath } from './lang';
@@ -9,6 +9,8 @@ interface Entry { name: string; kind: 'file' | 'dir'; size?: number }
 interface Props {
   client: WireClient;
   cwd: string;
+  /** Signaled when a file is opened/closed so the parent (NavDrawer) can swap to fullscreen mode. */
+  onOpenChange?: (open: boolean) => void;
 }
 
 interface OpenFile {
@@ -104,7 +106,7 @@ function Row({
   );
 }
 
-export default function BrowseView({ client, cwd }: Props) {
+export default function BrowseView({ client, cwd, onOpenChange }: Props) {
   const [rootEntries, setRootEntries] = useState<Entry[]>([]);
   const [open, setOpen] = useState<OpenFile | null>(null);
   const [loadingRoot, setLoadingRoot] = useState(true);
@@ -112,7 +114,9 @@ export default function BrowseView({ client, cwd }: Props) {
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    setLoadingRoot(true); setErr(null); setOpen(null);
+    setLoadingRoot(true); setErr(null);
+    setOpen(null);
+    onOpenChange?.(false);
     client.listFiles(cwd, '')
       .then((e) => setRootEntries(e as Entry[]))
       .catch((e: Error) => setErr(e.message))
@@ -122,15 +126,71 @@ export default function BrowseView({ client, cwd }: Props) {
   const pickFile = (path: string) => {
     setLoadingFile(true);
     client.readFile(cwd, path)
-      .then((r: any) => setOpen({ path, ...r }))
+      .then((r: any) => {
+        setOpen({ path, ...r });
+        onOpenChange?.(true);
+      })
       .finally(() => setLoadingFile(false));
   };
 
+  const closeFile = () => {
+    setOpen(null);
+    onOpenChange?.(false);
+  };
+
+  if (open && !loadingFile) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+        <div style={{
+          flexShrink: 0,
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '8px 12px',
+          background: 'var(--bg-secondary)',
+          borderBottom: '1px solid var(--border)',
+        }}>
+          <button
+            onClick={closeFile}
+            aria-label="Back to files"
+            style={{
+              width: 32, height: 32,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              background: 'transparent', color: 'var(--text)',
+              border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer',
+            }}
+          ><ArrowLeft size={16} /></button>
+          <div style={{
+            flex: 1, minWidth: 0,
+            fontFamily: '"Geist Mono", ui-monospace, monospace',
+            fontSize: 12, color: 'var(--text-muted)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>{open.path}</div>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+          <FileViewer
+            client={client}
+            cwd={cwd}
+            path={open.path}
+            content={open.content}
+            signedUrl={open.signedUrl}
+            encoding={open.encoding}
+            size={open.size}
+            lang={open.lang ?? langFromPath(open.path) ?? undefined}
+            mime={open.mime}
+            mtime={open.mtime}
+            sha={open.sha}
+            onRefetch={() => pickFile(open.path)}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-      <div style={{ flex: '0 0 auto', maxHeight: '40%', overflowY: 'auto', borderBottom: '1px solid var(--border)' }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
         {loadingRoot && <div style={{ padding: '10px 14px', fontSize: 12, color: 'var(--text-muted)' }}>Loading…</div>}
         {err && <div style={{ padding: '10px 14px', fontSize: 12, color: 'var(--red)' }}>{err}</div>}
+        {loadingFile && <div style={{ padding: '10px 14px', fontSize: 12, color: 'var(--text-muted)' }}>Opening…</div>}
         {!loadingRoot && rootEntries.map((e) => (
           <Row
             key={e.name}
@@ -142,41 +202,6 @@ export default function BrowseView({ client, cwd }: Props) {
             onPickFile={pickFile}
           />
         ))}
-      </div>
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-        {loadingFile && <div style={{ padding: 16, fontSize: 12, color: 'var(--text-muted)' }}>Loading…</div>}
-        {!loadingFile && !open && (
-          <div style={{ padding: 16, fontSize: 12, color: 'var(--text-muted)' }}>
-            Select a file to view.
-          </div>
-        )}
-        {!loadingFile && open && (
-          <>
-            <div style={{
-              padding: '6px 12px',
-              fontFamily: '"Geist Mono", ui-monospace, monospace',
-              fontSize: 11,
-              color: 'var(--text-muted)',
-              borderBottom: '1px solid var(--border)',
-            }}>
-              {open.path}
-            </div>
-            <FileViewer
-              client={client}
-              cwd={cwd}
-              path={open.path}
-              content={open.content}
-              signedUrl={open.signedUrl}
-              encoding={open.encoding}
-              size={open.size}
-              lang={open.lang ?? langFromPath(open.path) ?? undefined}
-              mime={open.mime}
-              mtime={open.mtime}
-              sha={open.sha}
-              onRefetch={() => pickFile(open.path)}
-            />
-          </>
-        )}
       </div>
     </div>
   );
