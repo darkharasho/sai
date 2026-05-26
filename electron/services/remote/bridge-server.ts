@@ -288,12 +288,20 @@ export class BridgeServer {
       const ext = nodePath.extname(resolved).toLowerCase();
       res.statusCode = 200;
       res.setHeader('content-type', BridgeServer.MIME[ext] ?? 'application/octet-stream');
+      // index.html must always be re-fetched so a fresh deploy picks up new
+      // bundle filenames; hashed assets (JS/CSS) are immutable and cacheable.
+      if (ext === '.html' || ext === '') {
+        res.setHeader('cache-control', 'no-cache, no-store, must-revalidate');
+      } else if (ext === '.js' || ext === '.mjs' || ext === '.css' || ext === '.woff2' || ext === '.woff') {
+        res.setHeader('cache-control', 'public, max-age=31536000, immutable');
+      }
       res.end(buf);
     } catch {
       try {
         const buf = await fsp.readFile(nodePath.join(root, 'index.html'));
         res.statusCode = 200;
         res.setHeader('content-type', 'text/html; charset=utf-8');
+        res.setHeader('cache-control', 'no-cache, no-store, must-revalidate');
         res.end(buf);
       } catch { res.statusCode = 404; res.end('not found'); }
     }
