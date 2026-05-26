@@ -521,6 +521,39 @@ export class BridgeServer {
         return;
       }
 
+      if (msg.type === 'terminal.list' && typeof msg.cwd === 'string') {
+        const reqId = msg.reqId;
+        const store = this.opts.terminalStore;
+        if (!store) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'terminal_unavailable', message: 'no terminal store' }));
+          return;
+        }
+        try {
+          const terms = store.list(msg.cwd);
+          ws.send(JSON.stringify({ v: 1, type: 'terminal.list.result', reqId, terms }));
+        } catch (err) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'terminal_list_failed', message: (err as Error).message }));
+        }
+        return;
+      }
+
+      if (msg.type === 'terminal.open' && typeof msg.cwd === 'string'
+          && typeof msg.cols === 'number' && typeof msg.rows === 'number') {
+        const reqId = msg.reqId;
+        const store = this.opts.terminalStore;
+        if (!store) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'terminal_unavailable', message: 'no terminal store' }));
+          return;
+        }
+        try {
+          const t = store.open(msg.cwd, msg.cols, msg.rows);
+          ws.send(JSON.stringify({ v: 1, type: 'terminal.opened', reqId, termId: t.termId, cols: t.cols, rows: t.rows }));
+        } catch (err) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'terminal_open_failed', message: (err as Error).message }));
+        }
+        return;
+      }
+
       if (msg.type === 'prompt' && typeof msg.text === 'string' && typeof msg.projectPath === 'string') {
         this.opts.sendPrompt?.({
           text: msg.text,
