@@ -2,18 +2,15 @@ import { useEffect, useState } from 'react';
 import { BEARER_KEY, connect, extractPairCode, pair, type WireClient } from './wire';
 import Status from './Status';
 import Chat from './chat/Chat';
-import Tabs from './chat/Tabs';
-import Files from './files/Files';
+import NavDrawer from './chat/NavDrawer';
 import SaiLogo from './branding/SaiLogo';
 
 function ConnectedShell({ client }: { client: WireClient }) {
-  const [tab, setTab] = useState<'chat' | 'files'>(() => {
-    try { return (localStorage.getItem('sai-remote-tab') as 'chat' | 'files') ?? 'chat'; } catch { return 'chat'; }
-  });
   const [workspacePath, setWorkspacePath] = useState<string>('');
   const [metaMembers, setMetaMembers] = useState<{ projectPath: string; name: string }[] | undefined>(undefined);
+  const [navOpen, setNavOpen] = useState(false);
+  const [follow, setFollow] = useState(true);
 
-  // Track active workspace via session.active push
   useEffect(() => {
     return client.on((msg) => {
       const t = (msg as any).type;
@@ -24,7 +21,6 @@ function ConnectedShell({ client }: { client: WireClient }) {
     });
   }, [client]);
 
-  // When the active workspace changes, look up meta-member list (if any)
   useEffect(() => {
     if (!workspacePath) { setMetaMembers(undefined); return; }
     client.listWorkspaces()
@@ -36,21 +32,31 @@ function ConnectedShell({ client }: { client: WireClient }) {
       .catch(() => setMetaMembers(undefined));
   }, [client, workspacePath]);
 
-  const onTab = (v: 'chat' | 'files') => {
-    setTab(v);
-    try { localStorage.setItem('sai-remote-tab', v); } catch { /* quota */ }
-  };
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
-      <Tabs value={tab} onChange={onTab} />
       <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {tab === 'chat'
-          ? <Chat client={client} />
-          : workspacePath
-            ? <Files client={client} workspacePath={workspacePath} metaMembers={metaMembers} />
-            : <div style={{ padding: 16, color: 'var(--text-muted)' }}>No workspace attached.</div>}
+        <Chat
+          client={client}
+          follow={follow}
+          onFollowChange={setFollow}
+          onOpenNav={() => setNavOpen(true)}
+        />
       </div>
+      <NavDrawer
+        open={navOpen}
+        onClose={() => setNavOpen(false)}
+        client={client}
+        workspacePath={workspacePath}
+        metaMembers={metaMembers}
+        currentSessionProjectPath={workspacePath || null}
+        followEnabled={follow}
+        onFollowChange={setFollow}
+        onAttach={(projectPath, sessionId) => {
+          // Mirror Chat's optimistic attach when follow is off; in follow mode the
+          // server's session.active push will drive Chat's re-attach.
+          client.attach({ projectPath, scope: 'chat', sessionId });
+        }}
+      />
     </div>
   );
 }
