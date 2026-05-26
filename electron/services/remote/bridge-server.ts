@@ -554,6 +554,26 @@ export class BridgeServer {
         return;
       }
 
+      if (msg.type === 'terminal.attach' && typeof msg.termId === 'number'
+          && typeof msg.cols === 'number' && typeof msg.rows === 'number') {
+        const reqId = msg.reqId;
+        const store = this.opts.terminalStore;
+        if (!store) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'terminal_unavailable', message: 'no terminal store' }));
+          return;
+        }
+        const r = store.attach(msg.termId, ws, msg.cols, msg.rows);
+        if (!r) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'terminal_unknown', message: `no such terminal ${msg.termId}` }));
+          return;
+        }
+        ws.send(JSON.stringify({ v: 1, type: 'terminal.attached', reqId, termId: msg.termId, cols: r.cols, rows: r.rows }));
+        if (r.replay) {
+          ws.send(JSON.stringify({ v: 1, type: 'terminal.output', termId: msg.termId, data: r.replay }));
+        }
+        return;
+      }
+
       if (msg.type === 'prompt' && typeof msg.text === 'string' && typeof msg.projectPath === 'string') {
         this.opts.sendPrompt?.({
           text: msg.text,

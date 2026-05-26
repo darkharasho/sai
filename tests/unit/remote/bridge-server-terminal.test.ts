@@ -102,3 +102,49 @@ describe('BridgeServer — terminal.list / terminal.open', () => {
     ws.close();
   });
 });
+
+describe('BridgeServer — terminal.attach', () => {
+  let server: BridgeServer; let port: number;
+  afterEach(async () => { await server.stop(); });
+
+  it('terminal.attach replies with cols/rows then sends replay as terminal.output', async () => {
+    const store = fakeStore({
+      attach: vi.fn(() => ({ replay: 'hello\n', cols: 80, rows: 24 })),
+    });
+    server = new BridgeServer({
+      tailnetIp: '127.0.0.1', pairing: new PairingStore(':memory:'), bus: new SessionBus(),
+      pwaDir: null, screenshotSecret: 'x', loadScreenshot: async () => null,
+      terminalStore: store,
+    });
+    ({ port } = await server.start());
+    const ws = await pairedSocket(server, port);
+    const attachedP = once(ws, (m) => m.type === 'terminal.attached');
+    const replayP = once(ws, (m) => m.type === 'terminal.output' && m.termId === 7);
+    ws.send(JSON.stringify({ type: 'terminal.attach', termId: 7, cols: 80, rows: 24, reqId: 'A1' }));
+    const attached: any = await attachedP;
+    expect(attached.reqId).toBe('A1');
+    expect(attached.termId).toBe(7);
+    expect(attached.cols).toBe(80);
+    expect(attached.rows).toBe(24);
+    const replay: any = await replayP;
+    expect(replay.data).toBe('hello\n');
+    expect(store.attach).toHaveBeenCalled();
+    ws.close();
+  });
+
+  it('terminal.attach unknown termId returns error', async () => {
+    const store = fakeStore({ attach: vi.fn(() => null) });
+    server = new BridgeServer({
+      tailnetIp: '127.0.0.1', pairing: new PairingStore(':memory:'), bus: new SessionBus(),
+      pwaDir: null, screenshotSecret: 'x', loadScreenshot: async () => null,
+      terminalStore: store,
+    });
+    ({ port } = await server.start());
+    const ws = await pairedSocket(server, port);
+    ws.send(JSON.stringify({ type: 'terminal.attach', termId: 999, cols: 80, rows: 24, reqId: 'A2' }));
+    const m = await once(ws, (m) => m.type === 'error');
+    expect(m.reqId).toBe('A2');
+    expect(m.code).toBe('terminal_unknown');
+    ws.close();
+  });
+});
