@@ -132,6 +132,70 @@ describe('BridgeServer — terminal.attach', () => {
     ws.close();
   });
 
+});
+
+describe('BridgeServer — terminal input/resize/signal/kill/detach + ws close', () => {
+  let server: BridgeServer; let port: number;
+  afterEach(async () => { await server.stop(); });
+
+  it('terminal.input / resize / signal / detach are one-way, no reply', async () => {
+    const store = fakeStore();
+    server = new BridgeServer({
+      tailnetIp: '127.0.0.1', pairing: new PairingStore(':memory:'), bus: new SessionBus(),
+      pwaDir: null, screenshotSecret: 'x', loadScreenshot: async () => null,
+      terminalStore: store,
+    });
+    ({ port } = await server.start());
+    const ws = await pairedSocket(server, port);
+    ws.send(JSON.stringify({ type: 'terminal.input', termId: 7, data: 'ls\n' }));
+    ws.send(JSON.stringify({ type: 'terminal.resize', termId: 7, cols: 120, rows: 40 }));
+    ws.send(JSON.stringify({ type: 'terminal.signal', termId: 7, signal: 'SIGINT' }));
+    ws.send(JSON.stringify({ type: 'terminal.detach', termId: 7 }));
+    // No reply expected — give the server time to process
+    await new Promise((r) => setTimeout(r, 50));
+    expect(store.input).toHaveBeenCalledWith(7, 'ls\n');
+    expect(store.resize).toHaveBeenCalledWith(7, 120, 40);
+    expect(store.signal).toHaveBeenCalledWith(7, 'SIGINT');
+    expect(store.detach).toHaveBeenCalledWith(7, expect.anything());
+    ws.close();
+  });
+
+  it('terminal.kill calls store.kill and replies result', async () => {
+    const store = fakeStore();
+    server = new BridgeServer({
+      tailnetIp: '127.0.0.1', pairing: new PairingStore(':memory:'), bus: new SessionBus(),
+      pwaDir: null, screenshotSecret: 'x', loadScreenshot: async () => null,
+      terminalStore: store,
+    });
+    ({ port } = await server.start());
+    const ws = await pairedSocket(server, port);
+    ws.send(JSON.stringify({ type: 'terminal.kill', termId: 7, reqId: 'K1' }));
+    const m = await once(ws, (m) => m.type === 'terminal.kill.result');
+    expect(m.reqId).toBe('K1');
+    expect(store.kill).toHaveBeenCalledWith(7);
+    ws.close();
+  });
+
+  it('ws close calls store.detachAll(ws)', async () => {
+    const store = fakeStore();
+    server = new BridgeServer({
+      tailnetIp: '127.0.0.1', pairing: new PairingStore(':memory:'), bus: new SessionBus(),
+      pwaDir: null, screenshotSecret: 'x', loadScreenshot: async () => null,
+      terminalStore: store,
+    });
+    ({ port } = await server.start());
+    const ws = await pairedSocket(server, port);
+    ws.close();
+    // Allow the close handler to run
+    await new Promise((r) => setTimeout(r, 100));
+    expect(store.detachAll).toHaveBeenCalled();
+  });
+});
+
+describe('BridgeServer — terminal.attach unknown', () => {
+  let server: BridgeServer; let port: number;
+  afterEach(async () => { await server.stop(); });
+
   it('terminal.attach unknown termId returns error', async () => {
     const store = fakeStore({ attach: vi.fn(() => null) });
     server = new BridgeServer({

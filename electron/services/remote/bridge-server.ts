@@ -574,6 +574,38 @@ export class BridgeServer {
         return;
       }
 
+      if (msg.type === 'terminal.input' && typeof msg.termId === 'number' && typeof msg.data === 'string') {
+        this.opts.terminalStore?.input(msg.termId, msg.data);
+        return;
+      }
+
+      if (msg.type === 'terminal.resize' && typeof msg.termId === 'number'
+          && typeof msg.cols === 'number' && typeof msg.rows === 'number') {
+        this.opts.terminalStore?.resize(msg.termId, msg.cols, msg.rows);
+        return;
+      }
+
+      if (msg.type === 'terminal.signal' && typeof msg.termId === 'number' && typeof msg.signal === 'string') {
+        this.opts.terminalStore?.signal(msg.termId, msg.signal as NodeJS.Signals);
+        return;
+      }
+
+      if (msg.type === 'terminal.detach' && typeof msg.termId === 'number') {
+        this.opts.terminalStore?.detach(msg.termId, ws);
+        return;
+      }
+
+      if (msg.type === 'terminal.kill' && typeof msg.termId === 'number') {
+        const reqId = msg.reqId;
+        try {
+          this.opts.terminalStore?.kill(msg.termId);
+          ws.send(JSON.stringify({ v: 1, type: 'terminal.kill.result', reqId, termId: msg.termId }));
+        } catch (err) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'terminal_kill_failed', message: (err as Error).message }));
+        }
+        return;
+      }
+
       if (msg.type === 'prompt' && typeof msg.text === 'string' && typeof msg.projectPath === 'string') {
         this.opts.sendPrompt?.({
           text: msg.text,
@@ -620,6 +652,7 @@ export class BridgeServer {
     });
 
     ws.on('close', () => {
+      this.opts.terminalStore?.detachAll(ws);
       if (unsub) unsub();
       if (deviceId) {
         const set = this.liveSockets.get(deviceId);
