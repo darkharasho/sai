@@ -54,6 +54,14 @@ export default function Terminal({ client, termId, cwd: _cwd, onBack, onExit }: 
       // Wire input
       dispOnData = term.onData((data: string) => {
         client.inputTerminal(termId, data);
+        // iOS: keep the cursor in view as the user types.
+        try { term.scrollToBottom(); } catch { /* ignore */ }
+        // Auto-hide the soft keyboard after a line is submitted so output is
+        // readable without manually dismissing.
+        if (data.includes('\r') || data.includes('\n')) {
+          const ta = (term as any).textarea as HTMLTextAreaElement | undefined;
+          ta?.blur();
+        }
       });
 
       // Subscribe to terminal.output / terminal.exit for this termId
@@ -107,7 +115,10 @@ export default function Terminal({ client, termId, cwd: _cwd, onBack, onExit }: 
     };
   }, [client, termId]);
 
-  const sendBytes = (data: string) => client.inputTerminal(termId, data);
+  const sendBytes = (data: string) => {
+    client.inputTerminal(termId, data);
+    try { termRef.current?.scrollToBottom(); } catch { /* ignore */ }
+  };
 
   const onToolbarKey = (key: 'Esc' | 'Tab' | 'Up' | 'Down' | 'Left' | 'Right' | 'Ctrl') => {
     if (key === 'Ctrl') { setCtrlSticky((v) => !v); return; }
