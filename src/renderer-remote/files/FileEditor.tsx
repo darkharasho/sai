@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { WireClient } from '../wire';
+import { isWriteStaleError } from '../wire';
 
 interface Props {
   client: WireClient;
@@ -20,6 +21,7 @@ export default function FileEditor(props: Props) {
   const [sha, setSha] = useState(props.initialSha);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState<null | { currentMtime: number; currentSha: string }>(null);
 
   async function doSave(force = false) {
     setSaving(true); setError(null);
@@ -35,7 +37,29 @@ export default function FileEditor(props: Props) {
       props.onSave(result);
     } catch (err: any) {
       setSaving(false);
-      // Stale handling lands in Task 10; for now surface a generic error.
+      if (isWriteStaleError(err)) {
+        setConflict({ currentMtime: err.currentMtime, currentSha: err.currentSha });
+        return;
+      }
+      setError(String(err?.message ?? err));
+    }
+  }
+
+  async function doReload(force = false) {
+    if (dirty && !force) {
+      if (!confirm('Reloading will discard your unsaved edits. Continue?')) return;
+    }
+    setConflict(null);
+    try {
+      const r = await props.client.readFile(props.cwd, props.path);
+      if (r.encoding !== 'text' || typeof r.content !== 'string') {
+        setError('file is no longer text-editable');
+        return;
+      }
+      setContent(r.content);
+      if (typeof r.mtime === 'number') setMtime(r.mtime);
+      if (typeof r.sha === 'string') setSha(r.sha);
+    } catch (err: any) {
       setError(String(err?.message ?? err));
     }
   }
@@ -55,6 +79,7 @@ export default function FileEditor(props: Props) {
 
   return (
     <div style={{
+      position: 'relative',
       display: 'flex',
       flexDirection: 'column',
       height: viewportH ? `${viewportH}px` : '100%',
@@ -116,6 +141,44 @@ export default function FileEditor(props: Props) {
           whiteSpace: 'pre',
         }}
       />
+      {conflict && (
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'flex-end',
+          zIndex: 10,
+        }} onClick={() => setConflict(null)}>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%', padding: 16,
+              background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)',
+              display: 'flex', flexDirection: 'column', gap: 12,
+            }}
+          >
+            <div style={{ fontSize: 14, color: 'var(--text)' }}>
+              This file changed on the desktop since you opened it.
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                onClick={() => { setConflict(null); void doSave(true); }}
+                style={{ padding: '8px 12px', background: 'var(--accent)', color: '#000',
+                         border: 'none', borderRadius: 6, cursor: 'pointer' }}
+              >Overwrite</button>
+              <button
+                onClick={() => { void doReload(false); }}
+                style={{ padding: '8px 12px', background: 'var(--bg-elevated)', color: 'var(--text)',
+                         border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer' }}
+              >Reload</button>
+              <button
+                onClick={() => setConflict(null)}
+                style={{ padding: '8px 12px', background: 'transparent', color: 'var(--text-muted)',
+                         border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer' }}
+              >Keep editing</button>
+            </div>
+          </div>
+        </div>
+      )}
       {error && (
         <div style={{
           padding: '8px 12px',
