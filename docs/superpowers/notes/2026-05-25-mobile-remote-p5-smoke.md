@@ -51,3 +51,24 @@ Run on real hardware (laptop + iPhone) before declaring P5 done.
 
 ## Regression
 - [ ] Desktop SAI terminal still spawns normally (open a desktop window terminal — no change).
+
+## P5.1 — Desktop terminal viewing
+
+- [ ] On the desktop, open a SAI terminal in any workspace; run `top` or `tail -f /var/log/syslog` so output is continuous.
+- [ ] On phone, open the picker. A "Desktop terminals" section lists the desktop terminal under its cwd; row shows `desktop` pill.
+- [ ] Tap it. Terminal opens in view-only mode: no iOS keyboard appears when tapping the canvas. Toolbar shows Esc/Tab/Ctrl/arrows/Enter + a "view only" pill on the right.
+- [ ] Scrollback appears immediately (ring replay). Live output continues to stream within ~500ms of arriving on the desktop.
+- [ ] Tap Ctrl, then "c" via any on-screen key (or Ctrl on the toolbar then a hardware key) — the foreground process on the desktop is interrupted.
+- [ ] Tap ↑ — desktop prompt recalls last history entry (visible both on desktop and phone).
+- [ ] Tap Enter at an interactive prompt — desktop accepts the line.
+- [ ] Tap Esc inside `less` on the desktop — `less` exits.
+- [ ] Background phone for 30s, foreground — terminal reattaches; ring replay shows recent output; live stream resumes.
+- [ ] Kill the desktop terminal via the desktop window UI. Phone shows `[process exited]` line (or `terminal.exit` produces a Close button) and the row is gone from the picker after reopening it.
+- [ ] Phone picker still allows tapping "New terminal" — that one stays phone-owned and accepts typing.
+
+## Regression
+
+- [ ] Phone-owned terminals from P5 still accept typing and resize on viewport change.
+- [ ] Desktop terminal window still renders normally (no flicker, no double output) while phone is attached.
+- [ ] Disconnecting the phone WS does not affect the desktop terminal.
+- [ ] Multiple phones attached to the same desktop term all receive the same stream.
