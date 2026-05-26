@@ -84,25 +84,24 @@ export default function Terminal({ client, termId, cwd: _cwd, origin, onBack, on
         if (r.width < 20 || r.height < 20) return;
         try {
           fit.fit();
-          client.resizeTerminal(termId, term.cols, term.rows);
+          // Only push our dims to the server for phone-owned terms; desktop
+          // dims stand. Locally we still re-fit so the canvas fills the
+          // phone's viewport and long lines wrap to phone width.
+          if (!isDesktop) {
+            client.resizeTerminal(termId, term.cols, term.rows);
+          }
         } catch { /* ignore */ }
       };
-      if (!isDesktop) {
-        const sizeRo = new ResizeObserver(() => doFit());
-        sizeRo.observe(containerRef.current);
-        (term as any).__sizeRo = sizeRo;
-        // Best-effort initial fit on next frames in case ResizeObserver doesn't
-        // fire (already-sized container).
-        requestAnimationFrame(() => { doFit(); requestAnimationFrame(doFit); });
-        term.focus();
+      const sizeRo = new ResizeObserver(() => doFit());
+      sizeRo.observe(containerRef.current);
+      (term as any).__sizeRo = sizeRo;
+      requestAnimationFrame(() => { doFit(); requestAnimationFrame(doFit); });
 
-        // Wire input
+      if (!isDesktop) {
+        term.focus();
         dispOnData = term.onData((data: string) => {
           client.inputTerminal(termId, data);
-          // iOS: keep the cursor in view as the user types.
           try { term.scrollToBottom(); } catch { /* ignore */ }
-          // Auto-hide the soft keyboard after a line is submitted so output is
-          // readable without manually dismissing.
           if (data.includes('\r') || data.includes('\n')) {
             const ta2 = (term as any).textarea as HTMLTextAreaElement | undefined;
             ta2?.blur();
@@ -142,13 +141,12 @@ export default function Terminal({ client, termId, cwd: _cwd, origin, onBack, on
   // Recompute size on viewport changes (iOS keyboard show/hide, drawer changes)
   useEffect(() => {
     const recompute = () => {
-      if (isDesktop) return; // desktop dims stand
       const fit = fitRef.current;
       const term = termRef.current;
       if (!fit || !term) return;
       try {
         fit.fit();
-        client.resizeTerminal(termId, term.cols, term.rows);
+        if (!isDesktop) client.resizeTerminal(termId, term.cols, term.rows);
       } catch { /* ignore */ }
     };
     const vv = (window as any).visualViewport as VisualViewport | undefined;
