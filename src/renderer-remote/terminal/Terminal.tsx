@@ -200,8 +200,6 @@ export default function Terminal({ client, termId, cwd: _cwd, onBack, onExit }: 
       <div
         ref={containerRef}
         onTouchEnd={() => {
-          // iOS only opens the virtual keyboard when focus moves inside a real
-          // user gesture handler; call .focus() on the actual textarea node.
           const term = termRef.current;
           const ta = term && ((term as any).textarea as HTMLTextAreaElement | undefined);
           try { ta?.focus(); } catch { /* ignore */ }
@@ -211,7 +209,16 @@ export default function Terminal({ client, termId, cwd: _cwd, onBack, onExit }: 
           const ta = term && ((term as any).textarea as HTMLTextAreaElement | undefined);
           try { ta?.focus(); } catch { /* ignore */ }
         }}
-        style={{ flex: 1, minHeight: 0, padding: 4, overflow: 'hidden' }}
+        style={{
+          flex: 1,
+          minHeight: 0,
+          padding: 4,
+          overflow: 'hidden',
+          // Prevent iOS rubber-band overscroll from bubbling and shifting the
+          // toolbar up when xterm's scrollback is past the end.
+          overscrollBehavior: 'contain',
+          touchAction: 'pan-y',
+        }}
       />
       {exited !== null ? (
         <div style={{ padding: 12, display: 'flex', gap: 8, background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)' }}>
