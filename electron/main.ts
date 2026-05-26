@@ -11,7 +11,7 @@ import { resolveTailnetEndpoint } from './services/remote/tailnet';
 import { BlobStore } from './services/remote/blob-store';
 import { safeJoin } from './services/remote/safe-join';
 import { langFromPath, isTextLike, mimeFromPath } from './services/remote/lang';
-import { readDirImpl, readFileImpl, readFileBufImpl, statFileImpl } from './services/fs';
+import { readDirImpl, readFileImpl, readFileBufImpl, statFileImpl, writeFileImpl } from './services/fs';
 import { gitStatusImpl, gitDiffImpl, gitStageImpl, gitUnstageImpl, gitCommitImpl, gitPushImpl, gitPullImpl } from './services/git';
 import { enrichedEnv } from './services/shellEnv';
 import { execFile as _execFile } from 'node:child_process';
@@ -193,8 +193,8 @@ async function getOrInitRemote(): Promise<RemoteModule> {
           const lang = langFromPath(path) ?? undefined;
           const inline = isTextLike(path) && stat.size <= 64 * 1024;
           if (inline) {
-            const content = await readFileImpl(full);
-            return { content, encoding: 'text' as const, size: stat.size, lang };
+            const r = await readFileImpl(full);
+            return { content: r.content, encoding: 'text' as const, size: stat.size, lang, mtime: r.mtime, sha: r.sha };
           }
           const id = blobStore!.register(cwd, path);
           const signedUrl = b.signBlobUrl(id);
@@ -215,6 +215,7 @@ async function getOrInitRemote(): Promise<RemoteModule> {
           const buffer = await readFileBufImpl(full);
           return { buffer, mime: mimeFromPath(entry.path) };
         },
+        writeFile: (cwd, p, content, opts) => writeFileImpl(cwd, p, content, opts),
         stageFile:   (cwd, path) => gitStageImpl(cwd, path),
         unstageFile: (cwd, path) => gitUnstageImpl(cwd, path),
         commit:      (cwd, msg) => gitCommitImpl(cwd, msg),

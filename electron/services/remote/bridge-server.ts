@@ -79,6 +79,9 @@ export interface BridgeServerOpts {
   setActiveWorkspace?: (projectPath: string) => Promise<void>;
   listFiles?: (cwd: string, path: string) => Promise<FileEntry[]>;
   readFile?: (cwd: string, path: string) => Promise<FileReadResult>;
+  writeFile?: (cwd: string, path: string, content: string,
+               opts: { expectMtime: number | null; expectSha: string | null })
+              => Promise<{ mtime: number; sha: string }>;
   statusFiles?: (cwd: string) => Promise<{
     entries: FileStatusEntry[];
     branch?: string | null;
@@ -430,6 +433,37 @@ export class BridgeServer {
           ws.send(JSON.stringify({ v: 1, type: 'files.read.result', reqId, ...result }));
         } catch (err) {
           ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'read_failed', message: (err as Error).message }));
+        }
+        return;
+      }
+
+      if (msg.type === 'files.write' && typeof msg.cwd === 'string' && typeof msg.path === 'string'
+          && typeof msg.content === 'string') {
+        const reqId = msg.reqId;
+        if (!this.opts.writeFile) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'unsupported', message: 'writes disabled' }));
+          return;
+        }
+        const expectMtime = typeof msg.expectMtime === 'number' ? msg.expectMtime : null;
+        const expectSha   = typeof msg.expectSha   === 'string' ? msg.expectSha   : null;
+        try {
+          const { mtime, sha } = await this.opts.writeFile(
+            msg.cwd, msg.path, msg.content, { expectMtime, expectSha },
+          );
+          ws.send(JSON.stringify({ v: 1, type: 'files.write.result', reqId, mtime, sha }));
+        } catch (err: any) {
+          if (err?.code === 'stale') {
+            ws.send(JSON.stringify({
+              v: 1, type: 'error', reqId, code: 'stale', message: String(err.message ?? 'stale'),
+              currentMtime: err.currentMtime ?? 0, currentSha: err.currentSha ?? '',
+            }));
+          } else {
+            ws.send(JSON.stringify({
+              v: 1, type: 'error', reqId,
+              code: err?.code ?? 'write_failed',
+              message: String(err?.message ?? err),
+            }));
+          }
         }
         return;
       }

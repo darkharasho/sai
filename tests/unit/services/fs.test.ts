@@ -209,6 +209,7 @@ describe('fs:readFile', () => {
   it('returns file content as string', async () => {
     await setup();
     mockFsModule.default.promises.readFile.mockResolvedValue('hello world');
+    mockFsModule.default.promises.stat.mockResolvedValue({ mtimeMs: 1234 } as any);
 
     const result = await mockIpcMain._invoke('fs:readFile', '/path/file.txt');
 

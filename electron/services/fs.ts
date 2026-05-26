@@ -2,8 +2,14 @@ import { ipcMain, dialog, BrowserWindow } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { listMetaWorkspaces } from './metaWorkspace';
 import { syntheticRootFor } from './metaSyntheticRoot';
+import { safeJoin } from './remote/safe-join';
+
+function fileSha(content: string): string {
+  return createHash('sha256').update(content, 'utf8').digest('hex').slice(0, 16);
+}
 
 function isMetaSyntheticRoot(dir: string): boolean {
   const normalized = path.resolve(dir);
@@ -45,8 +51,58 @@ export async function readDirImpl(dirPath: string): Promise<FileEntry[]> {
   });
 }
 
-export async function readFileImpl(filePath: string): Promise<string> {
-  return fs.promises.readFile(filePath, 'utf-8');
+export interface ReadFileResult { content: string; mtime: number; sha: string }
+
+export async function readFileImpl(filePath: string): Promise<ReadFileResult> {
+  const content = await fs.promises.readFile(filePath, 'utf-8');
+  const st = await fs.promises.stat(filePath);
+  return { content, mtime: st.mtimeMs, sha: fileSha(content) };
+}
+
+const WRITE_MAX_BYTES = 256 * 1024;
+
+export interface WriteFileExpects { expectMtime: number | null; expectSha: string | null }
+export interface WriteFileResult { mtime: number; sha: string }
+
+export async function writeFileImpl(
+  cwd: string,
+  relPath: string,
+  content: string,
+  opts: WriteFileExpects,
+): Promise<WriteFileResult> {
+  if (Buffer.byteLength(content, 'utf8') > WRITE_MAX_BYTES) {
+    throw Object.assign(new Error('file too large for phone edit'), { code: 'too_large' });
+  }
+  const target = safeJoin(cwd, relPath);
+
+  const enforce = opts.expectMtime !== null && opts.expectSha !== null;
+  if (enforce) {
+    try {
+      const st = await fs.promises.stat(target);
+      const curMtime = st.mtimeMs;
+      const curContent = await fs.promises.readFile(target, 'utf-8');
+      const curSha = fileSha(curContent);
+      if (curMtime > opts.expectMtime! + 1 || curSha !== opts.expectSha) {
+        throw Object.assign(new Error('file changed since fetch'), {
+          code: 'stale', currentMtime: curMtime, currentSha: curSha,
+        });
+      }
+    } catch (err: any) {
+      if (err && err.code === 'stale') throw err;
+      if (err && err.code === 'ENOENT') {
+        throw Object.assign(new Error('file deleted'), {
+          code: 'stale', currentMtime: 0, currentSha: '',
+        });
+      }
+      throw err;
+    }
+  }
+
+  const tmp = `${target}.tmp.${process.pid}.${Date.now()}`;
+  await fs.promises.writeFile(tmp, content, 'utf-8');
+  await fs.promises.rename(tmp, target);
+  const st = await fs.promises.stat(target);
+  return { mtime: st.mtimeMs, sha: fileSha(content) };
 }
 
 export async function readFileBufImpl(filePath: string): Promise<Buffer> {
@@ -61,7 +117,10 @@ export async function statFileImpl(filePath: string): Promise<{ size: number; is
 export function registerFsHandlers(mainWindow: BrowserWindow) {
   ipcMain.handle('fs:readDir', (_e, dirPath: string) => readDirImpl(dirPath));
 
-  ipcMain.handle('fs:readFile', (_e, filePath: string) => readFileImpl(filePath));
+  ipcMain.handle('fs:readFile', async (_e, filePath: string) => {
+    const r = await readFileImpl(filePath);
+    return r.content;
+  });
 
   ipcMain.handle('fs:readFileBase64', async (_event, filePath: string) => {
     const buffer = await fs.promises.readFile(filePath);

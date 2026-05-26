@@ -53,6 +53,7 @@ export default function NavDrawer({
   const [gitChangeCount, setGitChangeCount] = useState(0);
   const [activeTerm, setActiveTerm] = useState<{ termId: number; origin: 'phone' | 'desktop' } | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [filesFileOpen, setFilesFileOpen] = useState(false);
 
   const gitCwd = metaMembers && metaMembers.length > 0 ? metaMembers[0].projectPath : workspacePath;
 
@@ -91,6 +92,8 @@ export default function NavDrawer({
 
   const badgeLabel = gitChangeCount > 100 ? '99+' : `${gitChangeCount}`;
   const terminalActive = active === 'terminal' && activeTerm !== null;
+  const filesActive = active === 'files' && filesFileOpen;
+  const fullscreen = terminalActive || filesActive;
   const gitCwdLocal = gitCwd;
 
   return (
@@ -105,7 +108,7 @@ export default function NavDrawer({
       }}
     >
       {/* Left rail */}
-      {!terminalActive && (
+      {!fullscreen && (
       <div
         style={{
           width: RAIL_WIDTH,
@@ -217,7 +220,7 @@ export default function NavDrawer({
           borderRight: '1px solid var(--border)',
           paddingTop: 'env(safe-area-inset-top)',
           paddingBottom: 'env(safe-area-inset-bottom)',
-          marginRight: terminalActive ? 0 : SLIVER_WIDTH,
+          marginRight: fullscreen ? 0 : SLIVER_WIDTH,
         }}
       >
         {active === 'files' && (
@@ -225,6 +228,7 @@ export default function NavDrawer({
             client={client}
             workspacePath={workspacePath}
             metaMembers={metaMembers}
+            onOpenChange={setFilesFileOpen}
           />
         )}
         {active === 'git' && (
@@ -256,7 +260,7 @@ export default function NavDrawer({
       </div>
 
       {/* Sliver — tap-to-close */}
-      {!terminalActive && (
+      {!fullscreen && (
         <button
           onClick={onClose}
           aria-label="Close drawer"
