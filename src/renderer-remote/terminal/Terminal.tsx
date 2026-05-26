@@ -10,12 +10,14 @@ interface Props {
   client: WireClient;
   termId: number;
   cwd: string;
+  origin: 'phone' | 'desktop';
   onBack: () => void;
   /** Called when the PTY has exited and the user dismisses the message. */
   onExit?: (code: number) => void;
 }
 
-export default function Terminal({ client, termId, cwd: _cwd, onBack, onExit }: Props) {
+export default function Terminal({ client, termId, cwd: _cwd, origin, onBack, onExit }: Props) {
+  const isDesktop = origin === 'desktop';
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<XTermInstance | null>(null);
   const fitRef = useRef<FitAddonInstance | null>(null);
@@ -64,6 +66,10 @@ export default function Terminal({ client, termId, cwd: _cwd, onBack, onExit }: 
         ta.setAttribute('autocapitalize', 'none');
         ta.setAttribute('spellcheck', 'false');
         ta.setAttribute('inputmode', 'text');
+        if (isDesktop) {
+          ta.setAttribute('tabindex', '-1');
+          ta.setAttribute('readonly', 'true');
+        }
       }
       termRef.current = term;
       fitRef.current = fit;
@@ -81,26 +87,28 @@ export default function Terminal({ client, termId, cwd: _cwd, onBack, onExit }: 
           client.resizeTerminal(termId, term.cols, term.rows);
         } catch { /* ignore */ }
       };
-      const sizeRo = new ResizeObserver(() => doFit());
-      sizeRo.observe(containerRef.current);
-      (term as any).__sizeRo = sizeRo;
-      // Best-effort initial fit on next frames in case ResizeObserver doesn't
-      // fire (already-sized container).
-      requestAnimationFrame(() => { doFit(); requestAnimationFrame(doFit); });
-      term.focus();
+      if (!isDesktop) {
+        const sizeRo = new ResizeObserver(() => doFit());
+        sizeRo.observe(containerRef.current);
+        (term as any).__sizeRo = sizeRo;
+        // Best-effort initial fit on next frames in case ResizeObserver doesn't
+        // fire (already-sized container).
+        requestAnimationFrame(() => { doFit(); requestAnimationFrame(doFit); });
+        term.focus();
 
-      // Wire input
-      dispOnData = term.onData((data: string) => {
-        client.inputTerminal(termId, data);
-        // iOS: keep the cursor in view as the user types.
-        try { term.scrollToBottom(); } catch { /* ignore */ }
-        // Auto-hide the soft keyboard after a line is submitted so output is
-        // readable without manually dismissing.
-        if (data.includes('\r') || data.includes('\n')) {
-          const ta = (term as any).textarea as HTMLTextAreaElement | undefined;
-          ta?.blur();
-        }
-      });
+        // Wire input
+        dispOnData = term.onData((data: string) => {
+          client.inputTerminal(termId, data);
+          // iOS: keep the cursor in view as the user types.
+          try { term.scrollToBottom(); } catch { /* ignore */ }
+          // Auto-hide the soft keyboard after a line is submitted so output is
+          // readable without manually dismissing.
+          if (data.includes('\r') || data.includes('\n')) {
+            const ta2 = (term as any).textarea as HTMLTextAreaElement | undefined;
+            ta2?.blur();
+          }
+        });
+      }
 
       // Subscribe to terminal.output / terminal.exit for this termId
       cleanupOnMsg = client.on((msg: WireMsg) => {
@@ -134,6 +142,7 @@ export default function Terminal({ client, termId, cwd: _cwd, onBack, onExit }: 
   // Recompute size on viewport changes (iOS keyboard show/hide, drawer changes)
   useEffect(() => {
     const recompute = () => {
+      if (isDesktop) return; // desktop dims stand
       const fit = fitRef.current;
       const term = termRef.current;
       if (!fit || !term) return;
@@ -159,7 +168,7 @@ export default function Terminal({ client, termId, cwd: _cwd, onBack, onExit }: 
     try { termRef.current?.scrollToBottom(); } catch { /* ignore */ }
   };
 
-  const onToolbarKey = (key: 'Esc' | 'Tab' | 'Up' | 'Down' | 'Left' | 'Right' | 'Ctrl') => {
+  const onToolbarKey = (key: 'Esc' | 'Tab' | 'Up' | 'Down' | 'Left' | 'Right' | 'Ctrl' | 'Enter') => {
     if (key === 'Ctrl') { setCtrlSticky((v) => !v); return; }
     if (ctrlSticky) {
       // Ctrl+<key> only well-defined for letters; for arrows/Esc/Tab we still emit the base sequence.
@@ -172,6 +181,7 @@ export default function Terminal({ client, termId, cwd: _cwd, onBack, onExit }: 
       case 'Down':  return sendBytes('\x1b[B');
       case 'Right': return sendBytes('\x1b[C');
       case 'Left':  return sendBytes('\x1b[D');
+      case 'Enter': return sendBytes('\r');
     }
   };
 
@@ -200,12 +210,12 @@ export default function Terminal({ client, termId, cwd: _cwd, onBack, onExit }: 
     }}>
       <div
         ref={containerRef}
-        onTouchEnd={() => {
+        onTouchEnd={isDesktop ? undefined : () => {
           const term = termRef.current;
           const ta = term && ((term as any).textarea as HTMLTextAreaElement | undefined);
           try { ta?.focus(); } catch { /* ignore */ }
         }}
-        onClick={() => {
+        onClick={isDesktop ? undefined : () => {
           const term = termRef.current;
           const ta = term && ((term as any).textarea as HTMLTextAreaElement | undefined);
           try { ta?.focus(); } catch { /* ignore */ }
@@ -237,6 +247,7 @@ export default function Terminal({ client, termId, cwd: _cwd, onBack, onExit }: 
           onKey={onToolbarKey}
           onBack={onBack}
           onCtrlChar={onCtrlChar}
+          variant={isDesktop ? 'view-only' : 'full'}
         />
       )}
     </div>
