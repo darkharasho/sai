@@ -87,9 +87,9 @@ export default function FileViewer(props: Props) {
 
   if (!html) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 12 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'var(--bg-primary)' }}>
         {editable && (
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '8px 12px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
             <button
               onClick={() => setMode('edit')}
               style={{ padding: '4px 10px', background: 'var(--bg-elevated)', color: 'var(--text)',
@@ -97,7 +97,12 @@ export default function FileViewer(props: Props) {
             >Edit</button>
           </div>
         )}
-        <pre style={{ margin: 0, color: 'var(--text-muted)', fontSize: 12 }}>
+        <pre style={{
+          margin: 0, padding: 12,
+          flex: 1, minHeight: 0, overflow: 'auto',
+          color: 'var(--text-muted)', fontSize: 12,
+          fontFamily: '"Geist Mono", ui-monospace, monospace',
+        }}>
           {content ?? ''}
         </pre>
       </div>
@@ -105,9 +110,9 @@ export default function FileViewer(props: Props) {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 12 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'var(--bg-primary)' }}>
       {editable && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '8px 12px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           <button
             onClick={() => setMode('edit')}
             style={{ padding: '4px 10px', background: 'var(--bg-elevated)', color: 'var(--text)',
@@ -118,9 +123,8 @@ export default function FileViewer(props: Props) {
       <div
         style={{
           margin: 0,
-          background: 'var(--bg-input)',
-          border: '1px solid var(--border)',
-          borderRadius: 8,
+          flex: 1, minHeight: 0,
+          background: 'var(--bg-primary)',
           fontFamily: '"Geist Mono", ui-monospace, monospace',
           fontSize: 12,
           lineHeight: 1.5,
