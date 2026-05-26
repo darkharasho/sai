@@ -17,6 +17,15 @@ export async function pair(code: string, deviceLabel: string): Promise<PairResul
 
 export type WireMsg = { type: string; [k: string]: unknown };
 
+export interface WriteStaleError extends Error {
+  code: 'stale';
+  currentMtime: number;
+  currentSha: string;
+}
+export function isWriteStaleError(e: unknown): e is WriteStaleError {
+  return !!e && typeof e === 'object' && (e as any).code === 'stale';
+}
+
 export interface ChatPromptArgs {
   text: string;
   projectPath: string;
@@ -55,7 +64,12 @@ export interface WireClient {
     size: number;
     lang?: string;
     mime?: string;
+    mtime?: number;
+    sha?: string;
   }>;
+  writeFile(cwd: string, path: string, content: string,
+            expectMtime: number | null, expectSha: string | null
+  ): Promise<{ mtime: number; sha: string }>;
   statusFiles(cwd: string): Promise<unknown[]>;
   diffFile(cwd: string, path: string, staged?: boolean): Promise<{ diff: string; lang?: string }>;
   stageFile(cwd: string, path: string): Promise<void>;
@@ -126,7 +140,21 @@ export function connect(token: string): WireClient {
       pendingReq.delete(reqId);
       const t = (msg as any).type;
       if (t === 'error') {
-        entry.reject(new Error(String((msg as any).message ?? 'error')));
+        const code = (msg as any).code;
+        if (code === 'stale') {
+          const e = Object.assign(new Error(String((msg as any).message ?? 'stale')), {
+            code: 'stale' as const,
+            currentMtime: (msg as any).currentMtime ?? 0,
+            currentSha: (msg as any).currentSha ?? '',
+          });
+          entry.reject(e);
+        } else {
+          const e: any = new Error(String((msg as any).message ?? 'error'));
+          if (code) e.code = code;
+          entry.reject(e);
+        }
+      } else if (t === 'files.write.result') {
+        entry.resolve({ mtime: (msg as any).mtime, sha: (msg as any).sha });
       } else if (t === 'sessions.list.result') {
         entry.resolve((msg as any).sessions ?? []);
       } else if (t === 'workspaces.list.result') {
@@ -193,6 +221,12 @@ export function connect(token: string): WireClient {
       pendingReq.set(reqId, { resolve, reject });
       setTimeout(() => { if (pendingReq.delete(reqId)) reject(new Error('files.read timeout')); }, 10_000);
       sendFrame({ type: 'files.read', cwd, path, reqId });
+    }),
+    writeFile: (cwd, path, content, expectMtime, expectSha) => new Promise((resolve, reject) => {
+      const reqId = `r${++reqCounter}`;
+      pendingReq.set(reqId, { resolve, reject });
+      setTimeout(() => { if (pendingReq.delete(reqId)) reject(new Error('files.write timeout')); }, 10_000);
+      sendFrame({ type: 'files.write', cwd, path, content, expectMtime, expectSha, reqId });
     }),
     statusFiles: (cwd) => new Promise((resolve, reject) => {
       const reqId = `r${++reqCounter}`;
