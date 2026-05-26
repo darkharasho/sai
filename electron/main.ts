@@ -193,8 +193,8 @@ async function getOrInitRemote(): Promise<RemoteModule> {
           const lang = langFromPath(path) ?? undefined;
           const inline = isTextLike(path) && stat.size <= 64 * 1024;
           if (inline) {
-            const content = await readFileImpl(full);
-            return { content, encoding: 'text' as const, size: stat.size, lang };
+            const r = await readFileImpl(full);
+            return { content: r.content, encoding: 'text' as const, size: stat.size, lang, mtime: r.mtime, sha: r.sha };
           }
           const id = blobStore!.register(cwd, path);
           const signedUrl = b.signBlobUrl(id);

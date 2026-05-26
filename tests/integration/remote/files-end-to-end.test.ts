@@ -46,8 +46,8 @@ describe('mobile remote files end-to-end', () => {
             const full = safeJoin(cwd, p);
             const stat = await statFileImpl(full);
             if (isTextLike(p) && stat.size <= 64 * 1024) {
-              const content = await readFileImpl(full);
-              return { content, encoding: 'text' as const, size: stat.size, lang: langFromPath(p) ?? undefined };
+              const r = await readFileImpl(full);
+              return { content: r.content, encoding: 'text' as const, size: stat.size, lang: langFromPath(p) ?? undefined, mtime: r.mtime, sha: r.sha };
             }
             const id = blobStore.register(cwd, p);
             const signedUrl = b.signBlobUrl(id);
