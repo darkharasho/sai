@@ -27,19 +27,24 @@ export default function Terminal({ client, termId, cwd: _cwd, onBack, onExit }: 
     let dispOnData: { dispose: () => void } | null = null;
     let cleanupOnMsg: (() => void) | null = null;
 
-    void Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit')]).then(([xterm, fitMod]) => {
+    void Promise.all([
+      import('@xterm/xterm'),
+      import('@xterm/addon-fit'),
+      import('@xterm/addon-canvas'),
+    ]).then(([xterm, fitMod, canvasMod]) => {
       if (cancelled || !containerRef.current) return;
       const term = new xterm.Terminal({
         cursorBlink: true,
         fontFamily: '"Geist Mono", ui-monospace, monospace',
         fontSize: 13,
         theme: { background: '#000000' },
-        // Canvas renderer is more reliable on iOS Safari than WebGL
-        ...(({ rendererType: 'canvas' }) as any),
+        // iOS Safari's DOM renderer mis-aligns the cursor; canvas renders cleanly.
+        allowProposedApi: true,
       });
       const fit = new fitMod.FitAddon();
       term.loadAddon(fit);
       term.open(containerRef.current);
+      try { term.loadAddon(new canvasMod.CanvasAddon()); } catch { /* fall back to DOM renderer */ }
       // Disable iOS autocorrect on xterm's hidden textarea
       const ta = (term as any).textarea as HTMLTextAreaElement | undefined;
       if (ta) {
