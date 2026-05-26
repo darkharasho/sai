@@ -50,6 +50,23 @@ export default function Terminal({ client, termId, cwd: _cwd, onBack, onExit }: 
         ta.setAttribute('autocorrect', 'off');
         ta.setAttribute('autocapitalize', 'none');
         ta.setAttribute('spellcheck', 'false');
+        ta.setAttribute('inputmode', 'text');
+        // iOS will only show the virtual keyboard for an input that is in
+        // viewport with non-zero size. xterm's helper textarea is parked off-
+        // screen by default. Overlay it on the visible terminal so taps land
+        // directly on it (iOS treats that as a real user gesture).
+        ta.style.position = 'absolute';
+        ta.style.top = '0';
+        ta.style.left = '0';
+        ta.style.width = '100%';
+        ta.style.height = '100%';
+        ta.style.opacity = '0';
+        ta.style.zIndex = '10';
+        ta.style.background = 'transparent';
+        ta.style.border = 'none';
+        ta.style.outline = 'none';
+        ta.style.resize = 'none';
+        ta.style.caretColor = 'transparent';
       }
       termRef.current = term;
       fitRef.current = fit;
@@ -175,7 +192,18 @@ export default function Terminal({ client, termId, cwd: _cwd, onBack, onExit }: 
     }}>
       <div
         ref={containerRef}
-        onClick={() => { try { termRef.current?.focus(); } catch { /* ignore */ } }}
+        onTouchEnd={() => {
+          // iOS only opens the virtual keyboard when focus moves inside a real
+          // user gesture handler; call .focus() on the actual textarea node.
+          const term = termRef.current;
+          const ta = term && ((term as any).textarea as HTMLTextAreaElement | undefined);
+          try { ta?.focus(); } catch { /* ignore */ }
+        }}
+        onClick={() => {
+          const term = termRef.current;
+          const ta = term && ((term as any).textarea as HTMLTextAreaElement | undefined);
+          try { ta?.focus(); } catch { /* ignore */ }
+        }}
         style={{ flex: 1, minHeight: 0, padding: 4, overflow: 'hidden' }}
       />
       {exited !== null ? (
