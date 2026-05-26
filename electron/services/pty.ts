@@ -163,7 +163,7 @@ export function killTerminalImpl(termId: number): void {
 }
 
 export function registerTerminalHandlers(win: BrowserWindow) {
-  ipcMain.handle('terminal:create', (_event, cwd: string, scope?: string) => {
+  ipcMain.handle('terminal:create', (_event, cwd: string, cols?: number, rows?: number) => {
     const id = nextId++;
     const env = { ...process.env } as Record<string, string>;
 
@@ -235,6 +235,8 @@ export function registerTerminalHandlers(win: BrowserWindow) {
     const term = pty.spawn(spawnCmd, spawnArgs, {
       name: ptyName,
       cwd: cwd || fallbackCwd,
+      cols: (cols && cols > 0) ? cols : 80,
+      rows: (rows && rows > 0) ? rows : 24,
       env,
     });
 
