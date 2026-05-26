@@ -3,6 +3,7 @@ import type { WireClient } from '../wire';
 import { isWriteStaleError } from '../wire';
 import { highlightToHtml } from './shiki';
 import { langFromPath } from './lang';
+import EditorToolbar from './EditorToolbar';
 
 interface Props {
   client: WireClient;
@@ -96,6 +97,48 @@ export default function FileEditor(props: Props) {
     if (!ta || !pre) return;
     pre.scrollTop = ta.scrollTop;
     pre.scrollLeft = ta.scrollLeft;
+  };
+
+  /** Insert text at cursor (or replace selection). Updates state + restores focus. */
+  const insertAtCursor = (text: string) => {
+    const ta = taRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart ?? content.length;
+    const end = ta.selectionEnd ?? content.length;
+    const next = content.slice(0, start) + text + content.slice(end);
+    setContent(next);
+    // Restore caret after React re-renders.
+    requestAnimationFrame(() => {
+      ta.focus();
+      const pos = start + text.length;
+      ta.setSelectionRange(pos, pos);
+    });
+  };
+
+  /** Move cursor by delta. dy=lines, dx=columns within the current line. */
+  const moveCursor = (dx: number, dy: number) => {
+    const ta = taRef.current;
+    if (!ta) return;
+    const pos = ta.selectionStart ?? 0;
+    let next = pos;
+    if (dy !== 0) {
+      const before = content.slice(0, pos);
+      const lineStart = before.lastIndexOf('\n') + 1;
+      const col = pos - lineStart;
+      const lines = content.split('\n');
+      let lineIdx = before.split('\n').length - 1;
+      lineIdx = Math.max(0, Math.min(lines.length - 1, lineIdx + dy));
+      const targetLine = lines[lineIdx] ?? '';
+      let offset = 0;
+      for (let i = 0; i < lineIdx; i++) offset += lines[i].length + 1;
+      next = offset + Math.min(col, targetLine.length);
+    } else {
+      next = Math.max(0, Math.min(content.length, pos + dx));
+    }
+    requestAnimationFrame(() => {
+      ta.focus();
+      ta.setSelectionRange(next, next);
+    });
   };
 
   // iOS PWA: track visualViewport so the editor shrinks above the keyboard.
@@ -203,6 +246,26 @@ export default function FileEditor(props: Props) {
           }}
         />
       </div>
+      <EditorToolbar
+        onTab={() => insertAtCursor('  ')}
+        onUp={() => moveCursor(0, -1)}
+        onDown={() => moveCursor(0, 1)}
+        onLeft={() => moveCursor(-1, 0)}
+        onRight={() => moveCursor(1, 0)}
+        onHome={() => {
+          const ta = taRef.current; if (!ta) return;
+          const pos = ta.selectionStart ?? 0;
+          const lineStart = content.lastIndexOf('\n', pos - 1) + 1;
+          requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(lineStart, lineStart); });
+        }}
+        onEnd={() => {
+          const ta = taRef.current; if (!ta) return;
+          const pos = ta.selectionStart ?? 0;
+          const nextNewline = content.indexOf('\n', pos);
+          const lineEnd = nextNewline === -1 ? content.length : nextNewline;
+          requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(lineEnd, lineEnd); });
+        }}
+      />
       {conflict && (
         <div style={{
           position: 'absolute', inset: 0,
