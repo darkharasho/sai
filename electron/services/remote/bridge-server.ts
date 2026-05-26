@@ -7,6 +7,9 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { PairingStore } from './pairing-store';
 import type { SessionBus } from './session-bus';
 import { ScreenshotUrlSigner } from './screenshot-urls';
+import type { PhoneTerminalRegistry, PhoneTerminalSummary } from './terminal-store';
+
+export type { PhoneTerminalSummary } from './terminal-store';
 
 export interface PromptArgs {
   text: string;
@@ -88,6 +91,8 @@ export interface BridgeServerOpts {
   commit?:      (cwd: string, message: string) => Promise<{ hash?: string }>;
   push?:        (cwd: string) => Promise<void>;
   pull?:        (cwd: string) => Promise<void>;
+  /** Phone-owned PTY registry. If absent, terminal.* messages return an error. */
+  terminalStore?: PhoneTerminalRegistry;
   loadBlob?: (id: string) => Promise<{ buffer: Buffer; mime: string } | null>;
 }
 
