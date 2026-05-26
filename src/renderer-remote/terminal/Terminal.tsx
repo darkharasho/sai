@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import '@xterm/xterm/css/xterm.css';
 import type { WireClient, WireMsg } from '../wire';
 import TerminalToolbar from './TerminalToolbar';
 
