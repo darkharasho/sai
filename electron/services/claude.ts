@@ -583,6 +583,44 @@ export function interruptImpl(projectPath: string, scope?: string): void {
   }
 }
 
+export async function answerQuestionImpl(
+  projectPath: string,
+  toolUseId: string,
+  answers: Record<string, string | string[]>,
+  scope?: string,
+): Promise<boolean> {
+  const ws = get(projectPath);
+  if (!ws) return false;
+  const effectiveScope = scope || 'chat';
+  const claude = getClaude(ws, effectiveScope);
+
+  if (claude.awaitingQuestionAnswer && claude.pendingQuestionId === toolUseId) {
+    claude.awaitingQuestionAnswer = false;
+    claude.pendingQuestionId = null;
+  }
+
+  emitChatMessage({
+    type: 'question_answered',
+    projectPath: ws.projectPath,
+    scope: effectiveScope,
+    toolUseId,
+    answers,
+  });
+
+  const proc = claude.process;
+  if (proc?.stdin && !proc.stdin.destroyed) {
+    const followUp = JSON.stringify({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: `[AskUserQuestion answers for tool call ${toolUseId}]\nThe user picked the following answers (the earlier placeholder tool_result for this tool call should be disregarded):\n${JSON.stringify(answers, null, 2)}`,
+      },
+    });
+    proc.stdin.write(followUp + '\n');
+  }
+  return true;
+}
+
 export async function approveImpl(
   projectPath: string,
   toolUseId: string,
@@ -909,41 +947,9 @@ export function registerClaudeHandlers(win: BrowserWindow) {
   // tool_result still passes through, but this corrective message is authoritative).
   // We also emit `question_answered` so the renderer can paint the answered state
   // by merging answers into the tool call's input JSON.
-  ipcMain.handle('claude:answer-question', async (_event, projectPath: string, toolUseId: string, answers: Record<string, string | string[]>, scope?: string) => {
-    const ws = get(projectPath);
-    if (!ws) return false;
-    const effectiveScope = scope || 'chat';
-    const claude = getClaude(ws, effectiveScope);
-
-    // Stop buffering CLI output now that the user has answered. The buffered
-    // messages (placeholder tool_result + cancellation acknowledgment) are
-    // dropped — the corrective user message below replaces them.
-    if (claude.awaitingQuestionAnswer && claude.pendingQuestionId === toolUseId) {
-      claude.awaitingQuestionAnswer = false;
-      claude.pendingQuestionId = null;
-    }
-
-    emitChatMessage({
-      type: 'question_answered',
-      projectPath: ws.projectPath,
-      scope: effectiveScope,
-      toolUseId,
-      answers,
-    });
-
-    const proc = claude.process;
-    if (proc?.stdin && !proc.stdin.destroyed) {
-      const followUp = JSON.stringify({
-        type: 'user',
-        message: {
-          role: 'user',
-          content: `[AskUserQuestion answers for tool call ${toolUseId}]\nThe user picked the following answers (the earlier placeholder tool_result for this tool call should be disregarded):\n${JSON.stringify(answers, null, 2)}`,
-        },
-      });
-      proc.stdin.write(followUp + '\n');
-    }
-    return true;
-  });
+  ipcMain.handle('claude:answer-question', (_event, projectPath: string, toolUseId: string, answers: Record<string, string | string[]>, scope?: string) =>
+    answerQuestionImpl(projectPath, toolUseId, answers, scope)
+  );
 
   // claude:alwaysAllow — add a tool pattern to the project's .claude/settings.local.json
   ipcMain.handle('claude:alwaysAllow', async (_event, projectPath: string, toolPattern: string) => {
