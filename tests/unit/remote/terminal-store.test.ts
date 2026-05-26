@@ -158,3 +158,48 @@ describe('PhoneTerminalRegistry — attach/detach + replay', () => {
     expect(reg.attach(9999, ws, 80, 24)).toBeNull();
   });
 });
+
+describe('PhoneTerminalRegistry — idle GC + destroyAll', () => {
+  let reg: PhoneTerminalRegistry;
+
+  beforeEach(() => {
+    reg = new PhoneTerminalRegistry();
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    reg.destroyAll();
+    vi.useRealTimers();
+  });
+
+  it('destroyAll() kills every entry', () => {
+    const a = reg.open('/r', 80, 24);
+    const b = reg.open('/r', 80, 24);
+    reg.destroyAll();
+    expect(reg.list()).toHaveLength(0);
+    expect(ptyStub().kills).toEqual(expect.arrayContaining([a.termId, b.termId]));
+  });
+
+  it('idle GC kills unattached terminals older than maxIdleMs', () => {
+    vi.setSystemTime(1_000_000);
+    let now = 1_000_000;
+    reg.startIdleGc({ intervalMs: 1000, maxIdleMs: 5000, now: () => now });
+    const a = reg.open('/r', 80, 24);
+    // Detached from birth → lastAttachAt = 1_000_000
+    now = 1_000_000 + 6000; // 6s later
+    vi.advanceTimersByTime(1000);
+    expect(reg.list().find((x) => x.termId === a.termId)).toBeUndefined();
+    expect(ptyStub().kills).toContain(a.termId);
+  });
+
+  it('idle GC leaves attached terminals alone', () => {
+    vi.setSystemTime(1_000_000);
+    let now = 1_000_000;
+    reg.startIdleGc({ intervalMs: 1000, maxIdleMs: 5000, now: () => now });
+    const a = reg.open('/r', 80, 24);
+    const ws: any = { OPEN: 1, readyState: 1, send: () => {} };
+    reg.attach(a.termId, ws, 80, 24);
+    now = 1_000_000 + 999_999;
+    vi.advanceTimersByTime(1000);
+    expect(reg.list().find((x) => x.termId === a.termId)).toBeDefined();
+  });
+});
