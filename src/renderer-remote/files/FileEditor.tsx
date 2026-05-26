@@ -94,7 +94,12 @@ export default function FileEditor(props: Props) {
         background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)',
       }}>
         <button
-          onClick={() => props.onCancel()}
+          onClick={() => {
+            if (dirty) {
+              if (!confirm('Discard your changes?')) return;
+            }
+            props.onCancel();
+          }}
           style={{ padding: '6px 10px', background: 'transparent', color: 'var(--text)',
                    border: 'none', cursor: 'pointer', fontSize: 14 }}
         >Cancel</button>
