@@ -76,13 +76,19 @@ export default function Chat({ client, initialActive, follow, onFollowChange, on
               } else if (tc.input && typeof tc.input === 'object') {
                 parsedInput = tc.input;
               }
+              const rawOutput = tc.output;
+              const toolResult = rawOutput == null
+                ? undefined
+                : typeof rawOutput === 'string'
+                  ? rawOutput
+                  : JSON.stringify(rawOutput, null, 2);
               out.push({
                 id: `h-${i}-tc-${j}-${tc.id ?? j}`,
                 role: 'tool',
                 toolName: tc.name ?? tc.type ?? 'tool',
                 toolInput: parsedInput,
-                toolResult: typeof tc.output === 'string' ? tc.output : undefined,
-                toolStatus: tc.output !== undefined ? 'done' : 'running',
+                toolResult,
+                toolStatus: rawOutput != null ? 'done' : 'running',
               });
             });
           }

@@ -63,7 +63,7 @@ function iconFor(name: string) {
 }
 
 export default function ToolCard({ name, input, result, status }: Props) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const summary = summarize(name, input);
   const Icon = status === 'error' ? AlertCircle : iconFor(name);
   const accentColor = status === 'error' ? 'var(--red)' : status === 'done' ? 'var(--green)' : 'var(--accent)';
@@ -82,6 +82,10 @@ export default function ToolCard({ name, input, result, status }: Props) {
     fontSize: 'inherit',
     textAlign: 'left',
     minWidth: 0,
+    minHeight: 32,
+    boxSizing: 'border-box',
+    WebkitAppearance: 'none',
+    appearance: 'none',
   };
 
   return (
