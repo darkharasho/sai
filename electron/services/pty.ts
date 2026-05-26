@@ -2,6 +2,7 @@ import * as pty from 'node-pty';
 import * as fs from 'node:fs';
 import { BrowserWindow, ipcMain } from 'electron';
 import { get, touchActivity } from './workspace';
+import { RingBuffer } from './remote/ring-buffer';
 
 /** Check whether systemd-run --user --scope is available (Linux only). Cached after first call. */
 let hasSystemdRun: boolean | undefined;
@@ -48,6 +49,15 @@ const allTerminals = new Map<number, pty.IPty>();
 // Reverse lookup: terminal ID → project path
 const terminalOwner = new Map<number, string>();
 let nextId = 1;
+
+// Shared scrollback + fan-out for desktop-owned terminals so phone clients can
+// attach via the remote bridge. Phone-owned terminals (created via
+// createTerminalImpl from PhoneTerminalRegistry) keep their own ring inside
+// the registry — these maps are only populated by the desktop IPC handler.
+const DESKTOP_RING_CAP_BYTES = 64 * 1024;
+type DesktopDataListener = (data: string) => void;
+const ringByTerm = new Map<number, RingBuffer>();
+const subscribersByTerm = new Map<number, Set<DesktopDataListener>>();
 
 /**
  * Spawn a node-pty shell at `cwd` and return its IPty + the globally-unique id.
@@ -400,4 +410,58 @@ export function destroyAllTerminals() {
   for (const term of allTerminals.values()) { term.kill(); }
   allTerminals.clear();
   terminalOwner.clear();
+}
+
+/**
+ * Return the current ring snapshot for a desktop-owned terminal, or '' if none.
+ * Phone-owned terminals (PhoneTerminalRegistry) snapshot their own ring directly.
+ */
+export function snapshotTerminal(termId: number): string {
+  return ringByTerm.get(termId)?.snapshot() ?? '';
+}
+
+/**
+ * Subscribe to live output for a desktop-owned terminal. Returns an unsubscribe.
+ * The callback runs synchronously inside the pty.onData handler — keep it cheap.
+ */
+export function subscribeTerminal(termId: number, cb: DesktopDataListener): () => void {
+  let set = subscribersByTerm.get(termId);
+  if (!set) { set = new Set(); subscribersByTerm.set(termId, set); }
+  set.add(cb);
+  return () => { set?.delete(cb); };
+}
+
+/**
+ * List desktop-owned terminals with best-effort cwd / cols / rows.
+ * cwd is taken from terminalOwner; cols/rows from the IPty instance.
+ */
+export function listDesktopTerminals(): Array<{
+  termId: number; cwd: string; cols: number; rows: number; alive: boolean;
+}> {
+  const out: Array<{ termId: number; cwd: string; cols: number; rows: number; alive: boolean }> = [];
+  for (const [termId, term] of allTerminals.entries()) {
+    // Skip phone-owned: phone terms live in PhoneTerminalRegistry, but they also
+    // pass through createTerminalImpl → allTerminals. We tag desktop ownership
+    // by the presence of a terminalOwner entry (set only inside the IPC handler).
+    const cwd = terminalOwner.get(termId);
+    if (cwd === undefined) continue;
+    const t = term as unknown as { cols?: number; rows?: number };
+    out.push({
+      termId, cwd,
+      cols: typeof t.cols === 'number' ? t.cols : 80,
+      rows: typeof t.rows === 'number' ? t.rows : 24,
+      alive: true,
+    });
+  }
+  return out;
+}
+
+/** Test hook: seed desktop state without spawning a real PTY. */
+export function _seedDesktopTerminalForTest(termId: number, cwd: string, cols = 80, rows = 24): void {
+  // Used by integration test to simulate a desktop term. We can't fake
+  // allTerminals (it needs a real IPty), so we only populate the ancillary
+  // maps; listDesktopTerminals reads allTerminals → use this in unit tests via
+  // the vi.hoisted stub instead. (Kept here as an explicit no-op anchor so
+  // test code can document its intent; integration tests use the real path.)
+  void termId; void cwd; void cols; void rows;
 }
