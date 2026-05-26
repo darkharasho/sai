@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Folder, FileText, ChevronRight, ChevronDown, ArrowLeft } from 'lucide-react';
 import type { WireClient } from '../wire';
 import FileViewer from './FileViewer';
+import FileEditor from './FileEditor';
 import { langFromPath } from './lang';
 
 interface Entry { name: string; kind: 'file' | 'dir'; size?: number }
@@ -139,6 +140,28 @@ export default function BrowseView({ client, cwd, onOpenChange }: Props) {
   };
 
   if (open && !loadingFile) {
+    // Text files within the inline-content threshold open directly in the editor;
+    // anything else (binary, oversized → signedUrl) falls back to the viewer.
+    const editable =
+      open.encoding === 'text' && !open.signedUrl &&
+      typeof open.content === 'string' &&
+      typeof open.mtime === 'number' && typeof open.sha === 'string';
+
+    if (editable) {
+      return (
+        <FileEditor
+          client={client}
+          cwd={cwd}
+          path={open.path}
+          initialContent={open.content!}
+          initialMtime={open.mtime!}
+          initialSha={open.sha!}
+          onSave={() => { /* stay in editor after save; mtime/sha already refreshed internally */ }}
+          onCancel={closeFile}
+        />
+      );
+    }
+
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
         <div style={{

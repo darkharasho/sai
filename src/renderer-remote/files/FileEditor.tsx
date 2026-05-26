@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { WireClient } from '../wire';
 import { isWriteStaleError } from '../wire';
+import { highlightToHtml } from './shiki';
+import { langFromPath } from './lang';
 
 interface Props {
   client: WireClient;
@@ -64,6 +66,38 @@ export default function FileEditor(props: Props) {
     }
   }
 
+  // Syntax highlight overlay: rendered behind a transparent-text textarea.
+  // Re-highlight on idle to avoid blocking input on every keystroke.
+  const [highlighted, setHighlighted] = useState<string>('');
+  const lang = useMemo(() => langFromPath(path) ?? null, [path]);
+  useEffect(() => {
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void highlightToHtml(content, lang).then((html) => {
+        if (cancelled) return;
+        // Strip Shiki's <pre>/<code> wrappers so the overlay's padding controls
+        // alignment with the textarea (otherwise pre's default margin shifts text).
+        const stripped = html
+          .replace(/<pre[^>]*>/i, '')
+          .replace(/<\/pre>\s*$/i, '')
+          .replace(/<code[^>]*>/i, '')
+          .replace(/<\/code>\s*$/i, '');
+        setHighlighted(stripped);
+      });
+    }, 120);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [content, lang]);
+
+  // Scroll sync: pre overlay follows the textarea's scroll position.
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const preRef = useRef<HTMLDivElement | null>(null);
+  const onScroll = () => {
+    const ta = taRef.current; const pre = preRef.current;
+    if (!ta || !pre) return;
+    pre.scrollTop = ta.scrollTop;
+    pre.scrollLeft = ta.scrollLeft;
+  };
+
   // iOS PWA: track visualViewport so the editor shrinks above the keyboard.
   const [viewportH, setViewportH] = useState<number | null>(() =>
     typeof window !== 'undefined' && (window as any).visualViewport
@@ -121,31 +155,54 @@ export default function FileEditor(props: Props) {
         >{saving ? 'Saving…' : 'Save'}</button>
       </div>
 
-      <textarea
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        autoCorrect="off"
-        autoCapitalize="none"
-        spellCheck={false}
-        inputMode="text"
-        wrap="off"
-        style={{
-          flex: 1,
-          minHeight: 0,
-          width: '100%',
-          padding: 12,
-          background: 'var(--bg-input)',
-          color: 'var(--text)',
-          border: 'none',
-          outline: 'none',
-          resize: 'none',
-          fontFamily: '"Geist Mono", ui-monospace, monospace',
-          fontSize: 13,
-          lineHeight: 1.5,
-          tabSize: 2,
-          whiteSpace: 'pre',
-        }}
-      />
+      <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
+        {/* Highlight overlay — sits behind the textarea, paints the colors. */}
+        <div
+          ref={preRef}
+          aria-hidden
+          dangerouslySetInnerHTML={{ __html: highlighted }}
+          style={{
+            position: 'absolute', inset: 0,
+            padding: 12,
+            overflow: 'auto',
+            background: 'var(--bg-input)',
+            fontFamily: '"Geist Mono", ui-monospace, monospace',
+            fontSize: 13,
+            lineHeight: 1.5,
+            tabSize: 2,
+            whiteSpace: 'pre',
+            pointerEvents: 'none',
+            // Shiki wraps in <pre><code>; flatten margins so positions match the textarea.
+          }}
+        />
+        <textarea
+          ref={taRef}
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          onScroll={onScroll}
+          autoCorrect="off"
+          autoCapitalize="none"
+          spellCheck={false}
+          inputMode="text"
+          wrap="off"
+          style={{
+            position: 'absolute', inset: 0,
+            width: '100%', height: '100%',
+            padding: 12,
+            background: 'transparent',
+            color: 'transparent',
+            caretColor: 'var(--text)',
+            border: 'none',
+            outline: 'none',
+            resize: 'none',
+            fontFamily: '"Geist Mono", ui-monospace, monospace',
+            fontSize: 13,
+            lineHeight: 1.5,
+            tabSize: 2,
+            whiteSpace: 'pre',
+          }}
+        />
+      </div>
       {conflict && (
         <div style={{
           position: 'absolute', inset: 0,
