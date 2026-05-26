@@ -140,7 +140,7 @@ async function getOrInitRemote(): Promise<RemoteModule> {
   setRemoteCeiling(kv.remoteCeiling ?? null);
 
   const pwaDir = app.isPackaged
-    ? path.join(process.resourcesPath, 'app', 'dist', 'renderer-remote')
+    ? path.join(app.getAppPath(), 'dist', 'renderer-remote')
     : path.join(__dirname, '..', 'dist', 'renderer-remote');
 
   remote = new RemoteModule({
