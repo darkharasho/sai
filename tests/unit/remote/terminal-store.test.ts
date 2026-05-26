@@ -76,3 +76,85 @@ describe('PhoneTerminalRegistry — basic lifecycle', () => {
     expect(t.rows).toBeGreaterThanOrEqual(5);
   });
 });
+
+describe('PhoneTerminalRegistry — attach/detach + replay', () => {
+  let reg: PhoneTerminalRegistry;
+
+  beforeEach(() => { reg = new PhoneTerminalRegistry(); });
+  afterEach(() => { reg.destroyAll(); });
+
+  function fakeWs(): any {
+    const sent: string[] = [];
+    return {
+      OPEN: 1,
+      readyState: 1,
+      send: (s: string) => sent.push(s),
+      __sent: sent,
+    };
+  }
+
+  it('attach() returns ring snapshot + dims; resizes PTY to client dims', () => {
+    const t = reg.open('/r', 80, 24);
+    const onData = ptyStub().dataCbs.get(t.termId)!;
+    onData('first ');
+    onData('second\n');
+
+    const ws = fakeWs();
+    const r = reg.attach(t.termId, ws, 100, 30);
+    expect(r).not.toBeNull();
+    expect(r!.replay).toBe('first second\n');
+    expect(r!.cols).toBe(100);
+    expect(r!.rows).toBe(30);
+    expect(ptyStub().resizes).toContainEqual({ termId: t.termId, cols: 100, rows: 30 });
+  });
+
+  it('streams subsequent output to the attached client only', () => {
+    const t = reg.open('/r', 80, 24);
+    const ws = fakeWs();
+    reg.attach(t.termId, ws, 80, 24);
+    const onData = ptyStub().dataCbs.get(t.termId)!;
+    onData('live\n');
+    expect(ws.__sent.some((s: string) => s.includes('"terminal.output"') && s.includes('live'))).toBe(true);
+  });
+
+  it('attach with a new ws displaces the previous attached client', () => {
+    const t = reg.open('/r', 80, 24);
+    const wsA = fakeWs(); const wsB = fakeWs();
+    reg.attach(t.termId, wsA, 80, 24);
+    reg.attach(t.termId, wsB, 80, 24);
+    const onData = ptyStub().dataCbs.get(t.termId)!;
+    onData('after-swap');
+    expect(wsA.__sent.some((s: string) => s.includes('after-swap'))).toBe(false);
+    expect(wsB.__sent.some((s: string) => s.includes('after-swap'))).toBe(true);
+  });
+
+  it('detach stops live output but keeps PTY alive + ring filling', () => {
+    const t = reg.open('/r', 80, 24);
+    const ws = fakeWs();
+    reg.attach(t.termId, ws, 80, 24);
+    reg.detach(t.termId, ws);
+    const onData = ptyStub().dataCbs.get(t.termId)!;
+    onData('buffered\n');
+    expect(ws.__sent.some((s: string) => s.includes('buffered'))).toBe(false);
+    const ws2 = fakeWs();
+    const r = reg.attach(t.termId, ws2, 80, 24);
+    expect(r!.replay).toContain('buffered\n');
+  });
+
+  it('detachAll(ws) detaches every term the ws was attached to', () => {
+    const a = reg.open('/r', 80, 24);
+    const b = reg.open('/r', 80, 24);
+    const ws = fakeWs();
+    reg.attach(a.termId, ws, 80, 24);
+    reg.attach(b.termId, ws, 80, 24);
+    reg.detachAll(ws);
+    ptyStub().dataCbs.get(a.termId)!('xa');
+    ptyStub().dataCbs.get(b.termId)!('xb');
+    expect(ws.__sent.some((s: string) => s.includes('xa') || s.includes('xb'))).toBe(false);
+  });
+
+  it('attach returns null for an unknown termId', () => {
+    const ws = fakeWs();
+    expect(reg.attach(9999, ws, 80, 24)).toBeNull();
+  });
+});
