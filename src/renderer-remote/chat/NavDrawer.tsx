@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { FolderClosed, GitBranch, Clock, X } from 'lucide-react';
+import { FolderClosed, GitBranch, Clock, X, Terminal as TerminalIcon } from 'lucide-react';
 import SaiLogo from '../branding/SaiLogo';
 import type { WireClient } from '../wire';
 import Files from '../files/Files';
 import Git from '../files/Git';
+import Terminal from '../terminal/Terminal';
+import TerminalPicker from '../terminal/TerminalPicker';
 
 interface SessionMeta {
   id: string;
@@ -13,7 +15,7 @@ interface SessionMeta {
   kind?: string;
 }
 
-type NavItem = 'files' | 'git' | 'chats';
+type NavItem = 'files' | 'git' | 'chats' | 'terminal';
 
 interface Props {
   open: boolean;
@@ -37,9 +39,10 @@ const SLIVER_WIDTH = 32;
 
 interface NavItemMeta { id: NavItem; icon: typeof FolderClosed; label: string }
 const NAV_ITEMS: NavItemMeta[] = [
-  { id: 'files', icon: FolderClosed, label: 'Files' },
-  { id: 'git',   icon: GitBranch,    label: 'Changes' },
-  { id: 'chats', icon: Clock,        label: 'Chats' },
+  { id: 'files',    icon: FolderClosed, label: 'Files' },
+  { id: 'git',      icon: GitBranch,    label: 'Changes' },
+  { id: 'chats',    icon: Clock,        label: 'Chats' },
+  { id: 'terminal', icon: TerminalIcon, label: 'Terminal' },
 ];
 
 export default function NavDrawer({
@@ -48,8 +51,16 @@ export default function NavDrawer({
 }: Props) {
   const [active, setActive] = useState<NavItem>('files');
   const [gitChangeCount, setGitChangeCount] = useState(0);
+  const [activeTerm, setActiveTerm] = useState<{ termId: number; origin: 'phone' | 'desktop' } | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const gitCwd = metaMembers && metaMembers.length > 0 ? metaMembers[0].projectPath : workspacePath;
+
+  // When the user clicks the Terminal rail item, open the picker (unless a term is already active).
+  useEffect(() => {
+    if (active === 'terminal' && activeTerm === null) setPickerOpen(true);
+    if (active !== 'terminal') setPickerOpen(false);
+  }, [active, activeTerm]);
 
   useEffect(() => {
     if (!open || !gitCwd) return;
@@ -79,6 +90,8 @@ export default function NavDrawer({
   if (!open) return null;
 
   const badgeLabel = gitChangeCount > 100 ? '99+' : `${gitChangeCount}`;
+  const terminalActive = active === 'terminal' && activeTerm !== null;
+  const gitCwdLocal = gitCwd;
 
   return (
     <div
@@ -92,6 +105,7 @@ export default function NavDrawer({
       }}
     >
       {/* Left rail */}
+      {!terminalActive && (
       <div
         style={{
           width: RAIL_WIDTH,
@@ -190,6 +204,7 @@ export default function NavDrawer({
           <X size={18} strokeWidth={2} />
         </button>
       </div>
+      )}
 
       {/* Right panel — fills the rest, minus the sliver on the right */}
       <div
@@ -202,7 +217,7 @@ export default function NavDrawer({
           borderRight: '1px solid var(--border)',
           paddingTop: 'env(safe-area-inset-top)',
           paddingBottom: 'env(safe-area-inset-bottom)',
-          marginRight: SLIVER_WIDTH,
+          marginRight: terminalActive ? 0 : SLIVER_WIDTH,
         }}
       >
         {active === 'files' && (
@@ -228,22 +243,46 @@ export default function NavDrawer({
             onAttach={(p, s) => { onAttach(p, s); onClose(); }}
           />
         )}
+        {active === 'terminal' && activeTerm !== null && (
+          <Terminal
+            client={client}
+            termId={activeTerm.termId}
+            cwd={gitCwdLocal}
+            origin={activeTerm.origin}
+            onBack={() => { setActiveTerm(null); setActive('files'); }}
+            onExit={() => { setActiveTerm(null); }}
+          />
+        )}
       </div>
 
       {/* Sliver — tap-to-close */}
-      <button
-        onClick={onClose}
-        aria-label="Close drawer"
-        style={{
-          position: 'absolute',
-          top: 0, bottom: 0, right: 0,
-          width: SLIVER_WIDTH,
-          background: 'transparent',
-          border: 'none',
-          cursor: 'pointer',
-          padding: 0,
-        }}
-      />
+      {!terminalActive && (
+        <button
+          onClick={onClose}
+          aria-label="Close drawer"
+          style={{
+            position: 'absolute',
+            top: 0, bottom: 0, right: 0,
+            width: SLIVER_WIDTH,
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            padding: 0,
+          }}
+        />
+      )}
+      {pickerOpen && (
+        <TerminalPicker
+          client={client}
+          cwd={gitCwdLocal}
+          onPick={(termId, origin) => { setActiveTerm({ termId, origin }); setPickerOpen(false); }}
+          onClose={() => {
+            setPickerOpen(false);
+            // If no terminal was picked, drop back to files
+            if (activeTerm === null) setActive('files');
+          }}
+        />
+      )}
     </div>
   );
 }

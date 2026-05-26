@@ -2,6 +2,7 @@ import * as pty from 'node-pty';
 import * as fs from 'node:fs';
 import { BrowserWindow, ipcMain } from 'electron';
 import { get, touchActivity } from './workspace';
+import { RingBuffer } from './remote/ring-buffer';
 
 /** Check whether systemd-run --user --scope is available (Linux only). Cached after first call. */
 let hasSystemdRun: boolean | undefined;
@@ -48,6 +49,118 @@ const allTerminals = new Map<number, pty.IPty>();
 // Reverse lookup: terminal ID → project path
 const terminalOwner = new Map<number, string>();
 let nextId = 1;
+
+// Shared scrollback + fan-out for desktop-owned terminals so phone clients can
+// attach via the remote bridge. Phone-owned terminals (created via
+// createTerminalImpl from PhoneTerminalRegistry) keep their own ring inside
+// the registry — these maps are only populated by the desktop IPC handler.
+const DESKTOP_RING_CAP_BYTES = 64 * 1024;
+type DesktopDataListener = (data: string) => void;
+const ringByTerm = new Map<number, RingBuffer>();
+const subscribersByTerm = new Map<number, Set<DesktopDataListener>>();
+
+/**
+ * Spawn a node-pty shell at `cwd` and return its IPty + the globally-unique id.
+ * Caller is responsible for wiring data/exit listeners. This impl is shared by
+ * the desktop IPC handler and the phone-remote terminal store; they maintain
+ * independent registries.
+ */
+export function createTerminalImpl(opts: {
+  cwd: string;
+  cols: number;
+  rows: number;
+  onData: (data: string) => void;
+  onExit: (code: number) => void;
+}): { termId: number; pty: pty.IPty } {
+  const id = nextId++;
+  const env = { ...process.env } as Record<string, string>;
+
+  let spawnCmd: string;
+  let spawnArgs: string[];
+  let ptyName: string;
+  let fallbackCwd: string;
+
+  if (process.platform === 'win32') {
+    const pwsh7Candidates = [
+      process.env.PWSH_PATH,
+      'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+      'C:\\Program Files (x86)\\PowerShell\\7\\pwsh.exe',
+    ].filter((p): p is string => typeof p === 'string' && p.length > 0);
+    const winPwsh = process.env.SystemRoot
+      ? `${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
+      : '';
+    let resolved: string | null = null;
+    for (const candidate of pwsh7Candidates) {
+      try { if (fs.existsSync(candidate)) { resolved = candidate; break; } } catch { /* ignore */ }
+    }
+    if (!resolved && winPwsh) {
+      try { if (fs.existsSync(winPwsh)) resolved = winPwsh; } catch { /* ignore */ }
+    }
+    spawnCmd = resolved || process.env.ComSpec || 'cmd.exe';
+    const isCmd = spawnCmd.toLowerCase().endsWith('cmd.exe');
+    spawnArgs = isCmd ? [] : ['-NoLogo'];
+    ptyName = 'xterm-256color';
+    fallbackCwd = process.env.USERPROFILE || process.env.HOMEDRIVE || 'C:\\';
+  } else {
+    const shell = process.env.SHELL || '/bin/bash';
+    delete env.GIO_LAUNCHED_DESKTOP_FILE;
+    delete env.GIO_LAUNCHED_DESKTOP_FILE_PID;
+    delete env.BAMF_DESKTOP_FILE_HINT;
+    delete env.XDG_ACTIVATION_TOKEN;
+    delete env.DESKTOP_STARTUP_ID;
+    delete env.CHROME_DESKTOP;
+    delete env.INVOCATION_ID;
+    const shellInit = `stty -echoctl 2>/dev/null; exec "${shell}" --login`;
+    const useScope = canUseSystemdScope();
+    spawnCmd = useScope ? 'systemd-run' : shell;
+    spawnArgs = useScope
+      ? ['--user', '--scope', '--quiet', '--', shell, '-c', shellInit]
+      : ['-c', shellInit];
+    ptyName = 'xterm-256color';
+    fallbackCwd = process.env.HOME || '/';
+  }
+
+  const term = pty.spawn(spawnCmd, spawnArgs, {
+    name: ptyName,
+    cwd: opts.cwd || fallbackCwd,
+    cols: opts.cols,
+    rows: opts.rows,
+    env,
+  });
+
+  allTerminals.set(id, term);
+  term.onData((data) => opts.onData(data));
+  term.onExit(({ exitCode }) => {
+    allTerminals.delete(id);
+    opts.onExit(exitCode);
+  });
+  return { termId: id, pty: term };
+}
+
+export function writeTerminalImpl(termId: number, data: string): void {
+  if (desktopTestSidecar.has(termId)) {
+    desktopTestWrites.push({ termId, data });
+    return;
+  }
+  allTerminals.get(termId)?.write(data);
+}
+
+export function resizeTerminalImpl(termId: number, cols: number, rows: number): void {
+  allTerminals.get(termId)?.resize(cols, rows);
+}
+
+export function signalTerminalImpl(termId: number, signal: NodeJS.Signals): void {
+  const term = allTerminals.get(termId);
+  if (!term) return;
+  try { process.kill(-term.pid, signal); } catch { /* already exited */ }
+}
+
+export function killTerminalImpl(termId: number): void {
+  const term = allTerminals.get(termId);
+  if (!term) return;
+  try { term.kill(); } catch { /* already exited */ }
+  allTerminals.delete(termId);
+}
 
 export function registerTerminalHandlers(win: BrowserWindow) {
   ipcMain.handle('terminal:create', (_event, cwd: string, scope?: string) => {
@@ -133,7 +246,20 @@ export function registerTerminalHandlers(win: BrowserWindow) {
       terminalOwner.set(id, cwd);
     }
 
-    term.onData((data) => { safeSend(win, 'terminal:data', id, data); });
+    term.onData((data) => {
+      // Desktop renderer (unchanged behavior)
+      safeSend(win, 'terminal:data', id, data);
+      // Phone-bridge fan-out: write to ring, broadcast to subscribers.
+      let ring = ringByTerm.get(id);
+      if (!ring) { ring = new RingBuffer(DESKTOP_RING_CAP_BYTES); ringByTerm.set(id, ring); }
+      ring.push(data);
+      const subs = subscribersByTerm.get(id);
+      if (subs && subs.size > 0) {
+        for (const cb of subs) {
+          try { cb(data); } catch { /* isolate one subscriber's failure */ }
+        }
+      }
+    });
     term.onExit(() => {
       allTerminals.delete(id);
       const owner = terminalOwner.get(id);
@@ -142,6 +268,8 @@ export function registerTerminalHandlers(win: BrowserWindow) {
         ownerWs?.terminals.delete(id);
         terminalOwner.delete(id);
       }
+      ringByTerm.delete(id);
+      subscribersByTerm.delete(id);
     });
     return id;
   });
@@ -293,6 +421,8 @@ export function registerTerminalHandlers(win: BrowserWindow) {
         ownerWs?.terminals.delete(id);
         terminalOwner.delete(id);
       }
+      ringByTerm.delete(id);
+      subscribersByTerm.delete(id);
     }
   });
 }
@@ -301,4 +431,102 @@ export function destroyAllTerminals() {
   for (const term of allTerminals.values()) { term.kill(); }
   allTerminals.clear();
   terminalOwner.clear();
+  ringByTerm.clear();
+  subscribersByTerm.clear();
+}
+
+/**
+ * Return the current ring snapshot for a desktop-owned terminal, or '' if none.
+ * Phone-owned terminals (PhoneTerminalRegistry) snapshot their own ring directly.
+ */
+export function snapshotTerminal(termId: number): string {
+  return ringByTerm.get(termId)?.snapshot() ?? '';
+}
+
+/**
+ * Subscribe to live output for a desktop-owned terminal. Returns an unsubscribe.
+ * The callback runs synchronously inside the pty.onData handler — keep it cheap.
+ */
+export function subscribeTerminal(termId: number, cb: DesktopDataListener): () => void {
+  let set = subscribersByTerm.get(termId);
+  if (!set) { set = new Set(); subscribersByTerm.set(termId, set); }
+  set.add(cb);
+  return () => { set?.delete(cb); };
+}
+
+/**
+ * List desktop-owned terminals with best-effort cwd / cols / rows.
+ * cwd is taken from terminalOwner; cols/rows from the IPty instance.
+ */
+export function listDesktopTerminals(): Array<{
+  termId: number; cwd: string; cols: number; rows: number; alive: boolean;
+}> {
+  const out: Array<{ termId: number; cwd: string; cols: number; rows: number; alive: boolean }> = [];
+  for (const [termId, term] of [...allTerminals.entries()]) {
+    // Skip phone-owned: phone terms live in PhoneTerminalRegistry, but they also
+    // pass through createTerminalImpl → allTerminals. We tag desktop ownership
+    // by the presence of a terminalOwner entry (set only inside the IPC handler).
+    const cwd = terminalOwner.get(termId);
+    if (cwd === undefined) continue;
+    // Verify the underlying process is still alive. If onExit didn't fire
+    // (e.g. shell crashed before listener attached, or hot-reload state leak),
+    // we get phantom entries here. Probe with signal 0 and prune.
+    const pid = (term as unknown as { pid?: number }).pid;
+    if (typeof pid === 'number') {
+      try { process.kill(pid, 0); }
+      catch {
+        allTerminals.delete(termId);
+        terminalOwner.delete(termId);
+        ringByTerm.delete(termId);
+        subscribersByTerm.delete(termId);
+        continue;
+      }
+    }
+    const t = term as unknown as { cols?: number; rows?: number };
+    out.push({
+      termId, cwd,
+      cols: typeof t.cols === 'number' ? t.cols : 80,
+      rows: typeof t.rows === 'number' ? t.rows : 24,
+      alive: true,
+    });
+  }
+  for (const [termId, t] of desktopTestSidecar.entries()) {
+    out.push({ termId, cwd: t.cwd, cols: t.cols, rows: t.rows, alive: t.alive });
+  }
+  return out;
+}
+
+// Test-only sidecar so integration tests can simulate a desktop terminal
+// without spawning a real IPty. Only consulted by listDesktopTerminals when
+// the sidecar map is non-empty.
+const desktopTestSidecar = new Map<number, { cwd: string; cols: number; rows: number; alive: boolean }>();
+const desktopTestWrites: Array<{ termId: number; data: string }> = [];
+
+export function _seedDesktopTerminalForTest(termId: number, cwd: string, cols = 80, rows = 24): {
+  fireData: (data: string) => void;
+  fireExit: () => void;
+  writes: Array<{ termId: number; data: string }>;
+} {
+  desktopTestSidecar.set(termId, { cwd, cols, rows, alive: true });
+  // Seed ring so snapshotTerminal returns something useful.
+  if (!ringByTerm.get(termId)) ringByTerm.set(termId, new RingBuffer(DESKTOP_RING_CAP_BYTES));
+  return {
+    fireData: (data: string) => {
+      ringByTerm.get(termId)!.push(data);
+      const subs = subscribersByTerm.get(termId);
+      if (subs) for (const cb of subs) { try { cb(data); } catch { /* isolate */ } }
+    },
+    fireExit: () => {
+      desktopTestSidecar.delete(termId);
+      ringByTerm.delete(termId);
+      subscribersByTerm.delete(termId);
+    },
+    writes: desktopTestWrites,
+  };
+}
+
+export function _drainDesktopTestWrites(): Array<{ termId: number; data: string }> {
+  const copy = [...desktopTestWrites];
+  desktopTestWrites.length = 0;
+  return copy;
 }

@@ -83,8 +83,24 @@ export default function App() {
         if (!bearer) { setPhase('needs-pair'); return; }
         const { token } = JSON.parse(bearer);
         const c = connect(token);
-        c.onState(setWsState);
-        c.on((msg) => { if (msg.type === 'auth_ok') setPhase('connected'); });
+        let everAuthed = false;
+        let closeStreak = 0;
+        c.onState((s) => {
+          setWsState(s);
+          // If we hit 'closed' before any auth_ok arrived, the bearer is stale.
+          // After two close events with no auth, drop it and surface re-pair.
+          if (s === 'closed' && !everAuthed) {
+            closeStreak++;
+            if (closeStreak >= 2) {
+              try { c.close(); } catch { /* ignore */ }
+              localStorage.removeItem(BEARER_KEY);
+              setPhase('needs-pair');
+            }
+          }
+        });
+        c.on((msg) => {
+          if (msg.type === 'auth_ok') { everAuthed = true; closeStreak = 0; setPhase('connected'); }
+        });
         setClient(c);
       } catch (err) {
         setError((err as Error).message);

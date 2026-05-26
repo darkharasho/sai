@@ -3,6 +3,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { RemoteModule } from './services/remote';
+import { PhoneTerminalRegistry } from './services/remote/terminal-store';
 import { BridgeServer } from './services/remote/bridge-server';
 import { PairingStore } from './services/remote/pairing-store';
 import { SessionBus } from './services/remote/session-bus';
@@ -84,6 +85,8 @@ let useFramelessRounded = false;
 
 // Remote module singletons
 let remote: RemoteModule | null = null;
+const terminalStore = new PhoneTerminalRegistry();
+terminalStore.startIdleGc();
 let pairing: PairingStore | null = null;
 let bus: SessionBus | null = null;
 let rendererProxy: RendererProxy | null = null;
@@ -217,6 +220,7 @@ async function getOrInitRemote(): Promise<RemoteModule> {
         commit:      (cwd, msg) => gitCommitImpl(cwd, msg),
         push:        (cwd) => gitPushImpl(cwd),
         pull:        (cwd) => gitPullImpl(cwd),
+        terminalStore,
       });
       bridge = b;
       return b;
@@ -335,6 +339,7 @@ function createWindow() {
     if (mainWindow) writeSetting('windowBounds', mainWindow.getBounds());
     stopSuspendTimer();
     destroyAllTerminals();
+    terminalStore.destroyAll();
     destroyAll(mainWindow!);
   });
 
@@ -802,6 +807,7 @@ app.on('window-all-closed', () => {
   stopSuspendTimer();
   destroyUsagePolling();
   destroyAllTerminals();
+  terminalStore.destroyAll();
   if (mainWindow) destroyAll(mainWindow);
   try { swarmMcpHost.stop(); } catch { /* noop */ }
   app.quit();

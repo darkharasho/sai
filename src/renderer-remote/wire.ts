@@ -63,6 +63,21 @@ export interface WireClient {
   commit(cwd: string, message: string): Promise<{ hash?: string }>;
   push(cwd: string): Promise<void>;
   pull(cwd: string): Promise<void>;
+  listTerminals(cwd: string): Promise<Array<{
+    termId: number;
+    cwd: string;
+    cols: number;
+    rows: number;
+    alive: boolean;
+    origin: 'phone' | 'desktop';
+  }>>;
+  openTerminal(cwd: string, cols: number, rows: number): Promise<{ termId: number; cols: number; rows: number }>;
+  attachTerminal(termId: number, cols: number, rows: number): Promise<{ termId: number; cols: number; rows: number }>;
+  detachTerminal(termId: number): void;
+  inputTerminal(termId: number, data: string): void;
+  resizeTerminal(termId: number, cols: number, rows: number): void;
+  signalTerminal(termId: number, signal: string): void;
+  killTerminal(termId: number): Promise<void>;
 }
 
 export function connect(token: string): WireClient {
@@ -128,6 +143,14 @@ export function connect(token: string): WireClient {
         entry.resolve(undefined);
       } else if (t === 'git.commit.result') {
         entry.resolve({ hash: (msg as any).hash });
+      } else if (t === 'terminal.list.result') {
+        entry.resolve((msg as any).terms ?? []);
+      } else if (t === 'terminal.opened') {
+        entry.resolve({ termId: (msg as any).termId, cols: (msg as any).cols, rows: (msg as any).rows });
+      } else if (t === 'terminal.attached') {
+        entry.resolve({ termId: (msg as any).termId, cols: (msg as any).cols, rows: (msg as any).rows });
+      } else if (t === 'terminal.kill.result') {
+        entry.resolve(undefined);
       } else {
         entry.resolve(msg);
       }
@@ -212,6 +235,34 @@ export function connect(token: string): WireClient {
       pendingReq.set(reqId, { resolve, reject });
       setTimeout(() => { if (pendingReq.delete(reqId)) reject(new Error('git.pull timeout')); }, 60_000);
       sendFrame({ type: 'git.pull', cwd, reqId });
+    }),
+    listTerminals: (cwd) => new Promise((resolve, reject) => {
+      const reqId = `r${++reqCounter}`;
+      pendingReq.set(reqId, { resolve, reject });
+      setTimeout(() => { if (pendingReq.delete(reqId)) reject(new Error('terminal.list timeout')); }, 5000);
+      sendFrame({ type: 'terminal.list', cwd, reqId });
+    }),
+    openTerminal: (cwd, cols, rows) => new Promise((resolve, reject) => {
+      const reqId = `r${++reqCounter}`;
+      pendingReq.set(reqId, { resolve, reject });
+      setTimeout(() => { if (pendingReq.delete(reqId)) reject(new Error('terminal.open timeout')); }, 10_000);
+      sendFrame({ type: 'terminal.open', cwd, cols, rows, reqId });
+    }),
+    attachTerminal: (termId, cols, rows) => new Promise((resolve, reject) => {
+      const reqId = `r${++reqCounter}`;
+      pendingReq.set(reqId, { resolve, reject });
+      setTimeout(() => { if (pendingReq.delete(reqId)) reject(new Error('terminal.attach timeout')); }, 10_000);
+      sendFrame({ type: 'terminal.attach', termId, cols, rows, reqId });
+    }),
+    detachTerminal: (termId) => sendFrame({ type: 'terminal.detach', termId }),
+    inputTerminal: (termId, data) => sendFrame({ type: 'terminal.input', termId, data }),
+    resizeTerminal: (termId, cols, rows) => sendFrame({ type: 'terminal.resize', termId, cols, rows }),
+    signalTerminal: (termId, signal) => sendFrame({ type: 'terminal.signal', termId, signal }),
+    killTerminal: (termId) => new Promise((resolve, reject) => {
+      const reqId = `r${++reqCounter}`;
+      pendingReq.set(reqId, { resolve, reject });
+      setTimeout(() => { if (pendingReq.delete(reqId)) reject(new Error('terminal.kill timeout')); }, 10_000);
+      sendFrame({ type: 'terminal.kill', termId, reqId });
     }),
   };
 }

@@ -7,6 +7,9 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { PairingStore } from './pairing-store';
 import type { SessionBus } from './session-bus';
 import { ScreenshotUrlSigner } from './screenshot-urls';
+import type { PhoneTerminalRegistry, PhoneTerminalSummary } from './terminal-store';
+
+export type { PhoneTerminalSummary } from './terminal-store';
 
 export interface PromptArgs {
   text: string;
@@ -88,6 +91,8 @@ export interface BridgeServerOpts {
   commit?:      (cwd: string, message: string) => Promise<{ hash?: string }>;
   push?:        (cwd: string) => Promise<void>;
   pull?:        (cwd: string) => Promise<void>;
+  /** Phone-owned PTY registry. If absent, terminal.* messages return an error. */
+  terminalStore?: PhoneTerminalRegistry;
   loadBlob?: (id: string) => Promise<{ buffer: Buffer; mime: string } | null>;
 }
 
@@ -516,6 +521,91 @@ export class BridgeServer {
         return;
       }
 
+      if (msg.type === 'terminal.list' && typeof msg.cwd === 'string') {
+        const reqId = msg.reqId;
+        const store = this.opts.terminalStore;
+        if (!store) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'terminal_unavailable', message: 'no terminal store' }));
+          return;
+        }
+        try {
+          const terms = store.list(msg.cwd);
+          ws.send(JSON.stringify({ v: 1, type: 'terminal.list.result', reqId, terms }));
+        } catch (err) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'terminal_list_failed', message: (err as Error).message }));
+        }
+        return;
+      }
+
+      if (msg.type === 'terminal.open' && typeof msg.cwd === 'string'
+          && typeof msg.cols === 'number' && typeof msg.rows === 'number') {
+        const reqId = msg.reqId;
+        const store = this.opts.terminalStore;
+        if (!store) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'terminal_unavailable', message: 'no terminal store' }));
+          return;
+        }
+        try {
+          const t = store.open(msg.cwd, msg.cols, msg.rows);
+          ws.send(JSON.stringify({ v: 1, type: 'terminal.opened', reqId, termId: t.termId, cols: t.cols, rows: t.rows }));
+        } catch (err) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'terminal_open_failed', message: (err as Error).message }));
+        }
+        return;
+      }
+
+      if (msg.type === 'terminal.attach' && typeof msg.termId === 'number'
+          && typeof msg.cols === 'number' && typeof msg.rows === 'number') {
+        const reqId = msg.reqId;
+        const store = this.opts.terminalStore;
+        if (!store) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'terminal_unavailable', message: 'no terminal store' }));
+          return;
+        }
+        const r = store.attach(msg.termId, ws, msg.cols, msg.rows);
+        if (!r) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'terminal_unknown', message: `no such terminal ${msg.termId}` }));
+          return;
+        }
+        ws.send(JSON.stringify({ v: 1, type: 'terminal.attached', reqId, termId: msg.termId, cols: r.cols, rows: r.rows }));
+        if (r.replay) {
+          ws.send(JSON.stringify({ v: 1, type: 'terminal.output', termId: msg.termId, data: r.replay }));
+        }
+        return;
+      }
+
+      if (msg.type === 'terminal.input' && typeof msg.termId === 'number' && typeof msg.data === 'string') {
+        this.opts.terminalStore?.input(msg.termId, msg.data);
+        return;
+      }
+
+      if (msg.type === 'terminal.resize' && typeof msg.termId === 'number'
+          && typeof msg.cols === 'number' && typeof msg.rows === 'number') {
+        this.opts.terminalStore?.resize(msg.termId, msg.cols, msg.rows);
+        return;
+      }
+
+      if (msg.type === 'terminal.signal' && typeof msg.termId === 'number' && typeof msg.signal === 'string') {
+        this.opts.terminalStore?.signal(msg.termId, msg.signal as NodeJS.Signals);
+        return;
+      }
+
+      if (msg.type === 'terminal.detach' && typeof msg.termId === 'number') {
+        this.opts.terminalStore?.detach(msg.termId, ws);
+        return;
+      }
+
+      if (msg.type === 'terminal.kill' && typeof msg.termId === 'number') {
+        const reqId = msg.reqId;
+        try {
+          this.opts.terminalStore?.kill(msg.termId);
+          ws.send(JSON.stringify({ v: 1, type: 'terminal.kill.result', reqId, termId: msg.termId }));
+        } catch (err) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'terminal_kill_failed', message: (err as Error).message }));
+        }
+        return;
+      }
+
       if (msg.type === 'prompt' && typeof msg.text === 'string' && typeof msg.projectPath === 'string') {
         this.opts.sendPrompt?.({
           text: msg.text,
@@ -562,6 +652,7 @@ export class BridgeServer {
     });
 
     ws.on('close', () => {
+      this.opts.terminalStore?.detachAll(ws);
       if (unsub) unsub();
       if (deviceId) {
         const set = this.liveSockets.get(deviceId);
