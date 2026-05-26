@@ -187,6 +187,10 @@ export default function RemoteSettings() {
             <div style={{ fontSize: 13, color: 'var(--text)' }}>Scan with your phone's camera</div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Expires in {countdown}s</div>
             <div style={{ ...codeStyle, wordBreak: 'break-all', maxWidth: '100%' }}>{pairUrl}</div>
+            <button
+              onClick={() => { if (pairUrl) void navigator.clipboard.writeText(pairUrl); }}
+              style={buttonStyle}
+            >Copy link</button>
           </div>
         </div>
       )}
