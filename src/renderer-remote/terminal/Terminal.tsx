@@ -55,16 +55,24 @@ export default function Terminal({ client, termId, cwd: _cwd, onBack, onExit }: 
       termRef.current = term;
       fitRef.current = fit;
 
-      // The container's height is 0 on initial mount until the flex layout
-      // settles. Defer fit() until after layout so cols/rows are real.
+      // Wait for the container to have real dimensions before fitting. The
+      // CanvasAddon captures dims at fit() time; if we fit() too early we end
+      // up with a 1×1 canvas. ResizeObserver fires the moment the layout
+      // commits a non-zero size.
       const doFit = () => {
-        if (!termRef.current) return;
+        if (!termRef.current || !containerRef.current) return;
+        const r = containerRef.current.getBoundingClientRect();
+        if (r.width < 20 || r.height < 20) return;
         try {
           fit.fit();
-          // Tell the server about the real dims so the PTY isn't 80x24.
           client.resizeTerminal(termId, term.cols, term.rows);
         } catch { /* ignore */ }
       };
+      const sizeRo = new ResizeObserver(() => doFit());
+      sizeRo.observe(containerRef.current);
+      (term as any).__sizeRo = sizeRo;
+      // Best-effort initial fit on next frames in case ResizeObserver doesn't
+      // fire (already-sized container).
       requestAnimationFrame(() => { doFit(); requestAnimationFrame(doFit); });
       term.focus();
 
@@ -103,6 +111,7 @@ export default function Terminal({ client, termId, cwd: _cwd, onBack, onExit }: 
       dispOnData?.dispose();
       cleanupOnMsg?.();
       try { client.detachTerminal(termId); } catch { /* ignore */ }
+      try { ((termRef.current as any)?.__sizeRo as ResizeObserver | undefined)?.disconnect(); } catch { /* ignore */ }
       try { termRef.current?.dispose(); } catch { /* ignore */ }
       termRef.current = null;
       fitRef.current = null;
