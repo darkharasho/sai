@@ -3,7 +3,6 @@ import type { WireClient } from '../wire';
 import Transcript, { type TranscriptMessage } from './Transcript';
 import Composer from './Composer';
 import Approval from './Approval';
-import SessionDrawer from './SessionDrawer';
 import SaiLogo from '../branding/SaiLogo';
 import WorkspaceHeader from './WorkspaceHeader';
 import { getOverrides, setOverrides as persistOverrides, clearOverrides, type SessionOverrides } from '../lib/overrides';
@@ -11,17 +10,18 @@ import { getOverrides, setOverrides as persistOverrides, clearOverrides, type Se
 interface Props {
   client: WireClient;
   initialActive?: { projectPath: string; scope: string; sessionId: string };
+  follow: boolean;
+  onFollowChange: (v: boolean) => void;
+  onOpenNav: () => void;
 }
 
 interface PendingApproval { toolUseId: string; toolName: string; command?: string; input?: Record<string, unknown> }
 
-export default function Chat({ client, initialActive }: Props) {
+export default function Chat({ client, initialActive, follow, onFollowChange, onOpenNav }: Props) {
   const [active, setActive] = useState<{ projectPath: string; scope: string; sessionId: string } | null>(initialActive ?? null);
-  const [follow, setFollow] = useState(true);
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [overrides, setOverridesState] = useState<SessionOverrides>({});
 
   // Load overrides for the new session whenever attached session changes.
@@ -264,7 +264,7 @@ export default function Chat({ client, initialActive }: Props) {
         }}
       >
         <button
-          onClick={() => setDrawerOpen(true)}
+          onClick={onOpenNav}
           aria-label="Open sessions"
           style={{
             flexShrink: 0,
@@ -314,15 +314,6 @@ export default function Chat({ client, initialActive }: Props) {
           onOverridesChange={updateOverrides}
         />
       </div>
-      <SessionDrawer
-        client={client}
-        followEnabled={follow}
-        onFollowChange={setFollow}
-        onAttach={(projectPath, sessionId) => setActive({ projectPath, scope: 'chat', sessionId })}
-        currentProjectPath={active?.projectPath ?? null}
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-      />
     </div>
   );
 }

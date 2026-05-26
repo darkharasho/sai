@@ -41,6 +41,18 @@ export interface SessionActivePayload {
   sessionId: string;
 }
 
+export interface FileEntry { name: string; kind: 'file' | 'dir'; size?: number }
+export interface FileReadResult {
+  content?: string;
+  signedUrl?: string;
+  encoding: 'text' | 'binary';
+  size: number;
+  lang?: string;
+  mime?: string;
+}
+export interface FileStatusEntry { path: string; status: string; staged: boolean }
+export interface FileDiffResult { diff: string; lang?: string }
+
 export interface BridgeServerOpts {
   tailnetIp: string | null;
   pairing: PairingStore;
@@ -62,6 +74,11 @@ export interface BridgeServerOpts {
   getActiveSessionFromRenderer?: () => Promise<SessionActivePayload | null>;
   listWorkspaces?: () => Promise<import('./renderer-proxy').RemoteWorkspace[]>;
   setActiveWorkspace?: (projectPath: string) => Promise<void>;
+  listFiles?: (cwd: string, path: string) => Promise<FileEntry[]>;
+  readFile?: (cwd: string, path: string) => Promise<FileReadResult>;
+  statusFiles?: (cwd: string) => Promise<FileStatusEntry[]>;
+  diffFile?: (cwd: string, path: string, staged: boolean) => Promise<FileDiffResult>;
+  loadBlob?: (id: string) => Promise<{ buffer: Buffer; mime: string } | null>;
 }
 
 interface PairingCode { code: string; expiresAt: number }
@@ -191,6 +208,7 @@ export class BridgeServer {
         return;
       }
       if (req.method === 'POST' && req.url === '/pair') return await this.handlePair(req, res);
+      if (req.method === 'GET' && req.url?.startsWith('/blob/')) return await this.handleBlob(req, res);
       if (req.method === 'GET' && req.url?.startsWith('/screenshot/')) return await this.handleScreenshot(req, res);
       if (req.method === 'GET' && this.opts.pwaDir) return await this.handleStatic(req, res);
       res.statusCode = 404; res.end('not found');
@@ -220,6 +238,21 @@ export class BridgeServer {
     res.statusCode = 200;
     res.setHeader('content-type', 'image/png');
     res.end(buf);
+  }
+
+  private async handleBlob(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const result = this.signer.verify(req.url!);
+    if (!result.ok || !result.id) { res.statusCode = 401; res.end('bad url'); return; }
+    const blob = await this.opts.loadBlob?.(result.id);
+    if (!blob) { res.statusCode = 404; res.end('not found'); return; }
+    res.statusCode = 200;
+    res.setHeader('content-type', blob.mime);
+    res.setHeader('content-length', blob.buffer.length.toString());
+    res.end(blob.buffer);
+  }
+
+  signBlobUrl(id: string): string {
+    return this.signer.sign(id).replace('/screenshot/', '/blob/');
   }
 
   private static readonly MIME: Record<string, string> = {
@@ -348,6 +381,58 @@ export class BridgeServer {
         try { await this.opts.setActiveWorkspace?.(msg.projectPath); }
         catch (err) {
           ws.send(JSON.stringify({ v: 1, type: 'error', code: 'switch_failed', message: (err as Error).message }));
+        }
+        return;
+      }
+
+      if (msg.type === 'files.list' && typeof msg.cwd === 'string' && typeof msg.path === 'string') {
+        const reqId = msg.reqId;
+        try {
+          const entries = (await this.opts.listFiles?.(msg.cwd, msg.path)) ?? [];
+          ws.send(JSON.stringify({ v: 1, type: 'files.list.result', reqId, entries }));
+        } catch (err) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'list_failed', message: (err as Error).message }));
+        }
+        return;
+      }
+
+      if (msg.type === 'files.read' && typeof msg.cwd === 'string' && typeof msg.path === 'string') {
+        const reqId = msg.reqId;
+        try {
+          const result = await this.opts.readFile?.(msg.cwd, msg.path);
+          if (!result) {
+            ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'read_failed', message: 'no readFile callback' }));
+            return;
+          }
+          ws.send(JSON.stringify({ v: 1, type: 'files.read.result', reqId, ...result }));
+        } catch (err) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'read_failed', message: (err as Error).message }));
+        }
+        return;
+      }
+
+      if (msg.type === 'files.status' && typeof msg.cwd === 'string') {
+        const reqId = msg.reqId;
+        try {
+          const entries = (await this.opts.statusFiles?.(msg.cwd)) ?? [];
+          ws.send(JSON.stringify({ v: 1, type: 'files.status.result', reqId, entries }));
+        } catch (err) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'status_failed', message: (err as Error).message }));
+        }
+        return;
+      }
+
+      if (msg.type === 'files.diff' && typeof msg.cwd === 'string' && typeof msg.path === 'string') {
+        const reqId = msg.reqId;
+        try {
+          const result = await this.opts.diffFile?.(msg.cwd, msg.path, !!msg.staged);
+          if (!result) {
+            ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'diff_failed', message: 'no diffFile callback' }));
+            return;
+          }
+          ws.send(JSON.stringify({ v: 1, type: 'files.diff.result', reqId, diff: result.diff, lang: result.lang }));
+        } catch (err) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', reqId, code: 'diff_failed', message: (err as Error).message }));
         }
         return;
       }

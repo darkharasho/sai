@@ -2,7 +2,64 @@ import { useEffect, useState } from 'react';
 import { BEARER_KEY, connect, extractPairCode, pair, type WireClient } from './wire';
 import Status from './Status';
 import Chat from './chat/Chat';
+import NavDrawer from './chat/NavDrawer';
 import SaiLogo from './branding/SaiLogo';
+
+function ConnectedShell({ client }: { client: WireClient }) {
+  const [workspacePath, setWorkspacePath] = useState<string>('');
+  const [metaMembers, setMetaMembers] = useState<{ projectPath: string; name: string }[] | undefined>(undefined);
+  const [navOpen, setNavOpen] = useState(false);
+  const [follow, setFollow] = useState(true);
+
+  useEffect(() => {
+    return client.on((msg) => {
+      const t = (msg as any).type;
+      if (t === 'session.active') {
+        const p = (msg as any).projectPath ?? '';
+        setWorkspacePath(p);
+      }
+    });
+  }, [client]);
+
+  useEffect(() => {
+    if (!workspacePath) { setMetaMembers(undefined); return; }
+    client.listWorkspaces()
+      .then((ws) => {
+        const me = (ws as any[]).find((w) => w.projectPath === workspacePath);
+        if (me && me.kind === 'meta' && Array.isArray(me.members)) setMetaMembers(me.members);
+        else setMetaMembers(undefined);
+      })
+      .catch(() => setMetaMembers(undefined));
+  }, [client, workspacePath]);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        <Chat
+          client={client}
+          follow={follow}
+          onFollowChange={setFollow}
+          onOpenNav={() => setNavOpen(true)}
+        />
+      </div>
+      <NavDrawer
+        open={navOpen}
+        onClose={() => setNavOpen(false)}
+        client={client}
+        workspacePath={workspacePath}
+        metaMembers={metaMembers}
+        currentSessionProjectPath={workspacePath || null}
+        followEnabled={follow}
+        onFollowChange={setFollow}
+        onAttach={(projectPath, sessionId) => {
+          // Mirror Chat's optimistic attach when follow is off; in follow mode the
+          // server's session.active push will drive Chat's re-attach.
+          client.attach({ projectPath, scope: 'chat', sessionId });
+        }}
+      />
+    </div>
+  );
+}
 
 export default function App() {
   const [phase, setPhase] = useState<'init' | 'pairing' | 'connected' | 'needs-pair' | 'error'>('init');
@@ -46,7 +103,7 @@ export default function App() {
     if (wsState !== 'open') {
       return <Status deviceLabel="" serverUrl={location.origin} wsState={wsState} onDisconnect={disconnect} />;
     }
-    return <Chat client={client} />;
+    return <ConnectedShell client={client} />;
   }
 
   const mode = phase === 'init' || phase === 'pairing' ? 'scanner' : phase === 'error' ? 'static' : 'idle';
