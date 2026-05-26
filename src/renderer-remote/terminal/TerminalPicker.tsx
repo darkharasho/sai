@@ -2,13 +2,19 @@ import { useEffect, useState } from 'react';
 import { Plus, X } from 'lucide-react';
 import type { WireClient } from '../wire';
 
-interface Summary { termId: number; cwd: string; cols: number; rows: number; alive: boolean }
+interface Summary {
+  termId: number;
+  cwd: string;
+  cols: number;
+  rows: number;
+  alive: boolean;
+  origin: 'phone' | 'desktop';
+}
 
 interface Props {
   client: WireClient;
   cwd: string;
-  /** Called after the user picks (existing) or creates (new) a terminal. */
-  onPick: (termId: number) => void;
+  onPick: (termId: number, origin: 'phone' | 'desktop') => void;
   onClose: () => void;
 }
 
@@ -32,15 +38,50 @@ export default function TerminalPicker({ client, cwd, onPick, onClose }: Props) 
     setCreating(true);
     setErr(null);
     try {
-      // Reasonable default; Terminal.tsx will resize after mount via fit().
       const r = await client.openTerminal(cwd, 80, 24);
-      onPick(r.termId);
+      onPick(r.termId, 'phone');
     } catch (e) {
       setErr((e as Error).message);
     } finally {
       setCreating(false);
     }
   };
+
+  const phoneTerms = terms.filter((t) => t.origin === 'phone');
+  const desktopTerms = terms.filter((t) => t.origin === 'desktop');
+
+  const renderRow = (t: Summary) => (
+    <button key={t.termId} onClick={() => onPick(t.termId, t.origin)} style={{
+      display: 'flex', alignItems: 'center', gap: 8,
+      width: '100%', textAlign: 'left',
+      padding: '10px 14px', background: 'transparent',
+      color: 'var(--text)', border: 'none',
+      borderBottom: '1px solid var(--border)',
+      fontFamily: '"Geist Mono", ui-monospace, monospace',
+      fontSize: 13, cursor: 'pointer',
+    }}>
+      <span style={{ color: 'var(--accent)' }}>#{t.termId}</span>
+      <span style={{ flex: 1, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.cwd}</span>
+      <span style={{
+        fontSize: 10, padding: '2px 6px', borderRadius: 999,
+        border: t.origin === 'desktop' ? '1px solid var(--border)' : 'none',
+        background: t.origin === 'phone' ? 'var(--accent)' : 'transparent',
+        color: t.origin === 'phone' ? '#000' : 'var(--text-muted)',
+      }}>{t.origin}</span>
+      <span style={{ color: 'var(--text-muted)' }}>{t.cols}×{t.rows}</span>
+    </button>
+  );
+
+  const sectionHeader = (label: string) => (
+    <div style={{
+      padding: '8px 14px 4px',
+      fontSize: 11,
+      color: 'var(--text-muted)',
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+      background: 'var(--bg-secondary)',
+    }}>{label}</div>
+  );
 
   return (
     <div style={{
@@ -89,21 +130,10 @@ export default function TerminalPicker({ client, cwd, onPick, onClose }: Props) 
               No terminals yet.
             </div>
           )}
-          {terms.map((t) => (
-            <button key={t.termId} onClick={() => onPick(t.termId)} style={{
-              display: 'flex', alignItems: 'center', gap: 8,
-              width: '100%', textAlign: 'left',
-              padding: '10px 14px', background: 'transparent',
-              color: 'var(--text)', border: 'none',
-              borderBottom: '1px solid var(--border)',
-              fontFamily: '"Geist Mono", ui-monospace, monospace',
-              fontSize: 13, cursor: 'pointer',
-            }}>
-              <span style={{ color: 'var(--accent)' }}>#{t.termId}</span>
-              <span style={{ flex: 1, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.cwd}</span>
-              <span style={{ color: 'var(--text-muted)' }}>{t.cols}×{t.rows}</span>
-            </button>
-          ))}
+          {phoneTerms.length > 0 && sectionHeader('Phone terminals')}
+          {phoneTerms.map(renderRow)}
+          {desktopTerms.length > 0 && sectionHeader('Desktop terminals')}
+          {desktopTerms.map(renderRow)}
         </div>
       </div>
     </div>
