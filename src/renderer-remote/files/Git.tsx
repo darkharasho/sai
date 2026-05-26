@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { WireClient } from '../wire';
-import BrowseView from './BrowseView';
+import ChangesView from './ChangesView';
 import RepoPicker from './RepoPicker';
 
 interface Props {
@@ -9,7 +9,7 @@ interface Props {
   metaMembers?: { projectPath: string; name: string }[];
 }
 
-export default function Files({ client, workspacePath, metaMembers }: Props) {
+export default function Git({ client, workspacePath, metaMembers }: Props) {
   const [cwd, setCwd] = useState<string>(metaMembers && metaMembers.length > 0 ? metaMembers[0].projectPath : workspacePath);
 
   useEffect(() => {
@@ -26,13 +26,13 @@ export default function Files({ client, workspacePath, metaMembers }: Props) {
         fontWeight: 600,
         color: 'var(--text)',
       }}>
-        Files
+        Changes
       </div>
       {metaMembers && metaMembers.length > 0 && (
         <RepoPicker members={metaMembers} current={cwd} onPick={setCwd} />
       )}
       <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        <BrowseView client={client} cwd={cwd} />
+        <ChangesView client={client} cwd={cwd} />
       </div>
     </div>
   );

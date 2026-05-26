@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { FolderClosed, Clock, X } from 'lucide-react';
+import { FolderClosed, GitBranch, Clock, X } from 'lucide-react';
 import SaiLogo from '../branding/SaiLogo';
 import type { WireClient } from '../wire';
 import Files from '../files/Files';
+import Git from '../files/Git';
 
 interface SessionMeta {
   id: string;
@@ -12,7 +13,7 @@ interface SessionMeta {
   kind?: string;
 }
 
-type NavItem = 'files' | 'chats';
+type NavItem = 'files' | 'git' | 'chats';
 
 interface Props {
   open: boolean;
@@ -37,6 +38,7 @@ const SLIVER_WIDTH = 32;
 interface NavItemMeta { id: NavItem; icon: typeof FolderClosed; label: string }
 const NAV_ITEMS: NavItemMeta[] = [
   { id: 'files', icon: FolderClosed, label: 'Files' },
+  { id: 'git',   icon: GitBranch,    label: 'Changes' },
   { id: 'chats', icon: Clock,        label: 'Chats' },
 ];
 
@@ -155,6 +157,13 @@ export default function NavDrawer({
       >
         {active === 'files' && (
           <Files
+            client={client}
+            workspacePath={workspacePath}
+            metaMembers={metaMembers}
+          />
+        )}
+        {active === 'git' && (
+          <Git
             client={client}
             workspacePath={workspacePath}
             metaMembers={metaMembers}
