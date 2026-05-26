@@ -16,6 +16,29 @@ export default function FileEditor(props: Props) {
   const { path, initialContent } = props;
   const [content, setContent] = useState(initialContent);
   const dirty = useMemo(() => content !== initialContent, [content, initialContent]);
+  const [mtime, setMtime] = useState(props.initialMtime);
+  const [sha, setSha] = useState(props.initialSha);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function doSave(force = false) {
+    setSaving(true); setError(null);
+    try {
+      const result = await props.client.writeFile(
+        props.cwd, props.path, content,
+        force ? null : mtime,
+        force ? null : sha,
+      );
+      setMtime(result.mtime);
+      setSha(result.sha);
+      setSaving(false);
+      props.onSave(result);
+    } catch (err: any) {
+      setSaving(false);
+      // Stale handling lands in Task 10; for now surface a generic error.
+      setError(String(err?.message ?? err));
+    }
+  }
 
   // iOS PWA: track visualViewport so the editor shrinks above the keyboard.
   const [viewportH, setViewportH] = useState<number | null>(() =>
@@ -56,8 +79,8 @@ export default function FileEditor(props: Props) {
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>{path}</div>
         <button
-          disabled={!dirty}
-          onClick={() => { /* wired in Task 9 */ }}
+          disabled={!dirty || saving}
+          onClick={() => { void doSave(false); }}
           style={{
             padding: '6px 12px',
             background: dirty ? 'var(--accent)' : 'var(--bg-elevated)',
@@ -65,7 +88,7 @@ export default function FileEditor(props: Props) {
             border: '1px solid var(--border)', borderRadius: 6, cursor: dirty ? 'pointer' : 'not-allowed',
             fontSize: 14,
           }}
-        >Save</button>
+        >{saving ? 'Saving…' : 'Save'}</button>
       </div>
 
       <textarea
@@ -93,6 +116,13 @@ export default function FileEditor(props: Props) {
           whiteSpace: 'pre',
         }}
       />
+      {error && (
+        <div style={{
+          padding: '8px 12px',
+          background: 'var(--bg-elevated)', color: 'var(--red, #f88)',
+          borderTop: '1px solid var(--border)', fontSize: 12,
+        }}>{error}</div>
+      )}
     </div>
   );
 }
