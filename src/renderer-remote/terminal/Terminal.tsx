@@ -197,8 +197,6 @@ export default function Terminal({ client, termId, cwd: _cwd, onBack, onExit }: 
       minHeight: 0,
       background: '#000',
       overflow: 'hidden',
-      overscrollBehavior: 'contain',
-      touchAction: 'none',
     }}>
       <div
         ref={containerRef}
