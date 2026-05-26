@@ -6,6 +6,9 @@ import {
   resizeTerminalImpl,
   signalTerminalImpl,
   killTerminalImpl,
+  snapshotTerminal,
+  subscribeTerminal,
+  listDesktopTerminals,
 } from '../pty';
 
 export interface PhoneTerminalSummary {
@@ -14,6 +17,7 @@ export interface PhoneTerminalSummary {
   cols: number;
   rows: number;
   alive: boolean;
+  origin: 'phone' | 'desktop';
 }
 
 export interface PhoneTerminal {
@@ -34,8 +38,36 @@ const MIN_ROWS = 5;
 function clampCols(c: number): number { return Math.max(MIN_COLS, c | 0); }
 function clampRows(r: number): number { return Math.max(MIN_ROWS, r | 0); }
 
+/**
+ * Restricted byte allow-list for input on desktop-owned terminals. Returns the
+ * filtered string (possibly empty). Phone-owned terms bypass this filter.
+ * Allowed: ESC, TAB, CR, LF, Ctrl-A..Z (\x01-\x1A), arrow sequences
+ * (\x1b[A/B/C/D). Everything else is dropped.
+ */
+function filterDesktopInput(data: string): string {
+  if (data === '') return '';
+  // Whole-string fast paths for the common control sequences the toolbar emits.
+  if (data === '\x1b[A' || data === '\x1b[B' || data === '\x1b[C' || data === '\x1b[D') return data;
+  let out = '';
+  for (let i = 0; i < data.length; i++) {
+    const ch = data.charCodeAt(i);
+    // \x01..\x1a covers Ctrl-A..Ctrl-Z (and includes \t=\x09, \n=\x0a, \r=\x0d).
+    // \x1b is ESC; toolbar may send it on its own.
+    if ((ch >= 0x01 && ch <= 0x1a) || ch === 0x1b) {
+      out += data[i];
+    }
+    // else drop silently
+  }
+  return out;
+}
+
+function isDesktopTermId(termId: number): boolean {
+  return listDesktopTerminals().some((t) => t.termId === termId);
+}
+
 export class PhoneTerminalRegistry {
   private readonly terms = new Map<number, PhoneTerminal>();
+  private readonly desktopUnsubs = new Map<WebSocket, Map<number, () => void>>();
   private gcTimer: NodeJS.Timeout | null = null;
 
   open(cwd: string, cols: number, rows: number): PhoneTerminal {
@@ -82,62 +114,120 @@ export class PhoneTerminalRegistry {
   }
 
   list(cwd?: string): PhoneTerminalSummary[] {
-    const out: PhoneTerminalSummary[] = [];
+    const phone: PhoneTerminalSummary[] = [];
     for (const t of this.terms.values()) {
       if (cwd && t.cwd !== cwd) continue;
-      out.push({ termId: t.termId, cwd: t.cwd, cols: t.cols, rows: t.rows, alive: t.alive });
+      phone.push({
+        termId: t.termId, cwd: t.cwd, cols: t.cols, rows: t.rows, alive: t.alive,
+        origin: 'phone',
+      });
     }
-    return out;
+    const desktop: PhoneTerminalSummary[] = listDesktopTerminals()
+      .filter((t) => !cwd || t.cwd === cwd)
+      .map((t) => ({ ...t, origin: 'desktop' as const }));
+    return [...phone, ...desktop];
   }
 
   input(termId: number, data: string): void {
     const t = this.terms.get(termId);
-    if (!t || !t.alive) return;
-    writeTerminalImpl(termId, data);
+    if (t && t.alive) {
+      writeTerminalImpl(termId, data);
+      return;
+    }
+    // Desktop-owned: re-validate at the bridge for safety even though the phone
+    // toolbar only emits allow-listed bytes.
+    const filtered = filterDesktopInput(data);
+    if (!filtered) return;
+    writeTerminalImpl(termId, filtered);
   }
 
   resize(termId: number, cols: number, rows: number): void {
     const t = this.terms.get(termId);
-    if (!t || !t.alive) return;
-    t.cols = clampCols(cols); t.rows = clampRows(rows);
-    resizeTerminalImpl(termId, t.cols, t.rows);
+    if (t && t.alive) {
+      t.cols = clampCols(cols); t.rows = clampRows(rows);
+      resizeTerminalImpl(termId, t.cols, t.rows);
+      return;
+    }
+    // Desktop-owned: silently ignore. Desktop dims stand.
   }
 
   signal(termId: number, sig: NodeJS.Signals): void {
     const t = this.terms.get(termId);
-    if (!t || !t.alive) return;
-    signalTerminalImpl(termId, sig);
+    if (t && t.alive) {
+      signalTerminalImpl(termId, sig);
+      return;
+    }
+    // Desktop-owned: only SIGINT is allowed (Ctrl+C synonym).
+    if (isDesktopTermId(termId) && sig === 'SIGINT') {
+      signalTerminalImpl(termId, sig);
+    }
   }
 
   kill(termId: number): void {
     const t = this.terms.get(termId);
-    if (!t) return;
-    killTerminalImpl(termId);
-    t.alive = false;
-    this.terms.delete(termId);
+    if (t) {
+      killTerminalImpl(termId);
+      t.alive = false;
+      this.terms.delete(termId);
+      return;
+    }
+    if (isDesktopTermId(termId)) {
+      throw new Error('Cannot kill desktop-owned terminal from phone');
+    }
+    // Unknown — no-op (preserves prior behavior for already-gone termIds).
+  }
+
+  private attachDesktop(termId: number, ws: WebSocket): { replay: string; cols: number; rows: number } | null {
+    const meta = listDesktopTerminals().find((t) => t.termId === termId);
+    if (!meta) return null;
+    // Clear any previous subscription this ws had on this termId.
+    const existing = this.desktopUnsubs.get(ws)?.get(termId);
+    if (existing) { try { existing(); } catch { /* ignore */ } }
+    const unsub = subscribeTerminal(termId, (data) => {
+      if (ws.readyState !== ws.OPEN) return;
+      try {
+        ws.send(JSON.stringify({ v: 1, type: 'terminal.output', termId, data }));
+      } catch { /* socket dying */ }
+    });
+    let perWs = this.desktopUnsubs.get(ws);
+    if (!perWs) { perWs = new Map(); this.desktopUnsubs.set(ws, perWs); }
+    perWs.set(termId, unsub);
+    return { replay: snapshotTerminal(termId), cols: meta.cols, rows: meta.rows };
   }
 
   attach(termId: number, ws: WebSocket, cols: number, rows: number):
     { replay: string; cols: number; rows: number } | null
   {
+    // Phone-owned first (existing behavior, including resize).
     const t = this.terms.get(termId);
-    if (!t || !t.alive) return null;
-    if (t.attachedClient && t.attachedClient !== ws) {
-      t.attachedClient = null;
+    if (t && t.alive) {
+      if (t.attachedClient && t.attachedClient !== ws) {
+        t.attachedClient = null;
+      }
+      t.cols = clampCols(cols); t.rows = clampRows(rows);
+      resizeTerminalImpl(termId, t.cols, t.rows);
+      t.attachedClient = ws;
+      t.lastAttachAt = Date.now();
+      return { replay: t.ring.snapshot(), cols: t.cols, rows: t.rows };
     }
-    t.cols = clampCols(cols); t.rows = clampRows(rows);
-    resizeTerminalImpl(termId, t.cols, t.rows);
-    t.attachedClient = ws;
-    t.lastAttachAt = Date.now();
-    return { replay: t.ring.snapshot(), cols: t.cols, rows: t.rows };
+    // Otherwise: try desktop. cols/rows are ignored — desktop dims stand.
+    return this.attachDesktop(termId, ws);
   }
 
   detach(termId: number, ws: WebSocket): void {
     const t = this.terms.get(termId);
-    if (!t) return;
-    if (t.attachedClient === ws) {
+    if (t && t.attachedClient === ws) {
       t.attachedClient = null;
       t.lastAttachAt = Date.now();
+      return;
+    }
+    // Desktop-owned: pop and call the stored unsub.
+    const perWs = this.desktopUnsubs.get(ws);
+    const unsub = perWs?.get(termId);
+    if (unsub) {
+      try { unsub(); } catch { /* ignore */ }
+      perWs!.delete(termId);
+      if (perWs!.size === 0) this.desktopUnsubs.delete(ws);
     }
   }
 
@@ -147,6 +237,13 @@ export class PhoneTerminalRegistry {
         t.attachedClient = null;
         t.lastAttachAt = Date.now();
       }
+    }
+    const perWs = this.desktopUnsubs.get(ws);
+    if (perWs) {
+      for (const unsub of perWs.values()) {
+        try { unsub(); } catch { /* ignore */ }
+      }
+      this.desktopUnsubs.delete(ws);
     }
   }
 
