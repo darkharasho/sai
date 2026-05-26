@@ -242,7 +242,20 @@ export function registerTerminalHandlers(win: BrowserWindow) {
       terminalOwner.set(id, cwd);
     }
 
-    term.onData((data) => { safeSend(win, 'terminal:data', id, data); });
+    term.onData((data) => {
+      // Desktop renderer (unchanged behavior)
+      safeSend(win, 'terminal:data', id, data);
+      // Phone-bridge fan-out: write to ring, broadcast to subscribers.
+      let ring = ringByTerm.get(id);
+      if (!ring) { ring = new RingBuffer(DESKTOP_RING_CAP_BYTES); ringByTerm.set(id, ring); }
+      ring.push(data);
+      const subs = subscribersByTerm.get(id);
+      if (subs && subs.size > 0) {
+        for (const cb of subs) {
+          try { cb(data); } catch { /* isolate one subscriber's failure */ }
+        }
+      }
+    });
     term.onExit(() => {
       allTerminals.delete(id);
       const owner = terminalOwner.get(id);
@@ -251,6 +264,8 @@ export function registerTerminalHandlers(win: BrowserWindow) {
         ownerWs?.terminals.delete(id);
         terminalOwner.delete(id);
       }
+      ringByTerm.delete(id);
+      subscribersByTerm.delete(id);
     });
     return id;
   });
@@ -402,6 +417,8 @@ export function registerTerminalHandlers(win: BrowserWindow) {
         ownerWs?.terminals.delete(id);
         terminalOwner.delete(id);
       }
+      ringByTerm.delete(id);
+      subscribersByTerm.delete(id);
     }
   });
 }
@@ -410,6 +427,8 @@ export function destroyAllTerminals() {
   for (const term of allTerminals.values()) { term.kill(); }
   allTerminals.clear();
   terminalOwner.clear();
+  ringByTerm.clear();
+  subscribersByTerm.clear();
 }
 
 /**
