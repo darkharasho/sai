@@ -49,6 +49,105 @@ const allTerminals = new Map<number, pty.IPty>();
 const terminalOwner = new Map<number, string>();
 let nextId = 1;
 
+/**
+ * Spawn a node-pty shell at `cwd` and return its IPty + the globally-unique id.
+ * Caller is responsible for wiring data/exit listeners. This impl is shared by
+ * the desktop IPC handler and the phone-remote terminal store; they maintain
+ * independent registries.
+ */
+export function createTerminalImpl(opts: {
+  cwd: string;
+  cols: number;
+  rows: number;
+  onData: (data: string) => void;
+  onExit: (code: number) => void;
+}): { termId: number; pty: pty.IPty } {
+  const id = nextId++;
+  const env = { ...process.env } as Record<string, string>;
+
+  let spawnCmd: string;
+  let spawnArgs: string[];
+  let ptyName: string;
+  let fallbackCwd: string;
+
+  if (process.platform === 'win32') {
+    const pwsh7Candidates = [
+      process.env.PWSH_PATH,
+      'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+      'C:\\Program Files (x86)\\PowerShell\\7\\pwsh.exe',
+    ].filter((p): p is string => typeof p === 'string' && p.length > 0);
+    const winPwsh = process.env.SystemRoot
+      ? `${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
+      : '';
+    let resolved: string | null = null;
+    for (const candidate of pwsh7Candidates) {
+      try { if (fs.existsSync(candidate)) { resolved = candidate; break; } } catch { /* ignore */ }
+    }
+    if (!resolved && winPwsh) {
+      try { if (fs.existsSync(winPwsh)) resolved = winPwsh; } catch { /* ignore */ }
+    }
+    spawnCmd = resolved || process.env.ComSpec || 'cmd.exe';
+    const isCmd = spawnCmd.toLowerCase().endsWith('cmd.exe');
+    spawnArgs = isCmd ? [] : ['-NoLogo'];
+    ptyName = 'xterm-256color';
+    fallbackCwd = process.env.USERPROFILE || process.env.HOMEDRIVE || 'C:\\';
+  } else {
+    const shell = process.env.SHELL || '/bin/bash';
+    delete env.GIO_LAUNCHED_DESKTOP_FILE;
+    delete env.GIO_LAUNCHED_DESKTOP_FILE_PID;
+    delete env.BAMF_DESKTOP_FILE_HINT;
+    delete env.XDG_ACTIVATION_TOKEN;
+    delete env.DESKTOP_STARTUP_ID;
+    delete env.CHROME_DESKTOP;
+    delete env.INVOCATION_ID;
+    const shellInit = `stty -echoctl 2>/dev/null; exec "${shell}" --login`;
+    const useScope = canUseSystemdScope();
+    spawnCmd = useScope ? 'systemd-run' : shell;
+    spawnArgs = useScope
+      ? ['--user', '--scope', '--quiet', '--', shell, '-c', shellInit]
+      : ['-c', shellInit];
+    ptyName = 'xterm-256color';
+    fallbackCwd = process.env.HOME || '/';
+  }
+
+  const term = pty.spawn(spawnCmd, spawnArgs, {
+    name: ptyName,
+    cwd: opts.cwd || fallbackCwd,
+    cols: opts.cols,
+    rows: opts.rows,
+    env,
+  });
+
+  allTerminals.set(id, term);
+  term.onData((data) => opts.onData(data));
+  term.onExit(({ exitCode }) => {
+    allTerminals.delete(id);
+    opts.onExit(exitCode);
+  });
+  return { termId: id, pty: term };
+}
+
+export function writeTerminalImpl(termId: number, data: string): void {
+  allTerminals.get(termId)?.write(data);
+}
+
+export function resizeTerminalImpl(termId: number, cols: number, rows: number): void {
+  allTerminals.get(termId)?.resize(cols, rows);
+}
+
+export function signalTerminalImpl(termId: number, signal: NodeJS.Signals): void {
+  const term = allTerminals.get(termId);
+  if (!term) return;
+  try { process.kill(-term.pid, signal); } catch { /* already exited */ }
+}
+
+export function killTerminalImpl(termId: number): void {
+  const term = allTerminals.get(termId);
+  if (!term) return;
+  try { term.kill(); } catch { /* already exited */ }
+  allTerminals.delete(termId);
+}
+
 export function registerTerminalHandlers(win: BrowserWindow) {
   ipcMain.handle('terminal:create', (_event, cwd: string, scope?: string) => {
     const id = nextId++;
