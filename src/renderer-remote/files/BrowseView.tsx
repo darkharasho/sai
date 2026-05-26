@@ -19,6 +19,8 @@ interface OpenFile {
   size: number;
   lang?: string;
   mime?: string;
+  mtime?: number;
+  sha?: string;
 }
 
 function Row({
@@ -160,6 +162,7 @@ export default function BrowseView({ client, cwd }: Props) {
               {open.path}
             </div>
             <FileViewer
+              client={client}
               cwd={cwd}
               path={open.path}
               content={open.content}
@@ -168,6 +171,9 @@ export default function BrowseView({ client, cwd }: Props) {
               size={open.size}
               lang={open.lang ?? langFromPath(open.path) ?? undefined}
               mime={open.mime}
+              mtime={open.mtime}
+              sha={open.sha}
+              onRefetch={() => pickFile(open.path)}
             />
           </>
         )}
