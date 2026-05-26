@@ -45,16 +45,27 @@ export default function Terminal({ client, termId, cwd: _cwd, onBack, onExit }: 
       term.loadAddon(fit);
       term.open(containerRef.current);
       try { term.loadAddon(new canvasMod.CanvasAddon()); } catch { /* fall back to DOM renderer */ }
-      // Disable iOS autocorrect on xterm's hidden textarea
       const ta = (term as any).textarea as HTMLTextAreaElement | undefined;
       if (ta) {
         ta.setAttribute('autocorrect', 'off');
         ta.setAttribute('autocapitalize', 'none');
         ta.setAttribute('spellcheck', 'false');
       }
-      fit.fit();
       termRef.current = term;
       fitRef.current = fit;
+
+      // The container's height is 0 on initial mount until the flex layout
+      // settles. Defer fit() until after layout so cols/rows are real.
+      const doFit = () => {
+        if (!termRef.current) return;
+        try {
+          fit.fit();
+          // Tell the server about the real dims so the PTY isn't 80x24.
+          client.resizeTerminal(termId, term.cols, term.rows);
+        } catch { /* ignore */ }
+      };
+      requestAnimationFrame(() => { doFit(); requestAnimationFrame(doFit); });
+      term.focus();
 
       // Wire input
       dispOnData = term.onData((data: string) => {
@@ -159,11 +170,14 @@ export default function Terminal({ client, termId, cwd: _cwd, onBack, onExit }: 
       display: 'flex',
       flexDirection: 'column',
       height: '100%',
+      minHeight: 0,
       background: '#000',
-      paddingTop: 'env(safe-area-inset-top)',
-      paddingBottom: 'env(safe-area-inset-bottom)',
     }}>
-      <div ref={containerRef} style={{ flex: 1, minHeight: 0, padding: 4 }} />
+      <div
+        ref={containerRef}
+        onClick={() => { try { termRef.current?.focus(); } catch { /* ignore */ } }}
+        style={{ flex: 1, minHeight: 0, padding: 4, overflow: 'hidden' }}
+      />
       {exited !== null ? (
         <div style={{ padding: 12, display: 'flex', gap: 8, background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)' }}>
           <button
