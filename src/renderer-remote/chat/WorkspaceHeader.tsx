@@ -29,25 +29,33 @@ interface Props {
   statusStore: WorkspaceStatusStore;
 }
 
-function StatusDot({ status, store }: { status: WorkspaceStatus | undefined; store: WorkspaceStatusStore }) {
-  const p = store.priority(status);
-  if (p === 'idle') return null;
-  const color =
-    p === 'approval'  ? 'var(--orange)' :
-    p === 'streaming' ? 'var(--accent)' :
-    p === 'busy'      ? 'var(--blue)'   :
-                        'var(--green)';
-  const title =
-    p === 'approval'  ? 'pending approval' :
-    p === 'streaming' ? 'streaming'        :
-    p === 'busy'      ? 'working'          :
-                        'completed';
-  return (
-    <span
-      title={title}
-      style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }}
-    />
-  );
+interface StatusDotProps {
+  status: WorkspaceStatus | undefined;
+  /** When true, render a green squircle even if priority is 'idle' (used for current/active workspace rows). */
+  activeIdle?: boolean;
+  /** When true, render a gold squircle in idle state (used for suspended rows). */
+  suspendedIdle?: boolean;
+}
+
+function StatusDot({ status, activeIdle, suspendedIdle }: StatusDotProps) {
+  const p = displayPriority(status);
+
+  if (p === 'approval') {
+    return <span className="ws-dot ws-dot-approval" title="approval needed" />;
+  }
+  if (p === 'busy') {
+    return <span className="ws-dot ws-dot-busy" title="working" />;
+  }
+  if (p === 'completed') {
+    return <span className="ws-dot ws-dot-completed" title="completed" />;
+  }
+  if (activeIdle) {
+    return <span className="ws-dot ws-dot-active" title="active" />;
+  }
+  if (suspendedIdle) {
+    return <span className="ws-dot ws-dot-suspended" title="suspended" />;
+  }
+  return null;
 }
 
 export default function WorkspaceHeader({ client, currentProjectPath, onPick, statusStore }: Props) {
@@ -144,7 +152,10 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
             </div>
           )}
         </div>
-        <StatusDot status={current ? statusStore.get(current.projectPath) : undefined} store={statusStore} />
+        <StatusDot
+          status={current ? statusStore.get(current.projectPath) : undefined}
+          activeIdle={!!current}
+        />
         <ChevronDown
           size={14}
           color="var(--text-muted)"
@@ -277,7 +288,11 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
                       </div>
                     )}
                   </div>
-                  <StatusDot status={statusStore.get(w.projectPath)} store={statusStore} />
+                  <StatusDot
+                    status={statusStore.get(w.projectPath)}
+                    activeIdle={isActive}
+                    suspendedIdle={w.state === 'suspended'}
+                  />
                 </button>
               );
             };
@@ -293,6 +308,55 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
           })()}
         </div>
       )}
+      <style>{`
+  .ws-dot {
+    display: inline-block;
+    flex-shrink: 0;
+    width: 9px;
+    height: 9px;
+  }
+  .ws-dot-active {
+    background: #4ade80;
+    -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+    mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+  }
+  .ws-dot-busy {
+    background: var(--accent);
+    -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+    mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+    animation: ws-spinner-pulse 2.2s ease-in-out infinite;
+  }
+  .ws-dot-completed {
+    background: #4ade80;
+    -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+    mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+    animation: ws-done-pulse 2s ease-in-out infinite;
+  }
+  .ws-dot-suspended {
+    background: #d4a72c;
+    -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+    mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+  }
+  .ws-dot-approval {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #f59e0b;
+    animation: ws-approval-blink 1s ease-in-out infinite;
+  }
+  @keyframes ws-spinner-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.35; transform: scale(0.75); }
+  }
+  @keyframes ws-done-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.4; }
+  }
+  @keyframes ws-approval-blink {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.2; }
+  }
+`}</style>
     </div>
   );
 }
