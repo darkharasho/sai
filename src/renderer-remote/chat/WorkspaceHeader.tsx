@@ -2,6 +2,17 @@ import { useEffect, useRef, useState } from 'react';
 import { Folder, Layers, ChevronDown } from 'lucide-react';
 import type { WireClient } from '../wire';
 import type { WorkspaceStatus, WorkspaceStatusStore } from '../lib/workspaceStatusStore';
+import { DOT_MASK_URL } from '../../lib/assets';
+
+type DisplayPriority = 'idle' | 'busy' | 'completed' | 'approval';
+
+function displayPriority(status: WorkspaceStatus | undefined): DisplayPriority {
+  if (!status) return 'idle';
+  if (status.approval) return 'approval';
+  if (status.busy || status.streaming || status.awaitingQuestion) return 'busy';
+  if (status.completed) return 'completed';
+  return 'idle';
+}
 
 interface WorkspaceMeta {
   projectPath: string;
