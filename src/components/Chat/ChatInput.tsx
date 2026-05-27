@@ -703,6 +703,16 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
         setValue(history[next]);
         setTickerDir('up');
         setTimeout(() => setTickerDir(null), 200);
+        // Linux/Electron: textarea's prior cursor index can survive the
+        // controlled re-render and leave the viewport scrolled to a position
+        // where the recalled content looks blank. Snap cursor to end and
+        // reset scrollTop so the new value is visible from the top.
+        requestAnimationFrame(() => {
+          const t = textareaRef.current;
+          if (!t) return;
+          t.setSelectionRange(t.value.length, t.value.length);
+          t.scrollTop = 0;
+        });
         return;
       }
     }
@@ -721,6 +731,13 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
         }
         setTickerDir('down');
         setTimeout(() => setTickerDir(null), 200);
+        // See ArrowUp branch above — keep the recalled value visible.
+        requestAnimationFrame(() => {
+          const t = textareaRef.current;
+          if (!t) return;
+          t.setSelectionRange(t.value.length, t.value.length);
+          t.scrollTop = 0;
+        });
         return;
       }
     }
