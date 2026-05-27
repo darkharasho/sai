@@ -65,6 +65,8 @@ export interface BridgeServerOpts {
   loadScreenshot: (id: string) => Promise<Buffer | null>;
   /** Preferred TCP port. Defaults to ephemeral inside the class; the production caller pins 17829. */
   port?: number;
+  /** Fallback ports tried in order when `port` is held. If all are held, falls back to ephemeral. */
+  fallbackPorts?: number[];
   sendPrompt?: (args: PromptArgs) => void;
   resolveApproval?: (args: ApprovalArgs) => Promise<void | unknown>;
   answerQuestion?: (args: { toolUseId: string; answers: Record<string, string | string[]>; projectPath: string; scope: string }) => Promise<unknown> | unknown;
@@ -131,6 +133,7 @@ export class BridgeServer {
       throw new Error('tailnet IP not available; refusing to bind to 0.0.0.0 or 127.0.0.1');
     }
     const desired = this.opts.port ?? BridgeServer.DEFAULT_PORT;
+    const fallbacks = this.opts.fallbackPorts ?? [];
     // Build a fresh http.Server per attempt — reusing the same instance
     // across listen() calls leaks internal listeners.
     const tryListen = (p: number): Promise<http.Server> => new Promise((resolve, reject) => {
@@ -140,8 +143,10 @@ export class BridgeServer {
       s.listen(p, this.opts.tailnetIp!, () => { s.removeListener('error', onErr); resolve(s); });
     });
     // Pin the stable port; retry on EADDRINUSE to ride out hot-restart
-    // races where the previous socket is still releasing. Fall back to
-    // ephemeral only if the port stays held by something else.
+    // races where the previous socket is still releasing. If it stays held
+    // (a second SAI instance is running), try the configured fallback
+    // ports in order — that keeps the URL stable across restarts so the
+    // phone bearer doesn't need a re-pair. Only as a last resort go ephemeral.
     let server: http.Server | null = null;
     if (desired !== 0) {
       for (let i = 0; i < 10; i++) {
@@ -156,7 +161,19 @@ export class BridgeServer {
       }
     }
     if (!server) {
-      console.warn(`[remote] port ${desired} held by another process; falling back to ephemeral`);
+      for (const fb of fallbacks) {
+        try {
+          server = await tryListen(fb);
+          console.warn(`[remote] port ${desired} held; using fallback port ${fb}`);
+          break;
+        } catch (err) {
+          const e = err as NodeJS.ErrnoException;
+          if (e.code !== 'EADDRINUSE') throw err;
+        }
+      }
+    }
+    if (!server) {
+      console.warn(`[remote] port ${desired}${fallbacks.length ? ` and fallbacks [${fallbacks.join(', ')}]` : ''} held by another process; falling back to ephemeral`);
       server = await tryListen(0);
     }
     this.server = server;

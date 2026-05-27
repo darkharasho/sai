@@ -159,6 +159,7 @@ async function getOrInitRemote(): Promise<RemoteModule> {
         screenshotSecret,
         loadScreenshot: async () => null, // Phase 3+ wires this
         port: REMOTE_PORT,
+        fallbackPorts: [17831, 17832],
         sendPrompt: (args) => sendImpl(
           args.projectPath, args.text, undefined,
           args.permMode, args.effort, args.model,
