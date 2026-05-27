@@ -53,6 +53,8 @@ export interface WireClient {
   listSessions(projectPath: string): Promise<unknown[]>;
   listWorkspaces(): Promise<unknown[]>;
   setActiveWorkspace(projectPath: string): void;
+  subscribeWorkspaceStatus(): void;
+  unsubscribeWorkspaceStatus(): void;
   sendPrompt(args: ChatPromptArgs): void;
   approve(args: ChatApprovalArgs): void;
   interrupt(projectPath: string, scope?: string): void;
@@ -207,6 +209,8 @@ export function connect(token: string): WireClient {
       sendFrame({ type: 'workspaces.list', reqId });
     }),
     setActiveWorkspace: (projectPath) => sendFrame({ type: 'workspace.set', projectPath }),
+    subscribeWorkspaceStatus: () => sendFrame({ type: 'workspace.status.subscribe' }),
+    unsubscribeWorkspaceStatus: () => sendFrame({ type: 'workspace.status.unsubscribe' }),
     sendPrompt: (a) => sendFrame({ type: 'prompt', text: a.text, projectPath: a.projectPath, scope: a.scope ?? 'chat', model: a.model, effort: a.effort, permMode: a.permMode }),
     approve: (a) => sendFrame({ type: 'approval', toolUseId: a.toolUseId, decision: a.decision, modifiedCommand: a.modifiedCommand, projectPath: a.projectPath, scope: a.scope ?? 'chat' }),
     interrupt: (projectPath, scope) => sendFrame({ type: 'interrupt', projectPath, scope: scope ?? 'chat' }),
