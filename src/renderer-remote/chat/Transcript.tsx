@@ -72,10 +72,26 @@ interface Props {
 
 export default function Transcript({ messages, streaming = false, onAnswerQuestion }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const last = messages[messages.length - 1];
+  // If the latest message is a running tool card (typically AskUserQuestion),
+  // pin the TOP of that card in view instead of the bottom — otherwise a tall
+  // multi-question card scrolls past the first question.
+  const pinTopOfLast = last?.role === 'tool' && (last.toolStatus ?? 'running') === 'running';
   useEffect(() => {
-    if (!ref.current) return;
-    ref.current.scrollTop = ref.current.scrollHeight;
-  }, [messages.length, messages[messages.length - 1]?.text?.length, streaming]);
+    const container = ref.current;
+    if (!container) return;
+    if (pinTopOfLast && last) {
+      const el = container.querySelector(`[data-msg-id="${CSS.escape(last.id)}"]`) as HTMLElement | null;
+      if (el) {
+        // Place the card's top just under the transcript's top padding.
+        const containerTop = container.getBoundingClientRect().top;
+        const elTop = el.getBoundingClientRect().top;
+        container.scrollTop += (elTop - containerTop) - 16;
+        return;
+      }
+    }
+    container.scrollTop = container.scrollHeight;
+  }, [messages.length, last?.text?.length, streaming, pinTopOfLast, last?.id]);
 
   return (
     <div
@@ -94,15 +110,16 @@ export default function Transcript({ messages, streaming = false, onAnswerQuesti
       {messages.map((m) => {
         if (m.role === 'tool') {
           return (
-            <ToolCard
-              key={m.id}
-              name={m.toolName ?? 'tool'}
-              input={m.toolInput}
-              result={m.toolResult}
-              status={m.toolStatus ?? 'running'}
-              toolUseId={m.toolUseId}
-              onAnswerQuestion={onAnswerQuestion}
-            />
+            <div key={m.id} data-msg-id={m.id} style={{ width: '100%', minWidth: 0 }}>
+              <ToolCard
+                name={m.toolName ?? 'tool'}
+                input={m.toolInput}
+                result={m.toolResult}
+                status={m.toolStatus ?? 'running'}
+                toolUseId={m.toolUseId}
+                onAnswerQuestion={onAnswerQuestion}
+              />
+            </div>
           );
         }
 
