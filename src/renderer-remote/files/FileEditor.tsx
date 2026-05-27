@@ -4,6 +4,7 @@ import { isWriteStaleError } from '../wire';
 import { highlightToHtml } from './shiki';
 import { langFromPath } from './lang';
 import EditorToolbar from './EditorToolbar';
+import { useVisualViewport } from '../lib/useVisualViewport';
 
 interface Props {
   client: WireClient;
@@ -141,29 +142,25 @@ export default function FileEditor(props: Props) {
     });
   };
 
-  // iOS PWA: track visualViewport so the editor shrinks above the keyboard.
-  const [viewportH, setViewportH] = useState<number | null>(() =>
-    typeof window !== 'undefined' && (window as any).visualViewport
-      ? (window as any).visualViewport.height : null,
-  );
-  useEffect(() => {
-    const vv = (window as any).visualViewport as VisualViewport | undefined;
-    if (!vv) return;
-    const onResize = () => setViewportH(vv.height);
-    vv.addEventListener('resize', onResize);
-    return () => vv.removeEventListener('resize', onResize);
-  }, []);
+  // iOS Safari: anchor the editor to the visual viewport via position:fixed
+  // so the toolbar stays glued above the keyboard with no empty band below.
+  // The hook reports both the visible height AND the offsetTop so we follow
+  // Safari when it scrolls the layout viewport for caret visibility.
+  const { height: vvHeight, offsetTop: vvOffset } = useVisualViewport();
 
   return (
     <div style={{
-      position: 'relative',
+      position: 'fixed',
+      left: 0,
+      right: 0,
+      top: vvOffset,
+      height: vvHeight,
       display: 'flex',
       flexDirection: 'column',
-      height: viewportH ? `${viewportH}px` : '100%',
-      maxHeight: viewportH ? `${viewportH}px` : '100%',
       minHeight: 0,
       background: 'var(--bg-primary)',
       overflow: 'hidden',
+      zIndex: 50,
     }}>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -210,7 +207,7 @@ export default function FileEditor(props: Props) {
             overflow: 'auto',
             background: 'var(--bg-input)',
             fontFamily: '"Geist Mono", ui-monospace, monospace',
-            fontSize: 13,
+            fontSize: 16,
             lineHeight: 1.5,
             tabSize: 2,
             whiteSpace: 'pre',
@@ -239,7 +236,7 @@ export default function FileEditor(props: Props) {
             outline: 'none',
             resize: 'none',
             fontFamily: '"Geist Mono", ui-monospace, monospace',
-            fontSize: 13,
+            fontSize: 16,
             lineHeight: 1.5,
             tabSize: 2,
             whiteSpace: 'pre',
