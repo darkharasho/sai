@@ -262,7 +262,6 @@ export class BridgeServer {
     const entry = this.codes.get(body.code);
     const now = Date.now();
     if (!entry || entry.expiresAt < now) { res.statusCode = 401; res.end('invalid code'); return; }
-    this.codes.delete(body.code);
     const { deviceId, token } = await this.opts.pairing.issue(
       body.deviceLabel ?? 'Mobile',
       body.clientId ?? null,

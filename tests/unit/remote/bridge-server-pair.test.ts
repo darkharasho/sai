@@ -51,22 +51,26 @@ describe('BridgeServer HTTP', () => {
     expect(r.status).toBe(401);
   });
 
-  it('POST /pair succeeds with valid code, then 401 on reuse', async () => {
+  it('POST /pair allows reuse within TTL so Safari + home-screen PWA can both pair', async () => {
     const code = server.mintPairingCode();
     const r1 = await fetch(`http://127.0.0.1:${port}/pair`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ code, deviceLabel: 'Test' }),
+      body: JSON.stringify({ code, deviceLabel: 'Safari' }),
     });
     expect(r1.status).toBe(200);
-    const body = await r1.json();
-    expect(body.token).toBeDefined();
-    expect(body.deviceId).toBeDefined();
+    const body1 = await r1.json();
+    expect(body1.token).toBeDefined();
+    expect(body1.deviceId).toBeDefined();
 
     const r2 = await fetch(`http://127.0.0.1:${port}/pair`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ code, deviceLabel: 'Test' }),
+      body: JSON.stringify({ code, deviceLabel: 'PWA' }),
     });
-    expect(r2.status).toBe(401);
+    expect(r2.status).toBe(200);
+    const body2 = await r2.json();
+    expect(body2.token).toBeDefined();
+    expect(body2.deviceId).toBeDefined();
+    expect(body2.deviceId).not.toBe(body1.deviceId);
   });
 
   it('POST /pair with clientId dedupes prior pairings from the same client', async () => {
