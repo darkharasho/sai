@@ -3162,6 +3162,7 @@ export default function App() {
                       onFileOpen={handleFileOpen}
                       isActive={wsPath === activeProjectPath}
                       isStreaming={streamingScopes.has(`${wsPath}:${orchSessionId}`)}
+                      awaitingQuestion={awaitingQuestionWorkspaces.has(wsPath)}
                       initialDraft={chatDraftsRef.current.get(wsPath) || ''}
                       onDraftChange={(draft: string) => handleDraftChange(wsPath, draft)}
                       initialContextItems={(chatContextItemsRef.current.get(wsPath) as any) || []}
@@ -3472,6 +3473,7 @@ export default function App() {
                       ? streamingScopes.has(`${wsPath}:${ws.activeSession.id}`)
                       : chatStreamingWorkspaces.has(wsPath)
                   }
+                  awaitingQuestion={awaitingQuestionWorkspaces.has(wsPath)}
                   initialDraft={chatDraftsRef.current.get(wsPath) || ''}
                   onDraftChange={(draft: string) => handleDraftChange(wsPath, draft)}
                   initialContextItems={(chatContextItemsRef.current.get(wsPath) as any) || []}

@@ -67,10 +67,11 @@ interface Props {
   messages: TranscriptMessage[];
   /** Whether the assistant is currently working (between user send and turn done). */
   streaming?: boolean;
+  awaitingQuestion?: boolean;
   onAnswerQuestion?: (toolUseId: string, answers: Record<string, string | string[]>) => void;
 }
 
-export default function Transcript({ messages, streaming = false, onAnswerQuestion }: Props) {
+export default function Transcript({ messages, streaming = false, awaitingQuestion = false, onAnswerQuestion }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
   const isTouchingRef = useRef(false);
@@ -229,7 +230,7 @@ export default function Transcript({ messages, streaming = false, onAnswerQuesti
           </div>
         );
       })}
-      {streaming && (
+      {streaming && !awaitingQuestion && (
         <div
           aria-live="polite"
           style={{

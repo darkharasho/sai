@@ -320,6 +320,7 @@ interface ChatPanelProps {
   onFileOpen?: (path: string, line?: number) => void;
   isActive?: boolean;
   isStreaming?: boolean;
+  awaitingQuestion?: boolean;
   initialDraft?: string;
   onDraftChange?: (draft: string) => void;
   initialContextItems?: ContextItem[];
@@ -587,7 +588,7 @@ const FAKE_ERROR_VARIANTS = {
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(initialMessages || []);
   const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);
   const setMessages = useCallback((updater: ChatMessageType[] | ((prev: ChatMessageType[]) => ChatMessageType[])) => {
@@ -1322,7 +1323,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     }
     return null;
   }, [messages, turnStartIndex]);
-  const showThinking = isStreaming;
+  const showThinking = isStreaming && !awaitingQuestion;
   const hasHiddenMessages = renderStart > 0;
 
   useEffect(() => {

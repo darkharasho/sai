@@ -52,6 +52,11 @@ export default function Chat({ client, statusStore, active, onActiveChange, foll
     return s.streamingSessionId === active.sessionId;
   })();
   const streaming = backendStreaming || localStreaming;
+  const awaitingQuestion = (() => {
+    if (!active) return false;
+    const s = statusStore.get(active.projectPath);
+    return !!s?.awaitingQuestion;
+  })();
 
   // Load overrides for the new session whenever attached session changes.
   useEffect(() => {
@@ -366,7 +371,7 @@ export default function Chat({ client, statusStore, active, onActiveChange, foll
           an iOS Safari quirk where `overflow: auto` inside a flex chain can
           fail to become a scroll container (transcript becomes frozen). */}
       <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-        <Transcript messages={messages} streaming={streaming} onAnswerQuestion={onAnswerQuestion} />
+        <Transcript messages={messages} streaming={streaming} awaitingQuestion={awaitingQuestion} onAnswerQuestion={onAnswerQuestion} />
       </div>
       {pendingApproval && (
         <div style={{ flexShrink: 0, padding: '0 14px' }}>
