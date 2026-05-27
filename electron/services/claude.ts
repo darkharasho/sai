@@ -594,6 +594,9 @@ export async function answerQuestionImpl(
   const effectiveScope = scope || 'chat';
   const claude = getClaude(ws, effectiveScope);
 
+  // Stop buffering CLI output now that the user has answered. The buffered
+  // messages (placeholder tool_result + cancellation acknowledgment) are
+  // dropped — the corrective user message below replaces them.
   if (claude.awaitingQuestionAnswer && claude.pendingQuestionId === toolUseId) {
     claude.awaitingQuestionAnswer = false;
     claude.pendingQuestionId = null;
