@@ -3,6 +3,8 @@ export interface WorkspaceStatus {
   streaming: boolean;
   completed: boolean;
   approval: boolean;
+  /** Session id of the streaming turn, or null if unknown (first turn before session_id arrives). */
+  streamingSessionId?: string | null;
 }
 
 export type WorkspaceStatusPriority = 'idle' | 'completed' | 'busy' | 'streaming' | 'approval';

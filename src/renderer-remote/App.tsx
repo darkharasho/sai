@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { BEARER_KEY, connect, extractPairCode, pair, type WireClient } from './wire';
 import Status from './Status';
-import Chat from './chat/Chat';
+import Chat, { type ChatActive } from './chat/Chat';
 import NavDrawer from './chat/NavDrawer';
 import SaiLogo from './branding/SaiLogo';
 import { createWorkspaceStatusStore, type WorkspaceStatus, type WorkspaceStatusStore } from './lib/workspaceStatusStore';
@@ -13,6 +13,7 @@ function ConnectedShell({ client }: { client: WireClient }) {
   const [metaMembers, setMetaMembers] = useState<{ projectPath: string; name: string }[] | undefined>(undefined);
   const [navOpen, setNavOpen] = useState(false);
   const [follow, setFollow] = useState(true);
+  const [active, setActive] = useState<ChatActive | null>(null);
 
   useEffect(() => {
     return client.on((msg) => {
@@ -52,6 +53,8 @@ function ConnectedShell({ client }: { client: WireClient }) {
         <Chat
           client={client}
           statusStore={workspaceStatusStore}
+          active={active}
+          onActiveChange={setActive}
           follow={follow}
           onFollowChange={setFollow}
           onOpenNav={() => setNavOpen(true)}
@@ -67,9 +70,10 @@ function ConnectedShell({ client }: { client: WireClient }) {
         followEnabled={follow}
         onFollowChange={setFollow}
         onAttach={(projectPath, sessionId) => {
-          // Mirror Chat's optimistic attach when follow is off; in follow mode the
-          // server's session.active push will drive Chat's re-attach.
-          client.attach({ projectPath, scope: 'chat', sessionId });
+          // Drive Chat's active state from the picker so its own useEffect
+          // dispatches attach + resets messages. Without this, client.attach
+          // would fire but Chat's active stayed stale.
+          setActive({ projectPath, scope: 'chat', sessionId });
         }}
       />
     </div>

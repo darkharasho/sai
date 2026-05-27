@@ -282,7 +282,12 @@ export default function App() {
   // swarm (sidebar change or back to overview) so the chat panel doesn't
   // keep showing the task's chat outside the swarm view.
   const preSwarmSessionByWsRef = useRef<Map<string, string>>(new Map());
-  const lastEmittedWorkspaceStatusRef = useRef<Map<string, { busy: boolean; streaming: boolean; completed: boolean; approval: boolean }>>(new Map());
+  const lastEmittedWorkspaceStatusRef = useRef<Map<string, { busy: boolean; streaming: boolean; completed: boolean; approval: boolean; streamingSessionId: string | null }>>(new Map());
+  // sessionId of the chat turn that's currently streaming on each workspace.
+  // Set on streaming_start (sessionId carried by claude.ts); cleared on result.
+  // Lets mobile distinguish a lingering prior-session turn from the freshly
+  // switched-into session so the thinking indicator follows the right session.
+  const chatStreamingSessionRef = useRef<Map<string, string | null>>(new Map());
 
   // Update taskbar badge count when notifications are pending
   useEffect(() => {
@@ -394,14 +399,21 @@ export default function App() {
       ...lastEmittedWorkspaceStatusRef.current.keys(),
     ]);
     for (const projectPath of all) {
+      const streaming = chatStreamingWorkspaces.has(projectPath);
       const next = {
         busy: busyWorkspaces.has(projectPath),
-        streaming: chatStreamingWorkspaces.has(projectPath),
+        streaming,
         completed: completedWorkspaces.has(projectPath),
         approval: approvalWorkspaces.has(projectPath),
+        streamingSessionId: streaming ? (chatStreamingSessionRef.current.get(projectPath) ?? null) : null,
       };
       const prev = lastEmittedWorkspaceStatusRef.current.get(projectPath);
-      if (!prev || prev.busy !== next.busy || prev.streaming !== next.streaming || prev.completed !== next.completed || prev.approval !== next.approval) {
+      if (!prev
+          || prev.busy !== next.busy
+          || prev.streaming !== next.streaming
+          || prev.completed !== next.completed
+          || prev.approval !== next.approval
+          || prev.streamingSessionId !== next.streamingSessionId) {
         lastEmittedWorkspaceStatusRef.current.set(projectPath, next);
         void (window.sai as any).remoteEmitWorkspaceStatus?.(projectPath, next);
       }
@@ -1893,6 +1905,7 @@ export default function App() {
         busyScopeCountRef.current.set(msg.projectPath, count + 1);
         setBusyWorkspaces(prev => new Set(prev).add(msg.projectPath));
         if ((msg.scope || 'chat') === 'chat') {
+          chatStreamingSessionRef.current.set(msg.projectPath, (msg.sessionId ?? null) as string | null);
           setChatStreamingWorkspaces(prev => prev.has(msg.projectPath) ? prev : new Set(prev).add(msg.projectPath));
         }
         setStreamingScopes(prev => prev.has(scopeKey) ? prev : new Set(prev).add(scopeKey));
@@ -2147,6 +2160,7 @@ export default function App() {
           }
         }
         if ((msg.scope || 'chat') === 'chat') {
+          chatStreamingSessionRef.current.delete(msg.projectPath);
           setChatStreamingWorkspaces(prev => {
             if (!prev.has(msg.projectPath)) return prev;
             const next = new Set(prev);

@@ -543,7 +543,7 @@ export function sendImpl(
   }
   // Interrupt case: activeTurnSeq stays at the old value until the CLI finishes the
   // old response and the stdout handler updates it to claude.turnSeq.
-  emitChatMessage({ type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
+  emitChatMessage({ type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, sessionId: claude.sessionId ?? null, turnSeq: claude.turnSeq });
 
   const msg = JSON.stringify({
     type: 'user',
@@ -746,7 +746,7 @@ export async function approveImpl(
     if (proc?.stdin && !proc.stdin.destroyed) {
       claude.turnSeq++;
       claude.busy = true;
-      emitChatMessage({ type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
+      emitChatMessage({ type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, sessionId: claude.sessionId ?? null, turnSeq: claude.turnSeq });
       const retryMsg = JSON.stringify({
         type: 'user',
         message: {

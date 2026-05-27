@@ -385,14 +385,23 @@ export class BridgeServer {
         const topic = `chat:${msg.projectPath}:${scope}`;
         (ws as any).__attachedTopic = topic;
         if (typeof msg.sessionId === 'string') {
-          try {
-            const messages = (await this.opts.loadHistory?.(msg.sessionId)) ?? [];
+          // Empty sessionId is the "new session" sentinel — skip the history
+          // round-trip and send an empty transcript so the phone clears state.
+          if (msg.sessionId === '') {
             ws.send(JSON.stringify({
               v: 1, type: 'session.history',
-              projectPath: msg.projectPath, scope, sessionId: msg.sessionId, messages,
+              projectPath: msg.projectPath, scope, sessionId: '', messages: [],
             }));
-          } catch (err) {
-            ws.send(JSON.stringify({ v: 1, type: 'error', code: 'history_unavailable', message: (err as Error).message }));
+          } else {
+            try {
+              const messages = (await this.opts.loadHistory?.(msg.sessionId)) ?? [];
+              ws.send(JSON.stringify({
+                v: 1, type: 'session.history',
+                projectPath: msg.projectPath, scope, sessionId: msg.sessionId, messages,
+              }));
+            } catch (err) {
+              ws.send(JSON.stringify({ v: 1, type: 'error', code: 'history_unavailable', message: (err as Error).message }));
+            }
           }
         }
         return;

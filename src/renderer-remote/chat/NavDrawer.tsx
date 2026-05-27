@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { FolderClosed, GitBranch, Clock, X, Terminal as TerminalIcon } from 'lucide-react';
+import { FolderClosed, GitBranch, Clock, X, Terminal as TerminalIcon, Plus } from 'lucide-react';
 import SaiLogo from '../branding/SaiLogo';
 import type { WireClient } from '../wire';
 import Files from '../files/Files';
@@ -325,6 +325,35 @@ function ChatsPanel({
         gap: 10,
       }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Sessions</div>
+        <div style={{ flex: 1 }} />
+        <button
+          onClick={() => {
+            if (!currentProjectPath) return;
+            // Detach from desktop's active session so the next session.active
+            // push doesn't yank us back into the prior session.
+            onFollowChange(false);
+            onAttach(currentProjectPath, '');
+          }}
+          disabled={!currentProjectPath}
+          aria-label="New session"
+          title="New session"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '6px 10px',
+            background: 'transparent',
+            color: currentProjectPath ? 'var(--accent)' : 'var(--text-muted)',
+            border: '1px solid var(--border)',
+            borderRadius: 8,
+            cursor: currentProjectPath ? 'pointer' : 'not-allowed',
+            fontSize: 12,
+            fontFamily: 'inherit',
+          }}
+        >
+          <Plus size={14} strokeWidth={2} />
+          New
+        </button>
       </div>
       <label
         style={{

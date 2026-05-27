@@ -8,10 +8,13 @@ import WorkspaceHeader from './WorkspaceHeader';
 import { getOverrides, setOverrides as persistOverrides, clearOverrides, type SessionOverrides } from '../lib/overrides';
 import type { WorkspaceStatusStore } from '../lib/workspaceStatusStore';
 
+export interface ChatActive { projectPath: string; scope: string; sessionId: string }
+
 interface Props {
   client: WireClient;
   statusStore: WorkspaceStatusStore;
-  initialActive?: { projectPath: string; scope: string; sessionId: string };
+  active: ChatActive | null;
+  onActiveChange: (next: ChatActive | null) => void;
   follow: boolean;
   onFollowChange: (v: boolean) => void;
   onOpenNav: () => void;
@@ -19,8 +22,8 @@ interface Props {
 
 interface PendingApproval { toolUseId: string; toolName: string; command?: string; input?: Record<string, unknown> }
 
-export default function Chat({ client, statusStore, initialActive, follow, onFollowChange, onOpenNav }: Props) {
-  const [active, setActive] = useState<{ projectPath: string; scope: string; sessionId: string } | null>(initialActive ?? null);
+export default function Chat({ client, statusStore, active, onActiveChange, follow, onFollowChange, onOpenNav }: Props) {
+  const setActive = onActiveChange;
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
   const [localStreaming, setLocalStreaming] = useState(false);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
@@ -36,7 +39,18 @@ export default function Chat({ client, statusStore, initialActive, follow, onFol
     return off;
   }, [statusStore, active?.projectPath]);
 
-  const backendStreaming = active ? !!statusStore.get(active.projectPath)?.streaming : false;
+  // Gate workspace-level streaming on the session it belongs to. If the desktop
+  // carried the streaming turn's sessionId, only show thinking when it matches
+  // our attached session (so a lingering prior-session turn doesn't bleed into
+  // a freshly switched-into session). Null streamingSessionId = first turn
+  // before session_id arrived, where we stay permissive.
+  const backendStreaming = (() => {
+    if (!active) return false;
+    const s = statusStore.get(active.projectPath);
+    if (!s?.streaming) return false;
+    if (!s.streamingSessionId) return true;
+    return s.streamingSessionId === active.sessionId;
+  })();
   const streaming = backendStreaming || localStreaming;
 
   // Load overrides for the new session whenever attached session changes.
@@ -348,7 +362,10 @@ export default function Chat({ client, statusStore, initialActive, follow, onFol
           }}
         />
       </div>
-      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      {/* position: relative on the parent + absolute on Transcript sidesteps
+          an iOS Safari quirk where `overflow: auto` inside a flex chain can
+          fail to become a scroll container (transcript becomes frozen). */}
+      <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         <Transcript messages={messages} streaming={streaming} onAnswerQuestion={onAnswerQuestion} />
       </div>
       {pendingApproval && (
