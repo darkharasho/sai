@@ -57,6 +57,7 @@ export interface WireClient {
   unsubscribeWorkspaceStatus(): void;
   sendPrompt(args: ChatPromptArgs): void;
   approve(args: ChatApprovalArgs): void;
+  answerQuestion(args: { toolUseId: string; answers: Record<string, string | string[]>; projectPath: string; scope?: string }): void;
   interrupt(projectPath: string, scope?: string): void;
   listFiles(cwd: string, path: string): Promise<unknown[]>;
   readFile(cwd: string, path: string): Promise<{
@@ -213,6 +214,7 @@ export function connect(token: string): WireClient {
     unsubscribeWorkspaceStatus: () => sendFrame({ type: 'workspace.status.unsubscribe' }),
     sendPrompt: (a) => sendFrame({ type: 'prompt', text: a.text, projectPath: a.projectPath, scope: a.scope ?? 'chat', model: a.model, effort: a.effort, permMode: a.permMode }),
     approve: (a) => sendFrame({ type: 'approval', toolUseId: a.toolUseId, decision: a.decision, modifiedCommand: a.modifiedCommand, projectPath: a.projectPath, scope: a.scope ?? 'chat' }),
+    answerQuestion: (a) => sendFrame({ type: 'answer.question', toolUseId: a.toolUseId, answers: a.answers, projectPath: a.projectPath, scope: a.scope ?? 'chat' }),
     interrupt: (projectPath, scope) => sendFrame({ type: 'interrupt', projectPath, scope: scope ?? 'chat' }),
     listFiles: (cwd, path) => new Promise((resolve, reject) => {
       const reqId = `r${++reqCounter}`;

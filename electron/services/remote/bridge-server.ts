@@ -67,6 +67,7 @@ export interface BridgeServerOpts {
   port?: number;
   sendPrompt?: (args: PromptArgs) => void;
   resolveApproval?: (args: ApprovalArgs) => Promise<void | unknown>;
+  answerQuestion?: (args: { toolUseId: string; answers: Record<string, string | string[]>; projectPath: string; scope: string }) => Promise<unknown> | unknown;
   interruptTurn?: (projectPath: string, scope: string) => void;
   listSessions?: (projectPath: string) => Promise<SessionMeta[]>;
   loadHistory?: (sessionId: string) => Promise<ChatMsg[]>;
@@ -680,6 +681,24 @@ export class BridgeServer {
           });
         } catch (err) {
           ws.send(JSON.stringify({ v: 1, type: 'error', code: 'approval_failed', message: (err as Error).message }));
+        }
+        return;
+      }
+
+      if (msg.type === 'answer.question'
+          && typeof msg.toolUseId === 'string'
+          && typeof msg.projectPath === 'string'
+          && msg.answers && typeof msg.answers === 'object') {
+        const scope = typeof msg.scope === 'string' ? msg.scope : 'chat';
+        try {
+          await this.opts.answerQuestion?.({
+            toolUseId: msg.toolUseId,
+            answers: msg.answers as Record<string, string | string[]>,
+            projectPath: msg.projectPath,
+            scope,
+          });
+        } catch (err) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', code: 'answer_failed', message: (err as Error).message }));
         }
         return;
       }
