@@ -39,16 +39,34 @@ function loadBearer(): Bearer | null {
   return null;
 }
 
+function randomUUID(): string {
+  // crypto.randomUUID requires a secure context; SAI Remote often runs over
+  // plain HTTP on LAN, where it's undefined. Fall back to a v4 from getRandomValues,
+  // then to Math.random() if even that's missing.
+  const c: Crypto | undefined = typeof crypto !== 'undefined' ? crypto : undefined;
+  if (c && typeof c.randomUUID === 'function') return c.randomUUID();
+  const bytes = new Uint8Array(16);
+  if (c && typeof c.getRandomValues === 'function') {
+    c.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0'));
+  return `${hex.slice(0, 4).join('')}-${hex.slice(4, 6).join('')}-${hex.slice(6, 8).join('')}-${hex.slice(8, 10).join('')}-${hex.slice(10, 16).join('')}`;
+}
+
 function getOrCreateClientId(): string {
   try {
     const existing = localStorage.getItem(CLIENT_ID_KEY);
     if (existing) return existing;
-    const created = crypto.randomUUID();
+    const created = randomUUID();
     localStorage.setItem(CLIENT_ID_KEY, created);
     return created;
   } catch {
     // localStorage unavailable (private mode / disabled). Per-session fallback.
-    return crypto.randomUUID();
+    return randomUUID();
   }
 }
 import Status from './Status';
@@ -178,6 +196,13 @@ export default function App() {
       try {
         let bearer = loadBearer();
         const code = extractPairCode(location.href);
+        // A fresh `?code=` in the URL is explicit re-pair intent (the user just
+        // scanned a QR). Drop any stale bearer so we always exchange the code,
+        // otherwise an invalid leftover token would silently keep us locked out.
+        if (code && bearer) {
+          removePersisted(BEARER_KEY);
+          bearer = null;
+        }
         if (code && !bearer) {
           setPhase('pairing');
           const clientId = getOrCreateClientId();

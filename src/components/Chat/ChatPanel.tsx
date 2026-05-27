@@ -907,6 +907,15 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         return;
       }
 
+      // Approval was resolved (possibly from the mobile remote). For local
+      // tools the follow-up tool_result clears the card too, but for MCP /
+      // CLI-retried tools the retry can take seconds — clear immediately so
+      // the desktop card doesn't sit stale when mobile already decided.
+      if (msg.type === 'approval_resolved') {
+        setPendingApproval(null);
+        return;
+      }
+
       // Skip system noise
       if (msg.type === 'system' || msg.type === 'rate_limit_event') {
         return;
