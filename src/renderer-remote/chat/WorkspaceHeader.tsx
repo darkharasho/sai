@@ -170,16 +170,20 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
           )}
         </div>
         {(() => {
-          const p = displayPriority(current ? statusStore.get(current.projectPath) : undefined);
-          if (p === 'approval') {
-            return <span className="ws-approval-icon" title="Approval needed">!</span>;
+          // Summary indicator: reflects background activity in OTHER workspaces,
+          // not the current one. Matches desktop titlebar behavior.
+          const others = workspaces.filter((w) => w.projectPath !== currentProjectPath);
+          const priorities = others.map((w) => displayPriority(statusStore.get(w.projectPath)));
+          if (priorities.includes('approval')) {
+            return <span className="ws-approval-icon" title="Approval needed elsewhere">!</span>;
           }
-          return (
-            <StatusDot
-              status={current ? statusStore.get(current.projectPath) : undefined}
-              activeIdle={!!current}
-            />
-          );
+          if (priorities.includes('busy')) {
+            return <span className="ws-dot ws-dot-busy" title="Working in another workspace" />;
+          }
+          if (priorities.includes('completed')) {
+            return <span className="ws-dot ws-dot-completed" title="Response complete elsewhere" />;
+          }
+          return null;
         })()}
         <ChevronDown
           size={14}
