@@ -152,10 +152,21 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
             </div>
           )}
         </div>
-        <StatusDot
-          status={current ? statusStore.get(current.projectPath) : undefined}
-          activeIdle={!!current}
-        />
+        {(() => {
+          const p = displayPriority(current ? statusStore.get(current.projectPath) : undefined);
+          if (p === 'approval') {
+            return <span className="ws-approval-icon" title="Approval needed">!</span>;
+          }
+          if (p === 'completed') {
+            return <span className="ws-completed-icon" title="Response complete">!</span>;
+          }
+          return (
+            <StatusDot
+              status={current ? statusStore.get(current.projectPath) : undefined}
+              activeIdle={!!current}
+            />
+          );
+        })()}
         <ChevronDown
           size={14}
           color="var(--text-muted)"
@@ -288,11 +299,27 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
                       </div>
                     )}
                   </div>
-                  <StatusDot
-                    status={statusStore.get(w.projectPath)}
-                    activeIdle={isActive}
-                    suspendedIdle={w.state === 'suspended'}
-                  />
+                  {(() => {
+                    const p = displayPriority(statusStore.get(w.projectPath));
+                    if (p === 'approval') {
+                      return (
+                        <>
+                          <span className="ws-approval-icon" title="Approval needed">!</span>
+                          <span className="ws-approval-label">Approval needed</span>
+                        </>
+                      );
+                    }
+                    if (p === 'completed') {
+                      return <span className="ws-completed-icon" title="Response complete">!</span>;
+                    }
+                    return (
+                      <StatusDot
+                        status={statusStore.get(w.projectPath)}
+                        activeIdle={isActive}
+                        suspendedIdle={w.state === 'suspended'}
+                      />
+                    );
+                  })()}
                 </button>
               );
             };
@@ -355,6 +382,39 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
   @keyframes ws-approval-blink {
     0%, 100% { opacity: 1; }
     50%      { opacity: 0.2; }
+  }
+  .ws-approval-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #f59e0b;
+    color: #000;
+    font-size: 10px;
+    font-weight: 800;
+    flex-shrink: 0;
+    animation: ws-approval-blink 1s ease-in-out infinite;
+  }
+  .ws-completed-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #4ade80;
+    color: #000;
+    font-size: 10px;
+    font-weight: 800;
+    flex-shrink: 0;
+    animation: ws-done-pulse 2s ease-in-out infinite;
+  }
+  .ws-approval-label {
+    font-size: 11px;
+    color: #f59e0b;
+    margin-left: 4px;
   }
 `}</style>
     </div>
