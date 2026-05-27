@@ -72,26 +72,10 @@ interface Props {
 
 export default function Transcript({ messages, streaming = false, onAnswerQuestion }: Props) {
   const ref = useRef<HTMLDivElement>(null);
-  const last = messages[messages.length - 1];
-  // If the latest message is a running tool card (typically AskUserQuestion),
-  // pin the TOP of that card in view instead of the bottom — otherwise a tall
-  // multi-question card scrolls past the first question.
-  const pinTopOfLast = last?.role === 'tool' && (last.toolStatus ?? 'running') === 'running';
   useEffect(() => {
-    const container = ref.current;
-    if (!container) return;
-    if (pinTopOfLast && last) {
-      const el = container.querySelector(`[data-msg-id="${CSS.escape(last.id)}"]`) as HTMLElement | null;
-      if (el) {
-        // Place the card's top just under the transcript's top padding.
-        const containerTop = container.getBoundingClientRect().top;
-        const elTop = el.getBoundingClientRect().top;
-        container.scrollTop += (elTop - containerTop) - 16;
-        return;
-      }
-    }
-    container.scrollTop = container.scrollHeight;
-  }, [messages.length, last?.text?.length, streaming, pinTopOfLast, last?.id]);
+    if (!ref.current) return;
+    ref.current.scrollTop = ref.current.scrollHeight;
+  }, [messages.length, messages[messages.length - 1]?.text?.length, streaming]);
 
   return (
     <div

@@ -95,7 +95,23 @@ export default function AskUserQuestionView({ toolUseId, input, onAnswer }: Prop
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      minWidth: 0,
+      // Cap the card so a long multi-question form scrolls internally
+      // instead of pushing the submit button below the viewport.
+      maxHeight: 'min(65vh, 560px)',
+    }}>
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+        minWidth: 0,
+        flex: 1,
+        overflowY: 'auto',
+        paddingRight: 2,
+      }}>
       {parsed.questions.map((q, qi) => (
         <div key={qi} style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
           {q.header && (
@@ -149,18 +165,20 @@ export default function AskUserQuestionView({ toolUseId, input, onAnswer }: Prop
           </div>
         </div>
       ))}
+      </div>
       {!isAnswered && (
         <button
           type="button"
           onClick={submit}
           disabled={!canSubmit}
           style={{
-            width: '100%', padding: '10px 16px',
+            width: '100%', padding: '10px 16px', marginTop: 10,
             background: canSubmit ? 'var(--accent)' : 'var(--bg-mid)',
             color: canSubmit ? '#000' : 'var(--text-muted)',
             border: '1px solid', borderColor: canSubmit ? 'var(--accent)' : 'var(--border)',
             borderRadius: 8, fontFamily: 'inherit', fontSize: 14, fontWeight: 600,
             cursor: canSubmit ? 'pointer' : 'default', minHeight: 44,
+            flexShrink: 0,
           }}
         >
           {submitting ? 'Submitting…' : 'Submit'}
