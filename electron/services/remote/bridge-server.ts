@@ -338,7 +338,13 @@ export class BridgeServer {
         ws.send(JSON.stringify({ v: 1, type: 'auth_ok', deviceId: found.id, deviceLabel: found.label }));
         (ws as any).__attachedTopic = null;
         (ws as any).__followEnabled = false;
+        (ws as any).__workspaceStatusEnabled = false;
         unsub = this.opts.bus.subscribeAll((topic, e) => {
+          if (topic === 'workspace.status') {
+            if (!(ws as any).__workspaceStatusEnabled) return;
+            try { ws.send(JSON.stringify({ v: 1, ...e })); } catch { /* closed */ }
+            return;
+          }
           if ((ws as any).__attachedTopic !== topic) return; // gate by attachment
           try { ws.send(JSON.stringify({ v: 1, topic, ...e })); } catch { /* ws may be closed */ }
         });
@@ -346,6 +352,15 @@ export class BridgeServer {
       }
 
       if (msg.type === 'ping') { ws.send(JSON.stringify({ v: 1, type: 'pong' })); return; }
+
+      if (msg.type === 'workspace.status.subscribe') {
+        (ws as any).__workspaceStatusEnabled = true;
+        return;
+      }
+      if (msg.type === 'workspace.status.unsubscribe') {
+        (ws as any).__workspaceStatusEnabled = false;
+        return;
+      }
 
       if (msg.type === 'session.attach' && typeof msg.projectPath === 'string') {
         const scope = (typeof msg.scope === 'string' ? msg.scope : 'chat');
