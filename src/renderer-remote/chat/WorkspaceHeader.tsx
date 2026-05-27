@@ -65,6 +65,7 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
     return off;
   }, [statusStore]);
   const [open, setOpen] = useState(false);
+  const [pickerTab, setPickerTab] = useState<'projects' | 'meta'>('projects');
   const [workspaces, setWorkspaces] = useState<WorkspaceMeta[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -96,6 +97,22 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
       document.removeEventListener('touchstart', onDoc);
     };
   }, [open]);
+
+  const tabIndicator = (kind: 'project' | 'meta') => {
+    const summary = workspaces
+      .filter((w) => w.kind === kind)
+      .map((w) => displayPriority(statusStore.get(w.projectPath)));
+    if (summary.includes('approval')) {
+      return <span className="ws-tab-indicator-dot ws-tab-indicator-approval" title="Approval needed" />;
+    }
+    if (summary.includes('completed')) {
+      return <span className="ws-tab-indicator-dot ws-tab-indicator-completed" title="Response complete" />;
+    }
+    if (summary.includes('busy')) {
+      return <span className="ws-tab-indicator-busy" title="Working..." />;
+    }
+    return null;
+  };
 
   const current = workspaces.find((w) => w.projectPath === currentProjectPath);
   const Icon = current?.kind === 'meta' ? Layers : Folder;
@@ -194,6 +211,20 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
             zIndex: 40,
           }}
         >
+          <div className="ws-picker-tabs">
+            <button
+              className={pickerTab === 'projects' ? 'active' : ''}
+              onClick={() => setPickerTab('projects')}
+            >
+              Projects{tabIndicator('project')}
+            </button>
+            <button
+              className={pickerTab === 'meta' ? 'active' : ''}
+              onClick={() => setPickerTab('meta')}
+            >
+              Meta{tabIndicator('meta')}
+            </button>
+          </div>
           {loading && (
             <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--text-muted)' }}>Loading…</div>
           )}
@@ -206,10 +237,13 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
             </div>
           )}
           {(() => {
-            const active = workspaces.filter((w) => w.state === 'active' || (!w.state && w.projectPath === currentProjectPath));
-            const open = workspaces.filter((w) => w.state === 'open');
-            const suspended = workspaces.filter((w) => w.state === 'suspended');
-            const recent = workspaces.filter((w) => w.state === 'recent');
+            const wantKind: 'project' | 'meta' = pickerTab === 'meta' ? 'meta' : 'project';
+            const visible = workspaces.filter((w) => w.kind === wantKind);
+            const active = visible.filter((w) => w.state === 'active' || (!w.state && w.projectPath === currentProjectPath));
+            const open = visible.filter((w) => w.state === 'open');
+            const suspended = visible.filter((w) => w.state === 'suspended');
+            const recent = visible.filter((w) => w.state === 'recent');
+            const isEmptyMeta = pickerTab === 'meta' && visible.length === 0 && !loading && !err;
 
             const sectionLabel = (label: string) => (
               <div style={{
@@ -326,10 +360,15 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
 
             return (
               <>
-                {active.length > 0 && (<>{sectionLabel('Active')}{active.map(row)}</>)}
-                {open.length > 0 && (<>{sectionLabel('Open')}{open.map(row)}</>)}
-                {suspended.length > 0 && (<>{sectionLabel('Suspended')}{suspended.map(row)}</>)}
-                {recent.length > 0 && (<>{sectionLabel('Recent')}{recent.map(row)}</>)}
+                {isEmptyMeta && (
+                  <div style={{ padding: '16px 12px', fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>
+                    No meta workspaces open on desktop.
+                  </div>
+                )}
+                {!isEmptyMeta && active.length > 0 && (<>{sectionLabel('Active')}{active.map(row)}</>)}
+                {!isEmptyMeta && open.length > 0 && (<>{sectionLabel('Open')}{open.map(row)}</>)}
+                {!isEmptyMeta && suspended.length > 0 && (<>{sectionLabel('Suspended')}{suspended.map(row)}</>)}
+                {!isEmptyMeta && recent.length > 0 && (<>{sectionLabel('Recent')}{recent.map(row)}</>)}
               </>
             );
           })()}
@@ -415,6 +454,57 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
     font-size: 11px;
     color: #f59e0b;
     margin-left: 4px;
+  }
+  .ws-picker-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    padding: 4px 8px 0;
+    gap: 2px;
+  }
+  .ws-picker-tabs button {
+    flex: 1;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 6px 8px;
+    cursor: pointer;
+    margin-bottom: -1px;
+    border-radius: 4px 4px 0 0;
+    transition: color 0.12s, background 0.12s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font-family: inherit;
+  }
+  .ws-picker-tabs button:hover {
+    color: var(--text);
+    background: var(--bg-hover);
+  }
+  .ws-picker-tabs button.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+  .ws-tab-indicator-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+  }
+  .ws-tab-indicator-approval { background: #f59e0b; animation: ws-approval-blink 1s ease-in-out infinite; }
+  .ws-tab-indicator-completed { background: #4ade80; }
+  .ws-tab-indicator-busy {
+    width: 9px;
+    height: 9px;
+    background: var(--accent);
+    -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+    mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+    display: inline-block;
+    flex-shrink: 0;
+    animation: ws-spinner-pulse 2.2s ease-in-out infinite;
   }
 `}</style>
     </div>
