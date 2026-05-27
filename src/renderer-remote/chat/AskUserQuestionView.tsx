@@ -95,13 +95,13 @@ export default function AskUserQuestionView({ toolUseId, input, onAnswer }: Prop
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
       {parsed.questions.map((q, qi) => (
-        <div key={qi} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div key={qi} style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
           {q.header && (
             <div style={{ fontFamily: '"Geist Mono", ui-monospace, monospace', fontSize: 10, textTransform: 'uppercase', color: 'var(--text-muted)' }}>{q.header}</div>
           )}
-          <div style={{ fontSize: 13, color: 'var(--text)' }}>{q.question}</div>
+          <div style={{ fontSize: 13, color: 'var(--text)', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>{q.question}</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {[...q.options, { label: OTHER, description: 'Type your own response' } as AskOption].map((opt, oi) => {
               const sel = isSel(q, opt.label);
@@ -114,6 +114,7 @@ export default function AskUserQuestionView({ toolUseId, input, onAnswer }: Prop
                   disabled={isAnswered || submitting}
                   style={{
                     display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 10px', textAlign: 'left',
+                    width: '100%', minWidth: 0,
                     background: sel ? 'var(--bg-input)' : 'var(--bg-mid)', color: 'var(--text)',
                     border: '1px solid', borderColor: sel ? 'var(--accent)' : 'var(--border)',
                     borderRadius: 8, cursor: isAnswered || submitting ? 'default' : 'pointer',
@@ -126,9 +127,9 @@ export default function AskUserQuestionView({ toolUseId, input, onAnswer }: Prop
                     border: '1.5px solid', borderColor: sel ? 'var(--accent)' : 'var(--border)',
                     background: sel ? 'var(--accent)' : 'transparent',
                   }} />
-                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <span style={{ fontWeight: 500 }}>{isOther ? 'Other' : opt.label}</span>
-                    {opt.description && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{opt.description}</span>}
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
+                    <span style={{ fontWeight: 500, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>{isOther ? 'Other' : opt.label}</span>
+                    {opt.description && <span style={{ fontSize: 11, color: 'var(--text-muted)', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>{opt.description}</span>}
                   </span>
                 </button>
               );
@@ -154,12 +155,12 @@ export default function AskUserQuestionView({ toolUseId, input, onAnswer }: Prop
           onClick={submit}
           disabled={!canSubmit}
           style={{
-            alignSelf: 'flex-end', padding: '8px 16px',
+            width: '100%', padding: '10px 16px',
             background: canSubmit ? 'var(--accent)' : 'var(--bg-mid)',
             color: canSubmit ? '#000' : 'var(--text-muted)',
             border: '1px solid', borderColor: canSubmit ? 'var(--accent)' : 'var(--border)',
-            borderRadius: 8, fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
-            cursor: canSubmit ? 'pointer' : 'default', minHeight: 36,
+            borderRadius: 8, fontFamily: 'inherit', fontSize: 14, fontWeight: 600,
+            cursor: canSubmit ? 'pointer' : 'default', minHeight: 44,
           }}
         >
           {submitting ? 'Submitting…' : 'Submit'}
