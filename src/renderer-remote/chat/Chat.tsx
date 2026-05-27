@@ -101,6 +101,7 @@ export default function Chat({ client, statusStore, initialActive, follow, onFol
                 id: `h-${i}-tc-${j}-${tc.id ?? j}`,
                 role: 'tool',
                 toolName: tc.name ?? tc.type ?? 'tool',
+                toolUseId: tc.id,
                 toolInput: parsedInput,
                 toolResult,
                 toolStatus: rawOutput != null ? 'done' : 'running',
@@ -172,6 +173,7 @@ export default function Chat({ client, statusStore, initialActive, follow, onFol
                 id: `tool-${blk.id}`,
                 role: 'tool',
                 toolName: blk.name && blk.name.length > 0 ? blk.name : 'tool',
+                toolUseId: blk.id,
                 toolInput: blk.input,
                 toolStatus: 'running',
               });
@@ -217,6 +219,16 @@ export default function Chat({ client, statusStore, initialActive, follow, onFol
         });
         return;
       }
+      if (t === 'question_answered') {
+        const toolUseId = (msg as any).toolUseId;
+        const answers = (msg as any).answers;
+        setMessages((arr) => arr.map((m) =>
+          m.role === 'tool' && m.toolUseId === toolUseId
+            ? { ...m, toolInput: { ...(m.toolInput ?? {}), answers }, toolStatus: 'done' }
+            : m
+        ));
+        return;
+      }
       if (t === 'result' || t === 'done') {
         setLocalStreaming(false);
         setMessages((arr) => arr.map((m, i) => i === arr.length - 1 && m.streaming ? { ...m, streaming: false } : m));
@@ -255,6 +267,16 @@ export default function Chat({ client, statusStore, initialActive, follow, onFol
   };
 
   const onInterrupt = () => { if (active) client.interrupt(active.projectPath, active.scope); };
+
+  const onAnswerQuestion = (toolUseId: string, answers: Record<string, string | string[]>) => {
+    if (!active) return;
+    client.answerQuestion({
+      toolUseId,
+      answers,
+      projectPath: active.projectPath,
+      scope: active.scope,
+    });
+  };
 
   const onApprove = (decision: 'approve' | 'deny', modifiedCommand?: string) => {
     if (!pendingApproval || !active) return;
@@ -327,7 +349,7 @@ export default function Chat({ client, statusStore, initialActive, follow, onFol
         />
       </div>
       <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        <Transcript messages={messages} streaming={streaming} />
+        <Transcript messages={messages} streaming={streaming} onAnswerQuestion={onAnswerQuestion} />
       </div>
       {pendingApproval && (
         <div style={{ flexShrink: 0, padding: '0 14px' }}>

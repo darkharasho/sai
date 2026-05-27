@@ -56,6 +56,7 @@ export interface TranscriptMessage {
   role: 'user' | 'assistant' | 'tool' | 'system';
   text?: string;
   toolName?: string;
+  toolUseId?: string;
   toolInput?: Record<string, unknown>;
   toolResult?: string | Record<string, unknown>;
   toolStatus?: 'running' | 'done' | 'error';
@@ -66,9 +67,10 @@ interface Props {
   messages: TranscriptMessage[];
   /** Whether the assistant is currently working (between user send and turn done). */
   streaming?: boolean;
+  onAnswerQuestion?: (toolUseId: string, answers: Record<string, string | string[]>) => void;
 }
 
-export default function Transcript({ messages, streaming = false }: Props) {
+export default function Transcript({ messages, streaming = false, onAnswerQuestion }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!ref.current) return;
@@ -98,6 +100,8 @@ export default function Transcript({ messages, streaming = false }: Props) {
               input={m.toolInput}
               result={m.toolResult}
               status={m.toolStatus ?? 'running'}
+              toolUseId={m.toolUseId}
+              onAnswerQuestion={onAnswerQuestion}
             />
           );
         }
