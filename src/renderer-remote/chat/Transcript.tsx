@@ -73,8 +73,23 @@ interface Props {
 export default function Transcript({ messages, streaming = false, onAnswerQuestion }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!ref.current) return;
-    ref.current.scrollTop = ref.current.scrollHeight;
+    const container = ref.current;
+    if (!container) return;
+    // Scroll across two animation frames so we measure scrollHeight after a
+    // freshly-mounted card (especially AskUserQuestion) has finished laying
+    // out — otherwise the first measurement is short and the bottom is cut.
+    const scroll = () => { container.scrollTop = container.scrollHeight; };
+    scroll();
+    const r1 = requestAnimationFrame(() => {
+      scroll();
+      const r2 = requestAnimationFrame(scroll);
+      (container as any).__r2 = r2;
+    });
+    return () => {
+      cancelAnimationFrame(r1);
+      const r2 = (container as any).__r2;
+      if (r2) cancelAnimationFrame(r2);
+    };
   }, [messages.length, messages[messages.length - 1]?.text?.length, streaming]);
 
   return (
