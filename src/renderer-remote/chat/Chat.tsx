@@ -6,9 +6,11 @@ import Approval from './Approval';
 import SaiLogo from '../branding/SaiLogo';
 import WorkspaceHeader from './WorkspaceHeader';
 import { getOverrides, setOverrides as persistOverrides, clearOverrides, type SessionOverrides } from '../lib/overrides';
+import type { WorkspaceStatusStore } from '../lib/workspaceStatusStore';
 
 interface Props {
   client: WireClient;
+  statusStore: WorkspaceStatusStore;
   initialActive?: { projectPath: string; scope: string; sessionId: string };
   follow: boolean;
   onFollowChange: (v: boolean) => void;
@@ -17,12 +19,25 @@ interface Props {
 
 interface PendingApproval { toolUseId: string; toolName: string; command?: string; input?: Record<string, unknown> }
 
-export default function Chat({ client, initialActive, follow, onFollowChange, onOpenNav }: Props) {
+export default function Chat({ client, statusStore, initialActive, follow, onFollowChange, onOpenNav }: Props) {
   const [active, setActive] = useState<{ projectPath: string; scope: string; sessionId: string } | null>(initialActive ?? null);
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
-  const [streaming, setStreaming] = useState(false);
+  const [localStreaming, setLocalStreaming] = useState(false);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
   const [overrides, setOverridesState] = useState<SessionOverrides>({});
+
+  // Re-render when the active workspace's status changes in the store, so the
+  // thinking indicator stays in sync with the backend across workspace switches.
+  const [, setStatusTick] = useState(0);
+  useEffect(() => {
+    const off = statusStore.subscribe((projectPath) => {
+      if (projectPath === active?.projectPath) setStatusTick((n) => n + 1);
+    });
+    return off;
+  }, [statusStore, active?.projectPath]);
+
+  const backendStreaming = active ? !!statusStore.get(active.projectPath)?.streaming : false;
+  const streaming = backendStreaming || localStreaming;
 
   // Load overrides for the new session whenever attached session changes.
   useEffect(() => {
@@ -43,7 +58,7 @@ export default function Chat({ client, initialActive, follow, onFollowChange, on
 
   useEffect(() => {
     if (!active) return;
-    setMessages([]); setPendingApproval(null); setStreaming(false);
+    setMessages([]); setPendingApproval(null); setLocalStreaming(false);
     client.attach({ projectPath: active.projectPath, scope: active.scope, sessionId: active.sessionId });
   }, [active?.projectPath, active?.scope, active?.sessionId]);
 
@@ -96,7 +111,7 @@ export default function Chat({ client, initialActive, follow, onFollowChange, on
         setMessages(out);
         return;
       }
-      if (t === 'streaming_start') { setStreaming(true); return; }
+      if (t === 'streaming_start') { setLocalStreaming(true); return; }
       if (t === 'assistant') {
         // SDK shape: { type:'assistant', message: { content: Block[] } }
         // Blocks: { type:'text', text } | { type:'tool_use', id, name, input }
@@ -203,7 +218,7 @@ export default function Chat({ client, initialActive, follow, onFollowChange, on
         return;
       }
       if (t === 'result' || t === 'done') {
-        setStreaming(false);
+        setLocalStreaming(false);
         setMessages((arr) => arr.map((m, i) => i === arr.length - 1 && m.streaming ? { ...m, streaming: false } : m));
         return;
       }
@@ -218,7 +233,7 @@ export default function Chat({ client, initialActive, follow, onFollowChange, on
       }
       if (t === 'error') {
         setMessages((arr) => [...arr, { id: `e-${Date.now()}`, role: 'system', text: `Error: ${(msg as any).message ?? 'unknown'}` }]);
-        setStreaming(false);
+        setLocalStreaming(false);
         return;
       }
     });
@@ -228,7 +243,7 @@ export default function Chat({ client, initialActive, follow, onFollowChange, on
   const onSend = (text: string) => {
     if (!active) return;
     setMessages((arr) => [...arr, { id: `u-opt-${Date.now()}`, role: 'user', text }]);
-    setStreaming(true);
+    setLocalStreaming(true);
     client.sendPrompt({
       text,
       projectPath: active.projectPath,
@@ -301,6 +316,7 @@ export default function Chat({ client, initialActive, follow, onFollowChange, on
         <SaiLogo mode="idle" size={20} color="var(--accent)" />
         <WorkspaceHeader
           client={client}
+          statusStore={statusStore}
           currentProjectPath={active?.projectPath ?? null}
           onPick={(projectPath) => {
             client.setActiveWorkspace(projectPath);

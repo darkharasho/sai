@@ -1,20 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { Folder, Layers, ChevronDown } from 'lucide-react';
 import type { WireClient } from '../wire';
-
-interface WorkspaceStatusMeta {
-  busy?: boolean;
-  streaming?: boolean;
-  completed?: boolean;
-  approval?: boolean;
-}
+import type { WorkspaceStatus, WorkspaceStatusStore } from '../lib/workspaceStatusStore';
 
 interface WorkspaceMeta {
   projectPath: string;
   name: string;
   kind: 'project' | 'meta';
   members?: { projectPath: string; name: string }[];
-  status?: WorkspaceStatusMeta;
   state?: 'active' | 'open' | 'suspended' | 'recent';
 }
 
@@ -22,26 +15,36 @@ interface Props {
   client: WireClient;
   currentProjectPath: string | null;
   onPick: (projectPath: string) => void;
+  statusStore: WorkspaceStatusStore;
 }
 
-function StatusDots({ status }: { status?: WorkspaceStatusMeta }) {
-  if (!status) return null;
-  const dot = (color: string, key: string, title: string) => (
+function StatusDot({ status, store }: { status: WorkspaceStatus | undefined; store: WorkspaceStatusStore }) {
+  const p = store.priority(status);
+  if (p === 'idle') return null;
+  const color =
+    p === 'approval'  ? 'var(--orange)' :
+    p === 'streaming' ? 'var(--accent)' :
+    p === 'busy'      ? 'var(--blue)'   :
+                        'var(--green)';
+  const title =
+    p === 'approval'  ? 'pending approval' :
+    p === 'streaming' ? 'streaming'        :
+    p === 'busy'      ? 'working'          :
+                        'completed';
+  return (
     <span
-      key={key}
       title={title}
-      style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: color }}
+      style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }}
     />
   );
-  const dots: React.ReactNode[] = [];
-  if (status.approval) dots.push(dot('var(--orange)', 'approval', 'pending approval'));
-  if (status.streaming) dots.push(dot('var(--accent)', 'streaming', 'streaming'));
-  if (status.busy && !status.streaming) dots.push(dot('var(--blue)', 'busy', 'working'));
-  if (status.completed) dots.push(dot('var(--green)', 'completed', 'completed'));
-  return dots.length ? <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>{dots}</span> : null;
 }
 
-export default function WorkspaceHeader({ client, currentProjectPath, onPick }: Props) {
+export default function WorkspaceHeader({ client, currentProjectPath, onPick, statusStore }: Props) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const off = statusStore.subscribe(() => setTick((n) => n + 1));
+    return off;
+  }, [statusStore]);
   const [open, setOpen] = useState(false);
   const [workspaces, setWorkspaces] = useState<WorkspaceMeta[]>([]);
   const [loading, setLoading] = useState(false);
@@ -130,7 +133,7 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick }: 
             </div>
           )}
         </div>
-        <StatusDots status={current?.status} />
+        <StatusDot status={current ? statusStore.get(current.projectPath) : undefined} store={statusStore} />
         <ChevronDown
           size={14}
           color="var(--text-muted)"
@@ -263,7 +266,7 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick }: 
                       </div>
                     )}
                   </div>
-                  <StatusDots status={w.status} />
+                  <StatusDot status={statusStore.get(w.projectPath)} store={statusStore} />
                 </button>
               );
             };

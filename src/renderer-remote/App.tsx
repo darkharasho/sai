@@ -4,6 +4,9 @@ import Status from './Status';
 import Chat from './chat/Chat';
 import NavDrawer from './chat/NavDrawer';
 import SaiLogo from './branding/SaiLogo';
+import { createWorkspaceStatusStore, type WorkspaceStatus, type WorkspaceStatusStore } from './lib/workspaceStatusStore';
+
+const workspaceStatusStore: WorkspaceStatusStore = createWorkspaceStatusStore();
 
 function ConnectedShell({ client }: { client: WireClient }) {
   const [workspacePath, setWorkspacePath] = useState<string>('');
@@ -22,6 +25,17 @@ function ConnectedShell({ client }: { client: WireClient }) {
   }, [client]);
 
   useEffect(() => {
+    client.subscribeWorkspaceStatus();
+    const off = client.on((msg) => {
+      if ((msg as any).type === 'workspace.status') {
+        const m = msg as any;
+        workspaceStatusStore.set(m.projectPath, m.status as WorkspaceStatus);
+      }
+    });
+    return () => { client.unsubscribeWorkspaceStatus(); off(); };
+  }, [client]);
+
+  useEffect(() => {
     if (!workspacePath) { setMetaMembers(undefined); return; }
     client.listWorkspaces()
       .then((ws) => {
@@ -37,6 +51,7 @@ function ConnectedShell({ client }: { client: WireClient }) {
       <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <Chat
           client={client}
+          statusStore={workspaceStatusStore}
           follow={follow}
           onFollowChange={setFollow}
           onOpenNav={() => setNavOpen(true)}
