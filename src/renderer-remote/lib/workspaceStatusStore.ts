@@ -3,11 +3,13 @@ export interface WorkspaceStatus {
   streaming: boolean;
   completed: boolean;
   approval: boolean;
+  /** True while the AI has invoked AskUserQuestion and is awaiting an answer. Visual override only — busy/streaming may still be true. */
+  awaitingQuestion: boolean;
   /** Session id of the streaming turn, or null if unknown (first turn before session_id arrives). */
   streamingSessionId?: string | null;
 }
 
-export type WorkspaceStatusPriority = 'idle' | 'completed' | 'busy' | 'streaming' | 'approval';
+export type WorkspaceStatusPriority = 'idle' | 'completed' | 'busy' | 'streaming' | 'awaitingQuestion' | 'approval';
 
 export interface WorkspaceStatusStore {
   get(projectPath: string): WorkspaceStatus | undefined;
@@ -22,7 +24,7 @@ export function createWorkspaceStatusStore(): WorkspaceStatusStore {
   return {
     get: (p) => map.get(p),
     set: (p, s) => {
-      const allFalse = !s.busy && !s.streaming && !s.completed && !s.approval;
+      const allFalse = !s.busy && !s.streaming && !s.completed && !s.approval && !s.awaitingQuestion;
       if (allFalse) map.delete(p);
       else map.set(p, s);
       const out = map.get(p);
@@ -32,6 +34,7 @@ export function createWorkspaceStatusStore(): WorkspaceStatusStore {
     priority: (s) => {
       if (!s) return 'idle';
       if (s.approval) return 'approval';
+      if (s.awaitingQuestion) return 'awaitingQuestion';
       if (s.streaming) return 'streaming';
       if (s.busy) return 'busy';
       if (s.completed) return 'completed';
