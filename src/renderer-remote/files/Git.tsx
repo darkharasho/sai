@@ -3,6 +3,7 @@ import { ArrowDown, ArrowUp, GitBranch } from 'lucide-react';
 import type { WireClient } from '../wire';
 import ChangesView from './ChangesView';
 import RepoPicker from './RepoPicker';
+import { readPersisted, writePersisted, isString } from '../lib/persisted';
 
 interface Props {
   client: WireClient;
@@ -15,15 +16,25 @@ interface StatusEntry { path: string; status: string; staged: boolean }
 type Note = { id: string; text: string; kind: 'ok' | 'err' };
 
 const DRAFT_KEY = 'sai-remote-commit-draft';
+const DRAFT_VERSION = 1;
+
+function validateDrafts(raw: unknown): Record<string, string> | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (isString(v)) out[k] = v;
+  }
+  return out;
+}
 
 function readDrafts(): Record<string, string> {
-  try { return JSON.parse(localStorage.getItem(DRAFT_KEY) ?? '{}'); } catch { return {}; }
+  return readPersisted(DRAFT_KEY, DRAFT_VERSION, validateDrafts, {});
 }
 function writeDraft(cwd: string, message: string) {
   const m = readDrafts();
   if (message) m[cwd] = message;
   else delete m[cwd];
-  try { localStorage.setItem(DRAFT_KEY, JSON.stringify(m)); } catch { /* quota */ }
+  writePersisted(DRAFT_KEY, DRAFT_VERSION, m);
 }
 
 export default function Git({ client, workspacePath, metaMembers }: Props) {

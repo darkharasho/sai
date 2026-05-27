@@ -1,8 +1,43 @@
 import { useEffect, useState } from 'react';
 import { BEARER_KEY, connect, extractPairCode, pair, type WireClient } from './wire';
 import { describeDevice } from './deviceLabel';
+import { readPersisted, writePersisted, removePersisted, isNonEmptyString } from './lib/persisted';
 
 const CLIENT_ID_KEY = 'sai.remote.clientId';
+const BEARER_VERSION = 1;
+
+interface Bearer { token: string; deviceId: string; label: string }
+
+function validateBearer(raw: unknown): Bearer | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  if (!isNonEmptyString(o.token)) return null;
+  if (!isNonEmptyString(o.deviceId)) return null;
+  if (!isNonEmptyString(o.label)) return null;
+  return { token: o.token, deviceId: o.deviceId, label: o.label };
+}
+
+function loadBearer(): Bearer | null {
+  // Migrate legacy unversioned `{token, deviceId, label}` (pre-1.4.5)
+  // by re-wrapping it in the versioned envelope on first load.
+  const versioned = readPersisted<Bearer | null>(BEARER_KEY, BEARER_VERSION, validateBearer, null);
+  if (versioned) return versioned;
+  try {
+    const raw = localStorage.getItem(BEARER_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    // If it parses to a legacy shape (no `v`/`d` envelope), migrate.
+    if (parsed && typeof parsed === 'object' && !('v' in parsed) && !('d' in parsed)) {
+      const legacy = validateBearer(parsed);
+      if (legacy) {
+        writePersisted(BEARER_KEY, BEARER_VERSION, legacy);
+        return legacy;
+      }
+    }
+  } catch { /* fall through */ }
+  removePersisted(BEARER_KEY);
+  return null;
+}
 
 function getOrCreateClientId(): string {
   try {
@@ -23,6 +58,29 @@ import SaiLogo from './branding/SaiLogo';
 import { createWorkspaceStatusStore, type WorkspaceStatus, type WorkspaceStatusStore } from './lib/workspaceStatusStore';
 
 const workspaceStatusStore: WorkspaceStatusStore = createWorkspaceStatusStore();
+
+function OfflineBanner({ show }: { show: boolean }) {
+  if (!show) return null;
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0, left: 0, right: 0,
+      paddingTop: 'calc(6px + env(safe-area-inset-top))',
+      paddingBottom: 6,
+      paddingLeft: 'max(12px, env(safe-area-inset-left))',
+      paddingRight: 'max(12px, env(safe-area-inset-right))',
+      background: 'var(--red)',
+      color: '#000',
+      fontSize: 12,
+      fontFamily: '"Geist Mono", ui-monospace, monospace',
+      textAlign: 'center',
+      zIndex: 1000,
+      pointerEvents: 'none',
+    }}>
+      offline — reconnecting when network returns
+    </div>
+  );
+}
 
 function ConnectedShell({ client }: { client: WireClient }) {
   const [workspacePath, setWorkspacePath] = useState<string>('');
@@ -101,23 +159,41 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [wsState, setWsState] = useState<'opening' | 'open' | 'closed'>('opening');
   const [client, setClient] = useState<WireClient | null>(null);
+  const [online, setOnline] = useState<boolean>(() =>
+    typeof navigator === 'undefined' ? true : navigator.onLine);
+
+  useEffect(() => {
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => {
+      window.removeEventListener('online', on);
+      window.removeEventListener('offline', off);
+    };
+  }, []);
 
   useEffect(() => {
     void (async () => {
       try {
-        let bearer = localStorage.getItem(BEARER_KEY);
+        let bearer = loadBearer();
         const code = extractPairCode(location.href);
         if (code && !bearer) {
           setPhase('pairing');
           const clientId = getOrCreateClientId();
           const label = describeDevice(navigator.userAgent, clientId);
           const { token, deviceId } = await pair(code, label, clientId);
-          localStorage.setItem(BEARER_KEY, JSON.stringify({ token, deviceId, label }));
+          const wrote = writePersisted<Bearer>(BEARER_KEY, BEARER_VERSION, { token, deviceId, label });
+          if (!wrote) {
+            setError('Could not save pairing — storage is full or disabled. Try clearing browser data and re-pairing.');
+            setPhase('error');
+            return;
+          }
           history.replaceState(null, '', location.pathname);
-          bearer = localStorage.getItem(BEARER_KEY);
+          bearer = { token, deviceId, label };
         }
         if (!bearer) { setPhase('needs-pair'); return; }
-        const { token } = JSON.parse(bearer);
+        const { token } = bearer;
         const c = connect(token);
         let everAuthed = false;
         let closeStreak = 0;
@@ -129,7 +205,7 @@ export default function App() {
             closeStreak++;
             if (closeStreak >= 2) {
               try { c.close(); } catch { /* ignore */ }
-              localStorage.removeItem(BEARER_KEY);
+              removePersisted(BEARER_KEY);
               setPhase('needs-pair');
             }
           }
@@ -147,15 +223,25 @@ export default function App() {
 
   const disconnect = () => {
     client?.close();
-    localStorage.removeItem(BEARER_KEY);
+    removePersisted(BEARER_KEY);
     location.reload();
   };
 
   if (phase === 'connected' && client) {
     if (wsState !== 'open') {
-      return <Status deviceLabel="" serverUrl={location.origin} wsState={wsState} onDisconnect={disconnect} />;
+      return (
+        <>
+          <OfflineBanner show={!online} />
+          <Status deviceLabel="" serverUrl={location.origin} wsState={wsState} onDisconnect={disconnect} />
+        </>
+      );
     }
-    return <ConnectedShell client={client} />;
+    return (
+      <>
+        <OfflineBanner show={!online} />
+        <ConnectedShell client={client} />
+      </>
+    );
   }
 
   const mode = phase === 'init' || phase === 'pairing' ? 'scanner' : phase === 'error' ? 'static' : 'idle';
@@ -168,11 +254,16 @@ export default function App() {
       alignItems: 'center',
       justifyContent: 'center',
       padding: 32,
+      paddingTop: 'max(32px, env(safe-area-inset-top))',
+      paddingBottom: 'max(32px, env(safe-area-inset-bottom))',
+      paddingLeft: 'max(32px, env(safe-area-inset-left))',
+      paddingRight: 'max(32px, env(safe-area-inset-right))',
       gap: 18,
       textAlign: 'center',
       background: 'var(--bg-primary)',
       color: 'var(--text)',
     }}>
+      <OfflineBanner show={!online} />
       <SaiLogo mode={mode} size={64} color="var(--accent)" />
       <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, letterSpacing: '-0.01em' }}>SAI Remote</h1>
       {phase === 'init' && <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', fontFamily: '"Geist Mono", ui-monospace, monospace' }}>connecting…</p>}

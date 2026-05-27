@@ -160,11 +160,36 @@ async function getOrInitRemote(): Promise<RemoteModule> {
         loadScreenshot: async () => null, // Phase 3+ wires this
         port: REMOTE_PORT,
         fallbackPorts: [17831, 17832],
-        sendPrompt: (args) => sendImpl(
-          args.projectPath, args.text, undefined,
-          args.permMode, args.effort, args.model,
-          args.scope, 'remote',
-        ),
+        sendPrompt: (args) => {
+          // Persist base64 image attachments to temp files (parity with the
+          // desktop path, which expects on-disk paths). Fire-and-forget:
+          // bridge-server doesn't await this callback.
+          const writeImages = (imgs?: string[]): string[] => {
+            if (!imgs || imgs.length === 0) return [];
+            const tmpDir = path.join(app.getPath('temp'), 'sai-images');
+            try { fs.mkdirSync(tmpDir, { recursive: true }); } catch { /* best-effort */ }
+            const out: string[] = [];
+            for (const dataUrl of imgs) {
+              const m = dataUrl.match(/^data:image\/([\w+.-]+);base64,(.+)$/);
+              if (!m) continue;
+              const ext = (m[1] || 'png').replace(/[^\w]/g, '') || 'png';
+              const filename = `image-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
+              const filepath = path.join(tmpDir, filename);
+              try {
+                fs.writeFileSync(filepath, Buffer.from(m[2], 'base64'));
+                out.push(filepath);
+              } catch { /* skip unreadable item */ }
+            }
+            return out;
+          };
+          const imagePaths = writeImages(args.images);
+          sendImpl(
+            args.projectPath, args.text,
+            imagePaths.length > 0 ? imagePaths : undefined,
+            args.permMode, args.effort, args.model,
+            args.scope, 'remote',
+          );
+        },
         resolveApproval: async (args) => {
           await approveImpl(args.projectPath, args.toolUseId, args.decision === 'approve', args.modifiedCommand, args.scope);
         },

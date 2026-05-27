@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Check } from 'lucide-react';
 import type { WireClient } from '../wire';
 import DiffViewer from './DiffViewer';
 
@@ -106,7 +107,7 @@ export default function ChangesView({ client, cwd, pendingStagePath, onToggleSta
                     lineHeight: 1,
                   }}
                 >
-                  {e.staged ? '✓' : ''}
+                  {e.staged ? <Check size={10} strokeWidth={3} /> : null}
                 </span>
               </button>
               <button

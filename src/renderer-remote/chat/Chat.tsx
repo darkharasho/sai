@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Menu } from 'lucide-react';
 import type { WireClient } from '../wire';
 import Transcript, { type TranscriptMessage } from './Transcript';
 import Composer from './Composer';
@@ -7,6 +8,7 @@ import SaiLogo from '../branding/SaiLogo';
 import WorkspaceHeader from './WorkspaceHeader';
 import { getOverrides, setOverrides as persistOverrides, clearOverrides, type SessionOverrides } from '../lib/overrides';
 import type { WorkspaceStatusStore } from '../lib/workspaceStatusStore';
+import { loadTranscript, saveTranscript } from '../lib/transcriptCache';
 
 export interface ChatActive { projectPath: string; scope: string; sessionId: string }
 
@@ -79,7 +81,29 @@ export default function Chat({ client, statusStore, active, onActiveChange, foll
     if (!active) return;
     setMessages([]); setPendingApproval(null); setLocalStreaming(false);
     client.attach({ projectPath: active.projectPath, scope: active.scope, sessionId: active.sessionId });
+    // Hydrate from IDB while the server replays history. The server's
+    // session.history reply overwrites this whenever it arrives, so the
+    // cache is purely a "something visible immediately" hint.
+    const sid = active.sessionId;
+    let cancelled = false;
+    void loadTranscript<TranscriptMessage>(sid).then((cached) => {
+      if (cancelled || !cached || cached.length === 0) return;
+      setMessages((cur) => (cur.length === 0 ? cached : cur));
+    });
+    return () => { cancelled = true; };
   }, [active?.projectPath, active?.scope, active?.sessionId]);
+
+  // Debounced persistence of the current transcript. Skips while streaming
+  // to avoid burning IDB cycles on every token; the post-stream `result`
+  // event finalizes the last bubble and triggers a final save.
+  useEffect(() => {
+    if (!active?.sessionId) return;
+    if (messages.length === 0) return;
+    const sid = active.sessionId;
+    const snapshot = messages;
+    const t = setTimeout(() => { void saveTranscript(sid, snapshot); }, 400);
+    return () => clearTimeout(t);
+  }, [messages, active?.sessionId]);
 
   useEffect(() => { client.setFollow(follow); }, [follow]);
 
@@ -271,7 +295,7 @@ export default function Chat({ client, statusStore, active, onActiveChange, foll
     return off;
   }, [client, follow]);
 
-  const onSend = (text: string) => {
+  const onSend = (text: string, images?: string[]) => {
     if (!active) return;
     setMessages((arr) => [...arr, { id: `u-opt-${Date.now()}`, role: 'user', text }]);
     setLocalStreaming(true);
@@ -282,6 +306,7 @@ export default function Chat({ client, statusStore, active, onActiveChange, foll
       model: overrides.model,
       effort: overrides.effort,
       permMode: overrides.permMode,
+      images,
     });
   };
 
@@ -320,9 +345,11 @@ export default function Chat({ client, statusStore, active, onActiveChange, foll
         // the keyboard opens; 100% of the locked body tracks that.
         width: '100%',
         height: '100%',
-        background: 'var(--bg-primary)',
+        background: 'var(--bg-secondary)',
         paddingTop: 'env(safe-area-inset-top)',
-        paddingBottom: 'env(safe-area-inset-bottom)',
+        // Bottom inset is owned by the Composer so its background color
+        // bleeds into the home-indicator strip — otherwise a band of
+        // bg-primary shows under the input on iOS.
       }}
     >
       <div
@@ -349,10 +376,9 @@ export default function Chat({ client, statusStore, active, onActiveChange, foll
             border: '1px solid var(--border)',
             borderRadius: 8,
             cursor: 'pointer',
-            fontSize: 18,
           }}
         >
-          ≡
+          <Menu size={18} />
         </button>
         <SaiLogo mode="idle" size={20} color="var(--accent)" />
         <WorkspaceHeader

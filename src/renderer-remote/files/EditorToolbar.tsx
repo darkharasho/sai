@@ -1,4 +1,11 @@
 import type { CSSProperties } from 'react';
+import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-react';
+
+const arrowBtn: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+};
 
 interface Props {
   onTab: () => void;
@@ -45,10 +52,10 @@ export default function EditorToolbar({
       <button onMouseDown={noBlur} onClick={onHome}  style={btnBase}>Home</button>
       <button onMouseDown={noBlur} onClick={onEnd}   style={btnBase}>End</button>
       <div style={{ flex: 1 }} />
-      <button onMouseDown={noBlur} onClick={onLeft}  style={btnBase}>←</button>
-      <button onMouseDown={noBlur} onClick={onDown}  style={btnBase}>↓</button>
-      <button onMouseDown={noBlur} onClick={onUp}    style={btnBase}>↑</button>
-      <button onMouseDown={noBlur} onClick={onRight} style={btnBase}>→</button>
+      <button onMouseDown={noBlur} onClick={onLeft}  aria-label="Left"  style={{ ...btnBase, ...arrowBtn }}><ArrowLeft size={16} strokeWidth={2} /></button>
+      <button onMouseDown={noBlur} onClick={onDown}  aria-label="Down"  style={{ ...btnBase, ...arrowBtn }}><ArrowDown size={16} strokeWidth={2} /></button>
+      <button onMouseDown={noBlur} onClick={onUp}    aria-label="Up"    style={{ ...btnBase, ...arrowBtn }}><ArrowUp size={16} strokeWidth={2} /></button>
+      <button onMouseDown={noBlur} onClick={onRight} aria-label="Right" style={{ ...btnBase, ...arrowBtn }}><ArrowRight size={16} strokeWidth={2} /></button>
     </div>
   );
 }

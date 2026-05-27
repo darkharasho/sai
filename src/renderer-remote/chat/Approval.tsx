@@ -1,3 +1,5 @@
+import { AlertCircle } from 'lucide-react';
+
 interface Props {
   toolName: string;
   command?: string;
@@ -28,7 +30,7 @@ export default function Approval({ toolName, command, input, onDecide }: Props) 
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600 }}>
-        <span style={{ color: 'var(--orange)' }}>●</span>
+        <AlertCircle size={14} color="var(--orange)" />
         <span style={{ color: 'var(--text)' }}>Approval needed</span>
         <span style={{
           fontFamily: '"Geist Mono", ui-monospace, monospace',

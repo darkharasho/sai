@@ -1,4 +1,10 @@
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, ArrowUp, ArrowDown, ArrowRight } from 'lucide-react';
+
+const ARROW_BTN_STYLE: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+};
 
 type Key = 'Esc' | 'Tab' | 'Up' | 'Down' | 'Left' | 'Right' | 'Ctrl' | 'Enter';
 
@@ -47,10 +53,10 @@ export default function TerminalToolbar({ ctrlSticky, onKey, onBack, variant = '
       <button onClick={() => onKey('Esc')}  style={btnBase}>Esc</button>
       <button onClick={() => onKey('Tab')}  style={btnBase}>Tab</button>
       <button onClick={() => onKey('Ctrl')} style={ctrlStyle}>Ctrl</button>
-      <button onClick={() => onKey('Up')}    style={btnBase}>↑</button>
-      <button onClick={() => onKey('Down')}  style={btnBase}>↓</button>
-      <button onClick={() => onKey('Left')}  style={btnBase}>←</button>
-      <button onClick={() => onKey('Right')} style={btnBase}>→</button>
+      <button onClick={() => onKey('Up')}    aria-label="Up"    style={{ ...btnBase, ...ARROW_BTN_STYLE }}><ArrowUp size={16} strokeWidth={2} /></button>
+      <button onClick={() => onKey('Down')}  aria-label="Down"  style={{ ...btnBase, ...ARROW_BTN_STYLE }}><ArrowDown size={16} strokeWidth={2} /></button>
+      <button onClick={() => onKey('Left')}  aria-label="Left"  style={{ ...btnBase, ...ARROW_BTN_STYLE }}><ArrowLeft size={16} strokeWidth={2} /></button>
+      <button onClick={() => onKey('Right')} aria-label="Right" style={{ ...btnBase, ...ARROW_BTN_STYLE }}><ArrowRight size={16} strokeWidth={2} /></button>
       {variant === 'view-only' && (
         <>
           <button onClick={() => onKey('Enter')} style={btnBase}>Enter</button>

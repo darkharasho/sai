@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import ToolCard from './ToolCard';
 import ThinkingAnimation from '../branding/ThinkingAnimation';
+import { useVisualViewportHeight } from '../lib/useVisualViewport';
 
 const mdComponents = {
   p: (props: any) => <p style={{ margin: '0 0 8px 0', lineHeight: 1.5 }} {...props} />,
@@ -134,6 +135,18 @@ export default function Transcript({ messages, streaming = false, awaitingQuesti
     if (!container || !stickToBottomRef.current) return;
     container.scrollTop = container.scrollHeight;
   }, [messages[messages.length - 1]?.text?.length, streaming]);
+
+  // When the on-screen keyboard opens/closes on iOS, the visual viewport
+  // height changes but ResizeObserver on the transcript children doesn't
+  // necessarily fire (the children themselves haven't resized). Re-pin
+  // explicitly so the last message stays visible above the keyboard.
+  const viewportH = useVisualViewportHeight();
+  useEffect(() => {
+    const container = ref.current;
+    if (!container || !stickToBottomRef.current) return;
+    if (isTouchingRef.current) return;
+    container.scrollTop = container.scrollHeight;
+  }, [viewportH]);
 
   return (
     <div

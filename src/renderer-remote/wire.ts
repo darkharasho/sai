@@ -33,6 +33,8 @@ export interface ChatPromptArgs {
   model?: string;
   effort?: string;
   permMode?: string;
+  /** Base64 data URLs for inline image attachments (e.g. `data:image/png;base64,…`). */
+  images?: string[];
 }
 
 export interface ChatApprovalArgs {
@@ -104,38 +106,153 @@ export function connect(token: string): WireClient {
   let ws: WebSocket | null = null;
   let closed = false;
   let pingTimer: ReturnType<typeof setInterval> | null = null;
+  let pongDeadline: ReturnType<typeof setTimeout> | null = null;
+  let probeDeadline: ReturnType<typeof setTimeout> | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let retryAttempt = 0;
+  let lastActivityTs = Date.now();
+
+  // Replay state: the server forgets subscriptions/attachments when a socket
+  // dies. We remember the latest ones and re-issue them on every auth_ok so
+  // consumers don't have to know that a reconnect happened.
+  let replayAttach: { projectPath: string; scope: string; sessionId: string } | null = null;
+  let replayFollow: boolean | null = null;
+  let replayWorkspaceStatus = false;
+  let replayActiveWorkspace: string | null = null;
 
   const notifyState = (s: 'opening' | 'open' | 'closed') => {
     for (const h of stateHandlers) try { h(s); } catch { /* isolate */ }
   };
 
+  // Exponential backoff with jitter. 1s → 2 → 4 → 8 → 16 → 30 (cap), ±20% jitter.
+  const scheduleReconnect = () => {
+    if (closed || reconnectTimer) return;
+    const base = Math.min(30_000, 1_000 * Math.pow(2, retryAttempt));
+    const jitter = base * (0.8 + Math.random() * 0.4);
+    retryAttempt++;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      open();
+    }, jitter);
+  };
+
+  const clearTimers = () => {
+    if (pingTimer)     { clearInterval(pingTimer);  pingTimer = null; }
+    if (pongDeadline)  { clearTimeout(pongDeadline); pongDeadline = null; }
+    if (probeDeadline) { clearTimeout(probeDeadline); probeDeadline = null; }
+  };
+
+  // Force the current socket closed (without flipping `closed`) so onclose
+  // fires and the backoff/replay path takes over. Used by the foreground
+  // probe + pong-timeout watchdog when we detect a zombie OPEN socket.
+  const killSocket = () => {
+    clearTimers();
+    if (!ws) return;
+    try { ws.close(); } catch { /* ignore */ }
+    // Some browsers won't fire onclose synchronously on a zombie socket;
+    // schedule the reconnect ourselves so the user isn't stuck waiting.
+    if (!closed) scheduleReconnect();
+  };
+
+  // Probe the connection: called on `online`, `visibilitychange→visible`,
+  // and `pageshow`. If the socket is closed, reconnect immediately. If
+  // it claims OPEN, send a ping and require a reply within 5s — otherwise
+  // assume the socket is half-open (common after iOS background) and reset.
+  const probeConnection = () => {
+    if (closed) return;
+    // Drop any backoff timer — we want to act now, not wait it out.
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+      retryAttempt = 0; // user is engaging; don't penalize them with backoff
+      open();
+      return;
+    }
+    if (ws.readyState !== WebSocket.OPEN) return; // CONNECTING — let it finish
+    if (probeDeadline) return; // a probe is already in flight
+    try { ws.send(JSON.stringify({ type: 'ping' })); }
+    catch { killSocket(); return; }
+    probeDeadline = setTimeout(() => {
+      probeDeadline = null;
+      // No traffic since the probe started → half-open. Kick it.
+      if (Date.now() - lastActivityTs > 4_500) killSocket();
+    }, 5_000);
+  };
+
+  const onOnline = () => probeConnection();
+  const onVisibility = () => { if (document.visibilityState === 'visible') probeConnection(); };
+  const onPageShow = () => probeConnection();
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('online', onOnline);
+    window.addEventListener('pageshow', onPageShow);
+    document.addEventListener('visibilitychange', onVisibility);
+  }
+
   const open = () => {
     notifyState('opening');
     ws = new WebSocket(wsUrl);
     ws.onopen = () => {
-      ws!.send(JSON.stringify({ type: 'auth', token }));
+      try { ws!.send(JSON.stringify({ type: 'auth', token })); }
+      catch { /* socket died between open and send; onclose will follow */ }
     };
     ws.onmessage = (ev) => {
+      lastActivityTs = Date.now();
       let msg: WireMsg;
       try { msg = JSON.parse(ev.data); } catch { return; }
       if (msg.type === 'auth_ok') {
+        retryAttempt = 0; // successful auth resets backoff
         notifyState('open');
+        // Replay client-side state the server doesn't persist across sockets.
+        // Order matters: workspace.set before attach so the active-workspace
+        // hint lands first, mirroring the original setup sequence.
+        if (replayWorkspaceStatus) {
+          try { ws!.send(JSON.stringify({ type: 'workspace.status.subscribe' })); } catch { /* ignore */ }
+        }
+        if (replayActiveWorkspace) {
+          try { ws!.send(JSON.stringify({ type: 'workspace.set', projectPath: replayActiveWorkspace })); } catch { /* ignore */ }
+        }
+        if (replayFollow !== null) {
+          try { ws!.send(JSON.stringify({ type: 'session.follow', enabled: replayFollow })); } catch { /* ignore */ }
+        }
+        if (replayAttach) {
+          try { ws!.send(JSON.stringify({ type: 'session.attach', ...replayAttach })); } catch { /* ignore */ }
+        }
+        // Heartbeat: ping every 25s; expect any traffic within 10s of each
+        // ping (server replies with at least a pong / ack), else reconnect.
         pingTimer = setInterval(() => {
-          try { ws?.send(JSON.stringify({ type: 'ping' })); } catch { /* socket may be closed */ }
+          try { ws?.send(JSON.stringify({ type: 'ping' })); }
+          catch { killSocket(); return; }
+          if (pongDeadline) return;
+          const sentAt = Date.now();
+          pongDeadline = setTimeout(() => {
+            pongDeadline = null;
+            if (lastActivityTs < sentAt) killSocket();
+          }, 10_000);
         }, 25_000);
       }
+      // Any message satisfies an in-flight pong/probe wait.
+      if (pongDeadline)  { clearTimeout(pongDeadline);  pongDeadline = null; }
+      if (probeDeadline) { clearTimeout(probeDeadline); probeDeadline = null; }
       for (const h of handlers) try { h(msg); } catch { /* isolate */ }
     };
     ws.onclose = () => {
-      if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+      clearTimers();
       notifyState('closed');
-      if (!closed) setTimeout(open, 2_000); // simple linear reconnect
+      // Fail every in-flight request now so UI moves on instead of waiting
+      // out per-call timeouts (up to 60s for push/pull).
+      if (pendingReq.size > 0) {
+        const err: any = new Error('connection lost');
+        err.code = 'wire_closed';
+        for (const [, entry] of pendingReq) try { entry.reject(err); } catch { /* ignore */ }
+        pendingReq.clear();
+      }
+      if (!closed) scheduleReconnect();
     };
   };
-  open();
 
   let reqCounter = 0;
   const pendingReq = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void }>();
+  open();
   handlers.add((msg) => {
     const reqId = (msg as any).reqId;
     if (typeof reqId === 'string' && pendingReq.has(reqId)) {
@@ -188,15 +305,36 @@ export function connect(token: string): WireClient {
     }
   });
 
-  const sendFrame = (m: WireMsg) => ws?.send(JSON.stringify(m));
+  const sendFrame = (m: WireMsg) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    try { ws.send(JSON.stringify(m)); }
+    catch { /* socket just transitioned out from under us; onclose handles it */ }
+  };
 
   return {
     send: sendFrame,
-    close: () => { closed = true; ws?.close(); },
+    close: () => {
+      closed = true;
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      clearTimers();
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('online', onOnline);
+        window.removeEventListener('pageshow', onPageShow);
+        document.removeEventListener('visibilitychange', onVisibility);
+      }
+      ws?.close();
+    },
     on: (h) => { handlers.add(h); return () => { handlers.delete(h); }; },
     onState: (h) => { stateHandlers.add(h); return () => { stateHandlers.delete(h); }; },
-    attach: (a) => sendFrame({ type: 'session.attach', projectPath: a.projectPath, scope: a.scope ?? 'chat', sessionId: a.sessionId }),
-    setFollow: (enabled) => sendFrame({ type: 'session.follow', enabled }),
+    attach: (a) => {
+      const scope = a.scope ?? 'chat';
+      replayAttach = { projectPath: a.projectPath, scope, sessionId: a.sessionId };
+      sendFrame({ type: 'session.attach', projectPath: a.projectPath, scope, sessionId: a.sessionId });
+    },
+    setFollow: (enabled) => {
+      replayFollow = enabled;
+      sendFrame({ type: 'session.follow', enabled });
+    },
     listSessions: (projectPath) => new Promise((resolve, reject) => {
       const reqId = `r${++reqCounter}`;
       pendingReq.set(reqId, { resolve, reject });
@@ -209,10 +347,28 @@ export function connect(token: string): WireClient {
       setTimeout(() => { if (pendingReq.delete(reqId)) reject(new Error('workspaces.list timeout')); }, 5000);
       sendFrame({ type: 'workspaces.list', reqId });
     }),
-    setActiveWorkspace: (projectPath) => sendFrame({ type: 'workspace.set', projectPath }),
-    subscribeWorkspaceStatus: () => sendFrame({ type: 'workspace.status.subscribe' }),
-    unsubscribeWorkspaceStatus: () => sendFrame({ type: 'workspace.status.unsubscribe' }),
-    sendPrompt: (a) => sendFrame({ type: 'prompt', text: a.text, projectPath: a.projectPath, scope: a.scope ?? 'chat', model: a.model, effort: a.effort, permMode: a.permMode }),
+    setActiveWorkspace: (projectPath) => {
+      replayActiveWorkspace = projectPath;
+      sendFrame({ type: 'workspace.set', projectPath });
+    },
+    subscribeWorkspaceStatus: () => {
+      replayWorkspaceStatus = true;
+      sendFrame({ type: 'workspace.status.subscribe' });
+    },
+    unsubscribeWorkspaceStatus: () => {
+      replayWorkspaceStatus = false;
+      sendFrame({ type: 'workspace.status.unsubscribe' });
+    },
+    sendPrompt: (a) => sendFrame({
+      type: 'prompt',
+      text: a.text,
+      projectPath: a.projectPath,
+      scope: a.scope ?? 'chat',
+      model: a.model,
+      effort: a.effort,
+      permMode: a.permMode,
+      images: a.images && a.images.length > 0 ? a.images : undefined,
+    }),
     approve: (a) => sendFrame({ type: 'approval', toolUseId: a.toolUseId, decision: a.decision, modifiedCommand: a.modifiedCommand, projectPath: a.projectPath, scope: a.scope ?? 'chat' }),
     answerQuestion: (a) => sendFrame({ type: 'answer.question', toolUseId: a.toolUseId, answers: a.answers, projectPath: a.projectPath, scope: a.scope ?? 'chat' }),
     interrupt: (projectPath, scope) => sendFrame({ type: 'interrupt', projectPath, scope: scope ?? 'chat' }),

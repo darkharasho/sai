@@ -18,6 +18,9 @@ export interface PromptArgs {
   model?: string;
   effort?: string;
   permMode?: string;
+  /** Base64 data URLs from the mobile composer. Main writes them to temp
+   * files before handing off to the local sender. */
+  images?: string[];
 }
 
 export interface ApprovalArgs {
@@ -686,6 +689,24 @@ export class BridgeServer {
       }
 
       if (msg.type === 'prompt' && typeof msg.text === 'string' && typeof msg.projectPath === 'string') {
+        // Defensive: cap attachment count + total bytes here so a malformed
+        // or malicious client can't blow the desktop's temp dir / memory.
+        const MAX_IMAGES = 8;
+        const MAX_TOTAL_BYTES = 24 * 1024 * 1024;
+        let images: string[] | undefined;
+        if (Array.isArray(msg.images)) {
+          let total = 0;
+          images = [];
+          for (const it of msg.images as unknown[]) {
+            if (typeof it !== 'string') continue;
+            if (!/^data:image\/[\w+.-]+;base64,/.test(it)) continue;
+            total += it.length;
+            if (total > MAX_TOTAL_BYTES) break;
+            images.push(it);
+            if (images.length >= MAX_IMAGES) break;
+          }
+          if (images.length === 0) images = undefined;
+        }
         this.opts.sendPrompt?.({
           text: msg.text,
           projectPath: msg.projectPath,
@@ -693,6 +714,7 @@ export class BridgeServer {
           model: typeof msg.model === 'string' ? msg.model : undefined,
           effort: typeof msg.effort === 'string' ? msg.effort : undefined,
           permMode: typeof msg.permMode === 'string' ? msg.permMode : undefined,
+          images,
         });
         return;
       }
