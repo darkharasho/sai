@@ -162,6 +162,8 @@ export default function ToolCard({ name, input, result, status, toolUseId, onAns
           display: 'flex',
           flexDirection: 'column',
           gap: 10,
+          minWidth: 0,
+          overflowX: 'hidden',
         }}>
           {name === 'AskUserQuestion' ? (
             <AskUserQuestionView toolUseId={toolUseId} input={input} onAnswer={onAnswerQuestion} />

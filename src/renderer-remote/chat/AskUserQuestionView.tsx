@@ -102,8 +102,8 @@ export default function AskUserQuestionView({ toolUseId, input, onAnswer }: Prop
             <div style={{ fontFamily: '"Geist Mono", ui-monospace, monospace', fontSize: 10, textTransform: 'uppercase', color: 'var(--text-muted)' }}>{q.header}</div>
           )}
           <div style={{ fontSize: 13, color: 'var(--text)', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>{q.question}</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {[...q.options, { label: OTHER, description: 'Type your own response' } as AskOption].map((opt, oi) => {
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+            {[...(Array.isArray(q.options) ? q.options : []), { label: OTHER, description: 'Type your own response' } as AskOption].map((opt, oi) => {
               const sel = isSel(q, opt.label);
               const isOther = opt.label === OTHER;
               return (
