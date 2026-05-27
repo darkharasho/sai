@@ -255,12 +255,15 @@ export class BridgeServer {
 
   private async handlePair(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     if (this.rateLimited(req)) { res.statusCode = 429; res.end('too many requests'); return; }
-    const body = await this.readJson<{ code: string; deviceLabel?: string }>(req);
+    const body = await this.readJson<{ code: string; deviceLabel?: string; clientId?: string }>(req);
     const entry = this.codes.get(body.code);
     const now = Date.now();
     if (!entry || entry.expiresAt < now) { res.statusCode = 401; res.end('invalid code'); return; }
     this.codes.delete(body.code);
-    const { deviceId, token } = await this.opts.pairing.issue(body.deviceLabel ?? 'Mobile');
+    const { deviceId, token } = await this.opts.pairing.issue(
+      body.deviceLabel ?? 'Mobile',
+      body.clientId ?? null,
+    );
     res.statusCode = 200;
     res.setHeader('content-type', 'application/json');
     res.end(JSON.stringify({ token, deviceId, wsUrl: '/ws' }));

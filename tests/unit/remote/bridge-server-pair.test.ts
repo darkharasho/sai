@@ -69,6 +69,36 @@ describe('BridgeServer HTTP', () => {
     expect(r2.status).toBe(401);
   });
 
+  it('POST /pair with clientId dedupes prior pairings from the same client', async () => {
+    const code1 = server.mintPairingCode();
+    const r1 = await fetch(`http://127.0.0.1:${port}/pair`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code: code1, deviceLabel: 'iPhone', clientId: 'client-A' }),
+    });
+    expect(r1.status).toBe(200);
+    const code2 = server.mintPairingCode();
+    const r2 = await fetch(`http://127.0.0.1:${port}/pair`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code: code2, deviceLabel: 'iPhone (re-pair)', clientId: 'client-A' }),
+    });
+    expect(r2.status).toBe(200);
+    const list = (server as unknown as { opts: { pairing: PairingStore } }).opts.pairing.list();
+    const active = list.filter((d) => !d.revokedAt);
+    expect(active).toHaveLength(1);
+    expect(active[0].label).toBe('iPhone (re-pair)');
+  });
+
+  it('POST /pair without clientId stores clientId as null', async () => {
+    const code = server.mintPairingCode();
+    const r = await fetch(`http://127.0.0.1:${port}/pair`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code, deviceLabel: 'Legacy' }),
+    });
+    expect(r.status).toBe(200);
+    const list = (server as unknown as { opts: { pairing: PairingStore } }).opts.pairing.list();
+    expect(list[0].clientId).toBeNull();
+  });
+
   it('GET /blob/<id> serves bytes via the same signer + loadBlob', async () => {
     let loaded: string | null = null;
     const server2 = new BridgeServer({
