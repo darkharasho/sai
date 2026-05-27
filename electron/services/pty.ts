@@ -149,10 +149,36 @@ export function resizeTerminalImpl(termId: number, cols: number, rows: number): 
   allTerminals.get(termId)?.resize(cols, rows);
 }
 
+/**
+ * Read the foreground process group id (tpgid) for a Linux pty session.
+ * Returns null off Linux or if the read fails. The caller decides what to do
+ * when the foreground pgrp equals the shell's own pid (i.e. the shell is in
+ * the foreground itself — Ctrl+C while at the prompt is a no-op anyway).
+ */
+function getForegroundPgid(shellPid: number): number | null {
+  if (process.platform !== 'linux') return null;
+  try {
+    const stat = fs.readFileSync(`/proc/${shellPid}/stat`, 'utf8');
+    const closeParen = stat.lastIndexOf(')');
+    const fields = stat.slice(closeParen + 2).split(' ');
+    const tpgid = parseInt(fields[5], 10);
+    return tpgid > 0 ? tpgid : null;
+  } catch {
+    return null;
+  }
+}
+
 export function signalTerminalImpl(termId: number, signal: NodeJS.Signals): void {
   const term = allTerminals.get(termId);
   if (!term) return;
-  try { process.kill(-term.pid, signal); } catch { /* already exited */ }
+  // Prefer the foreground process group: when the user Ctrl+Cs a tool that
+  // put the tty into raw mode (vite, npm-run-dev, REPLs), the kernel won't
+  // translate \x03 to SIGINT and we need to deliver the signal ourselves.
+  // -term.pid only signals the shell's pgrp, which under bash job control is
+  // a different pgrp than the foreground job.
+  const fgPgid = getForegroundPgid(term.pid);
+  const target = fgPgid && fgPgid !== term.pid ? -fgPgid : -term.pid;
+  try { process.kill(target, signal); } catch { /* already exited */ }
 }
 
 export function killTerminalImpl(termId: number): void {
@@ -402,10 +428,7 @@ export function registerTerminalHandlers(win: BrowserWindow) {
   });
 
   ipcMain.on('terminal:signal', (_event, id: number, signal: string) => {
-    const term = allTerminals.get(id);
-    if (term) {
-      try { process.kill(-term.pid, signal); } catch { /* process already exited */ }
-    }
+    signalTerminalImpl(id, signal as NodeJS.Signals);
   });
 
   ipcMain.on('terminal:resize', (_event, id: number, cols: number, rows: number) => {
