@@ -73,9 +73,14 @@ interface Props {
 export default function Transcript({ messages, streaming = false, onAnswerQuestion }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
+  const isTouchingRef = useRef(false);
 
   // Track whether the user has scrolled away from the bottom — only auto-stick
   // when they're already near the bottom, so manual scroll-up isn't yanked.
+  // Also gate the auto-stick on touch state because iOS Safari withholds the
+  // `scroll` event until the gesture ends — without this gate, a ResizeObserver
+  // fire mid-touch would re-stick stickToBottomRef-still-true to the bottom
+  // and the user could never reach a non-bottom position.
   useEffect(() => {
     const container = ref.current;
     if (!container) return;
@@ -83,8 +88,24 @@ export default function Transcript({ messages, streaming = false, onAnswerQuesti
       const distance = container.scrollHeight - container.scrollTop - container.clientHeight;
       stickToBottomRef.current = distance < 60;
     };
+    const onTouchStart = () => { isTouchingRef.current = true; };
+    const onTouchEnd = () => {
+      isTouchingRef.current = false;
+      // After the gesture, re-evaluate stick state from the now-final scrollTop
+      // so subsequent ResizeObserver fires honor where the user landed.
+      const distance = container.scrollHeight - container.scrollTop - container.clientHeight;
+      stickToBottomRef.current = distance < 60;
+    };
     container.addEventListener('scroll', onScroll, { passive: true });
-    return () => container.removeEventListener('scroll', onScroll);
+    container.addEventListener('touchstart', onTouchStart, { passive: true });
+    container.addEventListener('touchend', onTouchEnd, { passive: true });
+    container.addEventListener('touchcancel', onTouchEnd, { passive: true });
+    return () => {
+      container.removeEventListener('scroll', onScroll);
+      container.removeEventListener('touchstart', onTouchStart);
+      container.removeEventListener('touchend', onTouchEnd);
+      container.removeEventListener('touchcancel', onTouchEnd);
+    };
   }, []);
 
   // Watch the content for size changes (new messages, tool-card growth as
@@ -95,6 +116,7 @@ export default function Transcript({ messages, streaming = false, onAnswerQuesti
     if (!container) return;
     const stick = () => {
       if (!stickToBottomRef.current) return;
+      if (isTouchingRef.current) return; // don't fight an in-progress touch
       container.scrollTop = container.scrollHeight;
     };
     stick();
@@ -116,9 +138,14 @@ export default function Transcript({ messages, streaming = false, onAnswerQuesti
     <div
       ref={ref}
       style={{
-        height: '100%',
+        // Absolute fill of the position:relative parent — sidesteps iOS Safari
+        // failing to make `overflow: auto + height: 100%` inside a flex chain
+        // an actual scroll container.
+        position: 'absolute',
+        inset: 0,
         overflowY: 'auto',
         overflowX: 'hidden',
+        WebkitOverflowScrolling: 'touch',
         padding: '16px 14px',
         display: 'flex',
         flexDirection: 'column',
@@ -129,7 +156,7 @@ export default function Transcript({ messages, streaming = false, onAnswerQuesti
       {messages.map((m) => {
         if (m.role === 'tool') {
           return (
-            <div key={m.id} data-msg-id={m.id} style={{ width: '100%', minWidth: 0 }}>
+            <div key={m.id} data-msg-id={m.id} style={{ width: '100%', minWidth: 0, flexShrink: 0 }}>
               <ToolCard
                 name={m.toolName ?? 'tool'}
                 input={m.toolInput}
@@ -150,6 +177,7 @@ export default function Transcript({ messages, streaming = false, onAnswerQuesti
               style={{
                 alignSelf: 'center',
                 maxWidth: '90%',
+                flexShrink: 0,
                 color: 'var(--text-muted)',
                 fontSize: 11,
                 fontStyle: 'italic',
@@ -166,6 +194,7 @@ export default function Transcript({ messages, streaming = false, onAnswerQuesti
           alignSelf: isUser ? 'flex-end' : 'flex-start',
           maxWidth: '88%',
           minWidth: 0,
+          flexShrink: 0,
           padding: '10px 14px',
           fontSize: 14,
           lineHeight: 1.5,
