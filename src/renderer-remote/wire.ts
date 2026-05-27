@@ -6,10 +6,10 @@ export function extractPairCode(url: string): string | null {
 
 export interface PairResult { token: string; deviceId: string }
 
-export async function pair(code: string, deviceLabel: string): Promise<PairResult> {
+export async function pair(code: string, deviceLabel: string, clientId: string): Promise<PairResult> {
   const r = await fetch('/pair', {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ code, deviceLabel }),
+    body: JSON.stringify({ code, deviceLabel, clientId }),
   });
   if (!r.ok) throw new Error(`pair failed: ${r.status}`);
   return r.json();

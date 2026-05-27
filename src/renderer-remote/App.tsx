@@ -1,5 +1,21 @@
 import { useEffect, useState } from 'react';
 import { BEARER_KEY, connect, extractPairCode, pair, type WireClient } from './wire';
+import { describeDevice } from './deviceLabel';
+
+const CLIENT_ID_KEY = 'sai.remote.clientId';
+
+function getOrCreateClientId(): string {
+  try {
+    const existing = localStorage.getItem(CLIENT_ID_KEY);
+    if (existing) return existing;
+    const created = crypto.randomUUID();
+    localStorage.setItem(CLIENT_ID_KEY, created);
+    return created;
+  } catch {
+    // localStorage unavailable (private mode / disabled). Per-session fallback.
+    return crypto.randomUUID();
+  }
+}
 import Status from './Status';
 import Chat, { type ChatActive } from './chat/Chat';
 import NavDrawer from './chat/NavDrawer';
@@ -93,8 +109,9 @@ export default function App() {
         const code = extractPairCode(location.href);
         if (code && !bearer) {
           setPhase('pairing');
-          const label = navigator.userAgent.slice(0, 64);
-          const { token, deviceId } = await pair(code, label);
+          const clientId = getOrCreateClientId();
+          const label = describeDevice(navigator.userAgent, clientId);
+          const { token, deviceId } = await pair(code, label, clientId);
           localStorage.setItem(BEARER_KEY, JSON.stringify({ token, deviceId, label }));
           history.replaceState(null, '', location.pathname);
           bearer = localStorage.getItem(BEARER_KEY);
