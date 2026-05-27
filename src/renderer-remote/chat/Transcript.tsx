@@ -72,25 +72,45 @@ interface Props {
 
 export default function Transcript({ messages, streaming = false, onAnswerQuestion }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
+
+  // Track whether the user has scrolled away from the bottom — only auto-stick
+  // when they're already near the bottom, so manual scroll-up isn't yanked.
   useEffect(() => {
     const container = ref.current;
     if (!container) return;
-    // Scroll across two animation frames so we measure scrollHeight after a
-    // freshly-mounted card (especially AskUserQuestion) has finished laying
-    // out — otherwise the first measurement is short and the bottom is cut.
-    const scroll = () => { container.scrollTop = container.scrollHeight; };
-    scroll();
-    const r1 = requestAnimationFrame(() => {
-      scroll();
-      const r2 = requestAnimationFrame(scroll);
-      (container as any).__r2 = r2;
-    });
-    return () => {
-      cancelAnimationFrame(r1);
-      const r2 = (container as any).__r2;
-      if (r2) cancelAnimationFrame(r2);
+    const onScroll = () => {
+      const distance = container.scrollHeight - container.scrollTop - container.clientHeight;
+      stickToBottomRef.current = distance < 60;
     };
-  }, [messages.length, messages[messages.length - 1]?.text?.length, streaming]);
+    container.addEventListener('scroll', onScroll, { passive: true });
+    return () => container.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // Watch the content for size changes (new messages, tool-card growth as
+  // more questions stream in, code-block expansion) and re-pin to the bottom
+  // if the user hasn't scrolled away.
+  useEffect(() => {
+    const container = ref.current;
+    if (!container) return;
+    const stick = () => {
+      if (!stickToBottomRef.current) return;
+      container.scrollTop = container.scrollHeight;
+    };
+    stick();
+    const ro = new ResizeObserver(() => stick());
+    // Observe the scroll container itself (its scrollHeight grows with content).
+    for (const child of Array.from(container.children)) ro.observe(child);
+    return () => ro.disconnect();
+  }, [messages.length]);
+
+  // Explicit re-pin on streaming-text growth (text bubbles don't trigger
+  // ResizeObserver fast enough on every character).
+  useEffect(() => {
+    const container = ref.current;
+    if (!container || !stickToBottomRef.current) return;
+    container.scrollTop = container.scrollHeight;
+  }, [messages[messages.length - 1]?.text?.length, streaming]);
 
   return (
     <div
