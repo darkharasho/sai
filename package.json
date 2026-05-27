@@ -5,7 +5,7 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "postinstall": "electron-rebuild -w node-pty",
-    "dev": "vite",
+    "dev": "concurrently -k -n electron,pwa -c blue,magenta \"vite\" \"vite build --config vite.config.pwa.ts --watch\"",
     "build": "tsc && vite build && vite build --config vite.config.pwa.ts",
     "electron:dev": "vite --no-sandbox",
     "dist": "vite build && electron-builder --linux AppImage",
@@ -15,8 +15,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "npx playwright test",
-    "dev:update": "node scripts/fake-update.js && vite",
-    "dev:debug": "SAI_REMOTE_DEBUG=9222 vite"
+    "dev:update": "concurrently -k -n electron,pwa -c blue,magenta \"node scripts/fake-update.js && vite\" \"vite build --config vite.config.pwa.ts --watch\"",
+    "dev:debug": "concurrently -k -n electron,pwa -c blue,magenta \"SAI_REMOTE_DEBUG=9222 vite\" \"vite build --config vite.config.pwa.ts --watch\""
   },
   "build": {
     "appId": "com.sai.app",
@@ -104,6 +104,7 @@
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.3.0",
     "@vitest/coverage-v8": "^4.1.2",
+    "concurrently": "^9.2.1",
     "electron": "^36.0.0",
     "electron-builder": "^26.8.1",
     "electron-builder-notarize": "^1.5.2",
