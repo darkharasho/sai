@@ -6,10 +6,15 @@ import Approval from './Approval';
 import SaiLogo from '../branding/SaiLogo';
 import WorkspaceHeader from './WorkspaceHeader';
 import { getOverrides, setOverrides as persistOverrides, clearOverrides, type SessionOverrides } from '../lib/overrides';
+import type { WorkspaceStatusStore } from '../lib/workspaceStatusStore';
+
+export interface ChatActive { projectPath: string; scope: string; sessionId: string }
 
 interface Props {
   client: WireClient;
-  initialActive?: { projectPath: string; scope: string; sessionId: string };
+  statusStore: WorkspaceStatusStore;
+  active: ChatActive | null;
+  onActiveChange: (next: ChatActive | null) => void;
   follow: boolean;
   onFollowChange: (v: boolean) => void;
   onOpenNav: () => void;
@@ -17,12 +22,41 @@ interface Props {
 
 interface PendingApproval { toolUseId: string; toolName: string; command?: string; input?: Record<string, unknown> }
 
-export default function Chat({ client, initialActive, follow, onFollowChange, onOpenNav }: Props) {
-  const [active, setActive] = useState<{ projectPath: string; scope: string; sessionId: string } | null>(initialActive ?? null);
+export default function Chat({ client, statusStore, active, onActiveChange, follow, onFollowChange, onOpenNav }: Props) {
+  const setActive = onActiveChange;
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
-  const [streaming, setStreaming] = useState(false);
+  const [localStreaming, setLocalStreaming] = useState(false);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
   const [overrides, setOverridesState] = useState<SessionOverrides>({});
+
+  // Re-render when the active workspace's status changes in the store, so the
+  // thinking indicator stays in sync with the backend across workspace switches.
+  const [, setStatusTick] = useState(0);
+  useEffect(() => {
+    const off = statusStore.subscribe((projectPath) => {
+      if (projectPath === active?.projectPath) setStatusTick((n) => n + 1);
+    });
+    return off;
+  }, [statusStore, active?.projectPath]);
+
+  // Gate workspace-level streaming on the session it belongs to. If the desktop
+  // carried the streaming turn's sessionId, only show thinking when it matches
+  // our attached session (so a lingering prior-session turn doesn't bleed into
+  // a freshly switched-into session). Null streamingSessionId = first turn
+  // before session_id arrived, where we stay permissive.
+  const backendStreaming = (() => {
+    if (!active) return false;
+    const s = statusStore.get(active.projectPath);
+    if (!s?.streaming) return false;
+    if (!s.streamingSessionId) return true;
+    return s.streamingSessionId === active.sessionId;
+  })();
+  const streaming = backendStreaming || localStreaming;
+  const awaitingQuestion = (() => {
+    if (!active) return false;
+    const s = statusStore.get(active.projectPath);
+    return !!s?.awaitingQuestion;
+  })();
 
   // Load overrides for the new session whenever attached session changes.
   useEffect(() => {
@@ -43,7 +77,7 @@ export default function Chat({ client, initialActive, follow, onFollowChange, on
 
   useEffect(() => {
     if (!active) return;
-    setMessages([]); setPendingApproval(null); setStreaming(false);
+    setMessages([]); setPendingApproval(null); setLocalStreaming(false);
     client.attach({ projectPath: active.projectPath, scope: active.scope, sessionId: active.sessionId });
   }, [active?.projectPath, active?.scope, active?.sessionId]);
 
@@ -76,13 +110,20 @@ export default function Chat({ client, initialActive, follow, onFollowChange, on
               } else if (tc.input && typeof tc.input === 'object') {
                 parsedInput = tc.input;
               }
+              const rawOutput = tc.output;
+              const toolResult = rawOutput == null
+                ? undefined
+                : typeof rawOutput === 'string'
+                  ? rawOutput
+                  : JSON.stringify(rawOutput, null, 2);
               out.push({
                 id: `h-${i}-tc-${j}-${tc.id ?? j}`,
                 role: 'tool',
                 toolName: tc.name ?? tc.type ?? 'tool',
+                toolUseId: tc.id,
                 toolInput: parsedInput,
-                toolResult: typeof tc.output === 'string' ? tc.output : undefined,
-                toolStatus: tc.output !== undefined ? 'done' : 'running',
+                toolResult,
+                toolStatus: rawOutput != null ? 'done' : 'running',
               });
             });
           }
@@ -90,7 +131,7 @@ export default function Chat({ client, initialActive, follow, onFollowChange, on
         setMessages(out);
         return;
       }
-      if (t === 'streaming_start') { setStreaming(true); return; }
+      if (t === 'streaming_start') { setLocalStreaming(true); return; }
       if (t === 'assistant') {
         // SDK shape: { type:'assistant', message: { content: Block[] } }
         // Blocks: { type:'text', text } | { type:'tool_use', id, name, input }
@@ -151,6 +192,7 @@ export default function Chat({ client, initialActive, follow, onFollowChange, on
                 id: `tool-${blk.id}`,
                 role: 'tool',
                 toolName: blk.name && blk.name.length > 0 ? blk.name : 'tool',
+                toolUseId: blk.id,
                 toolInput: blk.input,
                 toolStatus: 'running',
               });
@@ -196,8 +238,18 @@ export default function Chat({ client, initialActive, follow, onFollowChange, on
         });
         return;
       }
+      if (t === 'question_answered') {
+        const toolUseId = (msg as any).toolUseId;
+        const answers = (msg as any).answers;
+        setMessages((arr) => arr.map((m) =>
+          m.role === 'tool' && m.toolUseId === toolUseId
+            ? { ...m, toolInput: { ...(m.toolInput ?? {}), answers }, toolStatus: 'done' }
+            : m
+        ));
+        return;
+      }
       if (t === 'result' || t === 'done') {
-        setStreaming(false);
+        setLocalStreaming(false);
         setMessages((arr) => arr.map((m, i) => i === arr.length - 1 && m.streaming ? { ...m, streaming: false } : m));
         return;
       }
@@ -212,7 +264,7 @@ export default function Chat({ client, initialActive, follow, onFollowChange, on
       }
       if (t === 'error') {
         setMessages((arr) => [...arr, { id: `e-${Date.now()}`, role: 'system', text: `Error: ${(msg as any).message ?? 'unknown'}` }]);
-        setStreaming(false);
+        setLocalStreaming(false);
         return;
       }
     });
@@ -222,7 +274,7 @@ export default function Chat({ client, initialActive, follow, onFollowChange, on
   const onSend = (text: string) => {
     if (!active) return;
     setMessages((arr) => [...arr, { id: `u-opt-${Date.now()}`, role: 'user', text }]);
-    setStreaming(true);
+    setLocalStreaming(true);
     client.sendPrompt({
       text,
       projectPath: active.projectPath,
@@ -234,6 +286,16 @@ export default function Chat({ client, initialActive, follow, onFollowChange, on
   };
 
   const onInterrupt = () => { if (active) client.interrupt(active.projectPath, active.scope); };
+
+  const onAnswerQuestion = (toolUseId: string, answers: Record<string, string | string[]>) => {
+    if (!active) return;
+    client.answerQuestion({
+      toolUseId,
+      answers,
+      projectPath: active.projectPath,
+      scope: active.scope,
+    });
+  };
 
   const onApprove = (decision: 'approve' | 'deny', modifiedCommand?: string) => {
     if (!pendingApproval || !active) return;
@@ -295,6 +357,7 @@ export default function Chat({ client, initialActive, follow, onFollowChange, on
         <SaiLogo mode="idle" size={20} color="var(--accent)" />
         <WorkspaceHeader
           client={client}
+          statusStore={statusStore}
           currentProjectPath={active?.projectPath ?? null}
           onPick={(projectPath) => {
             client.setActiveWorkspace(projectPath);
@@ -304,8 +367,11 @@ export default function Chat({ client, initialActive, follow, onFollowChange, on
           }}
         />
       </div>
-      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        <Transcript messages={messages} streaming={streaming} />
+      {/* position: relative on the parent + absolute on Transcript sidesteps
+          an iOS Safari quirk where `overflow: auto` inside a flex chain can
+          fail to become a scroll container (transcript becomes frozen). */}
+      <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        <Transcript messages={messages} streaming={streaming} awaitingQuestion={awaitingQuestion} onAnswerQuestion={onAnswerQuestion} />
       </div>
       {pendingApproval && (
         <div style={{ flexShrink: 0, padding: '0 14px' }}>

@@ -6,10 +6,10 @@ export function extractPairCode(url: string): string | null {
 
 export interface PairResult { token: string; deviceId: string }
 
-export async function pair(code: string, deviceLabel: string): Promise<PairResult> {
+export async function pair(code: string, deviceLabel: string, clientId: string): Promise<PairResult> {
   const r = await fetch('/pair', {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ code, deviceLabel }),
+    body: JSON.stringify({ code, deviceLabel, clientId }),
   });
   if (!r.ok) throw new Error(`pair failed: ${r.status}`);
   return r.json();
@@ -53,8 +53,11 @@ export interface WireClient {
   listSessions(projectPath: string): Promise<unknown[]>;
   listWorkspaces(): Promise<unknown[]>;
   setActiveWorkspace(projectPath: string): void;
+  subscribeWorkspaceStatus(): void;
+  unsubscribeWorkspaceStatus(): void;
   sendPrompt(args: ChatPromptArgs): void;
   approve(args: ChatApprovalArgs): void;
+  answerQuestion(args: { toolUseId: string; answers: Record<string, string | string[]>; projectPath: string; scope?: string }): void;
   interrupt(projectPath: string, scope?: string): void;
   listFiles(cwd: string, path: string): Promise<unknown[]>;
   readFile(cwd: string, path: string): Promise<{
@@ -207,8 +210,11 @@ export function connect(token: string): WireClient {
       sendFrame({ type: 'workspaces.list', reqId });
     }),
     setActiveWorkspace: (projectPath) => sendFrame({ type: 'workspace.set', projectPath }),
+    subscribeWorkspaceStatus: () => sendFrame({ type: 'workspace.status.subscribe' }),
+    unsubscribeWorkspaceStatus: () => sendFrame({ type: 'workspace.status.unsubscribe' }),
     sendPrompt: (a) => sendFrame({ type: 'prompt', text: a.text, projectPath: a.projectPath, scope: a.scope ?? 'chat', model: a.model, effort: a.effort, permMode: a.permMode }),
     approve: (a) => sendFrame({ type: 'approval', toolUseId: a.toolUseId, decision: a.decision, modifiedCommand: a.modifiedCommand, projectPath: a.projectPath, scope: a.scope ?? 'chat' }),
+    answerQuestion: (a) => sendFrame({ type: 'answer.question', toolUseId: a.toolUseId, answers: a.answers, projectPath: a.projectPath, scope: a.scope ?? 'chat' }),
     interrupt: (projectPath, scope) => sendFrame({ type: 'interrupt', projectPath, scope: scope ?? 'chat' }),
     listFiles: (cwd, path) => new Promise((resolve, reject) => {
       const reqId = `r${++reqCounter}`;

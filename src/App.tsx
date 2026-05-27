@@ -49,6 +49,7 @@ import { executeSlashCommand } from './lib/orchestratorSlashCommands';
 import { isOrchestratorToolDrift, describeToolDrift } from './lib/orchestratorToolDrift';
 import { resolveTaskRef } from './lib/swarmRef';
 import { installRemoteProxyHandler } from './lib/remoteProxyClient';
+import { applyQuestionEvent } from './lib/awaitingQuestionTracker';
 
 const SWARM_DEFAULT_CAP = 5;
 import { swarmBranchName } from './lib/swarmSlug';
@@ -195,6 +196,7 @@ export default function App() {
   const [externallyModified, setExternallyModified] = useState<Set<string>>(new Set());
   const [completedWorkspaces, setCompletedWorkspaces] = useState<Set<string>>(new Set());
   const [busyWorkspaces, setBusyWorkspaces] = useState<Set<string>>(new Set());
+  const [awaitingQuestionWorkspaces, setAwaitingQuestionWorkspaces] = useState<Set<string>>(new Set());
   // Workspaces with an in-flight chat turn. Distinct from busyWorkspaces, which
   // also counts terminal-scope activity. Lifted out of ChatPanel so the panel's
   // streaming indicator survives remounts (e.g. session/key swaps).
@@ -235,8 +237,8 @@ export default function App() {
   // accordion-bar IncludedProjectsControl so both share the same callback.
   const mentionInsertRef = useRef<((linkName: string) => void) | null>(null);
   const workspacesRef = useRef(workspaces);
-  const workspaceStatusRef = useRef<{ busy: Set<string>; streaming: Set<string>; completed: Set<string>; approval: Set<string> }>({
-    busy: new Set(), streaming: new Set(), completed: new Set(), approval: new Set(),
+  const workspaceStatusRef = useRef<{ busy: Set<string>; streaming: Set<string>; completed: Set<string>; approval: Set<string>; awaitingQuestion: Set<string> }>({
+    busy: new Set(), streaming: new Set(), completed: new Set(), approval: new Set(), awaitingQuestion: new Set(),
   });
   const activeProjectPathRef = useRef(activeProjectPath);
   const swarmTasksByWsRef = useRef(swarmTasksByWs);
@@ -282,6 +284,12 @@ export default function App() {
   // swarm (sidebar change or back to overview) so the chat panel doesn't
   // keep showing the task's chat outside the swarm view.
   const preSwarmSessionByWsRef = useRef<Map<string, string>>(new Map());
+  const lastEmittedWorkspaceStatusRef = useRef<Map<string, { busy: boolean; streaming: boolean; completed: boolean; approval: boolean; awaitingQuestion: boolean; streamingSessionId: string | null }>>(new Map());
+  // sessionId of the chat turn that's currently streaming on each workspace.
+  // Set on streaming_start (sessionId carried by claude.ts); cleared on result.
+  // Lets mobile distinguish a lingering prior-session turn from the freshly
+  // switched-into session so the thinking indicator follows the right session.
+  const chatStreamingSessionRef = useRef<Map<string, string | null>>(new Map());
 
   // Update taskbar badge count when notifications are pending
   useEffect(() => {
@@ -303,7 +311,7 @@ export default function App() {
           name: string;
           kind: 'project' | 'meta';
           members?: { projectPath: string; name: string }[];
-          status?: { busy?: boolean; streaming?: boolean; completed?: boolean; approval?: boolean };
+          status?: { busy?: boolean; streaming?: boolean; completed?: boolean; approval?: boolean; awaitingQuestion?: boolean };
           state?: 'active' | 'open' | 'suspended' | 'recent';
         };
         const sai = (window as any).sai;
@@ -316,8 +324,9 @@ export default function App() {
           const streaming = workspaceStatusRef.current.streaming.has(projectPath);
           const completed = workspaceStatusRef.current.completed.has(projectPath);
           const approval = workspaceStatusRef.current.approval.has(projectPath);
-          if (!busy && !streaming && !completed && !approval) return undefined;
-          return { busy, streaming, completed, approval };
+          const awaitingQuestion = workspaceStatusRef.current.awaitingQuestion.has(projectPath);
+          if (!busy && !streaming && !completed && !approval && !awaitingQuestion) return undefined;
+          return { busy, streaming, completed, approval, awaitingQuestion };
         };
         const out: Row[] = [];
         const seen = new Set<string>();
@@ -386,8 +395,37 @@ export default function App() {
       streaming: new Set(chatStreamingWorkspaces),
       completed: new Set(completedWorkspaces),
       approval: new Set(approvalWorkspaces.keys()),
+      awaitingQuestion: new Set(awaitingQuestionWorkspaces),
     };
-  }, [busyWorkspaces, chatStreamingWorkspaces, completedWorkspaces, approvalWorkspaces]);
+    // Emit per-workspace deltas to the remote bus so mobile sees live status.
+    const all = new Set<string>([
+      ...busyWorkspaces, ...chatStreamingWorkspaces, ...completedWorkspaces, ...approvalWorkspaces.keys(),
+      ...awaitingQuestionWorkspaces,
+      ...lastEmittedWorkspaceStatusRef.current.keys(),
+    ]);
+    for (const projectPath of all) {
+      const streaming = chatStreamingWorkspaces.has(projectPath);
+      const next = {
+        busy: busyWorkspaces.has(projectPath),
+        streaming,
+        completed: completedWorkspaces.has(projectPath),
+        approval: approvalWorkspaces.has(projectPath),
+        awaitingQuestion: awaitingQuestionWorkspaces.has(projectPath),
+        streamingSessionId: streaming ? (chatStreamingSessionRef.current.get(projectPath) ?? null) : null,
+      };
+      const prev = lastEmittedWorkspaceStatusRef.current.get(projectPath);
+      if (!prev
+          || prev.busy !== next.busy
+          || prev.streaming !== next.streaming
+          || prev.completed !== next.completed
+          || prev.approval !== next.approval
+          || prev.awaitingQuestion !== next.awaitingQuestion
+          || prev.streamingSessionId !== next.streamingSessionId) {
+        lastEmittedWorkspaceStatusRef.current.set(projectPath, next);
+        void (window.sai as any).remoteEmitWorkspaceStatus?.(projectPath, next);
+      }
+    }
+  }, [busyWorkspaces, chatStreamingWorkspaces, completedWorkspaces, approvalWorkspaces, awaitingQuestionWorkspaces]);
   useEffect(() => { swarmTasksByWsRef.current = swarmTasksByWs; }, [swarmTasksByWs]);
   useEffect(() => { swarmDiffStatsRef.current = swarmDiffStats; }, [swarmDiffStats]);
   useEffect(() => { orchestratorSessionIdByWsRef.current = orchestratorSessionIdByWs; }, [orchestratorSessionIdByWs]);
@@ -1874,6 +1912,7 @@ export default function App() {
         busyScopeCountRef.current.set(msg.projectPath, count + 1);
         setBusyWorkspaces(prev => new Set(prev).add(msg.projectPath));
         if ((msg.scope || 'chat') === 'chat') {
+          chatStreamingSessionRef.current.set(msg.projectPath, (msg.sessionId ?? null) as string | null);
           setChatStreamingWorkspaces(prev => prev.has(msg.projectPath) ? prev : new Set(prev).add(msg.projectPath));
         }
         setStreamingScopes(prev => prev.has(scopeKey) ? prev : new Set(prev).add(scopeKey));
@@ -2015,6 +2054,7 @@ export default function App() {
         }
       }
       if (msg.type === 'question_needed') {
+        setAwaitingQuestionWorkspaces(prev => applyQuestionEvent(prev, msg));
         if (msg.projectPath !== activeProjectPathRef.current) {
           setNotificationCounts(p => {
             const next = new Map(p);
@@ -2022,6 +2062,9 @@ export default function App() {
             return next;
           });
         }
+      }
+      if (msg.type === 'question_answered') {
+        setAwaitingQuestionWorkspaces(prev => applyQuestionEvent(prev, msg));
       }
       if (msg.type === 'approval_resolved') {
         const scope = msg.scope || 'chat';
@@ -2073,6 +2116,7 @@ export default function App() {
       // Treat 'result' as authoritative end-of-turn — clear busy immediately
       // so the titlebar spinner doesn't stay stuck if the 'done' message is lost.
       if (msg.type === 'result' || msg.type === 'done') {
+        setAwaitingQuestionWorkspaces(prev => applyQuestionEvent(prev, msg));
         // For 'done', ignore stale messages from a previous turn (per scope)
         if (msg.type === 'done' && msg.turnSeq != null) {
           const expected = wsTurnSeqRef.current.get(scopeKey);
@@ -2128,6 +2172,7 @@ export default function App() {
           }
         }
         if ((msg.scope || 'chat') === 'chat') {
+          chatStreamingSessionRef.current.delete(msg.projectPath);
           setChatStreamingWorkspaces(prev => {
             if (!prev.has(msg.projectPath)) return prev;
             const next = new Set(prev);
@@ -3117,6 +3162,7 @@ export default function App() {
                       onFileOpen={handleFileOpen}
                       isActive={wsPath === activeProjectPath}
                       isStreaming={streamingScopes.has(`${wsPath}:${orchSessionId}`)}
+                      awaitingQuestion={awaitingQuestionWorkspaces.has(wsPath)}
                       initialDraft={chatDraftsRef.current.get(wsPath) || ''}
                       onDraftChange={(draft: string) => handleDraftChange(wsPath, draft)}
                       initialContextItems={(chatContextItemsRef.current.get(wsPath) as any) || []}
@@ -3427,6 +3473,7 @@ export default function App() {
                       ? streamingScopes.has(`${wsPath}:${ws.activeSession.id}`)
                       : chatStreamingWorkspaces.has(wsPath)
                   }
+                  awaitingQuestion={awaitingQuestionWorkspaces.has(wsPath)}
                   initialDraft={chatDraftsRef.current.get(wsPath) || ''}
                   onDraftChange={(draft: string) => handleDraftChange(wsPath, draft)}
                   initialContextItems={(chatContextItemsRef.current.get(wsPath) as any) || []}

@@ -8,6 +8,7 @@ const scrypt = promisify(scryptCb) as (password: string, salt: Buffer, keylen: n
 export interface PairedDevice {
   id: string;
   label: string;
+  clientId: string | null;
   pairedAt: number;
   lastSeenAt: number | null;
   revokedAt: number | null;
@@ -59,7 +60,8 @@ export class PairingStore {
       if (!existsSync(this.path)) { this.rows = []; return; }
       const raw = readFileSync(this.path, 'utf8');
       const data = JSON.parse(raw) as FileShape;
-      this.rows = Array.isArray(data.devices) ? data.devices : [];
+      const loaded = Array.isArray(data.devices) ? data.devices : [];
+      this.rows = loaded.map((r) => ({ ...r, clientId: r.clientId ?? null }));
     } catch {
       this.rows = [];
     }
@@ -76,12 +78,20 @@ export class PairingStore {
     return this.writeChain;
   }
 
-  async issue(label: string): Promise<{ deviceId: string; token: string }> {
+  async issue(label: string, clientId?: string | null): Promise<{ deviceId: string; token: string }> {
+    const cid = clientId ?? null;
+    if (cid !== null) {
+      const now = this.now();
+      for (const row of this.rows) {
+        if (row.clientId === cid && !row.revokedAt) row.revokedAt = now;
+      }
+    }
     const deviceId = randomUUID();
     const token = randomBytes(32).toString('base64url');
     const { salt, hash } = await hashToken(token);
     this.rows.push({
-      id: deviceId, label, pairedAt: this.now(), lastSeenAt: null, revokedAt: null,
+      id: deviceId, label, clientId: cid,
+      pairedAt: this.now(), lastSeenAt: null, revokedAt: null,
       tokenSalt: salt, tokenHash: hash,
     });
     await this.persist();
@@ -94,7 +104,10 @@ export class PairingStore {
       if (await verifyToken(token, row.tokenSalt, row.tokenHash)) {
         row.lastSeenAt = this.now();
         await this.persist();
-        return { id: row.id, label: row.label, pairedAt: row.pairedAt, lastSeenAt: row.lastSeenAt, revokedAt: row.revokedAt };
+        return {
+          id: row.id, label: row.label, clientId: row.clientId,
+          pairedAt: row.pairedAt, lastSeenAt: row.lastSeenAt, revokedAt: row.revokedAt,
+        };
       }
     }
     return null;
@@ -111,6 +124,9 @@ export class PairingStore {
   list(): PairedDevice[] {
     return [...this.rows]
       .sort((a, b) => b.pairedAt - a.pairedAt)
-      .map((r) => ({ id: r.id, label: r.label, pairedAt: r.pairedAt, lastSeenAt: r.lastSeenAt, revokedAt: r.revokedAt }));
+      .map((r) => ({
+        id: r.id, label: r.label, clientId: r.clientId,
+        pairedAt: r.pairedAt, lastSeenAt: r.lastSeenAt, revokedAt: r.revokedAt,
+      }));
   }
 }

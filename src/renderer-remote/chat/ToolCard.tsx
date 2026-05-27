@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import { Terminal, FileEdit, FileText, Wrench, Globe, AlertCircle, ChevronRight, ListTodo, MessageCircleQuestion } from 'lucide-react';
+import AskUserQuestionView from './AskUserQuestionView';
 
 interface Props {
   name: string;
   input?: Record<string, unknown>;
   result?: string | Record<string, unknown>;
   status: 'running' | 'done' | 'error';
+  toolUseId?: string;
+  onAnswerQuestion?: (toolUseId: string, answers: Record<string, string | string[]>) => void;
 }
 
 interface Summary {
@@ -46,6 +49,11 @@ function summarize(name: string, input?: Record<string, unknown>): Summary {
   if (typeof i.query === 'string') return { label: i.query };
   // TodoWrite
   if (Array.isArray(i.todos)) return { label: `${i.todos.length} todos` };
+  // AskUserQuestion
+  if (name === 'AskUserQuestion') {
+    const answered = i.answers && typeof i.answers === 'object' && Object.keys(i.answers).length > 0;
+    return { label: answered ? 'Answered' : 'Waiting for answer…' };
+  }
   // Fallback: a small one-line preview of the keys
   const keys = Object.keys(i).slice(0, 3);
   return { label: keys.length ? keys.join(', ') : '' };
@@ -62,8 +70,8 @@ function iconFor(name: string) {
   return Wrench;
 }
 
-export default function ToolCard({ name, input, result, status }: Props) {
-  const [expanded, setExpanded] = useState(false);
+export default function ToolCard({ name, input, result, status, toolUseId, onAnswerQuestion }: Props) {
+  const [expanded, setExpanded] = useState(true);
   const summary = summarize(name, input);
   const Icon = status === 'error' ? AlertCircle : iconFor(name);
   const accentColor = status === 'error' ? 'var(--red)' : status === 'done' ? 'var(--green)' : 'var(--accent)';
@@ -82,6 +90,10 @@ export default function ToolCard({ name, input, result, status }: Props) {
     fontSize: 'inherit',
     textAlign: 'left',
     minWidth: 0,
+    minHeight: 32,
+    boxSizing: 'border-box',
+    WebkitAppearance: 'none',
+    appearance: 'none',
   };
 
   return (
@@ -150,19 +162,27 @@ export default function ToolCard({ name, input, result, status }: Props) {
           display: 'flex',
           flexDirection: 'column',
           gap: 10,
+          minWidth: 0,
+          overflowX: 'hidden',
         }}>
-          {summary.body && (
-            <CodeBlock content={summary.body} language={summary.language} />
-          )}
-          {!summary.body && input && Object.keys(input).length > 0 && (
-            <Section title="input">
-              <CodeBlock content={JSON.stringify(input, null, 2)} language="json" />
-            </Section>
-          )}
-          {result !== undefined && (
-            <Section title={status === 'error' ? 'error' : 'result'}>
-              <CodeBlock content={typeof result === 'string' ? result : JSON.stringify(result, null, 2)} />
-            </Section>
+          {name === 'AskUserQuestion' ? (
+            <AskUserQuestionView toolUseId={toolUseId} input={input} onAnswer={onAnswerQuestion} />
+          ) : (
+            <>
+              {summary.body && (
+                <CodeBlock content={summary.body} language={summary.language} />
+              )}
+              {!summary.body && input && Object.keys(input).length > 0 && (
+                <Section title="input">
+                  <CodeBlock content={JSON.stringify(input, null, 2)} language="json" />
+                </Section>
+              )}
+              {result !== undefined && (
+                <Section title={status === 'error' ? 'error' : 'result'}>
+                  <CodeBlock content={typeof result === 'string' ? result : JSON.stringify(result, null, 2)} />
+                </Section>
+              )}
+            </>
           )}
         </div>
       )}

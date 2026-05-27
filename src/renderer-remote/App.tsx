@@ -1,15 +1,35 @@
 import { useEffect, useState } from 'react';
 import { BEARER_KEY, connect, extractPairCode, pair, type WireClient } from './wire';
+import { describeDevice } from './deviceLabel';
+
+const CLIENT_ID_KEY = 'sai.remote.clientId';
+
+function getOrCreateClientId(): string {
+  try {
+    const existing = localStorage.getItem(CLIENT_ID_KEY);
+    if (existing) return existing;
+    const created = crypto.randomUUID();
+    localStorage.setItem(CLIENT_ID_KEY, created);
+    return created;
+  } catch {
+    // localStorage unavailable (private mode / disabled). Per-session fallback.
+    return crypto.randomUUID();
+  }
+}
 import Status from './Status';
-import Chat from './chat/Chat';
+import Chat, { type ChatActive } from './chat/Chat';
 import NavDrawer from './chat/NavDrawer';
 import SaiLogo from './branding/SaiLogo';
+import { createWorkspaceStatusStore, type WorkspaceStatus, type WorkspaceStatusStore } from './lib/workspaceStatusStore';
+
+const workspaceStatusStore: WorkspaceStatusStore = createWorkspaceStatusStore();
 
 function ConnectedShell({ client }: { client: WireClient }) {
   const [workspacePath, setWorkspacePath] = useState<string>('');
   const [metaMembers, setMetaMembers] = useState<{ projectPath: string; name: string }[] | undefined>(undefined);
   const [navOpen, setNavOpen] = useState(false);
   const [follow, setFollow] = useState(true);
+  const [active, setActive] = useState<ChatActive | null>(null);
 
   useEffect(() => {
     return client.on((msg) => {
@@ -19,6 +39,17 @@ function ConnectedShell({ client }: { client: WireClient }) {
         setWorkspacePath(p);
       }
     });
+  }, [client]);
+
+  useEffect(() => {
+    client.subscribeWorkspaceStatus();
+    const off = client.on((msg) => {
+      if ((msg as any).type === 'workspace.status') {
+        const m = msg as any;
+        workspaceStatusStore.set(m.projectPath, m.status as WorkspaceStatus);
+      }
+    });
+    return () => { client.unsubscribeWorkspaceStatus(); off(); };
   }, [client]);
 
   useEffect(() => {
@@ -37,6 +68,9 @@ function ConnectedShell({ client }: { client: WireClient }) {
       <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <Chat
           client={client}
+          statusStore={workspaceStatusStore}
+          active={active}
+          onActiveChange={setActive}
           follow={follow}
           onFollowChange={setFollow}
           onOpenNav={() => setNavOpen(true)}
@@ -52,9 +86,10 @@ function ConnectedShell({ client }: { client: WireClient }) {
         followEnabled={follow}
         onFollowChange={setFollow}
         onAttach={(projectPath, sessionId) => {
-          // Mirror Chat's optimistic attach when follow is off; in follow mode the
-          // server's session.active push will drive Chat's re-attach.
-          client.attach({ projectPath, scope: 'chat', sessionId });
+          // Drive Chat's active state from the picker so its own useEffect
+          // dispatches attach + resets messages. Without this, client.attach
+          // would fire but Chat's active stayed stale.
+          setActive({ projectPath, scope: 'chat', sessionId });
         }}
       />
     </div>
@@ -74,8 +109,9 @@ export default function App() {
         const code = extractPairCode(location.href);
         if (code && !bearer) {
           setPhase('pairing');
-          const label = navigator.userAgent.slice(0, 64);
-          const { token, deviceId } = await pair(code, label);
+          const clientId = getOrCreateClientId();
+          const label = describeDevice(navigator.userAgent, clientId);
+          const { token, deviceId } = await pair(code, label, clientId);
           localStorage.setItem(BEARER_KEY, JSON.stringify({ token, deviceId, label }));
           history.replaceState(null, '', location.pathname);
           bearer = localStorage.getItem(BEARER_KEY);

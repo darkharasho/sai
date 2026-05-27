@@ -65,8 +65,11 @@ export interface BridgeServerOpts {
   loadScreenshot: (id: string) => Promise<Buffer | null>;
   /** Preferred TCP port. Defaults to ephemeral inside the class; the production caller pins 17829. */
   port?: number;
+  /** Fallback ports tried in order when `port` is held. If all are held, falls back to ephemeral. */
+  fallbackPorts?: number[];
   sendPrompt?: (args: PromptArgs) => void;
   resolveApproval?: (args: ApprovalArgs) => Promise<void | unknown>;
+  answerQuestion?: (args: { toolUseId: string; answers: Record<string, string | string[]>; projectPath: string; scope: string }) => Promise<unknown> | unknown;
   interruptTurn?: (projectPath: string, scope: string) => void;
   listSessions?: (projectPath: string) => Promise<SessionMeta[]>;
   loadHistory?: (sessionId: string) => Promise<ChatMsg[]>;
@@ -130,6 +133,7 @@ export class BridgeServer {
       throw new Error('tailnet IP not available; refusing to bind to 0.0.0.0 or 127.0.0.1');
     }
     const desired = this.opts.port ?? BridgeServer.DEFAULT_PORT;
+    const fallbacks = this.opts.fallbackPorts ?? [];
     // Build a fresh http.Server per attempt — reusing the same instance
     // across listen() calls leaks internal listeners.
     const tryListen = (p: number): Promise<http.Server> => new Promise((resolve, reject) => {
@@ -139,8 +143,10 @@ export class BridgeServer {
       s.listen(p, this.opts.tailnetIp!, () => { s.removeListener('error', onErr); resolve(s); });
     });
     // Pin the stable port; retry on EADDRINUSE to ride out hot-restart
-    // races where the previous socket is still releasing. Fall back to
-    // ephemeral only if the port stays held by something else.
+    // races where the previous socket is still releasing. If it stays held
+    // (a second SAI instance is running), try the configured fallback
+    // ports in order — that keeps the URL stable across restarts so the
+    // phone bearer doesn't need a re-pair. Only as a last resort go ephemeral.
     let server: http.Server | null = null;
     if (desired !== 0) {
       for (let i = 0; i < 10; i++) {
@@ -155,7 +161,19 @@ export class BridgeServer {
       }
     }
     if (!server) {
-      console.warn(`[remote] port ${desired} held by another process; falling back to ephemeral`);
+      for (const fb of fallbacks) {
+        try {
+          server = await tryListen(fb);
+          console.warn(`[remote] port ${desired} held; using fallback port ${fb}`);
+          break;
+        } catch (err) {
+          const e = err as NodeJS.ErrnoException;
+          if (e.code !== 'EADDRINUSE') throw err;
+        }
+      }
+    }
+    if (!server) {
+      console.warn(`[remote] port ${desired}${fallbacks.length ? ` and fallbacks [${fallbacks.join(', ')}]` : ''} held by another process; falling back to ephemeral`);
       server = await tryListen(0);
     }
     this.server = server;
@@ -237,12 +255,15 @@ export class BridgeServer {
 
   private async handlePair(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     if (this.rateLimited(req)) { res.statusCode = 429; res.end('too many requests'); return; }
-    const body = await this.readJson<{ code: string; deviceLabel?: string }>(req);
+    const body = await this.readJson<{ code: string; deviceLabel?: string; clientId?: string }>(req);
     const entry = this.codes.get(body.code);
     const now = Date.now();
     if (!entry || entry.expiresAt < now) { res.statusCode = 401; res.end('invalid code'); return; }
     this.codes.delete(body.code);
-    const { deviceId, token } = await this.opts.pairing.issue(body.deviceLabel ?? 'Mobile');
+    const { deviceId, token } = await this.opts.pairing.issue(
+      body.deviceLabel ?? 'Mobile',
+      body.clientId ?? null,
+    );
     res.statusCode = 200;
     res.setHeader('content-type', 'application/json');
     res.end(JSON.stringify({ token, deviceId, wsUrl: '/ws' }));
@@ -338,7 +359,13 @@ export class BridgeServer {
         ws.send(JSON.stringify({ v: 1, type: 'auth_ok', deviceId: found.id, deviceLabel: found.label }));
         (ws as any).__attachedTopic = null;
         (ws as any).__followEnabled = false;
+        (ws as any).__workspaceStatusEnabled = false;
         unsub = this.opts.bus.subscribeAll((topic, e) => {
+          if (topic === 'workspace.status') {
+            if (!(ws as any).__workspaceStatusEnabled) return;
+            try { ws.send(JSON.stringify({ v: 1, ...e })); } catch { /* closed */ }
+            return;
+          }
           if ((ws as any).__attachedTopic !== topic) return; // gate by attachment
           try { ws.send(JSON.stringify({ v: 1, topic, ...e })); } catch { /* ws may be closed */ }
         });
@@ -347,19 +374,37 @@ export class BridgeServer {
 
       if (msg.type === 'ping') { ws.send(JSON.stringify({ v: 1, type: 'pong' })); return; }
 
+      if (msg.type === 'workspace.status.subscribe') {
+        (ws as any).__workspaceStatusEnabled = true;
+        return;
+      }
+      if (msg.type === 'workspace.status.unsubscribe') {
+        (ws as any).__workspaceStatusEnabled = false;
+        return;
+      }
+
       if (msg.type === 'session.attach' && typeof msg.projectPath === 'string') {
         const scope = (typeof msg.scope === 'string' ? msg.scope : 'chat');
         const topic = `chat:${msg.projectPath}:${scope}`;
         (ws as any).__attachedTopic = topic;
         if (typeof msg.sessionId === 'string') {
-          try {
-            const messages = (await this.opts.loadHistory?.(msg.sessionId)) ?? [];
+          // Empty sessionId is the "new session" sentinel — skip the history
+          // round-trip and send an empty transcript so the phone clears state.
+          if (msg.sessionId === '') {
             ws.send(JSON.stringify({
               v: 1, type: 'session.history',
-              projectPath: msg.projectPath, scope, sessionId: msg.sessionId, messages,
+              projectPath: msg.projectPath, scope, sessionId: '', messages: [],
             }));
-          } catch (err) {
-            ws.send(JSON.stringify({ v: 1, type: 'error', code: 'history_unavailable', message: (err as Error).message }));
+          } else {
+            try {
+              const messages = (await this.opts.loadHistory?.(msg.sessionId)) ?? [];
+              ws.send(JSON.stringify({
+                v: 1, type: 'session.history',
+                projectPath: msg.projectPath, scope, sessionId: msg.sessionId, messages,
+              }));
+            } catch (err) {
+              ws.send(JSON.stringify({ v: 1, type: 'error', code: 'history_unavailable', message: (err as Error).message }));
+            }
           }
         }
         return;
@@ -665,6 +710,24 @@ export class BridgeServer {
           });
         } catch (err) {
           ws.send(JSON.stringify({ v: 1, type: 'error', code: 'approval_failed', message: (err as Error).message }));
+        }
+        return;
+      }
+
+      if (msg.type === 'answer.question'
+          && typeof msg.toolUseId === 'string'
+          && typeof msg.projectPath === 'string'
+          && msg.answers && typeof msg.answers === 'object') {
+        const scope = typeof msg.scope === 'string' ? msg.scope : 'chat';
+        try {
+          await this.opts.answerQuestion?.({
+            toolUseId: msg.toolUseId,
+            answers: msg.answers as Record<string, string | string[]>,
+            projectPath: msg.projectPath,
+            scope,
+          });
+        } catch (err) {
+          ws.send(JSON.stringify({ v: 1, type: 'error', code: 'answer_failed', message: (err as Error).message }));
         }
         return;
       }

@@ -34,7 +34,7 @@ async function _resolveTailnetEndpointWithEnv() {
   });
 }
 import { registerTerminalHandlers, destroyAllTerminals } from './services/pty';
-import { registerClaudeHandlers, setRemoteCeiling, setRemoteBus, sendImpl, approveImpl, interruptImpl } from './services/claude';
+import { registerClaudeHandlers, setRemoteCeiling, setRemoteBus, sendImpl, approveImpl, interruptImpl, answerQuestionImpl } from './services/claude';
 import { RendererProxy } from './services/remote/renderer-proxy';
 import { registerGitHandlers } from './services/git';
 import { registerFsHandlers } from './services/fs';
@@ -130,6 +130,9 @@ async function getOrInitRemote(): Promise<RemoteModule> {
   blobStore = new BlobStore();
   rendererProxy = new RendererProxy({ getWindow: () => mainWindow });
   ipcMain.handle('remote:proxy:reply', (_e, reply) => rendererProxy?.handleReply(reply));
+  ipcMain.handle('remote:emit-workspace-status', (_evt, projectPath: string, status: { busy: boolean; streaming: boolean; completed: boolean; approval: boolean; streamingSessionId?: string | null }) => {
+    bus?.publish('workspace.status', { type: 'workspace.status', projectPath, status });
+  });
 
   let kv = readRemoteKv();
   if (!kv.screenshotSecret) {
@@ -156,6 +159,7 @@ async function getOrInitRemote(): Promise<RemoteModule> {
         screenshotSecret,
         loadScreenshot: async () => null, // Phase 3+ wires this
         port: REMOTE_PORT,
+        fallbackPorts: [17831, 17832],
         sendPrompt: (args) => sendImpl(
           args.projectPath, args.text, undefined,
           args.permMode, args.effort, args.model,
@@ -163,6 +167,9 @@ async function getOrInitRemote(): Promise<RemoteModule> {
         ),
         resolveApproval: async (args) => {
           await approveImpl(args.projectPath, args.toolUseId, args.decision === 'approve', args.modifiedCommand, args.scope);
+        },
+        answerQuestion: async (args) => {
+          await answerQuestionImpl(args.projectPath, args.toolUseId, args.answers, args.scope);
         },
         interruptTurn: (path, scope) => interruptImpl(path, scope),
         listSessions: async (path) => (await rendererProxy!.listSessions(path)) as any,
