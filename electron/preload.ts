@@ -29,6 +29,8 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.invoke('claude:approve', projectPath, toolUseId, approved, modifiedCommand, scope),
   claudeAnswerQuestion: (projectPath: string, toolUseId: string, answers: Record<string, string | string[]>, scope?: string) =>
     ipcRenderer.invoke('claude:answer-question', projectPath, toolUseId, answers, scope),
+  remoteEmitWorkspaceStatus: (projectPath: string, status: { busy: boolean; streaming: boolean; completed: boolean; approval: boolean }) =>
+    ipcRenderer.invoke('remote:emit-workspace-status', projectPath, status),
   claudeAlwaysAllow: (projectPath: string, toolPattern: string) =>
     ipcRenderer.invoke('claude:alwaysAllow', projectPath, toolPattern),
   // Codex CLI

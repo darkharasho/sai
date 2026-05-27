@@ -130,6 +130,9 @@ async function getOrInitRemote(): Promise<RemoteModule> {
   blobStore = new BlobStore();
   rendererProxy = new RendererProxy({ getWindow: () => mainWindow });
   ipcMain.handle('remote:proxy:reply', (_e, reply) => rendererProxy?.handleReply(reply));
+  ipcMain.handle('remote:emit-workspace-status', (_evt, projectPath: string, status: { busy: boolean; streaming: boolean; completed: boolean; approval: boolean }) => {
+    bus?.publish('workspace.status', { type: 'workspace.status', projectPath, status });
+  });
 
   let kv = readRemoteKv();
   if (!kv.screenshotSecret) {

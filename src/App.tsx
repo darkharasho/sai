@@ -282,6 +282,7 @@ export default function App() {
   // swarm (sidebar change or back to overview) so the chat panel doesn't
   // keep showing the task's chat outside the swarm view.
   const preSwarmSessionByWsRef = useRef<Map<string, string>>(new Map());
+  const lastEmittedWorkspaceStatusRef = useRef<Map<string, { busy: boolean; streaming: boolean; completed: boolean; approval: boolean }>>(new Map());
 
   // Update taskbar badge count when notifications are pending
   useEffect(() => {
@@ -387,6 +388,24 @@ export default function App() {
       completed: new Set(completedWorkspaces),
       approval: new Set(approvalWorkspaces.keys()),
     };
+    // Emit per-workspace deltas to the remote bus so mobile sees live status.
+    const all = new Set<string>([
+      ...busyWorkspaces, ...chatStreamingWorkspaces, ...completedWorkspaces, ...approvalWorkspaces.keys(),
+      ...lastEmittedWorkspaceStatusRef.current.keys(),
+    ]);
+    for (const projectPath of all) {
+      const next = {
+        busy: busyWorkspaces.has(projectPath),
+        streaming: chatStreamingWorkspaces.has(projectPath),
+        completed: completedWorkspaces.has(projectPath),
+        approval: approvalWorkspaces.has(projectPath),
+      };
+      const prev = lastEmittedWorkspaceStatusRef.current.get(projectPath);
+      if (!prev || prev.busy !== next.busy || prev.streaming !== next.streaming || prev.completed !== next.completed || prev.approval !== next.approval) {
+        lastEmittedWorkspaceStatusRef.current.set(projectPath, next);
+        void (window.sai as any).remoteEmitWorkspaceStatus?.(projectPath, next);
+      }
+    }
   }, [busyWorkspaces, chatStreamingWorkspaces, completedWorkspaces, approvalWorkspaces]);
   useEffect(() => { swarmTasksByWsRef.current = swarmTasksByWs; }, [swarmTasksByWs]);
   useEffect(() => { swarmDiffStatsRef.current = swarmDiffStats; }, [swarmDiffStats]);
