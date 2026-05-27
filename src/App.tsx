@@ -383,7 +383,21 @@ export default function App() {
 
         return out;
       },
-      setActiveWorkspace: (path) => setActiveProjectPath(path),
+      setActiveWorkspace: (path) => {
+        setActiveProjectPath(path);
+        setCompletedWorkspaces(prev => {
+          if (!prev.has(path)) return prev;
+          const next = new Set(prev);
+          next.delete(path);
+          return next;
+        });
+        setNotificationCounts(prev => {
+          if (!prev.has(path)) return prev;
+          const next = new Map(prev);
+          next.delete(path);
+          return next;
+        });
+      },
     });
     return off;
   }, [metaWorkspaces]);

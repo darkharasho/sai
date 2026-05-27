@@ -174,9 +174,6 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
           if (p === 'approval') {
             return <span className="ws-approval-icon" title="Approval needed">!</span>;
           }
-          if (p === 'completed') {
-            return <span className="ws-completed-icon" title="Response complete">!</span>;
-          }
           return (
             <StatusDot
               status={current ? statusStore.get(current.projectPath) : undefined}
@@ -343,7 +340,7 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
                         </>
                       );
                     }
-                    if (p === 'completed') {
+                    if (p === 'completed' && !isActive) {
                       return <span className="ws-completed-icon" title="Response complete">!</span>;
                     }
                     return (
