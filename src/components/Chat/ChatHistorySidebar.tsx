@@ -381,7 +381,7 @@ export default function ChatHistorySidebar({
                                   <span
                                     className="chat-history-suspended-dot"
                                     data-testid={`sidebar-status-${session.id}-suspended`}
-                                    title="Suspended (idle)"
+                                    title="Suspended after 30 min idle — send a message to resume"
                                   />
                                 );
                                 // Reserve the slot so titles stay aligned.

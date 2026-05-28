@@ -1,24 +1,31 @@
 import { PendingApproval } from '../types';
 import { basename } from '../utils/pathUtils';
 
-interface ApprovalBannerProps {
-  approvalWorkspaces: Map<string, PendingApproval>;
-  currentProjectPath: string;
-  onSwitchToWorkspace: (path: string) => void;
+export interface ApprovalBannerEntry {
+  projectPath: string;
+  sessionId: string;
+  approval: PendingApproval;
 }
 
-export default function ApprovalBanner({ approvalWorkspaces, currentProjectPath, onSwitchToWorkspace }: ApprovalBannerProps) {
-  if (approvalWorkspaces.size === 0) return null;
+interface ApprovalBannerProps {
+  approvals: ApprovalBannerEntry[];
+  currentProjectPath: string;
+  /** Switch to a project (and optionally focus a specific session). The
+   *  consumer is expected to handle the session-id navigation itself. */
+  onSwitchToWorkspace: (projectPath: string, sessionId?: string) => void;
+}
 
-  const entries = [...approvalWorkspaces.entries()];
-  const [projectPath, approval] = entries[0];
-  const wsName = basename(projectPath);
-  const isCurrent = projectPath === currentProjectPath;
-  const extraCount = entries.length - 1;
+export default function ApprovalBanner({ approvals, currentProjectPath, onSwitchToWorkspace }: ApprovalBannerProps) {
+  if (approvals.length === 0) return null;
 
-  const commandSnippet = approval.command.length > 60
-    ? approval.command.slice(0, 60) + '…'
-    : approval.command;
+  const [first, ...rest] = approvals;
+  const wsName = basename(first.projectPath);
+  const isCurrent = first.projectPath === currentProjectPath;
+  const extraCount = rest.length;
+
+  const commandSnippet = first.approval.command.length > 60
+    ? first.approval.command.slice(0, 60) + '…'
+    : first.approval.command;
 
   return (
     <div className="approval-banner">
@@ -26,11 +33,11 @@ export default function ApprovalBanner({ approvalWorkspaces, currentProjectPath,
       <span className="approval-banner-text">
         <strong>{wsName}</strong>
         {extraCount > 0 && <span className="approval-banner-extra"> +{extraCount} more</span>}
-        <span className="approval-banner-tool"> — {approval.toolName}: {commandSnippet}</span>
+        <span className="approval-banner-tool"> — {first.approval.toolName}: {commandSnippet}</span>
       </span>
       <button
         className="approval-banner-action"
-        onClick={() => onSwitchToWorkspace(projectPath)}
+        onClick={() => onSwitchToWorkspace(first.projectPath, first.sessionId)}
       >
         {isCurrent ? 'Review' : 'Switch & Review'}
       </button>

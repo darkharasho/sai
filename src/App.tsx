@@ -184,6 +184,10 @@ export default function App() {
   // onMessagesChange handler write once per session as soon as the user sends
   // their first message, without re-writing on every subsequent token.
   const firstUserPersistRef = useRef<Set<string>>(new Set());
+  // When the ApprovalBanner asks to switch to another workspace AND a
+  // specific session, stash the session id here. The session-load effect
+  // picks it up once `sessions` is populated and selects it.
+  const pendingSessionAfterSwitchRef = useRef<{ projectPath: string; sessionId: string } | null>(null);
   // Latest orchestrator-session messages, keyed by orchestrator session id, so
   // the regular wsMessagesRef (keyed by wsPath) doesn't get clobbered by the
   // orchestrator ChatPanel's onMessagesChange.
@@ -1626,8 +1630,45 @@ export default function App() {
       const retentionDays = await window.sai.settingsGet('historyRetention', 14);
       await dbPurgeExpired(retentionDays);
       const sessions = await dbGetSessions(activeProjectPath);
+      // Backfill lastViewedAt for sessions persisted before that field existed.
+      // Without this, the unread indicator can never go off on legacy rows
+      // (the fallback `lastViewedAt ?? updatedAt` makes them look "viewed",
+      // but if anything pushes updatedAt forward they'd suddenly look unread
+      // even though the user has clearly seen them).
+      const needsBackfill = sessions.filter(s => s.lastViewedAt == null);
+      if (needsBackfill.length > 0 && !cancelled) {
+        const now = Date.now();
+        await Promise.all(
+          needsBackfill.map(s =>
+            dbPatchSessionMeta(activeProjectPath, s.id, { lastViewedAt: s.updatedAt || now }).catch(() => {}),
+          ),
+        );
+        for (const s of needsBackfill) {
+          if (s.lastViewedAt == null) s.lastViewedAt = s.updatedAt || now;
+        }
+      }
       if (!cancelled) {
         updateWorkspace(activeProjectPath, ws => ({ ...ws, sessions }));
+        // Seed the in-memory suspendedScopes set from any persisted markers
+        // so the yellow indicator survives an app restart. (The backend
+        // doesn't restore live processes; sessions stay "suspended" until
+        // the user sends a message that respawns them.)
+        const reseed = sessions.filter(s => s.scopeSuspended).map(s => `${activeProjectPath}:${s.id}`);
+        if (reseed.length > 0) {
+          setSuspendedScopes(prev => {
+            const next = new Set(prev);
+            for (const k of reseed) next.add(k);
+            return next;
+          });
+        }
+      }
+      // Handle a deferred "switch to this workspace AND focus this session"
+      // request (currently only fired by ApprovalBanner clicks).
+      const pending = pendingSessionAfterSwitchRef.current;
+      if (!cancelled && pending && pending.projectPath === activeProjectPath) {
+        pendingSessionAfterSwitchRef.current = null;
+        const target = sessions.find(s => s.id === pending.sessionId);
+        if (target) handleSelectSession(pending.sessionId);
       }
     })();
     return () => { cancelled = true; };
@@ -1939,6 +1980,13 @@ export default function App() {
       }
       if (msg.type === 'scope_suspended') {
         setSuspendedScopes(prev => prev.has(scopeKey) ? prev : new Set(prev).add(scopeKey));
+        // Persist so the yellow indicator survives an app restart. Regular
+        // chats use scope === sessionId; the legacy 'chat' default scope
+        // isn't backed by a session row and we just skip persistence.
+        const scope = msg.scope || 'chat';
+        if (scope !== 'chat') {
+          void dbPatchSessionMeta(msg.projectPath, scope, { scopeSuspended: true }).catch(() => {});
+        }
         return;
       }
       if (msg.type === 'streaming_start') {
@@ -1958,6 +2006,10 @@ export default function App() {
           next.delete(scopeKey);
           return next;
         });
+        const scope = msg.scope || 'chat';
+        if (scope !== 'chat') {
+          void dbPatchSessionMeta(msg.projectPath, scope, { scopeSuspended: false }).catch(() => {});
+        }
       }
       // Orchestrator tool drift observability (Task 7).
       // claude.ts forwards assistant messages whose `content` may contain
@@ -2907,10 +2959,19 @@ export default function App() {
 
   const handleUpdateSessions = useCallback((updated: ChatSession[]) => {
     if (!activeProjectPath) return;
-    updateWorkspace(activeProjectPath, ws => ({
-      ...ws,
-      sessions: updated,
-    }));
+    updateWorkspace(activeProjectPath, ws => {
+      // Drop firstUserPersistRef + buffered messages for any session that
+      // disappeared from the list (typically: deletes from the sidebar).
+      // Otherwise the Set grows unbounded as users churn through chats.
+      const nextIds = new Set(updated.map(s => s.id));
+      for (const id of Array.from(firstUserPersistRef.current)) {
+        if (!nextIds.has(id)) firstUserPersistRef.current.delete(id);
+      }
+      for (const id of Array.from(taskMessagesBufferRef.current.keys())) {
+        if (!nextIds.has(id)) taskMessagesBufferRef.current.delete(id);
+      }
+      return { ...ws, sessions: updated };
+    });
   }, [activeProjectPath, updateWorkspace]);
 
   const saveClaudeSetting = (key: string, value: any) => {
@@ -3819,12 +3880,30 @@ export default function App() {
     prevAwaitingRef.current = awaitingSessionIds;
   }, [streamingSessionIds, awaitingSessionIds, sessions, activeSession?.id]);
 
+  // Surface session-level unread/error state up to the workspace level so the
+  // TitleBar workspace switcher shows the green '!' even when the workspace
+  // isn't actively busy. Mirrors how approvalSessions.keys() rolls per-session
+  // approvals up to per-workspace badges.
+  const completedWorkspacesWithUnread = useMemo(() => {
+    const next = new Set(completedWorkspaces);
+    const focused = activeProjectPath;
+    for (const [wsPath, ws] of workspaces) {
+      const focusedSessionId = wsPath === focused ? activeSession?.id : undefined;
+      for (const s of ws.sessions) {
+        if (s.id === focusedSessionId) continue;
+        if (s.updatedAt > (s.lastViewedAt ?? s.updatedAt)) { next.add(wsPath); break; }
+        if (s.lastTurnErrored) { next.add(wsPath); break; }
+      }
+    }
+    return next;
+  }, [completedWorkspaces, workspaces, activeProjectPath, activeSession?.id]);
+
   return (
     <div className="app">
       <TitleBar
         projectPath={projectPath}
         onProjectChange={handleProjectSwitch}
-        completedWorkspaces={completedWorkspaces}
+        completedWorkspaces={completedWorkspacesWithUnread}
         busyWorkspaces={busyWorkspaces}
         approvalWorkspaces={new Set(approvalSessions.keys())}
         metaWorkspaces={metaWorkspaces}
@@ -3889,12 +3968,21 @@ export default function App() {
         }}
       />
       <ApprovalBanner
-        approvalWorkspaces={new Map(Array.from(approvalSessions.entries()).flatMap(([k, inner]) => {
-          const first = inner.values().next().value;
-          return first ? [[k, first] as [string, PendingApproval]] : [];
-        }))}
+        approvals={Array.from(approvalSessions.entries()).flatMap(([projectPath, inner]) =>
+          Array.from(inner.entries()).map(([sessionId, approval]) => ({ projectPath, sessionId, approval }))
+        )}
         currentProjectPath={projectPath}
-        onSwitchToWorkspace={handleProjectSwitch}
+        onSwitchToWorkspace={(targetPath, sessionId) => {
+          if (sessionId && targetPath !== activeProjectPath) {
+            // Defer the session-select until the session list for the new
+            // workspace has loaded (see the activeProjectPath effect).
+            pendingSessionAfterSwitchRef.current = { projectPath: targetPath, sessionId };
+          } else if (sessionId && activeSession?.id !== sessionId) {
+            // Same workspace, just hop sessions.
+            handleSelectSession(sessionId);
+          }
+          handleProjectSwitch(targetPath);
+        }}
       />
       <div className="app-body">
         <NavBar activeSidebar={sidebarOpen} onToggle={toggleSidebar} gitChangeCount={gitChangeCount} swarmApprovalCount={swarmApprovalCount} chatNotificationCount={chatNotificationCount} />
