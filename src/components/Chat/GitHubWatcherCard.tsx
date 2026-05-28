@@ -50,6 +50,17 @@ interface JobState {
   startedAt?: string;
   completedAt?: string;
   steps: JobStep[];
+  needs?: string[];
+  synthetic?: boolean;
+  level?: number;
+  defKey?: string;
+  defIndex?: number;
+}
+
+interface WorkflowJobDef {
+  key: string;
+  name?: string;
+  needs: string[];
 }
 
 const POLL_ACTIVE_MS = 5000;
@@ -92,9 +103,209 @@ function fmtClock(iso?: string): string {
   return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
 }
 
+// Cached workflow YAML parses, keyed by `${owner}/${repo}@${sha}:${path}`. A given
+// commit's workflow file is immutable, so we never need to refetch it during polling.
+const WORKFLOW_CACHE = new Map<string, WorkflowJobDef[]>();
+const WORKFLOW_INFLIGHT = new Map<string, Promise<WorkflowJobDef[] | null>>();
+
+// Minimal YAML parser for GitHub Actions `jobs:` blocks. Extracts job key, optional
+// `name:`, and `needs:` (string, inline array, or multi-line array). Not a general
+// YAML parser — covers the shapes actually used by GH workflows.
+function parseWorkflowJobs(yaml: string): WorkflowJobDef[] {
+  const lines = yaml.split(/\r?\n/);
+  // Find `jobs:` at column 0.
+  let i = 0;
+  while (i < lines.length && !/^jobs:\s*$/.test(lines[i])) i++;
+  if (i >= lines.length) return [];
+  i++;
+  const defs: WorkflowJobDef[] = [];
+  // Determine job-key indent from the first non-blank, non-comment child line.
+  let jobIndent = -1;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^\s*(#|$)/.test(line)) { i++; continue; }
+    const indent = line.match(/^(\s*)/)![1].length;
+    if (indent === 0) break;
+    if (jobIndent < 0) jobIndent = indent;
+    if (indent !== jobIndent) { i++; continue; }
+    const keyMatch = line.match(/^\s*([A-Za-z0-9_-]+)\s*:\s*$/);
+    if (!keyMatch) { i++; break; }
+    const key = keyMatch[1];
+    i++;
+    const def: WorkflowJobDef = { key, needs: [] };
+    while (i < lines.length) {
+      const sub = lines[i];
+      if (/^\s*(#|$)/.test(sub)) { i++; continue; }
+      const subIndent = sub.match(/^(\s*)/)![1].length;
+      if (subIndent <= jobIndent) break;
+      const nameMatch = sub.match(/^\s*name\s*:\s*(.+?)\s*$/);
+      if (nameMatch && def.name === undefined) {
+        def.name = nameMatch[1].replace(/^["']|["']$/g, '');
+      }
+      const needsInline = sub.match(/^\s*needs\s*:\s*(.+)$/);
+      if (needsInline) {
+        const v = needsInline[1].trim();
+        if (v.startsWith('[')) {
+          def.needs = v.replace(/^\[|\]$/g, '').split(',').map(s => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+        } else {
+          def.needs = [v.replace(/^["']|["']$/g, '')];
+        }
+      } else if (/^\s*needs\s*:\s*$/.test(sub)) {
+        i++;
+        while (i < lines.length) {
+          const item = lines[i];
+          if (/^\s*(#|$)/.test(item)) { i++; continue; }
+          const itemMatch = item.match(/^(\s*)-\s*(.+?)\s*$/);
+          if (!itemMatch) break;
+          if (itemMatch[1].length <= subIndent) break;
+          def.needs.push(itemMatch[2].replace(/^["']|["']$/g, ''));
+          i++;
+        }
+        continue;
+      }
+      i++;
+    }
+    defs.push(def);
+  }
+  return defs;
+}
+
+function decodeBase64Utf8(b64: string): string {
+  const clean = b64.replace(/\s+/g, '');
+  const bin = atob(clean);
+  const bytes = new Uint8Array(bin.length);
+  for (let j = 0; j < bin.length; j++) bytes[j] = bin.charCodeAt(j);
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
+async function loadWorkflowDefs(
+  owner: string,
+  repo: string,
+  path: string,
+  sha: string,
+  fetchJson: (p: string) => Promise<any>,
+): Promise<WorkflowJobDef[] | null> {
+  const key = `${owner}/${repo}@${sha}:${path}`;
+  const cached = WORKFLOW_CACHE.get(key);
+  if (cached) return cached;
+  const inflight = WORKFLOW_INFLIGHT.get(key);
+  if (inflight) return inflight;
+  const p = (async () => {
+    try {
+      const body = await fetchJson(`/repos/${owner}/${repo}/contents/${path}?ref=${sha}`);
+      const content = typeof body?.content === 'string' ? body.content : '';
+      if (!content) return null;
+      const yaml = body.encoding === 'base64' ? decodeBase64Utf8(content) : content;
+      const defs = parseWorkflowJobs(yaml);
+      WORKFLOW_CACHE.set(key, defs);
+      return defs;
+    } catch {
+      return null;
+    } finally {
+      WORKFLOW_INFLIGHT.delete(key);
+    }
+  })();
+  WORKFLOW_INFLIGHT.set(key, p);
+  return p;
+}
+
+// Merge YAML-declared jobs into the live job list and tag each with a DAG `level`
+// derived from `needs:` so we can render columns left-to-right by dependency depth.
+// Matrix-expanded live jobs ("Tests (linux)") are mapped to their YAML parent by
+// prefix so they inherit the right level + needs.
+function mergeWithWorkflow(live: JobState[], defs: WorkflowJobDef[]): JobState[] {
+  if (defs.length === 0) return live.map(j => ({ ...j, level: 0 }));
+
+  const defByKey = new Map<string, WorkflowJobDef>();
+  const defIndexByKey = new Map<string, number>();
+  for (let i = 0; i < defs.length; i++) {
+    defByKey.set(defs[i].key, defs[i]);
+    defIndexByKey.set(defs[i].key, i);
+  }
+  const defByDisplay = new Map<string, WorkflowJobDef>();
+  for (const d of defs) {
+    defByDisplay.set(d.key, d);
+    if (d.name) defByDisplay.set(d.name, d);
+  }
+
+  // Memoized topological depth: a job's level is max(deps) + 1, or 0 if no deps.
+  const levelByKey = new Map<string, number>();
+  const visiting = new Set<string>();
+  function levelOf(key: string): number {
+    const cached = levelByKey.get(key);
+    if (cached !== undefined) return cached;
+    if (visiting.has(key)) return 0; // cycle guard
+    visiting.add(key);
+    const def = defByKey.get(key);
+    let lvl = 0;
+    if (def && def.needs.length > 0) {
+      let max = -1;
+      for (const dep of def.needs) max = Math.max(max, levelOf(dep));
+      lvl = max + 1;
+    }
+    levelByKey.set(key, lvl);
+    visiting.delete(key);
+    return lvl;
+  }
+  for (const d of defs) levelOf(d.key);
+
+  function defForLive(name: string): WorkflowJobDef | undefined {
+    const exact = defByDisplay.get(name);
+    if (exact) return exact;
+    // GH renders matrix jobs as "<job name> (<combo>)". Pick the longest prefix match.
+    let best: WorkflowJobDef | undefined;
+    for (const d of defs) {
+      const display = d.name ?? d.key;
+      if (name.startsWith(display + ' (')) {
+        if (!best || (display.length > (best.name ?? best.key).length)) best = d;
+      }
+    }
+    return best;
+  }
+
+  const matchedDefs = new Set<string>();
+  const out: JobState[] = [];
+  for (const j of live) {
+    const d = defForLive(j.name);
+    if (d) {
+      matchedDefs.add(d.key);
+      out.push({
+        ...j,
+        needs: d.needs,
+        level: levelByKey.get(d.key) ?? 0,
+        defKey: d.key,
+        defIndex: defIndexByKey.get(d.key),
+      });
+    } else {
+      // Jobs that don't map to any YAML def (reusable-workflow callers etc.) — park at
+      // level 0 and at the end of their column via a high defIndex.
+      out.push({ ...j, level: 0, defIndex: Number.POSITIVE_INFINITY });
+    }
+  }
+  let syntheticId = -1;
+  for (let i = 0; i < defs.length; i++) {
+    const d = defs[i];
+    if (matchedDefs.has(d.key)) continue;
+    out.push({
+      id: syntheticId--,
+      name: d.name ?? d.key,
+      status: 'waiting',
+      conclusion: null,
+      steps: [],
+      needs: d.needs,
+      synthetic: true,
+      level: levelByKey.get(d.key) ?? 0,
+      defKey: d.key,
+      defIndex: i,
+    });
+  }
+  return out;
+}
+
 function jobIcon(j: JobState): { Icon: React.ComponentType<{ size?: number }>; color: string; live: boolean } {
   if (j.status === 'in_progress') return { Icon: CircleDot, color: 'var(--accent, #c7910c)', live: true };
-  if (j.status === 'queued' || j.status === 'waiting') return { Icon: Clock, color: 'var(--text-muted, #8a9099)', live: false };
+  if (j.status === 'waiting') return { Icon: Circle, color: 'var(--text-muted, #8a9099)', live: false };
+  if (j.status === 'queued') return { Icon: Clock, color: 'var(--text-muted, #8a9099)', live: false };
   if (j.status === 'completed') {
     if (j.conclusion === 'success') return { Icon: CheckCircle2, color: '#3fb950', live: false };
     if (j.conclusion === 'failure' || j.conclusion === 'timed_out') return { Icon: XCircle, color: '#f85149', live: false };
@@ -188,25 +399,30 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
         startedAt: status === 'queued' ? undefined : new Date(Date.now() - 20_000).toISOString(),
         completedAt: status === 'completed' ? new Date().toISOString() : undefined,
         steps: mkSteps(running, total, failedAt),
+        // Tests runs first (no deps), then build matrix gates on tests — mirrors the
+        // shape of the real release.yml so column ordering reads correctly in dev.
+        level: name.startsWith('Tests') ? 0 : 1,
+        needs: name.startsWith('Build') ? ['test'] : undefined,
+        defIndex: name.startsWith('Tests') ? 0 : 1,
       });
       const jobsSeq: JobState[][] = [
         [
-          mkJob(1, 'Build (linux)', 'queued', null, 0),
-          mkJob(2, 'Build (windows)', 'queued', null, 0),
-          mkJob(3, 'Build (macos)', 'queued', null, 0),
-          mkJob(4, 'Tests', 'queued', null, 0),
+          mkJob(4, 'Tests', 'in_progress', null, 3),
+          mkJob(1, 'Build (linux)', 'waiting', null, 0),
+          mkJob(2, 'Build (windows)', 'waiting', null, 0),
+          mkJob(3, 'Build (macos)', 'waiting', null, 0),
         ],
         [
+          mkJob(4, 'Tests', 'completed', 'success', 6),
           mkJob(1, 'Build (linux)', 'in_progress', null, 4),
           mkJob(2, 'Build (windows)', 'in_progress', null, 3),
           mkJob(3, 'Build (macos)', 'in_progress', null, 2),
-          mkJob(4, 'Tests', 'queued', null, 0),
         ],
         [
+          mkJob(4, 'Tests', 'completed', 'success', 6),
           mkJob(1, 'Build (linux)', 'completed', 'success', 6),
           mkJob(2, 'Build (windows)', 'completed', 'success', 6),
-          mkJob(3, 'Build (macos)', outcome === 'failure' ? 'completed' : 'completed', outcome === 'failure' ? 'failure' : 'success', 6, 6, outcome === 'failure' ? 4 : undefined),
-          mkJob(4, 'Tests', 'completed', outcome === 'failure' ? 'cancelled' : 'success', 6),
+          mkJob(3, 'Build (macos)', 'completed', outcome === 'failure' ? 'failure' : 'success', 6, 6, outcome === 'failure' ? 4 : undefined),
         ],
       ];
       const seq: { run: RunState; jobs: JobState[] }[] = [
@@ -268,7 +484,7 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
           startedAt: runJson.run_started_at,
           updatedAt: runJson.updated_at,
         };
-        const nextJobs: JobState[] = Array.isArray(jobsJson?.jobs)
+        const liveJobs: JobState[] = Array.isArray(jobsJson?.jobs)
           ? jobsJson.jobs.map((j: any) => ({
               id: j.id,
               name: j.name,
@@ -284,6 +500,15 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
               })) : [],
             }))
           : [];
+        let nextJobs = liveJobs;
+        // While the run is still active, fetch+parse the workflow YAML so jobs gated
+        // by `needs:` (which GH's /jobs endpoint omits until they're scheduled) show
+        // up as 'waiting' placeholders. Skip for completed runs — the API list is final.
+        if (nextRun.status !== 'completed' && runJson.path && runJson.head_sha) {
+          const defs = await loadWorkflowDefs(target.owner, target.repo, runJson.path, runJson.head_sha, fetchJson);
+          if (cancelled) return;
+          if (defs) nextJobs = mergeWithWorkflow(liveJobs, defs);
+        }
         setRun(nextRun);
         setJobs(nextJobs);
         STATUS_CACHE.set(target.url, { run: nextRun, jobs: nextJobs });
@@ -407,57 +632,84 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
             )}
           </div>
         )}
-        {jobs && jobs.length > 0 && (
-          <div className="gh-watcher-pipeline" onClick={(e) => e.stopPropagation()}>
-            {jobs.map((j) => {
-              const { Icon, color, live } = jobIcon(j);
-              const step = j.status === 'in_progress' ? activeStepName(j) : undefined;
-              const dur = jobDuration(j);
-              const doneSteps = j.steps.filter(s => s.status === 'completed').length;
-              const total = j.steps.length;
-              const progressPct = total > 0 ? Math.round((doneSteps / total) * 100) : 0;
-              const stateLabel =
-                j.status === 'in_progress' ? (step ?? 'Running…')
-                : j.status === 'queued' || j.status === 'waiting' ? 'Queued'
-                : j.status === 'completed'
-                  ? (j.conclusion === 'success' ? 'Passed'
-                    : j.conclusion === 'failure' || j.conclusion === 'timed_out' ? 'Failed'
-                    : j.conclusion === 'cancelled' ? 'Cancelled'
-                    : j.conclusion === 'skipped' ? 'Skipped'
-                    : 'Completed')
-                : '';
-              return (
-                <div
-                  key={j.id}
-                  className={`gh-watcher-pipe-job${live ? ' gh-watcher-pipe-job-live' : ''}`}
-                  data-status={j.status}
-                  data-conclusion={j.conclusion ?? ''}
-                  style={{ '--job-color': color } as React.CSSProperties}
-                >
-                  <div className="gh-watcher-pipe-head">
-                    <span className="gh-watcher-pipe-icon" aria-hidden>
-                      <Icon size={14} />
-                      {live && <span className="gh-watcher-pipe-pulse" aria-hidden />}
-                    </span>
-                    <span className="gh-watcher-pipe-name" title={j.name}>{j.name}</span>
-                    {dur && <span className="gh-watcher-pipe-dur">{dur}</span>}
-                  </div>
-                  {total > 0 && (
-                    <div className="gh-watcher-pipe-bar" aria-hidden>
-                      <div className="gh-watcher-pipe-bar-fill" style={{ width: `${progressPct}%` }} />
-                    </div>
-                  )}
-                  <div className="gh-watcher-pipe-state" title={stateLabel}>
-                    {stateLabel}
-                    {total > 0 && j.status !== 'queued' && j.status !== 'waiting' && (
-                      <span className="gh-watcher-pipe-steps"> · {doneSteps}/{total}</span>
-                    )}
-                  </div>
+        {jobs && jobs.length > 0 && (() => {
+          const byLevel = new Map<number, JobState[]>();
+          for (const j of jobs) {
+            const l = j.level ?? 0;
+            const bucket = byLevel.get(l);
+            if (bucket) bucket.push(j);
+            else byLevel.set(l, [j]);
+          }
+          // Stable column ordering: by YAML def index, then by name (keeps matrix
+          // children "Tests (linux)" / "Tests (windows)" in alpha order regardless of
+          // which finished first).
+          for (const bucket of byLevel.values()) {
+            bucket.sort((a, b) => {
+              const ai = a.defIndex ?? Number.POSITIVE_INFINITY;
+              const bi = b.defIndex ?? Number.POSITIVE_INFINITY;
+              if (ai !== bi) return ai - bi;
+              return a.name.localeCompare(b.name);
+            });
+          }
+          const levels = Array.from(byLevel.keys()).sort((a, b) => a - b);
+          return (
+            <div className="gh-watcher-pipeline" onClick={(e) => e.stopPropagation()}>
+              {levels.map((level, levelIdx) => (
+                <div key={level} className="gh-watcher-pipe-col" data-level={level}>
+                  {levelIdx > 0 && <span className="gh-watcher-pipe-arrow" aria-hidden />}
+                  {byLevel.get(level)!.map((j) => {
+                    const { Icon, color, live } = jobIcon(j);
+                    const step = j.status === 'in_progress' ? activeStepName(j) : undefined;
+                    const dur = jobDuration(j);
+                    const doneSteps = j.steps.filter(s => s.status === 'completed').length;
+                    const total = j.steps.length;
+                    const progressPct = total > 0 ? Math.round((doneSteps / total) * 100) : 0;
+                    const stateLabel =
+                      j.status === 'in_progress' ? (step ?? 'Running…')
+                      : j.status === 'waiting' ? (j.needs && j.needs.length > 0 ? `Needs ${j.needs.join(', ')}` : 'Waiting')
+                      : j.status === 'queued' ? 'Queued'
+                      : j.status === 'completed'
+                        ? (j.conclusion === 'success' ? 'Passed'
+                          : j.conclusion === 'failure' || j.conclusion === 'timed_out' ? 'Failed'
+                          : j.conclusion === 'cancelled' ? 'Cancelled'
+                          : j.conclusion === 'skipped' ? 'Skipped'
+                          : 'Completed')
+                      : '';
+                    return (
+                      <div
+                        key={j.id}
+                        className={`gh-watcher-pipe-job${live ? ' gh-watcher-pipe-job-live' : ''}`}
+                        data-status={j.status}
+                        data-conclusion={j.conclusion ?? ''}
+                        style={{ '--job-color': color } as React.CSSProperties}
+                      >
+                        <div className="gh-watcher-pipe-head">
+                          <span className="gh-watcher-pipe-icon" aria-hidden>
+                            <Icon size={14} />
+                            {live && <span className="gh-watcher-pipe-pulse" aria-hidden />}
+                          </span>
+                          <span className="gh-watcher-pipe-name" title={j.name}>{j.name}</span>
+                          {dur && <span className="gh-watcher-pipe-dur">{dur}</span>}
+                        </div>
+                        {total > 0 && (
+                          <div className="gh-watcher-pipe-bar" aria-hidden>
+                            <div className="gh-watcher-pipe-bar-fill" style={{ width: `${progressPct}%` }} />
+                          </div>
+                        )}
+                        <div className="gh-watcher-pipe-state" title={stateLabel}>
+                          {stateLabel}
+                          {total > 0 && j.status !== 'queued' && j.status !== 'waiting' && (
+                            <span className="gh-watcher-pipe-steps"> · {doneSteps}/{total}</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
-          </div>
-        )}
+              ))}
+            </div>
+          );
+        })()}
         {error && <div className="gh-watcher-error">{error}</div>}
         {!error && !run && <div className="gh-watcher-pending">Watching…</div>}
         <div className="gh-watcher-foot">
@@ -472,6 +724,16 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
         </div>
       </div>
       <style>{`
+        .chat-msg-watcher-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          align-items: flex-start;
+        }
+        .chat-msg-watcher-row .gh-watcher {
+          margin: 0;
+          flex: 1 1 320px;
+        }
         .gh-watcher {
           position: relative;
           width: 100%;
@@ -506,22 +768,22 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
           0% { background-position: 0% 0%; }
           100% { background-position: 0% 240%; }
         }
-        .gh-watcher-inner { padding: 14px 18px 14px 22px; }
+        .gh-watcher-inner { padding: 10px 12px 10px 14px; }
         .gh-watcher-head {
           display: grid;
           grid-template-columns: max-content 1fr max-content;
           align-items: center;
-          gap: 14px;
+          gap: 8px;
         }
         .gh-watcher-badge {
           position: relative;
-          display: inline-flex; align-items: center; gap: 7px;
-          padding: 6px 11px;
+          display: inline-flex; align-items: center; gap: 5px;
+          padding: 4px 8px;
           background: color-mix(in srgb, var(--gh-accent) 14%, var(--bg-input, #161a1f));
           border: 1px solid color-mix(in srgb, var(--gh-accent) 35%, transparent);
           color: var(--gh-accent);
           border-radius: 999px;
-          font-size: 12px;
+          font-size: 11px;
           font-weight: 600;
           letter-spacing: 0.02em;
           flex-shrink: 0;
@@ -571,13 +833,17 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
           letter-spacing: 0;
         }
         .gh-watcher-title {
-          margin: 10px 0 0;
-          font-size: 16px;
-          line-height: 1.35;
+          margin: 8px 0 0;
+          font-size: 13.5px;
+          line-height: 1.3;
           font-weight: 600;
           color: var(--text-primary, #e8ecef);
           letter-spacing: -0.005em;
           word-break: break-word;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
         }
         .gh-watcher-times {
           display: flex; flex-direction: column; align-items: flex-end; gap: 2px;
@@ -587,13 +853,13 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
         }
         .gh-watcher-duration { color: var(--gh-accent); font-weight: 500; }
         .gh-watcher-chips {
-          display: flex; flex-wrap: wrap; gap: 6px;
-          margin-top: 10px;
+          display: flex; flex-wrap: wrap; gap: 4px;
+          margin-top: 8px;
         }
         .gh-watcher-chip {
-          display: inline-flex; align-items: center; gap: 5px;
-          padding: 3px 8px;
-          font-size: 11.5px;
+          display: inline-flex; align-items: center; gap: 4px;
+          padding: 2px 6px;
+          font-size: 10.5px;
           background: var(--bg-input, #161a1f);
           border: 1px solid var(--border-color, rgba(255,255,255,0.06));
           border-radius: 5px;
@@ -610,8 +876,8 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
         .gh-watcher-chip-actor img {
           width: 14px; height: 14px; border-radius: 50%; object-fit: cover;
         }
-        .gh-watcher-pending { color: var(--text-muted, #8a9099); margin-top: 12px; font-size: 12.5px; }
-        .gh-watcher-foot { margin-top: 12px; }
+        .gh-watcher-pending { color: var(--text-muted, #8a9099); margin-top: 8px; font-size: 11.5px; }
+        .gh-watcher-foot { margin-top: 8px; }
         .gh-watcher-error {
           color: #f85149;
           background: rgba(248, 81, 73, 0.08);
@@ -635,23 +901,63 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
         .gh-watcher-cta:hover { background: color-mix(in srgb, var(--gh-accent) 28%, transparent); }
 
         .gh-watcher-pipeline {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-          gap: 10px;
-          margin-top: 14px;
+          display: flex;
+          flex-direction: row;
+          justify-content: center;
+          align-items: stretch;
+          gap: 28px;
+          margin-top: 10px;
           cursor: default;
+          overflow-x: auto;
+          padding-bottom: 2px;
+        }
+        .gh-watcher-pipe-col {
+          position: relative;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          gap: 6px;
+          min-width: 140px;
+          max-width: 200px;
+          flex: 1 1 160px;
+        }
+        .gh-watcher-pipe-arrow {
+          position: absolute;
+          left: -28px;
+          top: 50%;
+          width: 28px;
+          height: 1px;
+          background: color-mix(in srgb, var(--text-muted, #8a9099) 50%, transparent);
+          transform: translateY(-50%);
+          pointer-events: none;
+        }
+        .gh-watcher-pipe-arrow::after {
+          content: '';
+          position: absolute;
+          right: -1px;
+          top: 50%;
+          width: 5px;
+          height: 5px;
+          border-top: 1.5px solid var(--text-muted, #8a9099);
+          border-right: 1.5px solid var(--text-muted, #8a9099);
+          transform: translateY(-50%) rotate(45deg);
+          opacity: 0.7;
         }
         .gh-watcher-pipe-job {
           position: relative;
           display: flex;
           flex-direction: column;
-          gap: 8px;
-          padding: 10px 12px 11px;
+          gap: 5px;
+          padding: 7px 9px 8px;
           background: color-mix(in srgb, var(--bg-input, #161a1f) 70%, transparent);
           border: 1px solid var(--border-color, rgba(255,255,255,0.08));
           border-radius: 8px;
           min-width: 0;
           overflow: hidden;
+        }
+        .gh-watcher-pipe-job[data-status="waiting"] {
+          opacity: 0.55;
+          border-style: dashed;
         }
         .gh-watcher-pipe-job[data-status="in_progress"] {
           border-color: color-mix(in srgb, var(--job-color) 50%, transparent);

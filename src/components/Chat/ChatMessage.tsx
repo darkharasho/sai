@@ -287,6 +287,7 @@ function ChatMessage({
   renderMessage,
   metaRuntime,
   onAnswerQuestion,
+  watcherUrlAllowlist,
 }: {
   message: ChatMessageType;
   projectPath?: string;
@@ -306,6 +307,9 @@ function ChatMessage({
   metaRuntime?: MetaWorkspaceRuntime | null;
   /** Submit answers for an AskUserQuestion tool call. */
   onAnswerQuestion?: (toolUseId: string, answers: Record<string, string | string[]>) => Promise<void> | void;
+  /** URLs this message is allowed to render watcher cards for. Undefined = render none;
+   *  parent computes per-URL "first message" ownership to prevent duplicate cards. */
+  watcherUrlAllowlist?: Set<string>;
 }) {
   // Allow callers to substitute the entire message render for special meta
   // types (e.g. inline approval cards). Done before any of the normal layout
@@ -807,7 +811,12 @@ function ChatMessage({
 
   const isAssistantStreaming = isStreaming && message.role === 'assistant';
   const isTyping = typewriterActive && displayLen < rawAssistantContent.length;
-  const watcherTargets = detectWatchTargets(message);
+  // When the parent passes an allowlist (main chat), only render watchers it explicitly
+  // owns — prevents duplicates when the same run URL shows up in multiple messages. Other
+  // callers (orchestrator, tests) don't pass an allowlist and get the full set.
+  const watcherTargets = watcherUrlAllowlist
+    ? detectWatchTargets(message).filter(t => watcherUrlAllowlist.has(t.url))
+    : detectWatchTargets(message);
 
   return (
     <>
@@ -1259,5 +1268,6 @@ export default memo(ChatMessage, (prev, next) =>
   prev.onClearContext === next.onClearContext &&
   prev.renderToolCall === next.renderToolCall &&
   prev.renderMessage === next.renderMessage &&
-  prev.metaRuntime === next.metaRuntime
+  prev.metaRuntime === next.metaRuntime &&
+  prev.watcherUrlAllowlist === next.watcherUrlAllowlist
 );

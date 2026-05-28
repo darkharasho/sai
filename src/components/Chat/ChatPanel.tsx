@@ -279,6 +279,9 @@ function GeminiThinkingAnimation({ loadingPhrases = 'all' }: { loadingPhrases?: 
 }
 
 import ChatMessage from './ChatMessage';
+import { detectWatchTargets } from './githubWatcher';
+
+const EMPTY_URL_SET: Set<string> = new Set();
 import ChatInput, { type ContextItem } from './ChatInput';
 import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, QueuedMessage, TerminalTab } from '../../types';
 import type { MetaWorkspaceRuntime } from '../../types';
@@ -1405,6 +1408,26 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     }
     return null;
   }, [messages, turnStartIndex]);
+
+  // Each watcher URL renders on the first message that mentions it. A reply that
+  // re-quotes the URL (or a tool call that re-fetches the run) would otherwise spawn
+  // a duplicate card lower in the chat.
+  const watcherUrlsByMessageId = useMemo(() => {
+    const owner = new Map<string, Set<string>>();
+    const seen = new Set<string>();
+    for (const m of messages) {
+      const targets = detectWatchTargets(m);
+      if (targets.length === 0) continue;
+      const owned = new Set<string>();
+      for (const t of targets) {
+        if (seen.has(t.url)) continue;
+        seen.add(t.url);
+        owned.add(t.url);
+      }
+      if (owned.size > 0) owner.set(m.id, owned);
+    }
+    return owner;
+  }, [messages]);
   const showThinking = isStreaming && !awaitingQuestion;
   const hasHiddenMessages = renderStart > 0;
 
@@ -1768,7 +1791,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
                     />
                   </div>
                 )
-                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} renderToolCall={renderToolCall} renderMessage={renderMessage} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} />
+                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} renderToolCall={renderToolCall} renderMessage={renderMessage} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} watcherUrlAllowlist={watcherUrlsByMessageId.get(msg.id) ?? EMPTY_URL_SET} />
               )}
           </>
         )}
