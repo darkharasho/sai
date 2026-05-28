@@ -274,7 +274,19 @@ export default function Chat({ client, statusStore, active, onActiveChange, foll
       }
       if (t === 'result' || t === 'done') {
         setLocalStreaming(false);
-        setMessages((arr) => arr.map((m, i) => i === arr.length - 1 && m.streaming ? { ...m, streaming: false } : m));
+        // Stamp duration on the last assistant bubble so the header label
+        // matches the desktop's `[Nms]` style. Only `result` envelopes
+        // carry duration_ms — `done` is just a state signal.
+        const durationMs = t === 'result' && typeof (msg as any).duration_ms === 'number'
+          ? (msg as any).duration_ms
+          : undefined;
+        setMessages((arr) => arr.map((m, i) => {
+          if (i !== arr.length - 1) return m;
+          if (m.role !== 'assistant') return m;
+          const next = { ...m, streaming: false };
+          if (durationMs != null && m.durationMs == null) next.durationMs = durationMs;
+          return next;
+        }));
         return;
       }
       if (t === 'approval_needed') {

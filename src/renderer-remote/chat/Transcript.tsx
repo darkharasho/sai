@@ -1,7 +1,9 @@
 import { useEffect, useRef } from 'react';
+import { Terminal } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import ToolCard from './ToolCard';
+import SaiLogo from '../branding/SaiLogo';
 import ThinkingAnimation from '../branding/ThinkingAnimation';
 import { useVisualViewportHeight } from '../lib/useVisualViewport';
 
@@ -62,6 +64,9 @@ export interface TranscriptMessage {
   toolResult?: string | Record<string, unknown>;
   toolStatus?: 'running' | 'done' | 'error';
   streaming?: boolean;
+  /** Set on the assistant's terminal envelope (`result`) so we can render
+   *  the desktop-style `[Nms]` tag above the bubble body. */
+  durationMs?: number;
 }
 
 interface Props {
@@ -204,42 +209,30 @@ export default function Transcript({ messages, streaming = false, awaitingQuesti
         }
 
         const isUser = m.role === 'user';
-        const bubbleStyle: React.CSSProperties = {
-          alignSelf: isUser ? 'flex-end' : 'flex-start',
-          maxWidth: '88%',
-          minWidth: 0,
-          flexShrink: 0,
-          padding: '10px 14px',
-          fontSize: 14,
-          lineHeight: 1.5,
-          background: isUser ? 'var(--accent)' : 'var(--bg-secondary)',
-          color: isUser ? '#000' : 'var(--text)',
-          border: isUser ? '1px solid var(--accent)' : '1px solid var(--border)',
-          borderRadius: 12,
-          // Soften one corner to mark direction (chat-bubble convention)
-          borderBottomRightRadius: isUser ? 4 : 12,
-          borderBottomLeftRadius: isUser ? 12 : 4,
-        };
+        const formatMs = (ms: number) => ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
 
         return (
-          <div key={m.id} style={bubbleStyle}>
-            {isUser ? (
-              <pre
-                style={{
-                  margin: 0,
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  overflowWrap: 'anywhere',
-                  fontFamily: 'inherit',
-                }}
-              >
-                {m.text}
-              </pre>
-            ) : (
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-                {m.text ?? ''}
-              </ReactMarkdown>
-            )}
+          <div
+            key={m.id}
+            className={`pwa-chat-msg pwa-chat-msg-${m.role}${m.streaming ? ' pwa-chat-msg-streaming' : ''}`}
+          >
+            <div className="pwa-chat-msg-content">
+              {isUser
+                ? <Terminal size={14} color="var(--green)" strokeWidth={2.5} className="pwa-chat-msg-dot" />
+                : <SaiLogo mode="static" size={16} className="pwa-chat-msg-dot" />}
+              <div className="pwa-chat-msg-body">
+                {!isUser && typeof m.durationMs === 'number' && (
+                  <div className="pwa-chat-msg-duration">[{formatMs(m.durationMs)}]</div>
+                )}
+                {isUser ? (
+                  <pre className="pwa-chat-msg-user-text">{m.text}</pre>
+                ) : (
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+                    {m.text ?? ''}
+                  </ReactMarkdown>
+                )}
+              </div>
+            </div>
           </div>
         );
       })}
@@ -254,6 +247,75 @@ export default function Transcript({ messages, streaming = false, awaitingQuesti
           <ThinkingAnimation size={18} />
         </div>
       )}
+      <style>{`
+        .pwa-chat-msg {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          width: 100%;
+          min-width: 0;
+          flex-shrink: 0;
+        }
+        .pwa-chat-msg-content {
+          display: grid;
+          grid-template-columns: 18px 1fr;
+          column-gap: 8px;
+          align-items: flex-start;
+          width: 100%;
+          min-width: 0;
+        }
+        .pwa-chat-msg-dot {
+          margin-top: 2px;
+          flex-shrink: 0;
+        }
+        .pwa-chat-msg-body {
+          min-width: 0;
+          word-break: break-word;
+          overflow-wrap: anywhere;
+          font-size: 14px;
+          line-height: 1.5;
+          color: var(--text);
+        }
+        .pwa-chat-msg-user .pwa-chat-msg-body {
+          color: var(--text);
+        }
+        .pwa-chat-msg-duration {
+          font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+          font-variant-numeric: tabular-nums;
+          font-size: 10px;
+          color: #6b6253;
+          letter-spacing: 0.04em;
+          margin-bottom: 4px;
+        }
+        .pwa-chat-msg-user-text {
+          margin: 0;
+          white-space: pre-wrap;
+          word-break: break-word;
+          overflow-wrap: anywhere;
+          font-family: inherit;
+          font-size: 14px;
+          line-height: 1.5;
+        }
+        .pwa-chat-msg-body p:first-child { margin-top: 0; }
+        .pwa-chat-msg-body p:last-child { margin-bottom: 0; }
+        .pwa-chat-msg-streaming .pwa-chat-msg-body::after {
+          content: '';
+          display: inline-block;
+          width: 0.5em;
+          height: 0.95em;
+          background: var(--accent);
+          vertical-align: -0.15em;
+          margin-left: 3px;
+          animation: pwa-chat-streaming-blink 1s steps(1) infinite;
+        }
+        @keyframes pwa-chat-streaming-blink {
+          0%, 49% { opacity: 1; }
+          50%, 100% { opacity: 0; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .pwa-chat-msg-streaming .pwa-chat-msg-body::after { animation: none; opacity: 1; }
+        }
+      `}</style>
     </div>
   );
 }
