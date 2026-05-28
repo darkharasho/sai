@@ -173,7 +173,7 @@ export default function ChatHistorySidebar({
     }
 
     for (const session of unpinned) {
-      const label = formatSessionDate(session.updatedAt);
+      const label = formatSessionDate(session.createdAt);
       const existing = groups.find(g => g.label === label);
       if (existing) existing.sessions.push(session);
       else groups.push({ label, sessions: [session] });
@@ -417,7 +417,7 @@ export default function ChatHistorySidebar({
                             <div className="chat-history-card-meta">
                               <span>{getMessageCount(session)} msgs</span>
                               <span className="chat-history-meta-dot">&middot;</span>
-                              <span>{formatRelativeTime(session.updatedAt)}</span>
+                              <span>{formatRelativeTime(session.createdAt)}</span>
                             </div>
                           </>
                         );

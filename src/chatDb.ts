@@ -58,7 +58,7 @@ export async function dbGetSessions(projectPath: string): Promise<ChatSession[]>
 
     request.onsuccess = () => {
       const sessions: ChatSession[] = request.result;
-      sessions.sort((a, b) => b.updatedAt - a.updatedAt);
+      sessions.sort((a, b) => b.createdAt - a.createdAt);
       resolve(sessions);
     };
     request.onerror = () => reject(request.error);

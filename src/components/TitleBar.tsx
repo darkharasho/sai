@@ -907,10 +907,11 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         }
         .titlebar-approval-dot {
           display: inline-block;
-          width: 7px;
-          height: 7px;
-          border-radius: 50%;
+          width: 9px;
+          height: 9px;
           background: #f59e0b;
+          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
           margin-left: 6px;
           vertical-align: middle;
           animation: approval-blink 1s ease-in-out infinite;
