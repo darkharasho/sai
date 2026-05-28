@@ -882,14 +882,20 @@ function ChatMessage({
                 return raw;
               })()}</ReactMarkdown>
             )}
-            {message.images && message.images.length > 0 && (
-              <div className="chat-msg-images">
-                {message.images.map((src, i) => (
-                  <img key={i} src={src} alt={`Attached image ${i + 1}`} className="chat-msg-thumb" onClick={() => setLightboxSrc(src)} />
-                ))}
-              </div>
-            )}
           </div>
+        </div>
+      )}
+      {message.images && message.images.length > 0 && (
+        <div className="chat-msg-attachments">
+          {message.images.map((src, i) => (
+            <img
+              key={i}
+              src={src}
+              alt={`Attached image ${i + 1}`}
+              className="chat-msg-attachment"
+              onClick={() => setLightboxSrc(src)}
+            />
+          ))}
         </div>
       )}
       {message.toolCalls && message.toolCalls.length > 0 && (
@@ -1135,23 +1141,27 @@ function ChatMessage({
         .chat-msg-body tr:hover td {
           background: var(--bg-secondary);
         }
-        .chat-msg-images {
+        .chat-msg-attachments {
           display: flex;
           flex-wrap: wrap;
-          gap: 6px;
-          margin-top: 6px;
+          gap: 8px;
+          margin: 8px 0 4px 0;
         }
-        .chat-msg-thumb {
-          max-width: 120px;
-          max-height: 80px;
-          object-fit: cover;
-          border-radius: 6px;
-          border: 1px solid var(--border);
-          cursor: pointer;
-          transition: opacity 0.15s;
+        .chat-msg-attachment {
+          max-width: min(480px, 100%);
+          max-height: 320px;
+          width: auto;
+          height: auto;
+          object-fit: contain;
+          border-radius: 10px;
+          background: var(--bg-secondary, #1a1a1a);
+          cursor: zoom-in;
+          transition: opacity 0.15s, transform 0.15s;
+          display: block;
         }
-        .chat-msg-thumb:hover {
-          opacity: 0.8;
+        .chat-msg-attachment:hover {
+          opacity: 0.92;
+          transform: translateY(-1px);
         }
         .img-modal-overlay {
           position: fixed;

@@ -107,10 +107,19 @@ describe('ChatMessage', () => {
       images: ['data:image/png;base64,abc123'],
     });
     const { container } = render(<ChatMessage message={msg} />);
-    expect(container.querySelector('.chat-msg-images')).toBeTruthy();
-    const img = container.querySelector('.chat-msg-thumb') as HTMLImageElement;
+    expect(container.querySelector('.chat-msg-attachments')).toBeTruthy();
+    const img = container.querySelector('.chat-msg-attachment') as HTMLImageElement;
     expect(img).toBeTruthy();
     expect(img.src).toContain('data:image/png');
+  });
+
+  it('renders attached images when message has no text content', () => {
+    // Images now live outside the bubble structure, so they render even when
+    // the message has no text.
+    const msg = makeMessage({ content: '', images: ['data:image/png;base64,abc123'] });
+    const { container } = render(<ChatMessage message={msg} />);
+    expect(container.querySelector('.chat-msg-attachments')).toBeTruthy();
+    expect(container.querySelector('.chat-msg-attachment')).toBeTruthy();
   });
 
   it('shows lightbox when thumbnail is clicked', () => {
@@ -118,7 +127,7 @@ describe('ChatMessage', () => {
       images: ['data:image/png;base64,abc123'],
     });
     render(<ChatMessage message={msg} />);
-    const thumb = document.querySelector('.chat-msg-thumb') as HTMLElement;
+    const thumb = document.querySelector('.chat-msg-attachment') as HTMLElement;
     fireEvent.click(thumb);
     expect(document.body.querySelector('.img-modal-overlay')).toBeTruthy();
   });
@@ -128,7 +137,7 @@ describe('ChatMessage', () => {
       images: ['data:image/png;base64,abc123'],
     });
     render(<ChatMessage message={msg} />);
-    const thumb = document.querySelector('.chat-msg-thumb') as HTMLElement;
+    const thumb = document.querySelector('.chat-msg-attachment') as HTMLElement;
     fireEvent.click(thumb);
     const overlay = document.body.querySelector('.img-modal-overlay') as HTMLElement;
     fireEvent.click(overlay);
