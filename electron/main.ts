@@ -34,7 +34,7 @@ async function _resolveTailnetEndpointWithEnv() {
   });
 }
 import { registerTerminalHandlers, destroyAllTerminals } from './services/pty';
-import { registerClaudeHandlers, setRemoteCeiling, setRemoteBus, sendImpl, approveImpl, interruptImpl, answerQuestionImpl } from './services/claude';
+import { registerClaudeHandlers, setRemoteCeiling, setRemoteBus, sendImpl, approveImpl, interruptImpl, answerQuestionImpl, setSubprocessMemoryCapMB } from './services/claude';
 import { RendererProxy } from './services/remote/renderer-proxy';
 import { registerGitHandlers } from './services/git';
 import { registerFsHandlers } from './services/fs';
@@ -661,7 +661,17 @@ function createWindow() {
 
   ipcMain.handle('settings:set', (_event, key: string, value: any) => {
     writeSetting(key, value);
+    if (key === 'subprocessMemoryCapMB') {
+      setSubprocessMemoryCapMB(typeof value === 'number' ? value : 0);
+    }
   });
+
+  // Initialize subprocess memory cap from settings (default 4096MB).
+  setSubprocessMemoryCapMB(
+    typeof readSettings().subprocessMemoryCapMB === 'number'
+      ? readSettings().subprocessMemoryCapMB
+      : 4096,
+  );
 
   ipcMain.handle('titlebar:setOverlay', (_event, color: string, symbolColor: string) => {
     if (mainWindow && !useFramelessRounded && !isMac) {

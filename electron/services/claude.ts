@@ -4,7 +4,7 @@ import { getOrCreate, get, getClaude, touchActivity } from './workspace';
 import type { PendingToolUse } from './workspace';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { enrichedEnv } from './shellEnv';
+import { enrichedEnv, withNodeMemoryCap } from './shellEnv';
 import { notifyCompletion, notifyApproval, notifyQuestion } from './notify';
 import { extractCodexCommitMessage } from './commit-message-parser';
 import { ensureGeminiCommitSession, ensureGeminiTransport, promptGeminiText } from './gemini';
@@ -24,6 +24,19 @@ const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-
 // typically shipped as `.cmd`/`.ps1` shims. Node's spawn won't resolve those
 // without shell: true, so requests fail with ENOENT.
 const IS_WIN = process.platform === 'win32';
+
+// Cap (in MB) applied via NODE_OPTIONS=--max-old-space-size to spawned Node
+// processes. 0 disables. Set by main.ts from the user setting on boot and
+// on every settings:set change. Applies to the claude CLI itself and any
+// node-based grandchildren (vitest, tsc, vite, etc.) — non-node tools are
+// unaffected.
+let subprocessMemoryCapMB = 0;
+export function setSubprocessMemoryCapMB(n: number): void {
+  subprocessMemoryCapMB = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+function spawnEnv(): NodeJS.ProcessEnv {
+  return withNodeMemoryCap(enrichedEnv(), subprocessMemoryCapMB);
+}
 
 function readCachedSlashCommands(): string[] {
   try {
@@ -251,7 +264,7 @@ function ensureProcess(
 
   const proc = spawn('claude', args, {
     cwd: claude.cwd || projectPath,
-    env: enrichedEnv(),
+    env: spawnEnv(),
     stdio: ['pipe', 'pipe', 'pipe'],
     shell: IS_WIN,
   });
@@ -775,7 +788,7 @@ export async function approveImpl(
           cwd,
           timeout: 120_000,
           maxBuffer: 10 * 1024 * 1024,
-          env: enrichedEnv(),
+          env: spawnEnv(),
           windowsVerbatimArguments: IS_WIN,
         }, (err, stdout, stderr) => {
           if (err && !stdout && !stderr) {
@@ -1002,7 +1015,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 
     const commitPrompt = `Generate a concise commit message for this diff. Output ONLY the commit message text, nothing else. Use conventional commit format (e.g. feat:, fix:, refactor:). Keep it under 72 characters for the subject line.\n\n${truncatedDiff}`;
 
-    const env = enrichedEnv();
+    const env = spawnEnv();
 
     if (aiProvider === 'gemini') {
       try {
@@ -1062,7 +1075,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 
     const titlePrompt = `Summarize this conversation in 3-5 words as a title. Respond with only the title, no quotes or punctuation. User said: ${userMessage.slice(0, 500)}`;
 
-    const env = enrichedEnv();
+    const env = spawnEnv();
 
     let cmd: string;
     let args: string[];

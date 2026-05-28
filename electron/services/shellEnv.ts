@@ -108,3 +108,17 @@ export function enrichedEnv(): NodeJS.ProcessEnv {
   }
   return heuristicEnv();
 }
+
+/**
+ * Append `--max-old-space-size=<capMB>` to NODE_OPTIONS so child Node processes
+ * (claude CLI itself plus any node grandchildren it spawns: vitest, tsc, vite,
+ * webpack, etc.) cap their heap. No-op when capMB <= 0 or the env already
+ * pins a max-old-space-size (respect user override).
+ */
+export function withNodeMemoryCap(env: NodeJS.ProcessEnv, capMB: number): NodeJS.ProcessEnv {
+  if (!capMB || capMB <= 0) return env;
+  const existing = env.NODE_OPTIONS || '';
+  if (existing.includes('--max-old-space-size')) return env;
+  const flag = `--max-old-space-size=${Math.floor(capMB)}`;
+  return { ...env, NODE_OPTIONS: existing ? `${existing} ${flag}` : flag };
+}
