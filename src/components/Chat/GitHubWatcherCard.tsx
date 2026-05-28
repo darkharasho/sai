@@ -757,16 +757,23 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
           opacity: 0.85;
         }
         .gh-watcher-bar-live {
+          /* Two bright peaks stacked in one gradient (positions 25% and 75%).
+             With background-size 100% 200%, one full animation period shifts
+             the gradient by exactly the spacing between peaks — so the visible
+             slice at the start of the loop matches the end frame perfectly
+             and the flow appears seamless. */
           background: linear-gradient(180deg,
             color-mix(in srgb, var(--gh-accent) 30%, transparent) 0%,
-            var(--gh-accent) 50%,
+            var(--gh-accent) 25%,
+            color-mix(in srgb, var(--gh-accent) 30%, transparent) 50%,
+            var(--gh-accent) 75%,
             color-mix(in srgb, var(--gh-accent) 30%, transparent) 100%);
-          background-size: 100% 240%;
+          background-size: 100% 200%;
           animation: gh-bar-flow 1.8s linear infinite;
         }
         @keyframes gh-bar-flow {
-          0% { background-position: 0% 0%; }
-          100% { background-position: 0% 240%; }
+          0%   { background-position: 0% 0%; }
+          100% { background-position: 0% 100%; }
         }
         .gh-watcher-inner { padding: 10px 12px 10px 14px; }
         .gh-watcher-head {
