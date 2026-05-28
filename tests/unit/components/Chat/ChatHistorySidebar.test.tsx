@@ -157,6 +157,29 @@ describe('ChatHistorySidebar', () => {
     expect(screen.getByTestId('sidebar-status-c-error')).toBeInTheDocument();
   });
 
+  it('renders suspended state on a session whose scope was reaped by the idle sweep', () => {
+    const s = makeSession({ id: 'd' });
+    render(<ChatHistorySidebar
+      {...defaultProps}
+      sessions={[s]}
+      suspendedSessionIds={new Set(['d'])}
+    />);
+    expect(screen.getByTestId('sidebar-status-d-suspended')).toBeInTheDocument();
+  });
+
+  it('prefers higher-priority indicators over suspended', () => {
+    // Busy spinner should win over suspended when both apply mid-resume
+    const s = makeSession({ id: 'e' });
+    render(<ChatHistorySidebar
+      {...defaultProps}
+      sessions={[s]}
+      streamingSessionIds={new Set(['e'])}
+      suspendedSessionIds={new Set(['e'])}
+    />);
+    expect(screen.getByTestId('sidebar-status-e-busy')).toBeInTheDocument();
+    expect(screen.queryByTestId('sidebar-status-e-suspended')).not.toBeInTheDocument();
+  });
+
   const baseProps = defaultProps;
 
   it('marks a non-active session as unread when updatedAt > lastViewedAt', () => {

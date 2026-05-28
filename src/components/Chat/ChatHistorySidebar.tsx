@@ -19,13 +19,11 @@ interface ChatHistorySidebarProps {
   streamingSessionIds?: Set<string>;
   awaitingSessionIds?: Set<string>;
   errorSessionIds?: Set<string>;
+  /** Sessions whose backing Claude process has been reaped by the idle sweep.
+   *  Renders the yellow squircle (matches the suspended-workspace pattern in
+   *  TitleBar). */
+  suspendedSessionIds?: Set<string>;
 }
-
-const PROVIDER_COLORS: Record<string, string> = {
-  claude: '#d4a574',
-  codex: '#74aa9c',
-  gemini: '#8b9cf7',
-};
 
 function formatRelativeTime(timestamp: number): string {
   const diff = Date.now() - timestamp;
@@ -86,6 +84,7 @@ export default function ChatHistorySidebar({
   streamingSessionIds = new Set<string>(),
   awaitingSessionIds = new Set<string>(),
   errorSessionIds = new Set<string>(),
+  suspendedSessionIds = new Set<string>(),
 }: ChatHistorySidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -270,8 +269,6 @@ export default function ChatHistorySidebar({
     setRenamingId(null);
   };
 
-  const providerColor = PROVIDER_COLORS[aiProvider] || '#888';
-
   return (
     <div className="chat-history-sidebar sidebar-mount">
       {/* Search bar */}
@@ -341,21 +338,16 @@ export default function ChatHistorySidebar({
                         return (
                           <>
                             <div className="chat-history-card-header">
-                              <span
-                                data-testid={`provider-chip-${session.id}`}
-                                className="chat-history-provider-dot"
-                                style={{ background: PROVIDER_COLORS[session.aiProvider || aiProvider] || providerColor }}
-                              />
-                              <span
-                                className="chat-history-card-title"
-                              >{session.title || 'Untitled'}</span>
-                              {titleGeneratingIds?.has(session.id) && (
-                                <SaiLogo mode="scanner" size={12} className="chat-history-title-spinner" ariaLabel="Generating title" />
-                              )}
                               {(() => {
+                                // Mirror the TitleBar workspace status pattern:
+                                // a single leading slot showing whichever of
+                                // busy / awaiting / error / unread / suspended
+                                // applies. Inactive viewed sessions render no
+                                // dot, matching workspace dropdown rows.
                                 const isRunning = streamingSessionIds.has(session.id);
                                 const isAwaiting = awaitingSessionIds.has(session.id);
                                 const isError = errorSessionIds.has(session.id);
+                                const isSuspended = suspendedSessionIds.has(session.id);
                                 if (isAwaiting) return (
                                   <span
                                     className="workspace-approval-icon"
@@ -385,8 +377,22 @@ export default function ChatHistorySidebar({
                                     title="Response complete"
                                   />
                                 );
-                                return null;
+                                if (isSuspended) return (
+                                  <span
+                                    className="chat-history-suspended-dot"
+                                    data-testid={`sidebar-status-${session.id}-suspended`}
+                                    title="Suspended (idle)"
+                                  />
+                                );
+                                // Reserve the slot so titles stay aligned.
+                                return <span className="chat-history-status-spacer" aria-hidden="true" />;
                               })()}
+                              <span
+                                className="chat-history-card-title"
+                              >{session.title || 'Untitled'}</span>
+                              {titleGeneratingIds?.has(session.id) && (
+                                <SaiLogo mode="scanner" size={12} className="chat-history-title-spinner" ariaLabel="Generating title" />
+                              )}
                               {session.id === activeSessionId && (
                                 <span className="chat-history-active-badge">ACTIVE</span>
                               )}
@@ -547,12 +553,20 @@ export default function ChatHistorySidebar({
           gap: 6px;
           margin-bottom: 3px;
         }
-        .chat-history-provider-dot {
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
+        .chat-history-suspended-dot {
+          display: inline-block;
+          width: 9px;
+          height: 9px;
+          background: #d4a72c;
+          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
           flex-shrink: 0;
-          opacity: 0.7;
+        }
+        .chat-history-status-spacer {
+          display: inline-block;
+          width: 9px;
+          height: 9px;
+          flex-shrink: 0;
         }
         .workspace-approval-icon {
           display: inline-flex;

@@ -1059,7 +1059,17 @@ export function registerClaudeHandlers(win: BrowserWindow) {
       now: Date.now(),
       idleMs: IDLE_SCOPE_MS,
       scopes: records,
-      stop: stopClaudeScope,
+      stop: (workspaceId, scope) => {
+        const ws = get(workspaceId);
+        if (ws) {
+          safeSend(win, 'claude:message', {
+            type: 'scope_suspended',
+            projectPath: ws.projectPath,
+            scope,
+          });
+        }
+        stopClaudeScope(workspaceId, scope);
+      },
     });
   }, SWEEP_INTERVAL_MS);
   idleSweepTimer.unref?.();

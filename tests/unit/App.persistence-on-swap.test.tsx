@@ -127,6 +127,7 @@ vi.mock('../../src/chatDb', () => ({
     saveOrder.push(session.id);
     return Promise.resolve();
   }),
+  dbPatchSessionMeta: vi.fn().mockResolvedValue(undefined),
   dbPurgeExpired: vi.fn().mockResolvedValue(undefined),
   dbDeleteSession: vi.fn().mockResolvedValue(undefined),
   migrateFromLocalStorage: vi.fn().mockResolvedValue(undefined),
@@ -194,7 +195,7 @@ describe('App: persistence on session swap', () => {
     render(<App />);
 
     // Wait for the chat history sidebar toggle button to appear
-    const chatsBtn = await waitFor(() => screen.getByTitle('Chat History'));
+    const chatsBtn = await waitFor(() => screen.getByTitle('Chats'));
 
     // Open the chat history sidebar
     await act(async () => {
@@ -228,8 +229,36 @@ describe('App: persistence on session swap', () => {
     // Session A must appear in saveOrder: flushAndPersist saved the outgoing session.
     expect(saveOrder).toContain('session-A');
 
-    // Session B is NOT saved immediately on swap — lastViewedAt persists on next
-    // natural save to avoid clobbering messages that live only in the DB.
+    // Session B is NOT saved via dbSaveSession on swap — its messages tail
+    // lives only in the DB and dbSaveSession would clobber it. lastViewedAt
+    // is patched via dbPatchSessionMeta instead (asserted below).
     expect(saveOrder).not.toContain('session-B');
+  });
+
+  it('patches lastViewedAt on the incoming session via dbPatchSessionMeta', async () => {
+    const { dbPatchSessionMeta } = await import('../../src/chatDb');
+    render(<App />);
+
+    const chatsBtn = await waitFor(() => screen.getByTitle('Chats'));
+    await act(async () => { fireEvent.click(chatsBtn); });
+
+    await waitFor(() => {
+      expect(screen.getByText('Chat A')).toBeInTheDocument();
+      expect(screen.getByText('Chat B')).toBeInTheDocument();
+    });
+
+    // Click into B
+    await act(async () => { fireEvent.click(screen.getByText('Chat B')); });
+    await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+
+    // dbPatchSessionMeta must have been called with B's id + a lastViewedAt
+    // timestamp. Anything else (e.g. lastTurnErrored) is allowed; we only
+    // require lastViewedAt because that's what gates the unread indicator.
+    const calls = vi.mocked(dbPatchSessionMeta).mock.calls;
+    const swapCall = calls.find(([, sessionId]) => sessionId === 'session-B');
+    expect(swapCall).toBeDefined();
+    const [, , patch] = swapCall!;
+    expect(typeof patch.lastViewedAt).toBe('number');
+    expect(patch.lastViewedAt).toBeGreaterThan(0);
   });
 });

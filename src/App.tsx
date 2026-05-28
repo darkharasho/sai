@@ -11,6 +11,7 @@ import CodePanel from './components/CodePanel/CodePanel';
 import UnsavedChangesModal from './components/UnsavedChangesModal';
 import WorkspaceToast, { type ToastTone } from './components/WorkspaceToast';
 import { computeChatToasts } from './lib/chatToasts';
+import { computeChatNotificationCount, isTurnErrored } from './lib/chatActivity';
 import CommandPalette from './components/CommandPalette';
 import { useWhatsNew } from './hooks/useWhatsNew';
 import { useKeybinding } from './hooks/useKeybinding';
@@ -20,7 +21,7 @@ import { setActiveWorkspace, updateTerminalName } from './terminalBuffer';
 import { basename } from './utils/pathUtils';
 import { createSession, generateSmartTitle } from './sessions';
 import { computeUnmountFlushes } from './workspaceFlush';
-import { dbGetSessions, dbGetMessages, dbGetMessagesTail, dbSaveSession, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
+import { dbGetSessions, dbGetMessages, dbGetMessagesTail, dbSaveSession, dbPatchSessionMeta, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval } from './types';
 import type { MetaWorkspaceListItem, MetaWorkspaceRuntime } from './types';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, setActiveHighlightTheme, type HighlightThemeId } from './themes';
@@ -177,6 +178,10 @@ export default function App() {
   const [pendingClose, setPendingClose] = useState<string | null>(null);
   // Ref to hold latest messages per workspace without triggering re-renders during streaming
   const wsMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
+  // Session IDs we've already persisted on first-user-message. Lets the
+  // onMessagesChange handler write once per session as soon as the user sends
+  // their first message, without re-writing on every subsequent token.
+  const firstUserPersistRef = useRef<Set<string>>(new Set());
   // Latest orchestrator-session messages, keyed by orchestrator session id, so
   // the regular wsMessagesRef (keyed by wsPath) doesn't get clobbered by the
   // orchestrator ChatPanel's onMessagesChange.
@@ -217,6 +222,10 @@ export default function App() {
     else chatContextItemsRef.current.delete(wsPath);
   }, []);
   const [approvalSessions, setApprovalSessions] = useState<Map<string, Map<string, PendingApproval>>>(new Map());
+  // Sessions whose Claude scope has been reaped by the idle sweep. Cleared on
+  // the next streaming_start for that scope (process respawned). Keyed by
+  // `${projectPath}:${scope}` to match streamingScopes.
+  const [suspendedScopes, setSuspendedScopes] = useState<Set<string>>(new Set());
   const [notificationCounts, setNotificationCounts] = useState<Map<string, number>>(new Map());
   const wsTurnSeqRef = useRef<Map<string, number>>(new Map());
   const [focusedChat, setFocusedChat] = useState(false);
@@ -1734,31 +1743,32 @@ export default function App() {
           }
         }
       }
-      // Background-task assistant message capture. When a swarm task runs
-      // while its ChatPanel isn't mounted (user is on overview / another task),
-      // accumulate assistant chunks here so we can flush them to chatDb on
-      // done/result. We skip when the focused workspace's active session IS
-      // this task — in that case ChatPanel's own onTurnComplete handles
-      // persistence and a parallel write would race / duplicate.
+      // Background-session assistant message capture. When a session streams
+      // while its ChatPanel isn't mounted (user swapped to another session, or
+      // the session is a swarm task running off-screen), accumulate assistant
+      // chunks here so we can flush them to chatDb on done/result. We skip when
+      // the focused workspace's active session IS this scope — in that case
+      // ChatPanel's own onTurnComplete handles persistence and a parallel write
+      // would race / duplicate.
       if (msg.type === 'assistant' && msg.message?.content) {
         const scope = msg.scope || 'chat';
         if (scope !== 'chat') {
-          const tasks = swarmTasksByWsRef.current.get(msg.projectPath) ?? [];
-          const swarmTask = tasks.find(t => t.sessionId === scope);
-          if (swarmTask) {
-            const focusedWs = workspacesRef.current.get(msg.projectPath);
-            const isFocusedHere =
-              msg.projectPath === activeProjectPathRef.current
-              && focusedWs?.activeSession.id === scope;
-            if (!isFocusedHere) {
-              const converted = convertAssistantEnvelope(msg);
-              if (converted) {
-                const prev = taskMessagesBufferRef.current.get(scope) ?? [];
-                taskMessagesBufferRef.current.set(scope, appendAssistantChunk(prev, converted));
-              }
+          const focusedWs = workspacesRef.current.get(msg.projectPath);
+          const isFocusedHere =
+            msg.projectPath === activeProjectPathRef.current
+            && focusedWs?.activeSession.id === scope;
+          if (!isFocusedHere) {
+            const converted = convertAssistantEnvelope(msg);
+            if (converted) {
+              const prev = taskMessagesBufferRef.current.get(scope) ?? [];
+              taskMessagesBufferRef.current.set(scope, appendAssistantChunk(prev, converted));
             }
           }
         }
+      }
+      if (msg.type === 'scope_suspended') {
+        setSuspendedScopes(prev => prev.has(scopeKey) ? prev : new Set(prev).add(scopeKey));
+        return;
       }
       if (msg.type === 'streaming_start') {
         if (msg.turnSeq != null) wsTurnSeqRef.current.set(scopeKey, msg.turnSeq);
@@ -1769,6 +1779,13 @@ export default function App() {
           setChatStreamingWorkspaces(prev => prev.has(msg.projectPath) ? prev : new Set(prev).add(msg.projectPath));
         }
         setStreamingScopes(prev => prev.has(scopeKey) ? prev : new Set(prev).add(scopeKey));
+        // Process is alive again — clear any suspended marker for this scope.
+        setSuspendedScopes(prev => {
+          if (!prev.has(scopeKey)) return prev;
+          const next = new Set(prev);
+          next.delete(scopeKey);
+          return next;
+        });
       }
       // Orchestrator tool drift observability (Task 7).
       // claude.ts forwards assistant messages whose `content` may contain
@@ -1991,15 +2008,16 @@ export default function App() {
             }
           }
         }
-        // Flush any buffered assistant messages for this background task to
-        // chatDb. Merged with the persisted prefix (the injected user prompt)
-        // so the task's chat panel shows the full exchange when the user
-        // clicks the row. ChatPanel's onTurnComplete handles the focused-task
-        // case; the buffer is only populated when the task wasn't focused.
+        // Flush any buffered assistant messages for this background session to
+        // chatDb. Merged with the persisted prefix (user prompt + earlier turns)
+        // so the session shows the full exchange when the user opens it.
+        // ChatPanel's onTurnComplete handles the focused case; the buffer is
+        // only populated when the session wasn't focused.
         {
           const scope = msg.scope || 'chat';
           if (scope !== 'chat') {
             const buffered = taskMessagesBufferRef.current.get(scope);
+            const turnErrored = isTurnErrored(msg);
             if (buffered && buffered.length > 0) {
               taskMessagesBufferRef.current.delete(scope);
               const wsPath = msg.projectPath;
@@ -2008,21 +2026,40 @@ export default function App() {
                   const existing = await dbGetMessages(scope);
                   const merged = mergePersistedWithBuffer(existing, buffered);
                   const sessions = await dbGetSessions(wsPath);
-                  const taskSession = sessions.find(s => s.id === scope);
-                  if (!taskSession) return;
+                  const targetSession = sessions.find(s => s.id === scope);
+                  if (!targetSession) return;
                   await dbSaveSession(wsPath, {
-                    ...taskSession,
+                    ...targetSession,
                     messages: merged,
                     messageCount: merged.length,
                     updatedAt: Date.now(),
+                    lastTurnErrored: turnErrored ? true : false,
                   }, 0);
                   // Refresh sessions list so sidebar message counts update.
                   const refreshed = await dbGetSessions(wsPath);
                   updateWorkspace(wsPath, w => ({ ...w, sessions: refreshed }));
                 } catch (err) {
                   // eslint-disable-next-line no-console
-                  console.error('swarm: persist task messages failed', err);
+                  console.error('background-session: persist messages failed', err);
                 }
+              })();
+            } else if (turnErrored) {
+              // No buffered assistant content (e.g. immediate error) — still
+              // stamp the session so the sidebar shows the error indicator.
+              const wsPath = msg.projectPath;
+              void (async () => {
+                try {
+                  const sessions = await dbGetSessions(wsPath);
+                  const targetSession = sessions.find(s => s.id === scope);
+                  if (!targetSession) return;
+                  await dbSaveSession(wsPath, {
+                    ...targetSession,
+                    updatedAt: Date.now(),
+                    lastTurnErrored: true,
+                  }, 0);
+                  const refreshed = await dbGetSessions(wsPath);
+                  updateWorkspace(wsPath, w => ({ ...w, sessions: refreshed }));
+                } catch { /* best-effort */ }
               })();
             }
           }
@@ -2545,8 +2582,9 @@ export default function App() {
     const ws = workspacesRef.current.get(wsPath);
     if (!ws) return;
     const latestMessages = wsMessagesRef.current.get(wsPath);
+    const now = Date.now();
     const sessionToSave = (latestMessages && latestMessages.length > 0)
-      ? { ...ws.activeSession, messages: latestMessages, updatedAt: Date.now(), messageCount: latestMessages.length }
+      ? { ...ws.activeSession, messages: latestMessages, updatedAt: now, lastViewedAt: now, messageCount: latestMessages.length }
       : ws.activeSession;
     if (!sessionToSave.title && sessionToSave.messages.length > 0) {
       const firstUserMsg = sessionToSave.messages.find(m => m.role === 'user');
@@ -2568,9 +2606,15 @@ export default function App() {
     // Clear backend sessions so next message starts fresh
     (window.sai as any).codexSetSessionId(activeProjectPath, undefined);
     window.sai.geminiSetSessionId?.(activeProjectPath, undefined, 'chat');
+    const fresh = { ...createSession(), lastViewedAt: Date.now() };
+    // Surface the new session in the sidebar immediately. It won't be persisted
+    // until the user sends their first message (see onMessagesChange below),
+    // but having it in the in-memory `sessions` list lets the sidebar render
+    // an active row right away instead of waiting for the first AI turn.
     updateWorkspace(activeProjectPath, ws => ({
       ...ws,
-      activeSession: createSession(),
+      activeSession: fresh,
+      sessions: [{ ...fresh, aiProvider }, ...ws.sessions.filter(s => s.id !== fresh.id)],
     }));
   };
 
@@ -2583,12 +2627,20 @@ export default function App() {
     // still workspace-scoped, so we still tell them which session to resume.
     (window.sai as any).codexSetSessionId(activeProjectPath, selected.codexSessionId);
     window.sai.geminiSetSessionId?.(activeProjectPath, selected.geminiSessionId, 'chat');
+    const viewedAt = Date.now();
+    // Persist lastViewedAt so a subsequent dbGetSessions refresh (triggered by
+    // background-chat persistence) doesn't roll it back to undefined, leaving
+    // the unread indicator perpetually off. Also patch it into the in-memory
+    // sessions list so the indicator clears immediately, without waiting for
+    // the refresh round-trip.
+    void dbPatchSessionMeta(activeProjectPath, selected.id, { lastViewedAt: viewedAt }).catch(() => {});
     // Load the tail from IndexedDB (full messages live there, not in the sessions list).
     dbGetMessagesTail(selected.id, MESSAGE_TAIL_LIMIT).then(({ messages, totalCount }) => {
       wsFirstLoadedIdxRef.current.set(activeProjectPath!, totalCount - messages.length);
       updateWorkspace(activeProjectPath!, ws => ({
         ...ws,
-        activeSession: { ...selected, messages, lastViewedAt: Date.now() },
+        activeSession: { ...selected, messages, lastViewedAt: viewedAt },
+        sessions: ws.sessions.map(s => s.id === selected.id ? { ...s, lastViewedAt: viewedAt } : s),
       }));
     });
   };
@@ -3315,6 +3367,7 @@ export default function App() {
                   onGeminiConversationModeChange={handleGeminiConversationModeChange}
                   geminiLoadingPhrases={geminiLoadingPhrases}
                   initialMessages={ws.activeSession.messages}
+                  initialPendingApproval={approvalSessions.get(wsPath)?.get(ws.activeSession.id) ?? null}
                   activeFilePath={ws.activeFilePath}
                   onFileOpen={handleFileOpen}
                   isActive={wsPath === activeProjectPath}
@@ -3331,6 +3384,25 @@ export default function App() {
                   sessionId={ws.activeSession.id}
                   onMessagesChange={(messages: ChatMessage[]) => {
                     wsMessagesRef.current.set(wsPath, messages);
+                    // First-user-message persist: as soon as the user sends
+                    // their first message, persist the session so it survives
+                    // a refresh and shows the right preview/messageCount in
+                    // the sidebar — without waiting for the AI turn to end.
+                    const sid = ws.activeSession.id;
+                    if (!firstUserPersistRef.current.has(sid) && messages.some(m => m.role === 'user')) {
+                      firstUserPersistRef.current.add(sid);
+                      const now = Date.now();
+                      const session = { ...ws.activeSession, messages, updatedAt: now, lastViewedAt: now, aiProvider, messageCount: messages.length };
+                      if (!session.title) {
+                        const firstUserMsg = messages.find(m => m.role === 'user');
+                        if (firstUserMsg) session.title = generateSmartTitle(firstUserMsg.content);
+                      }
+                      dbSaveSession(wsPath, session, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).then(() => {
+                        dbGetSessions(wsPath).then(refreshed => {
+                          updateWorkspace(wsPath, w2 => ({ ...w2, sessions: refreshed }));
+                        });
+                      }).catch(() => {});
+                    }
                   }}
                   onClaudeSessionId={(sessionId: string) => {
                     updateWorkspace(wsPath, w => ({
@@ -3356,7 +3428,13 @@ export default function App() {
                     const latestMessages = wsMessagesRef.current.get(wsPath) || [];
                     if (latestMessages.length === 0) return;
                     updateWorkspace(wsPath, w => {
-                      const updated = { ...w.activeSession, messages: latestMessages, updatedAt: Date.now(), aiProvider, messageCount: latestMessages.length };
+                      const tail = latestMessages[latestMessages.length - 1];
+                      const now = Date.now();
+                      // Track lastViewedAt alongside updatedAt while the user is
+                      // actively viewing this session — the green unread dot
+                      // should only appear after they swap away and new
+                      // activity arrives.
+                      const updated = { ...w.activeSession, messages: latestMessages, updatedAt: now, lastViewedAt: now, aiProvider, messageCount: latestMessages.length, lastTurnErrored: !!tail?.error };
                       if (!updated.title) {
                         const firstUserMsg = latestMessages.find(m => m.role === 'user');
                         if (firstUserMsg) updated.title = generateSmartTitle(firstUserMsg.content);
@@ -3496,14 +3574,50 @@ export default function App() {
     return new Set(approvalSessions.get(activeProjectPath)?.keys() ?? []);
   }, [approvalSessions, activeProjectPath]);
 
+  const suspendedSessionIds = useMemo(() => {
+    if (!activeProjectPath) return new Set<string>();
+    const prefix = `${activeProjectPath}:`;
+    const ids = new Set<string>();
+    for (const k of suspendedScopes) {
+      if (k.startsWith(prefix)) ids.add(k.slice(prefix.length));
+    }
+    return ids;
+  }, [suspendedScopes, activeProjectPath]);
+
+  const unreadSessionIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const s of sessions) {
+      if (s.id === activeSession?.id) continue;
+      if (s.updatedAt > (s.lastViewedAt ?? s.updatedAt)) ids.add(s.id);
+    }
+    return ids;
+  }, [sessions, activeSession?.id]);
+
   const errorSessionIds = useMemo(() => {
     const ids = new Set<string>();
     for (const s of sessions) {
+      // Prefer the persisted flag (covers background sessions); fall back to
+      // the in-memory tail message error (covers the just-active session
+      // before its persist round-trip completes).
+      if (s.lastTurnErrored) { ids.add(s.id); continue; }
       const tail = s.messages?.[s.messages.length - 1];
       if (tail?.error) ids.add(s.id);
     }
     return ids;
   }, [sessions]);
+
+  // Badge total for the NavBar Chats button: unread + awaiting approval +
+  // errored sessions other than the focused one. Mirrors the
+  // "needs-attention-elsewhere" pattern from the workspace dropdown badge.
+  const chatNotificationCount = useMemo(
+    () => computeChatNotificationCount({
+      unread: unreadSessionIds,
+      awaiting: awaitingSessionIds,
+      error: errorSessionIds,
+      activeSessionId: activeSession?.id,
+    }),
+    [unreadSessionIds, awaitingSessionIds, errorSessionIds, activeSession?.id],
+  );
 
   const prevStreamingRef = useRef<Set<string>>(new Set());
   const prevAwaitingRef = useRef<Set<string>>(new Set());
@@ -3603,7 +3717,7 @@ export default function App() {
         onSwitchToWorkspace={handleProjectSwitch}
       />
       <div className="app-body">
-        <NavBar activeSidebar={sidebarOpen} onToggle={toggleSidebar} gitChangeCount={gitChangeCount} swarmApprovalCount={swarmApprovalCount} />
+        <NavBar activeSidebar={sidebarOpen} onToggle={toggleSidebar} gitChangeCount={gitChangeCount} swarmApprovalCount={swarmApprovalCount} chatNotificationCount={chatNotificationCount} />
         <AnimatePresence initial={false}>
           {sidebarOpen === 'files' && (
             <motion.div
@@ -3668,6 +3782,7 @@ export default function App() {
                 streamingSessionIds={streamingSessionIds}
                 awaitingSessionIds={awaitingSessionIds}
                 errorSessionIds={errorSessionIds}
+                suspendedSessionIds={suspendedSessionIds}
               />
             </motion.div>
           )}

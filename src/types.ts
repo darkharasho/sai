@@ -53,6 +53,10 @@ export interface ChatSession {
   geminiSessionId?: string;
   pinned?: boolean;
   lastViewedAt?: number;
+  /** Stamped when a background turn ends with is_error/error_during_execution.
+   *  Cleared when a subsequent turn completes successfully. Drives the
+   *  ChatHistorySidebar error indicator. */
+  lastTurnErrored?: boolean;
   titleEdited?: boolean;
   messageCount: number;
   projectPath?: string;
