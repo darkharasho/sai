@@ -78,6 +78,43 @@ describe('bridge workspace.status routing', () => {
     ws.close();
   });
 
+  it('replays the current workspace.status snapshot on subscribe', async () => {
+    // Backend already streaming before the phone joins.
+    bus.publish('workspace.status', {
+      type: 'workspace.status', projectPath: '/a', status: { streaming: true, busy: true, completed: false, approval: false, awaitingQuestion: false },
+    });
+    bus.publish('workspace.status', {
+      type: 'workspace.status', projectPath: '/b', status: { streaming: false, busy: false, completed: true, approval: false, awaitingQuestion: false },
+    });
+    // A second event for /a — only the latest should be replayed.
+    bus.publish('workspace.status', {
+      type: 'workspace.status', projectPath: '/a', status: { streaming: true, busy: true, completed: false, approval: true, awaitingQuestion: false },
+    });
+
+    const token = await pairAndGetToken();
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await new Promise((r) => ws.once('open', r));
+    ws.send(JSON.stringify({ type: 'auth', token }));
+    await once(ws, 'auth_ok');
+
+    const received: any[] = [];
+    ws.on('message', (data) => {
+      const m = JSON.parse(data.toString());
+      if (m.type === 'workspace.status') received.push(m);
+    });
+
+    ws.send(JSON.stringify({ type: 'workspace.status.subscribe' }));
+    await new Promise((r) => setTimeout(r, 50));
+
+    const byPath = new Map<string, any>(received.map((e) => [e.projectPath, e]));
+    expect(byPath.size).toBe(2);
+    // Latest /a event won — approval: true should be present, not the earlier snapshot.
+    expect(byPath.get('/a')?.status.streaming).toBe(true);
+    expect(byPath.get('/a')?.status.approval).toBe(true);
+    expect(byPath.get('/b')?.status.completed).toBe(true);
+    ws.close();
+  });
+
   it('workspace.status.unsubscribe stops further events', async () => {
     const token = await pairAndGetToken();
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);

@@ -5,7 +5,7 @@ import { promises as fsp } from 'node:fs';
 import nodePath from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { PairingStore } from './pairing-store';
-import type { SessionBus } from './session-bus';
+import type { SessionBus, BusEvent } from './session-bus';
 import { ScreenshotUrlSigner } from './screenshot-urls';
 import type { PhoneTerminalRegistry, PhoneTerminalSummary } from './terminal-store';
 
@@ -118,9 +118,23 @@ export class BridgeServer {
   private readonly PAIR_MAX = 10;
   private static readonly DEFAULT_PORT = 0;
   private readonly signer: ScreenshotUrlSigner;
+  /** Latest workspace.status event per projectPath. The bridge keeps this
+   *  in sync with the bus so a phone joining mid-stream can be sent the
+   *  current snapshot immediately on subscribe — without it, the thinking
+   *  animation wouldn't activate until the next status delta. */
+  private readonly latestWorkspaceStatus = new Map<string, BusEvent>();
+  private workspaceStatusUnsub: (() => void) | null = null;
 
   constructor(private readonly opts: BridgeServerOpts) {
     this.signer = new ScreenshotUrlSigner(opts.screenshotSecret);
+    // Track the latest workspace.status event for every workspace so we can
+    // replay them when a new phone subscribes mid-flight.
+    this.workspaceStatusUnsub = opts.bus.subscribeAll((topic, event) => {
+      if (topic !== 'workspace.status') return;
+      const projectPath = typeof event.projectPath === 'string' ? event.projectPath : null;
+      if (!projectPath) return;
+      this.latestWorkspaceStatus.set(projectPath, event);
+    });
   }
 
   signScreenshotUrl(id: string): string { return this.signer.sign(id); }
@@ -208,6 +222,8 @@ export class BridgeServer {
       this.wss = null;
     }
     this.liveSockets.clear();
+    this.latestWorkspaceStatus.clear();
+    if (this.workspaceStatusUnsub) { this.workspaceStatusUnsub(); this.workspaceStatusUnsub = null; }
     if (!s) return;
     // Force-close any lingering HTTP connections too (Node 18.2+).
     const sAny = s as unknown as { closeAllConnections?: () => void };
@@ -378,6 +394,12 @@ export class BridgeServer {
 
       if (msg.type === 'workspace.status.subscribe') {
         (ws as any).__workspaceStatusEnabled = true;
+        // Replay the current status for every workspace so a phone joining
+        // mid-stream sees the thinking animation immediately instead of
+        // waiting for the next status delta.
+        for (const event of this.latestWorkspaceStatus.values()) {
+          try { ws.send(JSON.stringify({ v: 1, ...event })); } catch { /* closed */ }
+        }
         return;
       }
       if (msg.type === 'workspace.status.unsubscribe') {
