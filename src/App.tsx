@@ -2885,6 +2885,13 @@ export default function App() {
   const handleNewChat = () => {
     if (!activeProjectPath) return;
     flushAndPersist(activeProjectPath);
+    // Dismiss any pending approval banner from the previous session.
+    setApprovalWorkspaces(prev => {
+      if (!prev.has(activeProjectPath)) return prev;
+      const next = new Map(prev);
+      next.delete(activeProjectPath);
+      return next;
+    });
     // Clear backend sessions so next message starts fresh
     (window.sai as any).codexSetSessionId(activeProjectPath, undefined);
     window.sai.geminiSetSessionId?.(activeProjectPath, undefined, 'chat');
@@ -2903,6 +2910,14 @@ export default function App() {
   const handleSelectSession = (id: string) => {
     if (!activeProjectPath) return;
     flushAndPersist(activeProjectPath);
+    // Dismiss any pending approval banner — the approval belongs to the
+    // previous session's backend process, not the one we're switching to.
+    setApprovalWorkspaces(prev => {
+      if (!prev.has(activeProjectPath)) return prev;
+      const next = new Map(prev);
+      next.delete(activeProjectPath);
+      return next;
+    });
     const selected = sessions.find(s => s.id === id);
     if (!selected) return;
     // Claude scopes per-session now (no rebind needed). Codex and Gemini are
