@@ -68,6 +68,23 @@ describe('ChatMessage', () => {
     expect(screen.getByTestId('markdown').textContent).toBe('Hello world');
   });
 
+  it('renders streaming assistant content as plain text, not via markdown', () => {
+    // Perf fix: while streaming, skip ReactMarkdown + rehypeHighlight so the
+    // growing buffer isn't re-tokenized on every chunk.
+    const msg = makeMessage({ role: 'assistant', content: 'partial chunk' });
+    const { container } = render(<ChatMessage message={msg} isStreaming />);
+    expect(container.querySelector('.chat-msg-stream-text')).toBeTruthy();
+    expect(container.querySelector('.chat-msg-stream-text')!.textContent).toBe('partial chunk');
+    expect(container.querySelector('[data-testid="markdown"]')).toBeNull();
+  });
+
+  it('renders assistant content via markdown when not streaming', () => {
+    const msg = makeMessage({ role: 'assistant', content: 'done text' });
+    const { container } = render(<ChatMessage message={msg} isStreaming={false} />);
+    expect(container.querySelector('.chat-msg-stream-text')).toBeNull();
+    expect(container.querySelector('[data-testid="markdown"]')).toBeTruthy();
+  });
+
   it('renders no content when content is empty', () => {
     const msg = makeMessage({ content: '' });
     const { container } = render(<ChatMessage message={msg} />);

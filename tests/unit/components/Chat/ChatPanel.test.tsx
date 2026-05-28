@@ -5,7 +5,15 @@ import { installMockSai } from '../../../helpers/ipc-mock';
 import { readFlipRect, _resetFlipRegistry } from '../../../../src/components/Chat/flipRegistry';
 
 vi.mock('../../../../src/components/Chat/ChatMessage', () => ({
-  default: () => <div data-testid="chat-message" />,
+  default: (props: any) => (
+    <div
+      data-testid="chat-message"
+      data-msg-id={props.message?.id}
+      data-msg-content={typeof props.message?.content === 'string' ? props.message.content : ''}
+      data-msg-toolcalls={props.message?.toolCalls ? props.message.toolCalls.length : 0}
+      data-streaming={props.isStreaming ? 'true' : 'false'}
+    />
+  ),
 }));
 
 let latestChatInputProps: any;
@@ -829,6 +837,107 @@ describe('ChatPanel', () => {
       expect(mockSai.claudeSend.mock.calls[0][1]).toContain('immediate message');
       expect(onQueueShift).not.toHaveBeenCalled();
     });
+  });
+
+  it('coalesces streaming text deltas into a single bubble via rAF flush', async () => {
+    // Perf: per-chunk setMessages was retokenizing the entire growing message
+    // on every stdout chunk. Deltas now buffer in a ref and flush once per
+    // animation frame. This test confirms accumulated content is preserved.
+    const props: ChatPanelProps = { ...baseProps() };
+    const { container, rerender } = render(<ChatPanel {...props} />);
+
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+    });
+    rerender(<ChatPanel {...props} isStreaming />);
+
+    // Initial assistant text creates the bubble (non-delta path).
+    await act(async () => {
+      handler({
+        type: 'assistant',
+        projectPath: '/project',
+        scope: 'chat',
+        message: { content: [{ type: 'text', text: 'hello ' }] },
+      });
+    });
+
+    // Stream three deltas — these hit the buffered rAF path.
+    await act(async () => {
+      handler({
+        type: 'assistant',
+        projectPath: '/project',
+        scope: 'chat',
+        message: { content: [{ type: 'text', text: 'brave ', delta: true }] },
+      });
+      handler({
+        type: 'assistant',
+        projectPath: '/project',
+        scope: 'chat',
+        message: { content: [{ type: 'text', text: 'new ', delta: true }] },
+      });
+      handler({
+        type: 'assistant',
+        projectPath: '/project',
+        scope: 'chat',
+        message: { content: [{ type: 'text', text: 'world', delta: true }] },
+      });
+      // Let the rAF callback (mocked as setTimeout 0) fire.
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+
+    const bubbles = container.querySelectorAll('[data-testid="chat-message"]');
+    const assistant = Array.from(bubbles).find(el => el.getAttribute('data-msg-content')?.startsWith('hello'));
+    expect(assistant).toBeTruthy();
+    expect(assistant!.getAttribute('data-msg-content')).toBe('hello brave new world');
+  });
+
+  it('flushes pending deltas before pushing a tool-use bubble', async () => {
+    // A non-delta event (tool_use) must commit any buffered text to state
+    // before mutating, so order is preserved: prose bubble first, tool bubble after.
+    const props: ChatPanelProps = { ...baseProps() };
+    const { container, rerender } = render(<ChatPanel {...props} />);
+
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+    });
+    rerender(<ChatPanel {...props} isStreaming />);
+
+    await act(async () => {
+      handler({
+        type: 'assistant',
+        projectPath: '/project',
+        scope: 'chat',
+        message: { content: [{ type: 'text', text: 'reading file' }] },
+      });
+    });
+
+    // Buffer a delta but immediately follow with a tool_use without letting rAF fire.
+    await act(async () => {
+      handler({
+        type: 'assistant',
+        projectPath: '/project',
+        scope: 'chat',
+        message: { content: [{ type: 'text', text: ' now', delta: true }] },
+      });
+      handler({
+        type: 'assistant',
+        projectPath: '/project',
+        scope: 'chat',
+        message: { content: [{ type: 'tool_use', id: 'tu-1', name: 'Read', input: { path: 'x' } }] },
+      });
+    });
+
+    const bubbles = Array.from(container.querySelectorAll('[data-testid="chat-message"]'));
+    const prose = bubbles.find(el => el.getAttribute('data-msg-content') === 'reading file now');
+    const tool = bubbles.find(el => Number(el.getAttribute('data-msg-toolcalls')) > 0);
+    expect(prose).toBeTruthy();
+    expect(tool).toBeTruthy();
   });
 
   it('durationMs reflects the gap between streaming_start and stream end, not ~0', async () => {
