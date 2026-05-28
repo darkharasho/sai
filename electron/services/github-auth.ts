@@ -140,6 +140,30 @@ export function registerGithubAuthHandlers(
     writeSetting('github_auth', null);
   });
 
+  ipcMain.handle('github:apiGet', async (_event, path: string) => {
+    const token = readSettings().github_auth?.token;
+    const url = path.startsWith('http') ? path : `https://api.github.com${path.startsWith('/') ? '' : '/'}${path}`;
+    return await new Promise<{ ok: boolean; status: number; body: any }>((resolve, reject) => {
+      const u = new URL(url);
+      const headers: Record<string, string> = {
+        'Accept': 'application/vnd.github+json',
+        'User-Agent': 'SAI-App',
+      };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const req = https.request({ hostname: u.hostname, path: u.pathname + u.search, method: 'GET', headers }, (res) => {
+        let raw = '';
+        res.on('data', c => raw += c);
+        res.on('end', () => {
+          let body: any = raw;
+          try { body = JSON.parse(raw); } catch { /* keep as text */ }
+          resolve({ ok: (res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 300, status: res.statusCode ?? 0, body });
+        });
+      });
+      req.on('error', reject);
+      req.end();
+    });
+  });
+
   ipcMain.handle('github:listRepos', async (_event, page: number = 1, search?: string) => {
     const token = readSettings().github_auth?.token;
     if (!token) throw new Error('Not authenticated');

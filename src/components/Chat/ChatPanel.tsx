@@ -1417,6 +1417,33 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     onMessagesChange?.(messagesRef.current);
   }, [onMessagesChange]);
 
+  // GitHubWatcherCard dispatches a snapshot event on phase transitions. We attach
+  // the snapshot to the owning message so it persists with chat history and cards
+  // resume from their last-known state when the chat is reopened.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ messageId: string; snapshot: import('../../types').GitHubWatcherSnapshot }>).detail;
+      if (!detail?.messageId || !detail.snapshot) return;
+      setMessages(prev => {
+        let changed = false;
+        const next = prev.map(m => {
+          if (m.id !== detail.messageId) return m;
+          const existing = m.githubWatchers ?? [];
+          const otherUrls = existing.filter(s => s.url !== detail.snapshot.url);
+          // Skip the write when the phase hasn't actually changed (defensive — the card already
+          // dedupes, but stale events from remounts could otherwise churn the message ref).
+          const prior = existing.find(s => s.url === detail.snapshot.url);
+          if (prior && prior.phase === detail.snapshot.phase) return m;
+          changed = true;
+          return { ...m, githubWatchers: [...otherUrls, detail.snapshot] };
+        });
+        return changed ? next : prev;
+      });
+    };
+    window.addEventListener('sai-github-watcher-snapshot', handler);
+    return () => window.removeEventListener('sai-github-watcher-snapshot', handler);
+  }, []);
+
   const handleApprove = (modifiedCommand?: string) => {
     if (!pendingApproval) return;
     window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, true, modifiedCommand);
@@ -1460,6 +1487,14 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     // Handle built-in commands locally
     if (import.meta.env.DEV && text.startsWith('/fake-error')) {
       handleFakeError(text);
+      return;
+    }
+    // Dev-only: messages containing sai://fake-* render the watcher card without
+    // round-tripping to the LLM. Lets us preview live behavior with no real API calls.
+    if (import.meta.env.DEV && /sai:\/\/fake-(run|release)\//.test(text)) {
+      const userId = `fake-watcher-${Date.now()}`;
+      setMessages(prev => [...prev, { id: userId, role: 'user', content: text, timestamp: Date.now(), images }]);
+      flushMessagesToParent();
       return;
     }
     // Slash-command interception (orchestrator chat). When the parent provides
