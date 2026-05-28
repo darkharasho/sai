@@ -196,12 +196,14 @@ export default function App() {
       try {
         let bearer = loadBearer();
         const code = extractPairCode(location.href);
-        // A fresh `?code=` in the URL is explicit re-pair intent (the user just
-        // scanned a QR). Drop any stale bearer so we always exchange the code,
-        // otherwise an invalid leftover token would silently keep us locked out.
+        // If we already have a bearer, prefer it over any `?code=` in the URL.
+        // Bookmarked QR-landing URLs keep the (now-expired) code forever, so
+        // re-pairing on every visit would 401 after the 2-minute TTL. Strip the
+        // stale code from the URL so a refresh doesn't keep retrying. To
+        // explicitly re-pair, the user disconnects (which clears the bearer)
+        // and scans a new QR.
         if (code && bearer) {
-          removePersisted(BEARER_KEY);
-          bearer = null;
+          history.replaceState(null, '', location.pathname);
         }
         if (code && !bearer) {
           setPhase('pairing');
