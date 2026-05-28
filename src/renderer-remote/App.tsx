@@ -159,6 +159,8 @@ function ConnectedShell({ client }: { client: WireClient }) {
         workspacePath={workspacePath}
         metaMembers={metaMembers}
         currentSessionProjectPath={workspacePath || null}
+        currentSessionId={active?.sessionId ?? null}
+        statusStore={workspaceStatusStore}
         followEnabled={follow}
         onFollowChange={setFollow}
         onAttach={(projectPath, sessionId) => {

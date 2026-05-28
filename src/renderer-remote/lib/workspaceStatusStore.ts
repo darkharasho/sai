@@ -7,6 +7,11 @@ export interface WorkspaceStatus {
   awaitingQuestion: boolean;
   /** Session id of the streaming turn, or null if unknown (first turn before session_id arrives). */
   streamingSessionId?: string | null;
+  /** Per-session activity sets in this workspace. Used by the PWA chat list
+   *  to mirror the desktop sidebar's per-row status squircle. */
+  streamingSessionIds?: string[];
+  suspendedSessionIds?: string[];
+  awaitingSessionIds?: string[];
 }
 
 export type WorkspaceStatusPriority = 'idle' | 'completed' | 'busy' | 'streaming' | 'awaitingQuestion' | 'approval';

@@ -308,7 +308,17 @@ export default function App() {
   // swarm (sidebar change or back to overview) so the chat panel doesn't
   // keep showing the task's chat outside the swarm view.
   const preSwarmSessionByWsRef = useRef<Map<string, string>>(new Map());
-  const lastEmittedWorkspaceStatusRef = useRef<Map<string, { busy: boolean; streaming: boolean; completed: boolean; approval: boolean; awaitingQuestion: boolean; streamingSessionId: string | null }>>(new Map());
+  const lastEmittedWorkspaceStatusRef = useRef<Map<string, {
+    busy: boolean;
+    streaming: boolean;
+    completed: boolean;
+    approval: boolean;
+    awaitingQuestion: boolean;
+    streamingSessionId: string | null;
+    streamingSessionIds: string[];
+    suspendedSessionIds: string[];
+    awaitingSessionIds: string[];
+  }>>(new Map());
   // sessionId of the chat turn that's currently streaming on each workspace.
   // Set on streaming_start (sessionId carried by claude.ts); cleared on result.
   // Lets mobile distinguish a lingering prior-session turn from the freshly
@@ -441,8 +451,27 @@ export default function App() {
       ...awaitingQuestionWorkspaces,
       ...lastEmittedWorkspaceStatusRef.current.keys(),
     ]);
+    // Derive per-workspace session activity arrays from the global scope sets
+    // so the PWA can render per-row status indicators in its chat list.
+    const sessionIdsByWorkspace = (path: string) => {
+      const prefix = `${path}:`;
+      const streamingIds: string[] = [];
+      for (const k of streamingScopes) if (k.startsWith(prefix)) streamingIds.push(k.slice(prefix.length));
+      const suspendedIds: string[] = [];
+      for (const k of suspendedScopes) if (k.startsWith(prefix)) suspendedIds.push(k.slice(prefix.length));
+      const awaitingIds = Array.from(approvalSessions.get(path)?.keys() ?? []);
+      return { streamingIds, suspendedIds, awaitingIds };
+    };
+    const arraysEqual = (a: readonly string[] | undefined, b: readonly string[]) => {
+      if (!a) return false;
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+      return true;
+    };
     for (const projectPath of all) {
       const streaming = chatStreamingWorkspaces.has(projectPath);
+      const { streamingIds, suspendedIds, awaitingIds } = sessionIdsByWorkspace(projectPath);
+      streamingIds.sort(); suspendedIds.sort(); awaitingIds.sort();
       const next = {
         busy: busyWorkspaces.has(projectPath),
         streaming,
@@ -450,6 +479,9 @@ export default function App() {
         approval: approvalSessions.has(projectPath),
         awaitingQuestion: awaitingQuestionWorkspaces.has(projectPath),
         streamingSessionId: streaming ? (chatStreamingSessionRef.current.get(projectPath) ?? null) : null,
+        streamingSessionIds: streamingIds,
+        suspendedSessionIds: suspendedIds,
+        awaitingSessionIds: awaitingIds,
       };
       const prev = lastEmittedWorkspaceStatusRef.current.get(projectPath);
       if (!prev
@@ -458,12 +490,15 @@ export default function App() {
           || prev.completed !== next.completed
           || prev.approval !== next.approval
           || prev.awaitingQuestion !== next.awaitingQuestion
-          || prev.streamingSessionId !== next.streamingSessionId) {
+          || prev.streamingSessionId !== next.streamingSessionId
+          || !arraysEqual(prev.streamingSessionIds, next.streamingSessionIds)
+          || !arraysEqual(prev.suspendedSessionIds, next.suspendedSessionIds)
+          || !arraysEqual(prev.awaitingSessionIds, next.awaitingSessionIds)) {
         lastEmittedWorkspaceStatusRef.current.set(projectPath, next);
         void (window.sai as any).remoteEmitWorkspaceStatus?.(projectPath, next);
       }
     }
-  }, [busyWorkspaces, chatStreamingWorkspaces, completedWorkspaces, approvalSessions, awaitingQuestionWorkspaces]);
+  }, [busyWorkspaces, chatStreamingWorkspaces, completedWorkspaces, approvalSessions, awaitingQuestionWorkspaces, streamingScopes, suspendedScopes]);
   useEffect(() => { swarmTasksByWsRef.current = swarmTasksByWs; }, [swarmTasksByWs]);
   useEffect(() => { swarmDiffStatsRef.current = swarmDiffStats; }, [swarmDiffStats]);
   useEffect(() => { orchestratorSessionIdByWsRef.current = orchestratorSessionIdByWs; }, [orchestratorSessionIdByWs]);
