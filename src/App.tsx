@@ -11,7 +11,7 @@ import CodePanel from './components/CodePanel/CodePanel';
 import UnsavedChangesModal from './components/UnsavedChangesModal';
 import WorkspaceToast, { type ToastTone } from './components/WorkspaceToast';
 import { computeChatToasts } from './lib/chatToasts';
-import { computeChatNotificationCount, isTurnErrored } from './lib/chatActivity';
+import { computeChatNotificationCount, computeCompletedWorkspaces, isTurnErrored } from './lib/chatActivity';
 import CommandPalette from './components/CommandPalette';
 import { useWhatsNew } from './hooks/useWhatsNew';
 import { useKeybinding } from './hooks/useKeybinding';
@@ -3884,19 +3884,15 @@ export default function App() {
   // TitleBar workspace switcher shows the green '!' even when the workspace
   // isn't actively busy. Mirrors how approvalSessions.keys() rolls per-session
   // approvals up to per-workspace badges.
-  const completedWorkspacesWithUnread = useMemo(() => {
-    const next = new Set(completedWorkspaces);
-    const focused = activeProjectPath;
-    for (const [wsPath, ws] of workspaces) {
-      const focusedSessionId = wsPath === focused ? activeSession?.id : undefined;
-      for (const s of ws.sessions) {
-        if (s.id === focusedSessionId) continue;
-        if (s.updatedAt > (s.lastViewedAt ?? s.updatedAt)) { next.add(wsPath); break; }
-        if (s.lastTurnErrored) { next.add(wsPath); break; }
-      }
-    }
-    return next;
-  }, [completedWorkspaces, workspaces, activeProjectPath, activeSession?.id]);
+  const completedWorkspacesWithUnread = useMemo(
+    () => computeCompletedWorkspaces({
+      completedWorkspaces,
+      workspaces: Array.from(workspaces.values()),
+      focusedProjectPath: activeProjectPath,
+      focusedSessionId: activeSession?.id,
+    }),
+    [completedWorkspaces, workspaces, activeProjectPath, activeSession?.id],
+  );
 
   return (
     <div className="app">

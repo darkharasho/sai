@@ -27,6 +27,54 @@ export function isTurnErrored(msg: ResultEnvelopeShape | null | undefined): bool
 }
 
 /**
+ * Subset of ChatSession we need to evaluate per-workspace "needs attention"
+ * roll-up. Kept narrow so the helper isn't coupled to the full type.
+ */
+export interface WorkspaceUnreadSessionShape {
+  id: string;
+  updatedAt: number;
+  lastViewedAt?: number;
+  lastTurnErrored?: boolean;
+}
+
+/**
+ * Workspace context shape the roll-up reads. Just the projectPath + sessions
+ * list — the App passes its `workspaces` Map values straight through.
+ */
+export interface WorkspaceUnreadShape {
+  projectPath: string;
+  sessions: ReadonlyArray<WorkspaceUnreadSessionShape>;
+}
+
+/**
+ * Compute the union of (already-known completed workspaces) with workspaces
+ * that contain at least one session needing attention (unread or errored).
+ * The currently focused session is exempt — looking at it counts as viewing
+ * it, even if its updatedAt hasn't caught up to lastViewedAt yet.
+ *
+ * Used to drive the green '!' indicator in the TitleBar workspace switcher
+ * so it reflects per-session state, not just whole-workspace busy/idle.
+ */
+export function computeCompletedWorkspaces(opts: {
+  completedWorkspaces: ReadonlySet<string>;
+  workspaces: ReadonlyArray<WorkspaceUnreadShape>;
+  focusedProjectPath?: string;
+  focusedSessionId?: string;
+}): Set<string> {
+  const { completedWorkspaces, workspaces, focusedProjectPath, focusedSessionId } = opts;
+  const next = new Set(completedWorkspaces);
+  for (const ws of workspaces) {
+    const exemptId = ws.projectPath === focusedProjectPath ? focusedSessionId : undefined;
+    for (const s of ws.sessions) {
+      if (s.id === exemptId) continue;
+      if (s.lastTurnErrored) { next.add(ws.projectPath); break; }
+      if (s.updatedAt > (s.lastViewedAt ?? s.updatedAt)) { next.add(ws.projectPath); break; }
+    }
+  }
+  return next;
+}
+
+/**
  * Count of distinct sessions that need user attention from outside the
  * currently focused session. Surfaced as the NavBar `Chats` badge.
  *
