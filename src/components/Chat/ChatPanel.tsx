@@ -598,6 +598,37 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       return next;
     });
   }, []);
+
+  // Coalesce streaming text-delta appends to one React state update per animation
+  // frame. Per-chunk setMessages triggered re-tokenization of the entire growing
+  // assistant message on every stdout chunk and was the main driver of RAM spikes
+  // while Claude is coding. Non-delta events (tool calls, new bubbles, errors,
+  // result/done) flush the pending buffer before mutating state to preserve order.
+  const streamPendingRef = useRef<string>('');
+  const streamRafRef = useRef<number | null>(null);
+  // Stream-idle gate for the in-flight last assistant bubble. While true, the
+  // bubble renders as plain text; flips to true (settled) when no delta has
+  // arrived for STREAM_IDLE_MS, letting markdown/highlight render mid-turn
+  // instead of waiting for end-of-turn.
+  const STREAM_IDLE_MS = 250;
+  const [streamSettled, setStreamSettled] = useState(true);
+  const streamIdleTimerRef = useRef<number | null>(null);
+  const flushStreamingText = useCallback(() => {
+    if (streamRafRef.current != null) {
+      cancelAnimationFrame(streamRafRef.current);
+      streamRafRef.current = null;
+    }
+    const pending = streamPendingRef.current;
+    if (!pending) return;
+    streamPendingRef.current = '';
+    setMessages(prev => {
+      const last = prev[prev.length - 1];
+      if (!last || last.role !== 'assistant' || last.toolCalls) return prev;
+      const updated = [...prev];
+      updated[updated.length - 1] = { ...last, content: (last.content || '') + pending };
+      return updated;
+    });
+  }, [setMessages]);
   const emptyPrompt = useMemo(() => EMPTY_PROMPTS[Math.floor(Math.random() * EMPTY_PROMPTS.length)], []);
   const [turnStartIndex, setTurnStartIndex] = useState<number | null>(null);
   const thinkingTransition = useReducedMotionTransition(SPRING.pop);
@@ -739,6 +770,14 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       // Only process messages for this workspace and chat scope
       if (msg.projectPath && msg.projectPath !== projectPath) return;
       if (msg.scope && msg.scope !== claudeScope) return;
+
+      // Flush any buffered streaming text before processing a non-delta event,
+      // so the pending content is committed to state in the correct order.
+      const isPureTextDelta = msg.type === 'assistant'
+        && Array.isArray(msg.message?.content)
+        && msg.message.content.length > 0
+        && msg.message.content.every((b: any) => b.type === 'text' && b.delta && typeof b.text === 'string');
+      if (!isPureTextDelta) flushStreamingText();
 
       if (msg.type === 'ready') {
         setReady(true);
@@ -1009,6 +1048,35 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         }
 
         if (text || tools.length > 0) {
+          // Streaming text-delta fast path: buffer into the rAF accumulator and
+          // skip the setMessages entirely. Only applies when the last message is
+          // already a pure-text assistant bubble we can append to.
+          const lastNow = messagesRef.current[messagesRef.current.length - 1];
+          if (
+            isPureTextDelta
+            && tools.length === 0
+            && lastNow?.role === 'assistant'
+            && !lastNow.toolCalls
+          ) {
+            streamPendingRef.current += text;
+            if (streamRafRef.current == null) {
+              streamRafRef.current = requestAnimationFrame(() => {
+                streamRafRef.current = null;
+                flushStreamingText();
+              });
+            }
+            // Mark the bubble as in-flight and (re)arm the idle timer so
+            // markdown renders mid-turn when streaming pauses.
+            setStreamSettled(s => s ? false : s);
+            if (streamIdleTimerRef.current != null) {
+              clearTimeout(streamIdleTimerRef.current);
+            }
+            streamIdleTimerRef.current = window.setTimeout(() => {
+              streamIdleTimerRef.current = null;
+              setStreamSettled(true);
+            }, STREAM_IDLE_MS);
+            return;
+          }
           setMessages(prev => {
             const last = prev[prev.length - 1];
             // Update the last assistant message if it's a pure text message (no tool calls).
@@ -1104,9 +1172,14 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     });
 
     return () => {
+      flushStreamingText();
+      if (streamIdleTimerRef.current != null) {
+        clearTimeout(streamIdleTimerRef.current);
+        streamIdleTimerRef.current = null;
+      }
       cleanup();
     };
-  }, [projectPath, aiProvider, activeMetaRuntime]);
+  }, [projectPath, aiProvider, activeMetaRuntime, flushStreamingText]);
 
   // Poll the Anthropic usage API for real utilization percentages
   useEffect(() => {
@@ -1660,7 +1733,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
                     />
                   </div>
                 )
-                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId} renderToolCall={renderToolCall} renderMessage={renderMessage} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} />
+                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} renderToolCall={renderToolCall} renderMessage={renderMessage} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} />
               )}
           </>
         )}

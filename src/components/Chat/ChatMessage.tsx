@@ -834,43 +834,54 @@ function ChatMessage({
                 [{formatMs(message.durationMs)}]
               </div>
             )}
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              rehypePlugins={[rehypeHighlight, rehypeFilePaths]}
-              urlTransform={(url) => url.startsWith('sai-file://') ? url : defaultUrlTransform(url)}
-              components={{
-                pre: ({ children, ...props }) => (
-                  <CodeBlock {...props}>{children}</CodeBlock>
-                ),
-                a: ({ href, children }) => (
-                  <a
-                    href={href}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      if (href?.startsWith('sai-file://') && onFileOpen) {
-                        const raw = href.slice('sai-file://'.length);
-                        const lineMatch = raw.match(/:(\d+)$/);
-                        const line = lineMatch ? parseInt(lineMatch[1], 10) : undefined;
-                        const rel = lineMatch ? raw.slice(0, -lineMatch[0].length) : raw;
-                        const abs = rel.startsWith('/') ? rel : `${projectPath}/${rel}`;
-                        onFileOpen(abs, line);
-                      } else if (href) {
-                        window.sai.openExternal(href);
-                      }
-                    }}
-                  >
-                    {children}
-                  </a>
-                ),
-              }}
-            >{(() => {
-              const raw = typeof message.content === 'string' ? message.content : String(message.content ?? '');
-              // Preserve user newlines as hard line breaks (trailing double-space)
-              // so Shift+Enter in the chat input renders visually.
-              if (message.role === 'user') return raw.replace(/\n/g, '  \n');
-              if (typewriterActive && displayLen < rawAssistantContent.length) return raw.slice(0, snapToWordBoundary(raw, displayLen));
-              return raw;
-            })()}</ReactMarkdown>
+            {isAssistantStreaming ? (
+              // While the assistant message is actively streaming, render plain
+              // text. Running ReactMarkdown + rehypeHighlight on every chunk
+              // re-tokenizes the entire growing buffer ~50×/sec and is the
+              // dominant driver of RAM/CPU spikes during a turn. Once streaming
+              // ends, the memo re-renders this branch with full markdown.
+              <div className="chat-msg-stream-text">
+                {typeof message.content === 'string' ? message.content : String(message.content ?? '')}
+              </div>
+            ) : (
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeHighlight, rehypeFilePaths]}
+                urlTransform={(url) => url.startsWith('sai-file://') ? url : defaultUrlTransform(url)}
+                components={{
+                  pre: ({ children, ...props }) => (
+                    <CodeBlock {...props}>{children}</CodeBlock>
+                  ),
+                  a: ({ href, children }) => (
+                    <a
+                      href={href}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        if (href?.startsWith('sai-file://') && onFileOpen) {
+                          const raw = href.slice('sai-file://'.length);
+                          const lineMatch = raw.match(/:(\d+)$/);
+                          const line = lineMatch ? parseInt(lineMatch[1], 10) : undefined;
+                          const rel = lineMatch ? raw.slice(0, -lineMatch[0].length) : raw;
+                          const abs = rel.startsWith('/') ? rel : `${projectPath}/${rel}`;
+                          onFileOpen(abs, line);
+                        } else if (href) {
+                          window.sai.openExternal(href);
+                        }
+                      }}
+                    >
+                      {children}
+                    </a>
+                  ),
+                }}
+              >{(() => {
+                const raw = typeof message.content === 'string' ? message.content : String(message.content ?? '');
+                // Preserve user newlines as hard line breaks (trailing double-space)
+                // so Shift+Enter in the chat input renders visually.
+                if (message.role === 'user') return raw.replace(/\n/g, '  \n');
+                if (typewriterActive && displayLen < rawAssistantContent.length) return raw.slice(0, snapToWordBoundary(raw, displayLen));
+                return raw;
+              })()}</ReactMarkdown>
+            )}
             {message.images && message.images.length > 0 && (
               <div className="chat-msg-images">
                 {message.images.map((src, i) => (
@@ -989,6 +1000,7 @@ function ChatMessage({
           mask-repeat: no-repeat;
         }
         .chat-msg-body { color: var(--text); line-height: 1.6; flex: 1; min-width: 0; }
+        .chat-msg-stream-text { white-space: pre-wrap; word-break: break-word; }
         .chat-msg-duration {
           font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-variant-numeric: tabular-nums;
