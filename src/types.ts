@@ -68,11 +68,11 @@ export interface ChatSession {
 
 export interface GitHubWatcherSnapshot {
   url: string;
-  kind: 'run' | 'release';
+  kind: 'run';
   phase: 'pending' | 'queued' | 'in_progress' | 'success' | 'failure' | 'cancelled' | 'neutral' | 'error';
   /** ms epoch of when this snapshot was captured — used by the hybrid resume policy. */
   capturedAt: number;
-  /** Opaque payload (RunState or ReleaseState). Kept loose so this type doesn't depend on the card. */
+  /** Opaque RunState payload. Kept loose so this type doesn't depend on the card. */
   data: Record<string, unknown>;
 }
 

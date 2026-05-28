@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GitBranch, Tag, ExternalLink, AlertCircle, CheckCircle2, XCircle, CircleDot, Clock, MinusCircle } from 'lucide-react';
+import { GitBranch, ExternalLink, AlertCircle, CheckCircle2, XCircle, CircleDot, Clock, MinusCircle, Circle } from 'lucide-react';
 import { SPRING, useReducedMotionTransition } from './motion';
 import type { GitHubWatchTarget } from './githubWatcher';
 import type { GitHubWatcherSnapshot } from '../../types';
@@ -35,31 +35,33 @@ interface RunState {
   updatedAt?: string;
 }
 
-interface ReleaseState {
-  name?: string;
-  tagName?: string;
-  draft?: boolean;
-  prerelease?: boolean;
-  publishedAt?: string;
-  author?: string;
-  authorAvatar?: string;
-  body?: string;
-  assetCount?: number;
-  htmlUrl?: string;
+type JobStatus = 'queued' | 'in_progress' | 'waiting' | 'completed' | 'unknown';
+interface JobStep {
+  name: string;
+  status: JobStatus;
+  conclusion: RunConclusion;
+  number: number;
+}
+interface JobState {
+  id: number;
+  name: string;
+  status: JobStatus;
+  conclusion: RunConclusion;
+  startedAt?: string;
+  completedAt?: string;
+  steps: JobStep[];
 }
 
-// Active run polls fast; once terminal we stop. Releases poll once (mostly immutable).
 const POLL_ACTIVE_MS = 5000;
 
 // Module-level cache so cards remounted after a workspace swap reattach with last-known
 // status instead of flashing "Fetching…" again. Keyed by canonical github URL.
-const STATUS_CACHE = new Map<string, { run?: RunState; release?: ReleaseState }>();
+const STATUS_CACHE = new Map<string, { run: RunState; jobs?: JobState[] }>();
 
 type Phase = 'pending' | 'queued' | 'in_progress' | 'success' | 'failure' | 'cancelled' | 'neutral' | 'error';
 
-function phaseOf(args: { target: GitHubWatchTarget; run: RunState | null; release: ReleaseState | null; error: string | null }): Phase {
+function phaseOf(args: { run: RunState | null; error: string | null }): Phase {
   if (args.error) return 'error';
-  if (args.target.kind === 'release') return args.release ? 'success' : 'pending';
   const run = args.run;
   if (!run) return 'pending';
   if (run.status === 'queued') return 'queued';
@@ -84,17 +86,39 @@ const PHASE_THEME: Record<Phase, { color: string; label: string; Icon: React.Com
   error:       { color: '#f85149',                      label: 'Watcher error', Icon: AlertCircle },
 };
 
-function timeAgo(iso?: string): string {
+function fmtClock(iso?: string): string {
   if (!iso) return '';
-  const ms = Date.now() - new Date(iso).getTime();
-  if (ms < 0) return 'just now';
-  const sec = Math.floor(ms / 1000);
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  return `${Math.floor(hr / 24)}d ago`;
+  const d = new Date(iso);
+  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+}
+
+function jobIcon(j: JobState): { Icon: React.ComponentType<{ size?: number }>; color: string; live: boolean } {
+  if (j.status === 'in_progress') return { Icon: CircleDot, color: 'var(--accent, #c7910c)', live: true };
+  if (j.status === 'queued' || j.status === 'waiting') return { Icon: Clock, color: 'var(--text-muted, #8a9099)', live: false };
+  if (j.status === 'completed') {
+    if (j.conclusion === 'success') return { Icon: CheckCircle2, color: '#3fb950', live: false };
+    if (j.conclusion === 'failure' || j.conclusion === 'timed_out') return { Icon: XCircle, color: '#f85149', live: false };
+    if (j.conclusion === 'cancelled') return { Icon: MinusCircle, color: 'var(--text-muted, #8a9099)', live: false };
+    if (j.conclusion === 'skipped') return { Icon: Circle, color: 'var(--text-muted, #8a9099)', live: false };
+    return { Icon: CheckCircle2, color: 'var(--text-muted, #8a9099)', live: false };
+  }
+  return { Icon: Circle, color: 'var(--text-muted, #8a9099)', live: false };
+}
+
+function activeStepName(j: JobState): string | undefined {
+  const running = j.steps.find(s => s.status === 'in_progress');
+  if (running) return running.name;
+  // Fall back to "next queued" so a job sitting between steps still shows a hint.
+  return j.steps.find(s => s.status === 'queued')?.name;
+}
+
+function jobDuration(j: JobState): string | undefined {
+  if (!j.startedAt) return undefined;
+  const end = j.completedAt ? new Date(j.completedAt).getTime() : Date.now();
+  const ms = Math.max(0, end - new Date(j.startedAt).getTime());
+  if (ms < 1000) return undefined;
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
 }
 
 interface GitHubWatcherCardProps {
@@ -108,25 +132,26 @@ const TERMINAL_PHASES: ReadonlySet<GitHubWatcherSnapshot['phase']> =
 
 export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: GitHubWatcherCardProps) {
   const cached = STATUS_CACHE.get(target.url);
-  const seededRun = !cached && seedSnapshot?.kind === 'run' ? (seedSnapshot.data as unknown as RunState) : null;
-  const seededRelease = !cached && seedSnapshot?.kind === 'release' ? (seedSnapshot.data as unknown as ReleaseState) : null;
-  const [expanded, setExpanded] = useState(true);
+  const seededRun = !cached && seedSnapshot ? (seedSnapshot.data as unknown as RunState) : null;
+  const seededJobs = !cached && seedSnapshot && Array.isArray((seedSnapshot.data as any).__jobs)
+    ? ((seedSnapshot.data as any).__jobs as JobState[])
+    : null;
   const [run, setRun] = useState<RunState | null>(cached?.run ?? seededRun);
-  const [release, setRelease] = useState<ReleaseState | null>(cached?.release ?? seededRelease);
+  const [jobs, setJobs] = useState<JobState[] | null>(cached?.jobs ?? seededJobs);
   const [error, setError] = useState<string | null>(null);
   const visibleRef = useRef<boolean>(typeof document === 'undefined' ? true : document.visibilityState === 'visible');
   const pop = useReducedMotionTransition(SPRING.pop);
-  // Cache the seed in module STATUS_CACHE so dedupe + remounts reuse it without props plumbing.
-  if (seededRun) STATUS_CACHE.set(target.url, { run: seededRun });
-  if (seededRelease) STATUS_CACHE.set(target.url, { release: seededRelease });
+  // Capture the seed once on mount. seedSnapshot is re-derived from message state
+  // on every render (find() returns a new object), and our own phase-transition
+  // dispatch updates that message — depending on it would restart the effect mid-run.
+  const initialSeedRef = useRef(seedSnapshot);
+  if (seededRun && !cached) STATUS_CACHE.set(target.url, { run: seededRun, jobs: seededJobs ?? undefined });
 
   useEffect(() => {
-    // Hybrid resume policy: terminal phases never re-poll (immutable on GitHub).
-    // Non-terminal phases re-poll only if the snapshot is recent — older ones freeze
-    // so scrolling through stale history doesn't burn API budget.
-    if (seedSnapshot) {
-      if (TERMINAL_PHASES.has(seedSnapshot.phase)) return;
-      if (Date.now() - seedSnapshot.capturedAt > RESUME_REPOLL_WINDOW_MS) return;
+    const seed = initialSeedRef.current;
+    if (seed) {
+      if (TERMINAL_PHASES.has(seed.phase)) return;
+      if (Date.now() - seed.capturedAt > RESUME_REPOLL_WINDOW_MS) return;
     }
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -137,61 +162,77 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
       const params = new URLSearchParams(qIndex >= 0 ? target.url.slice(qIndex) : '');
       const speedMs = params.get('speed') === 'slow' ? 4000 : 1500;
       const outcome = (params.get('outcome') as RunConclusion) || 'success';
-      if (target.kind === 'run') {
-        const base = {
-          name: 'Build and Test',
-          displayTitle: 'feat(chat): preview live release/action watchers',
-          runNumber: 142,
-          runAttempt: 1,
-          headBranch: 'feat/github-watcher',
-          headSha: 'a1b2c3d4e5f6789012345678901234567890abcd',
-          event: 'push',
-          actor: 'darkharasho',
-          startedAt: new Date(Date.now() - 30_000).toISOString(),
-        };
-        const seq: RunState[] = [
-          { status: 'queued', conclusion: null, ...base, updatedAt: new Date().toISOString() },
-          { status: 'in_progress', conclusion: null, ...base, updatedAt: new Date().toISOString() },
-          { status: 'completed', conclusion: outcome, ...base, updatedAt: new Date().toISOString() },
-        ];
-        let i = 0;
-        const step = () => {
-          if (cancelled || i >= seq.length) return;
-          const next = { ...seq[i], updatedAt: new Date().toISOString() };
-          setRun(next);
-          STATUS_CACHE.set(target.url, { run: next });
-          i++;
-          if (i < seq.length) timer = setTimeout(step, speedMs);
-        };
-        step();
-      } else {
-        timer = setTimeout(() => {
-          if (cancelled) return;
-          const next: ReleaseState = {
-            name: `SAI ${target.tag}`,
-            tagName: target.tag,
-            draft: params.get('outcome') === 'draft',
-            prerelease: params.get('outcome') === 'prerelease',
-            publishedAt: new Date().toISOString(),
-            author: 'darkharasho',
-            assetCount: 4,
-            body: 'Adds live GitHub action + release watchers to chat. Status updates in-place via polling, supports scripted previews in dev (sai://fake-run/...).',
-          };
-          setRelease(next);
-          STATUS_CACHE.set(target.url, { release: next });
-        }, speedMs);
-      }
+      const base = {
+        name: 'Build and Test',
+        displayTitle: 'feat(chat): preview live action watchers',
+        runNumber: 142,
+        runAttempt: 1,
+        headBranch: 'feat/github-watcher',
+        headSha: 'a1b2c3d4e5f6789012345678901234567890abcd',
+        event: 'push',
+        actor: 'darkharasho',
+        startedAt: new Date(Date.now() - 30_000).toISOString(),
+      };
+      const mkSteps = (running: number, total: number, failedAt?: number): JobStep[] => Array.from({ length: total }, (_, i) => {
+        const n = i + 1;
+        const stepNames = ['Set up job', 'Checkout', 'Install deps', 'Build', 'Test', 'Upload artifacts'];
+        const name = stepNames[i] ?? `Step ${n}`;
+        if (failedAt != null && n === failedAt) return { name, status: 'completed', conclusion: 'failure', number: n };
+        if (failedAt != null && n > failedAt) return { name, status: 'queued', conclusion: null, number: n };
+        if (n < running) return { name, status: 'completed', conclusion: 'success', number: n };
+        if (n === running) return { name, status: 'in_progress', conclusion: null, number: n };
+        return { name, status: 'queued', conclusion: null, number: n };
+      });
+      const mkJob = (id: number, name: string, status: JobStatus, conclusion: RunConclusion, running: number, total = 6, failedAt?: number): JobState => ({
+        id, name, status, conclusion,
+        startedAt: status === 'queued' ? undefined : new Date(Date.now() - 20_000).toISOString(),
+        completedAt: status === 'completed' ? new Date().toISOString() : undefined,
+        steps: mkSteps(running, total, failedAt),
+      });
+      const jobsSeq: JobState[][] = [
+        [
+          mkJob(1, 'Build (linux)', 'queued', null, 0),
+          mkJob(2, 'Build (windows)', 'queued', null, 0),
+          mkJob(3, 'Build (macos)', 'queued', null, 0),
+          mkJob(4, 'Tests', 'queued', null, 0),
+        ],
+        [
+          mkJob(1, 'Build (linux)', 'in_progress', null, 4),
+          mkJob(2, 'Build (windows)', 'in_progress', null, 3),
+          mkJob(3, 'Build (macos)', 'in_progress', null, 2),
+          mkJob(4, 'Tests', 'queued', null, 0),
+        ],
+        [
+          mkJob(1, 'Build (linux)', 'completed', 'success', 6),
+          mkJob(2, 'Build (windows)', 'completed', 'success', 6),
+          mkJob(3, 'Build (macos)', outcome === 'failure' ? 'completed' : 'completed', outcome === 'failure' ? 'failure' : 'success', 6, 6, outcome === 'failure' ? 4 : undefined),
+          mkJob(4, 'Tests', 'completed', outcome === 'failure' ? 'cancelled' : 'success', 6),
+        ],
+      ];
+      const seq: { run: RunState; jobs: JobState[] }[] = [
+        { run: { status: 'queued', conclusion: null, ...base, updatedAt: new Date().toISOString() }, jobs: jobsSeq[0] },
+        { run: { status: 'in_progress', conclusion: null, ...base, updatedAt: new Date().toISOString() }, jobs: jobsSeq[1] },
+        { run: { status: 'completed', conclusion: outcome, ...base, updatedAt: new Date().toISOString() }, jobs: jobsSeq[2] },
+      ];
+      let i = 0;
+      const step = () => {
+        if (cancelled || i >= seq.length) return;
+        const next = { run: { ...seq[i].run, updatedAt: new Date().toISOString() }, jobs: seq[i].jobs };
+        setRun(next.run);
+        setJobs(next.jobs);
+        STATUS_CACHE.set(target.url, next);
+        i++;
+        if (i < seq.length) timer = setTimeout(step, speedMs);
+      };
+      step();
       return () => { cancelled = true; if (timer) clearTimeout(timer); };
     }
 
-    const path = target.kind === 'run'
-      ? `/repos/${target.owner}/${target.repo}/actions/runs/${target.runId}`
-      : `/repos/${target.owner}/${target.repo}/releases/tags/${encodeURIComponent(target.tag)}`;
+    const runPath = `/repos/${target.owner}/${target.repo}/actions/runs/${target.runId}`;
+    const jobsPath = `/repos/${target.owner}/${target.repo}/actions/runs/${target.runId}/jobs`;
 
-    // Prefer the main-process IPC (uses stored oauth token if logged in); fall back to
-    // an unauthenticated browser fetch when running outside Electron (web/test).
     const sai = (window as any).sai;
-    const fetchJson = async (): Promise<any> => {
+    const fetchJson = async (path: string): Promise<any> => {
       if (sai?.githubApiGet) {
         const r = await sai.githubApiGet(path);
         if (!r.ok) throw new Error(`${r.status}${r.body?.message ? ` ${r.body.message}` : ''}`);
@@ -209,50 +250,49 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
         return;
       }
       try {
-        const json = await fetchJson();
+        const [runJson, jobsJson] = await Promise.all([fetchJson(runPath), fetchJson(jobsPath)]);
         if (cancelled) return;
-        if (target.kind === 'run') {
-          const next: RunState = {
-            status: (json.status ?? 'unknown') as RunStatus,
-            conclusion: (json.conclusion ?? null) as RunConclusion,
-            name: json.name,
-            displayTitle: json.display_title,
-            runNumber: json.run_number,
-            runAttempt: json.run_attempt,
-            headBranch: json.head_branch,
-            headSha: json.head_sha,
-            event: json.event,
-            actor: json.actor?.login ?? json.triggering_actor?.login,
-            actorAvatar: json.actor?.avatar_url ?? json.triggering_actor?.avatar_url,
-            htmlUrl: json.html_url,
-            startedAt: json.run_started_at,
-            updatedAt: json.updated_at,
-          };
-          setRun(next);
-          STATUS_CACHE.set(target.url, { run: next });
-          if (next.status !== 'completed') {
-            timer = setTimeout(tick, POLL_ACTIVE_MS);
-          }
-        } else {
-          const next: ReleaseState = {
-            name: json.name,
-            tagName: json.tag_name,
-            draft: json.draft,
-            prerelease: json.prerelease,
-            publishedAt: json.published_at,
-            author: json.author?.login,
-            authorAvatar: json.author?.avatar_url,
-            body: json.body,
-            assetCount: Array.isArray(json.assets) ? json.assets.length : undefined,
-            htmlUrl: json.html_url,
-          };
-          setRelease(next);
-          STATUS_CACHE.set(target.url, { release: next });
+        const nextRun: RunState = {
+          status: (runJson.status ?? 'unknown') as RunStatus,
+          conclusion: (runJson.conclusion ?? null) as RunConclusion,
+          name: runJson.name,
+          displayTitle: runJson.display_title,
+          runNumber: runJson.run_number,
+          runAttempt: runJson.run_attempt,
+          headBranch: runJson.head_branch,
+          headSha: runJson.head_sha,
+          event: runJson.event,
+          actor: runJson.actor?.login ?? runJson.triggering_actor?.login,
+          actorAvatar: runJson.actor?.avatar_url ?? runJson.triggering_actor?.avatar_url,
+          htmlUrl: runJson.html_url,
+          startedAt: runJson.run_started_at,
+          updatedAt: runJson.updated_at,
+        };
+        const nextJobs: JobState[] = Array.isArray(jobsJson?.jobs)
+          ? jobsJson.jobs.map((j: any) => ({
+              id: j.id,
+              name: j.name,
+              status: (j.status ?? 'unknown') as JobStatus,
+              conclusion: (j.conclusion ?? null) as RunConclusion,
+              startedAt: j.started_at,
+              completedAt: j.completed_at,
+              steps: Array.isArray(j.steps) ? j.steps.map((s: any) => ({
+                name: s.name,
+                status: (s.status ?? 'unknown') as JobStatus,
+                conclusion: (s.conclusion ?? null) as RunConclusion,
+                number: s.number,
+              })) : [],
+            }))
+          : [];
+        setRun(nextRun);
+        setJobs(nextJobs);
+        STATUS_CACHE.set(target.url, { run: nextRun, jobs: nextJobs });
+        if (nextRun.status !== 'completed') {
+          timer = setTimeout(tick, POLL_ACTIVE_MS);
         }
       } catch (e) {
         if (cancelled) return;
         setError(e instanceof Error ? e.message : String(e));
-        // Don't reschedule on error — usually rate limit or 404. User can reopen the card later.
       }
     }
 
@@ -267,30 +307,28 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
       if (timer) clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [target.kind, target.owner, target.repo, target.kind === 'run' ? target.runId : target.tag, seedSnapshot]);
+  }, [target.owner, target.repo, target.runId, target.url]);
 
-  const phase = phaseOf({ target, run, release, error });
-  // Dispatch a snapshot only when the phase actually transitions (not on every poll).
-  // ChatPanel listens for these and writes them onto the owning message so they persist.
+  const phase = phaseOf({ run, error });
   const prevPhaseRef = useRef<typeof phase | null>(seedSnapshot?.phase ?? null);
   useEffect(() => {
     if (phase === 'pending') return;
     if (prevPhaseRef.current === phase) return;
     prevPhaseRef.current = phase;
     if (!messageId) return;
-    const data = target.kind === 'run' ? (run as unknown as Record<string, unknown>) : (release as unknown as Record<string, unknown>);
-    if (!data) return;
-    const snapshot: GitHubWatcherSnapshot = { url: target.url, kind: target.kind, phase, capturedAt: Date.now(), data };
+    if (!run) return;
+    // Stash jobs alongside the run under a leading-underscore key so the snapshot
+    // type stays opaque but reload can rehydrate the right column.
+    const data: Record<string, unknown> = { ...(run as unknown as Record<string, unknown>) };
+    if (jobs) data.__jobs = jobs;
+    const snapshot: GitHubWatcherSnapshot = {
+      url: target.url, kind: 'run', phase, capturedAt: Date.now(), data,
+    };
     const detail: GitHubWatcherSnapshotEventDetail = { messageId, snapshot };
     window.dispatchEvent(new CustomEvent(GITHUB_WATCHER_SNAPSHOT_EVENT, { detail }));
-  }, [phase, messageId, target.url, target.kind, run, release]);
+  }, [phase, messageId, target.url, run, jobs]);
   const theme = PHASE_THEME[phase];
-  const KindIcon = target.kind === 'run' ? GitBranch : Tag;
-  // Title: prefer commit-style display_title (what GitHub shows in the runs list),
-  // fall back to the workflow name. Release falls back to its tag.
-  const title = target.kind === 'run'
-    ? (run?.displayTitle || run?.name || `Run #${target.runId}`)
-    : (release?.name || release?.tagName || target.tag);
+  const title = run?.displayTitle || run?.name || `Run #${target.runId}`;
   const subtitle = `${target.owner}/${target.repo}`;
   const isLive = phase === 'queued' || phase === 'in_progress' || phase === 'pending';
   const StatusIcon = theme.Icon;
@@ -314,7 +352,7 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
       style={{ '--gh-accent': theme.color } as React.CSSProperties}
     >
       <div className={`gh-watcher-bar${isLive ? ' gh-watcher-bar-live' : ''}`} aria-hidden />
-      <div className="gh-watcher-inner" onClick={() => setExpanded(v => !v)}>
+      <div className="gh-watcher-inner">
         <header className="gh-watcher-head">
           <AnimatePresence mode="popLayout" initial={false}>
             <motion.div
@@ -331,11 +369,11 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
             </motion.div>
           </AnimatePresence>
           <div className="gh-watcher-eyebrow">
-            <KindIcon size={11} />
-            <span className="gh-watcher-eyebrow-kind">{target.kind === 'run' ? 'GitHub Action' : 'GitHub Release'}</span>
-            <span className="gh-watcher-sep">·</span>
+            <GitBranch size={11} />
+            {run?.name && <span className="gh-watcher-workflow-name" title={run.name}>{run.name}</span>}
+            {run?.name && <span className="gh-watcher-sep">·</span>}
             <span className="gh-watcher-repo">{subtitle}</span>
-            {target.kind === 'run' && run?.runNumber && (
+            {run?.runNumber && (
               <>
                 <span className="gh-watcher-sep">·</span>
                 <span className="gh-watcher-run-no">#{run.runNumber}{run.runAttempt && run.runAttempt > 1 ? ` · attempt ${run.runAttempt}` : ''}</span>
@@ -343,14 +381,19 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
             )}
           </div>
           <div className="gh-watcher-times">
-            {durationLabel && <span className="gh-watcher-time gh-watcher-duration">{durationLabel}</span>}
-            {(run?.updatedAt || release?.publishedAt) && (
-              <span className="gh-watcher-time">{timeAgo(run?.updatedAt ?? release?.publishedAt)}</span>
+            {run?.startedAt && (
+              <span className="gh-watcher-time">
+                {fmtClock(run.startedAt)}
+                {run.status === 'completed' && run.updatedAt
+                  ? <> → {fmtClock(run.updatedAt)}</>
+                  : null}
+              </span>
             )}
+            {durationLabel && <span className="gh-watcher-time gh-watcher-duration">{durationLabel}</span>}
           </div>
         </header>
         <h3 className="gh-watcher-title" title={title}>{title}</h3>
-        {target.kind === 'run' && (run?.headBranch || shortSha || run?.event || run?.actor) && (
+        {(run?.headBranch || shortSha || run?.event || run?.actor) && (
           <div className="gh-watcher-chips">
             {run?.headBranch && (
               <span className="gh-watcher-chip"><GitBranch size={11} /><code>{run.headBranch}</code></span>
@@ -364,65 +407,69 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
             )}
           </div>
         )}
-        {target.kind === 'release' && release && (
-          <div className="gh-watcher-chips">
-            <span className="gh-watcher-chip"><Tag size={11} /><code>{release.tagName}</code></span>
-            <span className={`gh-watcher-chip gh-watcher-chip-state gh-watcher-chip-state-${release.draft ? 'draft' : release.prerelease ? 'prerelease' : 'published'}`}>
-              {release.draft ? 'draft' : release.prerelease ? 'prerelease' : 'published'}
-            </span>
-            {typeof release.assetCount === 'number' && release.assetCount > 0 && (
-              <span className="gh-watcher-chip">{release.assetCount} asset{release.assetCount === 1 ? '' : 's'}</span>
-            )}
-            {release.author && (
-              <span className="gh-watcher-chip gh-watcher-chip-actor">
-                {release.authorAvatar && <img src={release.authorAvatar} alt="" />} @{release.author}
-              </span>
-            )}
+        {jobs && jobs.length > 0 && (
+          <div className="gh-watcher-pipeline" onClick={(e) => e.stopPropagation()}>
+            {jobs.map((j) => {
+              const { Icon, color, live } = jobIcon(j);
+              const step = j.status === 'in_progress' ? activeStepName(j) : undefined;
+              const dur = jobDuration(j);
+              const doneSteps = j.steps.filter(s => s.status === 'completed').length;
+              const total = j.steps.length;
+              const progressPct = total > 0 ? Math.round((doneSteps / total) * 100) : 0;
+              const stateLabel =
+                j.status === 'in_progress' ? (step ?? 'Running…')
+                : j.status === 'queued' || j.status === 'waiting' ? 'Queued'
+                : j.status === 'completed'
+                  ? (j.conclusion === 'success' ? 'Passed'
+                    : j.conclusion === 'failure' || j.conclusion === 'timed_out' ? 'Failed'
+                    : j.conclusion === 'cancelled' ? 'Cancelled'
+                    : j.conclusion === 'skipped' ? 'Skipped'
+                    : 'Completed')
+                : '';
+              return (
+                <div
+                  key={j.id}
+                  className={`gh-watcher-pipe-job${live ? ' gh-watcher-pipe-job-live' : ''}`}
+                  data-status={j.status}
+                  data-conclusion={j.conclusion ?? ''}
+                  style={{ '--job-color': color } as React.CSSProperties}
+                >
+                  <div className="gh-watcher-pipe-head">
+                    <span className="gh-watcher-pipe-icon" aria-hidden>
+                      <Icon size={14} />
+                      {live && <span className="gh-watcher-pipe-pulse" aria-hidden />}
+                    </span>
+                    <span className="gh-watcher-pipe-name" title={j.name}>{j.name}</span>
+                    {dur && <span className="gh-watcher-pipe-dur">{dur}</span>}
+                  </div>
+                  {total > 0 && (
+                    <div className="gh-watcher-pipe-bar" aria-hidden>
+                      <div className="gh-watcher-pipe-bar-fill" style={{ width: `${progressPct}%` }} />
+                    </div>
+                  )}
+                  <div className="gh-watcher-pipe-state" title={stateLabel}>
+                    {stateLabel}
+                    {total > 0 && j.status !== 'queued' && j.status !== 'waiting' && (
+                      <span className="gh-watcher-pipe-steps"> · {doneSteps}/{total}</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
-        <AnimatePresence initial={false}>
-          {expanded && (
-            <motion.div
-              key="body"
-              className="gh-watcher-body"
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] as const }}
-              style={{ overflow: 'hidden' }}
-            >
-              <div className="gh-watcher-body-inner">
-                {error && <div className="gh-watcher-error">{error}</div>}
-                {!error && target.kind === 'run' && run && (
-                  <dl className="gh-watcher-dl">
-                    {run.name && (<><dt>workflow</dt><dd>{run.name}</dd></>)}
-                    {run.conclusion && (<><dt>conclusion</dt><dd>{run.conclusion.replace(/_/g, ' ')}</dd></>)}
-                    {run.startedAt && (<><dt>started</dt><dd>{new Date(run.startedAt).toLocaleString()}</dd></>)}
-                    {run.updatedAt && (<><dt>updated</dt><dd>{new Date(run.updatedAt).toLocaleString()}</dd></>)}
-                  </dl>
-                )}
-                {!error && target.kind === 'release' && release && (
-                  <>
-                    <dl className="gh-watcher-dl">
-                      {release.publishedAt && (<><dt>published</dt><dd>{new Date(release.publishedAt).toLocaleString()}</dd></>)}
-                    </dl>
-                    {release.body && <pre className="gh-watcher-release-body">{release.body}</pre>}
-                  </>
-                )}
-                {!error && !run && !release && <div className="gh-watcher-pending">Watching…</div>}
-                <a
-                  href={target.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="gh-watcher-cta"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  Open on GitHub <ExternalLink size={12} />
-                </a>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {error && <div className="gh-watcher-error">{error}</div>}
+        {!error && !run && <div className="gh-watcher-pending">Watching…</div>}
+        <div className="gh-watcher-foot">
+          <a
+            href={target.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="gh-watcher-cta"
+          >
+            Open on GitHub <ExternalLink size={12} />
+          </a>
+        </div>
       </div>
       <style>{`
         .gh-watcher {
@@ -459,7 +506,7 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
           0% { background-position: 0% 0%; }
           100% { background-position: 0% 240%; }
         }
-        .gh-watcher-inner { padding: 14px 18px 14px 22px; cursor: pointer; }
+        .gh-watcher-inner { padding: 14px 18px 14px 22px; }
         .gh-watcher-head {
           display: grid;
           grid-template-columns: max-content 1fr max-content;
@@ -503,7 +550,13 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
           overflow: hidden;
         }
         .gh-watcher-eyebrow svg { opacity: 0.8; flex-shrink: 0; }
-        .gh-watcher-eyebrow-kind { white-space: nowrap; }
+        .gh-watcher-workflow-name {
+          font-family: var(--font-mono, ui-monospace, monospace);
+          text-transform: none;
+          letter-spacing: 0;
+          color: var(--text-primary, #e8ecef);
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
         .gh-watcher-sep { opacity: 0.45; }
         .gh-watcher-repo {
           font-family: var(--font-mono, ui-monospace, monospace);
@@ -557,54 +610,15 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
         .gh-watcher-chip-actor img {
           width: 14px; height: 14px; border-radius: 50%; object-fit: cover;
         }
-        .gh-watcher-chip-state-draft { color: var(--text-muted, #8a9099); }
-        .gh-watcher-chip-state-prerelease { color: #d29922; border-color: rgba(210, 153, 34, 0.3); }
-        .gh-watcher-chip-state-published { color: #3fb950; border-color: rgba(63, 185, 80, 0.3); }
-        .gh-watcher-release-body {
-          margin: 10px 0 12px;
-          padding: 10px 12px;
-          background: var(--bg-input, #161a1f);
-          border: 1px solid var(--border-color, rgba(255,255,255,0.06));
-          border-radius: 6px;
-          font-family: inherit;
-          font-size: 12.5px;
-          line-height: 1.55;
-          color: var(--text-secondary, #b8bec5);
-          white-space: pre-wrap;
-          word-break: break-word;
-          max-height: 240px;
-          overflow-y: auto;
-        }
-        .gh-watcher-body { border-top: 1px solid color-mix(in srgb, var(--gh-accent) 18%, transparent); margin-top: 14px; }
-        .gh-watcher-body-inner { padding: 12px 0 2px; font-size: 12.5px; }
-        .gh-watcher-dl {
-          display: grid;
-          grid-template-columns: max-content 1fr;
-          gap: 6px 18px;
-          margin: 0 0 12px;
-        }
-        .gh-watcher-dl dt {
-          color: var(--text-muted, #8a9099);
-          font-size: 11px;
-          text-transform: uppercase;
-          letter-spacing: 0.06em;
-          align-self: center;
-        }
-        .gh-watcher-dl dd { margin: 0; color: var(--text-primary, #e8ecef); }
-        .gh-watcher-dl code {
-          font-family: var(--font-mono, ui-monospace, monospace);
-          background: var(--bg-input, #161a1f);
-          padding: 1px 6px;
-          border-radius: 4px;
-          font-size: 11.5px;
-        }
-        .gh-watcher-pending { color: var(--text-muted, #8a9099); margin-bottom: 10px; }
+        .gh-watcher-pending { color: var(--text-muted, #8a9099); margin-top: 12px; font-size: 12.5px; }
+        .gh-watcher-foot { margin-top: 12px; }
         .gh-watcher-error {
           color: #f85149;
           background: rgba(248, 81, 73, 0.08);
           border: 1px solid rgba(248, 81, 73, 0.25);
           padding: 8px 10px; border-radius: 6px;
-          margin-bottom: 10px;
+          margin-top: 12px;
+          font-size: 12.5px;
         }
         .gh-watcher-cta {
           display: inline-flex; align-items: center; gap: 5px;
@@ -619,9 +633,114 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
           transition: background 0.15s ease;
         }
         .gh-watcher-cta:hover { background: color-mix(in srgb, var(--gh-accent) 28%, transparent); }
+
+        .gh-watcher-pipeline {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          gap: 10px;
+          margin-top: 14px;
+          cursor: default;
+        }
+        .gh-watcher-pipe-job {
+          position: relative;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          padding: 10px 12px 11px;
+          background: color-mix(in srgb, var(--bg-input, #161a1f) 70%, transparent);
+          border: 1px solid var(--border-color, rgba(255,255,255,0.08));
+          border-radius: 8px;
+          min-width: 0;
+          overflow: hidden;
+        }
+        .gh-watcher-pipe-job[data-status="in_progress"] {
+          border-color: color-mix(in srgb, var(--job-color) 50%, transparent);
+          box-shadow: 0 0 0 1px color-mix(in srgb, var(--job-color) 22%, transparent),
+                      0 2px 14px color-mix(in srgb, var(--job-color) 16%, transparent);
+        }
+        .gh-watcher-pipe-job[data-conclusion="success"] { border-color: rgba(63, 185, 80, 0.32); }
+        .gh-watcher-pipe-job[data-conclusion="failure"],
+        .gh-watcher-pipe-job[data-conclusion="timed_out"] { border-color: rgba(248, 81, 73, 0.4); }
+        .gh-watcher-pipe-head {
+          display: flex; align-items: center; gap: 8px;
+          min-width: 0;
+        }
+        .gh-watcher-pipe-icon {
+          position: relative;
+          display: inline-flex; align-items: center; justify-content: center;
+          width: 18px; height: 18px;
+          color: var(--job-color);
+          flex-shrink: 0;
+        }
+        .gh-watcher-pipe-pulse {
+          position: absolute; inset: -4px;
+          border-radius: 50%;
+          border: 2px solid var(--job-color);
+          opacity: 0;
+          animation: gh-job-pulse 1.6s ease-out infinite;
+          pointer-events: none;
+        }
+        @keyframes gh-job-pulse {
+          0% { opacity: 0.5; transform: scale(1); }
+          70% { opacity: 0; transform: scale(1.6); }
+          100% { opacity: 0; transform: scale(1.6); }
+        }
+        .gh-watcher-pipe-name {
+          flex: 1; min-width: 0;
+          font-size: 12.5px;
+          font-weight: 600;
+          color: var(--text-primary, #e8ecef);
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+          letter-spacing: -0.005em;
+        }
+        .gh-watcher-pipe-job-live .gh-watcher-pipe-name { color: var(--job-color); }
+        .gh-watcher-pipe-dur {
+          flex-shrink: 0;
+          font-size: 10.5px;
+          color: var(--text-muted, #8a9099);
+          font-variant-numeric: tabular-nums;
+        }
+        .gh-watcher-pipe-bar {
+          position: relative;
+          height: 3px;
+          background: color-mix(in srgb, var(--text-muted, #8a9099) 18%, transparent);
+          border-radius: 999px;
+          overflow: hidden;
+        }
+        .gh-watcher-pipe-bar-fill {
+          height: 100%;
+          background: var(--job-color);
+          border-radius: 999px;
+          transition: width 0.4s ease;
+        }
+        .gh-watcher-pipe-job-live .gh-watcher-pipe-bar {
+          background: color-mix(in srgb, var(--job-color) 20%, transparent);
+        }
+        .gh-watcher-pipe-job-live .gh-watcher-pipe-bar-fill {
+          background: linear-gradient(90deg,
+            color-mix(in srgb, var(--job-color) 40%, transparent) 0%,
+            var(--job-color) 50%,
+            color-mix(in srgb, var(--job-color) 40%, transparent) 100%);
+          background-size: 240% 100%;
+          animation: gh-pipe-shimmer 1.6s linear infinite;
+        }
+        @keyframes gh-pipe-shimmer {
+          0% { background-position: 240% 0%; }
+          100% { background-position: 0% 0%; }
+        }
+        .gh-watcher-pipe-state {
+          font-size: 11px;
+          color: var(--text-muted, #8a9099);
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .gh-watcher-pipe-job-live .gh-watcher-pipe-state { color: var(--job-color); }
+        .gh-watcher-pipe-steps { color: var(--text-muted, #8a9099); font-variant-numeric: tabular-nums; }
+
         @media (prefers-reduced-motion: reduce) {
           .gh-watcher-bar-live { animation: none; }
           .gh-watcher-badge-pulse { animation: none; opacity: 0; }
+          .gh-watcher-pipe-pulse { animation: none; opacity: 0; }
+          .gh-watcher-pipe-bar-fill { animation: none; }
         }
       `}</style>
     </motion.div>

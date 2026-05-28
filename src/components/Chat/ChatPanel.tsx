@@ -1491,7 +1491,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     }
     // Dev-only: messages containing sai://fake-* render the watcher card without
     // round-tripping to the LLM. Lets us preview live behavior with no real API calls.
-    if (import.meta.env.DEV && /sai:\/\/fake-(run|release)\//.test(text)) {
+    if (import.meta.env.DEV && /sai:\/\/fake-run\//.test(text)) {
       const userId = `fake-watcher-${Date.now()}`;
       setMessages(prev => [...prev, { id: userId, role: 'user', content: text, timestamp: Date.now(), images }]);
       flushMessagesToParent();
