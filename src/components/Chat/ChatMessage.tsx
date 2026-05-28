@@ -7,6 +7,8 @@ import 'highlight.js/styles/monokai.css';
 import { Check, ChevronRight, Circle, Copy, Eraser, RotateCw, Terminal, TerminalSquare, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ToolCallCard from './ToolCallCard';
+import GitHubWatcherCard from './GitHubWatcherCard';
+import { detectWatchTargets } from './githubWatcher';
 import Stagger from './Stagger';
 import { readFlipRect, hasFlipRect } from './flipRegistry';
 import { SPRING, DISTANCE, useReducedMotionTransition } from './motion';
@@ -805,8 +807,10 @@ function ChatMessage({
 
   const isAssistantStreaming = isStreaming && message.role === 'assistant';
   const isTyping = typewriterActive && displayLen < rawAssistantContent.length;
+  const watcherTargets = detectWatchTargets(message);
 
   return (
+    <>
     <motion.div
       key={flipActive ? flipPhase : undefined}
       ref={flipActive ? measureFlip : flipNodeRef}
@@ -1227,6 +1231,19 @@ function ChatMessage({
         }
       `}</style>
     </motion.div>
+    {watcherTargets.length > 0 && (
+      <div className="chat-msg chat-msg-watcher-row" data-testid="chat-msg-watcher-row">
+        {watcherTargets.map(t => (
+          <GitHubWatcherCard
+            key={t.url}
+            target={t}
+            messageId={message.id}
+            seedSnapshot={message.githubWatchers?.find(s => s.url === t.url)}
+          />
+        ))}
+      </div>
+    )}
+    </>
   );
 }
 

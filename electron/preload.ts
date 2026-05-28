@@ -215,6 +215,7 @@ contextBridge.exposeInMainWorld('sai', {
   githubStartAuth: () => ipcRenderer.invoke('github:startAuth'),
   githubCancelAuth: () => ipcRenderer.invoke('github:cancelAuth'),
   githubLogout: () => ipcRenderer.invoke('github:logout'),
+  githubApiGet: (path: string) => ipcRenderer.invoke('github:apiGet', path) as Promise<{ ok: boolean; status: number; body: any }>,
   githubOnAuthComplete: (callback: (user: any) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, user: any) => callback(user);
     ipcRenderer.on('github:authComplete', listener);
