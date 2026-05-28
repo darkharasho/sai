@@ -1656,6 +1656,23 @@ export default function App() {
     });
   }, []);
 
+  // Relay GitHub watcher snapshots over the remote bus so the PWA can render
+  // its own version of the card without polling the GitHub API itself. The
+  // desktop watcher card already broadcasts via window event; we tee it.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ messageId: string; snapshot: import('./types').GitHubWatcherSnapshot }>).detail;
+      if (!detail?.messageId || !detail.snapshot?.url) return;
+      void (window.sai as any).remoteEmitGithubWatcher?.({
+        messageId: detail.messageId,
+        url: detail.snapshot.url,
+        snapshot: detail.snapshot,
+      });
+    };
+    window.addEventListener('sai-github-watcher-snapshot', handler);
+    return () => window.removeEventListener('sai-github-watcher-snapshot', handler);
+  }, []);
+
   // Migrate localStorage sessions to IndexedDB and load sessions for the active project
   useEffect(() => {
     if (!activeProjectPath) return;

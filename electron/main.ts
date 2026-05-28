@@ -133,6 +133,9 @@ async function getOrInitRemote(): Promise<RemoteModule> {
   ipcMain.handle('remote:emit-workspace-status', (_evt, projectPath: string, status: { busy: boolean; streaming: boolean; completed: boolean; approval: boolean; streamingSessionId?: string | null }) => {
     bus?.publish('workspace.status', { type: 'workspace.status', projectPath, status });
   });
+  ipcMain.handle('remote:emit-github-watcher', (_evt, payload: { messageId: string; url: string; snapshot: unknown }) => {
+    bus?.publish('github.watcher', { type: 'github.watcher', ...payload });
+  });
 
   let kv = readRemoteKv();
   if (!kv.screenshotSecret) {

@@ -8,6 +8,7 @@ import SaiLogo from '../branding/SaiLogo';
 import WorkspaceHeader from './WorkspaceHeader';
 import { getOverrides, setOverrides as persistOverrides, clearOverrides, type SessionOverrides } from '../lib/overrides';
 import type { WorkspaceStatusStore } from '../lib/workspaceStatusStore';
+import type { GithubWatcherStore } from './githubWatcherStore';
 import { loadTranscript, saveTranscript } from '../lib/transcriptCache';
 
 export interface ChatActive { projectPath: string; scope: string; sessionId: string }
@@ -15,6 +16,7 @@ export interface ChatActive { projectPath: string; scope: string; sessionId: str
 interface Props {
   client: WireClient;
   statusStore: WorkspaceStatusStore;
+  watcherStore?: GithubWatcherStore;
   active: ChatActive | null;
   onActiveChange: (next: ChatActive | null) => void;
   follow: boolean;
@@ -24,7 +26,7 @@ interface Props {
 
 interface PendingApproval { toolUseId: string; toolName: string; command?: string; input?: Record<string, unknown> }
 
-export default function Chat({ client, statusStore, active, onActiveChange, follow, onFollowChange, onOpenNav }: Props) {
+export default function Chat({ client, statusStore, watcherStore, active, onActiveChange, follow, onFollowChange, onOpenNav }: Props) {
   const setActive = onActiveChange;
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
   const [localStreaming, setLocalStreaming] = useState(false);
@@ -409,7 +411,7 @@ export default function Chat({ client, statusStore, active, onActiveChange, foll
           an iOS Safari quirk where `overflow: auto` inside a flex chain can
           fail to become a scroll container (transcript becomes frozen). */}
       <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-        <Transcript messages={messages} streaming={streaming} awaitingQuestion={awaitingQuestion} onAnswerQuestion={onAnswerQuestion} />
+        <Transcript messages={messages} streaming={streaming} awaitingQuestion={awaitingQuestion} onAnswerQuestion={onAnswerQuestion} watcherStore={watcherStore} />
       </div>
       {pendingApproval && (
         <div style={{ flexShrink: 0, padding: '0 14px' }}>

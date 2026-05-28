@@ -74,8 +74,10 @@ import Chat, { type ChatActive } from './chat/Chat';
 import NavDrawer from './chat/NavDrawer';
 import SaiLogo from './branding/SaiLogo';
 import { createWorkspaceStatusStore, type WorkspaceStatus, type WorkspaceStatusStore } from './lib/workspaceStatusStore';
+import { createGithubWatcherStore, type GithubWatcherSnapshotShape } from './chat/githubWatcherStore';
 
 const workspaceStatusStore: WorkspaceStatusStore = createWorkspaceStatusStore();
+const githubWatcherStore = createGithubWatcherStore();
 
 function OfflineBanner({ show }: { show: boolean }) {
   if (!show) return null;
@@ -119,13 +121,19 @@ function ConnectedShell({ client }: { client: WireClient }) {
 
   useEffect(() => {
     client.subscribeWorkspaceStatus();
+    client.subscribeGithubWatcher();
     const off = client.on((msg) => {
       if ((msg as any).type === 'workspace.status') {
         const m = msg as any;
         workspaceStatusStore.set(m.projectPath, m.status as WorkspaceStatus);
+      } else if ((msg as any).type === 'github.watcher') {
+        const m = msg as any;
+        if (m.messageId && m.url && m.snapshot) {
+          githubWatcherStore.set(m.messageId, m.url, m.snapshot as GithubWatcherSnapshotShape);
+        }
       }
     });
-    return () => { client.unsubscribeWorkspaceStatus(); off(); };
+    return () => { client.unsubscribeWorkspaceStatus(); client.unsubscribeGithubWatcher(); off(); };
   }, [client]);
 
   useEffect(() => {
@@ -145,6 +153,7 @@ function ConnectedShell({ client }: { client: WireClient }) {
         <Chat
           client={client}
           statusStore={workspaceStatusStore}
+          watcherStore={githubWatcherStore}
           active={active}
           onActiveChange={setActive}
           follow={follow}

@@ -5,6 +5,9 @@ import remarkGfm from 'remark-gfm';
 import ToolCard from './ToolCard';
 import SaiLogo from '../branding/SaiLogo';
 import ThinkingAnimation from '../branding/ThinkingAnimation';
+import GitHubWatcherCard from './GitHubWatcherCard';
+import { detectWatchTargets } from './githubWatcher';
+import type { GithubWatcherStore } from './githubWatcherStore';
 import { useVisualViewportHeight } from '../lib/useVisualViewport';
 
 const mdComponents = {
@@ -75,9 +78,10 @@ interface Props {
   streaming?: boolean;
   awaitingQuestion?: boolean;
   onAnswerQuestion?: (toolUseId: string, answers: Record<string, string | string[]>) => void;
+  watcherStore?: GithubWatcherStore;
 }
 
-export default function Transcript({ messages, streaming = false, awaitingQuestion = false, onAnswerQuestion }: Props) {
+export default function Transcript({ messages, streaming = false, awaitingQuestion = false, onAnswerQuestion, watcherStore }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
   const isTouchingRef = useRef(false);
@@ -210,6 +214,7 @@ export default function Transcript({ messages, streaming = false, awaitingQuesti
 
         const isUser = m.role === 'user';
         const formatMs = (ms: number) => ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
+        const watcherTargets = !isUser && m.text ? detectWatchTargets(m.text) : [];
 
         return (
           <div
@@ -231,6 +236,9 @@ export default function Transcript({ messages, streaming = false, awaitingQuesti
                     {m.text ?? ''}
                   </ReactMarkdown>
                 )}
+                {watcherTargets.map((t) => (
+                  <GitHubWatcherCard key={t.url} messageId={m.id} target={t} watcherStore={watcherStore} />
+                ))}
               </div>
             </div>
           </div>

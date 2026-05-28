@@ -29,6 +29,8 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.invoke('claude:approve', projectPath, toolUseId, approved, modifiedCommand, scope),
   claudeAnswerQuestion: (projectPath: string, toolUseId: string, answers: Record<string, string | string[]>, scope?: string) =>
     ipcRenderer.invoke('claude:answer-question', projectPath, toolUseId, answers, scope),
+  remoteEmitGithubWatcher: (payload: { messageId: string; url: string; snapshot: unknown }) =>
+    ipcRenderer.invoke('remote:emit-github-watcher', payload),
   remoteEmitWorkspaceStatus: (projectPath: string, status: {
     busy: boolean;
     streaming: boolean;

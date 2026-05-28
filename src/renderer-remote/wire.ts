@@ -57,6 +57,8 @@ export interface WireClient {
   setActiveWorkspace(projectPath: string): void;
   subscribeWorkspaceStatus(): void;
   unsubscribeWorkspaceStatus(): void;
+  subscribeGithubWatcher(): void;
+  unsubscribeGithubWatcher(): void;
   sendPrompt(args: ChatPromptArgs): void;
   approve(args: ChatApprovalArgs): void;
   answerQuestion(args: { toolUseId: string; answers: Record<string, string | string[]>; projectPath: string; scope?: string }): void;
@@ -118,6 +120,7 @@ export function connect(token: string): WireClient {
   let replayAttach: { projectPath: string; scope: string; sessionId: string } | null = null;
   let replayFollow: boolean | null = null;
   let replayWorkspaceStatus = false;
+  let replayGithubWatcher = false;
   let replayActiveWorkspace: string | null = null;
 
   const notifyState = (s: 'opening' | 'open' | 'closed') => {
@@ -207,6 +210,9 @@ export function connect(token: string): WireClient {
         // hint lands first, mirroring the original setup sequence.
         if (replayWorkspaceStatus) {
           try { ws!.send(JSON.stringify({ type: 'workspace.status.subscribe' })); } catch { /* ignore */ }
+        }
+        if (replayGithubWatcher) {
+          try { ws!.send(JSON.stringify({ type: 'github.watcher.subscribe' })); } catch { /* ignore */ }
         }
         if (replayActiveWorkspace) {
           try { ws!.send(JSON.stringify({ type: 'workspace.set', projectPath: replayActiveWorkspace })); } catch { /* ignore */ }
@@ -358,6 +364,14 @@ export function connect(token: string): WireClient {
     unsubscribeWorkspaceStatus: () => {
       replayWorkspaceStatus = false;
       sendFrame({ type: 'workspace.status.unsubscribe' });
+    },
+    subscribeGithubWatcher: () => {
+      replayGithubWatcher = true;
+      sendFrame({ type: 'github.watcher.subscribe' });
+    },
+    unsubscribeGithubWatcher: () => {
+      replayGithubWatcher = false;
+      sendFrame({ type: 'github.watcher.unsubscribe' });
     },
     sendPrompt: (a) => sendFrame({
       type: 'prompt',
