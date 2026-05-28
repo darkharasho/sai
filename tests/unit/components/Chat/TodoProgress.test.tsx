@@ -129,6 +129,67 @@ describe('TodoProgress (ring + popover)', () => {
     expect(getByText('0/1')).toBeTruthy();
   });
 
+  it('shows new TodoWrite items added in a follow-up turn', () => {
+    // Turn 1: Claude completes a plan (ring would hide via completed===total).
+    // Turn 2: user follows up; Claude calls TodoWrite again with just the
+    // newly added items. The ring should reflect the latest TodoWrite, not
+    // disappear because the call sits in a later turn.
+    const messages = [
+      { id: 'u1', role: 'user' as const, content: 'do X', timestamp: 0 },
+      { ...buildTodosMsg([
+        { content: 'a', status: 'completed' },
+        { content: 'b', status: 'completed' },
+      ]), id: 'a1', timestamp: 1 },
+      { id: 'u2', role: 'user' as const, content: 'also do Y and Z', timestamp: 2 },
+      { ...buildTodosMsg([
+        { content: 'Y', status: 'in_progress' },
+        { content: 'Z', status: 'pending' },
+      ]), id: 'a2', timestamp: 3 },
+    ];
+    const { container, getByText } = render(<TodoProgress messages={messages as any} isStreaming={true} />);
+    expect(container.querySelector('[data-testid="todo-ring"]')).toBeTruthy();
+    expect(getByText('0/2')).toBeTruthy();
+  });
+
+  it('keeps prior-turn TodoWrite visible when current turn has no TodoWrite yet', () => {
+    // Mid-stream in turn 2 before Claude has called TodoWrite: the plan from
+    // turn 1 should remain visible (provided it is not fully complete).
+    const messages = [
+      { id: 'u1', role: 'user' as const, content: 'do X', timestamp: 0 },
+      { ...buildTodosMsg([
+        { content: 'a', status: 'completed' },
+        { content: 'b', status: 'in_progress' },
+        { content: 'c', status: 'pending' },
+      ]), id: 'a1', timestamp: 1 },
+      { id: 'u2', role: 'user' as const, content: 'also note this', timestamp: 2 },
+    ];
+    const { getByText } = render(<TodoProgress messages={messages as any} isStreaming={true} />);
+    expect(getByText('1/3')).toBeTruthy();
+  });
+
+  it('replays TaskCreate/TaskUpdate across turns so updates find prior tasks', () => {
+    const messages = [
+      { id: 'u1', role: 'user' as const, content: 'go', timestamp: 0 },
+      {
+        id: 'a1', role: 'assistant' as const, content: '', timestamp: 1,
+        toolCalls: [
+          { id: 'c1', name: 'TaskCreate', input: JSON.stringify({ subject: 'first' }), output: 'Task #1 created successfully: first' },
+          { id: 'c2', name: 'TaskCreate', input: JSON.stringify({ subject: 'second' }), output: 'Task #2 created successfully: second' },
+        ],
+      },
+      { id: 'u2', role: 'user' as const, content: 'add a third', timestamp: 2 },
+      {
+        id: 'a2', role: 'assistant' as const, content: '', timestamp: 3,
+        toolCalls: [
+          { id: 'u1', name: 'TaskUpdate', input: JSON.stringify({ taskId: '1', status: 'completed' }), output: 'ok' },
+          { id: 'c3', name: 'TaskCreate', input: JSON.stringify({ subject: 'third' }), output: 'Task #3 created successfully: third' },
+        ],
+      },
+    ];
+    const { getByText } = render(<TodoProgress messages={messages as any} isStreaming={true} />);
+    expect(getByText('1/3')).toBeTruthy();
+  });
+
   it('renders status indicators with correct classes', () => {
     const messages = [buildTodosMsg([
       { content: 'done one', status: 'completed' },

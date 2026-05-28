@@ -51,9 +51,10 @@ function TerminalInstance({ tabUid, projectPath, visible, onTerminalReady }: Ter
     if (visible && termRef.current.offsetWidth > 0) {
       xterm.open(termRef.current);
       openedRef.current = true;
-      requestAnimationFrame(() => {
-        try { fit.fit(); } catch { /* terminal not ready yet */ }
-      });
+      // Fit synchronously so xterm.cols/rows are correct before we spawn the PTY.
+      // This avoids a size mismatch where the shell starts at default 80x24 and
+      // readline miscalculates cursor positions (broken up-arrow history display).
+      try { fit.fit(); } catch { /* terminal not ready yet */ }
     }
 
     // Listen for live theme changes
@@ -98,8 +99,9 @@ function TerminalInstance({ tabUid, projectPath, visible, onTerminalReady }: Ter
       return true;
     });
 
-    // Create terminal in main process
-    window.sai.terminalCreate(cwd).then((id: number) => {
+    // Create terminal in main process — pass current xterm dimensions so the
+    // PTY starts at the correct size and readline doesn't miscalculate positions.
+    window.sai.terminalCreate(cwd, xterm.cols, xterm.rows).then((id: number) => {
       termIdRef.current = id;
       registerTerminal(id, xterm, projectPath);
       onTerminalReady?.(tabUid, id);

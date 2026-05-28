@@ -2,8 +2,40 @@ import { app, BrowserWindow, ipcMain, dialog, shell, Menu, MenuItem, screen } fr
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
+import { RemoteModule } from './services/remote';
+import { PhoneTerminalRegistry } from './services/remote/terminal-store';
+import { BridgeServer } from './services/remote/bridge-server';
+import { PairingStore } from './services/remote/pairing-store';
+import { SessionBus } from './services/remote/session-bus';
+import { resolveTailnetEndpoint } from './services/remote/tailnet';
+import { BlobStore } from './services/remote/blob-store';
+import { safeJoin } from './services/remote/safe-join';
+import { langFromPath, isTextLike, mimeFromPath } from './services/remote/lang';
+import { readDirImpl, readFileImpl, readFileBufImpl, statFileImpl, writeFileImpl } from './services/fs';
+import { gitStatusImpl, gitDiffImpl, gitStageImpl, gitUnstageImpl, gitCommitImpl, gitPushImpl, gitPullImpl } from './services/git';
+import { enrichedEnv } from './services/shellEnv';
+import { execFile as _execFile } from 'node:child_process';
+import { promisify as _promisify } from 'node:util';
+const _execFileP = _promisify(_execFile);
+
+// Wrap `tailscale` shell calls with SAI's enrichedEnv (login-shell PATH).
+// Without this, Electron's stripped PATH may not find `/usr/bin/tailscale`.
+async function _resolveTailnetEndpointWithEnv() {
+  return resolveTailnetEndpoint({
+    exec: async () => {
+      try {
+        const r = await _execFileP('tailscale', ['status', '--json'], { env: enrichedEnv() });
+        return { stdout: r.stdout, stderr: r.stderr, code: 0 };
+      } catch (err) {
+        const e = err as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
+        return { stdout: e.stdout ?? '', stderr: e.stderr ?? '', code: typeof e.code === 'number' ? e.code : 1 };
+      }
+    },
+  });
+}
 import { registerTerminalHandlers, destroyAllTerminals } from './services/pty';
-import { registerClaudeHandlers } from './services/claude';
+import { registerClaudeHandlers, setRemoteCeiling, setRemoteBus, sendImpl, approveImpl, interruptImpl, answerQuestionImpl, setSubprocessMemoryCapMB } from './services/claude';
+import { RendererProxy } from './services/remote/renderer-proxy';
 import { registerGitHandlers } from './services/git';
 import { registerFsHandlers } from './services/fs';
 import { registerUpdater } from './services/updater';
@@ -50,6 +82,194 @@ const THEME_TITLEBAR: Record<string, { color: string; symbolColor: string; bg: s
 
 const isMac = process.platform === 'darwin';
 let useFramelessRounded = false;
+
+// Remote module singletons
+let remote: RemoteModule | null = null;
+const terminalStore = new PhoneTerminalRegistry();
+terminalStore.startIdleGc();
+let pairing: PairingStore | null = null;
+let bus: SessionBus | null = null;
+let rendererProxy: RendererProxy | null = null;
+let blobStore: BlobStore | null = null;
+let bridge: BridgeServer | null = null;
+let remoteKvPath: string | null = null;
+let activeSessionBroadcast: ((payload: { projectPath: string; scope: string; sessionId: string }) => void) | null = null;
+let lastActiveSession: { projectPath: string; scope: string; sessionId: string } | null = null;
+// Otto uses 17829; pick a distinct port so both can run side by side.
+const REMOTE_PORT = 17830;
+
+// Register the active-session IPC handler at module load — the renderer fires this
+// on every session change regardless of whether the mobile bridge is enabled. The
+// handler stays a no-op until BridgeServer wires up `activeSessionBroadcast`.
+ipcMain.handle('remote:setActiveSession', (_e, payload) => {
+  lastActiveSession = payload;
+  activeSessionBroadcast?.(payload);
+});
+
+interface RemoteKv { screenshotSecret?: string; enabled?: boolean; remoteCeiling?: 'auto' | 'auto-read' | 'always-ask' | null }
+
+function readRemoteKv(): RemoteKv {
+  if (!remoteKvPath) return {};
+  try { return JSON.parse(fs.readFileSync(remoteKvPath, 'utf8')); } catch { return {}; }
+}
+function writeRemoteKv(patch: RemoteKv): void {
+  if (!remoteKvPath) return;
+  const merged = { ...readRemoteKv(), ...patch };
+  fs.mkdirSync(path.dirname(remoteKvPath), { recursive: true });
+  fs.writeFileSync(remoteKvPath, JSON.stringify(merged, null, 2), 'utf8');
+}
+
+async function getOrInitRemote(): Promise<RemoteModule> {
+  if (remote) return remote;
+  const userDataDir = app.getPath('userData');
+  const pairingPath = path.join(userDataDir, 'sai-remote-pairings.json');
+  remoteKvPath = path.join(userDataDir, 'sai-remote-kv.json');
+  pairing = new PairingStore(pairingPath);
+  bus = new SessionBus();
+  setRemoteBus(bus);
+  blobStore = new BlobStore();
+  rendererProxy = new RendererProxy({ getWindow: () => mainWindow });
+  ipcMain.handle('remote:proxy:reply', (_e, reply) => rendererProxy?.handleReply(reply));
+  ipcMain.handle('remote:emit-workspace-status', (_evt, projectPath: string, status: { busy: boolean; streaming: boolean; completed: boolean; approval: boolean; streamingSessionId?: string | null }) => {
+    bus?.publish('workspace.status', { type: 'workspace.status', projectPath, status });
+  });
+
+  let kv = readRemoteKv();
+  if (!kv.screenshotSecret) {
+    kv = { ...kv, screenshotSecret: crypto.randomBytes(32).toString('base64url') };
+    writeRemoteKv(kv);
+  }
+  const screenshotSecret = kv.screenshotSecret!;
+  setRemoteCeiling(kv.remoteCeiling ?? null);
+
+  const pwaDir = app.isPackaged
+    ? path.join(app.getAppPath(), 'dist', 'renderer-remote')
+    : path.join(__dirname, '..', 'dist', 'renderer-remote');
+
+  remote = new RemoteModule({
+    pairing,
+    bus,
+    resolveTailnetEndpoint: () => _resolveTailnetEndpointWithEnv(),
+    makeBridge: (tailnetIp) => {
+      const b: BridgeServer = new BridgeServer({
+        tailnetIp,
+        pairing: pairing!,
+        bus: bus!,
+        pwaDir,
+        screenshotSecret,
+        loadScreenshot: async () => null, // Phase 3+ wires this
+        port: REMOTE_PORT,
+        fallbackPorts: [17831, 17832],
+        sendPrompt: (args) => {
+          // Persist base64 image attachments to temp files (parity with the
+          // desktop path, which expects on-disk paths). Fire-and-forget:
+          // bridge-server doesn't await this callback.
+          const writeImages = (imgs?: string[]): string[] => {
+            if (!imgs || imgs.length === 0) return [];
+            const tmpDir = path.join(app.getPath('temp'), 'sai-images');
+            try { fs.mkdirSync(tmpDir, { recursive: true }); } catch { /* best-effort */ }
+            const out: string[] = [];
+            for (const dataUrl of imgs) {
+              const m = dataUrl.match(/^data:image\/([\w+.-]+);base64,(.+)$/);
+              if (!m) continue;
+              const ext = (m[1] || 'png').replace(/[^\w]/g, '') || 'png';
+              const filename = `image-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
+              const filepath = path.join(tmpDir, filename);
+              try {
+                fs.writeFileSync(filepath, Buffer.from(m[2], 'base64'));
+                out.push(filepath);
+              } catch { /* skip unreadable item */ }
+            }
+            return out;
+          };
+          const imagePaths = writeImages(args.images);
+          sendImpl(
+            args.projectPath, args.text,
+            imagePaths.length > 0 ? imagePaths : undefined,
+            args.permMode, args.effort, args.model,
+            args.scope, 'remote',
+          );
+        },
+        resolveApproval: async (args) => {
+          await approveImpl(args.projectPath, args.toolUseId, args.decision === 'approve', args.modifiedCommand, args.scope);
+        },
+        answerQuestion: async (args) => {
+          await answerQuestionImpl(args.projectPath, args.toolUseId, args.answers, args.scope);
+        },
+        interruptTurn: (path, scope) => interruptImpl(path, scope),
+        listSessions: async (path) => (await rendererProxy!.listSessions(path)) as any,
+        loadHistory: async (sid) => (await rendererProxy!.loadHistory(sid)) as any,
+        listWorkspaces: () => rendererProxy!.listWorkspaces(),
+        setActiveWorkspace: (path) => rendererProxy!.setActiveWorkspace(path),
+        registerActiveSessionBroadcast: (broadcast) => {
+          activeSessionBroadcast = broadcast;
+        },
+        getInitialActiveSession: () => lastActiveSession,
+        getActiveSessionFromRenderer: async () => {
+          try {
+            const v = await rendererProxy!.getActiveSession();
+            if (v) lastActiveSession = v as any;
+            return v as any;
+          } catch { return null; }
+        },
+        listFiles: async (cwd, path) => {
+          const full = safeJoin(cwd, path);
+          const stat = await statFileImpl(full);
+          if (!stat.isDir) throw new Error(`not a directory: ${path}`);
+          const entries = await readDirImpl(full);
+          return entries.map((e) => ({ name: e.name, kind: e.type === 'directory' ? 'dir' as const : 'file' as const }));
+        },
+        readFile: async (cwd, path) => {
+          const full = safeJoin(cwd, path);
+          const stat = await statFileImpl(full);
+          const lang = langFromPath(path) ?? undefined;
+          const inline = isTextLike(path) && stat.size <= 64 * 1024;
+          if (inline) {
+            const r = await readFileImpl(full);
+            return { content: r.content, encoding: 'text' as const, size: stat.size, lang, mtime: r.mtime, sha: r.sha };
+          }
+          const id = blobStore!.register(cwd, path);
+          const signedUrl = b.signBlobUrl(id);
+          return { signedUrl, encoding: 'binary' as const, size: stat.size, mime: mimeFromPath(path) };
+        },
+        statusFiles: async (cwd) => {
+          const { branch, ahead, behind, entries } = await gitStatusImpl(cwd);
+          return { entries, branch, ahead, behind };
+        },
+        diffFile: async (cwd, path, staged) => {
+          const diff = await gitDiffImpl(cwd, path, staged);
+          return { diff, lang: langFromPath(path) ?? undefined };
+        },
+        loadBlob: async (id) => {
+          const entry = blobStore!.consume(id);
+          if (!entry) return null;
+          const full = safeJoin(entry.cwd, entry.path);
+          const buffer = await readFileBufImpl(full);
+          return { buffer, mime: mimeFromPath(entry.path) };
+        },
+        writeFile: (cwd, p, content, opts) => writeFileImpl(cwd, p, content, opts),
+        stageFile:   (cwd, path) => gitStageImpl(cwd, path),
+        unstageFile: (cwd, path) => gitUnstageImpl(cwd, path),
+        commit:      (cwd, msg) => gitCommitImpl(cwd, msg),
+        push:        (cwd) => gitPushImpl(cwd),
+        pull:        (cwd) => gitPullImpl(cwd),
+        terminalStore,
+      });
+      bridge = b;
+      return b;
+    },
+  });
+  return remote;
+}
+
+async function getEnabledFlag(): Promise<boolean> {
+  await getOrInitRemote();
+  return Boolean(readRemoteKv().enabled);
+}
+async function setEnabledFlag(value: boolean): Promise<void> {
+  await getOrInitRemote();
+  writeRemoteKv({ enabled: value });
+}
 
 function createWindow() {
   let tb = THEME_TITLEBAR.default;
@@ -152,6 +372,7 @@ function createWindow() {
     if (mainWindow) writeSetting('windowBounds', mainWindow.getBounds());
     stopSuspendTimer();
     destroyAllTerminals();
+    terminalStore.destroyAll();
     destroyAll(mainWindow!);
   });
 
@@ -163,6 +384,16 @@ function createWindow() {
 
   registerTerminalHandlers(mainWindow);
   registerClaudeHandlers(mainWindow);
+
+  // Auto-start the mobile remote bridge if it was enabled before the last quit.
+  void (async () => {
+    const r = await getOrInitRemote();
+    if (readRemoteKv().enabled) {
+      try { await r.start(); } catch (err) {
+        console.warn('[remote] auto-start failed:', err);
+      }
+    }
+  })();
   registerCodexHandlers(mainWindow);
   registerGeminiHandlers(mainWindow);
   registerGitHandlers();
@@ -430,7 +661,17 @@ function createWindow() {
 
   ipcMain.handle('settings:set', (_event, key: string, value: any) => {
     writeSetting(key, value);
+    if (key === 'subprocessMemoryCapMB') {
+      setSubprocessMemoryCapMB(typeof value === 'number' ? value : 0);
+    }
   });
+
+  // Initialize subprocess memory cap from settings (default 4096MB).
+  setSubprocessMemoryCapMB(
+    typeof readSettings().subprocessMemoryCapMB === 'number'
+      ? readSettings().subprocessMemoryCapMB
+      : 4096,
+  );
 
   ipcMain.handle('titlebar:setOverlay', (_event, color: string, symbolColor: string) => {
     if (mainWindow && !useFramelessRounded && !isMac) {
@@ -544,6 +785,46 @@ function createWindow() {
       return shell.openExternal(url);
     }
   });
+
+  ipcMain.handle('remote:setEnabled', async (_e, enabled: boolean) => {
+    const r = await getOrInitRemote();
+    await setEnabledFlag(enabled);
+    if (enabled) await r.start();
+    else await r.stop();
+  });
+
+  ipcMain.handle('remote:status', async () => {
+    const enabled = await getEnabledFlag();
+    if (!remote) return { running: false, url: null, reason: 'disabled', pairedCount: 0, enabled };
+    return { ...remote.status(), enabled };
+  });
+
+  ipcMain.handle('remote:mintPairCode', async () => {
+    const r = await getOrInitRemote();
+    return r.mintPairingCode();
+  });
+
+  ipcMain.handle('remote:listDevices', async () => {
+    await getOrInitRemote();
+    return pairing!.list();
+  });
+
+  ipcMain.handle('remote:revoke', async (_e, deviceId: string) => {
+    await getOrInitRemote();
+    pairing!.revoke(deviceId);
+    remote!.closeDeviceConnections(deviceId);
+  });
+
+  ipcMain.handle('remote:setCeiling', async (_e, ceiling: 'auto' | 'auto-read' | 'always-ask' | null) => {
+    await getOrInitRemote();
+    writeRemoteKv({ remoteCeiling: ceiling });
+    setRemoteCeiling(ceiling);
+  });
+
+  ipcMain.handle('remote:getCeiling', async () => {
+    await getOrInitRemote();
+    return readRemoteKv().remoteCeiling ?? null;
+  });
 }
 
 // Suppress EPIPE errors from writing to closed streams (e.g. killed child processes)
@@ -553,13 +834,23 @@ process.on('uncaughtException', (err) => {
 });
 
 app.whenReady().then(createWindow);
-app.on('before-quit', () => {
+let _quitInProgress = false;
+app.on('before-quit', (e) => {
   try { swarmMcpHost.stop(); } catch { /* noop */ }
+  // Synchronously release the remote bridge port before Electron exits.
+  if (remote && !_quitInProgress) {
+    _quitInProgress = true;
+    e.preventDefault();
+    // Cap the await — never block Electron exit on a hung socket close.
+    const timer = setTimeout(() => app.exit(0), 2000);
+    void remote.stop().finally(() => { clearTimeout(timer); app.exit(0); });
+  }
 });
 app.on('window-all-closed', () => {
   stopSuspendTimer();
   destroyUsagePolling();
   destroyAllTerminals();
+  terminalStore.destroyAll();
   if (mainWindow) destroyAll(mainWindow);
   try { swarmMcpHost.stop(); } catch { /* noop */ }
   app.quit();

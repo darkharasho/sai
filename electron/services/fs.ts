@@ -2,8 +2,14 @@ import { ipcMain, dialog, BrowserWindow } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { listMetaWorkspaces } from './metaWorkspace';
 import { syntheticRootFor } from './metaSyntheticRoot';
+import { safeJoin } from './remote/safe-join';
+
+function fileSha(content: string): string {
+  return createHash('sha256').update(content, 'utf8').digest('hex').slice(0, 16);
+}
 
 function isMetaSyntheticRoot(dir: string): boolean {
   const normalized = path.resolve(dir);
@@ -27,25 +33,93 @@ function execFileAsync(cmd: string, args: string[], options: Record<string, unkn
   });
 }
 
-export function registerFsHandlers(mainWindow: BrowserWindow) {
-  ipcMain.handle('fs:readDir', async (_event, dirPath: string) => {
-    const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
-    const mapped = await Promise.all(entries.map(async entry => {
-      const full = path.join(dirPath, entry.name);
-      let isDir = entry.isDirectory();
-      if (entry.isSymbolicLink()) {
-        try { isDir = (await fs.promises.stat(full)).isDirectory(); } catch { isDir = false; }
-      }
-      return { name: entry.name, path: full, type: isDir ? 'directory' as const : 'file' as const };
-    }));
-    return mapped.sort((a, b) => {
-      if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
-  });
+export interface FileEntry { name: string; path: string; type: 'file' | 'directory' }
 
-  ipcMain.handle('fs:readFile', async (_event, filePath: string) => {
-    return fs.promises.readFile(filePath, 'utf-8');
+export async function readDirImpl(dirPath: string): Promise<FileEntry[]> {
+  const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+  const mapped = await Promise.all(entries.map(async (entry) => {
+    const full = path.join(dirPath, entry.name);
+    let isDir = entry.isDirectory();
+    if (entry.isSymbolicLink()) {
+      try { isDir = (await fs.promises.stat(full)).isDirectory(); } catch { isDir = false; }
+    }
+    return { name: entry.name, path: full, type: isDir ? 'directory' as const : 'file' as const };
+  }));
+  return mapped.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+export interface ReadFileResult { content: string; mtime: number; sha: string }
+
+export async function readFileImpl(filePath: string): Promise<ReadFileResult> {
+  const content = await fs.promises.readFile(filePath, 'utf-8');
+  const st = await fs.promises.stat(filePath);
+  return { content, mtime: st.mtimeMs, sha: fileSha(content) };
+}
+
+const WRITE_MAX_BYTES = 256 * 1024;
+
+export interface WriteFileExpects { expectMtime: number | null; expectSha: string | null }
+export interface WriteFileResult { mtime: number; sha: string }
+
+export async function writeFileImpl(
+  cwd: string,
+  relPath: string,
+  content: string,
+  opts: WriteFileExpects,
+): Promise<WriteFileResult> {
+  if (Buffer.byteLength(content, 'utf8') > WRITE_MAX_BYTES) {
+    throw Object.assign(new Error('file too large for phone edit'), { code: 'too_large' });
+  }
+  const target = safeJoin(cwd, relPath);
+
+  const enforce = opts.expectMtime !== null && opts.expectSha !== null;
+  if (enforce) {
+    try {
+      const st = await fs.promises.stat(target);
+      const curMtime = st.mtimeMs;
+      const curContent = await fs.promises.readFile(target, 'utf-8');
+      const curSha = fileSha(curContent);
+      if (curMtime > opts.expectMtime! + 1 || curSha !== opts.expectSha) {
+        throw Object.assign(new Error('file changed since fetch'), {
+          code: 'stale', currentMtime: curMtime, currentSha: curSha,
+        });
+      }
+    } catch (err: any) {
+      if (err && err.code === 'stale') throw err;
+      if (err && err.code === 'ENOENT') {
+        throw Object.assign(new Error('file deleted'), {
+          code: 'stale', currentMtime: 0, currentSha: '',
+        });
+      }
+      throw err;
+    }
+  }
+
+  const tmp = `${target}.tmp.${process.pid}.${Date.now()}`;
+  await fs.promises.writeFile(tmp, content, 'utf-8');
+  await fs.promises.rename(tmp, target);
+  const st = await fs.promises.stat(target);
+  return { mtime: st.mtimeMs, sha: fileSha(content) };
+}
+
+export async function readFileBufImpl(filePath: string): Promise<Buffer> {
+  return fs.promises.readFile(filePath);
+}
+
+export async function statFileImpl(filePath: string): Promise<{ size: number; isDir: boolean; mtime: number }> {
+  const s = await fs.promises.stat(filePath);
+  return { size: s.size, isDir: s.isDirectory(), mtime: s.mtimeMs };
+}
+
+export function registerFsHandlers(mainWindow: BrowserWindow) {
+  ipcMain.handle('fs:readDir', (_e, dirPath: string) => readDirImpl(dirPath));
+
+  ipcMain.handle('fs:readFile', async (_e, filePath: string) => {
+    const r = await readFileImpl(filePath);
+    return r.content;
   });
 
   ipcMain.handle('fs:readFileBase64', async (_event, filePath: string) => {
@@ -63,9 +137,9 @@ export function registerFsHandlers(mainWindow: BrowserWindow) {
     return `data:${mime};base64,${buffer.toString('base64')}`;
   });
 
-  ipcMain.handle('fs:mtime', async (_event, filePath: string) => {
-    const stat = await fs.promises.stat(filePath);
-    return { mtime: stat.mtimeMs };
+  ipcMain.handle('fs:mtime', async (_e, filePath: string) => {
+    const s = await statFileImpl(filePath);
+    return { mtime: s.mtime };
   });
 
   ipcMain.handle('fs:writeFile', async (_event, filePath: string, content: string) => {

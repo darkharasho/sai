@@ -279,6 +279,9 @@ function GeminiThinkingAnimation({ loadingPhrases = 'all' }: { loadingPhrases?: 
 }
 
 import ChatMessage from './ChatMessage';
+import { detectWatchTargets } from './githubWatcher';
+
+const EMPTY_URL_SET: Set<string> = new Set();
 import ChatInput, { type ContextItem } from './ChatInput';
 import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, QueuedMessage, TerminalTab } from '../../types';
 import type { MetaWorkspaceRuntime } from '../../types';
@@ -320,6 +323,7 @@ interface ChatPanelProps {
   onFileOpen?: (path: string, line?: number) => void;
   isActive?: boolean;
   isStreaming?: boolean;
+  awaitingQuestion?: boolean;
   initialDraft?: string;
   onDraftChange?: (draft: string) => void;
   initialContextItems?: ContextItem[];
@@ -591,7 +595,7 @@ const FAKE_ERROR_VARIANTS = {
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(initialMessages || []);
   const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);
   const setMessages = useCallback((updater: ChatMessageType[] | ((prev: ChatMessageType[]) => ChatMessageType[])) => {
@@ -601,6 +605,37 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       return next;
     });
   }, []);
+
+  // Coalesce streaming text-delta appends to one React state update per animation
+  // frame. Per-chunk setMessages triggered re-tokenization of the entire growing
+  // assistant message on every stdout chunk and was the main driver of RAM spikes
+  // while Claude is coding. Non-delta events (tool calls, new bubbles, errors,
+  // result/done) flush the pending buffer before mutating state to preserve order.
+  const streamPendingRef = useRef<string>('');
+  const streamRafRef = useRef<number | null>(null);
+  // Stream-idle gate for the in-flight last assistant bubble. While true, the
+  // bubble renders as plain text; flips to true (settled) when no delta has
+  // arrived for STREAM_IDLE_MS, letting markdown/highlight render mid-turn
+  // instead of waiting for end-of-turn.
+  const STREAM_IDLE_MS = 250;
+  const [streamSettled, setStreamSettled] = useState(true);
+  const streamIdleTimerRef = useRef<number | null>(null);
+  const flushStreamingText = useCallback(() => {
+    if (streamRafRef.current != null) {
+      cancelAnimationFrame(streamRafRef.current);
+      streamRafRef.current = null;
+    }
+    const pending = streamPendingRef.current;
+    if (!pending) return;
+    streamPendingRef.current = '';
+    setMessages(prev => {
+      const last = prev[prev.length - 1];
+      if (!last || last.role !== 'assistant' || last.toolCalls) return prev;
+      const updated = [...prev];
+      updated[updated.length - 1] = { ...last, content: (last.content || '') + pending };
+      return updated;
+    });
+  }, [setMessages]);
   const emptyPrompt = useMemo(() => EMPTY_PROMPTS[Math.floor(Math.random() * EMPTY_PROMPTS.length)], []);
   const [turnStartIndex, setTurnStartIndex] = useState<number | null>(null);
   const thinkingTransition = useReducedMotionTransition(SPRING.pop);
@@ -743,6 +778,14 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       if (msg.projectPath && msg.projectPath !== projectPath) return;
       if (msg.scope && msg.scope !== claudeScope) return;
 
+      // Flush any buffered streaming text before processing a non-delta event,
+      // so the pending content is committed to state in the correct order.
+      const isPureTextDelta = msg.type === 'assistant'
+        && Array.isArray(msg.message?.content)
+        && msg.message.content.length > 0
+        && msg.message.content.every((b: any) => b.type === 'text' && b.delta && typeof b.text === 'string');
+      if (!isPureTextDelta) flushStreamingText();
+
       if (msg.type === 'ready') {
         setReady(true);
         return;
@@ -766,6 +809,19 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           turnStartedAtRef.current = Date.now();
         }
         nextSegmentStartRef.current = Date.now();
+        return;
+      }
+
+      // Mobile remote: append the user bubble for phone-originated prompts.
+      // Desktop-originated prompts already do an optimistic add in the send path,
+      // so only echo when origin === 'remote'.
+      if (msg.type === 'user_message' && msg.origin === 'remote') {
+        setMessages(prev => [...prev, {
+          id: crypto.randomUUID(),
+          role: 'user',
+          content: msg.text ?? '',
+          timestamp: Date.now(),
+        }]);
         return;
       }
 
@@ -897,6 +953,15 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         return;
       }
 
+      // Approval was resolved (possibly from the mobile remote). For local
+      // tools the follow-up tool_result clears the card too, but for MCP /
+      // CLI-retried tools the retry can take seconds — clear immediately so
+      // the desktop card doesn't sit stale when mobile already decided.
+      if (msg.type === 'approval_resolved') {
+        setPendingApproval(null);
+        return;
+      }
+
       // Skip system noise
       if (msg.type === 'system' || msg.type === 'rate_limit_event') {
         return;
@@ -990,6 +1055,35 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         }
 
         if (text || tools.length > 0) {
+          // Streaming text-delta fast path: buffer into the rAF accumulator and
+          // skip the setMessages entirely. Only applies when the last message is
+          // already a pure-text assistant bubble we can append to.
+          const lastNow = messagesRef.current[messagesRef.current.length - 1];
+          if (
+            isPureTextDelta
+            && tools.length === 0
+            && lastNow?.role === 'assistant'
+            && !lastNow.toolCalls
+          ) {
+            streamPendingRef.current += text;
+            if (streamRafRef.current == null) {
+              streamRafRef.current = requestAnimationFrame(() => {
+                streamRafRef.current = null;
+                flushStreamingText();
+              });
+            }
+            // Mark the bubble as in-flight and (re)arm the idle timer so
+            // markdown renders mid-turn when streaming pauses.
+            setStreamSettled(s => s ? false : s);
+            if (streamIdleTimerRef.current != null) {
+              clearTimeout(streamIdleTimerRef.current);
+            }
+            streamIdleTimerRef.current = window.setTimeout(() => {
+              streamIdleTimerRef.current = null;
+              setStreamSettled(true);
+            }, STREAM_IDLE_MS);
+            return;
+          }
           setMessages(prev => {
             const last = prev[prev.length - 1];
             // Update the last assistant message if it's a pure text message (no tool calls).
@@ -1085,9 +1179,14 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     });
 
     return () => {
+      flushStreamingText();
+      if (streamIdleTimerRef.current != null) {
+        clearTimeout(streamIdleTimerRef.current);
+        streamIdleTimerRef.current = null;
+      }
       cleanup();
     };
-  }, [projectPath, aiProvider, activeMetaRuntime]);
+  }, [projectPath, aiProvider, activeMetaRuntime, flushStreamingText]);
 
   // Poll the Anthropic usage API for real utilization percentages
   useEffect(() => {
@@ -1313,7 +1412,27 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     }
     return null;
   }, [messages, turnStartIndex]);
-  const showThinking = isStreaming;
+
+  // Each watcher URL renders on the first message that mentions it. A reply that
+  // re-quotes the URL (or a tool call that re-fetches the run) would otherwise spawn
+  // a duplicate card lower in the chat.
+  const watcherUrlsByMessageId = useMemo(() => {
+    const owner = new Map<string, Set<string>>();
+    const seen = new Set<string>();
+    for (const m of messages) {
+      const targets = detectWatchTargets(m);
+      if (targets.length === 0) continue;
+      const owned = new Set<string>();
+      for (const t of targets) {
+        if (seen.has(t.url)) continue;
+        seen.add(t.url);
+        owned.add(t.url);
+      }
+      if (owned.size > 0) owner.set(m.id, owned);
+    }
+    return owner;
+  }, [messages]);
+  const showThinking = isStreaming && !awaitingQuestion;
   const hasHiddenMessages = renderStart > 0;
 
   useEffect(() => {
@@ -1324,6 +1443,33 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const flushMessagesToParent = useCallback(() => {
     onMessagesChange?.(messagesRef.current);
   }, [onMessagesChange]);
+
+  // GitHubWatcherCard dispatches a snapshot event on phase transitions. We attach
+  // the snapshot to the owning message so it persists with chat history and cards
+  // resume from their last-known state when the chat is reopened.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ messageId: string; snapshot: import('../../types').GitHubWatcherSnapshot }>).detail;
+      if (!detail?.messageId || !detail.snapshot) return;
+      setMessages(prev => {
+        let changed = false;
+        const next = prev.map(m => {
+          if (m.id !== detail.messageId) return m;
+          const existing = m.githubWatchers ?? [];
+          const otherUrls = existing.filter(s => s.url !== detail.snapshot.url);
+          // Skip the write when the phase hasn't actually changed (defensive — the card already
+          // dedupes, but stale events from remounts could otherwise churn the message ref).
+          const prior = existing.find(s => s.url === detail.snapshot.url);
+          if (prior && prior.phase === detail.snapshot.phase) return m;
+          changed = true;
+          return { ...m, githubWatchers: [...otherUrls, detail.snapshot] };
+        });
+        return changed ? next : prev;
+      });
+    };
+    window.addEventListener('sai-github-watcher-snapshot', handler);
+    return () => window.removeEventListener('sai-github-watcher-snapshot', handler);
+  }, []);
 
   const handleApprove = (modifiedCommand?: string) => {
     if (!pendingApproval) return;
@@ -1368,6 +1514,14 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     // Handle built-in commands locally
     if (import.meta.env.DEV && text.startsWith('/fake-error')) {
       handleFakeError(text);
+      return;
+    }
+    // Dev-only: messages containing sai://fake-* render the watcher card without
+    // round-tripping to the LLM. Lets us preview live behavior with no real API calls.
+    if (import.meta.env.DEV && /sai:\/\/fake-run\//.test(text)) {
+      const userId = `fake-watcher-${Date.now()}`;
+      setMessages(prev => [...prev, { id: userId, role: 'user', content: text, timestamp: Date.now(), images }]);
+      flushMessagesToParent();
       return;
     }
     // Slash-command interception (orchestrator chat). When the parent provides
@@ -1641,7 +1795,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
                     />
                   </div>
                 )
-                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId} renderToolCall={renderToolCall} renderMessage={renderMessage} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} />
+                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} renderToolCall={renderToolCall} renderMessage={renderMessage} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} watcherUrlAllowlist={watcherUrlsByMessageId.get(msg.id) ?? EMPTY_URL_SET} />
               )}
           </>
         )}

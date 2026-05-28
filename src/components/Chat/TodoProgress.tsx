@@ -30,21 +30,19 @@ function extractTaskCreateId(output: string | undefined, fallback: string): stri
 }
 
 function findLatestTodos(messages: ChatMessage[]): Todo[] | null {
-  // Only search messages belonging to the current turn (after the last user
-  // message). This prevents stale todos from a previous turn from showing up
-  // at the start of a new turn, and ensures status updates in the current turn
-  // are always reflected.
-  let turnStart = -1;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === 'user') { turnStart = i; break; }
-  }
-
   // Legacy: a single TodoWrite call emits the whole plan as `{ todos: [...] }`.
-  // Find the most recent assistant message in the current turn that has any
-  // TodoWrite calls. Within that message, return the last write with the
-  // maximum todo count — this avoids jumping to a transient sub-task write
+  // Find the most recent assistant message anywhere in the conversation that
+  // has any TodoWrite calls. Within that message, return the last write with
+  // the maximum todo count — this avoids jumping to a transient sub-task write
   // that was emitted in the same content block as the main plan write.
-  for (let i = messages.length - 1; i > turnStart; i--) {
+  //
+  // Why scan the whole history (not just the current turn): in a multi-turn
+  // chat, Claude may carry the plan across turns without re-emitting the full
+  // list every turn (e.g., it sends only the newly added items, or it doesn't
+  // call TodoWrite at all in the follow-up turn). Scoping to the current turn
+  // hid those plans entirely. Fully-completed prior plans are still hidden by
+  // the `completed === total` visibility guard at render time.
+  for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m.role !== 'assistant' || !m.toolCalls?.length) continue;
     let best: Todo[] | null = null;
@@ -64,11 +62,12 @@ function findLatestTodos(messages: ChatMessage[]): Todo[] | null {
   }
 
   // New: TaskCreate / TaskUpdate are atomic per-task calls. Replay them in
-  // order across the current turn to reconstruct the live task list.
+  // order across the whole conversation so updates in a later turn can still
+  // find tasks created earlier.
   const tasks = new Map<string, Todo>();
   const order: string[] = [];
   let createSeq = 0;
-  for (let i = turnStart + 1; i < messages.length; i++) {
+  for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
     if (m.role !== 'assistant' || !m.toolCalls?.length) continue;
     for (const tc of m.toolCalls) {

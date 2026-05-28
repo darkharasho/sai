@@ -101,7 +101,7 @@ describe('TerminalPanel', () => {
     );
     // Allow effects to run
     await vi.waitFor(() => {
-      expect(mockSai.terminalCreate).toHaveBeenCalledWith('/home/user/project');
+      expect(mockSai.terminalCreate).toHaveBeenCalledWith('/home/user/project', expect.any(Number), expect.any(Number));
     });
   });
 

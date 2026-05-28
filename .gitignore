@@ -12,3 +12,5 @@ playwright-report/
 test-results/
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
+graphify-out/
+GRAPH_REPORT.md

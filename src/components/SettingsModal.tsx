@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Check, ChevronDown, Settings as SettingsIcon, Monitor, Type, PanelLeft, Palette, HardDrive, Keyboard, Zap } from 'lucide-react';
+import { X, Check, ChevronDown, Settings as SettingsIcon, Monitor, Type, PanelLeft, Palette, HardDrive, Keyboard, Zap, Smartphone } from 'lucide-react';
 import KeybindingsPage from './Settings/KeybindingsPage';
 import SwarmSettings from './Settings/SwarmSettings';
+import RemoteSettings from './Settings/RemoteSettings';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, getActiveHighlightTheme, setActiveHighlightTheme, getShikiHighlighter, type HighlightThemeId } from '../themes';
 
 interface Props {
@@ -40,6 +41,15 @@ const AUTO_COMPACT_OPTIONS = [
   { label: '80%',  value: 80 },
 ];
 
+const SUBPROCESS_MEM_CAP_OPTIONS = [
+  { label: 'Unlimited', value: 0 },
+  { label: '2 GB',      value: 2048 },
+  { label: '4 GB',      value: 4096 },
+  { label: '6 GB',      value: 6144 },
+  { label: '8 GB',      value: 8192 },
+  { label: '12 GB',     value: 12288 },
+];
+
 const RETENTION_OPTIONS: { label: string; value: number | null }[] = [
   { label: '1 week', value: 7 },
   { label: '2 weeks', value: 14 },
@@ -49,7 +59,7 @@ const RETENTION_OPTIONS: { label: string; value: number | null }[] = [
 ];
 
 type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error';
-type SettingsPage = 'general' | 'editor' | 'layout' | 'style' | 'storage' | 'provider' | 'claude' | 'codex' | 'gemini' | 'swarm' | 'keybindings';
+type SettingsPage = 'general' | 'editor' | 'layout' | 'style' | 'storage' | 'provider' | 'claude' | 'codex' | 'gemini' | 'swarm' | 'remote' | 'keybindings';
 
 function formatRelative(ts: number): string {
   const secs = Math.floor((Date.now() - ts) / 1000);
@@ -85,6 +95,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [focusedChat, setFocusedChat] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(300);
   const [autoCompactThreshold, setAutoCompactThreshold] = useState(0);
+  const [subprocessMemoryCapMB, setSubprocessMemoryCapMB] = useState<number>(4096);
   const [mcpConfigPath, setMcpConfigPath] = useState('');
   const [defaultProjectDir, setDefaultProjectDir] = useState('');
   const [aiTitleGeneration, setAiTitleGeneration] = useState(false);
@@ -113,6 +124,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.settingsGet('focusedChat', false).then((v: boolean) => setFocusedChat(v));
     window.sai.settingsGet('sidebarWidth', 300).then((v: number) => setSidebarWidth(v));
     window.sai.settingsGet('autoCompactThreshold', 0).then((v: number) => setAutoCompactThreshold(v));
+    window.sai.settingsGet('subprocessMemoryCapMB', 4096).then((v: number) => setSubprocessMemoryCapMB(typeof v === 'number' ? v : 4096));
     window.sai.settingsGet('mcpConfigPath', '').then((v: string) => setMcpConfigPath(v || ''));
     window.sai.settingsGet('defaultProjectDir', '').then((v: string) => setDefaultProjectDir(v || ''));
     window.sai.settingsGet('aiTitleGeneration', false).then((v: boolean) => setAiTitleGeneration(!!v));
@@ -154,6 +166,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if ('focusedChat' in remote) setFocusedChat(remote.focusedChat);
       if ('sidebarWidth' in remote) setSidebarWidth(remote.sidebarWidth);
       if ('autoCompactThreshold' in remote) setAutoCompactThreshold(remote.autoCompactThreshold);
+      if ('subprocessMemoryCapMB' in remote) setSubprocessMemoryCapMB(remote.subprocessMemoryCapMB);
       if ('theme' in remote && THEMES.some(t => t.id === remote.theme)) {
         setTheme(remote.theme);
         applyTheme(remote.theme);
@@ -301,6 +314,12 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     setAutoCompactThreshold(value);
     window.sai.settingsSet('autoCompactThreshold', value);
     onSettingChange?.('autoCompactThreshold', value);
+  };
+
+  const handleSubprocessMemoryCapChange = (value: number) => {
+    setSubprocessMemoryCapMB(value);
+    window.sai.settingsSet('subprocessMemoryCapMB', value);
+    onSettingChange?.('subprocessMemoryCapMB', value);
   };
 
   const handleSystemNotificationsChange = (value: boolean) => {
@@ -801,6 +820,21 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
           ))}
         </select>
       </div>
+      <div className="settings-row">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Subprocess memory cap</div>
+          <div className="settings-row-desc">Cap heap for the Claude CLI and node-based grandchildren it spawns (vitest, tsc, vite, etc.) via NODE_OPTIONS=--max-old-space-size. Non-node tools unaffected.</div>
+        </div>
+        <select
+          className="settings-select"
+          value={subprocessMemoryCapMB}
+          onChange={e => handleSubprocessMemoryCapChange(Number(e.target.value))}
+        >
+          {SUBPROCESS_MEM_CAP_OPTIONS.map(opt => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
+      </div>
     </section>
   );
 
@@ -880,6 +914,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       case 'codex': return renderCodexPage();
       case 'gemini': return renderGeminiPage();
       case 'swarm': return <SwarmSettings onSettingChange={onSettingChange} />;
+      case 'remote': return <RemoteSettings />;
       case 'keybindings': return <KeybindingsPage />;
     }
   };
@@ -983,6 +1018,13 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             >
               <Zap size={14} />
               <span>Swarm</span>
+            </button>
+            <button
+              className={`settings-nav-item${activePage === 'remote' ? ' active' : ''}`}
+              onClick={() => setActivePage('remote')}
+            >
+              <Smartphone size={14} />
+              <span>Mobile Remote</span>
             </button>
           </nav>
 

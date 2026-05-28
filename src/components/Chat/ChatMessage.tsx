@@ -7,6 +7,8 @@ import 'highlight.js/styles/monokai.css';
 import { Check, ChevronRight, Circle, Copy, Eraser, RotateCw, Terminal, TerminalSquare, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ToolCallCard from './ToolCallCard';
+import GitHubWatcherCard from './GitHubWatcherCard';
+import { detectWatchTargets } from './githubWatcher';
 import Stagger from './Stagger';
 import { readFlipRect, hasFlipRect } from './flipRegistry';
 import { SPRING, DISTANCE, useReducedMotionTransition } from './motion';
@@ -285,6 +287,7 @@ function ChatMessage({
   renderMessage,
   metaRuntime,
   onAnswerQuestion,
+  watcherUrlAllowlist,
 }: {
   message: ChatMessageType;
   projectPath?: string;
@@ -304,6 +307,9 @@ function ChatMessage({
   metaRuntime?: MetaWorkspaceRuntime | null;
   /** Submit answers for an AskUserQuestion tool call. */
   onAnswerQuestion?: (toolUseId: string, answers: Record<string, string | string[]>) => Promise<void> | void;
+  /** URLs this message is allowed to render watcher cards for. Undefined = render none;
+   *  parent computes per-URL "first message" ownership to prevent duplicate cards. */
+  watcherUrlAllowlist?: Set<string>;
 }) {
   // Allow callers to substitute the entire message render for special meta
   // types (e.g. inline approval cards). Done before any of the normal layout
@@ -805,8 +811,15 @@ function ChatMessage({
 
   const isAssistantStreaming = isStreaming && message.role === 'assistant';
   const isTyping = typewriterActive && displayLen < rawAssistantContent.length;
+  // When the parent passes an allowlist (main chat), only render watchers it explicitly
+  // owns — prevents duplicates when the same run URL shows up in multiple messages. Other
+  // callers (orchestrator, tests) don't pass an allowlist and get the full set.
+  const watcherTargets = watcherUrlAllowlist
+    ? detectWatchTargets(message).filter(t => watcherUrlAllowlist.has(t.url))
+    : detectWatchTargets(message);
 
   return (
+    <>
     <motion.div
       key={flipActive ? flipPhase : undefined}
       ref={flipActive ? measureFlip : flipNodeRef}
@@ -834,51 +847,68 @@ function ChatMessage({
                 [{formatMs(message.durationMs)}]
               </div>
             )}
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              rehypePlugins={[rehypeHighlight, rehypeFilePaths]}
-              urlTransform={(url) => url.startsWith('sai-file://') ? url : defaultUrlTransform(url)}
-              components={{
-                pre: ({ children, ...props }) => (
-                  <CodeBlock {...props}>{children}</CodeBlock>
-                ),
-                a: ({ href, children }) => (
-                  <a
-                    href={href}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      if (href?.startsWith('sai-file://') && onFileOpen) {
-                        const raw = href.slice('sai-file://'.length);
-                        const lineMatch = raw.match(/:(\d+)$/);
-                        const line = lineMatch ? parseInt(lineMatch[1], 10) : undefined;
-                        const rel = lineMatch ? raw.slice(0, -lineMatch[0].length) : raw;
-                        const abs = rel.startsWith('/') ? rel : `${projectPath}/${rel}`;
-                        onFileOpen(abs, line);
-                      } else if (href) {
-                        window.sai.openExternal(href);
-                      }
-                    }}
-                  >
-                    {children}
-                  </a>
-                ),
-              }}
-            >{(() => {
-              const raw = typeof message.content === 'string' ? message.content : String(message.content ?? '');
-              // Preserve user newlines as hard line breaks (trailing double-space)
-              // so Shift+Enter in the chat input renders visually.
-              if (message.role === 'user') return raw.replace(/\n/g, '  \n');
-              if (typewriterActive && displayLen < rawAssistantContent.length) return raw.slice(0, snapToWordBoundary(raw, displayLen));
-              return raw;
-            })()}</ReactMarkdown>
-            {message.images && message.images.length > 0 && (
-              <div className="chat-msg-images">
-                {message.images.map((src, i) => (
-                  <img key={i} src={src} alt={`Attached image ${i + 1}`} className="chat-msg-thumb" onClick={() => setLightboxSrc(src)} />
-                ))}
+            {isAssistantStreaming ? (
+              // While the assistant message is actively streaming, render plain
+              // text. Running ReactMarkdown + rehypeHighlight on every chunk
+              // re-tokenizes the entire growing buffer ~50×/sec and is the
+              // dominant driver of RAM/CPU spikes during a turn. Once streaming
+              // ends, the memo re-renders this branch with full markdown.
+              <div className="chat-msg-stream-text">
+                {typeof message.content === 'string' ? message.content : String(message.content ?? '')}
               </div>
+            ) : (
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeHighlight, rehypeFilePaths]}
+                urlTransform={(url) => url.startsWith('sai-file://') ? url : defaultUrlTransform(url)}
+                components={{
+                  pre: ({ children, ...props }) => (
+                    <CodeBlock {...props}>{children}</CodeBlock>
+                  ),
+                  a: ({ href, children }) => (
+                    <a
+                      href={href}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        if (href?.startsWith('sai-file://') && onFileOpen) {
+                          const raw = href.slice('sai-file://'.length);
+                          const lineMatch = raw.match(/:(\d+)$/);
+                          const line = lineMatch ? parseInt(lineMatch[1], 10) : undefined;
+                          const rel = lineMatch ? raw.slice(0, -lineMatch[0].length) : raw;
+                          const abs = rel.startsWith('/') ? rel : `${projectPath}/${rel}`;
+                          onFileOpen(abs, line);
+                        } else if (href) {
+                          window.sai.openExternal(href);
+                        }
+                      }}
+                    >
+                      {children}
+                    </a>
+                  ),
+                }}
+              >{(() => {
+                const raw = typeof message.content === 'string' ? message.content : String(message.content ?? '');
+                // Preserve user newlines as hard line breaks (trailing double-space)
+                // so Shift+Enter in the chat input renders visually.
+                if (message.role === 'user') return raw.replace(/\n/g, '  \n');
+                if (typewriterActive && displayLen < rawAssistantContent.length) return raw.slice(0, snapToWordBoundary(raw, displayLen));
+                return raw;
+              })()}</ReactMarkdown>
             )}
           </div>
+        </div>
+      )}
+      {message.images && message.images.length > 0 && (
+        <div className="chat-msg-attachments">
+          {message.images.map((src, i) => (
+            <img
+              key={i}
+              src={src}
+              alt={`Attached image ${i + 1}`}
+              className="chat-msg-attachment"
+              onClick={() => setLightboxSrc(src)}
+            />
+          ))}
         </div>
       )}
       {message.toolCalls && message.toolCalls.length > 0 && (
@@ -989,6 +1019,7 @@ function ChatMessage({
           mask-repeat: no-repeat;
         }
         .chat-msg-body { color: var(--text); line-height: 1.6; flex: 1; min-width: 0; }
+        .chat-msg-stream-text { white-space: pre-wrap; word-break: break-word; }
         .chat-msg-duration {
           font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-variant-numeric: tabular-nums;
@@ -1123,23 +1154,27 @@ function ChatMessage({
         .chat-msg-body tr:hover td {
           background: var(--bg-secondary);
         }
-        .chat-msg-images {
+        .chat-msg-attachments {
           display: flex;
           flex-wrap: wrap;
-          gap: 6px;
-          margin-top: 6px;
+          gap: 8px;
+          margin: 8px 0 4px 0;
         }
-        .chat-msg-thumb {
-          max-width: 120px;
-          max-height: 80px;
-          object-fit: cover;
-          border-radius: 6px;
-          border: 1px solid var(--border);
-          cursor: pointer;
-          transition: opacity 0.15s;
+        .chat-msg-attachment {
+          max-width: min(480px, 100%);
+          max-height: 320px;
+          width: auto;
+          height: auto;
+          object-fit: contain;
+          border-radius: 10px;
+          background: var(--bg-secondary, #1a1a1a);
+          cursor: zoom-in;
+          transition: opacity 0.15s, transform 0.15s;
+          display: block;
         }
-        .chat-msg-thumb:hover {
-          opacity: 0.8;
+        .chat-msg-attachment:hover {
+          opacity: 0.92;
+          transform: translateY(-1px);
         }
         .img-modal-overlay {
           position: fixed;
@@ -1205,6 +1240,19 @@ function ChatMessage({
         }
       `}</style>
     </motion.div>
+    {watcherTargets.length > 0 && (
+      <div className="chat-msg chat-msg-watcher-row" data-testid="chat-msg-watcher-row">
+        {watcherTargets.map(t => (
+          <GitHubWatcherCard
+            key={t.url}
+            target={t}
+            messageId={message.id}
+            seedSnapshot={message.githubWatchers?.find(s => s.url === t.url)}
+          />
+        ))}
+      </div>
+    )}
+    </>
   );
 }
 
@@ -1220,5 +1268,6 @@ export default memo(ChatMessage, (prev, next) =>
   prev.onClearContext === next.onClearContext &&
   prev.renderToolCall === next.renderToolCall &&
   prev.renderMessage === next.renderMessage &&
-  prev.metaRuntime === next.metaRuntime
+  prev.metaRuntime === next.metaRuntime &&
+  prev.watcherUrlAllowlist === next.watcherUrlAllowlist
 );

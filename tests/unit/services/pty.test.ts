@@ -391,7 +391,7 @@ describe('terminal:create', () => {
     expect(id1).not.toBe(id2);
   });
 
-  it.skipIf(process.platform === 'win32')('spawns with stty -echoctl init and --login via exec', async () => {
+  it.skipIf(process.platform === 'win32')('spawns with stty -echoctl init and interactive shell via exec', async () => {
     await setupWithTerminal('/tmp');
     const ptyModule = await import('node-pty');
     expect(ptyModule.spawn).toHaveBeenCalledWith(
@@ -401,7 +401,8 @@ describe('terminal:create', () => {
     );
     const args = (ptyModule.spawn as any).mock.calls[0][1];
     expect(args[1]).toContain('exec');
-    expect(args[1]).toContain('--login');
+    // bash → --rcfile, zsh → -i with ZDOTDIR, other shells → --login
+    expect(args[1]).toMatch(/--rcfile|--login|"-i"/);
   });
 
   it('uses cwd from argument', async () => {
@@ -664,7 +665,7 @@ describe.skipIf(process.platform !== 'linux')('systemd scope isolation (Linux cg
     expect(dashDashIdx).toBeGreaterThan(-1);
     expect(args[dashDashIdx + 2]).toBe('-c');
     expect(args[dashDashIdx + 3]).toContain('stty -echoctl');
-    expect(args[dashDashIdx + 3]).toContain('--login');
+    expect(args[dashDashIdx + 3]).toMatch(/--rcfile|--login|"-i"/);
   });
 
   it('falls back to direct shell spawn when canUseSystemdScope returns false', async () => {
@@ -672,7 +673,7 @@ describe.skipIf(process.platform !== 'linux')('systemd scope isolation (Linux cg
     expect(cmd).not.toBe('systemd-run');
     expect(args[0]).toBe('-c');
     expect(args[1]).toContain('stty -echoctl');
-    expect(args[1]).toContain('--login');
+    expect(args[1]).toMatch(/--rcfile|--login|"-i"/);
   });
 });
 

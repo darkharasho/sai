@@ -182,6 +182,46 @@ export async function gitDiffShortstat(
   };
 }
 
+export interface GitStatusEntry { path: string; status: string; staged: boolean }
+
+export async function gitStatusImpl(cwd: string): Promise<{
+  branch: string | null;
+  ahead: number;
+  behind: number;
+  entries: GitStatusEntry[];
+}> {
+  const s = await git(cwd).status();
+  const entries: GitStatusEntry[] = [];
+  for (const p of s.staged)    entries.push({ path: p, status: 'modified', staged: true });
+  for (const p of s.modified)  entries.push({ path: p, status: 'modified', staged: false });
+  for (const p of s.created)   entries.push({ path: p, status: 'added',    staged: true  });
+  for (const p of s.deleted)   entries.push({ path: p, status: 'deleted',  staged: false });
+  for (const p of s.not_added) entries.push({ path: p, status: 'added',    staged: false });
+  return { branch: s.current ?? null, ahead: s.ahead, behind: s.behind, entries };
+}
+
+export async function gitDiffImpl(cwd: string, filepath: string, staged: boolean): Promise<string> {
+  const args = staged ? ['--cached', '--', filepath] : ['--', filepath];
+  return await git(cwd).diff(args);
+}
+
+export async function gitStageImpl(cwd: string, filepath: string): Promise<void> {
+  await git(cwd).add(filepath);
+}
+export async function gitUnstageImpl(cwd: string, filepath: string): Promise<void> {
+  await git(cwd).reset(['HEAD', '--', filepath]);
+}
+export async function gitCommitImpl(cwd: string, message: string): Promise<{ hash?: string }> {
+  const r = await git(cwd).commit(message);
+  return { hash: r.commit ?? undefined };
+}
+export async function gitPushImpl(cwd: string): Promise<void> {
+  await git(cwd).push();
+}
+export async function gitPullImpl(cwd: string): Promise<void> {
+  await git(cwd).pull();
+}
+
 export function registerGitHandlers() {
   ipcMain.handle('git:status', async (_event, cwd: string) => {
     const status = await git(cwd).status();
@@ -310,10 +350,7 @@ export function registerGitHandlers() {
     await git(cwd).checkoutLocalBranch(branchName);
   });
 
-  ipcMain.handle('git:diff', async (_event, cwd: string, filepath: string, staged: boolean) => {
-    const args = staged ? ['--cached', '--', filepath] : ['--', filepath];
-    return await git(cwd).diff(args);
-  });
+  ipcMain.handle('git:diff', (_e, cwd: string, filepath: string, staged: boolean) => gitDiffImpl(cwd, filepath, staged));
 
   ipcMain.handle('git:show', async (_event, cwd: string, filepath: string, ref: string) => {
     try {

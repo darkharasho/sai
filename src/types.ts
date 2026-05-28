@@ -6,6 +6,13 @@ export interface ChatMessage {
   startedAt?: number;
   toolCalls?: ToolCall[];
   images?: string[];
+  /**
+   * Snapshots of GitHubWatcherCard state captured at phase transitions so the
+   * card resumes from its last-known state when an old chat is reopened. Keyed
+   * by url. The payload shape is intentionally untyped here to avoid pulling
+   * watcher-internal types into the global ChatMessage interface.
+   */
+  githubWatchers?: GitHubWatcherSnapshot[];
   durationMs?: number;
   error?: {
     title: string;
@@ -62,6 +69,16 @@ export interface ChatSession {
   projectPath?: string;
   kind?: SessionKind;        // default 'chat'
   swarmTaskId?: string;      // populated for task / orchestrator sessions
+}
+
+export interface GitHubWatcherSnapshot {
+  url: string;
+  kind: 'run';
+  phase: 'pending' | 'queued' | 'in_progress' | 'success' | 'failure' | 'cancelled' | 'neutral' | 'error';
+  /** ms epoch of when this snapshot was captured — used by the hybrid resume policy. */
+  capturedAt: number;
+  /** Opaque RunState payload. Kept loose so this type doesn't depend on the card. */
+  data: Record<string, unknown>;
 }
 
 export interface ToolCall {

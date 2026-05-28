@@ -1,0 +1,5 @@
+@import "tailwindcss";
+@import "./theme.css";
+
+/* Be explicit so Tailwind scans the chat/ subtree */
+@source "./**/*.{ts,tsx,html}";

@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('sai', {
   platform: process.platform,
-  terminalCreate: (cwd: string, scope?: string) => ipcRenderer.invoke('terminal:create', cwd, scope),
+  terminalCreate: (cwd: string, cols?: number, rows?: number) => ipcRenderer.invoke('terminal:create', cwd, cols, rows),
   terminalWrite: (id: number, data: string) => ipcRenderer.send('terminal:write', id, data),
   terminalResize: (id: number, cols: number, rows: number) => ipcRenderer.send('terminal:resize', id, cols, rows),
   terminalGetProcess: (id: number) => ipcRenderer.invoke('terminal:getProcess', id),
@@ -29,6 +29,8 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.invoke('claude:approve', projectPath, toolUseId, approved, modifiedCommand, scope),
   claudeAnswerQuestion: (projectPath: string, toolUseId: string, answers: Record<string, string | string[]>, scope?: string) =>
     ipcRenderer.invoke('claude:answer-question', projectPath, toolUseId, answers, scope),
+  remoteEmitWorkspaceStatus: (projectPath: string, status: { busy: boolean; streaming: boolean; completed: boolean; approval: boolean; streamingSessionId?: string | null }) =>
+    ipcRenderer.invoke('remote:emit-workspace-status', projectPath, status),
   claudeAlwaysAllow: (projectPath: string, toolPattern: string) =>
     ipcRenderer.invoke('claude:alwaysAllow', projectPath, toolPattern),
   // Codex CLI
@@ -213,6 +215,7 @@ contextBridge.exposeInMainWorld('sai', {
   githubStartAuth: () => ipcRenderer.invoke('github:startAuth'),
   githubCancelAuth: () => ipcRenderer.invoke('github:cancelAuth'),
   githubLogout: () => ipcRenderer.invoke('github:logout'),
+  githubApiGet: (path: string) => ipcRenderer.invoke('github:apiGet', path) as Promise<{ ok: boolean; status: number; body: any }>,
   githubOnAuthComplete: (callback: (user: any) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, user: any) => callback(user);
     ipcRenderer.on('github:authComplete', listener);
@@ -273,5 +276,24 @@ contextBridge.exposeInMainWorld('sai', {
       ipcRenderer.invoke('swarm:diff-stats', cwd, baseBranch, branch),
     branchDiff: (cwd: string, baseBranch: string, branch: string) =>
       ipcRenderer.invoke('swarm:branch-diff', cwd, baseBranch, branch),
+  },
+  remote: {
+    setEnabled: (enabled: boolean) => ipcRenderer.invoke('remote:setEnabled', enabled),
+    status:     () => ipcRenderer.invoke('remote:status'),
+    mintPairCode: () => ipcRenderer.invoke('remote:mintPairCode'),
+    listDevices:  () => ipcRenderer.invoke('remote:listDevices'),
+    revoke:       (deviceId: string) => ipcRenderer.invoke('remote:revoke', deviceId),
+    setCeiling: (ceiling: 'auto' | 'auto-read' | 'always-ask' | null) =>
+      ipcRenderer.invoke('remote:setCeiling', ceiling),
+    getCeiling: () => ipcRenderer.invoke('remote:getCeiling'),
+    setActiveSession: (payload: { projectPath: string; scope: string; sessionId: string }) =>
+      ipcRenderer.invoke('remote:setActiveSession', payload),
+    onProxyRequest: (cb: (payload: { reqId: number; kind: string; args: any }) => void) => {
+      const listener = (_e: any, payload: any) => cb(payload);
+      ipcRenderer.on('remote:proxy:request', listener);
+      return () => ipcRenderer.removeListener('remote:proxy:request', listener);
+    },
+    sendProxyReply: (payload: { reqId: number; result?: unknown; error?: string }) =>
+      ipcRenderer.invoke('remote:proxy:reply', payload),
   },
 });
