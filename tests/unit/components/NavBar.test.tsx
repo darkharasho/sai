@@ -111,19 +111,19 @@ describe('NavBar', () => {
 
   it('renders chats toggle button', () => {
     const { container } = render(<NavBar activeSidebar={null} onToggle={vi.fn()} />);
-    expect(getNavButton(container, 'Chat History')).toBeTruthy();
+    expect(getNavButton(container, 'Chats')).toBeTruthy();
   });
 
   it('calls onToggle with "chats" when chats button is clicked', () => {
     const onToggle = vi.fn();
     const { container } = render(<NavBar activeSidebar={null} onToggle={onToggle} />);
-    fireEvent.click(getNavButton(container, 'Chat History'));
+    fireEvent.click(getNavButton(container, 'Chats'));
     expect(onToggle).toHaveBeenCalledWith('chats');
   });
 
   it('adds active class to chats button when activeSidebar is "chats"', () => {
     const { container } = render(<NavBar activeSidebar="chats" onToggle={vi.fn()} />);
-    const chatsBtn = getNavButton(container, 'Chat History');
+    const chatsBtn = getNavButton(container, 'Chats');
     expect(chatsBtn.className).toContain('active');
   });
 

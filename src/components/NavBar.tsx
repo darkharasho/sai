@@ -1,4 +1,4 @@
-import { FolderClosed, GitBranch, Clock, Puzzle, Server, Search, Zap } from 'lucide-react';
+import { FolderClosed, GitBranch, MessagesSquare, Puzzle, Server, Search, Zap } from 'lucide-react';
 import { DOT_MASK_URL } from '../lib/assets';
 
 interface NavBarProps {
@@ -6,11 +6,16 @@ interface NavBarProps {
   onToggle: (id: string) => void;
   gitChangeCount?: number;
   swarmApprovalCount?: number;
+  /** Total unread + awaiting chat sessions in the current workspace. Surfaced
+   *  as a badge on the Chats button so attention is drawn even while the
+   *  sidebar is collapsed (mirrors the workspace dropdown badge pattern). */
+  chatNotificationCount?: number;
 }
 
-export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, swarmApprovalCount = 0 }: NavBarProps) {
+export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, swarmApprovalCount = 0, chatNotificationCount = 0 }: NavBarProps) {
   const badgeLabel = gitChangeCount > 100 ? '99+' : `${gitChangeCount}`;
   const swarmBadgeLabel = swarmApprovalCount > 100 ? '99+' : `${swarmApprovalCount}`;
+  const chatBadgeLabel = chatNotificationCount > 100 ? '99+' : `${chatNotificationCount}`;
 
   return (
     <div className="navbar">
@@ -42,10 +47,11 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, sw
       <button
         className={`nav-btn ${activeSidebar === 'chats' ? 'active' : ''}`}
         onClick={() => onToggle('chats')}
-        title="Chat History"
+        title="Chats"
       >
-        <Clock size={18} />
+        <MessagesSquare size={18} />
         <span className="nav-label">Chats</span>
+        {chatNotificationCount > 0 && <span className="nav-badge">{chatBadgeLabel}</span>}
       </button>
       <button
         className={`nav-btn ${activeSidebar === 'swarm' ? 'active' : ''}`}

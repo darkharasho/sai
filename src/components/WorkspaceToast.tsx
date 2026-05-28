@@ -1,15 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-export type ToastTone = 'success' | 'error';
+export type ToastTone = 'success' | 'error' | 'attention';
 
 interface WorkspaceToastProps {
   message: string;
   onDismiss: () => void;
   tone?: ToastTone;
+  onClick?: () => void;
+  inline?: boolean;
 }
 
-export default function WorkspaceToast({ message, onDismiss, tone = 'success' }: WorkspaceToastProps) {
+export default function WorkspaceToast({ message, onDismiss, tone = 'success', onClick, inline = false }: WorkspaceToastProps) {
   const [visible, setVisible] = useState(false);
+  const clickDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     requestAnimationFrame(() => setVisible(true));
@@ -17,18 +20,34 @@ export default function WorkspaceToast({ message, onDismiss, tone = 'success' }:
       setVisible(false);
       setTimeout(onDismiss, 300);
     }, 4000);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      if (clickDismissTimerRef.current !== null) {
+        clearTimeout(clickDismissTimerRef.current);
+      }
+    };
   }, [onDismiss]);
 
-  const accentVar = tone === 'error' ? 'var(--red)' : 'var(--accent)';
-  const glyph = tone === 'error' ? '⚠' : '✓';
+  const accentVar =
+    tone === 'error' ? 'var(--red)' :
+    tone === 'attention' ? 'var(--orange)' :
+    'var(--accent)';
+  const glyph =
+    tone === 'error' ? '⚠' :
+    tone === 'attention' ? '!' :
+    '✓';
+
+  const handleClick = onClick
+    ? () => { onClick(); setVisible(false); clickDismissTimerRef.current = setTimeout(onDismiss, 100); }
+    : undefined;
 
   return (
     <div
+      onClick={handleClick}
       style={{
-        position: 'fixed',
-        bottom: 16,
-        right: 16,
+        position: inline ? 'relative' : 'fixed',
+        bottom: inline ? 'auto' : 16,
+        right: inline ? 'auto' : 16,
         background: 'var(--bg-elevated)',
         border: '1px solid var(--border)',
         borderRadius: 8,
@@ -44,6 +63,7 @@ export default function WorkspaceToast({ message, onDismiss, tone = 'success' }:
         opacity: visible ? 1 : 0,
         transition: 'transform 0.3s ease, opacity 0.3s ease',
         pointerEvents: 'auto',
+        cursor: onClick ? 'pointer' : 'default',
       }}
     >
       <span style={{ color: accentVar, fontSize: 14 }}>{glyph}</span>

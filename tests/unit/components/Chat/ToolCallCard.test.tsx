@@ -58,16 +58,12 @@ describe('ToolCallCard', () => {
     ['file_edit', 'tool-sig-wipe'],
     ['terminal_command', 'tool-sig-typed'],
     ['web_fetch', 'tool-sig-shimmer'],
-    ['file_read', null],
-    ['other', null],
+    ['file_read', 'tool-sig-scan'],
+    ['other', 'tool-sig-shimmer'],
   ] as const)('applies signature class for %s', (type, expectedClass) => {
     const { container } = render(
       <ToolCallCard toolCall={{ id: 't', type, name: 'X', input: '' }} />
     );
-    if (expectedClass) {
-      expect(container.querySelector(`.${expectedClass}`)).toBeTruthy();
-    } else {
-      expect(container.querySelector('.tool-sig-wipe, .tool-sig-typed, .tool-sig-shimmer')).toBeFalsy();
-    }
+    expect(container.querySelector(`.${expectedClass}`)).toBeTruthy();
   });
 });

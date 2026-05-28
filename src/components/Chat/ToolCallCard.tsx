@@ -621,7 +621,9 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
   const sigClass =
     toolCall.type === 'file_edit'        ? 'tool-sig-wipe' :
     toolCall.type === 'terminal_command' ? 'tool-sig-typed' :
-    toolCall.type === 'web_fetch'        ? 'tool-sig-shimmer' : '';
+    toolCall.type === 'web_fetch'        ? 'tool-sig-shimmer' :
+    toolCall.type === 'file_read'        ? 'tool-sig-scan' :
+    'tool-sig-shimmer';
 
   return (
     <>
@@ -1064,7 +1066,8 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
               to   { clip-path: inset(0 0 0 0); }
             }
             .tool-sig-wipe {
-              animation: tool-sig-wipe 380ms cubic-bezier(0.22, 1, 0.36, 1) 1;
+              animation: tool-sig-wipe 550ms cubic-bezier(0.22, 1, 0.36, 1) 1;
+              animation-fill-mode: both;
             }
 
             @keyframes tool-sig-typed {
@@ -1075,7 +1078,8 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
               display: inline-block;
               overflow: hidden;
               white-space: nowrap;
-              animation: tool-sig-typed 400ms steps(20, end) 1;
+              animation: tool-sig-typed 600ms steps(20, end) 1;
+              animation-fill-mode: both;
             }
 
             @keyframes tool-sig-shimmer {
@@ -1091,7 +1095,19 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
               );
               background-size: 60% 100%;
               background-repeat: no-repeat;
+              background-position: 220% 0;
               animation: tool-sig-shimmer 700ms ease-out 1;
+              animation-fill-mode: forwards;
+            }
+
+            @keyframes tool-sig-scan {
+              from { clip-path: inset(0 0 100% 0); }
+              to   { clip-path: inset(0 0 0 0); }
+            }
+            .tool-sig-scan {
+              display: inline-block;
+              animation: tool-sig-scan 550ms cubic-bezier(0.22, 1, 0.36, 1) 1;
+              animation-fill-mode: both;
             }
           }
           .askq-body {

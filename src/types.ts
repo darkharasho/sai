@@ -59,6 +59,15 @@ export interface ChatSession {
   codexSessionId?: string;
   geminiSessionId?: string;
   pinned?: boolean;
+  lastViewedAt?: number;
+  /** Stamped when a background turn ends with is_error/error_during_execution.
+   *  Cleared when a subsequent turn completes successfully. Drives the
+   *  ChatHistorySidebar error indicator. */
+  lastTurnErrored?: boolean;
+  /** Stamped when the backing Claude scope was reaped by the idle sweep.
+   *  Cleared on the next streaming_start (process respawned). Persisted so
+   *  the yellow sidebar dot survives app restarts. */
+  scopeSuspended?: boolean;
   titleEdited?: boolean;
   messageCount: number;
   projectPath?: string;

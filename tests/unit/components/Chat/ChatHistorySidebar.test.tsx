@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, fireEvent, act } from '@testing-library/react';
+import { render, fireEvent, act, screen } from '@testing-library/react';
 import ChatHistorySidebar from '../../../../src/components/Chat/ChatHistorySidebar';
 import type { ChatSession } from '../../../../src/types';
 
@@ -125,5 +125,90 @@ describe('ChatHistorySidebar', () => {
     const { getByText } = render(<ChatHistorySidebar {...defaultProps} sessions={sessions} />);
     fireEvent.contextMenu(getByText('Right-click me'));
     expect(getByText('Rename')).toBeTruthy();
+  });
+
+  it('renders running state on a streaming session', () => {
+    const s = makeSession({ id: 'a' });
+    render(<ChatHistorySidebar
+      {...defaultProps}
+      sessions={[s]}
+      streamingSessionIds={new Set(['a'])}
+    />);
+    expect(screen.getByTestId('sidebar-status-a-busy')).toBeInTheDocument();
+  });
+
+  it('renders awaiting state on an approval-pending session', () => {
+    const s = makeSession({ id: 'b' });
+    render(<ChatHistorySidebar
+      {...defaultProps}
+      sessions={[s]}
+      awaitingSessionIds={new Set(['b'])}
+    />);
+    expect(screen.getByTestId('sidebar-status-b-awaiting')).toBeInTheDocument();
+  });
+
+  it('renders error state on an errored session', () => {
+    const s = makeSession({ id: 'c' });
+    render(<ChatHistorySidebar
+      {...defaultProps}
+      sessions={[s]}
+      errorSessionIds={new Set(['c'])}
+    />);
+    expect(screen.getByTestId('sidebar-status-c-error')).toBeInTheDocument();
+  });
+
+  it('renders suspended state on a session whose scope was reaped by the idle sweep', () => {
+    const s = makeSession({ id: 'd' });
+    render(<ChatHistorySidebar
+      {...defaultProps}
+      sessions={[s]}
+      suspendedSessionIds={new Set(['d'])}
+    />);
+    expect(screen.getByTestId('sidebar-status-d-suspended')).toBeInTheDocument();
+  });
+
+  it('prefers higher-priority indicators over suspended', () => {
+    // Busy spinner should win over suspended when both apply mid-resume
+    const s = makeSession({ id: 'e' });
+    render(<ChatHistorySidebar
+      {...defaultProps}
+      sessions={[s]}
+      streamingSessionIds={new Set(['e'])}
+      suspendedSessionIds={new Set(['e'])}
+    />);
+    expect(screen.getByTestId('sidebar-status-e-busy')).toBeInTheDocument();
+    expect(screen.queryByTestId('sidebar-status-e-suspended')).not.toBeInTheDocument();
+  });
+
+  const baseProps = defaultProps;
+
+  it('marks a non-active session as unread when updatedAt > lastViewedAt', () => {
+    const unread = makeSession({ id: 'u', updatedAt: 2000, lastViewedAt: 1000 });
+    render(<ChatHistorySidebar
+      {...baseProps}
+      activeSessionId="other"
+      sessions={[unread]}
+    />);
+    expect(screen.getByTestId('sidebar-status-u-done')).toBeInTheDocument();
+  });
+
+  it('does not mark the active session as unread', () => {
+    const unread = makeSession({ id: 'u', updatedAt: 2000, lastViewedAt: 1000 });
+    render(<ChatHistorySidebar
+      {...baseProps}
+      activeSessionId="u"
+      sessions={[unread]}
+    />);
+    expect(screen.queryByTestId('sidebar-status-u-done')).not.toBeInTheDocument();
+  });
+
+  it('does not mark a viewed session as unread', () => {
+    const viewed = makeSession({ id: 'v', updatedAt: 1000, lastViewedAt: 2000 });
+    render(<ChatHistorySidebar
+      {...baseProps}
+      activeSessionId="other"
+      sessions={[viewed]}
+    />);
+    expect(screen.queryByTestId('sidebar-status-v-done')).not.toBeInTheDocument();
   });
 });

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { DOT_MASK_URL } from '../../lib/assets';
 import { Search, X, Plus, Pin } from 'lucide-react';
 import SaiLogo from '../SaiLogo';
 import { formatSessionDate, formatSessionTime, exportSessionAsMarkdown } from '../../sessions';
@@ -15,13 +16,14 @@ interface ChatHistorySidebarProps {
   onUpdateSessions: (sessions: ChatSession[]) => void;
   projectPath: string;
   titleGeneratingIds?: Set<string>;
+  streamingSessionIds?: Set<string>;
+  awaitingSessionIds?: Set<string>;
+  errorSessionIds?: Set<string>;
+  /** Sessions whose backing Claude process has been reaped by the idle sweep.
+   *  Renders the yellow squircle (matches the suspended-workspace pattern in
+   *  TitleBar). */
+  suspendedSessionIds?: Set<string>;
 }
-
-const PROVIDER_COLORS: Record<string, string> = {
-  claude: '#d4a574',
-  codex: '#74aa9c',
-  gemini: '#8b9cf7',
-};
 
 function formatRelativeTime(timestamp: number): string {
   const diff = Date.now() - timestamp;
@@ -79,6 +81,10 @@ export default function ChatHistorySidebar({
   onUpdateSessions,
   projectPath,
   titleGeneratingIds,
+  streamingSessionIds = new Set<string>(),
+  awaitingSessionIds = new Set<string>(),
+  errorSessionIds = new Set<string>(),
+  suspendedSessionIds = new Set<string>(),
 }: ChatHistorySidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -241,6 +247,7 @@ export default function ChatHistorySidebar({
       case 'delete': {
         const updated = sessions.filter(s => s.id !== sessionId);
         onUpdateSessions(updated);
+        try { window.sai.claudeStop?.(projectPath, sessionId); } catch {}
         dbDeleteSession(sessionId).catch(() => {});
         break;
       }
@@ -261,8 +268,6 @@ export default function ChatHistorySidebar({
     }
     setRenamingId(null);
   };
-
-  const providerColor = PROVIDER_COLORS[aiProvider] || '#888';
 
   return (
     <div className="chat-history-sidebar sidebar-mount">
@@ -327,41 +332,96 @@ export default function ChatHistorySidebar({
                     />
                   ) : (
                     <>
-                      <div className="chat-history-card-header">
-                        <span
-                          className="chat-history-provider-dot"
-                          style={{ background: PROVIDER_COLORS[session.aiProvider || aiProvider] || providerColor }}
-                        />
-                        <span className="chat-history-card-title">{session.title || 'Untitled'}</span>
-                        {titleGeneratingIds?.has(session.id) && (
-                          <SaiLogo mode="scanner" size={12} className="chat-history-title-spinner" ariaLabel="Generating title" />
-                        )}
-                        {session.id === activeSessionId && (
-                          <span className="chat-history-active-badge">ACTIVE</span>
-                        )}
-                      </div>
-                      {debouncedQuery.trim() ? (
-                        (() => {
-                          const snippet = getSearchSnippet(session.id);
-                          if (!snippet) return null;
-                          return (
-                            <div className="chat-history-card-preview">
-                              {snippet.before}<mark className="chat-history-match">{snippet.match}</mark>{snippet.after}
+                      {(() => {
+                        const isUnread = session.id !== activeSessionId
+                          && session.updatedAt > (session.lastViewedAt ?? session.updatedAt);
+                        return (
+                          <>
+                            <div className="chat-history-card-header">
+                              {(() => {
+                                // Mirror the TitleBar workspace status pattern:
+                                // a single leading slot showing whichever of
+                                // busy / awaiting / error / unread / suspended
+                                // applies. Inactive viewed sessions render no
+                                // dot, matching workspace dropdown rows.
+                                const isRunning = streamingSessionIds.has(session.id);
+                                const isAwaiting = awaitingSessionIds.has(session.id);
+                                const isError = errorSessionIds.has(session.id);
+                                const isSuspended = suspendedSessionIds.has(session.id);
+                                if (isAwaiting) return (
+                                  <span
+                                    className="workspace-approval-icon"
+                                    data-testid={`sidebar-status-${session.id}-awaiting`}
+                                    title="Approval needed"
+                                  >!</span>
+                                );
+                                if (isError) return (
+                                  <span
+                                    className="workspace-approval-icon"
+                                    style={{ background: 'var(--red)' }}
+                                    data-testid={`sidebar-status-${session.id}-error`}
+                                    title="Error"
+                                  >!</span>
+                                );
+                                if (isRunning) return (
+                                  <span
+                                    className="titlebar-busy-spinner"
+                                    data-testid={`sidebar-status-${session.id}-busy`}
+                                    title="Working..."
+                                  />
+                                );
+                                if (isUnread) return (
+                                  <span
+                                    className="workspace-done-dot"
+                                    data-testid={`sidebar-status-${session.id}-done`}
+                                    title="Response complete"
+                                  />
+                                );
+                                if (isSuspended) return (
+                                  <span
+                                    className="chat-history-suspended-dot"
+                                    data-testid={`sidebar-status-${session.id}-suspended`}
+                                    title="Suspended after 30 min idle — send a message to resume"
+                                  />
+                                );
+                                // Reserve the slot so titles stay aligned.
+                                return <span className="chat-history-status-spacer" aria-hidden="true" />;
+                              })()}
+                              <span
+                                className="chat-history-card-title"
+                              >{session.title || 'Untitled'}</span>
+                              {titleGeneratingIds?.has(session.id) && (
+                                <SaiLogo mode="scanner" size={12} className="chat-history-title-spinner" ariaLabel="Generating title" />
+                              )}
+                              {session.id === activeSessionId && (
+                                <span className="chat-history-active-badge">ACTIVE</span>
+                              )}
                             </div>
-                          );
-                        })()
-                      ) : (
-                        getSessionPreview(session) && (
-                          <div className="chat-history-card-preview">
-                            {getSessionPreview(session)}
-                          </div>
-                        )
-                      )}
-                      <div className="chat-history-card-meta">
-                        <span>{getMessageCount(session)} msgs</span>
-                        <span className="chat-history-meta-dot">&middot;</span>
-                        <span>{formatRelativeTime(session.updatedAt)}</span>
-                      </div>
+                            {debouncedQuery.trim() ? (
+                              (() => {
+                                const snippet = getSearchSnippet(session.id);
+                                if (!snippet) return null;
+                                return (
+                                  <div className="chat-history-card-preview">
+                                    {snippet.before}<mark className="chat-history-match">{snippet.match}</mark>{snippet.after}
+                                  </div>
+                                );
+                              })()
+                            ) : (
+                              getSessionPreview(session) && (
+                                <div className="chat-history-card-preview">
+                                  {getSessionPreview(session)}
+                                </div>
+                              )
+                            )}
+                            <div className="chat-history-card-meta">
+                              <span>{getMessageCount(session)} msgs</span>
+                              <span className="chat-history-meta-dot">&middot;</span>
+                              <span>{formatRelativeTime(session.updatedAt)}</span>
+                            </div>
+                          </>
+                        );
+                      })()}
                     </>
                   )}
                 </div>
@@ -493,12 +553,66 @@ export default function ChatHistorySidebar({
           gap: 6px;
           margin-bottom: 3px;
         }
-        .chat-history-provider-dot {
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
+        .chat-history-suspended-dot {
+          display: inline-block;
+          width: 9px;
+          height: 9px;
+          background: #d4a72c;
+          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
           flex-shrink: 0;
-          opacity: 0.7;
+        }
+        .chat-history-status-spacer {
+          display: inline-block;
+          width: 9px;
+          height: 9px;
+          flex-shrink: 0;
+        }
+        .workspace-approval-icon {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 14px;
+          height: 14px;
+          border-radius: 50%;
+          background: #f59e0b;
+          color: #000;
+          font-size: 10px;
+          font-weight: 800;
+          flex-shrink: 0;
+          animation: approval-blink 1s ease-in-out infinite;
+        }
+        @keyframes approval-blink {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.2; }
+        }
+        .titlebar-busy-spinner {
+          display: inline-block;
+          width: 9px;
+          height: 9px;
+          background: var(--accent);
+          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+          animation: dot-spinner-pulse 2.2s ease-in-out infinite;
+          flex-shrink: 0;
+        }
+        @keyframes dot-spinner-pulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50%      { opacity: 0.35; transform: scale(0.75); }
+        }
+        .workspace-done-dot {
+          display: inline-block;
+          width: 9px;
+          height: 9px;
+          background: var(--green);
+          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
+          flex-shrink: 0;
+          animation: done-pulse 2s ease-in-out infinite;
+        }
+        @keyframes done-pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
         }
         .chat-history-card-title {
           font-weight: 500;

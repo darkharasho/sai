@@ -7,6 +7,7 @@ import {
   dbGetMessagesTail,
   dbGetMessagesRange,
   dbDeleteSession,
+  dbPatchSessionMeta,
   dbPurgeExpired,
   clearDb,
   migrateFromLocalStorage,
@@ -464,5 +465,44 @@ describe('migrateFromLocalStorage', () => {
     expect(sessions).toEqual([]);
     const sessions2 = await dbGetSessions('/project/x');
     expect(sessions2).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dbPatchSessionMeta — used by handleSelectSession to stamp lastViewedAt
+// without rewriting the messages tail (which lives in a separate store).
+// ---------------------------------------------------------------------------
+describe('dbPatchSessionMeta', () => {
+  it('updates only the metadata fields, leaving messages intact', async () => {
+    const messages = [makeMessage({ content: 'one' }), makeMessage({ content: 'two' })];
+    const session = makeSession({ id: 's1', title: 'Orig', messages, messageCount: 2 });
+    await dbSaveSession('/p', session);
+
+    await dbPatchSessionMeta('/p', 's1', { lastViewedAt: 9999, lastTurnErrored: true });
+
+    const [updated] = await dbGetSessions('/p');
+    expect(updated.lastViewedAt).toBe(9999);
+    expect(updated.lastTurnErrored).toBe(true);
+    expect(updated.title).toBe('Orig');
+
+    // messages store unchanged — patch must not clobber persisted tail
+    const persistedMessages = await dbGetMessages('s1');
+    expect(persistedMessages).toHaveLength(2);
+    expect(persistedMessages.map(m => m.content)).toEqual(['one', 'two']);
+  });
+
+  it('is a no-op when the session does not exist', async () => {
+    await expect(dbPatchSessionMeta('/p', 'missing', { lastViewedAt: 1 })).resolves.toBeUndefined();
+    const sessions = await dbGetSessions('/p');
+    expect(sessions).toEqual([]);
+  });
+
+  it('preserves projectPath on the patched row', async () => {
+    const session = makeSession({ id: 's2' });
+    await dbSaveSession('/owner', session);
+    await dbPatchSessionMeta('/owner', 's2', { lastViewedAt: 42 });
+    const [updated] = await dbGetSessions('/owner');
+    expect(updated.projectPath).toBe('/owner');
+    expect(updated.lastViewedAt).toBe(42);
   });
 });

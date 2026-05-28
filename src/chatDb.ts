@@ -101,6 +101,33 @@ export async function dbGetMessagesRange(
 // When `fromIdx` is provided, replace messages [fromIdx, end) with `session.messages`
 // and keep the existing prefix [0, fromIdx) intact. Used to save a paginated tail
 // without clobbering the older messages still in the DB.
+/**
+ * Patch metadata fields on a session row without touching its messages.
+ * Used for cheap updates like stamping lastViewedAt on swap — using
+ * dbSaveSession with an empty messages array would clobber the persisted
+ * tail.
+ */
+export async function dbPatchSessionMeta(
+  projectPath: string,
+  sessionId: string,
+  patch: Partial<ChatSession>,
+): Promise<void> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(['sessions'], 'readwrite');
+    const store = tx.objectStore('sessions');
+    const getReq = store.get(sessionId);
+    getReq.onsuccess = () => {
+      const existing = getReq.result;
+      if (!existing) { resolve(); return; }
+      store.put({ ...existing, ...patch, projectPath });
+    };
+    getReq.onerror = () => reject(getReq.error);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 export async function dbSaveSession(
   projectPath: string,
   session: ChatSession,

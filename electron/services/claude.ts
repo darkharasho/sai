@@ -1,7 +1,8 @@
 import { spawn, ChildProcess, execFile } from 'node:child_process';
 import { BrowserWindow, ipcMain, app } from 'electron';
-import { getOrCreate, get, getClaude, touchActivity } from './workspace';
+import { getOrCreate, get, getClaude, touchActivity, listAllWorkspaces } from './workspace';
 import type { PendingToolUse } from './workspace';
+import { sweepIdleScopes, IDLE_SCOPE_MS, SWEEP_INTERVAL_MS } from './idleScopeSweep';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { enrichedEnv, withNodeMemoryCap } from './shellEnv';
@@ -285,6 +286,7 @@ function ensureProcess(
 
     for (const line of lines) {
       if (!line.trim()) continue;
+      claude.lastActivityAt = Date.now();
       try {
         const msg = JSON.parse(line);
         // Capture session ID and forward to renderer
@@ -388,6 +390,7 @@ function ensureProcess(
           // ensures the renderer can ignore this stale result/done correctly.
           const responseTurnSeq = claude.activeTurnSeq;
           claude.busy = false;
+          claude.streaming = false;
           claude.activeTurnSeq = claude.turnSeq; // CLI will now respond to the next queued turn
           emitChatMessage({ ...msg, projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq });
           emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq });
@@ -428,6 +431,7 @@ function ensureProcess(
         if (line.includes('"type":"result"') || line.includes('"type": "result"')) {
           const responseTurnSeq = claude.activeTurnSeq;
           claude.busy = false;
+          claude.streaming = false;
           claude.activeTurnSeq = claude.turnSeq;
           emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq });
         }
@@ -463,6 +467,7 @@ function ensureProcess(
     claude.awaitingApproval = false;
     claude.awaitingQuestionAnswer = false;
     claude.pendingQuestionId = null;
+    claude.streaming = false;
     if (wasBusy) {
       emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope, turnSeq: claude.turnSeq });
     }
@@ -479,6 +484,7 @@ function ensureProcess(
     claude.awaitingApproval = false;
     claude.awaitingQuestionAnswer = false;
     claude.pendingQuestionId = null;
+    claude.streaming = false;
     emitChatMessage({
       type: 'error', text: `Claude process error: ${err.message}`, projectPath: ws.projectPath, scope
     });
@@ -533,6 +539,7 @@ export function sendImpl(
       if (stale.type === 'result') {
         const responseTurnSeq = claude.activeTurnSeq;
         claude.busy = false;
+        claude.streaming = false;
         claude.activeTurnSeq = claude.turnSeq; // will be updated again below after turnSeq++
         emitChatMessage({ ...stale, projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
         emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: responseTurnSeq });
@@ -545,6 +552,7 @@ export function sendImpl(
   if (wasInterrupt) {
     // Tell the renderer the old turn is being interrupted. Use the CURRENT turnSeq
     // so the renderer's stale check can dismiss old done/result from the CLI.
+    claude.streaming = false;
     emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
   }
 
@@ -556,6 +564,7 @@ export function sendImpl(
   }
   // Interrupt case: activeTurnSeq stays at the old value until the CLI finishes the
   // old response and the stdout handler updates it to claude.turnSeq.
+  claude.streaming = true;
   emitChatMessage({ type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, sessionId: claude.sessionId ?? null, turnSeq: claude.turnSeq });
 
   const msg = JSON.stringify({
@@ -564,6 +573,7 @@ export function sendImpl(
   });
   if (!proc.stdin || proc.stdin.destroyed) {
     claude.busy = false;
+    claude.streaming = false;
     emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
     return;
   }
@@ -587,6 +597,7 @@ export function interruptImpl(projectPath: string, scope?: string): void {
     claude.process = null;
     claude.processConfig = null;
     claude.busy = false;
+    claude.streaming = false;
     claude.suppressForward = false;
     claude.pendingToolUse = null;
     claude.approvalBuffered = [];
@@ -1111,6 +1122,38 @@ export function registerClaudeHandlers(win: BrowserWindow) {
       proc.on('error', () => resolve(''));
     });
   });
+
+  // Idle-scope sweep: stop Claude scopes that have been inactive for >30 min
+  const idleSweepTimer = setInterval(() => {
+    const records: { workspaceId: string; scope: string; lastActivityAt: number; streaming: boolean }[] = [];
+    for (const ws of listAllWorkspaces()) {
+      for (const [scope, claude] of ws.claudeScopes.entries()) {
+        records.push({
+          workspaceId: ws.projectPath,
+          scope,
+          lastActivityAt: claude.lastActivityAt,
+          streaming: claude.streaming,
+        });
+      }
+    }
+    sweepIdleScopes({
+      now: Date.now(),
+      idleMs: IDLE_SCOPE_MS,
+      scopes: records,
+      stop: (workspaceId, scope) => {
+        const ws = get(workspaceId);
+        if (ws) {
+          emitChatMessage({
+            type: 'scope_suspended',
+            projectPath: ws.projectPath,
+            scope,
+          });
+        }
+        interruptImpl(workspaceId, scope);
+      },
+    });
+  }, SWEEP_INTERVAL_MS);
+  idleSweepTimer.unref?.();
 }
 
 export function destroyClaude() {

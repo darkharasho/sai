@@ -41,6 +41,10 @@ export interface WorkspaceClaude {
   orchestratorContext?: Record<string, unknown> | null;
   /** Meta-workspace preamble to inject via --append-system-prompt at spawn time. */
   metaPreamble?: string;
+  /** Updated on every inbound stdout chunk. Used by the idle-scope sweep. */
+  lastActivityAt: number;
+  /** True between streaming_start and done. Idle sweep skips streaming scopes. */
+  streaming: boolean;
 }
 
 export interface WorkspaceCodex {
@@ -110,6 +114,8 @@ function newClaudeScope(cwd: string): WorkspaceClaude {
     pendingQuestionId: null,
     kind: 'chat',
     orchestratorContext: null,
+    lastActivityAt: Date.now(),
+    streaming: false,
   };
 }
 
@@ -184,6 +190,10 @@ export function getOrCreate(projectPath: string): Workspace {
 
 export function get(projectPath: string): Workspace | undefined {
   return workspaces.get(projectPath);
+}
+
+export function listAllWorkspaces(): Workspace[] {
+  return Array.from(workspaces.values());
 }
 
 export function touchActivity(projectPath: string): void {
