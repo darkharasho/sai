@@ -1,8 +1,65 @@
 import * as pty from 'node-pty';
 import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
 import { BrowserWindow, ipcMain } from 'electron';
 import { get, touchActivity } from './workspace';
 import { RingBuffer } from './remote/ring-buffer';
+
+// Shell-init scaffolding: bash --rcfile / zsh ZDOTDIR pointed at SAI-managed
+// files that source the user's login config, then enable incremental history
+// writes so every tab — and every SAI restart — sees commands from every
+// other tab. Without this, bash/zsh only flush history on clean exit (and
+// overwrite each other), so cross-tab history and post-restart history both
+// silently disappear.
+let shellInitDir: string | undefined;
+function ensureShellInitDir(): string {
+  if (shellInitDir && fs.existsSync(shellInitDir)) return shellInitDir;
+  const user = (os.userInfo().username || 'user').replace(/[^A-Za-z0-9._-]/g, '_');
+  const dir = path.join(os.tmpdir(), `sai-shell-init-${user}`);
+  const zdot = path.join(dir, 'zsh');
+  fs.mkdirSync(zdot, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'bashrc'),
+    `[ -f /etc/profile ] && . /etc/profile\n` +
+    `if [ -f "$HOME/.bash_profile" ]; then . "$HOME/.bash_profile"\n` +
+    `elif [ -f "$HOME/.bash_login" ]; then . "$HOME/.bash_login"\n` +
+    `elif [ -f "$HOME/.profile" ]; then . "$HOME/.profile"\n` +
+    `elif [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"\n` +
+    `fi\n` +
+    `shopt -s histappend\n` +
+    `case "$PROMPT_COMMAND" in\n` +
+    `  *"history -a"*) ;;\n` +
+    `  *) PROMPT_COMMAND='history -a'"\${PROMPT_COMMAND:+;$PROMPT_COMMAND}" ;;\n` +
+    `esac\n`);
+  fs.writeFileSync(path.join(zdot, '.zshenv'),
+    `[ -f "$HOME/.zshenv" ] && source "$HOME/.zshenv"\n`);
+  fs.writeFileSync(path.join(zdot, '.zshrc'),
+    `[ -f "$HOME/.zprofile" ] && source "$HOME/.zprofile"\n` +
+    `[ -f "$HOME/.zshrc" ] && source "$HOME/.zshrc"\n` +
+    `[ -f "$HOME/.zlogin" ] && source "$HOME/.zlogin"\n` +
+    `setopt INC_APPEND_HISTORY SHARE_HISTORY\n`);
+  shellInitDir = dir;
+  return dir;
+}
+
+/**
+ * Returns the args to exec on the user's shell so it runs interactively with
+ * SAI's shared-history init. Mutates `env` to add ZDOTDIR for zsh. Falls back
+ * to `--login` for shells we don't have init scaffolding for (fish, dash, ksh).
+ */
+function buildShellLaunchArgs(shellPath: string, env: Record<string, string>): string[] {
+  const base = path.basename(shellPath);
+  if (base === 'bash') {
+    const dir = ensureShellInitDir();
+    return ['--rcfile', path.join(dir, 'bashrc'), '-i'];
+  }
+  if (base === 'zsh') {
+    const dir = ensureShellInitDir();
+    env.ZDOTDIR = path.join(dir, 'zsh');
+    return ['-i'];
+  }
+  return ['--login'];
+}
 
 /** Check whether systemd-run --user --scope is available (Linux only). Cached after first call. */
 let hasSystemdRun: boolean | undefined;
@@ -110,7 +167,9 @@ export function createTerminalImpl(opts: {
     delete env.DESKTOP_STARTUP_ID;
     delete env.CHROME_DESKTOP;
     delete env.INVOCATION_ID;
-    const shellInit = `stty -echoctl 2>/dev/null; exec "${shell}" --login`;
+    const shellArgs = buildShellLaunchArgs(shell, env);
+    const quotedArgs = shellArgs.map(a => `"${a.replace(/"/g, '\\"')}"`).join(' ');
+    const shellInit = `stty -echoctl 2>/dev/null; exec "${shell}" ${quotedArgs}`;
     const useScope = canUseSystemdScope();
     spawnCmd = useScope ? 'systemd-run' : shell;
     spawnArgs = useScope
