@@ -87,10 +87,10 @@ describe('dbSaveSession / dbGetSessions', () => {
     expect(sessions[0].title).toBe('Updated');
   });
 
-  it('returns sessions sorted by updatedAt descending', async () => {
-    const s1 = makeSession({ title: 'Oldest', updatedAt: 1000 });
-    const s2 = makeSession({ title: 'Middle', updatedAt: 2000 });
-    const s3 = makeSession({ title: 'Newest', updatedAt: 3000 });
+  it('returns sessions sorted by createdAt descending', async () => {
+    const s1 = makeSession({ title: 'Oldest', createdAt: 1000 });
+    const s2 = makeSession({ title: 'Middle', createdAt: 2000 });
+    const s3 = makeSession({ title: 'Newest', createdAt: 3000 });
 
     await dbSaveSession('/project/a', s1);
     await dbSaveSession('/project/a', s2);
