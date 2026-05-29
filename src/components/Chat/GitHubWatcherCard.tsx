@@ -715,8 +715,10 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
         <div className="gh-watcher-foot">
           <a
             href={target.url}
-            target="_blank"
-            rel="noopener noreferrer"
+            onClick={(e) => {
+              e.preventDefault();
+              window.sai.openExternal(target.url);
+            }}
             className="gh-watcher-cta"
           >
             Open on GitHub <ExternalLink size={12} />
