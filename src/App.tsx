@@ -1682,21 +1682,29 @@ export default function App() {
       const retentionDays = await window.sai.settingsGet('historyRetention', 14);
       await dbPurgeExpired(retentionDays);
       const sessions = await dbGetSessions(activeProjectPath);
-      // Backfill lastViewedAt for sessions persisted before that field existed.
-      // Without this, the unread indicator can never go off on legacy rows
-      // (the fallback `lastViewedAt ?? updatedAt` makes them look "viewed",
-      // but if anything pushes updatedAt forward they'd suddenly look unread
-      // even though the user has clearly seen them).
-      const needsBackfill = sessions.filter(s => s.lastViewedAt == null);
+      // Normalize lastViewedAt on load. Two cases:
+      //   1. Legacy rows with no lastViewedAt field at all.
+      //   2. Rows where prior versions of the periodic-save path bumped
+      //      updatedAt every 30s without touching lastViewedAt, leaving
+      //      lastViewedAt < updatedAt even though the user never actually
+      //      missed anything. We treat app launch as a "clean slate" — any
+      //      stale unread state from prior runs is cleared. Real unread
+      //      state generated during this run (background workspace turn
+      //      completes while user is elsewhere) keeps lastViewedAt < updatedAt
+      //      because the new save paths no longer bump updatedAt without
+      //      real message activity.
+      const now = Date.now();
+      const needsBackfill = sessions.filter(
+        s => s.lastViewedAt == null || s.lastViewedAt < s.updatedAt,
+      );
       if (needsBackfill.length > 0 && !cancelled) {
-        const now = Date.now();
         await Promise.all(
           needsBackfill.map(s =>
             dbPatchSessionMeta(activeProjectPath, s.id, { lastViewedAt: s.updatedAt || now }).catch(() => {}),
           ),
         );
         for (const s of needsBackfill) {
-          if (s.lastViewedAt == null) s.lastViewedAt = s.updatedAt || now;
+          s.lastViewedAt = s.updatedAt || now;
         }
       }
       if (!cancelled) {
@@ -1729,14 +1737,31 @@ export default function App() {
   // Persist active sessions to IndexedDB before the window closes
   useEffect(() => {
     const handleBeforeUnload = () => {
+      const focusedPath = activeProjectPathRef.current;
       workspacesRef.current.forEach((ws, wsPath) => {
         const latestMessages = wsMessagesRef.current.get(wsPath);
-        const sessionToSave = (latestMessages && latestMessages.length > 0)
-          ? { ...ws.activeSession, messages: latestMessages, updatedAt: Date.now(), messageCount: latestMessages.length }
-          : ws.activeSession;
-        if (sessionToSave.messages.length > 0) {
-          dbSaveSession(wsPath, sessionToSave, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).catch(() => {});
+        if (!latestMessages || latestMessages.length === 0) {
+          if (ws.activeSession.messages.length > 0) {
+            dbSaveSession(wsPath, ws.activeSession, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).catch(() => {});
+          }
+          return;
         }
+        // Skip if no new messages since the last persist — bumping updatedAt
+        // without real activity would make this session look "unread" on next
+        // launch even though nothing happened.
+        if (latestMessages.length === ws.activeSession.messageCount) return;
+        const now = Date.now();
+        const sessionToSave = {
+          ...ws.activeSession,
+          messages: latestMessages,
+          updatedAt: now,
+          // Only bump lastViewedAt for the workspace the user is actually
+          // looking at; background workspaces should retain their unread
+          // state so the user sees the indicator when they switch over.
+          ...(wsPath === focusedPath ? { lastViewedAt: now } : {}),
+          messageCount: latestMessages.length,
+        };
+        dbSaveSession(wsPath, sessionToSave, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).catch(() => {});
       });
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
@@ -1746,20 +1771,32 @@ export default function App() {
   // Periodically persist active sessions as a safety net (every 30s)
   useEffect(() => {
     const interval = setInterval(() => {
+      const focusedPath = activeProjectPathRef.current;
       workspacesRef.current.forEach((ws, wsPath) => {
         const latestMessages = wsMessagesRef.current.get(wsPath);
-        if (latestMessages && latestMessages.length > 0) {
-          const sessionToSave = { ...ws.activeSession, messages: latestMessages, updatedAt: Date.now(), messageCount: latestMessages.length };
-          if (!sessionToSave.title) {
-            const firstUserMsg = latestMessages.find(m => m.role === 'user');
-            if (firstUserMsg) sessionToSave.title = generateSmartTitle(firstUserMsg.content);
-          }
-          dbSaveSession(wsPath, sessionToSave, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).then(() => {
-            dbGetSessions(wsPath).then(sessions => {
-              updateWorkspace(wsPath, ws2 => ({ ...ws2, sessions }));
-            });
-          }).catch(() => {});
+        if (!latestMessages || latestMessages.length === 0) return;
+        // Skip the save entirely if no new messages have arrived since the
+        // last persist. The earlier behaviour bumped updatedAt every 30s on
+        // every workspace's active session, so on the next launch they all
+        // appeared unread even though nothing had actually happened.
+        if (latestMessages.length === ws.activeSession.messageCount) return;
+        const now = Date.now();
+        const sessionToSave = {
+          ...ws.activeSession,
+          messages: latestMessages,
+          updatedAt: now,
+          ...(wsPath === focusedPath ? { lastViewedAt: now } : {}),
+          messageCount: latestMessages.length,
+        };
+        if (!sessionToSave.title) {
+          const firstUserMsg = latestMessages.find(m => m.role === 'user');
+          if (firstUserMsg) sessionToSave.title = generateSmartTitle(firstUserMsg.content);
         }
+        dbSaveSession(wsPath, sessionToSave, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).then(() => {
+          dbGetSessions(wsPath).then(sessions => {
+            updateWorkspace(wsPath, ws2 => ({ ...ws2, sessions }));
+          });
+        }).catch(() => {});
       });
     }, 30_000);
     return () => clearInterval(interval);
@@ -2865,8 +2902,11 @@ export default function App() {
     if (!ws) return;
     const latestMessages = wsMessagesRef.current.get(wsPath);
     const now = Date.now();
-    const sessionToSave = (latestMessages && latestMessages.length > 0)
-      ? { ...ws.activeSession, messages: latestMessages, updatedAt: now, lastViewedAt: now, messageCount: latestMessages.length }
+    const hasNewMessages = !!latestMessages
+      && latestMessages.length > 0
+      && latestMessages.length !== ws.activeSession.messageCount;
+    const sessionToSave = hasNewMessages
+      ? { ...ws.activeSession, messages: latestMessages!, updatedAt: now, lastViewedAt: now, messageCount: latestMessages!.length }
       : ws.activeSession;
     if (!sessionToSave.title && sessionToSave.messages.length > 0) {
       const firstUserMsg = sessionToSave.messages.find(m => m.role === 'user');
