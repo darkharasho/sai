@@ -3,45 +3,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { createMachinesStore, type Machine, type MachinesStore } from './machines';
 
-// iOS Keychain default accessibility is WhenUnlocked, which throws
-// "User interaction is not allowed" on background reads and during
-// app foreground transitions. AFTER_FIRST_UNLOCK lets us read tokens
-// any time after the first unlock since boot.
-const KC_OPTS: SecureStore.SecureStoreOptions = {
-  keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
-};
-
-const secureAdapter = {
-  async getItemAsync(k: string): Promise<string | null> {
-    try {
-      return await SecureStore.getItemAsync(k, KC_OPTS);
-    } catch (e) {
-      // Swallow keychain errors so callers see "no token" rather than
-      // an unhandled promise rejection that surfaces as a red-screen.
-      // We log to aid debugging but don't throw.
-      console.warn('[secure] getItemAsync failed for', k, e);
-      return null;
-    }
-  },
-  async setItemAsync(k: string, v: string): Promise<void> {
-    try {
-      await SecureStore.setItemAsync(k, v, KC_OPTS);
-    } catch (e) {
-      console.warn('[secure] setItemAsync failed for', k, e);
-    }
-  },
-  async deleteItemAsync(k: string): Promise<void> {
-    try {
-      await SecureStore.deleteItemAsync(k, KC_OPTS);
-    } catch (e) {
-      console.warn('[secure] deleteItemAsync failed for', k, e);
-    }
-  },
-};
-
 const backend: MachinesStore = createMachinesStore({
   storage: AsyncStorage,
-  secure: secureAdapter,
+  secure: SecureStore,
 });
 
 interface MachinesState {
