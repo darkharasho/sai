@@ -1,0 +1,22 @@
+{
+  "inbound": [
+    { "type": "auth_ok" },
+    { "type": "chat:user", "id": "u1", "text": "hello" },
+    { "type": "chat:assistant", "id": "a1", "text": "hi" },
+    { "type": "chat:delta", "id": "a1", "text": "hi there" },
+    { "type": "tool:use", "toolUseId": "t1", "name": "bash", "input": { "command": "ls" } },
+    { "type": "tool:result", "toolUseId": "t1", "result": "file.txt" },
+    { "type": "approval:request", "toolUseId": "ap1", "name": "write", "input": { "path": "/x" } },
+    { "type": "term:data", "termId": 1, "data": "$ " },
+    { "type": "workspace:status", "projectPath": "/repo", "status": "idle" }
+  ],
+  "outbound": [
+    { "type": "auth", "token": "T" },
+    { "type": "ping" },
+    { "type": "chat:prompt", "text": "go", "projectPath": "/r" },
+    { "type": "chat:approve", "toolUseId": "ap1", "decision": "approve", "projectPath": "/r" },
+    { "type": "attach", "projectPath": "/r", "sessionId": "s1" },
+    { "type": "term:input", "termId": 1, "data": "ls\n" },
+    { "type": "term:resize", "termId": 1, "cols": 80, "rows": 24 }
+  ]
+}
