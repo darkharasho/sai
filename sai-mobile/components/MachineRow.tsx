@@ -14,13 +14,44 @@ export function MachineRow({ m, online, onPress, onLongPress }: {
   m: Machine; online: boolean; onPress: () => void; onLongPress: () => void;
 }) {
   return (
-    <Pressable onPress={onPress} onLongPress={onLongPress} className="bg-[#1c2027] rounded-xl p-4 mb-3 flex-row items-center gap-3">
-      <View className={`w-2.5 h-2.5 rounded-full ${online ? 'bg-[#00a884]' : 'bg-[#475262]'}`} />
-      <View className="flex-1">
-        <Text className="text-white text-base font-medium">{m.label}</Text>
-        <Text className="text-[#a0acbb] text-xs">{m.hostUrl}</Text>
+    <Pressable
+      onPress={onPress}
+      onLongPress={onLongPress}
+      style={({ pressed }) => ({
+        backgroundColor: pressed ? '#21292f' : '#1c2027',
+        borderRadius: 12,
+        padding: 14,
+        marginBottom: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+      })}
+    >
+      <View
+        style={{
+          width: 10,
+          height: 10,
+          borderRadius: 5,
+          backgroundColor: online ? '#00a884' : '#475262',
+        }}
+      />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text
+          numberOfLines={1}
+          style={{ color: '#ffffff', fontSize: 16, fontWeight: '500' }}
+        >
+          {m.label}
+        </Text>
+        <Text
+          numberOfLines={1}
+          style={{ color: '#a0acbb', fontSize: 12, marginTop: 2 }}
+        >
+          {m.hostUrl}
+        </Text>
       </View>
-      <Text className="text-[#5a6a7a] text-xs">{online ? 'online' : ageLabel(m.lastSeenAt)}</Text>
+      <Text style={{ color: '#5a6a7a', fontSize: 12 }}>
+        {online ? 'online' : ageLabel(m.lastSeenAt)}
+      </Text>
     </Pressable>
   );
 }
