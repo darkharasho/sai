@@ -31,3 +31,38 @@ export function isAllowedPairHost(host: string): boolean {
 export function wsUrl(baseUrl: string): string {
   return baseUrl.replace(/^http/, 'ws') + '/ws';
 }
+
+export interface PairResult { token: string; deviceId: string }
+
+export async function pair(
+  baseUrl: string,
+  code: string,
+  deviceLabel: string,
+  clientId: string
+): Promise<PairResult> {
+  const r = await fetch(`${baseUrl}/pair`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code, deviceLabel, clientId }),
+  });
+  if (!r.ok) throw new Error(`pair failed: ${r.status}`);
+  return r.json();
+}
+
+export async function unpair(baseUrl: string, deviceId: string, token: string): Promise<void> {
+  const r = await fetch(`${baseUrl}/pair/${encodeURIComponent(deviceId)}`, {
+    method: 'DELETE',
+    headers: { authorization: `Bearer ${token}` },
+  });
+  if (!r.ok && r.status !== 404) throw new Error(`unpair failed: ${r.status}`);
+}
+
+export async function health(baseUrl: string, token: string, signal?: AbortSignal): Promise<boolean> {
+  try {
+    const r = await fetch(`${baseUrl}/health`, {
+      headers: { authorization: `Bearer ${token}` },
+      signal,
+    });
+    return r.ok;
+  } catch { return false; }
+}
