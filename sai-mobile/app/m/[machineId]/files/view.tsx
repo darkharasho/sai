@@ -4,9 +4,7 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { WebView } from 'react-native-webview';
 import { ChevronLeft } from 'lucide-react-native';
 import { useConn } from '../../../../lib/connection';
-import { useMachines } from '../../../../lib/machinesStore';
 import { useWorkspaces } from '../../../../lib/workspaceStore';
-import { api } from '../../../../lib/wire';
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -29,26 +27,23 @@ function htmlFor(content: string, lang: string | undefined): string {
 
 export default function FileView() {
   const params = useLocalSearchParams<{ path: string }>();
-  const { machine } = useConn();
+  const { machine, client } = useConn();
   const active = useWorkspaces((s) => s.activeByMachine[machine.machineId]) ?? null;
-  const getToken = useMachines((s) => s.getToken);
   const [data, setData] = useState<{ content: string; lang?: string } | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!active || !params.path) return;
+    if (!active || !params.path || !client) return;
     (async () => {
       try {
-        const t = await getToken(machine.machineId);
-        if (!t) return;
-        const r = await api.readFile(machine.hostUrl, t, active.projectPath, params.path);
+        const r = await client.readFile(active.projectPath, params.path);
         if (r.encoding !== 'text' || !r.content) { setErr('Binary file (preview unavailable).'); return; }
         setData({ content: r.content, lang: r.lang });
       } catch (e: any) {
         setErr(String(e?.message ?? e));
       }
     })();
-  }, [active?.projectPath, params.path, machine.hostUrl, machine.machineId, getToken]);
+  }, [client, active?.projectPath, params.path]);
 
   return (
     <View className="flex-1 bg-[#0e1114]">

@@ -3,29 +3,24 @@ import { View, Text, FlatList, Pressable, ActivityIndicator } from 'react-native
 import { router } from 'expo-router';
 import { Folder, File, ChevronLeft, GitBranch } from 'lucide-react-native';
 import { useConn } from '../../../../lib/connection';
-import { useMachines } from '../../../../lib/machinesStore';
 import { useWorkspaces } from '../../../../lib/workspaceStore';
-import { api } from '../../../../lib/wire';
 
 interface Entry { name: string; type: 'dir' | 'file' }
 
 export default function Browse() {
-  const { machine } = useConn();
+  const { machine, client } = useConn();
   const active = useWorkspaces((s) => s.activeByMachine[machine.machineId]) ?? null;
-  const getToken = useMachines((s) => s.getToken);
   const [path, setPath] = useState('');
   const [entries, setEntries] = useState<Entry[] | null>(null);
 
   useEffect(() => {
-    if (!active) return;
+    if (!active || !client) return;
     setEntries(null);
     (async () => {
-      const t = await getToken(machine.machineId);
-      if (!t) return;
-      const raw = await api.listFiles(machine.hostUrl, t, active.projectPath, path).catch(() => []);
+      const raw = await client.listFiles(active.projectPath, path).catch(() => []);
       setEntries((raw as any[]).map(e => ({ name: e.name, type: e.type })));
     })();
-  }, [active?.projectPath, path, machine.hostUrl, machine.machineId, getToken]);
+  }, [client, active?.projectPath, path]);
 
   if (!active) {
     return <View className="flex-1 items-center justify-center"><Text className="text-[#a0acbb]">Pick a workspace in Chat first.</Text></View>;

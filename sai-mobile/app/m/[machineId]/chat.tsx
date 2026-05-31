@@ -9,8 +9,7 @@ import { Transcript } from '../../../components/Transcript';
 import { Composer } from '../../../components/Composer';
 import { WorkspacePicker } from '../../../components/WorkspacePicker';
 import { uuid } from '../../../shims/uuid';
-import { api, sendPrompt, attachToSession, setActiveWorkspace, subscribeWorkspaceStatus } from '../../../lib/wire';
-import type { WireMsg } from '../../../lib/types';
+import type { WireMsg } from '../../../lib/wire';
 
 export default function Chat() {
   const { machine, client, state } = useConn();
@@ -21,50 +20,75 @@ export default function Chat() {
   const events = useTranscript((s) => s.byKey[tkey] ?? EMPTY_EVENTS);
   const append = useTranscript((s) => s.append);
 
-  // Load workspaces once connected
+  // Load workspaces once connected (over the WS, not REST).
   useEffect(() => {
-    if (state !== 'open') return;
+    if (!client || state !== 'open') return;
     (async () => {
-      const tok = (await import('../../../lib/machinesStore')).useMachines.getState().getToken;
-      const t = await tok(machine.machineId);
-      if (!t) return;
-      const raw = await api.listWorkspaces(machine.hostUrl, t);
+      const raw = await client.listWorkspaces();
       const ws = (raw as any[]).map(w => ({ projectPath: w.projectPath ?? w.path, label: w.label ?? w.name ?? w.projectPath, scope: w.scope }));
       setWorkspaces(machine.machineId, ws);
     })().catch(() => {});
-  }, [state, machine.hostUrl, machine.machineId, setWorkspaces]);
+  }, [client, state, machine.machineId, setWorkspaces]);
 
   // Attach + subscribe on (re)connect or workspace change
   useEffect(() => {
     if (!client || state !== 'open' || !active) return;
-    setActiveWorkspace(client, active.projectPath);
-    subscribeWorkspaceStatus(client);
-    attachToSession(client, { projectPath: active.projectPath, scope: active.scope, sessionId });
+    client.setActiveWorkspace(active.projectPath);
+    client.subscribeWorkspaceStatus();
+    client.attach({ projectPath: active.projectPath, scope: active.scope, sessionId });
   }, [client, state, active?.projectPath, active?.scope, sessionId]);
 
-  // Inbound transcript
+  // Inbound transcript — mirror the PWA's event names (Chat.tsx).
+  // SDK shape: `assistant` carries blocks (text + tool_use); `user` carries
+  // tool_result blocks; `user_message` is the remote-origin echo; `result`
+  // and `done` finalize streaming; `approval_needed` triggers an approval card.
   useEffect(() => {
     if (!client) return;
     const off = client.on((m: WireMsg) => {
-      const text = m.text as string | undefined;
-      if (m.type === 'chat:user') {
-        append(tkey, { id: String(m.id ?? uuid()), type: 'user', text });
-      } else if (m.type === 'chat:assistant' || m.type === 'chat:delta') {
-        append(tkey, { id: String(m.id ?? 'assistant-current'), type: 'assistant', text });
-      } else if (m.type === 'tool:use') {
+      const t = m.type;
+      if (t === 'assistant') {
+        const content = (m as any).message?.content;
+        if (Array.isArray(content)) {
+          for (const b of content) {
+            if (b?.type === 'text' && typeof b.text === 'string' && b.text.length) {
+              append(tkey, { id: 'assistant-current', type: 'assistant', text: b.text });
+            } else if (b?.type === 'tool_use' && typeof b.id === 'string') {
+              append(tkey, {
+                id: `tool-${b.id}`, type: 'tool_use',
+                toolName: b.name ?? 'tool', toolInput: b.input, toolUseId: b.id,
+              });
+            }
+          }
+        } else if (typeof (m as any).text === 'string' && (m as any).text.length) {
+          append(tkey, { id: String((m as any).id ?? 'assistant-current'), type: 'assistant', text: (m as any).text as string });
+        }
+      } else if (t === 'user') {
+        const content = (m as any).message?.content;
+        if (Array.isArray(content)) {
+          for (const b of content) {
+            if (b?.type === 'tool_result' && typeof b.tool_use_id === 'string') {
+              const resultText = typeof b.content === 'string'
+                ? b.content
+                : Array.isArray(b.content)
+                ? b.content.map((c: any) => (c?.type === 'text' ? c.text : JSON.stringify(c))).join('\n')
+                : JSON.stringify(b.content);
+              append(tkey, {
+                id: `result-${b.tool_use_id}`, type: 'tool_result',
+                toolUseId: b.tool_use_id, toolResult: resultText,
+              });
+            }
+          }
+        }
+      } else if (t === 'user_message') {
+        const text = (m as any).text as string | undefined;
+        append(tkey, { id: String((m as any).id ?? `u-${Date.now()}`), type: 'user', text });
+      } else if (t === 'approval_needed') {
+        const toolUseId = String((m as any).toolUseId);
         append(tkey, {
-          id: String(m.toolUseId ?? uuid()), type: 'tool_use',
-          toolName: m.name as string, toolInput: m.input, toolUseId: m.toolUseId as string,
-        });
-      } else if (m.type === 'tool:result') {
-        append(tkey, {
-          id: `result-${m.toolUseId}`, type: 'tool_result',
-          toolUseId: m.toolUseId as string, toolResult: m.result,
-        });
-      } else if (m.type === 'approval:request') {
-        append(tkey, {
-          id: `approval-${m.toolUseId}`, type: 'approval',
-          toolName: m.name as string, toolInput: m.input, toolUseId: m.toolUseId as string,
+          id: `approval-${toolUseId}`, type: 'approval',
+          toolName: (m as any).toolName as string ?? 'tool',
+          toolInput: (m as any).input ?? { command: (m as any).command },
+          toolUseId,
         });
       }
     });
@@ -82,9 +106,7 @@ export default function Chat() {
           events={events}
           onApprove={(toolUseId, decision) => {
             if (!client || !active) return;
-            import('../../../lib/wire').then(({ sendApproval }) => {
-              sendApproval(client, { toolUseId, decision, projectPath: active.projectPath, scope: active.scope });
-            });
+            client.approve({ toolUseId, decision, projectPath: active.projectPath, scope: active.scope });
           }}
         />
       </View>
@@ -94,7 +116,7 @@ export default function Chat() {
           if (!client || !active) return;
           const id = uuid();
           append(tkey, { id, type: 'user', text, images });
-          sendPrompt(client, {
+          client.sendPrompt({
             text, projectPath: active.projectPath, scope: active.scope, images,
           });
         }}

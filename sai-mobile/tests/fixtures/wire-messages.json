@@ -1,22 +1,40 @@
 {
   "inbound": [
     { "type": "auth_ok" },
-    { "type": "chat:user", "id": "u1", "text": "hello" },
-    { "type": "chat:assistant", "id": "a1", "text": "hi" },
-    { "type": "chat:delta", "id": "a1", "text": "hi there" },
-    { "type": "tool:use", "toolUseId": "t1", "name": "bash", "input": { "command": "ls" } },
-    { "type": "tool:result", "toolUseId": "t1", "result": "file.txt" },
-    { "type": "approval:request", "toolUseId": "ap1", "name": "write", "input": { "path": "/x" } },
-    { "type": "term:data", "termId": 1, "data": "$ " },
-    { "type": "workspace:status", "projectPath": "/repo", "status": "idle" }
+    { "type": "pong" },
+    { "type": "user_message", "id": "u1", "text": "hello" },
+    { "type": "assistant", "message": { "content": [{ "type": "text", "text": "hi" }] } },
+    { "type": "assistant", "message": { "content": [{ "type": "tool_use", "id": "t1", "name": "bash", "input": { "command": "ls" } }] } },
+    { "type": "user", "message": { "content": [{ "type": "tool_result", "tool_use_id": "t1", "content": "file.txt" }] } },
+    { "type": "approval_needed", "toolUseId": "ap1", "toolName": "write", "input": { "path": "/x" } },
+    { "type": "result", "duration_ms": 1200 },
+    { "type": "done" },
+    { "type": "session.active", "projectPath": "/repo", "scope": "chat", "sessionId": "s1" },
+    { "type": "session.history", "messages": [] },
+    { "type": "streaming_start" },
+    { "type": "question_answered", "toolUseId": "q1", "answers": {} },
+    { "type": "terminal.output", "termId": 1, "data": "$ " },
+    { "type": "terminal.exit", "termId": 1, "code": 0 },
+    { "type": "workspace.status", "projectPath": "/repo", "status": "idle" },
+    { "type": "workspaces.list.result", "workspaces": [], "reqId": "r1" },
+    { "type": "files.list.result", "entries": [], "reqId": "r2" },
+    { "type": "files.read.result", "encoding": "text", "size": 0, "content": "", "reqId": "r3" }
   ],
   "outbound": [
     { "type": "auth", "token": "T" },
     { "type": "ping" },
-    { "type": "chat:prompt", "text": "go", "projectPath": "/r" },
-    { "type": "chat:approve", "toolUseId": "ap1", "decision": "approve", "projectPath": "/r" },
-    { "type": "attach", "projectPath": "/r", "sessionId": "s1" },
-    { "type": "term:input", "termId": 1, "data": "ls\n" },
-    { "type": "term:resize", "termId": 1, "cols": 80, "rows": 24 }
+    { "type": "prompt", "text": "go", "projectPath": "/r", "scope": "chat" },
+    { "type": "approval", "toolUseId": "ap1", "decision": "approve", "projectPath": "/r", "scope": "chat" },
+    { "type": "session.attach", "projectPath": "/r", "scope": "chat", "sessionId": "s1" },
+    { "type": "session.follow", "enabled": true },
+    { "type": "workspace.set", "projectPath": "/r" },
+    { "type": "workspace.status.subscribe" },
+    { "type": "workspaces.list", "reqId": "r1" },
+    { "type": "files.list", "cwd": "/r", "path": "", "reqId": "r2" },
+    { "type": "files.read", "cwd": "/r", "path": "x", "reqId": "r3" },
+    { "type": "terminal.list", "cwd": "/r", "reqId": "r4" },
+    { "type": "terminal.input", "termId": 1, "data": "ls\n" },
+    { "type": "terminal.resize", "termId": 1, "cols": 80, "rows": 24 },
+    { "type": "terminal.attach", "termId": 1, "cols": 80, "rows": 24, "reqId": "r5" }
   ]
 }

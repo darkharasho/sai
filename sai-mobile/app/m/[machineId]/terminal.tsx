@@ -3,34 +3,29 @@ import { View, KeyboardAvoidingView, Platform, Text } from 'react-native';
 import { useConn } from '../../../lib/connection';
 import { useWorkspaces } from '../../../lib/workspaceStore';
 import { TerminalView, type TerminalHandle } from '../../../components/TerminalView';
-import { api, termInput, termResize, termAttach } from '../../../lib/wire';
-import { useMachines } from '../../../lib/machinesStore';
-import type { WireMsg } from '../../../lib/types';
+import type { WireMsg } from '../../../lib/wire';
 
 export default function TerminalScreen() {
   const { machine, client, state } = useConn();
   const active = useWorkspaces((s) => s.activeByMachine[machine.machineId]) ?? null;
-  const getToken = useMachines((s) => s.getToken);
   const [termId, setTermId] = useState<number | null>(null);
   const termRef = useRef<TerminalHandle>(null);
 
   // Pick the first terminal for the active workspace (or create-by-attach semantics handled by desktop).
   useEffect(() => {
-    if (state !== 'open' || !active) return;
+    if (!client || state !== 'open' || !active) return;
     (async () => {
-      const t = await getToken(machine.machineId);
-      if (!t) return;
-      const list = await api.listTerminals(machine.hostUrl, t, active.projectPath).catch(() => []);
+      const list = await client.listTerminals(active.projectPath).catch(() => []);
       const first = (list as any[]).find((x) => x.alive) ?? null;
       if (first) setTermId(first.termId);
     })();
-  }, [state, active?.projectPath, machine.hostUrl, machine.machineId, getToken]);
+  }, [client, state, active?.projectPath]);
 
-  // Forward term:data to webview
+  // Forward terminal.output to webview (PWA wire emits `terminal.output`).
   useEffect(() => {
     if (!client) return;
     return client.on((m: WireMsg) => {
-      if (m.type === 'term:data' && m.termId === termId && typeof m.data === 'string') {
+      if (m.type === 'terminal.output' && m.termId === termId && typeof m.data === 'string') {
         termRef.current?.write(m.data);
       }
     });
@@ -51,10 +46,10 @@ export default function TerminalScreen() {
           ref={termRef}
           onReady={(cols, rows) => {
             if (!client) return;
-            termAttach(client, termId, cols, rows);
+            client.attachTerminal(termId, cols, rows).catch(() => {});
           }}
-          onInput={(data) => { if (client) termInput(client, termId, data); }}
-          onResize={(cols, rows) => { if (client) termResize(client, termId, cols, rows); }}
+          onInput={(data) => { if (client) client.inputTerminal(termId, data); }}
+          onResize={(cols, rows) => { if (client) client.resizeTerminal(termId, cols, rows); }}
         />
       )}
     </KeyboardAvoidingView>

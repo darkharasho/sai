@@ -4,9 +4,7 @@ import { router } from 'expo-router';
 import { ChevronLeft } from 'lucide-react-native';
 import { WebView } from 'react-native-webview';
 import { useConn } from '../../../../lib/connection';
-import { useMachines } from '../../../../lib/machinesStore';
 import { useWorkspaces } from '../../../../lib/workspaceStore';
-import { api } from '../../../../lib/wire';
 
 interface ChangeEntry { path: string; status: string }
 
@@ -25,33 +23,28 @@ function diffHtml(diff: string): string {
 }
 
 export default function Changes() {
-  const { machine } = useConn();
+  const { machine, client } = useConn();
   const active = useWorkspaces((s) => s.activeByMachine[machine.machineId]) ?? null;
-  const getToken = useMachines((s) => s.getToken);
   const [entries, setEntries] = useState<ChangeEntry[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [diff, setDiff] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!active) return;
+    if (!active || !client) return;
     (async () => {
-      const t = await getToken(machine.machineId);
-      if (!t) return;
-      const raw = await api.statusFiles(machine.hostUrl, t, active.projectPath).catch(() => []);
+      const raw = await client.statusFiles(active.projectPath).catch(() => []);
       setEntries((raw as any[]).map(e => ({ path: e.path, status: e.status })));
     })();
-  }, [active?.projectPath, machine.hostUrl, machine.machineId, getToken]);
+  }, [client, active?.projectPath]);
 
   useEffect(() => {
-    if (!selected || !active) return;
+    if (!selected || !active || !client) return;
     setDiff(null);
     (async () => {
-      const t = await getToken(machine.machineId);
-      if (!t) return;
-      const r = await api.diffFile(machine.hostUrl, t, active.projectPath, selected).catch(() => ({ diff: '' }));
+      const r = await client.diffFile(active.projectPath, selected).catch(() => ({ diff: '' }));
       setDiff(r.diff);
     })();
-  }, [selected, active?.projectPath, machine.hostUrl, machine.machineId, getToken]);
+  }, [client, selected, active?.projectPath]);
 
   return (
     <View className="flex-1 bg-[#0e1114]">
