@@ -33,7 +33,7 @@ export default function Scan() {
         deviceId: result.deviceId,
         token: result.token,
       });
-      router.replace(`/m/${machine.machineId}/chat`);
+      router.replace(`/m/${machine.machineId}`);
     } catch (e: any) {
       const msg = String(e?.message ?? e);
       if (msg.includes('Network request failed')) setError({ kind: 'network', detail: msg });
