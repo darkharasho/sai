@@ -20,11 +20,35 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// Fallback extension→language map for when the server doesn't supply r.lang.
+// Names match highlight.js language ids.
+const EXT_LANG: Record<string, string> = {
+  ts: 'typescript', tsx: 'typescript',
+  js: 'javascript', jsx: 'javascript', mjs: 'javascript', cjs: 'javascript',
+  py: 'python', rb: 'ruby', go: 'go', rs: 'rust', java: 'java', kt: 'kotlin',
+  c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp', hpp: 'cpp', cs: 'csharp',
+  swift: 'swift', php: 'php', sh: 'bash', bash: 'bash', zsh: 'bash',
+  md: 'markdown', mdx: 'markdown',
+  json: 'json', yml: 'yaml', yaml: 'yaml', toml: 'ini', ini: 'ini',
+  xml: 'xml', html: 'xml', htm: 'xml', svg: 'xml',
+  css: 'css', scss: 'scss', less: 'less',
+  sql: 'sql', dockerfile: 'dockerfile', lua: 'lua', vim: 'vim',
+};
+
+function langFromPath(p: string): string | undefined {
+  const base = p.split('/').pop() ?? '';
+  if (base.toLowerCase() === 'dockerfile') return 'dockerfile';
+  const dot = base.lastIndexOf('.');
+  if (dot < 0) return undefined;
+  const ext = base.slice(dot + 1).toLowerCase();
+  return EXT_LANG[ext];
+}
+
 function htmlFor(content: string, lang: string | undefined): string {
   const display = content.length > 50_000 ? content.slice(0, 50_000) + '\n... (truncated)' : content;
   return `<!doctype html><html><head>
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/styles/github-dark.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/github-dark.min.css">
     <style>
       html,body{margin:0;background:#0e1114;color:#bec6d0;font-family:Menlo,ui-monospace,monospace;font-size:12px;line-height:1.5}
       pre{margin:0;padding:12px;white-space:pre;overflow:auto}
@@ -32,9 +56,9 @@ function htmlFor(content: string, lang: string | undefined): string {
     </style>
   </head><body>
     <pre><code class="${lang ? `language-${lang}` : ''}">${escapeHtml(display)}</code></pre>
-    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/lib/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
     <script>
-      hljs.highlightAll();
+      try { if (typeof hljs !== 'undefined') hljs.highlightAll(); } catch (e) {}
       window.__sai_content = ${JSON.stringify(display)};
       document.addEventListener('message', function(ev){
         try {
@@ -82,8 +106,8 @@ export default function FileView() {
   }, [client, cwd, path]);
 
   const html = useMemo(
-    () => (data ? htmlFor(data.content, data.lang) : null),
-    [data],
+    () => (data ? htmlFor(data.content, data.lang ?? langFromPath(path)) : null),
+    [data, path],
   );
 
   const onCopy = () => {

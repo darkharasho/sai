@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { View } from 'react-native';
+import { KeyboardAvoidingView, Platform, View } from 'react-native';
 import { useConn } from '../../../lib/connection';
 import { useTranscript, transcriptKey, type TranscriptEvent } from '../../../lib/transcriptStore';
 import { useWorkspaces, type Workspace } from '../../../lib/workspaceStore';
@@ -9,7 +9,6 @@ import { WorkspaceHeader } from '../../../components/WorkspaceHeader';
 import { NavDrawer } from '../../../components/NavDrawer';
 import { workspaceStatusStore, type WorkspaceStatus } from '../../../lib/workspaceStatusStore';
 import { githubWatcherStore } from '../../../lib/githubWatcherStore';
-import { uuid } from '../../../shims/uuid';
 import type { WireMsg } from '../../../lib/wire';
 
 const EMPTY_EVENTS: TranscriptEvent[] = [];
@@ -199,7 +198,11 @@ export default function Chat() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#0e1114' }}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      style={{ flex: 1, backgroundColor: '#0e1114' }}
+    >
       <WorkspaceHeader
         machineId={machine.machineId}
         onOpenNav={() => setNavOpen(true)}
@@ -247,8 +250,10 @@ export default function Chat() {
         onOverridesChange={setOverrides}
         onSend={(text, images) => {
           if (!client || !active) return;
-          const id = uuid();
-          append(tkey, { id, type: 'user', text, images });
+          // No optimistic user append — the server echoes the prompt back
+          // as a `user_message` frame within ~100ms over the local LAN, and
+          // appending here would double-post (see Bug 4). The composer
+          // clears immediately on submit so the UI still feels responsive.
           client.sendPrompt({
             text,
             projectPath: active.projectPath,
@@ -265,6 +270,6 @@ export default function Chat() {
           client.interrupt(active.projectPath, active.scope);
         }}
       />
-    </View>
+    </KeyboardAvoidingView>
   );
 }

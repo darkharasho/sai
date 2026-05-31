@@ -37,6 +37,16 @@ const HTML = `<!doctype html>
   term.loadAddon(fit);
   term.open(document.getElementById('t'));
   fit.fit();
+  // Focus the hidden textarea so iOS routes the soft keyboard's keystrokes
+  // into xterm immediately. Without this, the system keyboard appears but
+  // input never reaches term.onData (because the textarea isn't focused),
+  // and nothing is sent to the desktop PTY.
+  try { term.focus(); } catch (e) {}
+  // Re-focus on any tap on the terminal area. iOS sometimes drops focus
+  // when the WebView is re-laid-out (keyboard show/hide cycles).
+  document.getElementById('t').addEventListener('touchend', function () {
+    try { term.focus(); } catch (e) {}
+  });
   post({ type: 'ready', cols: term.cols, rows: term.rows });
   term.onData((d) => post({ type: 'input', data: d }));
   window.addEventListener('resize', () => {

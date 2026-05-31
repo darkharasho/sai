@@ -194,11 +194,12 @@ function Row({
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
         {isUser ? (
-          <Text style={{
-            color: C.text,
-            fontSize: 14,
-            lineHeight: 21,
-          }}>
+          // Preserve whitespace (PWA uses <pre> with white-space:pre-wrap).
+          // RN Text is already whitespace-preserving by default.
+          <Text
+            selectable
+            style={{ color: C.text, fontSize: 14, lineHeight: 21 }}
+          >
             {event.text}
           </Text>
         ) : (

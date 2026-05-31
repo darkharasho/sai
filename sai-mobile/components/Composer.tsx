@@ -197,11 +197,7 @@ export function Composer({
         }}
       />
 
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ alignItems: 'center', gap: 4 }}
-      >
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
         <Pressable
           onPress={pick}
           disabled={disabled || images.length >= MAX_ATTACHMENTS}
@@ -249,7 +245,7 @@ export function Composer({
           </Text>
         </Pressable>
 
-        <View style={{ flex: 1, minWidth: 8 }} />
+        <View style={{ flex: 1 }} />
 
         {streaming ? (
           <Pressable
@@ -272,7 +268,7 @@ export function Composer({
             <Send size={13} color={canSend ? '#000' : C.textMuted} />
           </Pressable>
         )}
-      </ScrollView>
+      </View>
 
       <PickerSheet
         open={sheet === 'model'}

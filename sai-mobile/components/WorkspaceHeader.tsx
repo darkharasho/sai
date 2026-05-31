@@ -77,35 +77,32 @@ export function WorkspaceHeader({ machineId, onOpenNav, onPick }: Props) {
 
       <Pressable
         onPress={() => setOpen(true)}
+        hitSlop={4}
         style={({ pressed }) => ({
           flex: 1,
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 8,
           paddingVertical: 4,
           paddingHorizontal: 8,
           borderRadius: 8,
           borderWidth: 1,
           borderColor: 'transparent',
           opacity: pressed ? 0.7 : 1,
-          minWidth: 0,
         })}
       >
-        <Folder size={14} color={C.textMuted} strokeWidth={2} />
-        <View style={{ flex: 1, minWidth: 0 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Folder size={14} color={C.textMuted} strokeWidth={2} />
           <Text
             numberOfLines={1}
-            style={{ fontSize: 13, fontWeight: '500', color: C.text }}
+            style={{ flexShrink: 1, fontSize: 13, fontWeight: '500', color: C.text }}
           >
             {active?.label ?? 'No workspace'}
           </Text>
+          <HeaderStatusDot projectPath={active?.projectPath ?? null} />
+          <ChevronDown
+            size={14}
+            color={C.textMuted}
+            style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }}
+          />
         </View>
-        <HeaderStatusDot projectPath={active?.projectPath ?? null} />
-        <ChevronDown
-          size={14}
-          color={C.textMuted}
-          style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }}
-        />
       </Pressable>
 
       <WorkspacePicker
