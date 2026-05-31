@@ -6,6 +6,7 @@ import { useWorkspaces, type Workspace } from '../../../lib/workspaceStore';
 import { Transcript } from '../../../components/Transcript';
 import { Composer, type SessionOverrides } from '../../../components/Composer';
 import { WorkspaceHeader } from '../../../components/WorkspaceHeader';
+import { NavDrawer } from '../../../components/NavDrawer';
 import { workspaceStatusStore, type WorkspaceStatus } from '../../../lib/workspaceStatusStore';
 import { uuid } from '../../../shims/uuid';
 import type { WireMsg } from '../../../lib/wire';
@@ -24,6 +25,7 @@ export default function Chat() {
   const [follow, setFollow] = useState(true);
   const [overrides, setOverrides] = useState<SessionOverrides>({});
   const [streaming, setStreaming] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
 
   const tkey = useMemo(
     () => transcriptKey(machine.machineId, active?.projectPath ?? '_', sessionId),
@@ -148,16 +150,48 @@ export default function Chat() {
     if (!follow) setSessionId('default');
   };
 
-  // Mark follow used so TS doesn't complain (also gives us a path for the
-  // NavDrawer to toggle this later).
-  void setFollow;
+  const onAttachSession = (projectPath: string, sid: string) => {
+    if (!client) return;
+    // Resolve the workspace by projectPath so subsequent prompts go to the
+    // right scope. Falls back to the current active if not found.
+    const list = useWorkspaces.getState().workspacesByMachine[machine.machineId] ?? [];
+    const next = list.find((w) => w.projectPath === projectPath) ?? active;
+    if (next && next.projectPath !== active?.projectPath) {
+      setActiveWs(machine.machineId, next);
+    }
+    // Empty sessionId == "new session": let the server mint one and the
+    // session.active frame will reset us when follow is on; otherwise we
+    // attach to the chosen id directly.
+    const nextSid = sid || 'default';
+    setSessionId(nextSid);
+    client.attach({
+      projectPath,
+      scope: next?.scope ?? 'chat',
+      sessionId: nextSid,
+    });
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: '#0e1114' }}>
       <WorkspaceHeader
         machineId={machine.machineId}
-        onOpenNav={() => { /* M11: NavDrawer opens here */ }}
+        onOpenNav={() => setNavOpen(true)}
         onPick={onPickWorkspace}
+      />
+      <NavDrawer
+        open={navOpen}
+        onClose={() => setNavOpen(false)}
+        client={client}
+        machineId={machine.machineId}
+        workspacePath={active?.projectPath ?? null}
+        currentSessionId={sessionId}
+        followEnabled={follow}
+        onFollowChange={(v) => {
+          setFollow(v);
+          client?.setFollow(v);
+        }}
+        onAttach={onAttachSession}
+        onPickWorkspace={onPickWorkspace}
       />
       <View style={{ flex: 1 }}>
         <Transcript
