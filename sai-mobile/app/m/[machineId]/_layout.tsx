@@ -11,9 +11,9 @@ function StatePill() {
   const color = state === 'open' ? '#00a884' : state === 'opening' ? '#c7910c' : '#E35535';
   const label = state === 'open' ? 'connected' : state === 'opening' ? 'connecting…' : 'offline';
   return (
-    <View className="flex-row items-center gap-1.5">
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
       <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color }} />
-      <Text className="text-[#a0acbb] text-xs">{label}</Text>
+      <Text style={{ color: '#a0acbb', fontSize: 12 }}>{label}</Text>
     </View>
   );
 }
@@ -21,11 +21,27 @@ function StatePill() {
 function Header() {
   const { machine } = useConn();
   return (
-    <View className="flex-row items-center px-3 py-2 border-b border-[#1e2228] bg-[#0c0f11]">
-      <Pressable onPress={() => router.replace('/')} className="p-1.5">
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: '#1e2228',
+        backgroundColor: '#0c0f11',
+        gap: 4,
+      }}
+    >
+      <Pressable onPress={() => router.replace('/')} hitSlop={8} style={{ padding: 6 }}>
         <ChevronLeft size={20} color="#bec6d0" />
       </Pressable>
-      <Text className="text-white text-base font-medium flex-1 ml-1">{machine.label}</Text>
+      <Text
+        numberOfLines={1}
+        style={{ color: '#fff', fontSize: 16, fontWeight: '500', flex: 1, marginLeft: 4 }}
+      >
+        {machine.label}
+      </Text>
       <StatePill />
     </View>
   );
@@ -33,7 +49,7 @@ function Header() {
 
 function Inner() {
   return (
-    <SafeAreaView className="flex-1 bg-[#0e1114]" edges={['top']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#0e1114' }} edges={['top']}>
       <Header />
       <Tabs
         screenOptions={{
