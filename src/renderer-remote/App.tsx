@@ -18,6 +18,12 @@ function validateBearer(raw: unknown): Bearer | null {
 }
 
 function loadBearer(): Bearer | null {
+  // When hosted inside the SAI mobile WebView, the native shell injects a
+  // bearer at window scope so we skip the QR pairing UI entirely.
+  if (typeof window !== 'undefined' && window.SAI_INJECTED_BEARER) {
+    const injected = validateBearer(window.SAI_INJECTED_BEARER);
+    if (injected) return injected;
+  }
   // Migrate legacy unversioned `{token, deviceId, label}` (pre-1.4.5)
   // by re-wrapping it in the versioned envelope on first load.
   const versioned = readPersisted<Bearer | null>(BEARER_KEY, BEARER_VERSION, validateBearer, null);

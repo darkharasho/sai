@@ -1,5 +1,23 @@
 export const BEARER_KEY = 'sai-remote-bearer';
 
+declare global {
+  interface Window {
+    SAI_BRIDGE_HOST?: string;
+    SAI_INJECTED_BEARER?: { token: string; deviceId: string; label: string };
+  }
+}
+
+// When the PWA is loaded inside a WebView (e.g. the SAI mobile native shell),
+// the host injects `window.SAI_BRIDGE_HOST` so we can hit the bridge over an
+// absolute URL instead of relying on same-origin. Falls back to `location.origin`
+// for the normal browser / electron-renderer case.
+export function bridgeBase(): string {
+  if (typeof window !== 'undefined' && window.SAI_BRIDGE_HOST) {
+    return window.SAI_BRIDGE_HOST.replace(/\/+$/, '');
+  }
+  return typeof location !== 'undefined' ? location.origin : '';
+}
+
 export function extractPairCode(url: string): string | null {
   try { return new URL(url).searchParams.get('code'); } catch { return null; }
 }
@@ -7,7 +25,7 @@ export function extractPairCode(url: string): string | null {
 export interface PairResult { token: string; deviceId: string }
 
 export async function pair(code: string, deviceLabel: string, clientId: string): Promise<PairResult> {
-  const r = await fetch('/pair', {
+  const r = await fetch(`${bridgeBase()}/pair`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ code, deviceLabel, clientId }),
   });
@@ -102,7 +120,11 @@ export interface WireClient {
 }
 
 export function connect(token: string): WireClient {
-  const wsUrl = new URL('/ws', location.href.replace(/^http/, 'ws')).toString();
+  const wsUrl = (() => {
+    const base = bridgeBase();
+    if (base) return base.replace(/^http/, 'ws') + '/ws';
+    return new URL('/ws', location.href.replace(/^http/, 'ws')).toString();
+  })();
   const handlers = new Set<(msg: WireMsg) => void>();
   const stateHandlers = new Set<(s: 'opening' | 'open' | 'closed') => void>();
   let ws: WebSocket | null = null;
