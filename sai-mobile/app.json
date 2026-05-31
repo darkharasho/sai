@@ -1,25 +1,60 @@
 {
   "expo": {
-    "name": "sai-mobile",
+    "name": "SAI",
     "slug": "sai-mobile",
-    "version": "1.0.0",
+    "version": "0.1.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "scheme": "sai",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "backgroundColor": "#0e1114",
+    "splash": {
+      "backgroundColor": "#0c0f11"
+    },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.project96.sai",
+      "infoPlist": {
+        "NSCameraUsageDescription": "SAI needs camera access to scan pairing QR codes from your desktop.",
+        "NSPhotoLibraryUsageDescription": "SAI needs photo access to attach images to chat messages.",
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true,
+          "NSAllowsArbitraryLoads": true,
+          "NSExceptionDomains": {
+            "ts.net": {
+              "NSExceptionAllowsInsecureHTTPLoads": true,
+              "NSIncludesSubdomains": true
+            },
+            "127.0.0.1": {
+              "NSExceptionAllowsInsecureHTTPLoads": true
+            },
+            "localhost": {
+              "NSExceptionAllowsInsecureHTTPLoads": true
+            }
+          }
+        }
+      }
     },
-    "android": {
-      "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "SAI needs camera access to scan pairing QR codes from your desktop."
+        }
+      ],
+      "./plugins/allow-http"
+    ],
+    "extra": {
+      "router": {
+        "origin": false
       },
-      "predictiveBackGestureEnabled": false
+      "eas": {
+        "projectId": ""
+      }
     },
-    "web": {
-      "favicon": "./assets/favicon.png"
-    }
+    "owner": "harasho"
   }
 }
