@@ -8,7 +8,7 @@
     "ios": "expo run:ios",
     "prebuild": "expo prebuild",
     "lint": "tsc --noEmit",
-    "test": "jest"
+    "test": "jest --passWithNoTests"
   },
   "dependencies": {
     "expo": "~54.0.0",
