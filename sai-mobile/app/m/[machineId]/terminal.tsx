@@ -1,57 +1,137 @@
-import { useEffect, useRef, useState } from 'react';
-import { View, KeyboardAvoidingView, Platform, Text } from 'react-native';
+// Terminal surface: toolbar (picker + new + kill) on top, xterm.js WebView below.
+// Mirrors src/renderer-remote/terminal/Terminal.tsx wiring; reuses TerminalView
+// (a thin WebView host) plus the new TerminalToolbar + TerminalPicker.
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { KeyboardAvoidingView, Platform, Text, View } from 'react-native';
 import { useConn } from '../../../lib/connection';
 import { useWorkspaces } from '../../../lib/workspaceStore';
 import { TerminalView, type TerminalHandle } from '../../../components/TerminalView';
+import TerminalToolbar from '../../../components/TerminalToolbar';
+import TerminalPicker, { type TerminalSummary } from '../../../components/TerminalPicker';
 import type { WireMsg } from '../../../lib/wire';
+
+const C = {
+  bgPrimary: '#0e1114',
+  textMuted: '#5a6a7a',
+};
 
 export default function TerminalScreen() {
   const { machine, client, state } = useConn();
   const active = useWorkspaces((s) => s.activeByMachine[machine.machineId]) ?? null;
-  const [termId, setTermId] = useState<number | null>(null);
+  const [term, setTerm] = useState<TerminalSummary | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [busyNew, setBusyNew] = useState(false);
+  const [busyKill, setBusyKill] = useState(false);
   const termRef = useRef<TerminalHandle>(null);
 
-  // Pick the first terminal for the active workspace (or create-by-attach semantics handled by desktop).
-  useEffect(() => {
-    if (!client || state !== 'open' || !active) return;
-    (async () => {
-      const list = await client.listTerminals(active.projectPath).catch(() => []);
-      const first = (list as any[]).find((x) => x.alive) ?? null;
-      if (first) setTermId(first.termId);
-    })();
-  }, [client, state, active?.projectPath]);
+  const cwd = active?.projectPath ?? null;
 
-  // Forward terminal.output to webview (PWA wire emits `terminal.output`).
+  // Auto-pick the first alive terminal for this workspace once connected.
   useEffect(() => {
-    if (!client) return;
+    if (!client || state !== 'open' || !cwd) return;
+    (async () => {
+      const list = await client.listTerminals(cwd).catch(() => [] as TerminalSummary[]);
+      const first = (list as TerminalSummary[]).find((x) => x.alive) ?? null;
+      if (first && !term) setTerm(first);
+    })();
+  }, [client, state, cwd, term]);
+
+  // Forward terminal.output to the WebView for the active term.
+  useEffect(() => {
+    if (!client || !term) return;
     return client.on((m: WireMsg) => {
-      if (m.type === 'terminal.output' && m.termId === termId && typeof m.data === 'string') {
-        termRef.current?.write(m.data);
+      if (m.type === 'terminal.output' && (m as { termId?: number }).termId === term.termId) {
+        const data = (m as { data?: string }).data;
+        if (typeof data === 'string') termRef.current?.write(data);
       }
     });
-  }, [client, termId]);
+  }, [client, term]);
+
+  const onNew = useCallback(async () => {
+    if (!client || !cwd) return;
+    setBusyNew(true);
+    try {
+      const r = await client.openTerminal(cwd, 80, 24);
+      setTerm({
+        termId: r.termId, cwd, cols: r.cols, rows: r.rows,
+        alive: true, origin: 'phone',
+      });
+    } catch { /* surfaced elsewhere */ }
+    finally { setBusyNew(false); }
+  }, [client, cwd]);
+
+  const onKill = useCallback(async () => {
+    if (!client || !term) return;
+    setBusyKill(true);
+    try {
+      await client.killTerminal(term.termId);
+      setTerm(null);
+    } catch { /* ignore */ }
+    finally { setBusyKill(false); }
+  }, [client, term]);
+
+  const onPickFromSheet = useCallback((picked: TerminalSummary) => {
+    setTerm(picked);
+    setPickerOpen(false);
+  }, []);
+
+  const onKillFromSheet = useCallback(async (picked: TerminalSummary) => {
+    if (!client) return;
+    try { await client.killTerminal(picked.termId); }
+    catch { /* ignore */ }
+    if (term?.termId === picked.termId) setTerm(null);
+  }, [client, term]);
 
   if (!active) {
-    return <View className="flex-1 bg-[#0e1114] items-center justify-center"><Text className="text-[#a0acbb]">Pick a workspace in Chat first.</Text></View>;
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: C.bgPrimary }}>
+        <Text style={{ color: C.textMuted }}>Pick a workspace in Chat first.</Text>
+      </View>
+    );
   }
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: '#0e1114' }}>
-      {termId == null ? (
-        <View className="flex-1 items-center justify-center">
-          <Text className="text-[#a0acbb] mb-3">No active terminal.</Text>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      style={{ flex: 1, backgroundColor: C.bgPrimary }}
+    >
+      <TerminalToolbar
+        termId={term?.termId ?? null}
+        termCwd={term?.cwd}
+        origin={term?.origin}
+        onOpenPicker={() => setPickerOpen(true)}
+        onNew={onNew}
+        onKill={onKill}
+        busyNew={busyNew}
+        busyKill={busyKill}
+      />
+      {term == null ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ color: C.textMuted, marginBottom: 12 }}>
+            No active terminal.
+          </Text>
         </View>
       ) : (
         <TerminalView
+          key={term.termId}
           ref={termRef}
           onReady={(cols, rows) => {
             if (!client) return;
-            client.attachTerminal(termId, cols, rows).catch(() => {});
+            client.attachTerminal(term.termId, cols, rows).catch(() => {});
           }}
-          onInput={(data) => { if (client) client.inputTerminal(termId, data); }}
-          onResize={(cols, rows) => { if (client) client.resizeTerminal(termId, cols, rows); }}
+          onInput={(data) => { if (client) client.inputTerminal(term.termId, data); }}
+          onResize={(cols, rows) => { if (client) client.resizeTerminal(term.termId, cols, rows); }}
         />
       )}
+      <TerminalPicker
+        open={pickerOpen}
+        client={client}
+        cwd={cwd ?? ''}
+        currentTermId={term?.termId ?? null}
+        onClose={() => setPickerOpen(false)}
+        onPick={onPickFromSheet}
+        onKill={onKillFromSheet}
+      />
     </KeyboardAvoidingView>
   );
 }
