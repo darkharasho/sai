@@ -61,7 +61,7 @@ export async function unpair(baseUrl: string, deviceId: string, token: string): 
 
 export async function health(baseUrl: string, token: string, signal?: AbortSignal): Promise<boolean> {
   try {
-    const r = await fetch(`${baseUrl}/health`, {
+    const r = await fetch(`${baseUrl}/healthz`, {
       headers: { authorization: `Bearer ${token}` },
       signal,
     });
