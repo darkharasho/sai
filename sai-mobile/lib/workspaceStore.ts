@@ -1,6 +1,12 @@
 import { create } from 'zustand';
 
-export interface Workspace { projectPath: string; label: string; scope?: string }
+export interface Workspace {
+  projectPath: string;
+  label: string;
+  scope?: string;
+  kind?: 'project' | 'meta';
+  members?: { projectPath: string; name: string }[];
+}
 
 interface State {
   workspacesByMachine: Record<string, Workspace[]>;

@@ -4,6 +4,7 @@
 // adapted for an RN view above an xterm.js WebView.
 import { Pressable, Text, View } from 'react-native';
 import { ChevronDown, Plus, X, RefreshCw } from 'lucide-react-native';
+import { FONT } from '../lib/fonts';
 
 const C = {
   bgSecondary: '#0c0f11',
@@ -13,7 +14,7 @@ const C = {
   textMuted: '#5a6a7a',
   accent: '#c7910c',
   red: '#E35535',
-  mono: 'Menlo',
+  mono: FONT.mono,
 };
 
 interface Props {

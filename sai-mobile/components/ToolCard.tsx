@@ -2,8 +2,14 @@
 // Mirrors the PWA's collapsible header + per-tool body switch (bash command,
 // edit/write diff, generic result block). Visual tokens come from the
 // default theme in src/themes.ts.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import {
   AlertCircle,
   ChevronRight,
@@ -16,6 +22,7 @@ import {
   Wrench,
 } from 'lucide-react-native';
 import { summarizeTool } from '../lib/toolPresenters';
+import { FONT } from '../lib/fonts';
 
 const C = {
   bgMid: '#0e1114',
@@ -26,7 +33,7 @@ const C = {
   accent: '#c7910c',
   green: '#00a884',
   red: '#E35535',
-  mono: 'Menlo',
+  mono: FONT.mono,
 };
 
 type Status = 'running' | 'done' | 'error';
@@ -73,6 +80,19 @@ export function ToolCard({ toolName, input, result, status: explicitStatus }: Pr
   const status = inferStatus(result, explicitStatus);
   const accent = status === 'error' ? C.red : status === 'done' ? C.green : C.accent;
   const Icon = status === 'error' ? AlertCircle : iconFor(name);
+
+  // Animated chevron rotation: 0° (collapsed) → 90° (expanded).
+  const rotation = useSharedValue(expanded ? 90 : 0);
+  useEffect(() => {
+    rotation.value = withTiming(expanded ? 90 : 0, {
+      duration: 180,
+      easing: Easing.inOut(Easing.ease),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded]);
+  const chevronStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${rotation.value}deg` }],
+  }));
 
   return (
     <View style={{
@@ -132,11 +152,9 @@ export function ToolCard({ toolName, input, result, status: explicitStatus }: Pr
             RUNNING
           </Text>
         ) : null}
-        <View style={{
-          transform: [{ rotate: expanded ? '90deg' : '0deg' }],
-        }}>
+        <Animated.View style={chevronStyle}>
           <ChevronRight size={14} color={C.textMuted} />
-        </View>
+        </Animated.View>
       </Pressable>
 
       {expanded ? (

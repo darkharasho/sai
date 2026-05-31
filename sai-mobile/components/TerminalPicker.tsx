@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { Plus, X } from 'lucide-react-native';
 import type { WireClient } from '../lib/wire';
+import { FONT } from '../lib/fonts';
 
 const C = {
   bgSecondary: '#0c0f11',
@@ -15,7 +16,7 @@ const C = {
   accent: '#c7910c',
   red: '#E35535',
   overlay: 'rgba(0,0,0,0.55)',
-  mono: 'Menlo',
+  mono: FONT.mono,
 };
 
 export interface TerminalSummary {

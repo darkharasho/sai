@@ -5,6 +5,7 @@
 import { useMemo } from 'react';
 import { Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
+import { FONT } from '../lib/fonts';
 
 const C = {
   bgPrimary: '#0e1114',
@@ -15,7 +16,7 @@ const C = {
   accent: '#c7910c',
   green: '#4ade80',
   red: '#E35535',
-  mono: 'Menlo',
+  mono: FONT.mono,
 };
 
 function escapeHtml(s: string): string {

@@ -11,6 +11,7 @@ import {
   ChevronDown, ChevronUp, Minus, Paperclip, Send, Shield, ShieldOff, Square, X,
 } from 'lucide-react-native';
 import PickerSheet from './PickerSheet';
+import { FONT } from '../lib/fonts';
 
 export type EffortLevel = 'low' | 'medium' | 'high';
 export type PermMode = 'auto' | 'auto-read' | 'always-ask';
@@ -41,7 +42,7 @@ const C = {
   red: '#E35535',
   orange: '#f59e0b',
   green: '#4ade80',
-  mono: 'Menlo',
+  mono: FONT.mono,
 };
 
 const EFFORT_CONFIG = {

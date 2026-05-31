@@ -4,6 +4,7 @@
 // editing is a non-goal — see docs/superpowers/specs/2026-05-30-sai-mobile-ios-app-design.md.)
 import { Pressable, Text, View } from 'react-native';
 import { ArrowLeft, Copy } from 'lucide-react-native';
+import { FONT } from '../lib/fonts';
 
 const C = {
   bgSecondary: '#0c0f11',
@@ -12,7 +13,7 @@ const C = {
   text: '#bec6d0',
   textMuted: '#5a6a7a',
   accent: '#c7910c',
-  mono: 'Menlo',
+  mono: FONT.mono,
 };
 
 interface Props {

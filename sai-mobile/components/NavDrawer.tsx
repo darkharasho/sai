@@ -5,6 +5,11 @@
 // separate later milestones. The visual language (search, follow toggle,
 // new-session button, grouped sessions, per-row status dots, active row
 // highlight, relative timestamps) mirrors the PWA's ChatsPanel.
+//
+// Animation: the drawer slides in from the LEFT edge via Reanimated. The
+// Modal is presented with animationType="none" + overFullScreen so we can
+// drive the transform ourselves. A pan gesture on the panel allows
+// drag-left-to-close.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
@@ -13,7 +18,16 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+  runOnJS,
+} from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Folder, Plus, Search, X } from 'lucide-react-native';
 import type { WireClient } from '../lib/wire';
 import { useWorkspaces, type Workspace } from '../lib/workspaceStore';
@@ -22,6 +36,8 @@ import {
   type WorkspaceStatus,
 } from '../lib/workspaceStatusStore';
 import { WorkspacePicker } from './WorkspacePicker';
+import { StatusDot } from './StatusDot';
+import { FONT } from '../lib/fonts';
 
 const C = {
   bgPrimary: '#0e1114',
@@ -37,7 +53,7 @@ const C = {
   red: '#ef4444',
   rowHover: 'rgba(255,255,255,0.04)',
   overlay: 'rgba(0,0,0,0.4)',
-  mono: 'Menlo',
+  mono: FONT.mono,
 };
 
 interface SessionMeta {
@@ -103,6 +119,56 @@ export function NavDrawer({
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [, setStatusTick] = useState(0);
   const refreshRef = useRef<() => void>(() => {});
+
+  // Animation: drawer slides from -WIDTH → 0. Backdrop opacity tracks it.
+  const { width: screenW } = useWindowDimensions();
+  const DRAWER_WIDTH = Math.min(screenW * 0.85, 360);
+  const translateX = useSharedValue(-DRAWER_WIDTH);
+  const [mounted, setMounted] = useState(open);
+
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      translateX.value = withSpring(0, { damping: 22, stiffness: 220, mass: 0.6 });
+    } else if (mounted) {
+      translateX.value = withTiming(-DRAWER_WIDTH, { duration: 220 }, (finished) => {
+        if (finished) runOnJS(setMounted)(false);
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, DRAWER_WIDTH]);
+
+  const panelStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+  }));
+
+  const backdropStyle = useAnimatedStyle(() => {
+    const progress = 1 - Math.min(Math.abs(translateX.value) / DRAWER_WIDTH, 1);
+    return { opacity: progress };
+  });
+
+  const panGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetX([-10, 10])
+        .onUpdate((e) => {
+          // Only respond to leftward drags from the panel.
+          const next = Math.min(0, e.translationX);
+          translateX.value = next;
+        })
+        .onEnd((e) => {
+          const shouldClose = e.translationX < -60 || e.velocityX < -500;
+          if (shouldClose) {
+            translateX.value = withTiming(-DRAWER_WIDTH, { duration: 200 }, (finished) => {
+              if (finished) runOnJS(onClose)();
+            });
+          } else {
+            translateX.value = withSpring(0, { damping: 22, stiffness: 220, mass: 0.6 });
+          }
+        }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [DRAWER_WIDTH, onClose]
+  );
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQuery(searchQuery), 250);
@@ -193,35 +259,42 @@ export function NavDrawer({
 
   return (
     <Modal
-      visible={open}
+      visible={mounted}
       transparent
-      animationType="slide"
+      animationType="none"
+      presentationStyle="overFullScreen"
       onRequestClose={onClose}
+      statusBarTranslucent
     >
-      {/* Backdrop — tap outside to close. The drawer panel itself takes
-          ~85% of width and slides in from the left (RN Modal slides from
-          bottom by default; we orient the layout left-aligned and let the
-          panel fill the safe area). */}
-      <Pressable
-        onPress={onClose}
-        style={{
-          flex: 1,
-          flexDirection: 'row',
-          backgroundColor: C.overlay,
-        }}
-      >
-        <Pressable
-          onPress={(e) => e.stopPropagation?.()}
-          style={{
-            width: '85%',
-            maxWidth: 420,
-            height: '100%',
-            backgroundColor: C.bgPrimary,
-            borderRightWidth: 1,
-            borderRightColor: C.border,
-            flexDirection: 'column',
-          }}
+      {/* Backdrop — animated opacity following drawer position. */}
+      <View style={{ flex: 1, flexDirection: 'row' }}>
+        <Animated.View
+          style={[
+            {
+              ...({ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 } as const),
+              backgroundColor: C.overlay,
+            },
+            backdropStyle,
+          ]}
+          pointerEvents="auto"
         >
+          <Pressable onPress={onClose} style={{ flex: 1 }} />
+        </Animated.View>
+
+        <GestureDetector gesture={panGesture}>
+          <Animated.View
+            style={[
+              {
+                width: DRAWER_WIDTH,
+                height: '100%',
+                backgroundColor: C.bgPrimary,
+                borderRightWidth: 1,
+                borderRightColor: C.border,
+                flexDirection: 'column',
+              },
+              panelStyle,
+            ]}
+          >
           {/* Header: workspace selector + close. */}
           <View
             style={{
@@ -466,12 +539,15 @@ export function NavDrawer({
                     typeof s.lastViewedAt === 'number' &&
                     s.updatedAt > s.lastViewedAt;
 
-                  let dot: { color: string; label: string } | null = null;
-                  if (isAwaiting) dot = { color: C.amber, label: '!' };
-                  else if (isError) dot = { color: C.red, label: '!' };
-                  else if (isStreaming) dot = { color: C.accent, label: '' };
-                  else if (isUnread) dot = { color: C.green, label: '' };
-                  else if (isSuspended) dot = { color: '#d4a72c', label: '' };
+                  // Map session-level signals to a StatusDot-style state for
+                  // animation consistency with WorkspaceHeader/Picker.
+                  let dotKind: 'approval' | 'busy' | 'unread' | 'suspended' | null = null;
+                  let dotLabel: string | null = null;
+                  if (isAwaiting) { dotKind = 'approval'; dotLabel = '!'; }
+                  else if (isError) { dotKind = 'approval'; dotLabel = '!'; }
+                  else if (isStreaming) { dotKind = 'busy'; }
+                  else if (isUnread) { dotKind = 'unread'; }
+                  else if (isSuspended) { dotKind = 'suspended'; }
 
                   return (
                     <Pressable
@@ -503,14 +579,14 @@ export function NavDrawer({
                           marginBottom: 3,
                         }}
                       >
-                        {dot ? (
-                          dot.label ? (
+                        {dotKind ? (
+                          dotLabel ? (
                             <View
                               style={{
                                 width: 14,
                                 height: 14,
                                 borderRadius: 7,
-                                backgroundColor: dot.color,
+                                backgroundColor: C.amber,
                                 alignItems: 'center',
                                 justifyContent: 'center',
                               }}
@@ -523,17 +599,14 @@ export function NavDrawer({
                                   lineHeight: 12,
                                 }}
                               >
-                                {dot.label}
+                                {dotLabel}
                               </Text>
                             </View>
                           ) : (
-                            <View
-                              style={{
-                                width: 9,
-                                height: 9,
-                                borderRadius: 2,
-                                backgroundColor: dot.color,
-                              }}
+                            <StatusDot
+                              kind={dotKind}
+                              size={9}
+                              shape="square"
                             />
                           )
                         ) : (
@@ -606,8 +679,9 @@ export function NavDrawer({
             }}
             currentProjectPath={active?.projectPath ?? null}
           />
-        </Pressable>
-      </Pressable>
+          </Animated.View>
+        </GestureDetector>
+      </View>
     </Modal>
   );
 }

@@ -6,6 +6,7 @@
 import { useMemo, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { AlertCircle } from 'lucide-react-native';
+import { FONT } from '../lib/fonts';
 
 const C = {
   bg: '#181a16',          // orange-tinted bg (color-mix orange@8% on bg-secondary)
@@ -19,7 +20,7 @@ const C = {
   green: '#00a884',
   red: '#E35535',
   black: '#000',
-  mono: 'Menlo',
+  mono: FONT.mono,
 };
 
 function extractCommand(toolName: string | undefined, input: unknown): string | undefined {

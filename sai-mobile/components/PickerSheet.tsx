@@ -2,6 +2,7 @@
 // Modal with slide-up animation, dark overlay, list of options with optional
 // hints, optional "clear" row at the top, and the current value highlighted.
 import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { FONT } from '../lib/fonts';
 
 const C = {
   bgSecondary: '#0c0f11',
@@ -11,7 +12,7 @@ const C = {
   textMuted: '#5a6a7a',
   accent: '#c7910c',
   overlay: 'rgba(0,0,0,0.55)',
-  mono: 'Menlo',
+  mono: FONT.mono,
 };
 
 interface Option<T> {

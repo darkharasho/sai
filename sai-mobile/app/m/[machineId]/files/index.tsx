@@ -10,6 +10,7 @@ import {
 import { useConn } from '../../../../lib/connection';
 import { useWorkspaces } from '../../../../lib/workspaceStore';
 import RepoPicker, { type RepoMember } from '../../../../components/RepoPicker';
+import { FONT } from '../../../../lib/fonts';
 
 const C = {
   bgPrimary: '#0e1114',
@@ -19,7 +20,7 @@ const C = {
   textMuted: '#5a6a7a',
   accent: '#c7910c',
   red: '#E35535',
-  mono: 'Menlo',
+  mono: FONT.mono,
 };
 
 interface Entry { name: string; type?: 'dir' | 'file'; kind?: 'dir' | 'file'; size?: number; mtime?: number }
@@ -176,10 +177,15 @@ export default function Browse() {
       .catch((e: Error) => setErr(e.message));
   }, [client, cwd]);
 
-  const members: RepoMember[] = useMemo(
-    () => workspaces.map((w) => ({ projectPath: w.projectPath, name: w.label })),
-    [workspaces],
-  );
+  // Pills: when the active workspace is meta, expose its member repos.
+  // Otherwise list sibling workspaces (PWA fallback for multi-repo desktops).
+  const isMeta = active?.kind === 'meta';
+  const members: RepoMember[] = useMemo(() => {
+    if (isMeta && active?.members && active.members.length > 0) {
+      return active.members.map((m) => ({ projectPath: m.projectPath, name: m.name }));
+    }
+    return workspaces.map((w) => ({ projectPath: w.projectPath, name: w.label }));
+  }, [isMeta, active?.members, workspaces]);
 
   if (!active) {
     return (
@@ -211,7 +217,7 @@ export default function Browse() {
           <GitBranch size={18} color={C.accent} strokeWidth={2} />
         </Pressable>
       </View>
-      <RepoPicker members={members} current={effectiveCwd} onPick={setCwd} />
+      <RepoPicker members={members} current={effectiveCwd} onPick={setCwd} isMeta={isMeta} />
       {entries == null && !err ? (
         <ActivityIndicator color={C.accent} style={{ marginTop: 24 }} />
       ) : err ? (

@@ -6,6 +6,8 @@ import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { Folder } from 'lucide-react-native';
 import { useWorkspaces, type Workspace } from '../lib/workspaceStore';
 import { workspaceStatusStore, displayPriority } from '../lib/workspaceStatusStore';
+import { StatusDot as AnimatedDot } from './StatusDot';
+import { FONT } from '../lib/fonts';
 
 const C = {
   bgSecondary: '#0c0f11',
@@ -16,7 +18,7 @@ const C = {
   green: '#4ade80',
   amber: '#f59e0b',
   overlay: 'rgba(0,0,0,0.55)',
-  mono: 'Menlo',
+  mono: FONT.mono,
 };
 
 interface Props {
@@ -31,18 +33,10 @@ function StatusDot({ projectPath, activeIdle }: { projectPath: string; activeIdl
   // Subscribe at parent (whole sheet) so this re-renders implicitly.
   const status = workspaceStatusStore.get(projectPath);
   const p = displayPriority(status);
-  if (p === 'approval') {
-    return <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.amber }} />;
-  }
-  if (p === 'busy') {
-    return <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.accent }} />;
-  }
-  if (p === 'completed') {
-    return <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.green }} />;
-  }
-  if (activeIdle) {
-    return <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.green }} />;
-  }
+  if (p === 'approval') return <AnimatedDot kind="approval" />;
+  if (p === 'busy') return <AnimatedDot kind="busy" />;
+  if (p === 'completed') return <AnimatedDot kind="completed" />;
+  if (activeIdle) return <AnimatedDot kind="idle" />;
   return null;
 }
 

@@ -1,7 +1,12 @@
-// Horizontal scroller of repo "pills". Mirrors src/renderer-remote/files/RepoPicker.tsx
-// but renders nothing when there is only one repo (the common case on phone).
+// Horizontal scroller of repo "pills". Mirrors src/renderer-remote/files/RepoPicker.tsx.
+// Renders when:
+//   * there are 2+ entries in `members`, OR
+//   * the active workspace is a meta workspace with `members.length >= 1`
+//     (matches the PWA's rule — meta workspaces always expose member pills
+//     even when there is just one).
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { Folder } from 'lucide-react-native';
+import { FONT } from '../lib/fonts';
 
 const C = {
   bgMid: '#13171b',
@@ -10,7 +15,7 @@ const C = {
   textMuted: '#5a6a7a',
   accent: '#c7910c',
   black: '#000000',
-  mono: 'Menlo',
+  mono: FONT.mono,
 };
 
 export interface RepoMember { projectPath: string; name: string }
@@ -19,10 +24,14 @@ interface Props {
   members: RepoMember[];
   current: string;
   onPick: (projectPath: string) => void;
+  /** When true (active workspace is a meta workspace), render whenever
+   *  members.length >= 1. Otherwise default to len >= 2. */
+  isMeta?: boolean;
 }
 
-export default function RepoPicker({ members, current, onPick }: Props) {
-  if (members.length <= 1) return null;
+export default function RepoPicker({ members, current, onPick, isMeta }: Props) {
+  const minMembers = isMeta ? 1 : 2;
+  if (members.length < minMembers) return null;
   return (
     <View style={{
       backgroundColor: C.bgMid,

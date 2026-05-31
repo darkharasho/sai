@@ -12,6 +12,7 @@ import { AskUserQuestionView } from './AskUserQuestionView';
 import { GitHubWatcherCard } from './GitHubWatcherCard';
 import { detectWatchTargets } from '../lib/githubWatcherStore';
 import { TypingDots } from './TypingDots';
+import { FONT } from '../lib/fonts';
 
 const C = {
   bgPrimary: '#111418',
@@ -24,7 +25,7 @@ const C = {
   green: '#00a884',
   blue: '#11B7D4',
   red: '#E35535',
-  mono: 'Menlo',
+  mono: FONT.mono,
 };
 
 const mdStyles = {

@@ -44,6 +44,8 @@ export default function Chat() {
         projectPath: w.projectPath ?? w.path,
         label: w.label ?? w.name ?? w.projectPath,
         scope: w.scope,
+        kind: w.kind,
+        members: w.members,
       }));
       setWorkspaces(machine.machineId, ws);
     })().catch(() => { /* surface in UI later */ });

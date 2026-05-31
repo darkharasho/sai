@@ -4,6 +4,7 @@
 // client's answerQuestion. Custom Pressable rows stand in for radios/checks.
 import { useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
+import { FONT } from '../lib/fonts';
 
 const C = {
   text: '#bec6d0',
@@ -13,7 +14,7 @@ const C = {
   border: '#1e2228',
   accent: '#c7910c',
   black: '#000',
-  mono: 'Menlo',
+  mono: FONT.mono,
 };
 
 interface AskOption { label: string; description?: string }
@@ -153,16 +154,29 @@ export function AskUserQuestionView({ toolUseId, input, onAnswer }: Props) {
                       opacity: disabled && !sel ? 0.8 : 1,
                     }}
                   >
+                    {/* Bordered outer ring + (when selected) inner filled
+                        shape — mirrors the PWA's radio/checkbox visual. */}
                     <View style={{
                       marginTop: 2,
-                      width: 12,
-                      height: 12,
-                      borderRadius: q.multiSelect ? 3 : 6,
-                      borderWidth: 1.5,
+                      width: 18,
+                      height: 18,
+                      borderRadius: q.multiSelect ? 4 : 9,
+                      borderWidth: 2,
                       borderColor: sel ? C.accent : C.border,
-                      backgroundColor: sel ? C.accent : 'transparent',
+                      backgroundColor: 'transparent',
+                      alignItems: 'center',
+                      justifyContent: 'center',
                       flexShrink: 0,
-                    }} />
+                    }}>
+                      {sel ? (
+                        <View style={{
+                          width: 10,
+                          height: 10,
+                          borderRadius: q.multiSelect ? 2 : 5,
+                          backgroundColor: C.accent,
+                        }} />
+                      ) : null}
+                    </View>
                     <View style={{ flex: 1, gap: 2 }}>
                       <Text style={{ fontSize: 13, color: C.text, fontWeight: '500' }}>
                         {isOther ? 'Other' : opt.label}

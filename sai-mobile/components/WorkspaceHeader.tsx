@@ -8,6 +8,7 @@ import { ChevronDown, Folder, Menu } from 'lucide-react-native';
 import { useWorkspaces, type Workspace } from '../lib/workspaceStore';
 import { workspaceStatusStore, displayPriority } from '../lib/workspaceStatusStore';
 import { WorkspacePicker } from './WorkspacePicker';
+import { StatusDot } from './StatusDot';
 
 const C = {
   bgSecondary: '#0c0f11',
@@ -29,14 +30,10 @@ function HeaderStatusDot({ projectPath }: { projectPath: string | null }) {
   if (!projectPath) return null;
   const status = workspaceStatusStore.get(projectPath);
   const p = displayPriority(status);
-  if (p === 'approval') {
-    return <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.amber }} />;
-  }
-  if (p === 'busy') {
-    return <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.accent }} />;
-  }
+  if (p === 'approval') return <StatusDot kind="approval" />;
+  if (p === 'busy') return <StatusDot kind="busy" />;
   // Idle / completed for the current workspace both render as green (running).
-  return <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.green }} />;
+  return <StatusDot kind="idle" />;
 }
 
 export function WorkspaceHeader({ machineId, onOpenNav, onPick }: Props) {

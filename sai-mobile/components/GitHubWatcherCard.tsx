@@ -21,6 +21,7 @@ import type {
   GitHubWatchTarget,
 } from '../lib/githubWatcherStore';
 import { githubWatcherStore as defaultStore } from '../lib/githubWatcherStore';
+import { FONT } from '../lib/fonts';
 
 type Phase = GithubWatcherSnapshotShape['phase'];
 
@@ -73,7 +74,7 @@ const C = {
   text: '#bec6d0',
   textMuted: '#5a6a7a',
   accent: '#c7910c',
-  mono: 'Menlo',
+  mono: FONT.mono,
 };
 
 interface Props {

@@ -13,6 +13,7 @@ import { useWorkspaces } from '../../../../lib/workspaceStore';
 import DiffViewer from '../../../../components/DiffViewer';
 import RepoPicker, { type RepoMember } from '../../../../components/RepoPicker';
 import type { WireClient, WireMsg } from '../../../../lib/wire';
+import { FONT } from '../../../../lib/fonts';
 
 const C = {
   bgPrimary: '#0e1114',
@@ -29,7 +30,7 @@ const C = {
   orange: '#f59e0b',
   blue: '#3b82f6',
   overlay: 'rgba(0,0,0,0.55)',
-  mono: 'Menlo',
+  mono: FONT.mono,
 };
 
 interface StatusEntry { path: string; status: string; staged: boolean }
@@ -188,10 +189,13 @@ export default function Changes() {
     [entries],
   );
 
-  const members: RepoMember[] = useMemo(
-    () => workspaces.map((w) => ({ projectPath: w.projectPath, name: w.label })),
-    [workspaces],
-  );
+  const isMeta = active?.kind === 'meta';
+  const members: RepoMember[] = useMemo(() => {
+    if (isMeta && active?.members && active.members.length > 0) {
+      return active.members.map((m) => ({ projectPath: m.projectPath, name: m.name }));
+    }
+    return workspaces.map((w) => ({ projectPath: w.projectPath, name: w.label }));
+  }, [isMeta, active?.members, workspaces]);
 
   const addNote = (text: string, kind: 'ok' | 'err') => {
     const n: Note = { id: `n${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, text, kind };
@@ -314,7 +318,7 @@ export default function Changes() {
         <Text style={{ flex: 1, fontSize: 13, fontWeight: '600', color: C.text }}>Changes</Text>
       </View>
 
-      <RepoPicker members={members} current={effectiveCwd ?? ''} onPick={setCwd} />
+      <RepoPicker members={members} current={effectiveCwd ?? ''} onPick={setCwd} isMeta={isMeta} />
 
       <View style={{
         flexDirection: 'row', alignItems: 'center', gap: 8,
