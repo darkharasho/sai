@@ -163,6 +163,49 @@ describe('computeUnmountFlushes', () => {
     expect(byPath['/b'].session.messageCount).toBe(2);
   });
 
+  it('skips workspaces whose in-flight message count matches the persisted count', () => {
+    // No new activity since the last persist — bumping updatedAt here would
+    // make the session look unread on next launch (b039f15 territory).
+    const m1 = msg();
+    const flushes = computeUnmountFlushes({
+      prevMounted: ['/a'],
+      nextMounted: new Set([]),
+      workspaces: new Map([['/a', ws({ messageCount: 1 })]]),
+      wsMessages: new Map([['/a', [m1]]]),
+      wsFirstLoadedIdx: new Map(),
+      now: FIXED_NOW,
+    });
+    expect(flushes).toEqual([]);
+  });
+
+  it('stamps lastViewedAt when the unmounting workspace was focused', () => {
+    const flushes = computeUnmountFlushes({
+      prevMounted: ['/a'],
+      nextMounted: new Set([]),
+      workspaces: new Map([['/a', ws({ id: 'sa', title: 't' })]]),
+      wsMessages: new Map([['/a', [msg()]]]),
+      wsFirstLoadedIdx: new Map(),
+      focusedPath: '/a',
+      now: FIXED_NOW,
+    });
+    expect(flushes).toHaveLength(1);
+    expect(flushes[0].session.lastViewedAt).toBe(FIXED_NOW);
+  });
+
+  it('does not stamp lastViewedAt for background workspaces', () => {
+    const flushes = computeUnmountFlushes({
+      prevMounted: ['/a'],
+      nextMounted: new Set([]),
+      workspaces: new Map([['/a', ws({ id: 'sa', title: 't', lastViewedAt: 123 })]]),
+      wsMessages: new Map([['/a', [msg()]]]),
+      wsFirstLoadedIdx: new Map(),
+      focusedPath: '/b',
+      now: FIXED_NOW,
+    });
+    expect(flushes).toHaveLength(1);
+    expect(flushes[0].session.lastViewedAt).toBe(123);
+  });
+
   it('does not flush a workspace that is busy (still in nextMounted)', () => {
     const flushes = computeUnmountFlushes({
       prevMounted: ['/a'],

@@ -21,7 +21,7 @@ import { setActiveWorkspace, updateTerminalName } from './terminalBuffer';
 import { basename } from './utils/pathUtils';
 import { createSession, generateSmartTitle } from './sessions';
 import { computeUnmountFlushes } from './workspaceFlush';
-import { dbGetSessions, dbGetMessages, dbGetMessagesTail, dbSaveSession, dbPatchSessionMeta, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
+import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbSaveSession, dbPatchSessionMeta, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval } from './types';
 import type { MetaWorkspaceListItem, MetaWorkspaceRuntime } from './types';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, setActiveHighlightTheme, type HighlightThemeId } from './themes';
@@ -1240,6 +1240,7 @@ export default function App() {
       workspaces: workspacesRef.current,
       wsMessages: wsMessagesRef.current,
       wsFirstLoadedIdx: wsFirstLoadedIdxRef.current,
+      focusedPath: activeProjectPath,
     });
     for (const { wsPath, session, fromIdx } of flushes) {
       setWorkspaces(p => {
@@ -1671,6 +1672,38 @@ export default function App() {
     };
     window.addEventListener('sai-github-watcher-snapshot', handler);
     return () => window.removeEventListener('sai-github-watcher-snapshot', handler);
+  }, []);
+
+  // One-shot global sweep at app boot: normalize stale `lastViewedAt < updatedAt`
+  // rows across EVERY workspace, not just the active one. Earlier app versions
+  // (and the unmount-flush path before its companion fix) bumped updatedAt
+  // without bumping lastViewedAt, leaving previously-visited sessions in other
+  // workspaces looking permanently unread until the user switched to them.
+  // Treat app launch as a clean slate everywhere — any unread state generated
+  // during this run is preserved because new save paths now stamp lastViewedAt
+  // alongside updatedAt for the focused workspace and only bump updatedAt
+  // when real message activity occurred.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const all = await dbGetAllSessions();
+        if (cancelled) return;
+        const stale = all.filter(
+          s => s.lastViewedAt == null || s.lastViewedAt < s.updatedAt,
+        );
+        if (stale.length === 0) return;
+        const now = Date.now();
+        await Promise.all(stale.map(s => {
+          const path = s.projectPath;
+          if (!path) return Promise.resolve();
+          return dbPatchSessionMeta(path, s.id, { lastViewedAt: s.updatedAt || now }).catch(() => {});
+        }));
+      } catch {
+        // best-effort — don't block app boot on the sweep
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   // Migrate localStorage sessions to IndexedDB and load sessions for the active project

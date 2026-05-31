@@ -65,6 +65,21 @@ export async function dbGetSessions(projectPath: string): Promise<ChatSession[]>
   });
 }
 
+/**
+ * Return every session row across every workspace. Only used for the
+ * one-shot launch sweep that normalizes stale `lastViewedAt` rows left
+ * behind by earlier app versions / save paths. Avoid in hot code paths.
+ */
+export async function dbGetAllSessions(): Promise<ChatSession[]> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('sessions', 'readonly');
+    const request = tx.objectStore('sessions').getAll();
+    request.onsuccess = () => resolve(request.result as ChatSession[]);
+    request.onerror = () => reject(request.error);
+  });
+}
+
 export async function dbGetMessages(sessionId: string): Promise<ChatMessage[]> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
