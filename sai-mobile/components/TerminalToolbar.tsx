@@ -24,12 +24,13 @@ interface Props {
   onOpenPicker: () => void;
   onNew: () => void;
   onKill: () => void;
+  onHideKeyboard?: () => void;
   busyNew?: boolean;
   busyKill?: boolean;
 }
 
 export default function TerminalToolbar({
-  termId, termCwd, origin, onOpenPicker, onNew, onKill, busyNew, busyKill,
+  termId, termCwd, origin, onOpenPicker, onNew, onKill, onHideKeyboard, busyNew, busyKill,
 }: Props) {
   return (
     <View style={{
@@ -133,7 +134,14 @@ export default function TerminalToolbar({
         <X size={16} color={termId == null ? C.textMuted : C.red} strokeWidth={2} />
       </Pressable>
       <Pressable
-        onPress={() => Keyboard.dismiss()}
+        onPress={() => {
+          // Keyboard.dismiss alone doesn't work when focus lives inside the
+          // WebView. The parent passes onHideKeyboard which posts a 'blur'
+          // message into the WebView's xterm helper textarea. Call both for
+          // belt-and-suspenders coverage on Android, where dismiss works.
+          Keyboard.dismiss();
+          onHideKeyboard?.();
+        }}
         accessibilityLabel="Hide keyboard"
         style={{
           height: 36,

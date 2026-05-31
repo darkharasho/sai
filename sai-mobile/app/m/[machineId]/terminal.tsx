@@ -23,10 +23,17 @@ export default function TerminalScreen() {
   const [busyNew, setBusyNew] = useState(false);
   const [busyKill, setBusyKill] = useState(false);
   const termRef = useRef<TerminalHandle>(null);
+  // Guard against duplicate openTerminal() calls (re-renders, double-tap, or
+  // races between list-empty auto-open and an explicit Plus tap).
+  const openingRef = useRef(false);
 
   const cwd = active?.projectPath ?? null;
 
   // Auto-pick the first alive terminal for this workspace once connected.
+  // Note: we deliberately do NOT call openTerminal here. The picker / Plus
+  // button are the only paths that create terminals — this avoids the
+  // "phantom 2nd terminal" bug where mount-time openTerminal duplicated
+  // the desktop's already-running PTY.
   useEffect(() => {
     if (!client || state !== 'open' || !cwd) return;
     (async () => {
@@ -49,6 +56,8 @@ export default function TerminalScreen() {
 
   const onNew = useCallback(async () => {
     if (!client || !cwd) return;
+    if (openingRef.current) return; // prevent double-fire (rapid taps / races)
+    openingRef.current = true;
     setBusyNew(true);
     try {
       const r = await client.openTerminal(cwd, 80, 24);
@@ -57,7 +66,10 @@ export default function TerminalScreen() {
         alive: true, origin: 'phone',
       });
     } catch { /* surfaced elsewhere */ }
-    finally { setBusyNew(false); }
+    finally {
+      setBusyNew(false);
+      openingRef.current = false;
+    }
   }, [client, cwd]);
 
   const onKill = useCallback(async () => {
@@ -102,6 +114,7 @@ export default function TerminalScreen() {
         onOpenPicker={() => setPickerOpen(true)}
         onNew={onNew}
         onKill={onKill}
+        onHideKeyboard={() => termRef.current?.blur()}
         busyNew={busyNew}
         busyKill={busyKill}
       />

@@ -18,7 +18,13 @@ export default function Chat() {
   const setWorkspaces = useWorkspaces((s) => s.setWorkspaces);
   const setActiveWs = useWorkspaces((s) => s.setActive);
   const active = useWorkspaces((s) => s.activeByMachine[machine.machineId]) ?? null;
-  const [sessionId, setSessionId] = useState<string>(() => 'default');
+  // Empty sessionId == "no explicit session selected". The PWA uses this
+  // sentinel (see ConnectedShell/onPick in App.tsx + Chat.tsx) — the bridge
+  // mints a fresh session on first prompt and announces it via session.active,
+  // which we then mirror into local state. Sending the literal string
+  // 'default' as a sessionId routes prompts into a phantom "default" session
+  // the desktop never opens, so messages never reach the desktop chat.
+  const [sessionId, setSessionId] = useState<string>(() => '');
   // Follow toggle — PWA defaults to true so the desktop's active session
   // change is mirrored to the mobile UI. Kept here even without UI yet
   // because the wire layer's setFollow is the source of truth.
@@ -57,7 +63,12 @@ export default function Chat() {
     client.subscribeWorkspaceStatus();
     client.subscribeGithubWatcher();
     client.setFollow(follow);
-    client.attach({ projectPath: active.projectPath, scope: active.scope, sessionId });
+    // Only attach when we actually have a real sessionId. Empty sentinel
+    // means "new session" — let the bridge mint one on first prompt and
+    // emit session.active, which we'll mirror into local state below.
+    if (sessionId) {
+      client.attach({ projectPath: active.projectPath, scope: active.scope, sessionId });
+    }
     return () => {
       // Best-effort unsubscribe on workspace/session swap. Wire layer ignores
       // sends on closed sockets, so this is safe across reconnects.
@@ -87,17 +98,21 @@ export default function Chat() {
       }
       if (t === 'streaming_start') { setStreaming(true); return; }
       if (t === 'result' || t === 'done') { setStreaming(false); return; }
-      if (t === 'session.active' && follow) {
+      if (t === 'session.active') {
         // PWA pattern: when follow is on, the desktop driving a session
-        // change updates our active session.
+        // change updates our active session. Additionally, if our local
+        // sessionId is the empty sentinel (a brand-new chat the bridge just
+        // minted on first prompt), always adopt the server's id so
+        // subsequent attaches/prompts route correctly.
         const projectPath = (m as any).projectPath as string | undefined;
         const sid = (m as any).sessionId as string | undefined;
-        if (sid) setSessionId(sid);
-        // setActive on workspace store only if it changes.
-        if (projectPath && projectPath !== active?.projectPath) {
-          const list = useWorkspaces.getState().workspacesByMachine[machine.machineId] ?? [];
-          const next = list.find((w) => w.projectPath === projectPath);
-          if (next) setActiveWs(machine.machineId, next);
+        if (follow || !sessionId) {
+          if (sid) setSessionId(sid);
+          if (projectPath && projectPath !== active?.projectPath) {
+            const list = useWorkspaces.getState().workspacesByMachine[machine.machineId] ?? [];
+            const next = list.find((w) => w.projectPath === projectPath);
+            if (next) setActiveWs(machine.machineId, next);
+          }
         }
         return;
       }
@@ -166,14 +181,15 @@ export default function Chat() {
       }
     });
     return () => { off(); };
-  }, [client, tkey, append, follow, machine.machineId, active?.projectPath, setActiveWs]);
+  }, [client, tkey, append, follow, sessionId, machine.machineId, active?.projectPath, setActiveWs]);
 
   const onPickWorkspace = (w: Workspace) => {
     if (!client) return;
     setActiveWs(machine.machineId, w);
     client.setActiveWorkspace(w.projectPath);
-    // When not following, also reset session to default for the new workspace.
-    if (!follow) setSessionId('default');
+    // When not following, also reset session for the new workspace.
+    // Empty sentinel = "new session" — see note on sessionId state init.
+    if (!follow) setSessionId('');
   };
 
   const onAttachSession = (projectPath: string, sid: string) => {
@@ -186,15 +202,16 @@ export default function Chat() {
       setActiveWs(machine.machineId, next);
     }
     // Empty sessionId == "new session": let the server mint one and the
-    // session.active frame will reset us when follow is on; otherwise we
-    // attach to the chosen id directly.
-    const nextSid = sid || 'default';
-    setSessionId(nextSid);
-    client.attach({
-      projectPath,
-      scope: next?.scope ?? 'chat',
-      sessionId: nextSid,
-    });
+    // session.active frame will update local state. Skip the attach() call
+    // entirely in that case (matches the PWA's ConnectedShell behavior).
+    setSessionId(sid);
+    if (sid) {
+      client.attach({
+        projectPath,
+        scope: next?.scope ?? 'chat',
+        sessionId: sid,
+      });
+    }
   };
 
   return (

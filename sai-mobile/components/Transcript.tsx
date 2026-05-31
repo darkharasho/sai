@@ -11,7 +11,7 @@ import { ApprovalCard } from './ApprovalCard';
 import { AskUserQuestionView } from './AskUserQuestionView';
 import { GitHubWatcherCard } from './GitHubWatcherCard';
 import { detectWatchTargets } from '../lib/githubWatcherStore';
-import { TypingDots } from './TypingDots';
+import ThinkingAnimation from './ThinkingAnimation';
 import { FONT } from '../lib/fonts';
 
 const C = {
@@ -249,7 +249,7 @@ export function Transcript({ events, streaming = false, onApprove, onAnswerQuest
       )}
       ListFooterComponent={streaming ? (
         <View style={{ alignSelf: 'flex-start', paddingLeft: 4, paddingTop: 4 }}>
-          <TypingDots />
+          <ThinkingAnimation />
         </View>
       ) : null}
     />
