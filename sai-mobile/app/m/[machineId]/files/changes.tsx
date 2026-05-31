@@ -9,8 +9,10 @@ import {
   ArrowDown, ArrowUp, Check, ChevronLeft, GitBranch, GitCommit, X,
 } from 'lucide-react-native';
 import { useConn } from '../../../../lib/connection';
-import { useWorkspaces } from '../../../../lib/workspaceStore';
+import { useWorkspaces, type Workspace } from '../../../../lib/workspaceStore';
 import DiffViewer from '../../../../components/DiffViewer';
+
+const EMPTY_WORKSPACES: Workspace[] = [];
 import RepoPicker, { type RepoMember } from '../../../../components/RepoPicker';
 import type { WireClient, WireMsg } from '../../../../lib/wire';
 import { FONT } from '../../../../lib/fonts';
@@ -146,7 +148,7 @@ function ChangeRow({ entry, active, pending, onToggleStage, onSelect }: RowProps
 export default function Changes() {
   const { machine, client } = useConn();
   const active = useWorkspaces((s) => s.activeByMachine[machine.machineId]) ?? null;
-  const workspaces = useWorkspaces((s) => s.workspacesByMachine[machine.machineId] ?? []);
+  const workspaces = useWorkspaces((s) => s.workspacesByMachine[machine.machineId] ?? EMPTY_WORKSPACES);
   const [cwd, setCwd] = useState<string | null>(active?.projectPath ?? null);
   const [entries, setEntries] = useState<StatusEntry[] | null>(null);
   const [selected, setSelected] = useState<StatusEntry | null>(null);

@@ -9,6 +9,8 @@ import { workspaceStatusStore, displayPriority } from '../lib/workspaceStatusSto
 import { StatusDot as AnimatedDot } from './StatusDot';
 import { FONT } from '../lib/fonts';
 
+const EMPTY_WORKSPACES: Workspace[] = [];
+
 const C = {
   bgSecondary: '#0c0f11',
   border: '#1e2228',
@@ -41,7 +43,7 @@ function StatusDot({ projectPath, activeIdle }: { projectPath: string; activeIdl
 }
 
 export function WorkspacePicker({ machineId, open, onClose, onPick, currentProjectPath }: Props) {
-  const list = useWorkspaces((s) => s.workspacesByMachine[machineId] ?? []);
+  const list = useWorkspaces((s) => s.workspacesByMachine[machineId] ?? EMPTY_WORKSPACES);
   // Tick on workspace-status changes so dots refresh while the sheet is open.
   const [, setTick] = useState(0);
   useEffect(() => {

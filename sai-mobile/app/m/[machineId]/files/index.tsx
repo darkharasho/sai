@@ -8,8 +8,10 @@ import {
   Image as ImgIcon, FileCode2, FileJson, FileType, GitBranch,
 } from 'lucide-react-native';
 import { useConn } from '../../../../lib/connection';
-import { useWorkspaces } from '../../../../lib/workspaceStore';
+import { useWorkspaces, type Workspace } from '../../../../lib/workspaceStore';
 import RepoPicker, { type RepoMember } from '../../../../components/RepoPicker';
+
+const EMPTY_WORKSPACES: Workspace[] = [];
 import { FONT } from '../../../../lib/fonts';
 
 const C = {
@@ -159,7 +161,7 @@ function Row({ cwd, entry, parent, depth, machineId, client }: RowProps) {
 export default function Browse() {
   const { machine, client } = useConn();
   const active = useWorkspaces((s) => s.activeByMachine[machine.machineId]) ?? null;
-  const workspaces = useWorkspaces((s) => s.workspacesByMachine[machine.machineId] ?? []);
+  const workspaces = useWorkspaces((s) => s.workspacesByMachine[machine.machineId] ?? EMPTY_WORKSPACES);
   const [cwd, setCwd] = useState<string | null>(active?.projectPath ?? null);
   const [entries, setEntries] = useState<Entry[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
