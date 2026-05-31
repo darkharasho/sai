@@ -3,9 +3,11 @@ import { View, Text, Pressable, Modal, FlatList } from 'react-native';
 import { ChevronDown } from 'lucide-react-native';
 import { useWorkspaces, type Workspace } from '../lib/workspaceStore';
 
+const EMPTY_WORKSPACES: Workspace[] = [];
+
 export function WorkspacePicker({ machineId }: { machineId: string }) {
   const [open, setOpen] = useState(false);
-  const list = useWorkspaces((s) => s.workspacesByMachine[machineId] ?? []);
+  const list = useWorkspaces((s) => s.workspacesByMachine[machineId] ?? EMPTY_WORKSPACES);
   const active = useWorkspaces((s) => s.activeByMachine[machineId]) ?? null;
   const setActive = useWorkspaces((s) => s.setActive);
 

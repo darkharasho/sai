@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { View, Text } from 'react-native';
 import { useConn } from '../../../lib/connection';
-import { useTranscript, transcriptKey } from '../../../lib/transcriptStore';
+import { useTranscript, transcriptKey, type TranscriptEvent } from '../../../lib/transcriptStore';
+
+const EMPTY_EVENTS: TranscriptEvent[] = [];
 import { useWorkspaces } from '../../../lib/workspaceStore';
 import { Transcript } from '../../../components/Transcript';
 import { Composer } from '../../../components/Composer';
@@ -16,7 +18,7 @@ export default function Chat() {
   const active = useWorkspaces((s) => s.activeByMachine[machine.machineId]) ?? null;
   const [sessionId, setSessionId] = useState<string>(() => 'default');
   const tkey = useMemo(() => transcriptKey(machine.machineId, active?.projectPath ?? '_', sessionId), [machine.machineId, active?.projectPath, sessionId]);
-  const events = useTranscript((s) => s.byKey[tkey] ?? []);
+  const events = useTranscript((s) => s.byKey[tkey] ?? EMPTY_EVENTS);
   const append = useTranscript((s) => s.append);
 
   // Load workspaces once connected
