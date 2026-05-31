@@ -8,6 +8,9 @@ import Markdown from 'react-native-markdown-display';
 import type { TranscriptEvent } from '../lib/transcriptStore';
 import { ToolCard } from './ToolCard';
 import { ApprovalCard } from './ApprovalCard';
+import { AskUserQuestionView } from './AskUserQuestionView';
+import { GitHubWatcherCard } from './GitHubWatcherCard';
+import { detectWatchTargets } from '../lib/githubWatcherStore';
 import { TypingDots } from './TypingDots';
 
 const C = {
@@ -86,20 +89,37 @@ function formatMs(ms: number) {
 interface Props {
   events: TranscriptEvent[];
   streaming?: boolean;
-  onApprove: (toolUseId: string, decision: 'approve' | 'deny') => void;
+  onApprove: (toolUseId: string, decision: 'approve' | 'deny', modifiedCommand?: string) => void;
+  onAnswerQuestion?: (toolUseId: string, answers: Record<string, string | string[]>) => void;
 }
 
 function Row({
   event,
   result,
   onApprove,
+  onAnswerQuestion,
 }: {
   event: TranscriptEvent;
   /** The paired tool_result event (resolved by parent) for tool_use rows. */
   result?: TranscriptEvent;
-  onApprove: (toolUseId: string, decision: 'approve' | 'deny') => void;
+  onApprove: (toolUseId: string, decision: 'approve' | 'deny', modifiedCommand?: string) => void;
+  onAnswerQuestion?: (toolUseId: string, answers: Record<string, string | string[]>) => void;
 }) {
   if (event.type === 'tool_use') {
+    // AskUserQuestion tool calls render as the question form, matching the
+    // PWA's ToolCard branch. The form is shown standalone (no tool card chrome)
+    // because the answers feed back through onAnswerQuestion.
+    if (event.toolName === 'AskUserQuestion') {
+      return (
+        <View style={{ width: '100%' }}>
+          <AskUserQuestionView
+            toolUseId={event.toolUseId}
+            input={event.toolInput}
+            onAnswer={onAnswerQuestion}
+          />
+        </View>
+      );
+    }
     return (
       <View style={{ width: '100%' }}>
         <ToolCard
@@ -120,12 +140,24 @@ function Row({
     );
   }
 
+  if (event.type === 'question') {
+    return (
+      <View style={{ width: '100%' }}>
+        <AskUserQuestionView
+          toolUseId={event.toolUseId}
+          input={event.toolInput}
+          onAnswer={onAnswerQuestion}
+        />
+      </View>
+    );
+  }
+
   if (event.type === 'approval') {
     return (
       <ApprovalCard
         toolName={event.toolName}
         input={event.toolInput}
-        onDecide={(d) => onApprove(event.toolUseId ?? '', d)}
+        onDecide={(d, modifiedCommand) => onApprove(event.toolUseId ?? '', d, modifiedCommand)}
       />
     );
   }
@@ -147,6 +179,7 @@ function Row({
   }
 
   const isUser = event.type === 'user';
+  const watcherTargets = !isUser && event.text ? detectWatchTargets(event.text) : [];
   // Two-column row: 18px gutter for the role icon + flexible body.
   return (
     <View style={{ flexDirection: 'row', width: '100%', gap: 8 }}>
@@ -170,12 +203,15 @@ function Row({
         ) : (
           <Markdown style={mdStyles as any}>{event.text ?? ''}</Markdown>
         )}
+        {watcherTargets.map((t) => (
+          <GitHubWatcherCard key={t.url} messageId={event.id} target={t} />
+        ))}
       </View>
     </View>
   );
 }
 
-export function Transcript({ events, streaming = false, onApprove }: Props) {
+export function Transcript({ events, streaming = false, onApprove, onAnswerQuestion }: Props) {
   // Pair each tool_use with its tool_result so the result renders inside the
   // same card (PWA renders one card per tool call, not two).
   const resultByUseId: Record<string, TranscriptEvent> = {};
@@ -206,6 +242,7 @@ export function Transcript({ events, streaming = false, onApprove }: Props) {
           event={item}
           result={item.type === 'tool_use' && item.toolUseId ? resultByUseId[item.toolUseId] : undefined}
           onApprove={onApprove}
+          onAnswerQuestion={onAnswerQuestion}
         />
       )}
       ListFooterComponent={streaming ? (

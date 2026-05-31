@@ -2,7 +2,7 @@ import { create } from 'zustand';
 
 export interface TranscriptEvent {
   id: string;
-  type: 'user' | 'assistant' | 'tool_use' | 'tool_result' | 'approval' | 'system';
+  type: 'user' | 'assistant' | 'tool_use' | 'tool_result' | 'approval' | 'question' | 'system';
   text?: string;
   toolName?: string;
   toolInput?: unknown;

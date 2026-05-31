@@ -8,6 +8,7 @@ import { Composer, type SessionOverrides } from '../../../components/Composer';
 import { WorkspaceHeader } from '../../../components/WorkspaceHeader';
 import { NavDrawer } from '../../../components/NavDrawer';
 import { workspaceStatusStore, type WorkspaceStatus } from '../../../lib/workspaceStatusStore';
+import { githubWatcherStore } from '../../../lib/githubWatcherStore';
 import { uuid } from '../../../shims/uuid';
 import type { WireMsg } from '../../../lib/wire';
 
@@ -53,8 +54,15 @@ export default function Chat() {
     if (!client || state !== 'open' || !active) return;
     client.setActiveWorkspace(active.projectPath);
     client.subscribeWorkspaceStatus();
+    client.subscribeGithubWatcher();
     client.setFollow(follow);
     client.attach({ projectPath: active.projectPath, scope: active.scope, sessionId });
+    return () => {
+      // Best-effort unsubscribe on workspace/session swap. Wire layer ignores
+      // sends on closed sockets, so this is safe across reconnects.
+      try { client.unsubscribeGithubWatcher(); } catch { /* ignore */ }
+      try { client.unsubscribeWorkspaceStatus(); } catch { /* ignore */ }
+    };
   }, [client, state, active?.projectPath, active?.scope, sessionId, follow]);
 
   // Inbound transcript — mirror the PWA's event names (Chat.tsx).
@@ -67,6 +75,13 @@ export default function Chat() {
         const pp = (m as any).projectPath as string | undefined;
         const status = (m as any).status as WorkspaceStatus | undefined;
         if (pp && status) workspaceStatusStore.set(pp, status);
+        return;
+      }
+      if (t === 'github.watcher') {
+        const messageId = (m as any).messageId as string | undefined;
+        const url = (m as any).url as string | undefined;
+        const snapshot = (m as any).snapshot;
+        if (messageId && url && snapshot) githubWatcherStore.set(messageId, url, snapshot);
         return;
       }
       if (t === 'streaming_start') { setStreaming(true); return; }
@@ -128,6 +143,16 @@ export default function Chat() {
           id: String((m as any).id ?? `u-${Date.now()}`),
           type: 'user',
           text,
+        });
+      } else if (t === 'ask.question') {
+        // Standalone ask.question frame (non-tool_use path) — render as a
+        // question event. Matches PWA's AskUserQuestion tool handling.
+        const toolUseId = String((m as any).toolUseId ?? `q-${Date.now()}`);
+        append(tkey, {
+          id: `question-${toolUseId}`, type: 'question',
+          toolName: 'AskUserQuestion',
+          toolInput: (m as any).input ?? { questions: (m as any).questions },
+          toolUseId,
         });
       } else if (t === 'approval_needed') {
         const toolUseId = String((m as any).toolUseId);
@@ -197,10 +222,17 @@ export default function Chat() {
         <Transcript
           events={events}
           streaming={streaming}
-          onApprove={(toolUseId, decision) => {
+          onApprove={(toolUseId, decision, modifiedCommand) => {
             if (!client || !active) return;
             client.approve({
-              toolUseId, decision,
+              toolUseId, decision, modifiedCommand,
+              projectPath: active.projectPath, scope: active.scope,
+            });
+          }}
+          onAnswerQuestion={(toolUseId, answers) => {
+            if (!client || !active) return;
+            client.answerQuestion({
+              toolUseId, answers,
               projectPath: active.projectPath, scope: active.scope,
             });
           }}
