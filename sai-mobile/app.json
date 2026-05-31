@@ -8,12 +8,20 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "backgroundColor": "#0e1114",
+    "icon": "./assets/icon.png",
     "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
       "backgroundColor": "#0c0f11"
     },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.project96.sai",
+      "icon": {
+        "light": "./assets/icon.png",
+        "dark": "./assets/icon-dark.png",
+        "tinted": "./assets/icon-tinted.png"
+      },
       "infoPlist": {
         "NSCameraUsageDescription": "SAI needs camera access to scan pairing QR codes from your desktop.",
         "NSPhotoLibraryUsageDescription": "SAI needs photo access to attach images to chat messages.",
