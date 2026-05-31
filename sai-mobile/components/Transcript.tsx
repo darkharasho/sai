@@ -91,12 +91,28 @@ interface Props {
 
 function Row({
   event,
+  result,
   onApprove,
 }: {
   event: TranscriptEvent;
+  /** The paired tool_result event (resolved by parent) for tool_use rows. */
+  result?: TranscriptEvent;
   onApprove: (toolUseId: string, decision: 'approve' | 'deny') => void;
 }) {
-  if (event.type === 'tool_use' || event.type === 'tool_result') {
+  if (event.type === 'tool_use') {
+    return (
+      <View style={{ width: '100%' }}>
+        <ToolCard
+          toolName={event.toolName}
+          input={event.toolInput}
+          result={result?.toolResult}
+        />
+      </View>
+    );
+  }
+  if (event.type === 'tool_result') {
+    // Orphan result (no matching tool_use seen) — render minimally so the
+    // user still gets visibility. Normally paired into the tool_use row above.
     return (
       <View style={{ width: '100%' }}>
         <ToolCard toolName={event.toolName} input={event.toolInput} result={event.toolResult} />
@@ -160,13 +176,38 @@ function Row({
 }
 
 export function Transcript({ events, streaming = false, onApprove }: Props) {
+  // Pair each tool_use with its tool_result so the result renders inside the
+  // same card (PWA renders one card per tool call, not two).
+  const resultByUseId: Record<string, TranscriptEvent> = {};
+  const usedResultIds = new Set<string>();
+  for (const e of events) {
+    if (e.type === 'tool_result' && e.toolUseId) resultByUseId[e.toolUseId] = e;
+  }
+  const visible = events.filter((e) => {
+    if (e.type === 'tool_result' && e.toolUseId && resultByUseId[e.toolUseId]) {
+      // Only drop the result if the matching tool_use is present in the list.
+      const hasUse = events.some((u) => u.type === 'tool_use' && u.toolUseId === e.toolUseId);
+      if (hasUse) {
+        usedResultIds.add(e.id);
+        return false;
+      }
+    }
+    return true;
+  });
+  void usedResultIds;
   return (
     <FlatList
       style={{ flex: 1, backgroundColor: C.bgPrimary }}
-      data={events}
+      data={visible}
       keyExtractor={(e) => e.id}
       contentContainerStyle={{ padding: 14, gap: 12 }}
-      renderItem={({ item }) => <Row event={item} onApprove={onApprove} />}
+      renderItem={({ item }) => (
+        <Row
+          event={item}
+          result={item.type === 'tool_use' && item.toolUseId ? resultByUseId[item.toolUseId] : undefined}
+          onApprove={onApprove}
+        />
+      )}
       ListFooterComponent={streaming ? (
         <View style={{ alignSelf: 'flex-start', paddingLeft: 4, paddingTop: 4 }}>
           <TypingDots />
