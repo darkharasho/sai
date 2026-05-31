@@ -1,6 +1,8 @@
 import { FlatList, View, Text } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 import type { TranscriptEvent } from '../lib/transcriptStore';
+import { ToolCard } from './ToolCard';
+import { ApprovalCard } from './ApprovalCard';
 
 const mdStyles = {
   body: { color: '#bec6d0', fontSize: 14, lineHeight: 20 },
@@ -10,7 +12,13 @@ const mdStyles = {
   link: { color: '#38c7bd' },
 };
 
-export function Transcript({ events }: { events: TranscriptEvent[] }) {
+export function Transcript({
+  events,
+  onApprove,
+}: {
+  events: TranscriptEvent[];
+  onApprove: (toolUseId: string, decision: 'approve' | 'deny') => void;
+}) {
   return (
     <FlatList
       data={events}
@@ -31,7 +39,19 @@ export function Transcript({ events }: { events: TranscriptEvent[] }) {
             </View>
           );
         }
-        return null; // tool/approval cards added in next task
+        if (item.type === 'tool_use' || item.type === 'tool_result') {
+          return <ToolCard toolName={item.toolName} input={item.toolInput} result={item.toolResult} />;
+        }
+        if (item.type === 'approval') {
+          return (
+            <ApprovalCard
+              toolName={item.toolName}
+              input={item.toolInput}
+              onDecide={(d) => onApprove(item.toolUseId ?? '', d)}
+            />
+          );
+        }
+        return null;
       }}
     />
   );

@@ -76,7 +76,15 @@ export default function Chat() {
         <Text className="text-[#5a6a7a] text-xs flex-1" numberOfLines={1}>session: {sessionId}</Text>
       </View>
       <View className="flex-1">
-        <Transcript events={events} />
+        <Transcript
+          events={events}
+          onApprove={(toolUseId, decision) => {
+            if (!client || !active) return;
+            import('../../../lib/wire').then(({ sendApproval }) => {
+              sendApproval(client, { toolUseId, decision, projectPath: active.projectPath, scope: active.scope });
+            });
+          }}
+        />
       </View>
       <Composer
         disabled={state !== 'open' || !active}
