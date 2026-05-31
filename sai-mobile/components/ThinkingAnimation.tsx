@@ -1,9 +1,8 @@
 // React Native port of src/renderer-remote/branding/ThinkingAnimation.tsx.
-// Scope: clock [mm:ss.s] + typewriter THINKING_WORDS + blinking block cursor +
-// a static SAI-accent placeholder square. Full SaiLogo chain modes (vortex,
-// glitch, pendulum, comet, ripple, …) are skipped in v1 — too large an SVG
-// port for the mobile surface. The placeholder is a small pulsing square in
-// the accent color.
+// Renders the real SAI logo (via SaiLogo.tsx) and cycles through a chain of
+// 2–4 animation modes, matching the desktop's "chain pool" behavior. The
+// chain pool here is a subset of the desktop's 17 modes — the ones that
+// translate cleanly to React Native + Reanimated at chat-bubble scale.
 
 import { useEffect, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
@@ -15,9 +14,23 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { FONT } from '../lib/fonts';
+import SaiLogo, { type SaiLogoMode } from './SaiLogo';
 
 const ACCENT = '#c7910c';
 const MUTED = '#6b6253';
+
+const CHAIN_POOL: Array<{ mode: SaiLogoMode; dur: number }> = [
+  { mode: 'pulse',    dur: 2400 },
+  { mode: 'inhale',   dur: 4400 },
+  { mode: 'scatter',  dur: 3200 },
+  { mode: 'wave',     dur: 3600 },
+  { mode: 'pendulum', dur: 3600 },
+];
+
+function sampleChain(n: number): typeof CHAIN_POOL {
+  const shuffled = CHAIN_POOL.slice().sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, n);
+}
 
 // Verbatim from PWA's ThinkingAnimation.tsx.
 const THINKING_WORDS = [
@@ -85,11 +98,14 @@ interface Props {
   color?: string;
 }
 
-export default function ThinkingAnimation({ size = 14, color = ACCENT }: Props = {}) {
+export default function ThinkingAnimation({ size = 18, color = ACCENT }: Props = {}) {
   const [wordIndex, setWordIndex] = useState(() => Math.floor(Math.random() * THINKING_WORDS.length));
   const [charIndex, setCharIndex] = useState(0);
   const [phase, setPhase] = useState<'typing' | 'pause' | 'erasing'>('typing');
   const [clockText, setClockText] = useState('00:00.0');
+  const [chainMode, setChainMode] = useState<SaiLogoMode>(
+    () => CHAIN_POOL[Math.floor(Math.random() * CHAIN_POOL.length)].mode,
+  );
   const mountedAtRef = useRef<number>(Date.now());
 
   // Cursor blink — match PWA's 1s step blink (1↔0).
@@ -103,12 +119,35 @@ export default function ThinkingAnimation({ size = 14, color = ACCENT }: Props =
   }, [cursorOpacity]);
   const cursorStyle = useAnimatedStyle(() => ({ opacity: cursorOpacity.value }));
 
-  // Logo placeholder — slow pulse on the accent square.
-  const pulse = useSharedValue(0.5);
+  // Drive the random animation chain: pick 2–4 from the pool, play each for
+  // one cycle, then reshuffle. Brief 'static' gap between steps gives the
+  // next animation a clean restart from neutral. Mirrors desktop behavior.
   useEffect(() => {
-    pulse.value = withRepeat(withTiming(1, { duration: 1200, easing: Easing.inOut(Easing.ease) }), -1, true);
-  }, [pulse]);
-  const pulseStyle = useAnimatedStyle(() => ({ opacity: 0.5 + pulse.value * 0.5 }));
+    let cancelled = false;
+    const timeouts: ReturnType<typeof setTimeout>[] = [];
+    const wait = (ms: number) =>
+      new Promise<void>((resolve) => {
+        timeouts.push(setTimeout(resolve, ms));
+      });
+    (async () => {
+      while (!cancelled) {
+        const n = 2 + Math.floor(Math.random() * 3);
+        const chain = sampleChain(n);
+        for (const step of chain) {
+          if (cancelled) return;
+          setChainMode(step.mode);
+          await wait(step.dur);
+          if (cancelled) return;
+          setChainMode('static');
+          await wait(80);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      timeouts.forEach(clearTimeout);
+    };
+  }, []);
 
   // Clock — mm:ss.d.
   useEffect(() => {
@@ -160,17 +199,7 @@ export default function ThinkingAnimation({ size = 14, color = ACCENT }: Props =
         minHeight: 32,
       }}
     >
-      <Animated.View
-        style={[
-          {
-            width: size,
-            height: size,
-            borderRadius: 3,
-            backgroundColor: color,
-          },
-          pulseStyle,
-        ]}
-      />
+      <SaiLogo size={size} color={color} mode={chainMode} />
       <Text
         style={{
           fontFamily: FONT.mono,

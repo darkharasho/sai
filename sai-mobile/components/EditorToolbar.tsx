@@ -1,9 +1,8 @@
-// Top chrome for the read-only file viewer. Mirrors the toolbar PWA's
-// FileViewer/FileEditor share: back button, file path, language pill, copy.
-// (The PWA's keyboard-arrows EditorToolbar is irrelevant on mobile while
-// editing is a non-goal — see docs/superpowers/specs/2026-05-30-sai-mobile-ios-app-design.md.)
+// Top chrome shared by the file viewer (read-only) and the file editor.
+// Renders: back button, file path, language pill, optional Edit / Save /
+// Copy actions. The presence of action callbacks decides which buttons show.
 import { Pressable, Text, View } from 'react-native';
-import { ArrowLeft, Copy } from 'lucide-react-native';
+import { ArrowLeft, Copy, GitCompare, Pencil, Save } from 'lucide-react-native';
 import { FONT } from '../lib/fonts';
 
 const C = {
@@ -22,9 +21,16 @@ interface Props {
   onBack: () => void;
   onCopy?: () => void;
   copyState?: 'idle' | 'copied';
+  onEdit?: () => void;
+  onSave?: () => void;
+  saveState?: 'clean' | 'dirty' | 'saving';
+  onDiff?: () => void;
 }
 
-export default function EditorToolbar({ path, lang, onBack, onCopy, copyState = 'idle' }: Props) {
+export default function EditorToolbar({
+  path, lang, onBack, onCopy, copyState = 'idle',
+  onEdit, onSave, saveState = 'clean', onDiff,
+}: Props) {
   return (
     <View style={{
       flexDirection: 'row',
@@ -70,6 +76,60 @@ export default function EditorToolbar({ path, lang, onBack, onCopy, copyState = 
         }}>
           <Text style={{ fontFamily: C.mono, fontSize: 10, color: C.textMuted }}>{lang}</Text>
         </View>
+      ) : null}
+      {onDiff ? (
+        <Pressable
+          onPress={onDiff}
+          accessibilityLabel="View diff"
+          style={{
+            height: 32, width: 32, borderRadius: 8,
+            borderWidth: 1, borderColor: C.border, backgroundColor: C.bgElevated,
+            alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <GitCompare size={14} color={C.text} strokeWidth={2} />
+        </Pressable>
+      ) : null}
+      {onEdit ? (
+        <Pressable
+          onPress={onEdit}
+          accessibilityLabel="Edit file"
+          style={{
+            height: 32, paddingHorizontal: 10, borderRadius: 8,
+            borderWidth: 1, borderColor: C.border, backgroundColor: C.bgElevated,
+            flexDirection: 'row', alignItems: 'center', gap: 4,
+          }}
+        >
+          <Pencil size={13} color={C.text} strokeWidth={2} />
+          <Text style={{ fontFamily: C.mono, fontSize: 11, color: C.text }}>Edit</Text>
+        </Pressable>
+      ) : null}
+      {onSave ? (
+        <Pressable
+          onPress={onSave}
+          disabled={saveState !== 'dirty'}
+          accessibilityLabel="Save file"
+          style={{
+            height: 32, paddingHorizontal: 10, borderRadius: 8,
+            borderWidth: 1,
+            borderColor: saveState === 'dirty' ? C.accent : C.border,
+            backgroundColor: saveState === 'dirty' ? C.accent : C.bgElevated,
+            flexDirection: 'row', alignItems: 'center', gap: 4,
+            opacity: saveState === 'saving' ? 0.6 : 1,
+          }}
+        >
+          <Save
+            size={13}
+            color={saveState === 'dirty' ? '#000' : C.textMuted}
+            strokeWidth={2}
+          />
+          <Text style={{
+            fontFamily: C.mono, fontSize: 11,
+            color: saveState === 'dirty' ? '#000' : C.textMuted,
+          }}>
+            {saveState === 'saving' ? 'Saving…' : 'Save'}
+          </Text>
+        </Pressable>
       ) : null}
       {onCopy ? (
         <Pressable

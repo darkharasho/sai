@@ -103,24 +103,39 @@ export default function PickerSheet<T extends string>({
                   key={String(opt.value)}
                   onPress={() => { onSelect(opt.value); onClose(); }}
                   style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 12,
                     paddingVertical: 12,
                     paddingHorizontal: 16,
                     borderBottomWidth: 1,
                     borderBottomColor: C.border,
                   }}
                 >
-                  <Text style={{
-                    fontSize: 14,
-                    color: selected ? C.accent : C.text,
-                    fontWeight: selected ? '600' : '400',
-                  }}>
-                    {opt.label}
-                  </Text>
-                  {opt.hint ? (
-                    <Text style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>
-                      {opt.hint}
-                    </Text>
+                  {opt.color ? (
+                    <View
+                      style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: 4,
+                        backgroundColor: opt.color,
+                      }}
+                    />
                   ) : null}
+                  <View style={{ flex: 1 }}>
+                    <Text style={{
+                      fontSize: 14,
+                      color: selected ? (opt.color ?? C.accent) : C.text,
+                      fontWeight: selected ? '600' : '400',
+                    }}>
+                      {opt.label}
+                    </Text>
+                    {opt.hint ? (
+                      <Text style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>
+                        {opt.hint}
+                      </Text>
+                    ) : null}
+                  </View>
                 </Pressable>
               );
             })}

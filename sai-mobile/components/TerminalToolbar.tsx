@@ -2,8 +2,8 @@
 // opens the bottom-sheet picker, and exposes new/kill shortcuts.
 // Mirrors src/renderer-remote/terminal/TerminalToolbar.tsx visually, but
 // adapted for an RN view above an xterm.js WebView.
-import { Keyboard, Pressable, Text, View } from 'react-native';
-import { ChevronDown, ChevronsDown, Plus, X, RefreshCw } from 'lucide-react-native';
+import { Pressable, Text, View } from 'react-native';
+import { ChevronDown, Plus, X, RefreshCw } from 'lucide-react-native';
 import { FONT } from '../lib/fonts';
 
 const C = {
@@ -24,13 +24,12 @@ interface Props {
   onOpenPicker: () => void;
   onNew: () => void;
   onKill: () => void;
-  onHideKeyboard?: () => void;
   busyNew?: boolean;
   busyKill?: boolean;
 }
 
 export default function TerminalToolbar({
-  termId, termCwd, origin, onOpenPicker, onNew, onKill, onHideKeyboard, busyNew, busyKill,
+  termId, termCwd, origin, onOpenPicker, onNew, onKill, busyNew, busyKill,
 }: Props) {
   return (
     <View style={{
@@ -132,29 +131,6 @@ export default function TerminalToolbar({
         }}
       >
         <X size={16} color={termId == null ? C.textMuted : C.red} strokeWidth={2} />
-      </Pressable>
-      <Pressable
-        onPress={() => {
-          // Keyboard.dismiss alone doesn't work when focus lives inside the
-          // WebView. The parent passes onHideKeyboard which posts a 'blur'
-          // message into the WebView's xterm helper textarea. Call both for
-          // belt-and-suspenders coverage on Android, where dismiss works.
-          Keyboard.dismiss();
-          onHideKeyboard?.();
-        }}
-        accessibilityLabel="Hide keyboard"
-        style={{
-          height: 36,
-          width: 36,
-          alignItems: 'center',
-          justifyContent: 'center',
-          borderRadius: 8,
-          borderWidth: 1,
-          borderColor: C.border,
-          backgroundColor: C.bgElevated,
-        }}
-      >
-        <ChevronsDown size={16} color={C.text} strokeWidth={2} />
       </Pressable>
     </View>
   );

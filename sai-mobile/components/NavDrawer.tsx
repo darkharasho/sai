@@ -28,7 +28,7 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { Folder, Plus, Search, X } from 'lucide-react-native';
+import { Eye, EyeOff, Folder, Plus, Search, X } from 'lucide-react-native';
 import type { WireClient } from '../lib/wire';
 import { useWorkspaces, type Workspace } from '../lib/workspaceStore';
 import {
@@ -36,8 +36,7 @@ import {
   type WorkspaceStatus,
 } from '../lib/workspaceStatusStore';
 import { WorkspacePicker } from './WorkspacePicker';
-import { StatusDot } from './StatusDot';
-import { FONT } from '../lib/fonts';
+import { SessionStatusIcon, type SessionStatusKind } from './SessionStatusIcon';
 
 const C = {
   bgPrimary: '#0e1114',
@@ -53,7 +52,6 @@ const C = {
   red: '#ef4444',
   rowHover: 'rgba(255,255,255,0.04)',
   overlay: 'rgba(0,0,0,0.4)',
-  mono: FONT.mono,
 };
 
 interface SessionMeta {
@@ -295,180 +293,93 @@ export function NavDrawer({
               panelStyle,
             ]}
           >
-          {/* Header: workspace selector + close. */}
+          {/* Unified header: workspace + Follow toggle + close. */}
           <View
             style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 8,
-              paddingHorizontal: 12,
-              paddingTop: 14,
-              paddingBottom: 10,
+              paddingHorizontal: 14,
+              paddingTop: 16,
+              paddingBottom: 12,
+              gap: 12,
+              backgroundColor: C.bgSecondary,
               borderBottomWidth: 1,
               borderBottomColor: C.border,
-              backgroundColor: C.bgSecondary,
             }}
           >
-            <Pressable
-              onPress={() => setPickerOpen(true)}
-              style={({ pressed }) => ({
-                flex: 1,
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Pressable
+                onPress={() => setPickerOpen(true)}
+                style={({ pressed }) => ({
+                  flex: 1,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                  minWidth: 0,
+                  opacity: pressed ? 0.6 : 1,
+                })}
+              >
+                <Folder size={14} color={C.textMuted} strokeWidth={2} />
+                <Text
+                  numberOfLines={1}
+                  style={{ flex: 1, fontSize: 15, color: C.text, fontWeight: '600' }}
+                >
+                  {active?.label ?? 'No workspace'}
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => onFollowChange(!followEnabled)}
+                hitSlop={8}
+                accessibilityLabel={followEnabled ? 'Stop following desktop' : 'Follow desktop'}
+                style={{
+                  width: 30, height: 30, borderRadius: 6,
+                  alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                {followEnabled
+                  ? <Eye size={16} color={C.accent} />
+                  : <EyeOff size={16} color={C.textMuted} />}
+              </Pressable>
+              <Pressable
+                onPress={onClose}
+                accessibilityLabel="Close drawer"
+                hitSlop={8}
+                style={{
+                  width: 30, height: 30, borderRadius: 6,
+                  alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <X size={18} color={C.textMuted} />
+              </Pressable>
+            </View>
+
+            {/* Search field shares the header surface — no extra divider. */}
+            <View
+              style={{
                 flexDirection: 'row',
                 alignItems: 'center',
                 gap: 8,
-                paddingVertical: 6,
-                paddingHorizontal: 8,
-                borderRadius: 8,
-                borderWidth: 1,
-                borderColor: C.border,
-                opacity: pressed ? 0.7 : 1,
-                minWidth: 0,
-              })}
-            >
-              <Folder size={14} color={C.textMuted} strokeWidth={2} />
-              <Text
-                numberOfLines={1}
-                style={{ flex: 1, fontSize: 13, color: C.text, fontWeight: '500' }}
-              >
-                {active?.label ?? 'No workspace'}
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={onClose}
-              accessibilityLabel="Close drawer"
-              hitSlop={8}
-              style={{
-                width: 32,
-                height: 32,
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: 8,
-              }}
-            >
-              <X size={18} color={C.textMuted} />
-            </Pressable>
-          </View>
-
-          {/* Chats header row: title + New button. */}
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 10,
-              paddingHorizontal: 14,
-              paddingVertical: 12,
-              borderBottomWidth: 1,
-              borderBottomColor: C.border,
-              backgroundColor: C.bgSecondary,
-            }}
-          >
-            <Text
-              style={{
-                flex: 1,
-                fontSize: 13,
-                fontWeight: '600',
-                color: C.text,
-              }}
-            >
-              Chats
-            </Text>
-            <Pressable
-              onPress={handleNewSession}
-              disabled={!workspacePath}
-              accessibilityLabel="New session"
-              style={({ pressed }) => ({
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 6,
-                paddingVertical: 6,
                 paddingHorizontal: 10,
+                height: 34,
                 borderRadius: 8,
-                borderWidth: 1,
-                borderColor: C.border,
-                opacity: !workspacePath ? 0.5 : pressed ? 0.7 : 1,
-              })}
+                backgroundColor: C.bgElevated,
+              }}
             >
-              <Plus
-                size={14}
-                color={workspacePath ? C.accent : C.textMuted}
-                strokeWidth={2}
+              <Search size={13} color={C.textMuted} />
+              <TextInput
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder="Search chats"
+                placeholderTextColor={C.textMuted}
+                autoCorrect={false}
+                autoCapitalize="none"
+                style={{ flex: 1, fontSize: 13, color: C.text, paddingVertical: 0 }}
               />
-              <Text
-                style={{
-                  fontSize: 12,
-                  color: workspacePath ? C.accent : C.textMuted,
-                }}
-              >
-                New
-              </Text>
-            </Pressable>
-          </View>
-
-          {/* Search row. */}
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 6,
-              paddingHorizontal: 12,
-              paddingVertical: 8,
-              borderBottomWidth: 1,
-              borderBottomColor: C.border,
-            }}
-          >
-            <Search size={12} color={C.textMuted} />
-            <TextInput
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              placeholder="Search conversations..."
-              placeholderTextColor={C.textMuted}
-              style={{
-                flex: 1,
-                fontSize: 13,
-                color: C.text,
-                paddingVertical: 4,
-              }}
-            />
-            {searchQuery.length > 0 && (
-              <Pressable onPress={() => setSearchQuery('')} hitSlop={8}>
-                <X size={12} color={C.textMuted} />
-              </Pressable>
-            )}
-          </View>
-
-          {/* Follow desktop toggle. */}
-          <Pressable
-            onPress={() => onFollowChange(!followEnabled)}
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 10,
-              paddingHorizontal: 14,
-              paddingVertical: 10,
-              borderBottomWidth: 1,
-              borderBottomColor: C.border,
-            }}
-          >
-            <View
-              style={{
-                width: 16,
-                height: 16,
-                borderRadius: 3,
-                borderWidth: 1,
-                borderColor: followEnabled ? C.accent : C.textMuted,
-                backgroundColor: followEnabled ? C.accent : 'transparent',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              {followEnabled && (
-                <Text style={{ color: '#000', fontSize: 11, fontWeight: '700', lineHeight: 12 }}>
-                  ✓
-                </Text>
+              {searchQuery.length > 0 && (
+                <Pressable onPress={() => setSearchQuery('')} hitSlop={8}>
+                  <X size={12} color={C.textMuted} />
+                </Pressable>
               )}
             </View>
-            <Text style={{ fontSize: 12, color: C.text }}>Follow desktop</Text>
-          </Pressable>
+          </View>
 
           {/* Sessions list. */}
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingVertical: 4 }}>
@@ -513,20 +424,18 @@ export function NavDrawer({
                     : 'Pick a workspace to see chats'}
               </Text>
             )}
-            {grouped.map((group) => (
-              <View key={group.label}>
+            {grouped.map((group, gi) => (
+              <View key={group.label} style={{ marginTop: gi === 0 ? 4 : 16 }}>
                 <Text
                   style={{
-                    paddingHorizontal: 12,
-                    paddingTop: 10,
-                    paddingBottom: 4,
-                    fontSize: 10,
-                    letterSpacing: 0.5,
+                    paddingHorizontal: 14,
+                    paddingBottom: 6,
+                    fontSize: 11,
                     color: C.textMuted,
-                    fontFamily: C.mono,
+                    fontWeight: '500',
                   }}
                 >
-                  {group.label.toUpperCase()}
+                  {group.label}
                 </Text>
                 {group.sessions.map((s) => {
                   const isActive = s.id === currentSessionId;
@@ -539,15 +448,16 @@ export function NavDrawer({
                     typeof s.lastViewedAt === 'number' &&
                     s.updatedAt > s.lastViewedAt;
 
-                  // Map session-level signals to a StatusDot-style state for
-                  // animation consistency with WorkspaceHeader/Picker.
-                  let dotKind: 'approval' | 'busy' | 'unread' | 'suspended' | null = null;
-                  let dotLabel: string | null = null;
-                  if (isAwaiting) { dotKind = 'approval'; dotLabel = '!'; }
-                  else if (isError) { dotKind = 'approval'; dotLabel = '!'; }
-                  else if (isStreaming) { dotKind = 'busy'; }
-                  else if (isUnread) { dotKind = 'unread'; }
-                  else if (isSuspended) { dotKind = 'suspended'; }
+                  // PWA status-icon vocabulary, in PWA priority order.
+                  // Spacer (kind='none') keeps row text aligned when no
+                  // signal applies.
+                  const statusKind: SessionStatusKind =
+                    isAwaiting ? 'awaiting'
+                    : isError ? 'error'
+                    : isStreaming ? 'busy'
+                    : isUnread ? 'unread'
+                    : isSuspended ? 'suspended'
+                    : 'none';
 
                   return (
                     <Pressable
@@ -557,117 +467,80 @@ export function NavDrawer({
                         onClose();
                       }}
                       style={({ pressed }) => ({
-                        marginHorizontal: 6,
-                        marginVertical: 1,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 10,
                         paddingVertical: 10,
-                        paddingHorizontal: 12,
-                        borderRadius: 6,
+                        paddingLeft: 14,
+                        paddingRight: 14,
                         backgroundColor: isActive
                           ? C.accentTint
                           : pressed
                             ? C.rowHover
                             : 'transparent',
-                        borderLeftWidth: isActive ? 2 : 0,
-                        borderLeftColor: isActive ? C.accent : 'transparent',
                       })}
                     >
-                      <View
+                      <View style={{ width: 14, alignItems: 'center' }}>
+                        <SessionStatusIcon kind={statusKind} />
+                      </View>
+                      <Text
+                        numberOfLines={1}
                         style={{
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          gap: 6,
-                          marginBottom: 3,
+                          flex: 1,
+                          fontSize: 14,
+                          color: isActive ? C.accent : C.text,
+                          fontWeight: isActive || isUnread ? '600' : '400',
                         }}
                       >
-                        {dotKind ? (
-                          dotLabel ? (
-                            <View
-                              style={{
-                                width: 14,
-                                height: 14,
-                                borderRadius: 7,
-                                backgroundColor: C.amber,
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                              }}
-                            >
-                              <Text
-                                style={{
-                                  color: '#000',
-                                  fontSize: 10,
-                                  fontWeight: '800',
-                                  lineHeight: 12,
-                                }}
-                              >
-                                {dotLabel}
-                              </Text>
-                            </View>
-                          ) : (
-                            <StatusDot
-                              kind={dotKind}
-                              size={9}
-                              shape="square"
-                            />
-                          )
-                        ) : (
-                          <View style={{ width: 9, height: 9 }} />
-                        )}
-                        <Text
-                          numberOfLines={1}
-                          style={{
-                            flex: 1,
-                            fontSize: 13,
-                            fontWeight: '500',
-                            color: C.text,
-                          }}
-                        >
-                          {s.title || 'Untitled'}
-                        </Text>
-                        {isActive && (
-                          <Text
-                            style={{
-                              fontSize: 9,
-                              backgroundColor: C.accent,
-                              color: '#000',
-                              paddingVertical: 1,
-                              paddingHorizontal: 5,
-                              borderRadius: 3,
-                              fontWeight: '600',
-                              overflow: 'hidden',
-                            }}
-                          >
-                            ACTIVE
-                          </Text>
-                        )}
-                      </View>
-                      <View
-                        style={{
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          gap: 6,
-                          opacity: 0.75,
-                        }}
-                      >
-                        {typeof s.messageCount === 'number' && (
-                          <>
-                            <Text style={{ fontSize: 11, color: C.textMuted }}>
-                              {s.messageCount} msgs
-                            </Text>
-                            <Text style={{ fontSize: 11, color: C.textMuted, opacity: 0.5 }}>
-                              ·
-                            </Text>
-                          </>
-                        )}
-                        <Text style={{ fontSize: 11, color: C.textMuted }}>
-                          {formatRelative(s.updatedAt)}
-                        </Text>
-                      </View>
+                        {s.title || 'Untitled'}
+                      </Text>
+                      <Text style={{ fontSize: 11, color: C.textMuted }}>
+                        {formatRelative(s.updatedAt)}
+                      </Text>
                     </Pressable>
                   );
                 })}
               </View>
             ))}
+            <View style={{ height: 80 }} />
           </ScrollView>
+
+          {/* Floating "New chat" button — primary action, always reachable. */}
+          <View
+            pointerEvents="box-none"
+            style={{
+              position: 'absolute',
+              left: 0, right: 0, bottom: 0,
+              padding: 14,
+              alignItems: 'flex-end',
+            }}
+          >
+            <Pressable
+              onPress={handleNewSession}
+              disabled={!workspacePath}
+              accessibilityLabel="New chat"
+              style={({ pressed }) => ({
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 8,
+                paddingVertical: 10,
+                paddingHorizontal: 14,
+                borderRadius: 999,
+                backgroundColor: C.accent,
+                opacity: !workspacePath ? 0.4 : pressed ? 0.85 : 1,
+                shadowColor: '#000',
+                shadowOpacity: 0.35,
+                shadowRadius: 8,
+                shadowOffset: { width: 0, height: 4 },
+                elevation: 4,
+              })}
+            >
+              <Plus size={16} color="#000" strokeWidth={2.5} />
+              <Text style={{ fontSize: 13, color: '#000', fontWeight: '600' }}>
+                New chat
+              </Text>
+            </Pressable>
+          </View>
 
           <WorkspacePicker
             machineId={machineId}

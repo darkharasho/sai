@@ -3,14 +3,18 @@
 // model picker sheet, perm-mode picker sheet, send/stop button. Keeps the
 // existing expo-image-picker + manipulator path (resize to 1568px) and
 // extends it to multi-attach.
-import { useState } from 'react';
-import { Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import {
+  Image, Keyboard, Platform, Pressable, ScrollView, Text, TextInput, View,
+  type KeyboardEvent,
+} from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import {
   ChevronDown, ChevronUp, Minus, Paperclip, Send, Shield, ShieldOff, Square, X,
 } from 'lucide-react-native';
 import PickerSheet from './PickerSheet';
+import { SaiGradientBorder } from './SaiGradientBorder';
 import { FONT } from '../lib/fonts';
 
 export type EffortLevel = 'low' | 'medium' | 'high';
@@ -72,6 +76,21 @@ export function Composer({
   const [text, setText] = useState('');
   const [images, setImages] = useState<string[]>([]);
   const [sheet, setSheet] = useState<Sheet>(null);
+  const [focused, setFocused] = useState(false);
+  // Keyboard lift — chat.tsx wraps us in KeyboardAvoidingView with an offset
+  // tuned for the navigation header, but that calc doesn't account for the
+  // bottom Tabs bar on iOS, which is what was clipping the Send button.
+  // Listen to the real keyboard height and apply it as padding here.
+  const [kbPad, setKbPad] = useState(0);
+  useEffect(() => {
+    const showName = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideName = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const onShow = (e: KeyboardEvent) => setKbPad(e.endCoordinates.height);
+    const onHide = () => setKbPad(0);
+    const s1 = Keyboard.addListener(showName, onShow);
+    const s2 = Keyboard.addListener(hideName, onHide);
+    return () => { s1.remove(); s2.remove(); };
+  }, []);
 
   const pick = async () => {
     if (images.length >= MAX_ATTACHMENTS) return;
@@ -133,7 +152,7 @@ export function Composer({
       style={{
         paddingTop: 8,
         paddingHorizontal: 10,
-        paddingBottom: 12,
+        paddingBottom: 12 + kbPad,
         gap: 6,
         borderTopWidth: 1,
         borderTopColor: C.border,
@@ -177,25 +196,31 @@ export function Composer({
         </ScrollView>
       )}
 
-      <TextInput
-        value={text}
-        onChangeText={setText}
-        placeholder={streaming ? 'Responding…' : 'Message'}
-        placeholderTextColor={C.textMuted}
-        editable={!disabled}
-        multiline
-        style={{
-          backgroundColor: C.bgInput,
-          color: C.text,
-          borderWidth: 1,
-          borderColor: C.border,
-          borderRadius: 8,
-          paddingHorizontal: 12,
-          paddingVertical: 10,
-          fontSize: 16,
-          maxHeight: 120,
-        }}
-      />
+      <SaiGradientBorder focused={focused} radius={14} strokeWidth={2}>
+        <TextInput
+          value={text}
+          onChangeText={setText}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          placeholder={streaming ? 'Responding…' : 'Message'}
+          placeholderTextColor={C.textMuted}
+          editable={!disabled}
+          multiline
+          style={{
+            backgroundColor: C.bgInput,
+            color: C.text,
+            borderRadius: 12,
+            paddingHorizontal: 14,
+            paddingVertical: 10,
+            fontSize: 16,
+            maxHeight: 120,
+            // 2px inset inside the gradient ring so the stroke sits flush
+            // against the bg-input fill, matching the desktop's
+            // mask-composite ring.
+            margin: 2,
+          }}
+        />
+      </SaiGradientBorder>
 
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
         <Pressable

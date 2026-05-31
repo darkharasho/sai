@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { KeyboardAvoidingView, Platform, View } from 'react-native';
+import { View } from 'react-native';
 import { useConn } from '../../../lib/connection';
 import { useTranscript, transcriptKey, type TranscriptEvent } from '../../../lib/transcriptStore';
 import { useWorkspaces, type Workspace } from '../../../lib/workspaceStore';
@@ -97,7 +97,22 @@ export default function Chat() {
         return;
       }
       if (t === 'streaming_start') { setStreaming(true); return; }
-      if (t === 'result' || t === 'done') { setStreaming(false); return; }
+      if (t === 'result' || t === 'done') {
+        setStreaming(false);
+        // Stamp duration on the last assistant event so the bubble can show
+        // the desktop's `[Nms]` tag. Only `result` carries duration_ms.
+        if (t === 'result' && typeof (m as any).duration_ms === 'number') {
+          const ms = (m as any).duration_ms as number;
+          const list = useTranscript.getState().byKey[tkey] ?? [];
+          for (let i = list.length - 1; i >= 0; i--) {
+            if (list[i].type === 'assistant') {
+              append(tkey, { ...list[i], durationMs: ms });
+              break;
+            }
+          }
+        }
+        return;
+      }
       if (t === 'session.active') {
         // PWA pattern: when follow is on, the desktop driving a session
         // change updates our active session. Additionally, if our local
@@ -215,11 +230,11 @@ export default function Chat() {
   };
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-      style={{ flex: 1, backgroundColor: '#0e1114' }}
-    >
+    // No KeyboardAvoidingView here: Composer applies its own bottom padding
+    // via a keyboard listener (the same approach TerminalInput uses) because
+    // KAV doesn't compose well with expo-router's bottom Tabs on iOS — the
+    // tab bar height pushed the input panel below the keyboard.
+    <View style={{ flex: 1, backgroundColor: '#0e1114' }}>
       <WorkspaceHeader
         machineId={machine.machineId}
         onOpenNav={() => setNavOpen(true)}
@@ -287,6 +302,6 @@ export default function Chat() {
           client.interrupt(active.projectPath, active.scope);
         }}
       />
-    </KeyboardAvoidingView>
+    </View>
   );
 }

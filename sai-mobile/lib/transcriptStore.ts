@@ -10,6 +10,9 @@ export interface TranscriptEvent {
   toolUseId?: string;
   images?: string[];
   ts?: number;
+  /** Set on assistant rows when a `result` envelope arrives so we can render
+   *  the desktop-style `[Nms]` tag above the bubble. */
+  durationMs?: number;
 }
 
 interface State {

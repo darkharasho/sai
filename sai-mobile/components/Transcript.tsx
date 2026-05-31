@@ -12,6 +12,7 @@ import { AskUserQuestionView } from './AskUserQuestionView';
 import { GitHubWatcherCard } from './GitHubWatcherCard';
 import { detectWatchTargets } from '../lib/githubWatcherStore';
 import ThinkingAnimation from './ThinkingAnimation';
+import SaiLogo from './SaiLogo';
 import { FONT } from '../lib/fonts';
 
 const C = {
@@ -81,6 +82,22 @@ const mdStyles = {
   },
   hr: { backgroundColor: C.border, height: 1, marginVertical: 10 },
   strong: { fontWeight: '600', color: C.text },
+  // GFM tables — react-native-markdown-display tokenizes table/thead/tbody/
+  // tr/th/td out of the box; without explicit styles they render as raw
+  // unstyled rows. These mirror the PWA's table CSS.
+  table: {
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 6,
+    marginVertical: 8,
+    overflow: 'hidden',
+  },
+  thead: { backgroundColor: C.bgInput },
+  tr: { borderBottomWidth: 1, borderBottomColor: C.border, flexDirection: 'row' },
+  th: { padding: 8, fontWeight: '600', color: C.text, flex: 1 },
+  td: { padding: 8, color: C.text, flex: 1 },
+  // Inline images embedded in assistant responses (`![alt](url)`).
+  image: { maxWidth: '100%', borderRadius: 6, marginVertical: 6 },
 };
 
 function formatMs(ms: number) {
@@ -187,12 +204,21 @@ function Row({
       <View style={{ width: 18, alignItems: 'center', paddingTop: 2 }}>
         {isUser
           ? <Terminal size={14} color={C.green} strokeWidth={2.5} />
-          // No SaiLogo on mobile yet — render an accent dot as a stand-in.
-          : <View style={{
-              width: 8, height: 8, borderRadius: 4, backgroundColor: C.accent, marginTop: 4,
-            }} />}
+          : <SaiLogo mode="static" size={16} color={C.accent} />}
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
+        {!isUser && typeof event.durationMs === 'number' && (
+          <Text
+            style={{
+              color: C.textMuted,
+              fontSize: 10,
+              fontFamily: C.mono,
+              marginBottom: 4,
+            }}
+          >
+            [{formatMs(event.durationMs)}]
+          </Text>
+        )}
         {isUser ? (
           // Preserve whitespace (PWA uses <pre> with white-space:pre-wrap).
           // RN Text is already whitespace-preserving by default.

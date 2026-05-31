@@ -124,6 +124,18 @@ export default function FileView() {
         onBack={() => router.back()}
         onCopy={data ? onCopy : undefined}
         copyState={copyState}
+        onEdit={data && data.content.length <= 256 * 1024 ? () => {
+          router.push({
+            pathname: `/m/${machine.machineId}/files/edit`,
+            params: { path, cwd: cwd ?? '' },
+          });
+        } : undefined}
+        onDiff={cwd ? () => {
+          router.push({
+            pathname: `/m/${machine.machineId}/files/diff`,
+            params: { path, cwd },
+          });
+        } : undefined}
       />
       {err ? (
         <Text style={{ color: C.red, padding: 16 }}>{err}</Text>

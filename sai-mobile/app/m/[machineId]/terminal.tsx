@@ -2,10 +2,11 @@
 // Mirrors src/renderer-remote/terminal/Terminal.tsx wiring; reuses TerminalView
 // (a thin WebView host) plus the new TerminalToolbar + TerminalPicker.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { useConn } from '../../../lib/connection';
 import { useWorkspaces } from '../../../lib/workspaceStore';
 import { TerminalView, type TerminalHandle } from '../../../components/TerminalView';
+import { TerminalInput } from '../../../components/TerminalInput';
 import TerminalToolbar from '../../../components/TerminalToolbar';
 import TerminalPicker, { type TerminalSummary } from '../../../components/TerminalPicker';
 import type { WireMsg } from '../../../lib/wire';
@@ -103,10 +104,10 @@ export default function TerminalScreen() {
   }
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={{ flex: 1, backgroundColor: C.bgPrimary }}
-    >
+    // No KeyboardAvoidingView here: TerminalInput owns its own keyboard
+    // listener and applies bottom padding to lift itself above the keyboard.
+    // KAV doesn't compose well with react-navigation's bottom Tabs on iOS.
+    <View style={{ flex: 1, backgroundColor: C.bgPrimary }}>
       <TerminalToolbar
         termId={term?.termId ?? null}
         termCwd={term?.cwd}
@@ -114,7 +115,6 @@ export default function TerminalScreen() {
         onOpenPicker={() => setPickerOpen(true)}
         onNew={onNew}
         onKill={onKill}
-        onHideKeyboard={() => termRef.current?.blur()}
         busyNew={busyNew}
         busyKill={busyKill}
       />
@@ -125,16 +125,21 @@ export default function TerminalScreen() {
           </Text>
         </View>
       ) : (
-        <TerminalView
-          key={term.termId}
-          ref={termRef}
-          onReady={(cols, rows) => {
-            if (!client) return;
-            client.attachTerminal(term.termId, cols, rows).catch(() => {});
-          }}
-          onInput={(data) => { if (client) client.inputTerminal(term.termId, data); }}
-          onResize={(cols, rows) => { if (client) client.resizeTerminal(term.termId, cols, rows); }}
-        />
+        <>
+          <TerminalView
+            key={term.termId}
+            ref={termRef}
+            onReady={(cols, rows) => {
+              if (!client) return;
+              client.attachTerminal(term.termId, cols, rows).catch(() => {});
+            }}
+            onResize={(cols, rows) => { if (client) client.resizeTerminal(term.termId, cols, rows); }}
+          />
+          <TerminalInput
+            disabled={!client}
+            onInput={(data) => { if (client) client.inputTerminal(term.termId, data); }}
+          />
+        </>
       )}
       <TerminalPicker
         open={pickerOpen}
@@ -145,6 +150,6 @@ export default function TerminalScreen() {
         onPick={onPickFromSheet}
         onKill={onKillFromSheet}
       />
-    </KeyboardAvoidingView>
+    </View>
   );
 }
