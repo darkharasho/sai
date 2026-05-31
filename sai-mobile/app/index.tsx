@@ -50,7 +50,7 @@ export default function Index() {
           <MachineRow
             m={item}
             online={item.lastSeenAt != null && (now - item.lastSeenAt) < 60_000}
-            onPress={() => router.push(`/m/${item.machineId}/chat`)}
+            onPress={() => router.push(`/m/${item.machineId}`)}
             onLongPress={() => Alert.alert(item.label, undefined, [
               { text: 'Unpair', style: 'destructive', onPress: async () => {
                 const tok = await getToken(item.machineId);

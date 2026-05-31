@@ -9,6 +9,9 @@ dist/
 web-build/
 expo-env.d.ts
 
+# Bundled PWA — produced by `npm run sync-pwa`. Build artifact, not source.
+assets/pwa/
+
 # Native
 .kotlin/
 *.orig.*
