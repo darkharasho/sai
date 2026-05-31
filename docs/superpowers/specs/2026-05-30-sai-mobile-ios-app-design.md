@@ -184,7 +184,7 @@ WebView holds the xterm.js buffer per `(machineId, terminalId)`. Switching termi
 
 - EAS Build, `eas.json` configured for `development` and `preview` (TestFlight) profiles.
 - Apple Developer account ($99/yr) — assume already in place from otto.
-- Bundle identifier: `com.sai.mobile` (confirm with user before first build).
+- Bundle identifier: `com.project96.sai`.
 - TestFlight from day 1, App Store submission deferred.
 
 ## Theme system
@@ -198,7 +198,6 @@ Port `src/themes.ts` (3 themes: default, midnight, steel) to NativeWind. Each th
 3. **Runtime theme switcher on mobile** — v1.1.
 4. **Detox or Maestro E2E** — when manual testing becomes the bottleneck.
 5. **Push notifications** for approvals / new messages — needs APNS setup and a server-side push from the bridge.
-6. **Bundle identifier confirmation** before first EAS Build.
 
 ## Reference
 
