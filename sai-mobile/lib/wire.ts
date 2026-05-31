@@ -142,3 +142,79 @@ export function connectWire({ baseUrl, token }: ConnectArgs): WireClient {
     },
   };
 }
+
+export interface ChatPromptArgs {
+  text: string;
+  projectPath: string;
+  scope?: string;
+  model?: string;
+  effort?: string;
+  permMode?: string;
+  images?: string[];
+}
+
+export interface ChatApprovalArgs {
+  toolUseId: string;
+  decision: 'approve' | 'deny';
+  modifiedCommand?: string;
+  projectPath: string;
+  scope?: string;
+}
+
+export function sendPrompt(c: WireClient, args: ChatPromptArgs): void {
+  c.send({ type: 'chat:prompt', ...args });
+}
+export function sendApproval(c: WireClient, args: ChatApprovalArgs): void {
+  c.send({ type: 'chat:approve', ...args });
+}
+export function attachToSession(c: WireClient, args: { projectPath: string; scope?: string; sessionId: string }): void {
+  c.send({ type: 'attach', ...args });
+}
+export function setActiveWorkspace(c: WireClient, projectPath: string): void {
+  c.send({ type: 'workspace:set', projectPath });
+}
+export function subscribeWorkspaceStatus(c: WireClient): void { c.send({ type: 'workspace:status:subscribe' }); }
+export function interrupt(c: WireClient, projectPath: string, scope?: string): void {
+  c.send({ type: 'chat:interrupt', projectPath, scope });
+}
+export function termInput(c: WireClient, termId: number, data: string): void {
+  c.send({ type: 'term:input', termId, data });
+}
+export function termResize(c: WireClient, termId: number, cols: number, rows: number): void {
+  c.send({ type: 'term:resize', termId, cols, rows });
+}
+export function termAttach(c: WireClient, termId: number, cols: number, rows: number): void {
+  c.send({ type: 'term:attach', termId, cols, rows });
+}
+export function termDetach(c: WireClient, termId: number): void {
+  c.send({ type: 'term:detach', termId });
+}
+
+async function authedJson<T>(baseUrl: string, token: string, path: string, init?: RequestInit): Promise<T> {
+  const r = await fetch(`${baseUrl}${path}`, {
+    ...init,
+    headers: { ...(init?.headers ?? {}), authorization: `Bearer ${token}` },
+  });
+  if (!r.ok) throw new Error(`${path} failed: ${r.status}`);
+  return r.json();
+}
+
+export const api = {
+  listWorkspaces: (b: string, t: string) => authedJson<unknown[]>(b, t, '/workspaces'),
+  listSessions: (b: string, t: string, projectPath: string) =>
+    authedJson<unknown[]>(b, t, `/sessions?projectPath=${encodeURIComponent(projectPath)}`),
+  listFiles: (b: string, t: string, cwd: string, path: string) =>
+    authedJson<unknown[]>(b, t, `/files?cwd=${encodeURIComponent(cwd)}&path=${encodeURIComponent(path)}`),
+  readFile: (b: string, t: string, cwd: string, path: string) =>
+    authedJson<{ content?: string; signedUrl?: string; encoding: 'text' | 'binary'; size: number; lang?: string; mime?: string; mtime?: number; sha?: string; }>(
+      b, t, `/files/read?cwd=${encodeURIComponent(cwd)}&path=${encodeURIComponent(path)}`
+    ),
+  statusFiles: (b: string, t: string, cwd: string) =>
+    authedJson<unknown[]>(b, t, `/git/status?cwd=${encodeURIComponent(cwd)}`),
+  diffFile: (b: string, t: string, cwd: string, path: string, staged = false) =>
+    authedJson<{ diff: string; lang?: string }>(b, t, `/git/diff?cwd=${encodeURIComponent(cwd)}&path=${encodeURIComponent(path)}&staged=${staged ? '1' : '0'}`),
+  listTerminals: (b: string, t: string, cwd: string) =>
+    authedJson<Array<{ termId: number; cwd: string; cols: number; rows: number; alive: boolean; origin: 'phone' | 'desktop' }>>(
+      b, t, `/terminals?cwd=${encodeURIComponent(cwd)}`
+    ),
+};
