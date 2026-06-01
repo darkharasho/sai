@@ -7,6 +7,18 @@ import { getShikiHighlighter, getActiveHighlightTheme } from '../../themes';
 import { DOT_MASK_URL } from '../../lib/assets';
 import { owningLink } from '../../lib/syntheticRoot';
 
+function parseMcpName(name: string): { server: string; tool: string } | null {
+  if (!name.startsWith('mcp__')) return null;
+  const rest = name.slice(5);
+  const idx = rest.indexOf('__');
+  if (idx < 0) return null;
+  let server = rest.slice(0, idx);
+  const tool = rest.slice(idx + 2);
+  if (server.startsWith('plugin_')) server = server.slice(7);
+  const parts = server.split('_');
+  return { server: parts[parts.length - 1], tool };
+}
+
 function formatMs(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
   const m = Math.floor(totalSec / 60);
@@ -656,7 +668,18 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             </motion.span>
           </AnimatePresence>
           <Icon size={14} className="tool-call-icon" />
-          <span className={`tool-call-name${sigClass ? ` ${sigClass}` : ''}`}>{toolCall.name}</span>
+          {(() => {
+            const mcp = parseMcpName(toolCall.name);
+            if (mcp) {
+              return (
+                <>
+                  <span className={`tool-call-name${sigClass ? ` ${sigClass}` : ''}`}>{mcp.tool}</span>
+                  <span className="tool-call-mcp-chip" title={`MCP server: ${mcp.server}`}>{mcp.server}</span>
+                </>
+              );
+            }
+            return <span className={`tool-call-name${sigClass ? ` ${sigClass}` : ''}`}>{toolCall.name}</span>;
+          })()}
           {(() => {
             const linkName = toolProjectLinkName(toolCall, metaRuntime);
             if (!linkName) return null;
@@ -808,6 +831,18 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             background: color-mix(in srgb, var(--accent) 18%, transparent);
             color: var(--accent);
             border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
+            flex-shrink: 0;
+          }
+          .tool-call-mcp-chip {
+            font-size: 9px;
+            padding: 2px 7px;
+            border-radius: 4px;
+            background: color-mix(in srgb, var(--text-muted) 15%, transparent);
+            color: var(--text-secondary);
+            border: 1px solid color-mix(in srgb, var(--text-muted) 35%, transparent);
             font-weight: 600;
             letter-spacing: 0.3px;
             text-transform: uppercase;

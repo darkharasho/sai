@@ -59,6 +59,18 @@ function summarize(name: string, input?: Record<string, unknown>): Summary {
   return { label: keys.length ? keys.join(', ') : '' };
 }
 
+function parseMcpName(name: string): { server: string; tool: string } | null {
+  if (!name.startsWith('mcp__')) return null;
+  const rest = name.slice(5);
+  const idx = rest.indexOf('__');
+  if (idx < 0) return null;
+  let server = rest.slice(0, idx);
+  const tool = rest.slice(idx + 2);
+  if (server.startsWith('plugin_')) server = server.slice(7);
+  const parts = server.split('_');
+  return { server: parts[parts.length - 1], tool };
+}
+
 function iconFor(name: string) {
   const lower = name.toLowerCase();
   if (lower === 'bash' || lower.includes('terminal')) return Terminal;
@@ -73,6 +85,8 @@ function iconFor(name: string) {
 export default function ToolCard({ name, input, result, status, toolUseId, onAnswerQuestion }: Props) {
   const [expanded, setExpanded] = useState(true);
   const summary = summarize(name, input);
+  const mcp = parseMcpName(name);
+  const displayName = mcp ? mcp.tool : name;
   const Icon = status === 'error' ? AlertCircle : iconFor(name);
   const accentColor = status === 'error' ? 'var(--red)' : status === 'done' ? 'var(--green)' : 'var(--accent)';
 
@@ -117,8 +131,28 @@ export default function ToolCard({ name, input, result, status, toolUseId, onAns
           color: 'var(--accent)',
           flexShrink: 0,
         }}>
-          {name}
+          {displayName}
         </span>
+        {mcp && (
+          <span
+            title={`MCP server: ${mcp.server}`}
+            style={{
+              fontFamily: '"Geist Mono", ui-monospace, monospace',
+              fontSize: 9,
+              padding: '2px 7px',
+              borderRadius: 4,
+              background: 'color-mix(in srgb, var(--text-muted) 15%, transparent)',
+              color: 'var(--text-secondary)',
+              border: '1px solid color-mix(in srgb, var(--text-muted) 35%, transparent)',
+              fontWeight: 600,
+              letterSpacing: '0.3px',
+              textTransform: 'uppercase',
+              flexShrink: 0,
+            }}
+          >
+            {mcp.server}
+          </span>
+        )}
         {summary.label && (
           <span
             style={{

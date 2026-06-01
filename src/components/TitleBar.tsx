@@ -172,10 +172,10 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
             const scope = (set: Set<string> | undefined, want: 'meta' | 'project') =>
               set ? [...set].filter(p => want === 'meta' ? metaRoots.has(p) : !metaRoots.has(p)) : [];
             const projApproval = scope(approvalWorkspaces, 'project').length;
-            const projCompleted = scope(completedWorkspaces, 'project').length;
+            const projCompleted = scope(completedWorkspaces, 'project').filter(p => !busyWorkspaces?.has(p)).length;
             const projBusy = scope(busyWorkspaces, 'project').filter(p => p !== projectPath).length;
             const metaApproval = scope(approvalWorkspaces, 'meta').length;
-            const metaCompleted = scope(completedWorkspaces, 'meta').length;
+            const metaCompleted = scope(completedWorkspaces, 'meta').filter(p => !busyWorkspaces?.has(p)).length;
             const metaBusy = scope(busyWorkspaces, 'meta').filter(p => p !== projectPath).length;
 
             const projectIndicator = projApproval > 0
@@ -215,7 +215,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                 set ? [...set].filter(p => want === 'meta' ? metaRoots.has(p) : !metaRoots.has(p)) : [];
               const tabIndicator = (kind: 'meta' | 'project') => {
                 const approval = filter(approvalWorkspaces, kind).length;
-                const completed = filter(completedWorkspaces, kind).length;
+                const completed = filter(completedWorkspaces, kind).filter(p => !busyWorkspaces?.has(p)).length;
                 const busy = filter(busyWorkspaces, kind).length;
                 if (approval === 0 && completed === 0 && busy === 0) return null;
                 const cls = approval > 0
@@ -266,7 +266,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                             <span className="dropdown-item-name">{basename(w.projectPath)}</span>
                             {approvalWorkspaces?.has(w.projectPath)
                               ? <span className="workspace-approval-label">Approval needed</span>
-                              : completedWorkspaces?.has(w.projectPath) && <span className="workspace-completed-icon" title="Response complete">!</span>}
+                              : !busyWorkspaces?.has(w.projectPath) && completedWorkspaces?.has(w.projectPath) && <span className="workspace-completed-icon" title="Response complete">!</span>}
                             <span className="dropdown-item-path">{w.projectPath}</span>
                           </button>
                           {w.projectPath !== projectPath && (<>
@@ -407,7 +407,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                             </div>
                             {approvalWorkspaces?.has(meta.syntheticRoot)
                               ? <span className="workspace-approval-label">Approval needed</span>
-                              : completedWorkspaces?.has(meta.syntheticRoot) && <span className="workspace-completed-icon" title="Response complete">!</span>}
+                              : !busyWorkspaces?.has(meta.syntheticRoot) && completedWorkspaces?.has(meta.syntheticRoot) && <span className="workspace-completed-icon" title="Response complete">!</span>}
                           </button>
                           <button
                             className="meta-workspace-manage-btn"
@@ -450,7 +450,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                               </div>
                               {approvalWorkspaces?.has(meta.syntheticRoot)
                                 ? <span className="workspace-approval-label">Approval needed</span>
-                                : completedWorkspaces?.has(meta.syntheticRoot) && <span className="workspace-completed-icon" title="Response complete">!</span>}
+                                : !busyWorkspaces?.has(meta.syntheticRoot) && completedWorkspaces?.has(meta.syntheticRoot) && <span className="workspace-completed-icon" title="Response complete">!</span>}
                             </button>
                             <button
                               className="meta-workspace-manage-btn"
