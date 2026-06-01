@@ -26,7 +26,7 @@ function Header() {
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 12,
-        paddingVertical: 8,
+        paddingVertical: 10,
         borderBottomWidth: 1,
         borderBottomColor: '#1e2228',
         backgroundColor: '#0c0f11',

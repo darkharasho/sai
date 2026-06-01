@@ -91,10 +91,11 @@ export const TerminalView = forwardRef<TerminalHandle, TerminalViewProps>(functi
     <WebView
       ref={wv}
       originWhitelist={['*']}
-      source={{ html: HTML }}
+      source={{ html: HTML, baseUrl: 'https://cdn.jsdelivr.net' }}
       onMessage={onMessage}
       javaScriptEnabled
       domStorageEnabled
+      allowsInlineMediaPlayback
       style={{ flex: 1, backgroundColor: '#0e1114' }}
       hideKeyboardAccessoryView
     />

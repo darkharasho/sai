@@ -1,5 +1,6 @@
 import { View, Text, Pressable } from 'react-native';
 import type { Machine } from '../lib/machines';
+import { OsIcon, guessOs } from './OsIcon';
 
 function ageLabel(ts: number | null): string {
   if (!ts) return 'never';
@@ -13,9 +14,18 @@ function ageLabel(ts: number | null): string {
 export function MachineRow({ m, online, onPress, onLongPress }: {
   m: Machine; online: boolean; onPress: () => void; onLongPress: () => void;
 }) {
+  const os = guessOs(m.label, m.hostUrl);
+  const iconColor = online ? '#00a884' : '#475262';
+
   return (
     <Pressable onPress={onPress} onLongPress={onLongPress} className="bg-[#1c2027] rounded-xl p-4 mb-3 flex-row items-center gap-3">
-      <View className={`w-2.5 h-2.5 rounded-full ${online ? 'bg-[#00a884]' : 'bg-[#475262]'}`} />
+      <View style={{
+        width: 40, height: 40, borderRadius: 10,
+        backgroundColor: online ? 'rgba(0,168,132,0.12)' : 'rgba(71,82,98,0.15)',
+        alignItems: 'center', justifyContent: 'center',
+      }}>
+        <OsIcon os={os} size={22} color={iconColor} />
+      </View>
       <View className="flex-1">
         <Text className="text-white text-base font-medium">{m.label}</Text>
         <Text className="text-[#a0acbb] text-xs">{m.hostUrl}</Text>

@@ -1,8 +1,8 @@
 // Git changes (staged + unstaged), per-row stage/unstage, top-bar commit/push/pull.
 // Mirrors src/renderer-remote/files/ChangesView.tsx + Git.tsx, RN-ified.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Modal, Pressable, ScrollView, Text, TextInput, View,
+  Animated, ActivityIndicator, Dimensions, Modal, Pressable, ScrollView, Text, TextInput, View,
 } from 'react-native';
 import { router } from 'expo-router';
 import {
@@ -161,6 +161,14 @@ export default function Changes() {
   const [commitOpen, setCommitOpen] = useState(false);
   const [commitMessage, setCommitMessage] = useState('');
   const [notes, setNotes] = useState<Note[]>([]);
+  const commitSlide = useRef(new Animated.Value(Dimensions.get('window').height)).current;
+
+  useEffect(() => {
+    if (commitOpen) {
+      commitSlide.setValue(Dimensions.get('window').height);
+      Animated.spring(commitSlide, { toValue: 0, damping: 20, stiffness: 200, useNativeDriver: true }).start();
+    }
+  }, [commitOpen]);
 
   const effectiveCwd = cwd ?? active?.projectPath ?? null;
   const { branch, ahead, behind, refresh: refreshHeader } = useStatusHeader(client, effectiveCwd);
@@ -484,13 +492,14 @@ export default function Changes() {
       <Modal
         visible={commitOpen}
         transparent
-        animationType="slide"
+        animationType="none"
         onRequestClose={() => setCommitOpen(false)}
       >
         <Pressable
           onPress={() => setCommitOpen(false)}
           style={{ flex: 1, backgroundColor: C.overlay, justifyContent: 'flex-end' }}
         >
+          <Animated.View style={{ transform: [{ translateY: commitSlide }] }}>
           <Pressable
             onPress={(e) => e.stopPropagation?.()}
             style={{
@@ -550,6 +559,7 @@ export default function Changes() {
               </Text>
             </Pressable>
           </Pressable>
+          </Animated.View>
         </Pressable>
       </Modal>
     </View>

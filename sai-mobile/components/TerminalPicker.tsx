@@ -1,8 +1,8 @@
 // Bottom-sheet picker for terminals (phone + desktop). Mirrors
 // src/renderer-remote/terminal/TerminalPicker.tsx but uses RN Modal/ScrollView
 // to follow the same UX as components/WorkspacePicker.tsx.
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Animated, Dimensions, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { Plus, X } from 'lucide-react-native';
 import type { WireClient } from '../lib/wire';
 import { FONT } from '../lib/fonts';
@@ -38,6 +38,8 @@ interface Props {
   onKill: (term: TerminalSummary) => void;
 }
 
+const SCREEN_HEIGHT = Dimensions.get('window').height;
+
 export default function TerminalPicker({
   open, client, cwd, currentTermId, onClose, onPick, onKill,
 }: Props) {
@@ -46,6 +48,14 @@ export default function TerminalPicker({
   const [err, setErr] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [killingId, setKillingId] = useState<number | null>(null);
+  const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+
+  useEffect(() => {
+    if (open) {
+      slideAnim.setValue(SCREEN_HEIGHT);
+      Animated.spring(slideAnim, { toValue: 0, damping: 20, stiffness: 200, useNativeDriver: true }).start();
+    }
+  }, [open]);
 
   useEffect(() => {
     if (!open || !client) return;
@@ -174,11 +184,12 @@ export default function TerminalPicker({
   );
 
   return (
-    <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={open} transparent animationType="none" onRequestClose={onClose}>
       <Pressable
         onPress={onClose}
         style={{ flex: 1, backgroundColor: C.overlay, justifyContent: 'flex-end' }}
       >
+        <Animated.View style={{ transform: [{ translateY: slideAnim }] }}>
         <Pressable
           onPress={(e) => e.stopPropagation?.()}
           style={{
@@ -188,7 +199,7 @@ export default function TerminalPicker({
             borderTopLeftRadius: 14,
             borderTopRightRadius: 14,
             paddingBottom: 24,
-            maxHeight: '75%',
+            maxHeight: SCREEN_HEIGHT * 0.75,
           }}
         >
           <View style={{
@@ -246,6 +257,7 @@ export default function TerminalPicker({
             {desktopTerms.map(renderRow)}
           </ScrollView>
         </Pressable>
+        </Animated.View>
       </Pressable>
     </Modal>
   );

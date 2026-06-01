@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
+import { ChevronDown, Folder, Menu } from 'lucide-react-native';
 import { useConn } from '../../../lib/connection';
 import { useTranscript, transcriptKey, type TranscriptEvent } from '../../../lib/transcriptStore';
 import { useWorkspaces, type Workspace } from '../../../lib/workspaceStore';
 import { Transcript } from '../../../components/Transcript';
 import { Composer, type SessionOverrides } from '../../../components/Composer';
-import { WorkspaceHeader } from '../../../components/WorkspaceHeader';
+import { WorkspacePicker } from '../../../components/WorkspacePicker';
 import { NavDrawer } from '../../../components/NavDrawer';
 import { workspaceStatusStore, type WorkspaceStatus } from '../../../lib/workspaceStatusStore';
 import { githubWatcherStore } from '../../../lib/githubWatcherStore';
@@ -32,6 +33,7 @@ export default function Chat() {
   const [overrides, setOverrides] = useState<SessionOverrides>({});
   const [streaming, setStreaming] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  const [wsPickerOpen, setWsPickerOpen] = useState(false);
 
   const tkey = useMemo(
     () => transcriptKey(machine.machineId, active?.projectPath ?? '_', sessionId),
@@ -59,19 +61,35 @@ export default function Chat() {
   // Attach + subscribe on (re)connect or workspace change.
   useEffect(() => {
     if (!client || state !== 'open' || !active) return;
+    let cancelled = false;
     client.setActiveWorkspace(active.projectPath);
     client.subscribeWorkspaceStatus();
     client.subscribeGithubWatcher();
     client.setFollow(follow);
-    // Only attach when we actually have a real sessionId. Empty sentinel
-    // means "new session" — let the bridge mint one on first prompt and
-    // emit session.active, which we'll mirror into local state below.
+
     if (sessionId) {
+      // Already have a session — attach directly.
       client.attach({ projectPath: active.projectPath, scope: active.scope, sessionId });
+    } else {
+      // No session yet — fetch the most recent one from the desktop and attach.
+      (async () => {
+        try {
+          const sessions = await client.listSessions(active.projectPath) as any[];
+          if (cancelled) return;
+          const latest = sessions[0];
+          const sid = (latest as any)?.id ?? '';
+          if (sid) setSessionId(sid);
+          // Attach even with empty sid to set __attachedTopic on the bridge.
+          client.attach({ projectPath: active.projectPath, scope: active.scope, sessionId: sid });
+        } catch {
+          // Fallback: attach with empty session so at least new messages flow.
+          if (!cancelled) client.attach({ projectPath: active.projectPath, scope: active.scope, sessionId: '' });
+        }
+      })();
     }
+
     return () => {
-      // Best-effort unsubscribe on workspace/session swap. Wire layer ignores
-      // sends on closed sockets, so this is safe across reconnects.
+      cancelled = true;
       try { client.unsubscribeGithubWatcher(); } catch { /* ignore */ }
       try { client.unsubscribeWorkspaceStatus(); } catch { /* ignore */ }
     };
@@ -216,17 +234,12 @@ export default function Chat() {
     if (next && next.projectPath !== active?.projectPath) {
       setActiveWs(machine.machineId, next);
     }
-    // Empty sessionId == "new session": let the server mint one and the
-    // session.active frame will update local state. Skip the attach() call
-    // entirely in that case (matches the PWA's ConnectedShell behavior).
     setSessionId(sid);
-    if (sid) {
-      client.attach({
-        projectPath,
-        scope: next?.scope ?? 'chat',
-        sessionId: sid,
-      });
-    }
+    client.attach({
+      projectPath,
+      scope: next?.scope ?? 'chat',
+      sessionId: sid,
+    });
   };
 
   return (
@@ -235,10 +248,43 @@ export default function Chat() {
     // KAV doesn't compose well with expo-router's bottom Tabs on iOS — the
     // tab bar height pushed the input panel below the keyboard.
     <View style={{ flex: 1, backgroundColor: '#0e1114' }}>
-      <WorkspaceHeader
+      <View style={{
+        flexDirection: 'row', alignItems: 'center', gap: 8,
+        paddingHorizontal: 12, paddingVertical: 6,
+        borderBottomWidth: 1, borderBottomColor: '#1e2228', backgroundColor: '#0c0f11',
+      }}>
+        <Pressable
+          onPress={() => setNavOpen(true)}
+          hitSlop={8}
+          style={{
+            width: 28, height: 28, alignItems: 'center', justifyContent: 'center',
+            borderWidth: 1, borderColor: '#1e2228', borderRadius: 6,
+          }}
+        >
+          <Menu size={16} color="#bec6d0" />
+        </Pressable>
+        <Pressable
+          onPress={() => setWsPickerOpen(true)}
+          hitSlop={4}
+          style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }}
+        >
+          <Folder size={12} color="#5a6a7a" strokeWidth={2} />
+          <Text numberOfLines={1} style={{ flexShrink: 1, fontSize: 13, color: '#bec6d0' }}>
+            {active?.label ?? 'No workspace'}
+          </Text>
+          <ChevronDown size={12} color="#5a6a7a" />
+        </Pressable>
+        <View style={{
+          width: 8, height: 8, borderRadius: 4,
+          backgroundColor: state === 'open' ? '#00a884' : state === 'opening' ? '#c7910c' : '#E35535',
+        }} />
+      </View>
+      <WorkspacePicker
         machineId={machine.machineId}
-        onOpenNav={() => setNavOpen(true)}
+        open={wsPickerOpen}
+        onClose={() => setWsPickerOpen(false)}
         onPick={onPickWorkspace}
+        currentProjectPath={active?.projectPath ?? null}
       />
       <NavDrawer
         open={navOpen}
