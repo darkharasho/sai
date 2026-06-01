@@ -3005,8 +3005,11 @@ export default function App() {
     flushAndPersist(activeProjectPath);
     const selected = sessions.find(s => s.id === id);
     if (!selected) return;
-    // Claude scopes per-session now (no rebind needed). Codex and Gemini are
-    // still workspace-scoped, so we still tell them which session to resume.
+    // Rebind the backend Claude scope to the persisted CLI session id so
+    // `--resume` is passed on the next spawn. The scope cache is in-memory only
+    // and empty after an app restart, so without this the CLI starts a fresh
+    // conversation with no history.
+    window.sai.claudeSetSessionId(activeProjectPath, selected.claudeSessionId, selected.id);
     (window.sai as any).codexSetSessionId(activeProjectPath, selected.codexSessionId);
     window.sai.geminiSetSessionId?.(activeProjectPath, selected.geminiSessionId, 'chat');
     const viewedAt = Date.now();
@@ -3064,6 +3067,7 @@ export default function App() {
         updateWorkspace(activeProjectPath, ws => ({ ...ws, sessions: fresh }));
         const selected = fresh.find(s => s.id === task.sessionId);
         if (!selected) return;
+        window.sai.claudeSetSessionId(activeProjectPath, selected.claudeSessionId, selected.id);
         (window.sai as any).codexSetSessionId(activeProjectPath, selected.codexSessionId);
         window.sai.geminiSetSessionId?.(activeProjectPath, selected.geminiSessionId, 'chat');
         dbGetMessagesTail(selected.id, MESSAGE_TAIL_LIMIT).then(({ messages, totalCount }) => {
