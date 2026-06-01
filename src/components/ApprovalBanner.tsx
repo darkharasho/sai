@@ -13,9 +13,11 @@ interface ApprovalBannerProps {
   /** Switch to a project (and optionally focus a specific session). The
    *  consumer is expected to handle the session-id navigation itself. */
   onSwitchToWorkspace: (projectPath: string, sessionId?: string) => void;
+  /** Dismiss a single approval entry from the banner (does NOT approve/deny). */
+  onDismiss?: (projectPath: string, sessionId: string) => void;
 }
 
-export default function ApprovalBanner({ approvals, currentProjectPath, onSwitchToWorkspace }: ApprovalBannerProps) {
+export default function ApprovalBanner({ approvals, currentProjectPath, onSwitchToWorkspace, onDismiss }: ApprovalBannerProps) {
   if (approvals.length === 0) return null;
 
   const [first, ...rest] = approvals;
@@ -40,6 +42,13 @@ export default function ApprovalBanner({ approvals, currentProjectPath, onSwitch
         onClick={() => onSwitchToWorkspace(first.projectPath, first.sessionId)}
       >
         {isCurrent ? 'Review' : 'Switch & Review'}
+      </button>
+      <button
+        className="approval-banner-dismiss"
+        onClick={() => onDismiss?.(first.projectPath, first.sessionId)}
+        title="Dismiss"
+      >
+        ×
       </button>
       <style>{`
         .approval-banner {
@@ -98,6 +107,22 @@ export default function ApprovalBanner({ approvals, currentProjectPath, onSwitch
         }
         .approval-banner-action:hover {
           background: rgba(245, 158, 11, 0.15);
+        }
+        .approval-banner-dismiss {
+          font-size: 16px;
+          line-height: 1;
+          padding: 2px 6px;
+          border-radius: 4px;
+          border: none;
+          background: transparent;
+          color: var(--text-muted);
+          cursor: pointer;
+          flex-shrink: 0;
+          opacity: 0.6;
+        }
+        .approval-banner-dismiss:hover {
+          opacity: 1;
+          background: rgba(255, 255, 255, 0.08);
         }
       `}</style>
     </div>

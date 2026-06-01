@@ -363,7 +363,14 @@ function ensureProcess(
             claude.awaitingApproval = true;
             claude.approvalBuffered = [];
             const tu = claude.pendingToolUse;
-            const command = tu.input.command || tu.input.file_path || JSON.stringify(tu.input);
+            const command = tu.input.command
+              || tu.input.file_path
+              || tu.input.path
+              || tu.input.pattern
+              || tu.input.url
+              || tu.input.query
+              || Object.values(tu.input).find(v => typeof v === 'string' && v.length > 0)
+              || JSON.stringify(tu.input);
             const description = tu.input.description || '';
             emitChatMessage({
               type: 'approval_needed',

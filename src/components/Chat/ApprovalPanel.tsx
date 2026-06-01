@@ -46,6 +46,12 @@ export default function ApprovalPanel({ approval, onApprove, onDeny, onAlwaysAll
     : approval.toolName === 'Write' ? 'wants to write a file'
     : `wants to use ${approval.toolName}`;
 
+  // Format tool input as structured key-value pairs instead of raw JSON
+  const inputEntries = approval.input && typeof approval.input === 'object'
+    ? Object.entries(approval.input).filter(([, v]) => v != null && v !== '')
+    : [];
+  const hasStructuredInput = !isBash && inputEntries.length > 0;
+
   return (
     <motion.div
       data-testid="approval-panel"
@@ -98,6 +104,55 @@ export default function ApprovalPanel({ approval, onApprove, onDeny, onAlwaysAll
             minHeight: 36,
           }}
         />
+      ) : hasStructuredInput ? (
+        <div style={{
+          margin: '8px 14px',
+          background: 'var(--bg-secondary)',
+          border: '1px solid var(--border)',
+          borderRadius: 6,
+          padding: '8px 12px',
+          fontSize: 12,
+          lineHeight: 1.6,
+          maxHeight: 160,
+          overflowY: 'auto',
+        }}>
+          {inputEntries.map(([key, value]) => {
+            const display = typeof value === 'string' ? value
+              : typeof value === 'boolean' ? String(value)
+              : JSON.stringify(value);
+            const isLong = typeof display === 'string' && (display.length > 80 || display.includes('\n'));
+            return (
+              <div key={key} style={{ marginBottom: 4 }}>
+                <span style={{
+                  color: 'var(--text-muted)',
+                  fontSize: 11,
+                  fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+                }}>{key}</span>
+                {isLong ? (
+                  <pre style={{
+                    margin: '2px 0 0',
+                    padding: '4px 8px',
+                    background: 'var(--bg)',
+                    borderRadius: 4,
+                    fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+                    fontSize: 11,
+                    color: 'var(--text)',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-all',
+                    maxHeight: 80,
+                    overflowY: 'auto',
+                  }}>{display}</pre>
+                ) : (
+                  <span style={{
+                    marginLeft: 6,
+                    fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+                    color: 'var(--text)',
+                  }}>{display}</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
       ) : (
         <div style={{
           margin: '8px 14px',

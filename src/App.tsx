@@ -995,10 +995,11 @@ export default function App() {
 
     function resolveProviderApproval(task: SwarmTask, toolUseId: string, approved: boolean) {
       const p = task.provider;
+      const scope = task.sessionId;
       // codexApprove/geminiApprove don't exist in the current preload; degrade gracefully.
-      if (p === 'codex') return (window.sai as any).codexApprove?.(ws, toolUseId, approved);
-      if (p === 'gemini') return (window.sai as any).geminiApprove?.(ws, toolUseId, approved);
-      return (window.sai as any).claudeApprove?.(ws, toolUseId, approved);
+      if (p === 'codex') return (window.sai as any).codexApprove?.(ws, toolUseId, approved, undefined, scope);
+      if (p === 'gemini') return (window.sai as any).geminiApprove?.(ws, toolUseId, approved, undefined, scope);
+      return (window.sai as any).claudeApprove?.(ws, toolUseId, approved, undefined, scope);
     }
 
     const spawnTask = async (i: { prompt: string; title?: string; provider?: string; model?: string; approvalPolicy?: string; project?: string }) => {
@@ -1071,6 +1072,19 @@ export default function App() {
           m.set(ws, (m.get(ws) ?? []).filter(x => x.id !== approvalId));
           return m;
         });
+        // Also clear the banner entry eagerly in case approval_resolved is delayed
+        if (task) {
+          setApprovalSessions(prev => {
+            const inner = prev.get(ws);
+            if (!inner || !inner.has(task.sessionId)) return prev;
+            const next = new Map(prev);
+            const innerNext = new Map(inner);
+            innerNext.delete(task.sessionId);
+            if (innerNext.size === 0) next.delete(ws);
+            else next.set(ws, innerNext);
+            return next;
+          });
+        }
       },
       deny: async (approvalId) => {
         const all = await swarmGetApprovals(ws);
@@ -1084,6 +1098,19 @@ export default function App() {
           m.set(ws, (m.get(ws) ?? []).filter(x => x.id !== approvalId));
           return m;
         });
+        // Also clear the banner entry eagerly in case approval_resolved is delayed
+        if (task) {
+          setApprovalSessions(prev => {
+            const inner = prev.get(ws);
+            if (!inner || !inner.has(task.sessionId)) return prev;
+            const next = new Map(prev);
+            const innerNext = new Map(inner);
+            innerNext.delete(task.sessionId);
+            if (innerNext.size === 0) next.delete(ws);
+            else next.set(ws, innerNext);
+            return next;
+          });
+        }
       },
       land: async (ref) => {
         const t = byRef(ref);
@@ -4103,6 +4130,18 @@ export default function App() {
             handleSelectSession(sessionId);
           }
           handleProjectSwitch(targetPath);
+        }}
+        onDismiss={(targetPath, sessionId) => {
+          setApprovalSessions(prev => {
+            const inner = prev.get(targetPath);
+            if (!inner || !inner.has(sessionId)) return prev;
+            const next = new Map(prev);
+            const innerNext = new Map(inner);
+            innerNext.delete(sessionId);
+            if (innerNext.size === 0) next.delete(targetPath);
+            else next.set(targetPath, innerNext);
+            return next;
+          });
         }}
       />
       <div className="app-body">
