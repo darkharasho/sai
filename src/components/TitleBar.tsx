@@ -7,7 +7,7 @@ import GitHubCloneModal from './GitHubCloneModal';
 import SettingsModal from './SettingsModal';
 import { CreateMetaWorkspaceModal } from './MetaWorkspace/CreateMetaWorkspaceModal';
 import { ManageMetaWorkspaceModal } from './MetaWorkspace/ManageMetaWorkspaceModal';
-import { LogOut, Settings, ChevronDown, FolderOpen, FolderPlus, Layers, Pencil } from 'lucide-react';
+import { LogOut, Settings, ChevronDown, FolderOpen, FolderPlus, Layers, Pencil, Search, X } from 'lucide-react';
 import { basename } from '../utils/pathUtils';
 import SaiLogo from './SaiLogo';
 import { DOT_MASK_URL } from '../lib/assets';
@@ -62,6 +62,8 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
   const [showCreateMeta, setShowCreateMeta] = useState(false);
   const [manageMeta, setManageMeta] = useState<MetaWorkspaceListItem | null>(null);
   const [recentProjects, setRecentProjects] = useState<string[]>([]);
+  const [recentQuery, setRecentQuery] = useState('');
+  const [recentFocused, setRecentFocused] = useState(false);
 
   useEffect(() => {
     window.sai.updateGetVersion().then((v: string) => setVersion(v));
@@ -96,8 +98,11 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
   }, [open]);
 
   useEffect(() => {
-    if (!open) setOverflowOpen(null);
+    if (!open) { setOverflowOpen(null); setRecentQuery(''); }
   }, [open]);
+
+  // Reset the recent filter when switching tabs so it doesn't carry over.
+  useEffect(() => { setRecentQuery(''); }, [pickerTab]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -153,6 +158,67 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
     setGhUser(user);
     setShowAuthModal(false);
   };
+
+  // "Recent" section header with an inline filter input, shared by the
+  // Projects and Meta tabs. `showDivider` draws the separator above it.
+  const recentHeader = (showDivider: boolean) => (
+    <>
+      {showDivider && <div className="dropdown-divider" />}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px 4px 12px' }}>
+        <div className="dropdown-label" style={{ flexShrink: 0, padding: 0 }}>Recent</div>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          marginLeft: 'auto',
+          width: 160,
+          maxWidth: '60%',
+          padding: '3px 2px',
+          borderBottom: `1px dashed ${recentFocused ? 'var(--accent)' : 'var(--text-muted)'}`,
+          transition: 'border-color var(--dur-fast, 120ms) ease',
+        }}>
+          <Search size={12} color={recentFocused ? 'var(--accent)' : 'var(--text-muted)'} style={{ flexShrink: 0 }} />
+          <input
+            type="text"
+            value={recentQuery}
+            onChange={(e) => setRecentQuery(e.target.value)}
+            onFocus={() => setRecentFocused(true)}
+            onBlur={() => setRecentFocused(false)}
+            placeholder="Filter recent…"
+            style={{
+              flex: 1,
+              minWidth: 0,
+              background: 'transparent',
+              border: 'none',
+              outline: 'none',
+              color: 'var(--text)',
+              fontFamily: 'inherit',
+              fontSize: 12,
+              padding: 0,
+            }}
+          />
+          {recentQuery && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setRecentQuery(''); }}
+              aria-label="Clear filter"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                background: 'transparent',
+                border: 'none',
+                padding: 0,
+                cursor: 'pointer',
+                color: 'var(--text-muted)',
+                flexShrink: 0,
+              }}
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
+      </div>
+    </>
+  );
 
   return (
     <div className={`titlebar${window.sai.platform === 'darwin' ? ' titlebar-mac' : ''}${framelessRounded ? ' titlebar-frameless' : ''}`}>
@@ -315,22 +381,33 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                             ))}
                           </>
                         )}
-                        {recent.length > 0 && (
+                        {recent.length > 0 && (() => {
+                          const rq = recentQuery.trim().toLowerCase();
+                          const filteredRecent = rq
+                            ? recent.filter(w =>
+                                basename(w.projectPath).toLowerCase().includes(rq) ||
+                                w.projectPath.toLowerCase().includes(rq))
+                            : recent;
+                          return (
                           <>
-                            {suspended.length > 0 && <div className="dropdown-divider" />}
-                            <div className="dropdown-label">Recent</div>
-                            {recent.map(w => (
-                              <button
-                                key={w.projectPath}
-                                className={`dropdown-item workspace-item ${w.projectPath === projectPath ? 'active' : ''}`}
-                                onClick={() => { onProjectChange(w.projectPath); setOpen(false); }}
-                              >
-                                <span className="dropdown-item-name">{basename(w.projectPath)}</span>
-                                <span className="dropdown-item-path">{w.projectPath}</span>
-                              </button>
-                            ))}
+                            {recentHeader(suspended.length > 0)}
+                            {filteredRecent.length > 0
+                              ? filteredRecent.map(w => (
+                                <button
+                                  key={w.projectPath}
+                                  className={`dropdown-item workspace-item ${w.projectPath === projectPath ? 'active' : ''}`}
+                                  onClick={() => { onProjectChange(w.projectPath); setOpen(false); }}
+                                >
+                                  <span className="dropdown-item-name">{basename(w.projectPath)}</span>
+                                  <span className="dropdown-item-path">{w.projectPath}</span>
+                                </button>
+                              ))
+                              : (
+                                <div className="dropdown-label" style={{ opacity: 0.7 }}>No matches</div>
+                              )}
                           </>
-                        )}
+                          );
+                        })()}
                       </div>
                     </>
                   )}
@@ -420,12 +497,21 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                       ))}
                     </>
                   )}
-                  {!isEmpty && recentMeta.length > 0 && (
+                  {!isEmpty && recentMeta.length > 0 && (() => {
+                    const rq = recentQuery.trim().toLowerCase();
+                    const filteredMeta = rq
+                      ? recentMeta.filter(m =>
+                          m.name.toLowerCase().includes(rq) ||
+                          m.projects.some(p => p.linkName.toLowerCase().includes(rq) || p.path.toLowerCase().includes(rq)))
+                      : recentMeta;
+                    return (
                     <>
-                      {activeMeta.length > 0 && <div className="dropdown-divider" />}
-                      <div className="dropdown-label">Recent</div>
+                      {recentHeader(activeMeta.length > 0)}
                       <div className="dropdown-inactive-scroll">
-                        {recentMeta.map(meta => (
+                        {filteredMeta.length === 0 && (
+                          <div className="dropdown-label" style={{ opacity: 0.7 }}>No matches</div>
+                        )}
+                        {filteredMeta.map(meta => (
                           <div key={meta.id} className="meta-workspace-row">
                             <button
                               className="dropdown-item meta-workspace-item"
@@ -463,7 +549,8 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                         ))}
                       </div>
                     </>
-                  )}
+                    );
+                  })()}
                   <div className="dropdown-divider" />
                   <button
                     className="dropdown-item"

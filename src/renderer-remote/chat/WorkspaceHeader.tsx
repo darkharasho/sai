@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Folder, Layers, ChevronDown } from 'lucide-react';
+import { Folder, Layers, ChevronDown, Search, X } from 'lucide-react';
 import type { WireClient } from '../wire';
 import type { WorkspaceStatus, WorkspaceStatusStore } from '../lib/workspaceStatusStore';
 import { DOT_MASK_URL } from '../../lib/assets';
@@ -69,6 +69,7 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
   const [workspaces, setWorkspaces] = useState<WorkspaceMeta[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [recentQuery, setRecentQuery] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
 
   const fetchList = () => {
@@ -79,8 +80,8 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
       .finally(() => setLoading(false));
   };
 
-  // Refetch every time the dropdown opens.
-  useEffect(() => { if (open) fetchList(); }, [open]);
+  // Refetch every time the dropdown opens; clear the recent filter on close.
+  useEffect(() => { if (open) fetchList(); else setRecentQuery(''); }, [open]);
   // Initial load for the header's own current-workspace badges.
   useEffect(() => { fetchList(); }, [client, currentProjectPath]);
 
@@ -246,6 +247,12 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
             const recent = visible.filter((w) => w.state === 'recent');
             const isEmptyMeta = pickerTab === 'meta' && visible.length === 0 && !loading && !err;
 
+            const rq = recentQuery.trim().toLowerCase();
+            const filteredRecent = rq
+              ? recent.filter((w) =>
+                  w.name.toLowerCase().includes(rq) || w.projectPath.toLowerCase().includes(rq))
+              : recent;
+
             const sectionLabel = (label: string) => (
               <div style={{
                 padding: '8px 12px 4px',
@@ -369,7 +376,65 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
                 {!isEmptyMeta && active.length > 0 && (<>{sectionLabel('Active')}{active.map(row)}</>)}
                 {!isEmptyMeta && open.length > 0 && (<>{sectionLabel('Open')}{open.map(row)}</>)}
                 {!isEmptyMeta && suspended.length > 0 && (<>{sectionLabel('Suspended')}{suspended.map(row)}</>)}
-                {!isEmptyMeta && recent.length > 0 && (<>{sectionLabel('Recent')}{recent.map(row)}</>)}
+                {!isEmptyMeta && recent.length > 0 && (
+                  <>
+                    {sectionLabel('Recent')}
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      margin: '0 12px 4px',
+                      padding: '5px 8px',
+                      background: 'var(--bg)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 6,
+                    }}>
+                      <Search size={12} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+                      <input
+                        type="text"
+                        value={recentQuery}
+                        onChange={(e) => setRecentQuery(e.target.value)}
+                        placeholder="Filter recent…"
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          background: 'transparent',
+                          border: 'none',
+                          outline: 'none',
+                          color: 'var(--text)',
+                          fontFamily: 'inherit',
+                          fontSize: 12,
+                          padding: 0,
+                        }}
+                      />
+                      {recentQuery && (
+                        <button
+                          onClick={() => setRecentQuery('')}
+                          aria-label="Clear filter"
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            background: 'transparent',
+                            border: 'none',
+                            padding: 0,
+                            cursor: 'pointer',
+                            color: 'var(--text-muted)',
+                            flexShrink: 0,
+                          }}
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+                    {filteredRecent.length > 0
+                      ? filteredRecent.map(row)
+                      : (
+                        <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text-muted)' }}>
+                          No matches
+                        </div>
+                      )}
+                  </>
+                )}
               </>
             );
           })()}
