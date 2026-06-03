@@ -1,0 +1,68 @@
+{
+  "expo": {
+    "name": "SAI",
+    "slug": "sai-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "sai",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "backgroundColor": "#0e1114",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0c0f11"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.project96.sai",
+      "icon": {
+        "light": "./assets/icon.png",
+        "dark": "./assets/icon-dark.png",
+        "tinted": "./assets/icon-tinted.png"
+      },
+      "infoPlist": {
+        "NSCameraUsageDescription": "SAI needs camera access to scan pairing QR codes from your desktop.",
+        "NSPhotoLibraryUsageDescription": "SAI needs photo access to attach images to chat messages.",
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true,
+          "NSAllowsArbitraryLoads": true,
+          "NSExceptionDomains": {
+            "ts.net": {
+              "NSExceptionAllowsInsecureHTTPLoads": true,
+              "NSIncludesSubdomains": true
+            },
+            "127.0.0.1": {
+              "NSExceptionAllowsInsecureHTTPLoads": true
+            },
+            "localhost": {
+              "NSExceptionAllowsInsecureHTTPLoads": true
+            }
+          }
+        }
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "SAI needs camera access to scan pairing QR codes from your desktop."
+        }
+      ],
+      "./plugins/allow-http"
+    ],
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "c1ea0be1-41e9-41e3-8a12-d7cde06f3e2e"
+      }
+    },
+    "owner": "harasho"
+  }
+}

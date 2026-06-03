@@ -6,6 +6,9 @@
   "scripts": {
     "postinstall": "electron-rebuild -w node-pty",
     "dev": "concurrently -k -n electron,pwa -c blue,magenta \"vite\" \"vite build --config vite.config.pwa.ts --watch\"",
+    "mobile": "npm --prefix sai-mobile start",
+    "mobile:install": "npm --prefix sai-mobile install --legacy-peer-deps",
+    "dev:all": "concurrently -k -n desktop,mobile -c blue,magenta \"npm run dev\" \"npm run mobile\"",
     "build": "tsc && vite build && vite build --config vite.config.pwa.ts",
     "electron:dev": "vite --no-sandbox",
     "dist": "vite build && electron-builder --linux AppImage",
@@ -74,6 +77,7 @@
     "diff2html": "^3.4.56",
     "electron-updater": "^6.8.3",
     "geist": "^1.7.0",
+    "highlight.js": "^11.11.1",
     "lucide-react": "^1.7.0",
     "monaco-editor": "^0.55.1",
     "motion": "^12.38.0",

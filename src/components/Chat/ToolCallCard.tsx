@@ -19,6 +19,17 @@ function parseMcpName(name: string): { server: string; tool: string } | null {
   return { server: parts[parts.length - 1], tool };
 }
 
+/** Humanize snake_case tool names (e.g. MCP tools) into title case.
+ *  PascalCase built-in names (Read, Edit, WebFetch) pass through unchanged. */
+function humanizeToolName(name: string): string {
+  if (!name.includes('_')) return name;
+  return name
+    .split('_')
+    .filter(Boolean)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
 function formatMs(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
   const m = Math.floor(totalSec / 60);
@@ -673,12 +684,12 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             if (mcp) {
               return (
                 <>
-                  <span className={`tool-call-name${sigClass ? ` ${sigClass}` : ''}`}>{mcp.tool}</span>
+                  <span className={`tool-call-name${sigClass ? ` ${sigClass}` : ''}`}>{humanizeToolName(mcp.tool)}</span>
                   <span className="tool-call-mcp-chip" title={`MCP server: ${mcp.server}`}>{mcp.server}</span>
                 </>
               );
             }
-            return <span className={`tool-call-name${sigClass ? ` ${sigClass}` : ''}`}>{toolCall.name}</span>;
+            return <span className={`tool-call-name${sigClass ? ` ${sigClass}` : ''}`}>{humanizeToolName(toolCall.name)}</span>;
           })()}
           {(() => {
             const linkName = toolProjectLinkName(toolCall, metaRuntime);
