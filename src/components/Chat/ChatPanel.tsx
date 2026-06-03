@@ -1473,13 +1473,13 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
   const handleApprove = (modifiedCommand?: string) => {
     if (!pendingApproval) return;
-    window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, true, modifiedCommand);
+    window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, true, modifiedCommand, claudeScope);
     setPendingApproval(null);
   };
 
   const handleDeny = () => {
     if (!pendingApproval) return;
-    window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, false);
+    window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, false, undefined, claudeScope);
     setPendingApproval(null);
   };
 
@@ -1487,7 +1487,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     if (!pendingApproval) return;
     const pattern = `${pendingApproval.toolName}(*)`;
     await window.sai.claudeAlwaysAllow(projectPath, pattern);
-    window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, true);
+    window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, true, undefined, claudeScope);
     setPendingApproval(null);
   };
 
