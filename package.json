@@ -53,7 +53,7 @@
         "zip"
       ],
       "category": "public.app-category.developer-tools",
-      "icon": "public/img/sai.png",
+      "icon": "build/sai.icns",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
