@@ -23,6 +23,14 @@ export function registerUpdater(mainWindow: BrowserWindow) {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
+  // Disable code-signing verification on macOS. Without an Apple Developer
+  // certificate the builds are ad-hoc signed, and each build gets a unique
+  // identity — so the updater's default signature check always fails.
+  if (process.platform === 'darwin') {
+    autoUpdater.forceDevUpdateConfig = false;
+    (autoUpdater as any).verifyUpdateCodeSignature = false;
+  }
+
   // On Linux, only AppImage supports auto-update
   if (process.platform === 'linux' && !process.env.APPIMAGE) {
     autoUpdater.autoDownload = false;
@@ -58,6 +66,7 @@ export function registerUpdater(mainWindow: BrowserWindow) {
   });
 
   autoUpdater.on('error', (err: any) => {
+    console.error('[updater] error:', err?.message, err?.stack);
     mainWindow.webContents.send('update:error', {
       message: err?.message ?? 'Unknown update error',
     });
