@@ -148,6 +148,9 @@ function WelcomeTypewriter() {
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState<string | null>(null);
+  const sidebarOpenRef = useRef<string | null>(null);
+  const sidebarByWsRef = useRef<Map<string, string | null>>(new Map());
+  const swarmSelectedByWsRef = useRef<Map<string, string>>(new Map());
 
   const [activeProjectPath, setActiveProjectPath] = useState<string>('');
   const [metaWorkspaces, setMetaWorkspaces] = useState<MetaWorkspaceListItem[]>([]);
@@ -536,18 +539,31 @@ export default function App() {
     })();
   }, []);
 
+  // Keep sidebarOpenRef in sync so workspace-switch can read the current value.
+  useEffect(() => { sidebarOpenRef.current = sidebarOpen; }, [sidebarOpen]);
+  const swarmSelectedRef = useRef<string>('overview');
+  useEffect(() => { swarmSelectedRef.current = swarmSelected; }, [swarmSelected]);
+
   useEffect(() => {
+    // Save the outgoing workspace's sidebar tab and swarm selection so we
+    // can restore them when the user switches back. Without this, returning
+    // to a workspace with an active swarm would reset to Overview and
+    // trigger the "leaving swarm" routing branch — which calls
+    // handleSelectSession on the wrong workspace, wiping messages.
+    const prev = activeProjectPathRef.current;
+    if (prev) {
+      sidebarByWsRef.current.set(prev, sidebarOpenRef.current);
+      swarmSelectedByWsRef.current.set(prev, swarmSelectedRef.current);
+    }
+    // Restore the incoming workspace's sidebar tab and swarm selection.
+    const restored = sidebarByWsRef.current.get(activeProjectPath) ?? null;
+    const restoredSwarm = swarmSelectedByWsRef.current.get(activeProjectPath) ?? 'overview';
+    setSidebarOpen(restored);
+    setSwarmSelected(restoredSwarm);
+
     activeProjectPathRef.current = activeProjectPath;
     setActiveWorkspace(activeProjectPath);
     window.sai.workspaceSetActive(activeProjectPath);
-  }, [activeProjectPath]);
-
-  // Reset the swarm sidebar selection to the Overview pin whenever the
-  // active workspace changes. Tasks themselves are ephemeral in-memory state
-  // (`swarmTasksByWs`); there's no longer a load/poll from swarmDb.
-  useEffect(() => {
-    if (!activeProjectPath) return;
-    setSwarmSelected('overview');
   }, [activeProjectPath]);
 
   // Refresh approvals whenever tasks change (status transitions to/from awaiting_approval)
@@ -2091,7 +2107,14 @@ export default function App() {
           const isFocusedHere =
             msg.projectPath === activeProjectPathRef.current
             && focusedWs?.activeSession.id === scope;
-          if (!isFocusedHere) {
+          // Always buffer for task scopes, even when focused. There is a race
+          // window between when the session becomes active (isFocusedHere=true)
+          // and when ChatPanel's useEffect registers its claudeOnMessage
+          // listener — messages arriving in that gap would be lost by both
+          // paths. The buffer is merged on session select and deduplicated by
+          // mergePersistedWithBuffer, so double-capturing is harmless.
+          const isTaskScope = (swarmTasksByWsRef.current.get(msg.projectPath) ?? []).some(t => t.sessionId === scope);
+          if (!isFocusedHere || isTaskScope) {
             const converted = convertAssistantEnvelope(msg);
             if (converted) {
               const prev = taskMessagesBufferRef.current.get(scope) ?? [];
@@ -2991,10 +3014,17 @@ export default function App() {
     void dbPatchSessionMeta(activeProjectPath, selected.id, { lastViewedAt: viewedAt }).catch(() => {});
     // Load the tail from IndexedDB (full messages live there, not in the sessions list).
     dbGetMessagesTail(selected.id, MESSAGE_TAIL_LIMIT).then(({ messages, totalCount }) => {
+      // Merge any in-flight buffered assistant content from background streaming.
+      // Without this, clicking a streaming swarm task shows blank content because
+      // the buffer hasn't been flushed to IndexedDB yet.
+      const buffered = taskMessagesBufferRef.current.get(selected.id);
+      const merged = buffered && buffered.length > 0
+        ? mergePersistedWithBuffer(messages, buffered)
+        : messages;
       wsFirstLoadedIdxRef.current.set(activeProjectPath!, totalCount - messages.length);
       updateWorkspace(activeProjectPath!, ws => ({
         ...ws,
-        activeSession: { ...selected, messages, lastViewedAt: viewedAt },
+        activeSession: { ...selected, messages: merged, lastViewedAt: viewedAt },
         sessions: ws.sessions.map(s => s.id === selected.id ? { ...s, lastViewedAt: viewedAt } : s),
       }));
     });
@@ -3008,6 +3038,10 @@ export default function App() {
       lastSwarmRoutedRef.current = null;
       // Leaving the swarm view: if we previously swapped to a task session,
       // restore the pre-swarm regular session so the chat panel reverts.
+      // Guard: only restore when the pre-swarm session belongs to THIS
+      // workspace — during workspace transitions the effect can fire with a
+      // stale saved ref from a different workspace, which would call
+      // handleSelectSession cross-workspace and corrupt messages/queues.
       const saved = preSwarmSessionByWsRef.current.get(activeProjectPath);
       if (saved && activeSession.kind === 'task' && saved !== activeSession.id) {
         const inMemorySaved = sessions.find(s => s.id === saved);
@@ -3040,10 +3074,14 @@ export default function App() {
         (window.sai as any).codexSetSessionId(activeProjectPath, selected.codexSessionId);
         window.sai.geminiSetSessionId?.(activeProjectPath, selected.geminiSessionId, 'chat');
         dbGetMessagesTail(selected.id, MESSAGE_TAIL_LIMIT).then(({ messages, totalCount }) => {
+          const buffered = taskMessagesBufferRef.current.get(selected.id);
+          const merged = buffered && buffered.length > 0
+            ? mergePersistedWithBuffer(messages, buffered)
+            : messages;
           wsFirstLoadedIdxRef.current.set(activeProjectPath, totalCount - messages.length);
           updateWorkspace(activeProjectPath, ws => ({
             ...ws,
-            activeSession: { ...selected, messages },
+            activeSession: { ...selected, messages: merged },
           }));
         });
       });
@@ -3954,6 +3992,9 @@ export default function App() {
     const ids = new Set<string>();
     for (const s of sessions) {
       if (s.id === activeSession?.id) continue;
+      // Task sessions belong to swarm, not the chats sidebar — exclude them
+      // so completed tasks don't produce a phantom badge on the Chats button.
+      if ((s as any).kind === 'task') continue;
       if (s.updatedAt > (s.lastViewedAt ?? s.updatedAt)) ids.add(s.id);
     }
     return ids;
@@ -3962,6 +4003,7 @@ export default function App() {
   const errorSessionIds = useMemo(() => {
     const ids = new Set<string>();
     for (const s of sessions) {
+      if ((s as any).kind === 'task') continue;
       // Prefer the persisted flag (covers background sessions); fall back to
       // the in-memory tail message error (covers the just-active session
       // before its persist round-trip completes).
