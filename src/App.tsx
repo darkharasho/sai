@@ -41,9 +41,9 @@ import SwarmToolCardSelector from './components/Swarm/cards/SwarmToolCardSelecto
 import { bucketToolCalls, trimEvents, pushRing, type TimedEvent } from './lib/swarmActivityHistory';
 import InlineApprovalCard from './components/Swarm/cards/InlineApprovalCard';
 import QuitSwarmConfirmModal from './components/Swarm/QuitSwarmConfirmModal';
-import { swarmInit, swarmGetApprovals, swarmResolveApproval, swarmCreateApproval, swarmGetTasks, swarmCreateTask, swarmDeleteTask } from './swarmDb';
-import { reconcileTasksOnStartup, findOrphanApprovalIds } from './lib/swarmReconcile';
+import { swarmInit, swarmGetApprovals, swarmResolveApproval, swarmCreateApproval, swarmCreateTask, swarmDeleteTask } from './swarmDb';
 import { diffSwarmTasks } from './lib/swarmPersistenceDiff';
+import { hydrateWorkspaceSwarm } from './lib/swarmHydrate';
 import { SwarmScheduler, isLikelyReadOnlyPrompt } from './lib/swarmScheduler';
 import { runSwarmTask } from './lib/swarmTaskRunner';
 import { landTask, discardTask } from './lib/swarmLanding';
@@ -560,13 +560,7 @@ export default function App() {
     let cancelled = false;
     (async () => {
       try {
-        await swarmInit();
-        await reconcileTasksOnStartup(ws);
-        const tasks = await swarmGetTasks(ws);
-        const approvals = await swarmGetApprovals(ws);
-        const orphanIds = findOrphanApprovalIds(tasks, approvals);
-        await Promise.all(orphanIds.map(id => swarmResolveApproval(id)));
-        const liveApprovals = approvals.filter(a => !orphanIds.includes(a.id));
+        const { tasks, liveApprovals } = await hydrateWorkspaceSwarm(ws);
         if (cancelled) return;
         // Establish the persistence baseline and mark hydrated together, before
         // seeding state, so the persistence effect only ever sees a correct
