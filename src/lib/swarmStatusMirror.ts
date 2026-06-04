@@ -5,9 +5,10 @@
 // without mounting App.tsx.
 
 import type { SwarmTask } from '../types';
+import { isTurnErrored } from './chatActivity';
 
 export type SwarmTaskPatch =
-  | { kind: 'status'; status: 'done' | 'failed'; lastActivityAt: number }
+  | { kind: 'status'; status: 'done' | 'failed'; costEstimate?: number; lastActivityAt: number }
   | { kind: 'toolCount'; delta: number; lastActivityAt: number };
 
 export interface MirrorResult {
@@ -33,17 +34,24 @@ export function deriveSwarmMirror(
   const task = tasksForWorkspace.find(t => t.sessionId === scope);
   if (!task) return null;
 
-  // Turn completion → mark task done (only if it was actively streaming).
+  // Turn completion → terminalize a still-in-flight task. A turn that ended in
+  // an error (result.is_error / error subtype) marks the task failed, not done.
+  // Cost, when reported, rides on the same terminal patch.
   if (msg.type === 'done' || msg.type === 'result') {
-    if (task.status === 'streaming') {
-      return { taskId: task.id, patch: { kind: 'status', status: 'done', lastActivityAt: now } };
+    if (task.status === 'streaming' || task.status === 'awaiting_approval') {
+      const status = isTurnErrored(msg) ? 'failed' : 'done';
+      const patch: SwarmTaskPatch = { kind: 'status', status, lastActivityAt: now };
+      if (typeof msg.total_cost_usd === 'number') patch.costEstimate = msg.total_cost_usd;
+      return { taskId: task.id, patch };
     }
     return null;
   }
 
-  // Errors at the turn level → mark failed.
+  // Only a fatal error (process crash / spawn failure, flagged by the provider)
+  // fails the task. Benign stderr lines arrive as non-fatal error messages and
+  // must not mark a healthy task failed.
   if (msg.type === 'error') {
-    if (task.status === 'streaming' || task.status === 'awaiting_approval' || task.status === 'queued') {
+    if (msg.fatal === true && (task.status === 'streaming' || task.status === 'awaiting_approval' || task.status === 'queued')) {
       return { taskId: task.id, patch: { kind: 'status', status: 'failed', lastActivityAt: now } };
     }
     return null;
@@ -66,7 +74,12 @@ export function deriveSwarmMirror(
 /** Apply a patch to a single task; returns the new task object. */
 export function applySwarmPatch(task: SwarmTask, patch: SwarmTaskPatch): SwarmTask {
   if (patch.kind === 'status') {
-    return { ...task, status: patch.status, lastActivityAt: patch.lastActivityAt };
+    return {
+      ...task,
+      status: patch.status,
+      lastActivityAt: patch.lastActivityAt,
+      ...(patch.costEstimate != null ? { costEstimate: patch.costEstimate } : {}),
+    };
   }
   return {
     ...task,
