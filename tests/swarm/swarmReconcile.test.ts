@@ -44,11 +44,11 @@ describe('reconcileTasksOnStartup', () => {
     expect(t.status).toBe('paused');
   });
 
-  it('leaves awaiting_approval untouched', async () => {
+  it('demotes awaiting_approval to paused', async () => {
     await swarmCreateTask(makeTask({ id: 'y', status: 'awaiting_approval' }));
     await reconcileTasksOnStartup('/p');
     const [t] = await swarmGetTasks('/p');
-    expect(t.status).toBe('awaiting_approval');
+    expect(t.status).toBe('paused');
   });
 
   it('leaves other statuses untouched', async () => {

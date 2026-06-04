@@ -7,10 +7,11 @@ export interface ReconcileDeps {
 }
 
 /**
- * On app start, demote any task that was left in `streaming` to `paused`.
- * The model wasn't actually running across the relaunch, so the user must
- * explicitly resume. Other statuses (including `awaiting_approval`) are
- * preserved as-is — their persisted approval rows remain valid.
+ * On app start, demote any task that was left mid-flight (`streaming` or
+ * `awaiting_approval`) to `paused`. The provider process did not survive the
+ * relaunch, so the task cannot still be running and any pending approval is
+ * stale; the user must explicitly resume. Other statuses (`queued`, `paused`,
+ * `done`, `failed`, `landed`, `discarded`) are preserved as-is.
  */
 export async function reconcileTasksOnStartup(
   workspaceId: string,
@@ -20,7 +21,7 @@ export async function reconcileTasksOnStartup(
   const updateTask = deps?.updateTask ?? swarmUpdateTask;
   const tasks = await getTasks(workspaceId);
   for (const t of tasks) {
-    if (t.status === 'streaming') {
+    if (t.status === 'streaming' || t.status === 'awaiting_approval') {
       await updateTask(t.id, { status: 'paused' });
     }
   }
