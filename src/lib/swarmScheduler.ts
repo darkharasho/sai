@@ -1,9 +1,7 @@
 import type { SwarmTask } from '../types';
+import { isWriteTool } from './swarmToolTaxonomy';
 
-export const WRITE_TOOLS = new Set(['edit_file', 'write_file', 'apply_patch', 'str_replace', 'create_file', 'bash']);
-export function isWriteTool(name: string): boolean {
-  return WRITE_TOOLS.has(name);
-}
+export { isWriteTool };
 
 const READ_ONLY_PROMPT_RE = /^(explain|what|why|how|describe|read|show)\b/i;
 export function isLikelyReadOnlyPrompt(prompt: string): boolean {

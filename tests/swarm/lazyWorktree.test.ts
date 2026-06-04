@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { isWriteTool, materializeIfNeeded, WRITE_TOOLS, isLikelyReadOnlyPrompt } from '@/lib/swarmScheduler';
+import { isWriteTool, materializeIfNeeded, isLikelyReadOnlyPrompt } from '@/lib/swarmScheduler';
 
 describe('lazy worktree', () => {
   it('classifies write tools', () => {
     expect(isWriteTool('edit_file')).toBe(true);
     expect(isWriteTool('read_file')).toBe(false);
   });
-  it('exports the canonical write tools set', () => {
-    expect(WRITE_TOOLS.has('bash')).toBe(true);
+  it('classifies bash as a write tool', () => {
+    expect(isWriteTool('bash')).toBe(true);
   });
   it('materializes once on first write call', async () => {
     const calls: string[] = [];
