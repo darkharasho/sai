@@ -171,6 +171,13 @@ contextBridge.exposeInMainWorld('sai', {
   saveImage: (base64Data: string) => ipcRenderer.invoke('project:saveImage', base64Data),
   settingsGet: (key: string, defaultValue?: any) => ipcRenderer.invoke('settings:get', key, defaultValue),
   settingsSet: (key: string, value: any) => ipcRenderer.invoke('settings:set', key, value),
+  // Issue tracker integrations
+  jiraConfigured: () => ipcRenderer.invoke('jira:configured') as Promise<boolean>,
+  jiraGetIssue: (key: string) => ipcRenderer.invoke('jira:getIssue', key) as Promise<{ ok: boolean; status: number; body: any }>,
+  jiraTest: () => ipcRenderer.invoke('jira:test') as Promise<{ ok: boolean; status: number; body: any }>,
+  linearConfigured: () => ipcRenderer.invoke('linear:configured') as Promise<boolean>,
+  linearGetIssue: (key: string) => ipcRenderer.invoke('linear:getIssue', key) as Promise<{ ok: boolean; status: number; body: any }>,
+  linearTest: () => ipcRenderer.invoke('linear:test') as Promise<{ ok: boolean; status: number; body: any }>,
   setTitleBarOverlay: (color: string, symbolColor: string) => ipcRenderer.invoke('titlebar:setOverlay', color, symbolColor),
   windowIsFramelessRounded: () => ipcRenderer.invoke('window:isFramelessRounded'),
   windowIsMaximized: () => ipcRenderer.invoke('window:isMaximized'),

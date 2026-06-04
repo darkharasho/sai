@@ -49,6 +49,8 @@ import { registerGeminiHandlers } from './services/gemini';
 import { registerPluginHandlers } from './services/plugins';
 import { registerMcpHandlers } from './services/mcp';
 import { registerScaffoldHandler } from './services/scaffold';
+import { registerJiraHandlers } from './services/jira';
+import { registerLinearHandlers } from './services/linear';
 import { registerBrainstormHandlers } from './services/brainstorm';
 import { registerSearchHandlers } from './services/search';
 import { registerSwarmHandlers } from './services/swarm';
@@ -403,6 +405,8 @@ function createWindow() {
 
   registerTerminalHandlers(mainWindow);
   registerClaudeHandlers(mainWindow);
+  registerJiraHandlers();
+  registerLinearHandlers();
 
   // Auto-start the mobile remote bridge if it was enabled before the last quit.
   void (async () => {
