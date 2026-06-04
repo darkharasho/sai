@@ -1,11 +1,18 @@
 import { useState, useEffect, useRef } from 'react';
-import { FileEdit, Terminal, FileText, Wrench, ChevronRight, Globe, AlertCircle } from 'lucide-react';
+import {
+  Terminal, FileText, Wrench, ChevronRight, Globe, AlertCircle,
+  FilePen, FilePlus, SearchCode, FolderSearch, ListTodo, Bot,
+  ClipboardList, ClipboardCheck, Zap, Send, GitBranch, GitMerge,
+  Activity, AlarmClock, Timer, TimerOff, SquareTerminal, CircleStop,
+  Radio, MessageCircleQuestion, NotebookPen, Plug,
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import type { ToolCall, MetaWorkspaceRuntime } from '../../types';
 import { SPRING, useReducedMotionTransition } from './motion';
 import { getShikiHighlighter, getActiveHighlightTheme } from '../../themes';
 import { DOT_MASK_URL } from '../../lib/assets';
 import { owningLink } from '../../lib/syntheticRoot';
+import PlanReviewCard from './PlanReviewCard';
 
 function parseMcpName(name: string): { server: string; tool: string } | null {
   if (!name.startsWith('mcp__')) return null;
@@ -274,13 +281,85 @@ function truncateCode(code: string, maxLines: number): { truncated: string; isTr
   return { truncated: lines.slice(0, maxLines).join('\n'), isTruncated: true };
 }
 
-const iconMap = {
-  file_edit: FileEdit,
+// Exact tool name → icon (primary resolution for all messages including persisted)
+const nameToIcon: Record<string, typeof Wrench> = {
+  // File operations
+  Read: FileText,
+  Edit: FilePen,
+  Write: FilePlus,
+  // Search
+  Grep: SearchCode,
+  Glob: FolderSearch,
+  ToolSearch: SearchCode,
+  // Terminal
+  Bash: Terminal,
+  // Web
+  WebFetch: Globe,
+  WebSearch: Globe,
+  // Planning & tasks
+  EnterPlanMode: ClipboardList,
+  ExitPlanMode: ClipboardCheck,
+  TodoWrite: ListTodo,
+  // Agent & orchestration
+  Agent: Bot,
+  Skill: Zap,
+  SendUserMessage: Send,
+  // Worktree
+  EnterWorktree: GitBranch,
+  ExitWorktree: GitMerge,
+  // Scheduling & monitoring
+  Monitor: Activity,
+  ScheduleWakeup: AlarmClock,
+  CronCreate: Timer,
+  CronDelete: TimerOff,
+  CronList: Timer,
+  // Background tasks
+  TaskOutput: SquareTerminal,
+  TaskStop: CircleStop,
+  RemoteTrigger: Radio,
+  // Interactive
+  AskUserQuestion: MessageCircleQuestion,
+  // Notebook
+  NotebookEdit: NotebookPen,
+};
+
+// Type-based fallback for tools that only have a stale type (no name match)
+const iconByType: Record<string, typeof Wrench> = {
+  file_edit: FilePen,
   terminal_command: Terminal,
   file_read: FileText,
+  file_search: SearchCode,
   web_fetch: Globe,
+  todo: ListTodo,
+  agent: Bot,
+  notebook: NotebookPen,
+  question: MessageCircleQuestion,
+  plan: ClipboardList,
+  worktree: GitBranch,
+  skill: Zap,
+  schedule: Timer,
+  task: SquareTerminal,
+  mcp: Plug,
   other: Wrench,
-} as const;
+};
+
+/** Resolve icon from tool name first, then type, then fallback. */
+function resolveIcon(name: string, type: string): typeof Wrench {
+  // Exact name match (covers all known Claude CLI tools)
+  if (nameToIcon[name]) return nameToIcon[name];
+  // MCP tools (mcp__serverName__toolName)
+  if (name.startsWith('mcp__')) return Plug;
+  // Fuzzy name fallbacks for unexpected variants
+  if (name.includes('Edit') || name.includes('Write')) return FilePen;
+  if (name.includes('Bash')) return Terminal;
+  if (name.includes('Grep') || name.includes('Search')) return SearchCode;
+  if (name.includes('Glob')) return FolderSearch;
+  if (name.includes('Read')) return FileText;
+  if (name.includes('Notebook')) return NotebookPen;
+  if (name.includes('Cron')) return Timer;
+  // Type-based fallback
+  return iconByType[type] || Wrench;
+}
 
 const MAX_PREVIEW_LINES = 20;
 
@@ -614,11 +693,39 @@ function toolProjectLinkName(toolCall: ToolCall, runtime: MetaWorkspaceRuntime |
   return runtime.projects.some(pp => pp.linkName === seg) ? seg : null;
 }
 
-export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRuntime, onAnswerQuestion }: { toolCall: ToolCall; defaultExpanded?: boolean; metaRuntime?: MetaWorkspaceRuntime | null; onAnswerQuestion?: (toolUseId: string, answers: Record<string, string | string[]>) => Promise<void> | void }) {
+export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRuntime, onAnswerQuestion, onAnswerPlanReview }: { toolCall: ToolCall; defaultExpanded?: boolean; metaRuntime?: MetaWorkspaceRuntime | null; onAnswerQuestion?: (toolUseId: string, answers: Record<string, string | string[]>) => Promise<void> | void; onAnswerPlanReview?: (toolUseId: string, approved: boolean) => Promise<void> | void }) {
+  // --- ExitPlanMode: render a dedicated plan review card instead of the generic tool card ---
+  const isExitPlanMode = toolCall.name === 'ExitPlanMode';
+  if (isExitPlanMode) {
+    let plan = '';
+    let planFilePath = '';
+    let resolved: 'approved' | 'rejected' | undefined;
+    try {
+      const input = JSON.parse(toolCall.input || '{}');
+      plan = input.plan || '';
+      planFilePath = input.planFilePath || '';
+      // If there's output, the review has been resolved
+      if (toolCall.output) {
+        const lower = (toolCall.output || '').toLowerCase();
+        resolved = lower.includes('rejected') || lower.includes('reject') ? 'rejected' : 'approved';
+      }
+    } catch { /* ignore parse errors */ }
+    return (
+      <PlanReviewCard
+        plan={plan}
+        planFilePath={planFilePath}
+        toolUseId={toolCall.id}
+        resolved={resolved}
+        onApprove={(id) => onAnswerPlanReview?.(id, true)}
+        onReject={(id) => onAnswerPlanReview?.(id, false)}
+      />
+    );
+  }
+
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [showAllCode, setShowAllCode] = useState(false);
   const [showAllOutput, setShowAllOutput] = useState(false);
-  const Icon = iconMap[toolCall.type] || Wrench;
+  const Icon = resolveIcon(toolCall.name, toolCall.type);
   const { label, code, langOverride, diff } = formatInput(toolCall);
   const lang = langOverride || detectLang(toolCall);
   const { truncated, isTruncated } = truncateCode(code, MAX_PREVIEW_LINES);
@@ -642,10 +749,10 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
   const hasBody = isAskUserQuestion ? true : isBash ? !!toolCall.output : isTodo ? true : !!code;
 
   const sigClass =
-    toolCall.type === 'file_edit'        ? 'tool-sig-wipe' :
-    toolCall.type === 'terminal_command' ? 'tool-sig-typed' :
-    toolCall.type === 'web_fetch'        ? 'tool-sig-shimmer' :
-    toolCall.type === 'file_read'        ? 'tool-sig-scan' :
+    (toolCall.name.includes('Edit') || toolCall.name === 'Write' || toolCall.type === 'file_edit') ? 'tool-sig-wipe' :
+    (toolCall.name.includes('Bash') || toolCall.type === 'terminal_command') ? 'tool-sig-typed' :
+    (toolCall.name.includes('Read') || toolCall.name.includes('Glob') || toolCall.name.includes('Grep') ||
+     toolCall.type === 'file_read' || toolCall.type === 'file_search') ? 'tool-sig-scan' :
     'tool-sig-shimmer';
 
   return (

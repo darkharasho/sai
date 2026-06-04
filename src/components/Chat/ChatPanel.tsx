@@ -941,6 +941,23 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         return;
       }
 
+      // ExitPlanMode answered — stamp resolved state into the tool call's output
+      // so PlanReviewCard re-renders in its collapsed resolved state.
+      if (msg.type === 'plan_review_answered') {
+        const { toolUseId, approved } = msg;
+        setMessages(prev => prev.map(m => {
+          if (m.role !== 'assistant' || !m.toolCalls) return m;
+          let touched = false;
+          const newToolCalls = m.toolCalls.map(tc => {
+            if (tc.id !== toolUseId) return tc;
+            touched = true;
+            return { ...tc, output: approved ? 'Plan approved' : 'Plan rejected' };
+          });
+          return touched ? { ...m, toolCalls: newToolCalls } : m;
+        }));
+        return;
+      }
+
       // Tool approval request from main process
       if (msg.type === 'approval_needed') {
         setPendingApproval({
@@ -1020,10 +1037,21 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           if (block.type === 'tool_use') {
             tools.push({
               id: block.id,
-              type: block.name?.includes('Edit') || block.name?.includes('Write') ? 'file_edit' :
+              type: block.name?.includes('Edit') || block.name === 'Write' ? 'file_edit' :
                     block.name?.includes('Bash') ? 'terminal_command' :
-                    block.name?.includes('Read') || block.name?.includes('Glob') || block.name?.includes('Grep') ? 'file_read' :
-                    block.name?.includes('WebFetch') || block.name?.includes('WebSearch') ? 'web_fetch' : 'other',
+                    block.name?.includes('Glob') || block.name?.includes('Grep') || block.name === 'ToolSearch' ? 'file_search' :
+                    block.name?.includes('Read') ? 'file_read' :
+                    block.name?.includes('WebFetch') || block.name?.includes('WebSearch') ? 'web_fetch' :
+                    block.name === 'TodoWrite' ? 'todo' :
+                    block.name === 'Agent' || block.name === 'SendUserMessage' ? 'agent' :
+                    block.name?.includes('Notebook') ? 'notebook' :
+                    block.name === 'AskUserQuestion' ? 'question' :
+                    block.name === 'EnterPlanMode' || block.name === 'ExitPlanMode' ? 'plan' :
+                    block.name === 'EnterWorktree' || block.name === 'ExitWorktree' ? 'worktree' :
+                    block.name === 'Skill' ? 'skill' :
+                    block.name === 'Monitor' || block.name === 'ScheduleWakeup' || block.name?.startsWith('Cron') ? 'schedule' :
+                    block.name === 'TaskOutput' || block.name === 'TaskStop' || block.name === 'RemoteTrigger' ? 'task' :
+                    block.name?.startsWith('mcp__') ? 'mcp' : 'other',
               name: block.name || 'tool',
               input: typeof block.input === 'string' ? block.input :
                      typeof block.input === 'object' ? JSON.stringify(block.input, null, 2) : '',
@@ -1646,6 +1674,11 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     return window.sai.claudeAnswerQuestion(projectPath, toolUseId, answers, claudeScope).then(() => undefined);
   }, [aiProvider, projectPath, claudeScope]);
 
+  const handleAnswerPlanReview = useCallback((toolUseId: string, approved: boolean) => {
+    if (aiProvider !== 'claude' || !projectPath) return Promise.resolve();
+    return window.sai.claudeAnswerPlanReview(projectPath, toolUseId, approved, claudeScope).then(() => undefined);
+  }, [aiProvider, projectPath, claudeScope]);
+
   const handleQueue = (text: string, fullText: string, images?: string[], attachments?: { images: number; files: number; terminal: boolean }) => {
     if (sessionId && onQueueAdd) {
       onQueueAdd(sessionId, text, fullText, images, attachments);
@@ -1792,10 +1825,11 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
                       renderMessage={renderMessage}
                       metaRuntime={activeMetaRuntime}
                       onAnswerQuestion={handleAnswerQuestion}
+                      onAnswerPlanReview={handleAnswerPlanReview}
                     />
                   </div>
                 )
-                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} renderToolCall={renderToolCall} renderMessage={renderMessage} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} watcherUrlAllowlist={watcherUrlsByMessageId.get(msg.id) ?? EMPTY_URL_SET} />
+                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} renderToolCall={renderToolCall} renderMessage={renderMessage} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} watcherUrlAllowlist={watcherUrlsByMessageId.get(msg.id) ?? EMPTY_URL_SET} />
               )}
           </>
         )}

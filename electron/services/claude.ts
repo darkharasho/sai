@@ -6,7 +6,7 @@ import { sweepIdleScopes, IDLE_SCOPE_MS, SWEEP_INTERVAL_MS } from './idleScopeSw
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { enrichedEnv, withNodeMemoryCap } from './shellEnv';
-import { notifyCompletion, notifyApproval, notifyQuestion } from './notify';
+import { notifyCompletion, notifyApproval, notifyQuestion, notifyPlanReview } from './notify';
 import { extractCodexCommitMessage } from './commit-message-parser';
 import { ensureGeminiCommitSession, ensureGeminiTransport, promptGeminiText } from './gemini';
 import * as swarmMcpHost from './swarmMcpHost';
@@ -331,8 +331,15 @@ function ensureProcess(
           continue;
         }
 
+        // --- ExitPlanMode flow: same buffering pattern as AskUserQuestion.
+        // Buffer CLI output until the user approves or rejects the plan in the UI. ---
+        if (claude.awaitingPlanReview) {
+          continue;
+        }
+
         // --- Track the latest tool_use from assistant messages ---
         let askUserQuestionId: string | null = null;
+        let exitPlanModeId: string | null = null;
         if (msg.type === 'assistant' && msg.message?.content) {
           const content = Array.isArray(msg.message.content) ? msg.message.content : [];
           for (const block of content) {
@@ -344,6 +351,9 @@ function ensureProcess(
               };
               if (block.name === 'AskUserQuestion') {
                 askUserQuestionId = block.id;
+              }
+              if (block.name === 'ExitPlanMode') {
+                exitPlanModeId = block.id;
               }
             }
           }
@@ -434,6 +444,25 @@ function ensureProcess(
             question: firstQuestion,
           });
         }
+
+        // After forwarding the assistant message that introduced an
+        // ExitPlanMode tool_use, start buffering subsequent CLI output
+        // until the user approves or rejects the plan in the UI.
+        if (exitPlanModeId) {
+          claude.awaitingPlanReview = true;
+          claude.pendingPlanReviewId = exitPlanModeId;
+          const planInput = claude.pendingToolUse?.input || {};
+          const wsName = ws.projectPath.split('/').pop() || ws.projectPath;
+          notifyPlanReview(win, wsName);
+          emitChatMessage({
+            type: 'plan_review_needed',
+            projectPath: ws.projectPath,
+            scope,
+            toolUseId: exitPlanModeId,
+            plan: planInput.plan || '',
+            planFilePath: planInput.planFilePath || '',
+          });
+        }
       } catch {
         if (line.includes('"type":"result"') || line.includes('"type": "result"')) {
           const responseTurnSeq = claude.activeTurnSeq;
@@ -474,6 +503,8 @@ function ensureProcess(
     claude.awaitingApproval = false;
     claude.awaitingQuestionAnswer = false;
     claude.pendingQuestionId = null;
+    claude.awaitingPlanReview = false;
+    claude.pendingPlanReviewId = null;
     claude.streaming = false;
     if (wasBusy) {
       emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope, turnSeq: claude.turnSeq });
@@ -491,6 +522,8 @@ function ensureProcess(
     claude.awaitingApproval = false;
     claude.awaitingQuestionAnswer = false;
     claude.pendingQuestionId = null;
+    claude.awaitingPlanReview = false;
+    claude.pendingPlanReviewId = null;
     claude.streaming = false;
     emitChatMessage({
       type: 'error', text: `Claude process error: ${err.message}`, projectPath: ws.projectPath, scope
@@ -649,6 +682,44 @@ export async function answerQuestionImpl(
         role: 'user',
         content: `[AskUserQuestion answers for tool call ${toolUseId}]\nThe user picked the following answers (the earlier placeholder tool_result for this tool call should be disregarded):\n${JSON.stringify(answers, null, 2)}`,
       },
+    });
+    proc.stdin.write(followUp + '\n');
+  }
+  return true;
+}
+
+export async function answerPlanReviewImpl(
+  projectPath: string,
+  toolUseId: string,
+  approved: boolean,
+  scope?: string,
+): Promise<boolean> {
+  const ws = get(projectPath);
+  if (!ws) return false;
+  const effectiveScope = scope || 'chat';
+  const claude = getClaude(ws, effectiveScope);
+
+  if (claude.awaitingPlanReview && claude.pendingPlanReviewId === toolUseId) {
+    claude.awaitingPlanReview = false;
+    claude.pendingPlanReviewId = null;
+  }
+
+  emitChatMessage({
+    type: 'plan_review_answered',
+    projectPath: ws.projectPath,
+    scope: effectiveScope,
+    toolUseId,
+    approved,
+  });
+
+  const proc = claude.process;
+  if (proc?.stdin && !proc.stdin.destroyed) {
+    const content = approved
+      ? `[ExitPlanMode result for tool call ${toolUseId}]\nThe user approved the plan. Proceed with implementation.`
+      : `[ExitPlanMode result for tool call ${toolUseId}]\nThe user rejected the plan. Please ask what changes they'd like and revise your approach.`;
+    const followUp = JSON.stringify({
+      type: 'user',
+      message: { role: 'user', content },
     });
     proc.stdin.write(followUp + '\n');
   }
@@ -983,6 +1054,12 @@ export function registerClaudeHandlers(win: BrowserWindow) {
   // by merging answers into the tool call's input JSON.
   ipcMain.handle('claude:answer-question', (_event, projectPath: string, toolUseId: string, answers: Record<string, string | string[]>, scope?: string) =>
     answerQuestionImpl(projectPath, toolUseId, answers, scope)
+  );
+
+  // claude:answer-plan-review — user approved or rejected an ExitPlanMode tool call.
+  // Same pattern as answer-question: send the decision as a follow-up user message.
+  ipcMain.handle('claude:answer-plan-review', (_event, projectPath: string, toolUseId: string, approved: boolean, scope?: string) =>
+    answerPlanReviewImpl(projectPath, toolUseId, approved, scope)
   );
 
   // claude:alwaysAllow — add a tool pattern to the project's .claude/settings.local.json

@@ -122,3 +122,22 @@ export function notifyQuestion(win: BrowserWindow, workspaceName: string, questi
     }).show();
   }
 }
+
+/**
+ * Fire an immediate system notification when the agent presents a plan
+ * via ExitPlanMode. Always fires regardless of focus — the agent is
+ * blocked until the user approves or rejects.
+ */
+export function notifyPlanReview(win: BrowserWindow, workspaceName: string) {
+  if (win.isDestroyed()) return;
+  if (!isEnabled()) return;
+
+  win.flashFrame(true);
+
+  if (Notification.isSupported()) {
+    new Notification({
+      title: `Plan review — ${workspaceName}`,
+      body: 'The agent has a plan ready for your approval.',
+    }).show();
+  }
+}
