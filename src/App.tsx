@@ -41,7 +41,9 @@ import SwarmToolCardSelector from './components/Swarm/cards/SwarmToolCardSelecto
 import { bucketToolCalls, trimEvents, pushRing, type TimedEvent } from './lib/swarmActivityHistory';
 import InlineApprovalCard from './components/Swarm/cards/InlineApprovalCard';
 import QuitSwarmConfirmModal from './components/Swarm/QuitSwarmConfirmModal';
-import { swarmInit, swarmGetApprovals, swarmResolveApproval, swarmCreateApproval } from './swarmDb';
+import { swarmInit, swarmGetApprovals, swarmResolveApproval, swarmCreateApproval, swarmGetTasks, swarmCreateTask, swarmDeleteTask } from './swarmDb';
+import { reconcileTasksOnStartup, findOrphanApprovalIds } from './lib/swarmReconcile';
+import { diffSwarmTasks } from './lib/swarmPersistenceDiff';
 import { SwarmScheduler, isLikelyReadOnlyPrompt } from './lib/swarmScheduler';
 import { runSwarmTask } from './lib/swarmTaskRunner';
 import { landTask, discardTask } from './lib/swarmLanding';
@@ -308,6 +310,13 @@ export default function App() {
   // swarm (sidebar change or back to overview) so the chat panel doesn't
   // keep showing the task's chat outside the swarm view.
   const preSwarmSessionByWsRef = useRef<Map<string, string>>(new Map());
+  // Workspaces whose persisted swarm tasks have already been hydrated this
+  // session (so we don't re-load and clobber live in-memory state).
+  const hydratedWorkspacesRef = useRef<Set<string>>(new Set());
+  // Last task list persisted per workspace, for diffing on change.
+  const persistedTasksRef = useRef<Map<string, SwarmTask[]>>(new Map());
+  // FIFO so overlapping persistence flushes don't interleave IndexedDB txns.
+  const persistQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const lastEmittedWorkspaceStatusRef = useRef<Map<string, {
     busy: boolean;
     streaming: boolean;
@@ -523,9 +532,7 @@ export default function App() {
     return cleanup;
   }, []);
 
-  // Initialize the swarm IndexedDB once. Tasks are now ephemeral session state
-  // (in `swarmTasksByWs`) and never persisted; the DB is still used for
-  // approvals records.
+  // Initialize the swarm IndexedDB once.
   useEffect(() => {
     (async () => {
       try {
@@ -536,6 +543,47 @@ export default function App() {
     })();
   }, []);
 
+  // Hydrate persisted swarm tasks for a workspace the first time it becomes
+  // active: load tasks, reconcile zombie (streaming/awaiting_approval) tasks to
+  // paused, prune approvals whose task is gone, then seed in-memory state.
+  useEffect(() => {
+    const ws = activeProjectPath;
+    if (!ws || hydratedWorkspacesRef.current.has(ws)) return;
+    hydratedWorkspacesRef.current.add(ws);
+    let cancelled = false;
+    (async () => {
+      try {
+        await swarmInit();
+        await reconcileTasksOnStartup(ws);
+        const tasks = await swarmGetTasks(ws);
+        const approvals = await swarmGetApprovals(ws);
+        const orphanIds = findOrphanApprovalIds(tasks, approvals);
+        await Promise.all(orphanIds.map(id => swarmResolveApproval(id)));
+        const liveApprovals = approvals.filter(a => !orphanIds.includes(a.id));
+        if (cancelled) return;
+        persistedTasksRef.current.set(ws, tasks);
+        setSwarmTasksByWs(prev => {
+          const m = new Map(prev);
+          // Don't clobber any tasks spawned before hydrate resolved.
+          const existing = m.get(ws) ?? [];
+          const existingIds = new Set(existing.map(t => t.id));
+          const merged = [...existing, ...tasks.filter(t => !existingIds.has(t.id))];
+          m.set(ws, merged);
+          return m;
+        });
+        setSwarmApprovalsByWs(prev => {
+          const m = new Map(prev);
+          m.set(ws, liveApprovals);
+          return m;
+        });
+      } catch {
+        // best-effort: a hydrate failure shouldn't crash the workspace.
+        hydratedWorkspacesRef.current.delete(ws);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeProjectPath]);
+
   useEffect(() => {
     activeProjectPathRef.current = activeProjectPath;
     setActiveWorkspace(activeProjectPath);
@@ -543,8 +591,7 @@ export default function App() {
   }, [activeProjectPath]);
 
   // Reset the swarm sidebar selection to the Overview pin whenever the
-  // active workspace changes. Tasks themselves are ephemeral in-memory state
-  // (`swarmTasksByWs`); there's no longer a load/poll from swarmDb.
+  // active workspace changes.
   useEffect(() => {
     if (!activeProjectPath) return;
     setSwarmSelected('overview');
@@ -565,6 +612,31 @@ export default function App() {
     }).catch(() => { /* ignore */ });
     return () => { cancelled = true; };
   }, [activeProjectPath, swarmTasksByWs]);
+
+  // Persist swarm task changes. All ~dozen setSwarmTasksByWs sites funnel here:
+  // we diff the new map against the last-persisted snapshot per workspace and
+  // upsert changed tasks / delete removed ones. Writes are serialized via a
+  // FIFO. The full task object is persisted (put), so there is no partial-patch
+  // read-modify-write race.
+  useEffect(() => {
+    const snapshot = swarmTasksByWs;
+    persistQueueRef.current = persistQueueRef.current.then(async () => {
+      for (const [ws, nextTasks] of snapshot.entries()) {
+        // Only persist workspaces that have been hydrated, so the diff baseline
+        // is correct (avoids deleting persisted tasks before they're loaded).
+        if (!hydratedWorkspacesRef.current.has(ws)) continue;
+        const prevTasks = persistedTasksRef.current.get(ws) ?? [];
+        const { upserts, deletes } = diffSwarmTasks(prevTasks, nextTasks);
+        for (const task of upserts) {
+          try { await swarmCreateTask(task); } catch { /* ignore */ }
+        }
+        for (const id of deletes) {
+          try { await swarmDeleteTask(id); } catch { /* ignore */ }
+        }
+        persistedTasksRef.current.set(ws, nextTasks);
+      }
+    }).catch(() => { /* keep the queue alive on error */ });
+  }, [swarmTasksByWs]);
 
   // Poll active task counts every 5s into a 12-element ring buffer per
   // workspace so the StatStrip ACTIVE card can render a 60s background
