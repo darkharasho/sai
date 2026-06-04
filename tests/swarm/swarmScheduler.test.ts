@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { SwarmScheduler } from '@/lib/swarmScheduler';
-import { materializeIfNeeded } from '@/lib/swarmScheduler';
+import { SwarmScheduler, materializeIfNeeded } from '@/lib/swarmScheduler';
 
 describe('SwarmScheduler', () => {
   it('promotes up to cap from queued to streaming and calls onStart', () => {

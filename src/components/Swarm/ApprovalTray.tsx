@@ -18,7 +18,6 @@ interface Props {
   onDenyAll: () => void;
 }
 
-
 function relativeTime(ts: number): string {
   const diff = Math.max(0, Date.now() - ts);
   const m = Math.floor(diff / 60000);
