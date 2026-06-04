@@ -1,4 +1,5 @@
 import React from 'react';
+import { isReadTool } from '../../lib/swarmToolTaxonomy';
 
 export interface ApprovalRow {
   id: string;
@@ -17,7 +18,6 @@ interface Props {
   onDenyAll: () => void;
 }
 
-const READ_TOOLS = new Set(['read', 'Read', 'view', 'View', 'cat']);
 
 function relativeTime(ts: number): string {
   const diff = Math.max(0, Date.now() - ts);
@@ -75,7 +75,7 @@ const approveBtn: React.CSSProperties = {
 
 export default function ApprovalTray({ approvals, onApprove, onDeny, onApproveAllReads, onDenyAll }: Props) {
   if (approvals.length === 0) return null;
-  const hasReads = approvals.some(a => READ_TOOLS.has(a.toolName));
+  const hasReads = approvals.some(a => isReadTool(a.toolName));
 
   return (
     <section
