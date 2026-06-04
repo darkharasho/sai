@@ -313,6 +313,9 @@ export default function App() {
   // Workspaces whose persisted swarm tasks have already been hydrated this
   // session (so we don't re-load and clobber live in-memory state).
   const hydratedWorkspacesRef = useRef<Set<string>>(new Set());
+  // Workspaces whose hydrate is currently running, to guard against the effect
+  // re-entering before the first load completes.
+  const hydrationInFlightRef = useRef<Set<string>>(new Set());
   // Last task list persisted per workspace, for diffing on change.
   const persistedTasksRef = useRef<Map<string, SwarmTask[]>>(new Map());
   // FIFO so overlapping persistence flushes don't interleave IndexedDB txns.
@@ -546,10 +549,14 @@ export default function App() {
   // Hydrate persisted swarm tasks for a workspace the first time it becomes
   // active: load tasks, reconcile zombie (streaming/awaiting_approval) tasks to
   // paused, prune approvals whose task is gone, then seed in-memory state.
+  // The workspace is marked hydrated only AFTER its persistence baseline is set
+  // (and an in-flight guard prevents re-entry), so the persistence effect —
+  // which skips non-hydrated workspaces — never runs against an empty baseline
+  // mid-load.
   useEffect(() => {
     const ws = activeProjectPath;
-    if (!ws || hydratedWorkspacesRef.current.has(ws)) return;
-    hydratedWorkspacesRef.current.add(ws);
+    if (!ws || hydratedWorkspacesRef.current.has(ws) || hydrationInFlightRef.current.has(ws)) return;
+    hydrationInFlightRef.current.add(ws);
     let cancelled = false;
     (async () => {
       try {
@@ -561,7 +568,11 @@ export default function App() {
         await Promise.all(orphanIds.map(id => swarmResolveApproval(id)));
         const liveApprovals = approvals.filter(a => !orphanIds.includes(a.id));
         if (cancelled) return;
+        // Establish the persistence baseline and mark hydrated together, before
+        // seeding state, so the persistence effect only ever sees a correct
+        // baseline for this workspace.
         persistedTasksRef.current.set(ws, tasks);
+        hydratedWorkspacesRef.current.add(ws);
         setSwarmTasksByWs(prev => {
           const m = new Map(prev);
           // Don't clobber any tasks spawned before hydrate resolved.
@@ -576,9 +587,12 @@ export default function App() {
           m.set(ws, liveApprovals);
           return m;
         });
-      } catch {
-        // best-effort: a hydrate failure shouldn't crash the workspace.
-        hydratedWorkspacesRef.current.delete(ws);
+      } catch (err) {
+        // best-effort: a hydrate failure shouldn't crash the workspace. Leaving
+        // the ws un-hydrated lets a later activation retry.
+        console.error('swarm: hydrate failed', err);
+      } finally {
+        hydrationInFlightRef.current.delete(ws);
       }
     })();
     return () => { cancelled = true; };
@@ -628,10 +642,10 @@ export default function App() {
         const prevTasks = persistedTasksRef.current.get(ws) ?? [];
         const { upserts, deletes } = diffSwarmTasks(prevTasks, nextTasks);
         for (const task of upserts) {
-          try { await swarmCreateTask(task); } catch { /* ignore */ }
+          try { await swarmCreateTask(task); } catch (err) { console.error('swarm: persist upsert failed', task.id, err); }
         }
         for (const id of deletes) {
-          try { await swarmDeleteTask(id); } catch { /* ignore */ }
+          try { await swarmDeleteTask(id); } catch (err) { console.error('swarm: persist delete failed', id, err); }
         }
         persistedTasksRef.current.set(ws, nextTasks);
       }
@@ -1023,10 +1037,11 @@ export default function App() {
 
     const wsTasks = () => swarmTasksByWs.get(ws) ?? [];
 
-    // Tasks are ephemeral in-memory state; the helpers' updateTask dep
-    // (which used to persist to swarmDb) is now a no-op. Local list mutations
-    // happen in the call sites below so terminal tasks are removed from view.
-    const noopUpdateTask = async () => { /* tasks are ephemeral */ };
+    // updateTask is a no-op here: task persistence is handled centrally by the
+    // diff effect, which deletes a task's row when it's filtered out of the
+    // in-memory list (e.g. on land/discard). Local list mutations in the call
+    // sites below drive both the UI and that persistence.
+    const noopUpdateTask = async () => { /* persistence handled by the diff effect */ };
     const landDeps = {
       canFastForward: (cwd: string, src: string, tgt: string) =>
         (window.sai as any).swarm.canFastForward(cwd, src, tgt),
