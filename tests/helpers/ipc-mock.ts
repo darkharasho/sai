@@ -18,6 +18,7 @@ export interface MockSai {
   terminalIsAwaitingInput: ReturnType<typeof vi.fn>;
   terminalTabComplete: ReturnType<typeof vi.fn>;
   terminalOnData: ReturnType<typeof vi.fn>;
+  terminalOnCtrlC: ReturnType<typeof vi.fn>;
 
   // Claude
   claudeStart: ReturnType<typeof vi.fn>;
@@ -158,6 +159,7 @@ export function createMockSai(): MockSai {
     terminalIsAwaitingInput: vi.fn().mockResolvedValue(false),
     terminalTabComplete: vi.fn().mockResolvedValue([]),
     terminalOnData: noopUnsubscribe,
+    terminalOnCtrlC: noopUnsubscribe,
 
     // Claude
     claudeStart: vi.fn().mockResolvedValue(undefined),
