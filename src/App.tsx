@@ -1188,7 +1188,7 @@ export default function App() {
             m.set(ws, (m.get(ws) ?? []).filter(x => x.id !== t.id));
             return m;
           });
-          void swarmDeleteApprovalsByTask(t.id);
+          void swarmDeleteApprovalsByTask(t.id).catch(() => { /* best-effort prune */ });
           setSwarmApprovalsByWs(prev => {
             const m = new Map(prev);
             m.set(ws, (m.get(ws) ?? []).filter(x => x.taskId !== t.id));
@@ -1206,7 +1206,7 @@ export default function App() {
           m.set(ws, (m.get(ws) ?? []).filter(x => x.id !== t.id));
           return m;
         });
-        void swarmDeleteApprovalsByTask(t.id);
+        void swarmDeleteApprovalsByTask(t.id).catch(() => { /* best-effort prune */ });
         setSwarmApprovalsByWs(prev => {
           const m = new Map(prev);
           m.set(ws, (m.get(ws) ?? []).filter(x => x.taskId !== t.id));
@@ -2091,7 +2091,7 @@ export default function App() {
           if (mirror.patch.kind === 'status' && patchedTask) {
             // A task that reached a terminal status can have no actionable
             // pending approval; prune any stale rows for it.
-            void swarmDeleteApprovalsByTask(patchedTask.id);
+            void swarmDeleteApprovalsByTask(patchedTask.id).catch(() => { /* best-effort prune */ });
             setSwarmApprovalsByWs(prev => {
               const list = prev.get(msg.projectPath) ?? [];
               if (!list.some(x => x.taskId === patchedTask.id)) return prev;
