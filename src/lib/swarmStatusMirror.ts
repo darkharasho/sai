@@ -41,7 +41,7 @@ export function deriveSwarmMirror(
     if (task.status === 'streaming' || task.status === 'awaiting_approval') {
       const status = isTurnErrored(msg) ? 'failed' : 'done';
       const patch: SwarmTaskPatch = { kind: 'status', status, lastActivityAt: now };
-      if (typeof msg.total_cost_usd === 'number') patch.costEstimate = msg.total_cost_usd;
+      if (typeof msg.total_cost_usd === 'number' && Number.isFinite(msg.total_cost_usd)) patch.costEstimate = msg.total_cost_usd;
       return { taskId: task.id, patch };
     }
     return null;

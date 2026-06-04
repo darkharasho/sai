@@ -78,6 +78,12 @@ describe('deriveSwarmMirror', () => {
     expect(r).toEqual({ taskId: 't1', patch: { kind: 'status', status: 'done', costEstimate: 0.42, lastActivityAt: 50 } });
   });
 
+  it('marks failed AND records cost when an errored result carries total_cost_usd', () => {
+    const t = makeTask();
+    const r = deriveSwarmMirror({ type: 'result', scope: 'sess-abc', is_error: true, total_cost_usd: 0.1 }, [t], 50);
+    expect(r).toEqual({ taskId: 't1', patch: { kind: 'status', status: 'failed', costEstimate: 0.1, lastActivityAt: 50 } });
+  });
+
   it('counts tool_use blocks in assistant messages', () => {
     const t = makeTask();
     const msg = {
