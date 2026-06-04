@@ -366,6 +366,22 @@ function createWindow() {
     }
   });
 
+  // On macOS, Chromium's Cocoa text-input layer can swallow Ctrl+key events
+  // before they reach the DOM / xterm.js.  Intercept Ctrl+C here so the
+  // renderer can forward SIGINT to the active terminal PTY.
+  mainWindow.webContents.on('before-input-event', (_event, input) => {
+    if (
+      input.type === 'keyDown' &&
+      input.control &&
+      !input.shift &&
+      !input.alt &&
+      !input.meta &&
+      input.key.toLowerCase() === 'c'
+    ) {
+      mainWindow?.webContents.send('terminal:ctrl-c');
+    }
+  });
+
   mainWindow.on('close', (e) => {
     if (!quitConfirmed) {
       e.preventDefault();
