@@ -1,23 +1,29 @@
 import { describe, it, expect } from 'vitest';
-import { shouldRequireApproval, READ_TOOLS } from '@/lib/swarmApprovalPolicy';
+import { shouldRequireApproval } from '@/lib/swarmApprovalPolicy';
 
 describe('shouldRequireApproval', () => {
-  it('auto-read pauses on writes', () => {
-    expect(shouldRequireApproval('auto-read', 'bash')).toBe(true);
-    expect(shouldRequireApproval('auto-read', 'read_file')).toBe(false);
+  it('auto-read auto-approves real read tools', () => {
+    expect(shouldRequireApproval('auto-read', 'Read')).toBe(false);
+    expect(shouldRequireApproval('auto-read', 'Grep')).toBe(false);
+    expect(shouldRequireApproval('auto-read', 'Glob')).toBe(false);
   });
-  it('always-ask pauses on everything', () => {
-    expect(shouldRequireApproval('always-ask', 'read_file')).toBe(true);
-  });
-  it('auto never pauses', () => {
-    expect(shouldRequireApproval('auto', 'bash')).toBe(false);
-  });
-});
 
-describe('READ_TOOLS', () => {
-  it('contains the documented read-only tool names', () => {
-    for (const t of ['read_file', 'list_files', 'grep', 'glob', 'search']) {
-      expect(READ_TOOLS.has(t)).toBe(true);
-    }
+  it('auto-read pauses on real write tools', () => {
+    expect(shouldRequireApproval('auto-read', 'Edit')).toBe(true);
+    expect(shouldRequireApproval('auto-read', 'Write')).toBe(true);
+    expect(shouldRequireApproval('auto-read', 'Bash')).toBe(true);
+  });
+
+  it('auto-read still handles legacy snake_case names', () => {
+    expect(shouldRequireApproval('auto-read', 'read_file')).toBe(false);
+    expect(shouldRequireApproval('auto-read', 'bash')).toBe(true);
+  });
+
+  it('always-ask pauses on everything, including reads', () => {
+    expect(shouldRequireApproval('always-ask', 'Read')).toBe(true);
+  });
+
+  it('auto never pauses', () => {
+    expect(shouldRequireApproval('auto', 'Bash')).toBe(false);
   });
 });
