@@ -18,6 +18,7 @@ import {
 } from '../../src/lib/orchestratorSystemPrompt';
 import type { SessionBus } from './remote/session-bus';
 import { clamp, type PermMode } from './remote/clamp';
+import { exitTerminalEvents } from './claudeExit';
 
 const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
 
@@ -475,8 +476,8 @@ function ensureProcess(
     claude.awaitingQuestionAnswer = false;
     claude.pendingQuestionId = null;
     claude.streaming = false;
-    if (wasBusy) {
-      emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope, turnSeq: claude.turnSeq });
+    for (const ev of exitTerminalEvents(code, signal, wasBusy)) {
+      emitChatMessage({ ...ev, projectPath: ws.projectPath, scope, turnSeq: claude.turnSeq });
     }
   });
 
@@ -493,7 +494,7 @@ function ensureProcess(
     claude.pendingQuestionId = null;
     claude.streaming = false;
     emitChatMessage({
-      type: 'error', text: `Claude process error: ${err.message}`, projectPath: ws.projectPath, scope
+      type: 'error', fatal: true, text: `Claude process error: ${err.message}`, projectPath: ws.projectPath, scope
     });
     emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope, turnSeq: claude.turnSeq });
   });
