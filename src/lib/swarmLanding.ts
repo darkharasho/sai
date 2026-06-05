@@ -9,6 +9,9 @@ export interface LandDeps {
    *  and a fast-forward isn't possible, landTask will auto-rebase and retry
    *  before falling back to the rebase-needed result. */
   rebase?: (worktreePath: string, baseBranch: string) => Promise<void>;
+  /** Optional: abort an in-progress rebase, leaving the worktree clean. Called
+   *  when `rebase` throws so a failed land doesn't wedge the worktree. */
+  rebaseAbort?: (worktreePath: string) => Promise<void>;
 }
 
 export async function landTask(
@@ -40,6 +43,11 @@ export async function landTask(
     try {
       await deps.rebase(task.worktreePath, task.baseBranch);
     } catch (err) {
+      // Leave the worktree clean so the next attempt / retry isn't blocked by an
+      // in-progress rebase.
+      if (deps.rebaseAbort) {
+        try { await deps.rebaseAbort(task.worktreePath); } catch { /* best-effort */ }
+      }
       return { ok: false, reason: 'rebase-needed', detail: err instanceof Error ? err.message : String(err) };
     }
     result = await tryFastForward();
@@ -63,4 +71,31 @@ export async function discardTask(task: SwarmTask, deps: DiscardDeps) {
     await deps.worktreeRemove(gitCwd, task.worktreePath, task.branch);
   }
   await deps.updateTask(task.id, { status: 'discarded', worktreePath: null });
+}
+
+export interface RebaseRetryDeps {
+  rebaseStatus: (worktreePath: string) => Promise<{ inProgress: boolean }>;
+  rebaseAbort: (worktreePath: string) => Promise<void>;
+  rebase: (worktreePath: string, baseBranch: string) => Promise<void>;
+}
+
+/**
+ * Re-run a rebase for a "rebase + retry" land. Clears any in-progress rebase
+ * first (re-running into an in-progress rebase is the wedge bug), then rebases.
+ * On failure it aborts so the worktree is left clean.
+ */
+export async function rebaseRetry(
+  worktreePath: string,
+  baseBranch: string,
+  deps: RebaseRetryDeps,
+): Promise<{ ok: true } | { ok: false; detail: string }> {
+  try {
+    const status = await deps.rebaseStatus(worktreePath);
+    if (status.inProgress) await deps.rebaseAbort(worktreePath);
+    await deps.rebase(worktreePath, baseBranch);
+    return { ok: true };
+  } catch (err) {
+    try { await deps.rebaseAbort(worktreePath); } catch { /* best-effort */ }
+    return { ok: false, detail: err instanceof Error ? err.message : String(err) };
+  }
 }

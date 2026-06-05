@@ -45,9 +45,9 @@ import { swarmInit, swarmGetApprovals, swarmResolveApproval, swarmCreateApproval
 import { approvalRoutingTarget } from './lib/swarmApprovalRouting';
 import { diffSwarmTasks } from './lib/swarmPersistenceDiff';
 import { hydrateWorkspaceSwarm } from './lib/swarmHydrate';
-import { SwarmScheduler, isLikelyReadOnlyPrompt } from './lib/swarmScheduler';
+import { SwarmScheduler, isLikelyReadOnlyPrompt, findStaleTasks } from './lib/swarmScheduler';
 import { runSwarmTask } from './lib/swarmTaskRunner';
-import { landTask, discardTask } from './lib/swarmLanding';
+import { landTask, discardTask, rebaseRetry } from './lib/swarmLanding';
 import { ensureOrchestratorSession } from './lib/swarmOrchestratorSession';
 import { handleSwarmToolRequest, type SwarmHost } from './lib/swarmOrchestratorDispatcher';
 import { executeSlashCommand } from './lib/orchestratorSlashCommands';
@@ -57,6 +57,8 @@ import { installRemoteProxyHandler } from './lib/remoteProxyClient';
 import { applyQuestionEvent } from './lib/awaitingQuestionTracker';
 
 const SWARM_DEFAULT_CAP = 5;
+const SWARM_STALE_THRESHOLD_MS = 10 * 60 * 1000; // 10 min of no activity → presumed dead
+const SWARM_WATCHDOG_INTERVAL_MS = 60 * 1000;    // sweep cadence
 import { swarmBranchName } from './lib/swarmSlug';
 import { shouldRequireApproval } from './lib/swarmApprovalPolicy';
 import { deriveSwarmMirror, applySwarmPatch } from './lib/swarmStatusMirror';
@@ -882,83 +884,120 @@ export default function App() {
     }).catch(() => { /* ignore */ });
   }, []);
 
-  useEffect(() => {
-    if (!activeProjectPath) return;
-    let s = swarmSchedulers.current.get(activeProjectPath);
+  // The scheduler's start callback. Stable so every per-workspace scheduler
+  // shares one implementation. On any failure it throws/rejects *after* cleanup
+  // so the scheduler releases the reserved cap slot (see SwarmScheduler.launch).
+  const makeSwarmOnStart = useCallback(() => async (task: SwarmTask) => {
+    const now = Date.now();
+    setSwarmTasksByWs(prev => {
+      const m = new Map(prev);
+      const list = (m.get(task.workspaceId) ?? []).map(t =>
+        t.id === task.id ? { ...t, status: 'streaming' as const, lastActivityAt: now } : t
+      );
+      m.set(task.workspaceId, list);
+      return m;
+    });
+    const removeFromList = () => {
+      setSwarmTasksByWs(prev => {
+        const m = new Map(prev);
+        m.set(task.workspaceId, (m.get(task.workspaceId) ?? []).filter(t => t.id !== task.id));
+        return m;
+      });
+    };
+    // Eager worktree materialization for likely-write tasks.
+    let effectiveWorktreePath: string | null = task.worktreePath;
+    if (!isLikelyReadOnlyPrompt(task.prompt) && !task.worktreePath) {
+      try {
+        const wt = await (window.sai as any).swarm.worktreeAdd(task.projectPath ?? task.workspaceId, task.id, task.branch, task.baseBranch);
+        effectiveWorktreePath = wt;
+        setSwarmTasksByWs(prev => {
+          const m = new Map(prev);
+          const list = (m.get(task.workspaceId) ?? []).map(t =>
+            t.id === task.id ? { ...t, worktreePath: wt } : t
+          );
+          m.set(task.workspaceId, list);
+          return m;
+        });
+      } catch (err) {
+        console.error('swarm: worktree materialization failed', err);
+        removeFromList();
+        throw err; // free the scheduler slot
+      }
+    }
+    // Kick off the provider runner for the task's session.
+    // Today only Claude is supported (codex/gemini IPC don't yet thread scope/kind through start).
+    try {
+      const sai = window.sai as any;
+      const dispatched = await runSwarmTask(
+        { ...task, worktreePath: effectiveWorktreePath },
+        {
+          claudeStart: sai.claudeStart,
+          claudeSend: sai.claudeSend,
+        },
+      );
+      if (!dispatched) {
+        console.warn(`swarm: provider '${task.provider}' is not yet supported for task runner; marking failed`);
+        try {
+          void (window.sai as any).swarmEmitCard?.(task.workspaceId, 'task_failed', {
+            taskId: task.id,
+            title: task.title,
+            branch: task.branch,
+            prompt: task.prompt,
+            reason: 'Task runner currently supports Claude only. Codex / Gemini support is a planned follow-up.',
+          });
+        } catch { /* best-effort */ }
+        removeFromList();
+        throw new Error(`unsupported provider: ${task.provider}`); // free the slot
+      }
+    } catch (err) {
+      console.error('swarm: provider runner failed to start', err);
+      removeFromList();
+      throw err; // free the scheduler slot
+    }
+  }, []);
+
+  const ensureSwarmScheduler = useCallback((ws: string): SwarmScheduler => {
+    let s = swarmSchedulers.current.get(ws);
     if (!s) {
       s = new SwarmScheduler({
         cap: swarmSettingsRef.current.concurrencyCap,
-        onStart: async (task) => {
-          const now = Date.now();
-          setSwarmTasksByWs(prev => {
-            const m = new Map(prev);
-            const list = (m.get(task.workspaceId) ?? []).map(t =>
-              t.id === task.id ? { ...t, status: 'streaming' as const, lastActivityAt: now } : t
-            );
-            m.set(task.workspaceId, list);
-            return m;
-          });
-          const removeFromList = () => {
-            setSwarmTasksByWs(prev => {
-              const m = new Map(prev);
-              m.set(task.workspaceId, (m.get(task.workspaceId) ?? []).filter(t => t.id !== task.id));
-              return m;
-            });
-          };
-          // Eager worktree materialization for likely-write tasks.
-          let effectiveWorktreePath: string | null = task.worktreePath;
-          if (!isLikelyReadOnlyPrompt(task.prompt) && !task.worktreePath) {
-            try {
-              const wt = await (window.sai as any).swarm.worktreeAdd(task.projectPath ?? task.workspaceId, task.id, task.branch, task.baseBranch);
-              effectiveWorktreePath = wt;
-              setSwarmTasksByWs(prev => {
-                const m = new Map(prev);
-                const list = (m.get(task.workspaceId) ?? []).map(t =>
-                  t.id === task.id ? { ...t, worktreePath: wt } : t
-                );
-                m.set(task.workspaceId, list);
-                return m;
-              });
-            } catch (err) {
-              console.error('swarm: worktree materialization failed', err);
-              removeFromList();
-              return;
-            }
-          }
-          // Kick off the provider runner for the task's session.
-          // Today only Claude is supported (codex/gemini IPC don't yet thread scope/kind through start).
-          try {
-            const sai = window.sai as any;
-            const dispatched = await runSwarmTask(
-              { ...task, worktreePath: effectiveWorktreePath },
-              {
-                claudeStart: sai.claudeStart,
-                claudeSend: sai.claudeSend,
-              },
-            );
-            if (!dispatched) {
-              console.warn(`swarm: provider '${task.provider}' is not yet supported for task runner; marking failed`);
-              try {
-                void (window.sai as any).swarmEmitCard?.(task.workspaceId, 'task_failed', {
-                  taskId: task.id,
-                  title: task.title,
-                  branch: task.branch,
-                  prompt: task.prompt,
-                  reason: 'Task runner currently supports Claude only. Codex / Gemini support is a planned follow-up.',
-                });
-              } catch { /* best-effort */ }
-              removeFromList();
-            }
-          } catch (err) {
-            console.error('swarm: provider runner failed to start', err);
-            removeFromList();
-          }
-        },
+        onStart: makeSwarmOnStart(),
       });
-      swarmSchedulers.current.set(activeProjectPath, s);
+      swarmSchedulers.current.set(ws, s);
     }
-    s.setTasks(swarmTasksByWs.get(activeProjectPath) ?? []);
-  }, [activeProjectPath, swarmTasksByWs]);
+    return s;
+  }, [makeSwarmOnStart]);
+
+  useEffect(() => {
+    // Ensure every workspace that has tasks has a scheduler, and feed each its
+    // current task list. Ticking all workspaces (not just the active one) lets
+    // queued tasks in background workspaces start under the cap.
+    for (const [ws, tasks] of swarmTasksByWs.entries()) {
+      ensureSwarmScheduler(ws).setTasks(tasks);
+    }
+  }, [swarmTasksByWs, ensureSwarmScheduler]);
+
+  // Watchdog: periodically fail streaming tasks that have gone silent (provider
+  // died without emitting a terminal event), reclaiming their cap slots. Reads
+  // tasks via a ref to avoid resetting the interval on every state change.
+  useEffect(() => {
+    const id = setInterval(() => {
+      const now = Date.now();
+      let changed = false;
+      const next = new Map(swarmTasksByWsRef.current);
+      for (const [ws, tasks] of next.entries()) {
+        const stale = findStaleTasks(tasks, now, SWARM_STALE_THRESHOLD_MS);
+        if (stale.length === 0) continue;
+        const staleIds = new Set(stale.map(t => t.id));
+        next.set(ws, tasks.map(t =>
+          staleIds.has(t.id) ? { ...t, status: 'failed' as const, lastActivityAt: now } : t
+        ));
+        changed = true;
+      }
+      if (changed) setSwarmTasksByWs(next);
+    }, SWARM_WATCHDOG_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, []);
 
   // Fetch diff stats for ready (done) tasks in the active workspace
   useEffect(() => {
@@ -1079,6 +1118,8 @@ export default function App() {
       updateTask: noopUpdateTask,
       rebase: (worktreePath: string, baseBranch: string) =>
         (window.sai as any).gitRebase(worktreePath, baseBranch),
+      rebaseAbort: (worktreePath: string) =>
+        (window.sai as any).gitRebaseAbort(worktreePath),
     };
     const discardDeps = {
       worktreeRemove: (cwd: string, wt: string, br: string) =>
@@ -3526,10 +3567,10 @@ export default function App() {
                       if (!focusedSwarmTask) return;
                       const task = focusedSwarmTask;
                       // Note: Claude CLI spawns a fresh process per turn, so a
-                      // true "resume" of the prior process isn't possible —
-                      // "resume" here re-dispatches the original prompt as a
-                      // new turn. If this feels misleading, consider renaming
-                      // the button to "Re-run" in SwarmTaskHeader.
+                      // true "resume" isn't possible — this re-dispatches the
+                      // original prompt as a new turn. Enqueue and let the
+                      // scheduler promote it under the concurrency cap rather
+                      // than starting it directly (which would bypass the cap).
                       setSwarmTasksByWs(prev => {
                         const m = new Map(prev);
                         const list = (m.get(activeProjectPath) ?? []).map(t =>
@@ -3538,25 +3579,6 @@ export default function App() {
                         m.set(activeProjectPath, list);
                         return m;
                       });
-                      try {
-                        const sai = window.sai as any;
-                        const dispatched = await runSwarmTask(
-                          { ...task, worktreePath: task.worktreePath },
-                          { claudeStart: sai.claudeStart, claudeSend: sai.claudeSend },
-                        );
-                        if (dispatched) {
-                          setSwarmTasksByWs(prev => {
-                            const m = new Map(prev);
-                            const list = (m.get(activeProjectPath) ?? []).map(t =>
-                              t.id === task.id ? { ...t, status: 'streaming' as const } : t
-                            );
-                            m.set(activeProjectPath, list);
-                            return m;
-                          });
-                        }
-                      } catch (err) {
-                        console.error('swarm: resume failed', err);
-                      }
                     }}
                   />
                 )}
@@ -3741,15 +3763,27 @@ export default function App() {
                               console.warn('swarm: rebase-retry skipped, task or worktree missing', taskRef);
                               return;
                             }
-                            try {
-                              await (window.sai as any).gitRebase?.(t.worktreePath, t.baseBranch);
-                            } catch (err) {
-                              console.error('swarm: rebase failed', err);
-                              window.alert(`Rebase failed: ${err instanceof Error ? err.message : String(err)}`);
-                              return;
-                            }
-                            try { await landWithCard(taskRef); }
-                            catch (err) { console.error('swarm: post-rebase land failed', err); }
+                            const wt = t.worktreePath;
+                            // Serialize behind the land queue so a retry never
+                            // races a concurrent land. Clear any in-progress
+                            // rebase first, then rebase, then land.
+                            const next = landQueueRef.current.then(async () => {
+                              const sai = window.sai as any;
+                              const r = await rebaseRetry(wt, t.baseBranch, {
+                                rebaseStatus: (p: string) => sai.gitRebaseStatus(p),
+                                rebaseAbort: (p: string) => sai.gitRebaseAbort(p),
+                                rebase: (p: string, base: string) => sai.gitRebase(p, base),
+                              });
+                              if (!r.ok) {
+                                console.error('swarm: rebase failed', r.detail);
+                                window.alert(`Rebase failed: ${r.detail}`);
+                                return;
+                              }
+                              try { await landWithCard(taskRef); }
+                              catch (err) { console.error('swarm: post-rebase land failed', err); }
+                            });
+                            landQueueRef.current = next.catch(() => {});
+                            await next;
                           }}
                           onLand={(id) => { void landWithCard(id); }}
                           onDiscard={(id) => { void discardWithCard(id); }}

@@ -2,8 +2,6 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   dispatchSwarmTool,
   handleSwarmToolRequest,
-  buildSyntheticToolUseMessage,
-  applySyntheticToolResult,
 } from '../../src/lib/swarmOrchestratorDispatcher';
 
 describe('dispatchSwarmTool', () => {
@@ -18,6 +16,43 @@ describe('dispatchSwarmTool', () => {
     const host = { snapshot: vi.fn().mockResolvedValue({ active: 2, approvals: 0, ready: 1, tasks: [] }) } as any;
     const r: any = await dispatchSwarmTool('query_status', {}, host);
     expect(r.snapshot.active).toBe(2);
+  });
+
+  it('spawn_tasks with missing prompts returns a structured error (no throw)', async () => {
+    const host = { spawnTasks: vi.fn() } as any;
+    const r: any = await dispatchSwarmTool('spawn_tasks', {}, host);
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/prompts/);
+    expect(host.spawnTasks).not.toHaveBeenCalled();
+  });
+
+  it('spawn_tasks with non-array prompts returns a structured error', async () => {
+    const host = { spawnTasks: vi.fn() } as any;
+    const r: any = await dispatchSwarmTool('spawn_tasks', { prompts: 'nope' }, host);
+    expect(r.ok).toBe(false);
+    expect(host.spawnTasks).not.toHaveBeenCalled();
+  });
+
+  it('pause_task without a taskRef returns a structured error', async () => {
+    const host = { pause: vi.fn() } as any;
+    const r: any = await dispatchSwarmTool('pause_task', {}, host);
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/taskRef/);
+    expect(host.pause).not.toHaveBeenCalled();
+  });
+
+  it('approve_tool_call without an approvalId returns a structured error', async () => {
+    const host = { approve: vi.fn() } as any;
+    const r: any = await dispatchSwarmTool('approve_tool_call', {}, host);
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/approvalId/);
+    expect(host.approve).not.toHaveBeenCalled();
+  });
+
+  it('handles null input without throwing', async () => {
+    const host = {} as any;
+    const r: any = await dispatchSwarmTool('spawn_tasks', null, host);
+    expect(r.ok).toBe(false);
   });
 });
 
@@ -62,46 +97,3 @@ describe('handleSwarmToolRequest', () => {
   });
 });
 
-describe('buildSyntheticToolUseMessage', () => {
-  it('builds an assistant message with a single mcp__swarm__-prefixed tool_use card', () => {
-    const msg = buildSyntheticToolUseMessage(
-      { id: 'mcp-1', tool: 'spawn_task', input: { prompt: 'do x' }, workspace: '/ws/a' },
-      1234,
-    );
-    expect(msg.role).toBe('assistant');
-    expect(msg.id).toBe('mcp-msg-mcp-1');
-    expect(msg.timestamp).toBe(1234);
-    expect(msg.toolCalls).toHaveLength(1);
-    expect(msg.toolCalls[0].id).toBe('mcp-tooluse-mcp-1');
-    expect(msg.toolCalls[0].name).toBe('mcp__swarm__spawn_task');
-    expect(JSON.parse(msg.toolCalls[0].input)).toEqual({ prompt: 'do x' });
-  });
-
-  it('does not double-prefix names that already start with mcp__swarm__', () => {
-    const msg = buildSyntheticToolUseMessage(
-      { id: 'mcp-2', tool: 'mcp__swarm__land', input: { taskRef: 't1' }, workspace: '/ws/a' },
-    );
-    expect(msg.toolCalls[0].name).toBe('mcp__swarm__land');
-  });
-});
-
-describe('applySyntheticToolResult', () => {
-  it('attaches output to the synthetic card matching the request id', () => {
-    const msg = buildSyntheticToolUseMessage(
-      { id: 'mcp-1', tool: 'spawn_task', input: { prompt: 'do x' }, workspace: '/ws/a' },
-      1000,
-    );
-    const list: any[] = [{ id: 'u1', toolCalls: [] }, msg];
-    const next = applySyntheticToolResult(list, 'mcp-1', { ok: true, task: { id: 't1', title: 'do x' } }, 1500);
-    expect(next).not.toBe(list);
-    const updated = next[1];
-    expect(updated.toolCalls[0].output).toContain('"ok": true');
-    expect(updated.toolCalls[0].durationMs).toBe(500);
-  });
-
-  it('returns the original list when no matching card is found', () => {
-    const list: any[] = [{ id: 'u1', toolCalls: [{ id: 'mcp-tooluse-other', type: 'other', name: 'x', input: '{}' }] }];
-    const next = applySyntheticToolResult(list, 'missing', { ok: true });
-    expect(next).toBe(list);
-  });
-});
