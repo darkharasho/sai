@@ -1934,7 +1934,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           border: 1px solid var(--border);
           border-left: 2px solid var(--accent);
           border-radius: 12px;
-          padding: 10px 13px;
           box-shadow: var(--glow-accent), var(--elev-highlight);
         }
         .chat-panel {
