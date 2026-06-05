@@ -7,21 +7,19 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render } from '@testing-library/react';
-import { installMockSai } from '../helpers/ipc-mock';
+import { installMockSai } from '../../../helpers/ipc-mock';
 
 // Must be hoisted before the component import
-vi.mock('../../src/terminalBuffer', () => ({
+vi.mock('../../../../src/terminalBuffer', () => ({
   getTerminalContent: vi.fn().mockReturnValue(''),
   getTerminalLastCommand: vi.fn().mockReturnValue(''),
   getLastCommandName: vi.fn().mockReturnValue(null),
   getTerminalById: vi.fn().mockReturnValue(null),
   getTerminalByName: vi.fn().mockReturnValue(null),
   getTerminalByIndex: vi.fn().mockReturnValue(null),
-  getTerminalLastCommandById: vi.fn().mockReturnValue(null),
-  getTerminalLastCommandByIndex: vi.fn().mockReturnValue(null),
 }));
 
-import ChatInput from '../../src/components/Chat/ChatInput';
+import ChatInput from '../../../../src/components/Chat/ChatInput';
 
 /** Stable empty array — prevents infinite-render from new `[]` on each render */
 const STABLE_SLASH_COMMANDS: string[] = [];
