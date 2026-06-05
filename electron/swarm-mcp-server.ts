@@ -221,6 +221,7 @@ export function makeSocketTransport(opts: SocketTransportOptions = {}): SocketTr
   let buffer = '';
   let closed = false;
   const pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  const CALL_TIMEOUT_MS = 120_000; // a call with no result/error frame this long is presumed wedged
 
   let readyResolve!: () => void;
   let readyReject!: (e: Error) => void;
@@ -313,12 +314,20 @@ export function makeSocketTransport(opts: SocketTransportOptions = {}): SocketTr
       if (closed) return Promise.reject(new Error('socket closed'));
       const id = crypto.randomBytes(8).toString('hex');
       return new Promise<unknown>((resolve, reject) => {
-        pending.set(id, { resolve, reject });
+        const timer = setTimeout(() => {
+          if (pending.delete(id)) reject(new Error(`tool call ${tool} timed out after ${CALL_TIMEOUT_MS}ms`));
+        }, CALL_TIMEOUT_MS);
+        // handleFrame / rejectAllPending call these, so the timer is always cleared on settle.
+        pending.set(id, {
+          resolve: (v: unknown) => { clearTimeout(timer); resolve(v); },
+          reject: (e: Error) => { clearTimeout(timer); reject(e); },
+        });
         try {
           socket?.write(
             JSON.stringify({ type: 'call', id, tool, input }) + '\n',
           );
         } catch (err) {
+          clearTimeout(timer);
           pending.delete(id);
           reject(err instanceof Error ? err : new Error(String(err)));
         }
