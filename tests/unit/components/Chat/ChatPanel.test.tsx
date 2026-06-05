@@ -984,4 +984,21 @@ describe('ChatPanel', () => {
     expect(assistantMsg.durationMs).toBe(2500);
     expect(assistantMsg.startedAt).toBe(1000);
   });
+
+  it('renders a dashed turn divider between turns but not before the first turn', async () => {
+    const props = {
+      ...baseProps(),
+      initialMessages: [
+        { id: 'u1', role: 'user' as const, content: 'first', timestamp: 0 },
+        { id: 'a1', role: 'assistant' as const, content: 'reply one', timestamp: 1 },
+        { id: 'u2', role: 'user' as const, content: 'second', timestamp: 2 },
+        { id: 'a2', role: 'assistant' as const, content: 'reply two', timestamp: 3 },
+      ],
+    };
+    const { container } = render(<ChatPanel {...props} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    // Two turns => exactly one divider (before the second user message).
+    const dividers = container.querySelectorAll('.chat-turn-divider');
+    expect(dividers.length).toBe(1);
+  });
 });
