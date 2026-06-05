@@ -47,7 +47,7 @@ import { diffSwarmTasks } from './lib/swarmPersistenceDiff';
 import { hydrateWorkspaceSwarm } from './lib/swarmHydrate';
 import { SwarmScheduler, isLikelyReadOnlyPrompt, findStaleTasks } from './lib/swarmScheduler';
 import { runSwarmTask } from './lib/swarmTaskRunner';
-import { landTask, discardTask } from './lib/swarmLanding';
+import { landTask, discardTask, rebaseRetry } from './lib/swarmLanding';
 import { ensureOrchestratorSession } from './lib/swarmOrchestratorSession';
 import { handleSwarmToolRequest, type SwarmHost } from './lib/swarmOrchestratorDispatcher';
 import { executeSlashCommand } from './lib/orchestratorSlashCommands';
@@ -1118,6 +1118,8 @@ export default function App() {
       updateTask: noopUpdateTask,
       rebase: (worktreePath: string, baseBranch: string) =>
         (window.sai as any).gitRebase(worktreePath, baseBranch),
+      rebaseAbort: (worktreePath: string) =>
+        (window.sai as any).gitRebaseAbort(worktreePath),
     };
     const discardDeps = {
       worktreeRemove: (cwd: string, wt: string, br: string) =>
@@ -3761,15 +3763,27 @@ export default function App() {
                               console.warn('swarm: rebase-retry skipped, task or worktree missing', taskRef);
                               return;
                             }
-                            try {
-                              await (window.sai as any).gitRebase?.(t.worktreePath, t.baseBranch);
-                            } catch (err) {
-                              console.error('swarm: rebase failed', err);
-                              window.alert(`Rebase failed: ${err instanceof Error ? err.message : String(err)}`);
-                              return;
-                            }
-                            try { await landWithCard(taskRef); }
-                            catch (err) { console.error('swarm: post-rebase land failed', err); }
+                            const wt = t.worktreePath;
+                            // Serialize behind the land queue so a retry never
+                            // races a concurrent land. Clear any in-progress
+                            // rebase first, then rebase, then land.
+                            const next = landQueueRef.current.then(async () => {
+                              const sai = window.sai as any;
+                              const r = await rebaseRetry(wt, t.baseBranch, {
+                                rebaseStatus: (p: string) => sai.gitRebaseStatus(p),
+                                rebaseAbort: (p: string) => sai.gitRebaseAbort(p),
+                                rebase: (p: string, base: string) => sai.gitRebase(p, base),
+                              });
+                              if (!r.ok) {
+                                console.error('swarm: rebase failed', r.detail);
+                                window.alert(`Rebase failed: ${r.detail}`);
+                                return;
+                              }
+                              try { await landWithCard(taskRef); }
+                              catch (err) { console.error('swarm: post-rebase land failed', err); }
+                            });
+                            landQueueRef.current = next.catch(() => {});
+                            await next;
                           }}
                           onLand={(id) => { void landWithCard(id); }}
                           onDiscard={(id) => { void discardWithCard(id); }}
