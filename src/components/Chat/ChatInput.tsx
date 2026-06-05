@@ -1977,6 +1977,7 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
         .stop-btn {
           background: var(--red);
           color: #fff;
+          box-shadow: none;
         }
         .stop-btn:hover { background: #ff6b4f; }
 
