@@ -1511,6 +1511,10 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
           opacity: 0.7;
           transition: opacity 0.2s ease;
         }
+        .input-box:focus-within {
+          box-shadow: var(--glow-focus), var(--elev-highlight);
+          border-color: var(--border);
+        }
         .input-box:focus-within::before {
           opacity: 1;
         }
@@ -1957,9 +1961,10 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
         }
 
         .send-btn {
-          background: var(--accent);
+          background: var(--gradient-accent);
+          box-shadow: var(--glow-accent);
           border: none;
-          color: #000;
+          color: var(--on-accent);
           cursor: pointer;
           padding: 6px;
           border-radius: 6px;
