@@ -740,11 +740,11 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
           position: relative;
           width: 100%;
           margin: 6px 0;
-          background: linear-gradient(180deg, var(--bg-elevated, #1c2027) 0%, var(--bg-secondary, #0c0f11) 100%);
-          border: 1px solid var(--border-color, rgba(255,255,255,0.08));
+          background: var(--elev-2);
+          border: 1px solid var(--border);
           border-radius: 10px;
           overflow: hidden;
-          box-shadow: 0 1px 0 rgba(255,255,255,0.03) inset, 0 4px 18px rgba(0,0,0,0.25);
+          box-shadow: var(--shadow-card), var(--elev-highlight);
         }
         .gh-watcher[data-phase="success"] { border-color: rgba(63, 185, 80, 0.35); }
         .gh-watcher[data-phase="failure"], .gh-watcher[data-phase="error"] { border-color: rgba(248, 81, 73, 0.4); }

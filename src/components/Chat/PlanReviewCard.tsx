@@ -145,6 +145,11 @@ export default function PlanReviewCard({
 }
 
 const STYLES = `
+  .tool-call-card {
+    background: var(--elev-2);
+    box-shadow: var(--shadow-card), var(--elev-highlight);
+    border: 1px solid var(--border);
+  }
   .plan-review-chip {
     display: inline-flex;
     align-items: center;

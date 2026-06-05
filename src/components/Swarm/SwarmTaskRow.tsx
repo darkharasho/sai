@@ -64,6 +64,11 @@ export default function SwarmTaskRow(p: Props) {
         </button>
       )}
       <style>{`
+        .swarm-row {
+          background: var(--elev-2);
+          border: 1px solid var(--border);
+          box-shadow: var(--elev-highlight);
+        }
         .swarm-row .row-project {
           display: inline-block;
           font-size: 9px;
