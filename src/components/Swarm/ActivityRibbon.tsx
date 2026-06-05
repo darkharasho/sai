@@ -58,28 +58,65 @@ export default function ActivityRibbon({ active, ready, approvals, cost, tokRate
     interleaved.push(seg);
   });
 
+  // Derive ribbon state class: "running" when agents are actively streaming,
+  // "done" when there are completed segments but nothing actively running.
+  const ribbonClass = [
+    'activity-ribbon',
+    active > 0 ? 'running' : segments.length > 0 ? 'done' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   return (
-    <div
-      data-testid="orch-activity-ribbon"
-      style={{
-        height: 24,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 0,
-        padding: '0 18px',
-        fontSize: 11,
-        color: 'var(--text)',
-        background: 'var(--bg-secondary)',
-        borderBottom: '1px solid var(--border)',
-        flexShrink: 0,
-        opacity: segments.length === 0 ? 0.5 : 1,
-      }}
-    >
-      {segments.length === 0 ? (
-        <span style={{ opacity: 0.6 }}>idle</span>
-      ) : (
-        interleaved
-      )}
-    </div>
+    <>
+      <style>{`
+        .activity-ribbon {
+          position: relative;
+          overflow: hidden;
+        }
+        /* done resting state: subtle green inset ring — always applied, no layout shift */
+        .activity-ribbon.done {
+          box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 40%, transparent);
+        }
+        /* sweep animation only when motion is not reduced */
+        @media (prefers-reduced-motion: no-preference) {
+          @keyframes ribbon-sweep {
+            to { transform: translateX(100%); }
+          }
+          .activity-ribbon.running::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.10), transparent);
+            transform: translateX(-100%);
+            animation: ribbon-sweep 1.8s linear infinite;
+            pointer-events: none;
+          }
+        }
+      `}</style>
+      <div
+        className={ribbonClass}
+        data-testid="orch-activity-ribbon"
+        style={{
+          height: 24,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 0,
+          padding: '0 18px',
+          fontSize: 11,
+          color: 'var(--text)',
+          background: 'var(--bg-secondary)',
+          borderBottom: '1px solid var(--border)',
+          flexShrink: 0,
+          opacity: segments.length === 0 ? 0.5 : 1,
+        }}
+      >
+        {segments.length === 0 ? (
+          <span style={{ opacity: 0.6 }}>idle</span>
+        ) : (
+          interleaved
+        )}
+      </div>
+    </>
   );
 }
