@@ -1837,6 +1837,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           {showThinking && (
             <motion.div
               key="thinking"
+              className="thinking-frame"
               initial={{ opacity: 0, y: DISTANCE.lift }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
@@ -1928,6 +1929,14 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         </div>
       </LayoutGroup>
       <style>{`
+        .thinking-frame {
+          background: var(--elev-1);
+          border: 1px solid var(--border);
+          border-left: 2px solid var(--accent);
+          border-radius: 12px;
+          padding: 10px 13px;
+          box-shadow: var(--glow-accent), var(--elev-highlight);
+        }
         .chat-panel {
           flex: 1;
           display: flex;
