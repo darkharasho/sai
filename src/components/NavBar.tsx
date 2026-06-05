@@ -92,8 +92,6 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, sw
         .navbar {
           width: var(--nav-width);
           background: var(--bg-secondary);
-          background-image: var(--elev-1);
-          box-shadow: var(--elev-highlight);
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -199,9 +197,8 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, sw
           background: var(--bg-hover);
         }
         .nav-btn.active {
-          color: var(--on-accent);
-          background: var(--gradient-accent);
-          box-shadow: var(--glow-accent), var(--elev-highlight);
+          color: var(--accent);
+          background: rgba(199, 145, 12, 0.08);
         }
         .nav-divider {
           width: 24px;

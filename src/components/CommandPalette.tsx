@@ -418,10 +418,10 @@ export default function CommandPalette({
           left: 50%;
           transform: translateX(-50%);
           width: 520px;
-          background: var(--elev-3);
+          background: var(--bg-elevated);
           border: 1px solid var(--border);
           border-radius: 10px;
-          box-shadow: var(--shadow-modal), var(--elev-highlight);
+          box-shadow: 0 16px 48px rgba(0,0,0,0.5);
           z-index: 9999;
           display: flex;
           flex-direction: column;

@@ -20,17 +20,6 @@
   --yellow: #c7910c;
   --turquoise: #38c7bd;
 
-  --elev-1: linear-gradient(180deg, #12171d 0%, #0f141a 100%);
-  --elev-2: linear-gradient(180deg, #161c22 0%, #11161c 100%);
-  --elev-3: linear-gradient(180deg, #1c2027 0%, #151a20 100%);
-  --elev-highlight: inset 0 1px 0 rgba(255,255,255,0.045);
-  --glow-accent: 0 0 16px rgba(199,145,12,0.30);
-  --glow-focus: 0 0 0 3px rgba(245,184,50,0.15);
-  --shadow-card: 0 4px 16px rgba(0,0,0,0.40);
-  --shadow-modal: 0 16px 48px rgba(0,0,0,0.50);
-  --gradient-accent: linear-gradient(135deg, #f5b832 0%, #c7910c 100%);
-  --on-accent: #0d0b07;
-
   --nav-width: 48px;
   --sidebar-width: 300px;
   --titlebar-height: 38px;

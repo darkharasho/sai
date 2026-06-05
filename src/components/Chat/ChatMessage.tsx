@@ -968,9 +968,8 @@ function ChatMessage({
           50%      { transform: scale(1.18); filter: drop-shadow(0 0 6px var(--accent)); opacity: 1; }
         }
         .chat-msg-user {
-          background: var(--elev-2);
+          background: var(--bg-input);
           border: 1px solid var(--border);
-          box-shadow: var(--shadow-card), var(--elev-highlight);
           border-radius: 10px;
           padding: 10px 14px;
           margin-left: 14px;

@@ -255,11 +255,11 @@ export default function TodoProgress({ messages, isStreaming }: TodoProgressProp
           bottom: calc(100% + 8px);
           left: 0;
           width: 320px;
-          background: var(--elev-2);
+          background: var(--bg-secondary);
           border: 1px solid var(--border);
           border-radius: 8px;
           padding: 0;
-          box-shadow: var(--shadow-card), var(--elev-highlight);
+          box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
           z-index: 10;
           color: var(--text);
           cursor: default;

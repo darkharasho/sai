@@ -10,7 +10,6 @@
   width: var(--sidebar-width, 300px);
   height: 100%;
   background: var(--bg-secondary);
-  background-image: var(--elev-1);
   color: var(--text);
   font-size: 13px;
   border-right: 1px solid var(--border);
@@ -395,8 +394,7 @@
   animation: overlay-in 120ms ease-out;
 }
 .search-confirm-dialog {
-  background: var(--elev-3);
-  box-shadow: var(--shadow-modal), var(--elev-highlight);
+  background: var(--bg-elevated);
   border: 1px solid var(--border);
   padding: 16px;
   border-radius: 6px;

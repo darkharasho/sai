@@ -149,13 +149,13 @@ export default function GitHubAuthModal({ onSuccess, onClose }: Props) {
             backdrop-filter: blur(4px);
           }
           .gh-modal {
-            background: var(--elev-3);
+            background: var(--bg-elevated);
             border: 1px solid var(--border);
             border-radius: 10px;
             padding: 24px;
             width: 360px;
             position: relative;
-            box-shadow: var(--shadow-modal), var(--elev-highlight);
+            box-shadow: 0 24px 64px rgba(0,0,0,0.5);
           }
           .gh-modal-close {
             position: absolute;

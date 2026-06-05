@@ -262,14 +262,13 @@ const STYLES = `
     border-radius: 4px;
     font-size: 12px;
     font-family: 'Geist Mono', 'JetBrains Mono', ui-monospace, monospace;
-    background: var(--elev-2);
+    background: var(--bg-secondary);
     border: 1px solid var(--border);
     color: var(--text);
     cursor: pointer;
     transition: background 0.15s ease, border-color 0.15s ease;
     vertical-align: baseline;
     line-height: 1.5;
-    box-shadow: var(--elev-highlight);
   }
   .link-preview-chip:hover {
     background: color-mix(in srgb, var(--text) 8%, transparent);
@@ -330,11 +329,11 @@ const STYLES = `
     z-index: 100;
     min-width: 280px;
     max-width: 400px;
-    background: var(--elev-2);
+    background: var(--bg-primary);
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 12px;
-    box-shadow: var(--shadow-card), var(--elev-highlight);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
     font-family: inherit;
   }
   .link-preview-card-header {

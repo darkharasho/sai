@@ -435,7 +435,6 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen, metaRunti
         width: 'var(--sidebar-width)',
         minWidth: 'var(--sidebar-width)',
         background: 'var(--bg-secondary)',
-        backgroundImage: 'var(--elev-1)',
         borderRight: '1px solid var(--border)',
         display: 'flex',
         flexDirection: 'column',

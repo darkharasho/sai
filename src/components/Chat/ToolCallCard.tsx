@@ -904,11 +904,11 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
           }
           .tool-call-card {
             margin: 2px 0;
-            background: var(--elev-2);
+            background: var(--bg-secondary);
             border: 1px solid var(--border);
             border-radius: 8px;
             overflow: hidden;
-            box-shadow: var(--shadow-card), var(--elev-highlight);
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
           }
           .tool-call-header {
             padding: 8px 12px;

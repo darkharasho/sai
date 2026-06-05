@@ -4337,7 +4337,7 @@ export default function App() {
           chatNotificationCount={chatNotificationCount}
           overallStatus={approvalSessions.size > 0 ? 'approval' : completedWorkspaces.size > 0 ? 'completed' : busyWorkspaces.size > 0 ? 'busy' : null}
         />
-        <AnimatePresence initial={false}>
+        <AnimatePresence initial={false} mode="popLayout">
           {sidebarOpen === 'files' && (
             <motion.div
               key="sidebar-files"
