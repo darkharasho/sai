@@ -214,6 +214,8 @@ pre {
 /* Papery dash — reusable dividers (see specs/2026-06-05-ui-papery-dash-refresh-design.md) */
 .dashed-rule {
   height: 1px;
+  min-height: 1px;
+  flex-shrink: 0; /* never collapse to 0 when used as a flex child (e.g. chat turn divider) */
   border: 0;
   background: var(--divider-dash);
 }
