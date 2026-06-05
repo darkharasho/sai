@@ -421,7 +421,7 @@ export default function CommandPalette({
           background: var(--elev-3);
           border: 1px solid var(--border);
           border-radius: 10px;
-          box-shadow: var(--shadow-card), var(--elev-highlight);
+          box-shadow: var(--shadow-modal), var(--elev-highlight);
           z-index: 9999;
           display: flex;
           flex-direction: column;

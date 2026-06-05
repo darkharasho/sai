@@ -1058,7 +1058,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             border: 1px solid var(--border);
             border-radius: 10px;
             width: 720px;
-            box-shadow: var(--shadow-card), var(--elev-highlight);
+            box-shadow: var(--shadow-modal), var(--elev-highlight);
             overflow: hidden;
           }
           .settings-header {

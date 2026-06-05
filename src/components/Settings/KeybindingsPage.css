@@ -106,7 +106,7 @@
 }
 .keybindings-modal {
   background: var(--elev-3);
-  box-shadow: var(--shadow-card), var(--elev-highlight);
+  box-shadow: var(--shadow-modal), var(--elev-highlight);
   border: 1px solid var(--border);
   padding: 16px;
   border-radius: 6px;

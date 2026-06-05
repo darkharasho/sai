@@ -155,7 +155,7 @@ export default function GitHubAuthModal({ onSuccess, onClose }: Props) {
             padding: 24px;
             width: 360px;
             position: relative;
-            box-shadow: var(--shadow-card), var(--elev-highlight);
+            box-shadow: var(--shadow-modal), var(--elev-highlight);
           }
           .gh-modal-close {
             position: absolute;
