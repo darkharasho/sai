@@ -3,8 +3,14 @@ import type { ITheme } from '@xterm/xterm';
 export type ThemeId = 'default' | 'midnight' | 'steel';
 
 export const DEPTH_TOKEN_KEYS = [
-  '--elev-1', '--elev-2', '--elev-3', '--elev-highlight',
-  '--glow-accent', '--glow-focus', '--shadow-card', '--gradient-accent',
+  '--elev-1',
+  '--elev-2',
+  '--elev-3',
+  '--elev-highlight',
+  '--glow-accent',
+  '--glow-focus',
+  '--shadow-card',
+  '--gradient-accent',
 ] as const;
 
 export const THEMES: { id: ThemeId; label: string; vars: Record<string, string>; terminal: ITheme; titleBar: { color: string; symbolColor: string } }[] = [
