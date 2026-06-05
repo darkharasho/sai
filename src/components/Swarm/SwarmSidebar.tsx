@@ -55,6 +55,7 @@ export default function SwarmSidebar({ tasks, selectedId, onSelect, onNewTask, o
           width: 260px;
           flex-shrink: 0;
           background: var(--bg-secondary);
+          background-image: var(--elev-1);
           color: var(--text);
           border-right: 1px solid var(--border);
           display: flex;
@@ -104,9 +105,11 @@ export default function SwarmSidebar({ tasks, selectedId, onSelect, onNewTask, o
           background: var(--bg-hover);
         }
         .swarm-overview-row.selected {
-          background: var(--bg-hover);
-          border-left: 3px solid var(--accent);
-          padding-left: 11px;
+          background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 15%, transparent), transparent);
+          box-shadow: inset 2px 0 0 var(--accent), var(--glow-accent);
+          color: var(--text);
+          border-left: none;
+          padding-left: 14px;
         }
         .swarm-overview-row .overview-title {
           font-weight: 600;
@@ -141,7 +144,9 @@ export default function SwarmSidebar({ tasks, selectedId, onSelect, onNewTask, o
           background: var(--bg-hover);
         }
         .swarm-row.selected {
-          background: var(--bg-hover);
+          background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 15%, transparent), transparent);
+          box-shadow: inset 2px 0 0 var(--accent), var(--glow-accent);
+          color: var(--text);
         }
         .swarm-row .row-title {
           font-size: 13px;

@@ -246,6 +246,7 @@ export default function McpSidebar() {
         .mcp-sidebar {
           width: var(--sidebar-width);
           background: var(--bg-secondary);
+          background-image: var(--elev-1);
           border-right: 1px solid var(--border);
           display: flex;
           flex-direction: column;

@@ -446,6 +446,7 @@ export default function ChatHistorySidebar({
         .chat-history-sidebar {
           width: var(--sidebar-width);
           background: var(--bg-secondary);
+          background-image: var(--elev-1);
           border-right: 1px solid var(--border);
           display: flex;
           flex-direction: column;
@@ -541,11 +542,12 @@ export default function ChatHistorySidebar({
           background: rgba(255,255,255,0.04);
         }
         .history-card-active {
-          border-left: 2px solid var(--accent);
-          background: rgba(199,145,12,0.12);
+          background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 15%, transparent), transparent);
+          box-shadow: inset 2px 0 0 var(--accent), var(--glow-accent);
+          color: var(--text);
         }
         .history-card-active:hover {
-          background: rgba(199,145,12,0.15);
+          background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 20%, transparent), transparent);
         }
         .chat-history-card-header {
           display: flex;
