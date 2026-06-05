@@ -105,7 +105,7 @@ export default function PlanReviewCard({
               transition={expandTransition}
               style={{ overflow: 'hidden' }}
             >
-              <div className="plan-review-body">
+              <div className="plan-review-body dashed-divider-top">
                 <div
                   ref={contentRef}
                   className={`plan-review-content${!overflows || expanded ? ' plan-review-content-expanded' : ''}`}
@@ -169,7 +169,7 @@ const STYLES = `
     border: 1px solid color-mix(in srgb, #f85149 35%, transparent);
   }
   .plan-review-body {
-    border-top: 1px solid var(--border);
+    /* dashed header↔body separator supplied by .dashed-divider-top */
   }
   .plan-review-content {
     padding: 12px 14px;
