@@ -1,11 +1,14 @@
 {
   "name": "sai",
-  "version": "1.5.8",
+  "version": "1.5.14",
   "description": "AI-First Code Editor",
   "main": "dist-electron/main.js",
   "scripts": {
     "postinstall": "electron-rebuild -w node-pty",
     "dev": "concurrently -k -n electron,pwa -c blue,magenta \"vite\" \"vite build --config vite.config.pwa.ts --watch\"",
+    "mobile": "npm --prefix sai-mobile start",
+    "mobile:install": "npm --prefix sai-mobile install --legacy-peer-deps",
+    "dev:all": "concurrently -k -n desktop,mobile -c blue,magenta \"npm run dev\" \"npm run mobile\"",
     "build": "tsc && vite build && vite build --config vite.config.pwa.ts",
     "electron:dev": "vite --no-sandbox",
     "dist": "vite build && electron-builder --linux AppImage",
@@ -50,13 +53,13 @@
         "zip"
       ],
       "category": "public.app-category.developer-tools",
-      "icon": "public/img/sai.png",
+      "icon": "build/sai.icns",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist"
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": true
     },
-    "afterSign": "electron-builder-notarize",
     "publish": {
       "provider": "github",
       "owner": "darkharasho",
@@ -67,6 +70,7 @@
     ]
   },
   "dependencies": {
+    "@icons-pack/react-simple-icons": "^13.11.1",
     "@xterm/addon-canvas": "^0.7.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-web-links": "^0.11.0",
@@ -74,6 +78,7 @@
     "diff2html": "^3.4.56",
     "electron-updater": "^6.8.3",
     "geist": "^1.7.0",
+    "highlight.js": "^11.11.1",
     "lucide-react": "^1.7.0",
     "monaco-editor": "^0.55.1",
     "motion": "^12.38.0",

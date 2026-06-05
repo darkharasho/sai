@@ -87,7 +87,7 @@ export interface GitHubWatcherSnapshot {
 
 export interface ToolCall {
   id?: string;
-  type: 'file_edit' | 'terminal_command' | 'file_read' | 'web_fetch' | 'other';
+  type: 'file_edit' | 'terminal_command' | 'file_read' | 'file_search' | 'web_fetch' | 'todo' | 'agent' | 'notebook' | 'question' | 'plan' | 'worktree' | 'skill' | 'schedule' | 'task' | 'mcp' | 'other';
   name: string;
   input: string;
   output?: string;

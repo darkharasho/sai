@@ -99,7 +99,7 @@ export default function UpdateNotification() {
 
       {phase === 'error' && (
         <div className="update-pill update-error">
-          <span>Update failed</span>
+          <span title={state.errorMessage || undefined}>Update failed{state.errorMessage ? `: ${state.errorMessage}` : ''}</span>
           <button className="update-dismiss" onClick={() => setDismissed(true)}>
             <X size={10} />
           </button>

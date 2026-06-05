@@ -118,6 +118,7 @@ const messagesBySessionId: Map<string, ChatMessage[]> = new Map();
 
 vi.mock('../../src/chatDb', () => ({
   dbGetSessions: vi.fn(),
+  dbGetAllSessions: vi.fn().mockResolvedValue([]),
   dbGetMessages: vi.fn().mockResolvedValue([]),
   dbGetMessagesTail: vi.fn((sessionId: string) => {
     const msgs = messagesBySessionId.get(sessionId) ?? [];

@@ -15,6 +15,8 @@ import { SPRING, DISTANCE, useReducedMotionTransition } from './motion';
 import type { ChatMessage as ChatMessageType, MetaWorkspaceRuntime } from '../../types';
 import { getActiveTerminalId } from '../../terminalBuffer';
 import SaiLogo from '../SaiLogo';
+import { matchLinkPreview } from './linkPreview';
+import LinkPreviewChip from './LinkPreviewChip';
 
 // Message IDs that have already played their entry animation. Prevents the
 // animation from replaying if a message remounts (e.g. workspace swap, list
@@ -287,6 +289,7 @@ function ChatMessage({
   renderMessage,
   metaRuntime,
   onAnswerQuestion,
+  onAnswerPlanReview,
   watcherUrlAllowlist,
 }: {
   message: ChatMessageType;
@@ -307,6 +310,8 @@ function ChatMessage({
   metaRuntime?: MetaWorkspaceRuntime | null;
   /** Submit answers for an AskUserQuestion tool call. */
   onAnswerQuestion?: (toolUseId: string, answers: Record<string, string | string[]>) => Promise<void> | void;
+  /** Submit plan review decision for an ExitPlanMode tool call. */
+  onAnswerPlanReview?: (toolUseId: string, approved: boolean) => Promise<void> | void;
   /** URLs this message is allowed to render watcher cards for. Undefined = render none;
    *  parent computes per-URL "first message" ownership to prevent duplicate cards. */
   watcherUrlAllowlist?: Set<string>;
@@ -865,26 +870,32 @@ function ChatMessage({
                   pre: ({ children, ...props }) => (
                     <CodeBlock {...props}>{children}</CodeBlock>
                   ),
-                  a: ({ href, children }) => (
-                    <a
-                      href={href}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        if (href?.startsWith('sai-file://') && onFileOpen) {
-                          const raw = href.slice('sai-file://'.length);
-                          const lineMatch = raw.match(/:(\d+)$/);
-                          const line = lineMatch ? parseInt(lineMatch[1], 10) : undefined;
-                          const rel = lineMatch ? raw.slice(0, -lineMatch[0].length) : raw;
-                          const abs = rel.startsWith('/') ? rel : `${projectPath}/${rel}`;
-                          onFileOpen(abs, line);
-                        } else if (href) {
-                          window.sai.openExternal(href);
-                        }
-                      }}
-                    >
-                      {children}
-                    </a>
-                  ),
+                  a: ({ href, children }) => {
+                    const preview = href ? matchLinkPreview(href) : null;
+                    if (preview) {
+                      return <LinkPreviewChip preview={preview}>{children}</LinkPreviewChip>;
+                    }
+                    return (
+                      <a
+                        href={href}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          if (href?.startsWith('sai-file://') && onFileOpen) {
+                            const raw = href.slice('sai-file://'.length);
+                            const lineMatch = raw.match(/:(\d+)$/);
+                            const line = lineMatch ? parseInt(lineMatch[1], 10) : undefined;
+                            const rel = lineMatch ? raw.slice(0, -lineMatch[0].length) : raw;
+                            const abs = rel.startsWith('/') ? rel : `${projectPath}/${rel}`;
+                            onFileOpen(abs, line);
+                          } else if (href) {
+                            window.sai.openExternal(href);
+                          }
+                        }}
+                      >
+                        {children}
+                      </a>
+                    );
+                  },
                 }}
               >{(() => {
                 const raw = typeof message.content === 'string' ? message.content : String(message.content ?? '');
@@ -918,7 +929,7 @@ function ChatMessage({
               const custom = renderToolCall(tc, toolCallsExpanded);
               if (custom != null) return <React.Fragment key={i}>{custom}</React.Fragment>;
             }
-            return <ToolCallCard key={i} toolCall={tc} defaultExpanded={toolCallsExpanded} metaRuntime={metaRuntime} onAnswerQuestion={onAnswerQuestion} />;
+            return <ToolCallCard key={i} toolCall={tc} defaultExpanded={toolCallsExpanded} metaRuntime={metaRuntime} onAnswerQuestion={onAnswerQuestion} onAnswerPlanReview={onAnswerPlanReview} />;
           })}
         </Stagger>
       )}

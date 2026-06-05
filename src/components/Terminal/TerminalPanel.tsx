@@ -260,6 +260,20 @@ export default function TerminalPanel({
     }
   }, [projectPath, activeTerminalId, terminalTabs]);
 
+  // Listen for Ctrl+C forwarded from the main process (macOS Cocoa workaround).
+  // Send \x03 + SIGINT to the active terminal's PTY.
+  useEffect(() => {
+    if (!isActive) return;
+    const cleanup = window.sai.terminalOnCtrlC(() => {
+      const activeTab = terminalTabs.find(t => t.uid === activeTerminalId);
+      if (activeTab && activeTab.id > 0) {
+        window.sai.terminalWrite(activeTab.id, '\x03');
+        window.sai.terminalSignal(activeTab.id, 'SIGINT');
+      }
+    });
+    return cleanup;
+  }, [isActive, activeTerminalId, terminalTabs]);
+
   // Track which tabs are awaiting user input
   const [awaitingInput, setAwaitingInput] = useState<Record<number, boolean>>({});
 

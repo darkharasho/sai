@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Check, ChevronDown, Settings as SettingsIcon, Monitor, Type, PanelLeft, Palette, HardDrive, Keyboard, Zap, Smartphone } from 'lucide-react';
+import { X, Check, ChevronDown, Settings as SettingsIcon, Monitor, Type, PanelLeft, Palette, HardDrive, Keyboard, Zap, Smartphone, Link } from 'lucide-react';
 import KeybindingsPage from './Settings/KeybindingsPage';
 import SwarmSettings from './Settings/SwarmSettings';
 import RemoteSettings from './Settings/RemoteSettings';
+import IntegrationsPage from './Settings/IntegrationsPage';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, getActiveHighlightTheme, setActiveHighlightTheme, getShikiHighlighter, type HighlightThemeId } from '../themes';
 
 interface Props {
@@ -59,7 +60,7 @@ const RETENTION_OPTIONS: { label: string; value: number | null }[] = [
 ];
 
 type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error';
-type SettingsPage = 'general' | 'editor' | 'layout' | 'style' | 'storage' | 'provider' | 'claude' | 'codex' | 'gemini' | 'swarm' | 'remote' | 'keybindings';
+type SettingsPage = 'general' | 'editor' | 'layout' | 'style' | 'storage' | 'provider' | 'claude' | 'codex' | 'gemini' | 'swarm' | 'remote' | 'keybindings' | 'integrations';
 
 function formatRelative(ts: number): string {
   const secs = Math.floor((Date.now() - ts) / 1000);
@@ -916,6 +917,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       case 'swarm': return <SwarmSettings onSettingChange={onSettingChange} />;
       case 'remote': return <RemoteSettings />;
       case 'keybindings': return <KeybindingsPage />;
+      case 'integrations': return <IntegrationsPage onSettingChange={onSettingChange} />;
     }
   };
 
@@ -1025,6 +1027,13 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             >
               <Smartphone size={14} />
               <span>Mobile Remote</span>
+            </button>
+            <button
+              className={`settings-nav-item${activePage === 'integrations' ? ' active' : ''}`}
+              onClick={() => setActivePage('integrations')}
+            >
+              <Link size={14} />
+              <span>Integrations</span>
             </button>
           </nav>
 

@@ -49,6 +49,8 @@ import { registerGeminiHandlers } from './services/gemini';
 import { registerPluginHandlers } from './services/plugins';
 import { registerMcpHandlers } from './services/mcp';
 import { registerScaffoldHandler } from './services/scaffold';
+import { registerJiraHandlers } from './services/jira';
+import { registerLinearHandlers } from './services/linear';
 import { registerBrainstormHandlers } from './services/brainstorm';
 import { registerSearchHandlers } from './services/search';
 import { registerSwarmHandlers } from './services/swarm';
@@ -366,6 +368,22 @@ function createWindow() {
     }
   });
 
+  // On macOS, Chromium's Cocoa text-input layer can swallow Ctrl+key events
+  // before they reach the DOM / xterm.js.  Intercept Ctrl+C here so the
+  // renderer can forward SIGINT to the active terminal PTY.
+  mainWindow.webContents.on('before-input-event', (_event, input) => {
+    if (
+      input.type === 'keyDown' &&
+      input.control &&
+      !input.shift &&
+      !input.alt &&
+      !input.meta &&
+      input.key.toLowerCase() === 'c'
+    ) {
+      mainWindow?.webContents.send('terminal:ctrl-c');
+    }
+  });
+
   mainWindow.on('close', (e) => {
     if (!quitConfirmed) {
       e.preventDefault();
@@ -387,6 +405,8 @@ function createWindow() {
 
   registerTerminalHandlers(mainWindow);
   registerClaudeHandlers(mainWindow);
+  registerJiraHandlers();
+  registerLinearHandlers();
 
   // Auto-start the mobile remote bridge if it was enabled before the last quit.
   void (async () => {
