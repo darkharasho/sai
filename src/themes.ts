@@ -11,6 +11,7 @@ export const DEPTH_TOKEN_KEYS = [
   '--glow-focus',
   '--shadow-card',
   '--gradient-accent',
+  '--on-accent',
 ] as const;
 
 export const THEMES: { id: ThemeId; label: string; vars: Record<string, string>; terminal: ITheme; titleBar: { color: string; symbolColor: string } }[] = [
@@ -38,6 +39,7 @@ export const THEMES: { id: ThemeId; label: string; vars: Record<string, string>;
       '--glow-focus': '0 0 0 3px rgba(245,184,50,0.15)',
       '--shadow-card': '0 4px 16px rgba(0,0,0,0.40)',
       '--gradient-accent': 'linear-gradient(135deg, #f5b832 0%, #c7910c 100%)',
+      '--on-accent': '#0d0b07',
     },
     terminal: {
       background: '#0e1114',
@@ -81,6 +83,7 @@ export const THEMES: { id: ThemeId; label: string; vars: Record<string, string>;
       '--glow-focus': '0 0 0 3px rgba(185,154,240,0.16)',
       '--shadow-card': '0 4px 16px rgba(0,0,0,0.45)',
       '--gradient-accent': 'linear-gradient(135deg, #b99af0 0%, #a07ee8 100%)',
+      '--on-accent': '#0d0b07',
     },
     terminal: {
       background: '#110f17',
@@ -124,6 +127,7 @@ export const THEMES: { id: ThemeId; label: string; vars: Record<string, string>;
       '--glow-focus': '0 0 0 3px rgba(107,188,224,0.20)',
       '--shadow-card': '0 4px 16px rgba(0,0,0,0.30)',
       '--gradient-accent': 'linear-gradient(135deg, #6bbce0 0%, #4da6d4 100%)',
+      '--on-accent': '#0d0b07',
     },
     terminal: {
       background: '#40434c',

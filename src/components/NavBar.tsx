@@ -199,7 +199,7 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, sw
           background: var(--bg-hover);
         }
         .nav-btn.active {
-          color: #0d0b07;
+          color: var(--on-accent);
           background: var(--gradient-accent);
           box-shadow: var(--glow-accent), var(--elev-highlight);
         }
