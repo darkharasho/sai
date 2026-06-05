@@ -41,7 +41,10 @@ import SwarmToolCardSelector from './components/Swarm/cards/SwarmToolCardSelecto
 import { bucketToolCalls, trimEvents, pushRing, type TimedEvent } from './lib/swarmActivityHistory';
 import InlineApprovalCard from './components/Swarm/cards/InlineApprovalCard';
 import QuitSwarmConfirmModal from './components/Swarm/QuitSwarmConfirmModal';
-import { swarmInit, swarmGetApprovals, swarmResolveApproval, swarmCreateApproval } from './swarmDb';
+import { swarmInit, swarmGetApprovals, swarmResolveApproval, swarmCreateApproval, swarmCreateTask, swarmDeleteTask, swarmGetApproval, swarmDeleteApprovalsByTask } from './swarmDb';
+import { approvalRoutingTarget } from './lib/swarmApprovalRouting';
+import { diffSwarmTasks } from './lib/swarmPersistenceDiff';
+import { hydrateWorkspaceSwarm } from './lib/swarmHydrate';
 import { SwarmScheduler, isLikelyReadOnlyPrompt } from './lib/swarmScheduler';
 import { runSwarmTask } from './lib/swarmTaskRunner';
 import { landTask, discardTask } from './lib/swarmLanding';
@@ -311,6 +314,19 @@ export default function App() {
   // swarm (sidebar change or back to overview) so the chat panel doesn't
   // keep showing the task's chat outside the swarm view.
   const preSwarmSessionByWsRef = useRef<Map<string, string>>(new Map());
+  // Workspaces whose persisted swarm tasks have already been hydrated this
+  // session (so we don't re-load and clobber live in-memory state).
+  const hydratedWorkspacesRef = useRef<Set<string>>(new Set());
+  // Workspaces whose hydrate is currently running, to guard against the effect
+  // re-entering before the first load completes.
+  const hydrationInFlightRef = useRef<Set<string>>(new Set());
+  // Approval ids currently being resolved, to make approve/deny idempotent
+  // against double-clicks / approve-then-deny.
+  const resolvingApprovalsRef = useRef<Set<string>>(new Set());
+  // Last task list persisted per workspace, for diffing on change.
+  const persistedTasksRef = useRef<Map<string, SwarmTask[]>>(new Map());
+  // FIFO so overlapping persistence flushes don't interleave IndexedDB txns.
+  const persistQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const lastEmittedWorkspaceStatusRef = useRef<Map<string, {
     busy: boolean;
     streaming: boolean;
@@ -526,9 +542,7 @@ export default function App() {
     return cleanup;
   }, []);
 
-  // Initialize the swarm IndexedDB once. Tasks are now ephemeral session state
-  // (in `swarmTasksByWs`) and never persisted; the DB is still used for
-  // approvals records.
+  // Initialize the swarm IndexedDB once.
   useEffect(() => {
     (async () => {
       try {
@@ -538,6 +552,52 @@ export default function App() {
       }
     })();
   }, []);
+
+  // Hydrate persisted swarm tasks for a workspace the first time it becomes
+  // active: load tasks, reconcile zombie (streaming/awaiting_approval) tasks to
+  // paused, prune approvals whose task is gone, then seed in-memory state.
+  // The workspace is marked hydrated only AFTER its persistence baseline is set
+  // (and an in-flight guard prevents re-entry), so the persistence effect —
+  // which skips non-hydrated workspaces — never runs against an empty baseline
+  // mid-load.
+  useEffect(() => {
+    const ws = activeProjectPath;
+    if (!ws || hydratedWorkspacesRef.current.has(ws) || hydrationInFlightRef.current.has(ws)) return;
+    hydrationInFlightRef.current.add(ws);
+    let cancelled = false;
+    (async () => {
+      try {
+        const { tasks, liveApprovals } = await hydrateWorkspaceSwarm(ws);
+        if (cancelled) return;
+        // Establish the persistence baseline and mark hydrated together, before
+        // seeding state, so the persistence effect only ever sees a correct
+        // baseline for this workspace.
+        persistedTasksRef.current.set(ws, tasks);
+        hydratedWorkspacesRef.current.add(ws);
+        setSwarmTasksByWs(prev => {
+          const m = new Map(prev);
+          // Don't clobber any tasks spawned before hydrate resolved.
+          const existing = m.get(ws) ?? [];
+          const existingIds = new Set(existing.map(t => t.id));
+          const merged = [...existing, ...tasks.filter(t => !existingIds.has(t.id))];
+          m.set(ws, merged);
+          return m;
+        });
+        setSwarmApprovalsByWs(prev => {
+          const m = new Map(prev);
+          m.set(ws, liveApprovals);
+          return m;
+        });
+      } catch (err) {
+        // best-effort: a hydrate failure shouldn't crash the workspace. Leaving
+        // the ws un-hydrated lets a later activation retry.
+        console.error('swarm: hydrate failed', err);
+      } finally {
+        hydrationInFlightRef.current.delete(ws);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeProjectPath]);
 
   // Keep sidebarOpenRef in sync so workspace-switch can read the current value.
   useEffect(() => { sidebarOpenRef.current = sidebarOpen; }, [sidebarOpen]);
@@ -585,6 +645,31 @@ export default function App() {
     }).catch(() => { /* ignore */ });
     return () => { cancelled = true; };
   }, [activeProjectPath, swarmTasksByWs]);
+
+  // Persist swarm task changes. All ~dozen setSwarmTasksByWs sites funnel here:
+  // we diff the new map against the last-persisted snapshot per workspace and
+  // upsert changed tasks / delete removed ones. Writes are serialized via a
+  // FIFO. The full task object is persisted (put), so there is no partial-patch
+  // read-modify-write race.
+  useEffect(() => {
+    const snapshot = swarmTasksByWs;
+    persistQueueRef.current = persistQueueRef.current.then(async () => {
+      for (const [ws, nextTasks] of snapshot.entries()) {
+        // Only persist workspaces that have been hydrated, so the diff baseline
+        // is correct (avoids deleting persisted tasks before they're loaded).
+        if (!hydratedWorkspacesRef.current.has(ws)) continue;
+        const prevTasks = persistedTasksRef.current.get(ws) ?? [];
+        const { upserts, deletes } = diffSwarmTasks(prevTasks, nextTasks);
+        for (const task of upserts) {
+          try { await swarmCreateTask(task); } catch (err) { console.error('swarm: persist upsert failed', task.id, err); }
+        }
+        for (const id of deletes) {
+          try { await swarmDeleteTask(id); } catch (err) { console.error('swarm: persist delete failed', id, err); }
+        }
+        persistedTasksRef.current.set(ws, nextTasks);
+      }
+    }).catch(() => { /* keep the queue alive on error */ });
+  }, [swarmTasksByWs]);
 
   // Poll active task counts every 5s into a 12-element ring buffer per
   // workspace so the StatStrip ACTIVE card can render a 60s background
@@ -971,10 +1056,11 @@ export default function App() {
 
     const wsTasks = () => swarmTasksByWs.get(ws) ?? [];
 
-    // Tasks are ephemeral in-memory state; the helpers' updateTask dep
-    // (which used to persist to swarmDb) is now a no-op. Local list mutations
-    // happen in the call sites below so terminal tasks are removed from view.
-    const noopUpdateTask = async () => { /* tasks are ephemeral */ };
+    // updateTask is a no-op here: task persistence is handled centrally by the
+    // diff effect, which deletes a task's row when it's filtered out of the
+    // in-memory list (e.g. on land/discard). Local list mutations in the call
+    // sites below drive both the UI and that persistence.
+    const noopUpdateTask = async () => { /* persistence handled by the diff effect */ };
     const landDeps = {
       canFastForward: (cwd: string, src: string, tgt: string) =>
         (window.sai as any).swarm.canFastForward(cwd, src, tgt),
@@ -1013,15 +1099,6 @@ export default function App() {
       return (window.sai as any).claudeStop?.(ws);
     }
 
-    function resolveProviderApproval(task: SwarmTask, toolUseId: string, approved: boolean) {
-      const p = task.provider;
-      const scope = task.sessionId;
-      // codexApprove/geminiApprove don't exist in the current preload; degrade gracefully.
-      if (p === 'codex') return (window.sai as any).codexApprove?.(ws, toolUseId, approved, undefined, scope);
-      if (p === 'gemini') return (window.sai as any).geminiApprove?.(ws, toolUseId, approved, undefined, scope);
-      return (window.sai as any).claudeApprove?.(ws, toolUseId, approved, undefined, scope);
-    }
-
     const spawnTask = async (i: { prompt: string; title?: string; provider?: string; model?: string; approvalPolicy?: string; project?: string }) => {
       const cfg = swarmSettingsRef.current;
       const provider = (i.provider as AIProvider) ?? cfg.defaultTaskProvider ?? aiProvider;
@@ -1049,6 +1126,45 @@ export default function App() {
         projectLinkName,
       });
       return { id: created.id, title: created.title };
+    };
+
+    // Resolve an approval by id, routed to the approval's OWN workspace (not
+    // the active one), idempotent against double-resolution.
+    const resolveApproval = async (approvalId: string, approved: boolean) => {
+      if (resolvingApprovalsRef.current.has(approvalId)) return;
+      resolvingApprovalsRef.current.add(approvalId);
+      try {
+        const a = await swarmGetApproval(approvalId);
+        if (!a) return;
+        const { workspaceId, task, toolUseId } = approvalRoutingTarget(a, swarmTasksByWsRef.current);
+        if (task) {
+          const scope = task.sessionId;
+          const p = task.provider;
+          if (p === 'codex') (window.sai as any).codexApprove?.(workspaceId, toolUseId, approved, undefined, scope);
+          else if (p === 'gemini') (window.sai as any).geminiApprove?.(workspaceId, toolUseId, approved, undefined, scope);
+          else (window.sai as any).claudeApprove?.(workspaceId, toolUseId, approved, undefined, scope);
+        }
+        await swarmResolveApproval(a.id);
+        setSwarmApprovalsByWs(prev => {
+          const m = new Map(prev);
+          m.set(workspaceId, (m.get(workspaceId) ?? []).filter(x => x.id !== approvalId));
+          return m;
+        });
+        if (task) {
+          setApprovalSessions(prev => {
+            const inner = prev.get(workspaceId);
+            if (!inner || !inner.has(task.sessionId)) return prev;
+            const next = new Map(prev);
+            const innerNext = new Map(inner);
+            innerNext.delete(task.sessionId);
+            if (innerNext.size === 0) next.delete(workspaceId);
+            else next.set(workspaceId, innerNext);
+            return next;
+          });
+        }
+      } finally {
+        resolvingApprovalsRef.current.delete(approvalId);
+      }
     };
 
     const host: SwarmHost = {
@@ -1080,58 +1196,8 @@ export default function App() {
           return m;
         });
       },
-      approve: async (approvalId) => {
-        const all = await swarmGetApprovals(ws);
-        const a = all.find(x => x.id === approvalId);
-        if (!a) return;
-        const task = wsTasks().find(t => t.id === a.taskId);
-        if (task) await resolveProviderApproval(task, a.toolUseId, true);
-        await swarmResolveApproval(a.id);
-        setSwarmApprovalsByWs(prev => {
-          const m = new Map(prev);
-          m.set(ws, (m.get(ws) ?? []).filter(x => x.id !== approvalId));
-          return m;
-        });
-        // Also clear the banner entry eagerly in case approval_resolved is delayed
-        if (task) {
-          setApprovalSessions(prev => {
-            const inner = prev.get(ws);
-            if (!inner || !inner.has(task.sessionId)) return prev;
-            const next = new Map(prev);
-            const innerNext = new Map(inner);
-            innerNext.delete(task.sessionId);
-            if (innerNext.size === 0) next.delete(ws);
-            else next.set(ws, innerNext);
-            return next;
-          });
-        }
-      },
-      deny: async (approvalId) => {
-        const all = await swarmGetApprovals(ws);
-        const a = all.find(x => x.id === approvalId);
-        if (!a) return;
-        const task = wsTasks().find(t => t.id === a.taskId);
-        if (task) await resolveProviderApproval(task, a.toolUseId, false);
-        await swarmResolveApproval(a.id);
-        setSwarmApprovalsByWs(prev => {
-          const m = new Map(prev);
-          m.set(ws, (m.get(ws) ?? []).filter(x => x.id !== approvalId));
-          return m;
-        });
-        // Also clear the banner entry eagerly in case approval_resolved is delayed
-        if (task) {
-          setApprovalSessions(prev => {
-            const inner = prev.get(ws);
-            if (!inner || !inner.has(task.sessionId)) return prev;
-            const next = new Map(prev);
-            const innerNext = new Map(inner);
-            innerNext.delete(task.sessionId);
-            if (innerNext.size === 0) next.delete(ws);
-            else next.set(ws, innerNext);
-            return next;
-          });
-        }
-      },
+      approve: async (approvalId) => { await resolveApproval(approvalId, true); },
+      deny: async (approvalId) => { await resolveApproval(approvalId, false); },
       land: async (ref) => {
         const t = byRef(ref);
         const r = await landTask(t, landDeps);
@@ -1141,6 +1207,12 @@ export default function App() {
           setSwarmTasksByWs(prev => {
             const m = new Map(prev);
             m.set(ws, (m.get(ws) ?? []).filter(x => x.id !== t.id));
+            return m;
+          });
+          void swarmDeleteApprovalsByTask(t.id).catch(() => { /* best-effort prune */ });
+          setSwarmApprovalsByWs(prev => {
+            const m = new Map(prev);
+            m.set(ws, (m.get(ws) ?? []).filter(x => x.taskId !== t.id));
             return m;
           });
         }
@@ -1153,6 +1225,12 @@ export default function App() {
         setSwarmTasksByWs(prev => {
           const m = new Map(prev);
           m.set(ws, (m.get(ws) ?? []).filter(x => x.id !== t.id));
+          return m;
+        });
+        void swarmDeleteApprovalsByTask(t.id).catch(() => { /* best-effort prune */ });
+        setSwarmApprovalsByWs(prev => {
+          const m = new Map(prev);
+          m.set(ws, (m.get(ws) ?? []).filter(x => x.taskId !== t.id));
           return m;
         });
       },
@@ -2032,6 +2110,16 @@ export default function App() {
           // Emit a completion / failure card into the orchestrator chat so
           // background task lifecycle events appear inline as a live feed.
           if (mirror.patch.kind === 'status' && patchedTask) {
+            // A task that reached a terminal status can have no actionable
+            // pending approval; prune any stale rows for it.
+            void swarmDeleteApprovalsByTask(patchedTask.id).catch(() => { /* best-effort prune */ });
+            setSwarmApprovalsByWs(prev => {
+              const list = prev.get(msg.projectPath) ?? [];
+              if (!list.some(x => x.taskId === patchedTask.id)) return prev;
+              const m = new Map(prev);
+              m.set(msg.projectPath, list.filter(x => x.taskId !== patchedTask.id));
+              return m;
+            });
             const statusPatch = mirror.patch;
             const dedupeKey = `${patchedTask.id}:${statusPatch.status}`;
             // claude.ts emits both 'result' and 'done' at end of turn; both pass

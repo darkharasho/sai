@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   swarmInit, swarmCreateTask, swarmGetTasks, swarmUpdateTask,
   swarmDeleteTask, swarmCreateApproval, swarmGetApprovals,
-  swarmResolveApproval, swarmClearDb,
+  swarmResolveApproval, swarmClearDb, swarmGetApproval, swarmDeleteApprovalsByTask,
 } from '@/swarmDb';
 import type { SwarmTask } from '@/types';
 
@@ -52,5 +52,29 @@ describe('swarmDb approvals', () => {
     expect((await swarmGetApprovals('/p'))).toHaveLength(1);
     await swarmResolveApproval('a1');
     expect((await swarmGetApprovals('/p'))).toHaveLength(0);
+  });
+});
+
+describe('swarmDb approval helpers', () => {
+  const appr = (id: string, taskId: string, ws = '/p') => ({
+    id, taskId, workspaceId: ws, toolName: 'Bash', toolUseId: `u-${id}`, createdAt: 1,
+  });
+
+  it('gets an approval by id regardless of workspace', async () => {
+    await swarmCreateApproval(appr('a1', 't1', '/wsA'));
+    await swarmCreateApproval(appr('a2', 't2', '/wsB'));
+    const got = await swarmGetApproval('a2');
+    expect(got?.workspaceId).toBe('/wsB');
+    expect(got?.taskId).toBe('t2');
+    expect(await swarmGetApproval('missing')).toBeUndefined();
+  });
+
+  it('deletes all approvals for a task', async () => {
+    await swarmCreateApproval(appr('a1', 't1'));
+    await swarmCreateApproval(appr('a2', 't1'));
+    await swarmCreateApproval(appr('a3', 't2'));
+    await swarmDeleteApprovalsByTask('t1');
+    const rows = await swarmGetApprovals('/p');
+    expect(rows.map(r => r.id)).toEqual(['a3']);
   });
 });
