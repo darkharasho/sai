@@ -28,7 +28,7 @@ describe('ThinkingAnimation preserved', () => {
     });
 
     // SaiLogo renders as an <svg> in our mock
-    expect(container.querySelector('svg')).not.toBeNull();
+    expect(container.querySelector('[data-testid="sai-logo"]')).not.toBeNull();
     expect(container.querySelector('.thinking-clock')).not.toBeNull();
     expect(container.querySelector('.thinking-text')).not.toBeNull();
   });
