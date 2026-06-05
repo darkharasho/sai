@@ -995,7 +995,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             flex-shrink: 0;
           }
           .tool-call-body {
-            border-top: 1px solid var(--border);
+            /* header↔body separator is the dashed line on .tool-call-expand (.dashed-divider-top) */
           }
           .tool-call-body .highlighted-code {
             font-size: 12px;
