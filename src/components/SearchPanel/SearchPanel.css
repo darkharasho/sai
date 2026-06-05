@@ -395,7 +395,8 @@
   animation: overlay-in 120ms ease-out;
 }
 .search-confirm-dialog {
-  background: var(--bg-elevated);
+  background: var(--elev-3);
+  box-shadow: var(--shadow-card), var(--elev-highlight);
   border: 1px solid var(--border);
   padding: 16px;
   border-radius: 6px;
