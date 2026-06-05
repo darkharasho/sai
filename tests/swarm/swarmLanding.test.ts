@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { landTask, discardTask } from '@/lib/swarmLanding';
+import { landTask, discardTask, rebaseRetry } from '@/lib/swarmLanding';
 
 describe('swarmLanding', () => {
   it('lands a task by ff-merging then removing worktree', async () => {
@@ -29,5 +29,56 @@ describe('swarmLanding', () => {
     await discardTask(task, { worktreeRemove: wtRemove, updateTask });
     expect(wtRemove).toHaveBeenCalledWith('/p', '/wt', 'swarm/x');
     expect(updateTask).toHaveBeenCalledWith('t', { status: 'discarded', worktreePath: null });
+  });
+
+  it('aborts the rebase and reports rebase-needed when rebase fails', async () => {
+    const rebaseAbort = vi.fn().mockResolvedValue(undefined);
+    const task = { id: 't', workspaceId: '/p', branch: 'swarm/x', baseBranch: 'main', worktreePath: '/wt' } as any;
+    const r = await landTask(task, {
+      canFastForward: () => Promise.resolve(false),
+      ffMerge: vi.fn(),
+      worktreeRemove: vi.fn(),
+      updateTask: vi.fn(),
+      rebase: () => Promise.reject(new Error('conflict')),
+      rebaseAbort,
+    });
+    expect(rebaseAbort).toHaveBeenCalledWith('/wt');
+    expect(r).toMatchObject({ ok: false, reason: 'rebase-needed' });
+  });
+});
+
+describe('rebaseRetry', () => {
+  it('aborts an in-progress rebase before retrying', async () => {
+    const calls: string[] = [];
+    const r = await rebaseRetry('/wt', 'main', {
+      rebaseStatus: async () => { calls.push('status'); return { inProgress: true }; },
+      rebaseAbort: async () => { calls.push('abort'); },
+      rebase: async () => { calls.push('rebase'); },
+    });
+    expect(r).toEqual({ ok: true });
+    expect(calls).toEqual(['status', 'abort', 'rebase']);
+  });
+
+  it('skips abort when no rebase is in progress', async () => {
+    const rebaseAbort = vi.fn();
+    const r = await rebaseRetry('/wt', 'main', {
+      rebaseStatus: async () => ({ inProgress: false }),
+      rebaseAbort,
+      rebase: async () => {},
+    });
+    expect(r).toEqual({ ok: true });
+    expect(rebaseAbort).not.toHaveBeenCalled();
+  });
+
+  it('aborts and returns ok:false when the rebase throws', async () => {
+    const rebaseAbort = vi.fn().mockResolvedValue(undefined);
+    const r = await rebaseRetry('/wt', 'main', {
+      rebaseStatus: async () => ({ inProgress: false }),
+      rebaseAbort,
+      rebase: async () => { throw new Error('conflict'); },
+    });
+    expect(rebaseAbort).toHaveBeenCalledWith('/wt');
+    expect(r).toMatchObject({ ok: false });
+    expect((r as any).detail).toContain('conflict');
   });
 });
