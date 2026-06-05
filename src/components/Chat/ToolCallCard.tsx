@@ -827,7 +827,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
           {expanded && hasBody && (
             <motion.div
               key="tool-call-expand"
-              className="tool-call-expand"
+              className="tool-call-expand dashed-divider-top"
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
