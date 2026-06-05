@@ -4226,9 +4226,8 @@ export default function App() {
       completedWorkspaces,
       workspaces: Array.from(workspaces.values()),
       focusedProjectPath: activeProjectPath,
-      focusedSessionId: activeSession?.id,
     }),
-    [completedWorkspaces, workspaces, activeProjectPath, activeSession?.id],
+    [completedWorkspaces, workspaces, activeProjectPath],
   );
 
   return (

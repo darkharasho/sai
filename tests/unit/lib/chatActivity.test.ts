@@ -102,20 +102,20 @@ describe('computeCompletedWorkspaces', () => {
     expect(out.has('/p')).toBe(true);
   });
 
-  it('does NOT add a workspace whose only triggering session is the focused one', () => {
-    // The user is looking at session 's' right now, so we don't badge its
-    // workspace even though updatedAt > lastViewedAt.
+  it('does NOT add the focused workspace, even when a session needs attention', () => {
+    // The user is looking at this workspace right now, so the titlebar must
+    // never badge its own status — regardless of session activity.
     const out = computeCompletedWorkspaces({
       completedWorkspaces: new Set(),
       workspaces: [ws('/p', [{ id: 's', updatedAt: 2000, lastViewedAt: 1000 }])],
       focusedProjectPath: '/p',
-      focusedSessionId: 's',
     });
     expect(out.has('/p')).toBe(false);
   });
 
-  it('exempts only the focused session, not other sessions in the same workspace', () => {
-    // Focused session is exempt; the OTHER session in /p triggers the badge.
+  it('exempts the whole focused workspace, including its non-focused sessions', () => {
+    // Even a different session in the focused workspace must not badge it —
+    // you're already viewing this workspace.
     const out = computeCompletedWorkspaces({
       completedWorkspaces: new Set(),
       workspaces: [ws('/p', [
@@ -123,9 +123,19 @@ describe('computeCompletedWorkspaces', () => {
         { id: 'other',   updatedAt: 5000, lastViewedAt: 4000 },
       ])],
       focusedProjectPath: '/p',
-      focusedSessionId: 'focused',
     });
-    expect(out.has('/p')).toBe(true);
+    expect(out.has('/p')).toBe(false);
+  });
+
+  it('clears the focused workspace from the incoming completed set (visiting clears it)', () => {
+    // Switching to a workspace makes it focused; its stale green notice must
+    // drop immediately even if it was already in completedWorkspaces.
+    const out = computeCompletedWorkspaces({
+      completedWorkspaces: new Set(['/p']),
+      workspaces: [ws('/p', [{ id: 's', updatedAt: 2000, lastViewedAt: 1000 }])],
+      focusedProjectPath: '/p',
+    });
+    expect(out.has('/p')).toBe(false);
   });
 
   it('treats a never-viewed session (lastViewedAt undefined) as viewed', () => {
