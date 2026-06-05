@@ -1513,7 +1513,6 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
         }
         .input-box:focus-within {
           box-shadow: var(--glow-focus), var(--elev-highlight);
-          border-color: var(--border);
         }
         .input-box:focus-within::before {
           opacity: 1;
