@@ -1,7 +1,9 @@
 # Design: "Depth & Glow" UI Refresh
 
 **Date:** 2026-06-05
-**Status:** Approved (direction + scope)
+**Status:** Superseded by `2026-06-05-ui-papery-dash-refresh-design.md` — the UI refresh
+direction changed to a flat, "papery dash" refinement; the depth/gradient/glow approach
+below is no longer the plan of record.
 **Branch target:** TBD (feature branch off `main`)
 
 ## Summary
