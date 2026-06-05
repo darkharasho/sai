@@ -19,6 +19,12 @@
   --red: #E35535;
   --yellow: #c7910c;
   --turquoise: #38c7bd;
+  /* Papery dash divider — tracks the active theme's accent. */
+  --divider-dash: repeating-linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 45%, transparent) 0 7px,
+    transparent 7px 13px
+  );
 
   --nav-width: 48px;
   --sidebar-width: 300px;
@@ -203,4 +209,22 @@ pre {
 @keyframes overlay-in {
   from { opacity: 0; backdrop-filter: blur(0px); }
   to   { opacity: 1; backdrop-filter: blur(4px); }
+}
+
+/* Papery dash — reusable dividers (see specs/2026-06-05-ui-papery-dash-refresh-design.md) */
+.dashed-rule {
+  height: 1px;
+  border: 0;
+  background: var(--divider-dash);
+}
+
+.dashed-divider-top {
+  background-image: var(--divider-dash);
+  background-repeat: no-repeat;
+  background-position: top left;
+  background-size: 100% 1px;
+}
+
+.chat-turn-divider {
+  margin: 14px 0;
 }
