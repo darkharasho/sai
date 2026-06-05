@@ -2,6 +2,11 @@ import type { ITheme } from '@xterm/xterm';
 
 export type ThemeId = 'default' | 'midnight' | 'steel';
 
+export const DEPTH_TOKEN_KEYS = [
+  '--elev-1', '--elev-2', '--elev-3', '--elev-highlight',
+  '--glow-accent', '--glow-focus', '--shadow-card', '--gradient-accent',
+] as const;
+
 export const THEMES: { id: ThemeId; label: string; vars: Record<string, string>; terminal: ITheme; titleBar: { color: string; symbolColor: string } }[] = [
   {
     id: 'default',
@@ -19,6 +24,14 @@ export const THEMES: { id: ThemeId; label: string; vars: Record<string, string>;
       '--text': '#bec6d0',
       '--text-secondary': '#a0acbb',
       '--text-muted': '#5a6a7a',
+      '--elev-1': 'linear-gradient(180deg, #12171d 0%, #0f141a 100%)',
+      '--elev-2': 'linear-gradient(180deg, #161c22 0%, #11161c 100%)',
+      '--elev-3': 'linear-gradient(180deg, #1c2027 0%, #151a20 100%)',
+      '--elev-highlight': 'inset 0 1px 0 rgba(255,255,255,0.045)',
+      '--glow-accent': '0 0 16px rgba(199,145,12,0.30)',
+      '--glow-focus': '0 0 0 3px rgba(245,184,50,0.15)',
+      '--shadow-card': '0 4px 16px rgba(0,0,0,0.40)',
+      '--gradient-accent': 'linear-gradient(135deg, #f5b832 0%, #c7910c 100%)',
     },
     terminal: {
       background: '#0e1114',
@@ -54,6 +67,14 @@ export const THEMES: { id: ThemeId; label: string; vars: Record<string, string>;
       '--text': '#ccc8d8',
       '--text-secondary': '#a8a0b8',
       '--text-muted': '#605878',
+      '--elev-1': 'linear-gradient(180deg, #1a1722 0%, #15121c 100%)',
+      '--elev-2': 'linear-gradient(180deg, #1e1b26 0%, #18151f 100%)',
+      '--elev-3': 'linear-gradient(180deg, #232030 0%, #1b1826 100%)',
+      '--elev-highlight': 'inset 0 1px 0 rgba(255,255,255,0.05)',
+      '--glow-accent': '0 0 16px rgba(160,126,232,0.32)',
+      '--glow-focus': '0 0 0 3px rgba(185,154,240,0.16)',
+      '--shadow-card': '0 4px 16px rgba(0,0,0,0.45)',
+      '--gradient-accent': 'linear-gradient(135deg, #b99af0 0%, #a07ee8 100%)',
     },
     terminal: {
       background: '#110f17',
@@ -89,6 +110,14 @@ export const THEMES: { id: ThemeId; label: string; vars: Record<string, string>;
       '--text': '#e0e0e6',
       '--text-secondary': '#b8b8c4',
       '--text-muted': '#85859a',
+      '--elev-1': 'linear-gradient(180deg, #4c4f58 0%, #44474f 100%)',
+      '--elev-2': 'linear-gradient(180deg, #52555e 0%, #4a4d56 100%)',
+      '--elev-3': 'linear-gradient(180deg, #585b64 0%, #4f525b 100%)',
+      '--elev-highlight': 'inset 0 1px 0 rgba(255,255,255,0.07)',
+      '--glow-accent': '0 0 16px rgba(77,166,212,0.35)',
+      '--glow-focus': '0 0 0 3px rgba(107,188,224,0.20)',
+      '--shadow-card': '0 4px 16px rgba(0,0,0,0.30)',
+      '--gradient-accent': 'linear-gradient(135deg, #6bbce0 0%, #4da6d4 100%)',
     },
     terminal: {
       background: '#40434c',
