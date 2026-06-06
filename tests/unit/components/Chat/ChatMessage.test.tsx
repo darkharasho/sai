@@ -462,4 +462,17 @@ describe('ChatMessage', () => {
     rerender(<ChatMessage message={msg} projectPath="/p" isStreaming={false} />);
     expect(container.querySelectorAll('.rv-word').length).toBeGreaterThan(0);
   });
+
+  it('reveal survives a post-completion re-render (e.g. durationMs added)', () => {
+    const base = { id: 'rv-dur', role: 'assistant' as const, content: 'hello brave new world here', timestamp: Date.now() };
+    const { container, rerender } = render(
+      <ChatMessage message={base} projectPath="/p" isStreaming={false} />
+    );
+    expect(container.querySelectorAll('.rv-word').length).toBeGreaterThan(0);
+    // A new message object (same content) lands right after completion — must NOT wipe the reveal.
+    rerender(<ChatMessage message={{ ...base, durationMs: 1234 }} projectPath="/p" isStreaming={false} />);
+    // Verify the re-render actually happened (durationMs should now be shown).
+    expect(container.querySelector('[data-testid="msg-duration"]')).toBeTruthy();
+    expect(container.querySelectorAll('.rv-word').length).toBeGreaterThan(0);
+  });
 });
