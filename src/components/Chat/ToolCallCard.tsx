@@ -64,6 +64,26 @@ function detectLang(toolCall: ToolCall): string {
   return 'text';
 }
 
+/** Decide whether a tool-card body should render as formatted markdown.
+ *  True when the label is a .md/.markdown path, or the body shows clear
+ *  markdown structure. Conservative: plain prose / plain code stays as source. */
+export function isMarkdownBody(label: string, code: string): boolean {
+  if (/\.(md|markdown)$/i.test(label.trim())) return true;
+  const body = code || '';
+  // Require non-trivial content so a single value line doesn't promote.
+  if (body.split('\n').filter(l => l.trim()).length < 2) return false;
+  // ATX heading
+  if (/^#{1,6}\s+\S/m.test(body)) return true;
+  // Fenced code block (a ``` on its own line)
+  if (/^```/m.test(body)) return true;
+  // GFM table: a row with a pipe followed by a separator row of ---/:--
+  if (/^.*\|.*$/m.test(body) && /^\s*\|?\s*:?-{3,}.*$/m.test(body)) return true;
+  // Two or more list items
+  const listItems = (body.match(/^\s*([-*+]|\d+\.)\s+\S/gm) || []).length;
+  if (listItems >= 2) return true;
+  return false;
+}
+
 function HighlightedCode({ code, lang, showLineNumbers }: { code: string; lang: string; showLineNumbers?: boolean }) {
   const isDiff = lang === 'diff';
   const ref = useRef<HTMLDivElement>(null);

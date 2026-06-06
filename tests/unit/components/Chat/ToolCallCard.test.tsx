@@ -8,7 +8,7 @@ vi.mock('shiki', () => ({
   }),
 }));
 
-import ToolCallCard from '../../../../src/components/Chat/ToolCallCard';
+import ToolCallCard, { isMarkdownBody } from '../../../../src/components/Chat/ToolCallCard';
 import { SPRING } from '../../../../src/components/Chat/motion';
 
 describe('ToolCallCard', () => {
@@ -65,5 +65,47 @@ describe('ToolCallCard', () => {
       <ToolCallCard toolCall={{ id: 't', type, name: 'X', input: '' }} />
     );
     expect(container.querySelector(`.${expectedClass}`)).toBeTruthy();
+  });
+});
+
+describe('isMarkdownBody', () => {
+  it('is true for a .md / .markdown label even with plain code', () => {
+    expect(isMarkdownBody('docs/plan.md', 'just plain text')).toBe(true);
+    expect(isMarkdownBody('NOTES.MARKDOWN', '')).toBe(true);
+    expect(isMarkdownBody('/abs/path/TODO.md', 'x')).toBe(true);
+  });
+
+  it('is true for content with an ATX heading', () => {
+    expect(isMarkdownBody('', '# Title\n\nSome body text here.')).toBe(true);
+  });
+
+  it('is true for content with a fenced code block', () => {
+    expect(isMarkdownBody('', 'intro line\n```\ncode\n```\n')).toBe(true);
+  });
+
+  it('is true for content with a GFM table', () => {
+    expect(isMarkdownBody('', 'col a | col b\n--- | ---\n1 | 2')).toBe(true);
+  });
+
+  it('is true for a multi-item markdown list', () => {
+    expect(isMarkdownBody('', '- one\n- two\n- three')).toBe(true);
+  });
+
+  it('is false for plain prose', () => {
+    expect(isMarkdownBody('', 'This is just a sentence about things.')).toBe(false);
+  });
+
+  it('is false for a single dash value line', () => {
+    expect(isMarkdownBody('', '- only one item')).toBe(false);
+  });
+
+  it('is false for plain code / JSON bodies', () => {
+    expect(isMarkdownBody('config.ts', 'const x = 1;\nexport default x;')).toBe(false);
+    expect(isMarkdownBody('', '{\n  "a": 1\n}')).toBe(false);
+  });
+
+  it('is false for empty body with no md label', () => {
+    expect(isMarkdownBody('', '')).toBe(false);
+    expect(isMarkdownBody('app.tsx', '')).toBe(false);
   });
 });
