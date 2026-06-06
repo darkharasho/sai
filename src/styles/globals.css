@@ -100,7 +100,6 @@
 }
 
 .sidebar-mount {
-  animation: sidebar-in var(--dur-base) var(--ease-out-soft);
   will-change: transform, opacity;
 }
 

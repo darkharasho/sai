@@ -4409,8 +4409,10 @@ export default function App() {
             <motion.div
               key="sidebar-files"
               className="sidebar-slot"
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, width: 0 }}
-              transition={{ duration: 0.18, ease: [0.4, 0, 1, 1] }}
+              transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
               style={{ overflow: 'hidden' }}
             >
               <FileExplorerSidebar
@@ -4424,8 +4426,10 @@ export default function App() {
             <motion.div
               key="sidebar-git"
               className="sidebar-slot"
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, width: 0 }}
-              transition={{ duration: 0.18, ease: [0.4, 0, 1, 1] }}
+              transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
               style={{ overflow: 'hidden' }}
             >
               {activeMetaRuntime && activeMetaRuntime.syntheticRoot === projectPath
@@ -4437,8 +4441,10 @@ export default function App() {
             <motion.div
               key="sidebar-search"
               className="sidebar-slot"
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, width: 0 }}
-              transition={{ duration: 0.18, ease: [0.4, 0, 1, 1] }}
+              transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
               style={{ overflow: 'hidden' }}
             >
               <SearchPanel
@@ -4456,8 +4462,10 @@ export default function App() {
             <motion.div
               key="sidebar-chats"
               className="sidebar-slot"
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, width: 0 }}
-              transition={{ duration: 0.18, ease: [0.4, 0, 1, 1] }}
+              transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
               style={{ overflow: 'hidden' }}
             >
               <ChatHistorySidebar
@@ -4480,8 +4488,10 @@ export default function App() {
             <motion.div
               key="sidebar-plugins"
               className="sidebar-slot"
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, width: 0 }}
-              transition={{ duration: 0.18, ease: [0.4, 0, 1, 1] }}
+              transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
               style={{ overflow: 'hidden' }}
             >
               <PluginsSidebar />
@@ -4491,8 +4501,10 @@ export default function App() {
             <motion.div
               key="sidebar-mcp"
               className="sidebar-slot"
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, width: 0 }}
-              transition={{ duration: 0.18, ease: [0.4, 0, 1, 1] }}
+              transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
               style={{ overflow: 'hidden' }}
             >
               <McpSidebar />
@@ -4502,8 +4514,10 @@ export default function App() {
             <motion.div
               key="sidebar-swarm"
               className="sidebar-slot"
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, width: 0 }}
-              transition={{ duration: 0.18, ease: [0.4, 0, 1, 1] }}
+              transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
               style={{ overflow: 'hidden' }}
             >
               <SwarmSidebar
