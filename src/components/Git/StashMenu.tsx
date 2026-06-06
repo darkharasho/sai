@@ -51,12 +51,12 @@ export default function StashMenu({ projectPath, onRefresh, disabled }: StashMen
         onClick={() => setOpen(o => !o)}
         disabled={disabled || busy}
         style={{
-          background: open ? 'var(--accent)' : 'none',
-          color: open ? '#000' : 'var(--text-muted)',
-          border: 'none',
-          borderRadius: 3,
-          padding: '2px 6px',
-          fontSize: 10,
+          background: open ? 'var(--accent)' : 'var(--surface-3)',
+          color: open ? '#000' : 'var(--text-secondary)',
+          border: open ? 'none' : '1px solid var(--border-subtle)',
+          borderRadius: 'var(--radius-sm)',
+          padding: '5px var(--sp-2)',
+          fontSize: 'var(--text-sm)',
           cursor: 'pointer',
           fontFamily: 'inherit',
           whiteSpace: 'nowrap',
