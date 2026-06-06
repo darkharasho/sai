@@ -728,7 +728,7 @@ function ChatMessage({
     revealedRef.current = true;
     const ctrl = revealWords(el);
     return () => ctrl.cancel();
-  }, [isAssistantStreaming, message.id, message.role, message.content]);
+  }, [isAssistantStreaming, message.id, message.role, message.content, message.timestamp]);
   // When the parent passes an allowlist (main chat), only render watchers it explicitly
   // owns — prevents duplicates when the same run URL shows up in multiple messages. Other
   // callers (orchestrator, tests) don't pass an allowlist and get the full set.
