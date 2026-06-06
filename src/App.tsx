@@ -2931,6 +2931,24 @@ export default function App() {
     }
   }, [activeProjectPath, workspaces, handleToggleMdPreview]));
 
+  // Mark a workspace's active session as viewed — bump lastViewedAt (persisted +
+  // in-memory), the same signal that clears a session's unread "!". Without this,
+  // visiting a workspace clears the raw completed flag but computeCompletedWorkspaces
+  // re-flags it as unread (updatedAt > lastViewedAt) the moment focus moves away, so
+  // the green "completed" squircle never durably clears on visit.
+  const markActiveSessionViewed = useCallback((projectPath: string) => {
+    const ws = workspacesRef.current.get(projectPath);
+    const sid = ws?.activeSession?.id;
+    if (!ws || !sid) return;
+    const viewedAt = Date.now();
+    void dbPatchSessionMeta(projectPath, sid, { lastViewedAt: viewedAt }).catch(() => {});
+    updateWorkspace(projectPath, w => ({
+      ...w,
+      activeSession: { ...w.activeSession, lastViewedAt: viewedAt },
+      sessions: w.sessions.map(s => s.id === sid ? { ...s, lastViewedAt: viewedAt } : s),
+    }));
+  }, [updateWorkspace]);
+
   const handleProjectSwitch = useCallback((newPath: string) => {
     setActiveMetaRuntime(null);
     if (newPath === activeProjectPath) return;
@@ -2968,7 +2986,10 @@ export default function App() {
       next.delete(newPath);
       return next;
     });
-  }, [activeProjectPath, workspaces]);
+    // Tie the green-squircle clear to the unread "!" mechanism: visiting marks the
+    // workspace's active session viewed so it isn't re-flagged after you switch away.
+    markActiveSessionViewed(newPath);
+  }, [activeProjectPath, workspaces, markActiveSessionViewed]);
 
   const handleMetaWorkspaceActivate = useCallback(async (id: string) => {
     const runtime = await window.sai.metaWorkspaceActivate?.(id);
@@ -3011,7 +3032,8 @@ export default function App() {
       next.delete(runtime.syntheticRoot);
       return next;
     });
-  }, [activeProjectPath]);
+    markActiveSessionViewed(runtime.syntheticRoot);
+  }, [activeProjectPath, markActiveSessionViewed]);
 
   const handleMetaWorkspaceCreated = useCallback((runtime: MetaWorkspaceRuntime) => {
     setMetaWorkspaces(prev => {
