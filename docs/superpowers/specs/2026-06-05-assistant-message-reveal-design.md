@@ -4,6 +4,28 @@
 **Status:** Approved (direction + scope)
 **Branch:** `ui-papery-dash-refresh` (rolling UI-refresh branch)
 
+## Revision (2026-06-05, post-implementation): wait-then-reveal for ALL replies
+
+The original design below revealed only *complete arrivals* and kept the live token
+append for streamed replies. The user revised this: **remove the live token append
+entirely — every assistant reply presents through the fake-stream reveal.** Concretely:
+
+- **No live append.** While an assistant reply is generating (`isAssistantStreaming`),
+  it displays nothing; the existing thinking animation (which stays visible the whole
+  turn — `showThinking = isStreaming`) represents the in-progress reply. No blank gap.
+- **Reveal on completion.** When the reply finishes (`isAssistantStreaming` → false), it
+  fake-streams in via `wordReveal` (calm fade entrance + crisp word-snap + caret).
+- **Trigger flips from exclude → include.** `STREAMED_MESSAGES` (now: streamed-this-
+  session) is used to *include*: a reply that streamed this session reveals on
+  completion, with **no freshness time limit** (long generations still reveal). A
+  complete-arrival reply (never streamed) reveals via the timestamp-freshness fallback.
+  **History** — loaded on chat reopen, never streamed this session, old timestamp —
+  still renders instantly.
+- Reduced-motion, history-instant, the engine, and the calm fade are all unchanged.
+
+The sections below are the original design; where they say "live streaming is unchanged
+/ raw append", read the revision above instead.
+
 ## Summary
 
 Replace the jarring assistant-message entrance and the unreliable "Typewriter
