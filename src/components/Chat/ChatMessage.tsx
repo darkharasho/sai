@@ -768,7 +768,7 @@ function ChatMessage({
                 [{formatMs(message.durationMs)}]
               </div>
             )}
-            {(
+            {
               <div ref={mdRef} className="chat-msg-md">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
@@ -813,7 +813,7 @@ function ChatMessage({
                 return raw;
               })()}</ReactMarkdown>
               </div>
-            )}
+            }
           </div>
         </div>
       )}
