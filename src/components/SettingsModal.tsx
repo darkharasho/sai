@@ -91,7 +91,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [geminiLoadingPhrases, setGeminiLoadingPhrases] = useState<'witty' | 'tips' | 'all' | 'off'>('all');
   const [systemNotifications, setSystemNotifications] = useState(false);
   const [toolCallsExpanded, setToolCallsExpanded] = useState(true);
-  const [typewriterEnabled, setTypewriterEnabled] = useState(true);
   const [saiAnimationEnabled, setSaiAnimationEnabled] = useState(true);
   const [focusedChat, setFocusedChat] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(300);
@@ -120,7 +119,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     });
     window.sai.settingsGet('systemNotifications', false).then((v: boolean) => setSystemNotifications(v));
     window.sai.settingsGet('toolCallsExpanded', true).then((v: boolean) => setToolCallsExpanded(v));
-    window.sai.settingsGet('typewriterEnabled', true).then((v: boolean) => setTypewriterEnabled(v));
     window.sai.settingsGet('saiAnimationEnabled', true).then((v: boolean) => setSaiAnimationEnabled(v !== false));
     window.sai.settingsGet('focusedChat', false).then((v: boolean) => setFocusedChat(v));
     window.sai.settingsGet('sidebarWidth', 300).then((v: number) => setSidebarWidth(v));
@@ -162,7 +160,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if ('lockCommitProvider' in remote) setLockCommitProvider(remote.lockCommitProvider);
       if ('systemNotifications' in remote) setSystemNotifications(remote.systemNotifications);
       if ('toolCallsExpanded' in remote) setToolCallsExpanded(remote.toolCallsExpanded);
-      if ('typewriterEnabled' in remote) setTypewriterEnabled(remote.typewriterEnabled);
       if ('saiAnimationEnabled' in remote) setSaiAnimationEnabled(remote.saiAnimationEnabled !== false);
       if ('focusedChat' in remote) setFocusedChat(remote.focusedChat);
       if ('sidebarWidth' in remote) setSidebarWidth(remote.sidebarWidth);
@@ -332,13 +329,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     setToolCallsExpanded(value);
     window.sai.settingsSet('toolCallsExpanded', value);
     onSettingChange?.('toolCallsExpanded', value);
-  };
-
-  const handleTypewriterEnabledChange = (value: boolean) => {
-    setTypewriterEnabled(value);
-    window.sai.settingsSet('typewriterEnabled', value);
-    window.dispatchEvent(new CustomEvent('sai-pref-typewriter', { detail: value }));
-    onSettingChange?.('typewriterEnabled', value);
   };
 
   const handleSaiAnimationEnabledChange = (value: boolean) => {
@@ -557,21 +547,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             onClick={() => handleToolCallsExpandedChange(!toolCallsExpanded)}
             role="switch"
             aria-checked={toolCallsExpanded}
-          >
-            <span className="settings-toggle-thumb" />
-          </button>
-        </div>
-
-        <div className="settings-row">
-          <div className="settings-row-info">
-            <div className="settings-row-name">Typewriter streaming</div>
-            <div className="settings-row-desc">Reveal assistant replies word-by-word as they stream. Off renders each chunk instantly.</div>
-          </div>
-          <button
-            className={`settings-toggle${typewriterEnabled ? ' on' : ''}`}
-            onClick={() => handleTypewriterEnabledChange(!typewriterEnabled)}
-            role="switch"
-            aria-checked={typewriterEnabled}
           >
             <span className="settings-toggle-thumb" />
           </button>
