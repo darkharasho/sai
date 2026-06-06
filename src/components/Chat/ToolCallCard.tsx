@@ -1269,9 +1269,9 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
           }
           .tool-call-card {
             margin: 2px 0;
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
-            border-radius: 8px;
+            background: var(--surface-2);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
             overflow: hidden;
             box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
           }
@@ -1282,6 +1282,8 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             gap: 8px;
             font-size: 12px;
             color: var(--text-secondary);
+            background: var(--surface-3);
+            border-bottom: 1px solid var(--border-hairline);
           }
           .tool-call-header-expandable {
             cursor: pointer;
@@ -1295,14 +1297,15 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
           }
           .tool-call-name {
             font-family: 'Geist Mono', 'JetBrains Mono', monospace;
-            font-size: 12px;
+            font-size: var(--text-xs);
+            font-weight: 600;
             color: var(--text);
           }
           .tool-call-label {
             flex: 1;
             font-family: 'Geist Mono', 'JetBrains Mono', monospace;
-            font-size: 11px;
-            color: var(--text-muted);
+            font-size: var(--text-xs);
+            color: var(--text-secondary);
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -1395,7 +1398,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             gap: 2px;
             margin: 8px 12px 0;
             padding: 2px;
-            border: 1px solid var(--border);
+            border: 1px solid var(--border-hairline);
             border-radius: 6px;
             background: var(--bg-secondary);
           }
@@ -1478,7 +1481,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
           .search-row-raw { color: var(--text-muted); }
           .search-sep {
             height: 0;
-            border-top: 1px dashed var(--border);
+            border-top: 1px dashed var(--border-hairline);
             margin: 3px 12px;
           }
           .task-card { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
@@ -1497,7 +1500,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
           .task-card-meta { display: flex; flex-wrap: wrap; gap: 6px; }
           .task-chip {
             font-size: 10px; padding: 2px 7px; border-radius: 4px;
-            background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-secondary);
+            background: var(--bg-secondary); border: 1px solid var(--border-hairline); color: var(--text-secondary);
             font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           }
           .diff-highlighted {
@@ -1536,7 +1539,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             padding: 6px 12px;
             background: none;
             border: none;
-            border-top: 1px solid var(--border);
+            border-top: 1px solid var(--border-hairline);
             color: var(--accent);
             font-size: 11px;
             cursor: pointer;
@@ -1546,7 +1549,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             background: var(--bg-hover);
           }
           .tool-call-output {
-            border-top: 1px dashed var(--border);
+            border-top: 1px dashed var(--border-hairline);
           }
           .tool-call-output-header {
             display: flex;
@@ -1578,7 +1581,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
           }
           /* Bash IN/OUT */
           .bash-inout-body {
-            border-top: 1px dashed var(--border);
+            border-top: 1px dashed var(--border-hairline);
             padding: 8px 0;
             display: flex;
             flex-direction: column;
@@ -1641,7 +1644,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
           }
           /* Todo list */
           .todo-list-body {
-            border-top: 1px solid var(--border);
+            border-top: 1px solid var(--border-hairline);
             padding: 6px 0;
             display: flex;
             flex-direction: column;
@@ -1671,7 +1674,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
           .todo-pending .todo-content { color: var(--text-secondary); }
           .todo-list-head {
             display: flex; align-items: baseline; gap: 8px;
-            padding: 4px 12px 2px; border-bottom: 1px dashed var(--border); margin-bottom: 4px;
+            padding: 4px 12px 2px; border-bottom: 1px dashed var(--border-hairline); margin-bottom: 4px;
           }
           .todo-list-title {
             font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); font-weight: 600;
@@ -1809,7 +1812,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             gap: 9px;
             padding: 8px 10px;
             background: var(--bg-secondary);
-            border: 1px solid var(--border);
+            border: 1px solid var(--border-hairline);
             border-radius: 6px;
             color: var(--text);
             cursor: pointer;
@@ -1839,7 +1842,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             width: 14px;
             height: 14px;
             border-radius: 50%;
-            border: 1.5px solid var(--border);
+            border: 1.5px solid var(--border-hairline);
             margin-top: 1px;
             position: relative;
             background: var(--bg-primary);
