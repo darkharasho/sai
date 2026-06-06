@@ -19,10 +19,10 @@
   --red: #E35535;
   --yellow: #c7910c;
   --turquoise: #38c7bd;
-  /* Papery dash divider — tracks the active theme's accent. */
+  /* Papery dash divider — uses border color for a uniform gray across all cards. */
   --divider-dash: repeating-linear-gradient(
     90deg,
-    color-mix(in srgb, var(--accent) 45%, transparent) 0 7px,
+    var(--border) 0 7px,
     transparent 7px 13px
   );
 

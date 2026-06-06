@@ -163,6 +163,38 @@ function HighlightedCode({ code, lang, showLineNumbers }: { code: string; lang: 
   return <pre className="plain-code"><code>{code}</code></pre>;
 }
 
+function InlineHighlightedCode({ code, lang }: { code: string; lang: string }) {
+  const [innerHtml, setInnerHtml] = useState<string>('');
+  const [hlTheme, setHlTheme] = useState(getActiveHighlightTheme());
+
+  useEffect(() => {
+    const handler = () => setHlTheme(getActiveHighlightTheme());
+    window.addEventListener('sai-highlight-theme-change', handler);
+    return () => window.removeEventListener('sai-highlight-theme-change', handler);
+  }, []);
+
+  useEffect(() => {
+    if (!code || lang === 'text') return;
+    getShikiHighlighter().then(highlighter => {
+      try {
+        const result = highlighter.codeToHtml(code, { lang, theme: hlTheme });
+        const codeMatch = result.match(/<code[^>]*>([\s\S]*)<\/code>/);
+        if (!codeMatch) return;
+        // Strip the outer <span class="line">...</span> wrapper shiki adds
+        const lineMatch = codeMatch[1].match(/<span class="line">([\s\S]*)<\/span>/);
+        setInnerHtml(lineMatch ? lineMatch[1] : codeMatch[1]);
+      } catch {
+        // language not loaded
+      }
+    });
+  }, [code, lang, hlTheme]);
+
+  if (innerHtml) {
+    return <span className="tool-call-label tool-call-label-hl" dangerouslySetInnerHTML={{ __html: innerHtml }} />;
+  }
+  return <span className="tool-call-label">{code}</span>;
+}
+
 function extractLineHtmls(shikiHtml: string): string[] {
   const codeMatch = shikiHtml.match(/<code[^>]*>([\s\S]*)<\/code>/);
   const inner = codeMatch ? codeMatch[1] : '';
@@ -241,6 +273,7 @@ interface FormatResult {
   label: string;
   code: string;
   langOverride?: string;
+  labelLang?: string;
   diff?: { oldString: string; newString: string; fileLang: string };
   query?: { pattern?: string; path?: string; glob?: string; type?: string };
 }
@@ -251,7 +284,7 @@ function formatInput(toolCall: ToolCall): FormatResult {
     const parsed = JSON.parse(input);
 
     // Bash — show command
-    if (parsed.command) return { label: 'Command', code: parsed.command };
+    if (parsed.command) return { label: 'Command', code: parsed.command, labelLang: 'bash' };
 
     // Write — show file path + content
     if (parsed.file_path && parsed.content) return { label: parsed.file_path, code: parsed.content };
@@ -285,6 +318,7 @@ function formatInput(toolCall: ToolCall): FormatResult {
       return {
         label: isGlob ? `glob: ${parsed.pattern}` : `grep: ${parsed.pattern}`,
         code: parts.length > 1 ? parts.join('\n') : '',
+        labelLang: isGlob ? undefined : 'regexp',
         query: { pattern: parsed.pattern, path: parsed.path, glob: parsed.glob, type: parsed.type },
       };
     }
@@ -437,6 +471,81 @@ function SearchResultLine({ text, pattern }: { text: string; pattern?: string })
   );
 }
 
+/** Merge shiki inner HTML with match highlights.
+ *  Splits shiki span tokens at match boundaries so <mark> can wrap
+ *  across token boundaries without breaking the syntax colors. */
+function mergeHighlightsIntoHtml(innerHtml: string, pattern: string): string {
+  // Parse shiki tokens: each is either a <span style="...">text</span> or a bare text node
+  const tokenRe = /<span style="([^"]*)">(.*?)<\/span>|([^<]+)/g;
+  const tokens: { style: string; text: string }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = tokenRe.exec(innerHtml)) !== null) {
+    const text = m[3] !== undefined ? m[3] : m[2];
+    if (text) tokens.push({ style: m[3] !== undefined ? '' : m[1], text });
+  }
+
+  // Decode HTML entities for plain-text matching
+  const decode = (s: string) => s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+  const plainText = tokens.map(t => decode(t.text)).join('');
+  const segments = highlightMatches(plainText, pattern);
+  if (segments.length === 1 && !segments[0].hit) return innerHtml; // no matches, return as-is
+
+  let result = '';
+  let tokenIdx = 0;
+  let posInToken = 0; // position in decoded text of current token
+
+  for (const seg of segments) {
+    let remaining = seg.text.length;
+    const parts: { style: string; text: string }[] = [];
+    while (remaining > 0 && tokenIdx < tokens.length) {
+      const token = tokens[tokenIdx];
+      const decoded = decode(token.text);
+      const available = decoded.length - posInToken;
+      const take = Math.min(remaining, available);
+      parts.push({ style: token.style, text: escapeHtml(decoded.slice(posInToken, posInToken + take)) });
+      remaining -= take;
+      posInToken += take;
+      if (posInToken >= decoded.length) { tokenIdx++; posInToken = 0; }
+    }
+    const partsHtml = parts.map(p =>
+      p.style ? `<span style="${p.style}">${p.text}</span>` : p.text
+    ).join('');
+    result += seg.hit ? `<mark class="search-hit">${partsHtml}</mark>` : partsHtml;
+  }
+  return result;
+}
+
+function SyntaxHighlightedSearchLine({ path, text, pattern }: { path: string; text: string; pattern?: string }) {
+  const lang = langFromPath(path);
+  const [innerHtml, setInnerHtml] = useState<string>('');
+  const [hlTheme, setHlTheme] = useState(getActiveHighlightTheme());
+
+  useEffect(() => {
+    const handler = () => setHlTheme(getActiveHighlightTheme());
+    window.addEventListener('sai-highlight-theme-change', handler);
+    return () => window.removeEventListener('sai-highlight-theme-change', handler);
+  }, []);
+
+  useEffect(() => {
+    if (!text || lang === 'text') { setInnerHtml(''); return; }
+    getShikiHighlighter().then(highlighter => {
+      try {
+        const result = highlighter.codeToHtml(text.trim(), { lang, theme: hlTheme });
+        const lineMatch = result.match(/<span class="line">([\s\S]*)<\/span>/);
+        const lineInner = lineMatch ? lineMatch[1] : '';
+        setInnerHtml(mergeHighlightsIntoHtml(lineInner, pattern || ''));
+      } catch {
+        setInnerHtml('');
+      }
+    });
+  }, [text, lang, pattern, hlTheme]);
+
+  if (innerHtml) {
+    return <span className="search-line-text" dangerouslySetInnerHTML={{ __html: innerHtml }} />;
+  }
+  return <SearchResultLine text={text} pattern={pattern} />;
+}
+
 function SearchResultView({ rows, pattern }: { rows: SearchRow[]; pattern?: string }) {
   const [showAll, setShowAll] = useState(false);
   if (rows.length === 0) return null;
@@ -459,7 +568,7 @@ function SearchResultView({ rows, pattern }: { rows: SearchRow[]; pattern?: stri
             <div key={i} className="search-row search-row-match">
               <span className="search-path">{row.path}</span>
               <span className="search-gutter">:{row.line}:</span>
-              <SearchResultLine text={row.text} pattern={pattern} />
+              <SyntaxHighlightedSearchLine path={row.path} text={row.text} pattern={pattern} />
             </div>
           );
         }
@@ -902,7 +1011,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
   const [showAllCode, setShowAllCode] = useState(false);
   const [showAllOutput, setShowAllOutput] = useState(false);
   const Icon = resolveIcon(toolCall.name, toolCall.type);
-  const { label, code, langOverride, diff, query } = formatInput(toolCall);
+  const { label, code, langOverride, labelLang, diff, query } = formatInput(toolCall);
   const lang = langOverride || detectLang(toolCall);
   const { truncated, isTruncated } = truncateCode(code, MAX_PREVIEW_LINES);
   const renderMarkdown = !diff && isMarkdownBody(label, code);
@@ -997,9 +1106,13 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
               <span className="tool-call-project-chip" title={`Project: ${linkName}`}>{linkName}</span>
             );
           })()}
-          {!isBash && !isTodo && !isAskUserQuestion && label && <span className="tool-call-label">{label}</span>}
+          {!isBash && !isTodo && !isAskUserQuestion && label && (
+            labelLang
+              ? <InlineHighlightedCode code={label} lang={labelLang} />
+              : <span className="tool-call-label">{label}</span>
+          )}
           {isAskUserQuestion && <span className="tool-call-label">{askAnswered ? 'Answered' : 'Waiting for answer…'}</span>}
-          {isBash && code && <span className="tool-call-label">{code}</span>}
+          {isBash && code && <InlineHighlightedCode code={code} lang="bash" />}
           {typeof toolCall.durationMs === 'number' && (
             <span className="tool-call-duration" data-testid="tool-call-duration">
               [{formatMs(toolCall.durationMs)}]
@@ -1131,7 +1244,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
                       <div className="tool-call-output-header">
                         <span className="tool-call-output-label">Output</span>
                       </div>
-                      <HighlightedCode code={showAllOutput ? toolCall.output : outputTruncation.truncated} lang="text" />
+                      <HighlightedCode code={showAllOutput ? toolCall.output : outputTruncation.truncated} lang={lang} />
                       {outputTruncation.isTruncated && (
                         <button
                           className="tool-call-show-more"
@@ -1193,6 +1306,10 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+          }
+          .tool-call-label-hl {
+            background: transparent !important;
+            filter: saturate(0.6);
           }
           .tool-call-project-chip {
             font-size: 9px;
@@ -1351,7 +1468,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
           .search-path { color: var(--accent); flex-shrink: 0; }
           .search-row-match .search-path { opacity: 0.85; }
           .search-gutter { color: var(--text-muted); flex-shrink: 0; }
-          .search-line-text { color: var(--text-secondary); }
+          .search-line-text { color: var(--text-secondary); filter: saturate(0.6); }
           .search-hit {
             background: color-mix(in srgb, var(--accent) 30%, transparent);
             color: var(--text);
@@ -1461,7 +1578,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
           }
           /* Bash IN/OUT */
           .bash-inout-body {
-            border-top: 1px solid var(--border);
+            border-top: 1px dashed var(--border);
             padding: 8px 0;
             display: flex;
             flex-direction: column;

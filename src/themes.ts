@@ -182,7 +182,7 @@ export const HIGHLIGHT_THEMES: { id: HighlightThemeId; label: string; hljsCss: s
   { id: 'vitesse-dark',          label: 'Vitesse Dark',           hljsCss: 'github-dark' },
 ];
 
-const SHIKI_LANGS = ['json', 'typescript', 'javascript', 'bash', 'python', 'html', 'css', 'markdown', 'yaml', 'toml', 'rust', 'go', 'diff'] as const;
+const SHIKI_LANGS = ['json', 'typescript', 'javascript', 'bash', 'python', 'html', 'css', 'markdown', 'yaml', 'toml', 'rust', 'go', 'diff', 'regexp'] as const;
 
 let _shikiPromise: Promise<any> | null = null;
 export function getShikiHighlighter(): Promise<any> {
