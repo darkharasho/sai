@@ -3,6 +3,7 @@ import type { ChatMessage } from '../../types';
 import { Check, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SPRING, useReducedMotionTransition } from './motion';
+import { buildTaskRegistry } from './taskRegistry';
 
 interface Todo {
   id: string;
@@ -15,18 +16,6 @@ interface Todo {
 interface TodoProgressProps {
   messages: ChatMessage[];
   isStreaming: boolean;
-}
-
-function extractTaskCreateId(output: string | undefined, fallback: string): string {
-  if (!output) return fallback;
-  // Output format from TaskCreate: "Task #1 created successfully: ..."
-  const m = /Task\s*#?\s*([0-9a-zA-Z_-]+)\b/i.exec(output);
-  if (m) return m[1];
-  try {
-    const parsed = JSON.parse(output);
-    if (parsed && (parsed.id || parsed.taskId)) return String(parsed.id || parsed.taskId);
-  } catch { /* ignore */ }
-  return fallback;
 }
 
 function findLatestTodos(messages: ChatMessage[]): Todo[] | null {
@@ -61,54 +50,16 @@ function findLatestTodos(messages: ChatMessage[]): Todo[] | null {
     if (best) return best;
   }
 
-  // New: TaskCreate / TaskUpdate are atomic per-task calls. Replay them in
-  // order across the whole conversation so updates in a later turn can still
-  // find tasks created earlier.
-  const tasks = new Map<string, Todo>();
-  const order: string[] = [];
-  let createSeq = 0;
-  for (let i = 0; i < messages.length; i++) {
-    const m = messages[i];
-    if (m.role !== 'assistant' || !m.toolCalls?.length) continue;
-    for (const tc of m.toolCalls) {
-      if (tc.name === 'TaskCreate') {
-        try {
-          const input = JSON.parse(tc.input || '{}');
-          createSeq += 1;
-          const id = extractTaskCreateId(tc.output, String(createSeq));
-          if (tasks.has(id)) continue;
-          tasks.set(id, {
-            id,
-            content: input.subject || input.description || 'Task',
-            activeForm: input.activeForm,
-            status: 'pending',
-          });
-          order.push(id);
-        } catch { /* ignore malformed input */ }
-      } else if (tc.name === 'TaskUpdate') {
-        try {
-          const input = JSON.parse(tc.input || '{}');
-          const id = input.taskId != null ? String(input.taskId) : '';
-          if (!id) continue;
-          if (input.status === 'deleted') {
-            tasks.delete(id);
-            const ix = order.indexOf(id);
-            if (ix >= 0) order.splice(ix, 1);
-            continue;
-          }
-          const existing = tasks.get(id);
-          if (!existing) continue;
-          if (input.status === 'pending' || input.status === 'in_progress' || input.status === 'completed') {
-            existing.status = input.status;
-          }
-          if (typeof input.subject === 'string') existing.content = input.subject;
-          if (typeof input.activeForm === 'string') existing.activeForm = input.activeForm;
-        } catch { /* ignore malformed input */ }
-      }
-    }
-  }
-  if (order.length > 0) {
-    return order.map((id) => tasks.get(id)!).filter(Boolean);
+  // New: TaskCreate / TaskUpdate are atomic per-task calls. Replay them via the
+  // shared registry so updates in a later turn still find tasks created earlier.
+  const registry = buildTaskRegistry(messages);
+  if (registry.size > 0) {
+    return Array.from(registry.values()).map((t) => ({
+      id: t.id,
+      content: t.subject,
+      activeForm: t.activeForm,
+      status: t.status,
+    }));
   }
   return null;
 }
