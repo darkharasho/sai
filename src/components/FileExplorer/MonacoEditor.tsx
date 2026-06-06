@@ -154,6 +154,9 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
   const decorationsRef = useRef<string[]>([]);
   const headContentRef = useRef<string[] | null>(null);
   const decorationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // True while we programmatically replace the model from an external `content` change,
+  // so the change-listener doesn't mistake the reload for a user edit and mark it dirty.
+  const applyingExternalRef = useRef(false);
   onContentChangeRef.current = onContentChange;
   const [dirty, setDirty] = useState(false);
   const [saveError, setSaveError] = useState(false);
@@ -371,6 +374,7 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
     }
 
     editor.onDidChangeModelContent(() => {
+      if (applyingExternalRef.current) return;
       setDirty(true);
       onDirtyChange?.(true);
       scheduleDecorationUpdate();
@@ -401,6 +405,32 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
       editor.dispose();
     };
   }, []);
+
+  // Reflect EXTERNAL `content` prop changes (e.g. a hot-reload from disk) into the live
+  // model. The editor is created once with the initial content; without this, a reloaded
+  // `content` prop would never reach the mounted editor and the view would stay stale.
+  // Guard: skip when the model already matches (our own edits echoed back, or the initial
+  // mount value); suppress the dirty flag since reloaded content equals what's on disk.
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    if (editor.getValue() === content) return;
+    const model = editor.getModel();
+    if (!model) return;
+    applyingExternalRef.current = true;
+    const view = editor.saveViewState();
+    model.pushEditOperations(
+      [],
+      [{ range: model.getFullModelRange(), text: content }],
+      () => null,
+    );
+    if (view) editor.restoreViewState(view);
+    applyingExternalRef.current = false;
+    setDirty(false);
+    onDirtyChange?.(false);
+    scheduleDecorationUpdate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [content]);
 
   // Jump to line when initialLine changes (e.g. clicking a second file reference)
   useEffect(() => {
