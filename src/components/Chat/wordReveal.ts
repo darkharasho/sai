@@ -90,6 +90,8 @@ export function revealWords(container: HTMLElement, opts: RevealOpts = {}): Reve
 
   const tick = () => {
     if (cancelled) return;
+    // Caller unmounted the message without calling cancel() — stop and clean up.
+    if (!container.isConnected) { cancelled = true; caret.remove(); return; }
     if (i >= items.length) {
       caret.remove();
       return;

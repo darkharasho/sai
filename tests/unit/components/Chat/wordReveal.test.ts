@@ -59,4 +59,15 @@ describe('revealWords', () => {
     });
     expect(el.querySelector('.rv-caret')).toBeNull();
   });
+
+  it('moves the caret across paragraph boundaries and ends clean', () => {
+    const el = mount('<p>one two</p><p>three four</p>');
+    revealWords(el);
+    vi.runAllTimers();
+    expect(el.querySelectorAll('.rv-word').length).toBe(4);
+    el.querySelectorAll<HTMLElement>('.rv-word').forEach(w => {
+      expect(w.style.opacity).toBe('1');
+    });
+    expect(el.querySelector('.rv-caret')).toBeNull();
+  });
 });
