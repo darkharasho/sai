@@ -169,9 +169,13 @@ export default function TodoProgress({ messages, isStreaming }: TodoProgressProp
                     <span className={`todo-ring-status todo-ring-status--${status}`}>
                       {status === 'done' && <Check size={9} strokeWidth={3} />}
                     </span>
-                    <span className="todo-ring-text">
-                      {status === 'active' ? (t.activeForm || t.content) : t.content}
+                    <span className="todo-ring-textwrap">
+                      <span className="todo-ring-text">{t.content}</span>
+                      {status === 'active' && t.activeForm && t.activeForm !== t.content && (
+                        <span className="todo-ring-subtext">{t.activeForm}</span>
+                      )}
                     </span>
+                    {t.priority && <span className="todo-ring-priority">{t.priority}</span>}
                   </li>
                 );
               })}
@@ -297,6 +301,17 @@ export default function TodoProgress({ messages, isStreaming }: TodoProgressProp
           }
         }
         .todo-ring-text { color: var(--text); word-break: break-word; }
+        .todo-ring-textwrap { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+        .todo-ring-subtext {
+          font-size: 10.5px; color: var(--text-muted); font-style: italic; word-break: break-word;
+        }
+        .todo-ring-priority {
+          flex-shrink: 0; align-self: flex-start; margin-top: 2px;
+          font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600;
+          padding: 1px 6px; border-radius: 3px;
+          background: color-mix(in srgb, var(--orange, #e6b84f) 18%, transparent);
+          color: var(--orange, #e6b84f);
+        }
         .todo-ring-item--done .todo-ring-text {
           color: var(--text-muted);
           text-decoration: line-through;

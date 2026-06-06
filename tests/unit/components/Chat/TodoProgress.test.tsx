@@ -190,6 +190,52 @@ describe('TodoProgress (ring + popover)', () => {
     expect(getByText('1/3')).toBeTruthy();
   });
 
+  it('shows a priority badge on a popover item with priority', () => {
+    const messages = [{
+      id: 'a1',
+      role: 'assistant' as const,
+      content: '',
+      timestamp: 0,
+      toolCalls: [{
+        id: 'tc1',
+        name: 'TodoWrite',
+        input: JSON.stringify({
+          todos: [
+            { id: '1', content: 'A', status: 'in_progress', activeForm: 'Doing A', priority: 'high' },
+            { id: '2', content: 'B', status: 'pending' },
+          ],
+        }),
+      }],
+    }];
+    const { container } = render(<TodoProgress messages={messages as any} isStreaming={true} />);
+    fireEvent.click(container.querySelector('[data-testid="todo-ring"]') as HTMLElement);
+    expect(container.querySelector('.todo-ring-priority')?.textContent).toBe('high');
+  });
+
+  it('shows title primary and activeForm secondary for the active item', () => {
+    const messages = [{
+      id: 'a1',
+      role: 'assistant' as const,
+      content: '',
+      timestamp: 0,
+      toolCalls: [{
+        id: 'tc1',
+        name: 'TodoWrite',
+        input: JSON.stringify({
+          todos: [
+            { id: '1', content: 'Run the suite', status: 'in_progress', activeForm: 'Running the suite' },
+            { id: '2', content: 'B', status: 'pending' },
+          ],
+        }),
+      }],
+    }];
+    const { container } = render(<TodoProgress messages={messages as any} isStreaming={true} />);
+    fireEvent.click(container.querySelector('[data-testid="todo-ring"]') as HTMLElement);
+    const active = container.querySelector('.todo-ring-item--active');
+    expect(active?.querySelector('.todo-ring-text')?.textContent).toContain('Run the suite');
+    expect(active?.querySelector('.todo-ring-subtext')?.textContent).toContain('Running the suite');
+  });
+
   it('renders status indicators with correct classes', () => {
     const messages = [buildTodosMsg([
       { content: 'done one', status: 'completed' },
