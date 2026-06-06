@@ -165,3 +165,70 @@ describe('ToolCallCard markdown body', () => {
     expect(container.querySelector('.card-md')).toBeNull();
   });
 });
+
+describe('ToolCallCard search rendering', () => {
+  const grep = {
+    id: 'g1',
+    type: 'file_search' as const,
+    name: 'Grep',
+    input: JSON.stringify({ pattern: 'const', path: 'src', glob: '*.ts' }),
+    output: 'src/a.ts:12:const x = 1\nsrc/b.ts:3:const y = 2',
+  };
+
+  it('renders grep output as search-result rows, not highlighted source', () => {
+    const { container } = render(<ToolCallCard toolCall={grep} />);
+    expect(container.querySelector('.search-result')).toBeTruthy();
+    expect(container.querySelectorAll('.search-row-match').length).toBe(2);
+  });
+
+  it('highlights the matched term inside grep results', () => {
+    const { container } = render(<ToolCallCard toolCall={grep} />);
+    const marks = container.querySelectorAll('.search-hit');
+    expect(marks.length).toBeGreaterThan(0);
+    expect(marks[0].textContent).toBe('const');
+  });
+
+  it('shows the query view for path/glob fields', () => {
+    const { container } = render(<ToolCallCard toolCall={grep} />);
+    const keys = Array.from(container.querySelectorAll('.search-query-key')).map(n => n.textContent);
+    expect(keys).toContain('path');
+    expect(keys).toContain('glob');
+  });
+
+  it('renders glob output as file rows even with no input body code', () => {
+    const glob = {
+      id: 'g2',
+      type: 'file_search' as const,
+      name: 'Glob',
+      input: JSON.stringify({ pattern: '**/*.ts' }),
+      output: 'src/a.ts\nsrc/b.ts',
+    };
+    const { container } = render(<ToolCallCard toolCall={glob} />);
+    expect(container.querySelectorAll('.search-row-file').length).toBe(2);
+  });
+
+  it('does not crash and renders plain content for an invalid regex pattern', () => {
+    const bad = {
+      id: 'g3',
+      type: 'file_search' as const,
+      name: 'Grep',
+      input: JSON.stringify({ pattern: '(' }),
+      output: 'src/a.ts:1:a(b',
+    };
+    const { container } = render(<ToolCallCard toolCall={bad} />);
+    expect(container.querySelector('.search-row-match')).toBeTruthy();
+    expect(container.querySelector('.search-hit')).toBeNull();
+  });
+
+  it('leaves a non-search tool (Read output) unchanged', () => {
+    const read = {
+      id: 'r1',
+      type: 'file_read' as const,
+      name: 'Read',
+      input: JSON.stringify({ file_path: 'src/a.ts' }),
+      output: 'just some file contents here',
+    };
+    const { container } = render(<ToolCallCard toolCall={read} />);
+    expect(container.querySelector('.search-result')).toBeNull();
+  });
+});

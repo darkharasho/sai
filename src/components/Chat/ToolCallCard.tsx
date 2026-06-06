@@ -836,11 +836,15 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
   const [showAllCode, setShowAllCode] = useState(false);
   const [showAllOutput, setShowAllOutput] = useState(false);
   const Icon = resolveIcon(toolCall.name, toolCall.type);
-  const { label, code, langOverride, diff } = formatInput(toolCall);
+  const { label, code, langOverride, diff, query } = formatInput(toolCall);
   const lang = langOverride || detectLang(toolCall);
   const { truncated, isTruncated } = truncateCode(code, MAX_PREVIEW_LINES);
   const renderMarkdown = !diff && isMarkdownBody(label, code);
   const [mdView, setMdView] = useState<'rendered' | 'source'>('rendered');
+  const search = !diff && !renderMarkdown && isSearchTool(toolCall.name, toolCall.output || '');
+  const searchParsed = search && toolCall.output && !parseToolError(toolCall.output).isToolError
+    ? parseSearchResults(toolCall.output)
+    : null;
   const entryTransition = useReducedMotionTransition(SPRING.pop);
   const badgeTransition = useReducedMotionTransition(SPRING.flick);
   const chevronTransition = useReducedMotionTransition(SPRING.flick);
@@ -858,7 +862,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
     toolCall.output && parseToolError(toolCall.output).isToolError ? 'error' :
     toolCall.output ? 'done' : 'running';
 
-  const hasBody = isAskUserQuestion ? true : isBash ? !!toolCall.output : isTodo ? true : !!code;
+  const hasBody = isAskUserQuestion ? true : isBash ? !!toolCall.output : isTodo ? true : search ? (!!toolCall.output || !!query) : !!code;
 
   const sigClass =
     (toolCall.name.includes('Edit') || toolCall.name === 'Write' || toolCall.type === 'file_edit') ? 'tool-sig-wipe' :
@@ -961,7 +965,30 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
                 onAnswerQuestion={onAnswerQuestion}
               />
             )}
-            {!isBash && !isTodo && !isAskUserQuestion && code && (
+            {search && (
+              <div className="tool-call-body search-tool-body">
+                {query && <SearchQueryView query={query} />}
+                {toolCall.output && (() => {
+                  const parsedOutput = parseToolError(toolCall.output);
+                  if (parsedOutput.isToolError) {
+                    return (
+                      <div className="tool-call-output">
+                        <ToolErrorDisplay message={parsedOutput.message} />
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="tool-call-output">
+                      <div className="tool-call-output-header">
+                        <span className="tool-call-output-label">Results</span>
+                      </div>
+                      <SearchResultView rows={searchParsed?.rows || []} pattern={query?.pattern} />
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+            {!isBash && !isTodo && !isAskUserQuestion && !search && code && (
               <div className="tool-call-body">
                 {diff ? (
                   <DiffHighlightedCode oldString={diff.oldString} newString={diff.newString} lang={diff.fileLang} />
@@ -1191,6 +1218,72 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
           .tool-call-md-seg-on {
             background: color-mix(in srgb, var(--accent) 16%, transparent);
             color: var(--accent);
+          }
+          .search-tool-body { padding-bottom: 4px; }
+          .search-query {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            padding: 10px 12px 6px;
+          }
+          .search-query-row {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+            font-family: 'Geist Mono', 'JetBrains Mono', monospace;
+            font-size: 11.5px;
+          }
+          .search-query-key {
+            flex-shrink: 0;
+            min-width: 56px;
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            padding-top: 1px;
+          }
+          .search-query-val { color: var(--text); word-break: break-all; }
+          .search-result {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            padding: 4px 0;
+          }
+          .search-row {
+            display: flex;
+            align-items: baseline;
+            gap: 6px;
+            padding: 1px 12px;
+            font-family: 'Geist Mono', 'JetBrains Mono', monospace;
+            font-size: 11.5px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-word;
+          }
+          .search-dot {
+            flex-shrink: 0;
+            width: 4px;
+            height: 4px;
+            border-radius: 50%;
+            background: var(--accent);
+            opacity: 0.7;
+            transform: translateY(-2px);
+          }
+          .search-path { color: var(--accent); flex-shrink: 0; }
+          .search-row-match .search-path { opacity: 0.85; }
+          .search-gutter { color: var(--text-muted); flex-shrink: 0; }
+          .search-line-text { color: var(--text-secondary); }
+          .search-hit {
+            background: color-mix(in srgb, var(--accent) 30%, transparent);
+            color: var(--text);
+            border-radius: 2px;
+            padding: 0 1px;
+          }
+          .search-row-raw { color: var(--text-muted); }
+          .search-sep {
+            height: 0;
+            border-top: 1px dashed var(--border);
+            margin: 3px 12px;
           }
           .diff-highlighted {
             margin: 0;
