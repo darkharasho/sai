@@ -6,16 +6,16 @@
 
 .sai-emoji-icon {
   display: inline-block;
-  width: 1.1em;
-  height: 1.1em;
+  width: 1.3em;
+  height: 1.3em;
   vertical-align: -0.2em;
   margin: 0 0.1em;
   color: var(--accent);
 }
 .sai-emoji-mask {
   display: inline-block;
-  width: 1.1em;
-  height: 1.1em;
+  width: 1.3em;
+  height: 1.3em;
   vertical-align: -0.2em;
   margin: 0 0.1em;
   background-color: var(--accent);
@@ -25,4 +25,10 @@
   mask-repeat: no-repeat;
   -webkit-mask-position: center;
   mask-position: center;
+}
+.sai-emoji-jumbo .sai-emoji-icon,
+.sai-emoji-jumbo .sai-emoji-mask {
+  width: 2.2em;
+  height: 2.2em;
+  vertical-align: -0.35em;
 }
