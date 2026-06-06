@@ -473,7 +473,7 @@ export default function TerminalPanel({
         .terminal-panel {
           height: 280px;
           flex-shrink: 0;
-          border-top: 1px solid var(--border);
+          border-top: 1px solid var(--border-hairline);
           display: flex;
           flex-direction: column;
           background: var(--bg-mid);
@@ -481,11 +481,12 @@ export default function TerminalPanel({
         }
         .terminal-header {
           padding: 6px 12px;
-          font-size: 11px;
+          font-size: var(--text-xs);
           text-transform: uppercase;
           color: var(--text-secondary);
-          border-bottom: 1px solid var(--border);
-          letter-spacing: 0.5px;
+          border-bottom: 1px solid var(--border-hairline);
+          letter-spacing: 0.06em;
+          font-weight: 600;
           flex-shrink: 0;
           display: flex;
           align-items: center;
@@ -503,7 +504,7 @@ export default function TerminalPanel({
         }
         .terminal-restart-btn:hover {
           color: var(--text);
-          background: var(--bg-hover);
+          background: var(--surface-4);
         }
         .terminal-content {
           overflow: hidden;
@@ -515,8 +516,8 @@ export default function TerminalPanel({
         }
         .terminal-tab-pane {
           width: 140px;
-          border-left: 1px solid var(--border);
-          background: var(--bg-secondary);
+          border-left: 1px solid var(--border-hairline);
+          background: var(--surface-1);
           display: flex;
           flex-direction: column;
           overflow-y: auto;
@@ -533,14 +534,14 @@ export default function TerminalPanel({
           position: relative;
         }
         .terminal-tab-item:hover {
-          background: var(--bg-hover);
+          background: var(--surface-4);
         }
         .terminal-tab-item:hover .terminal-tab-close {
           opacity: 1;
         }
         .terminal-tab-active {
-          border-left: 2px solid var(--accent, #c7910c);
-          background: var(--bg-active, rgba(199,145,12,0.1));
+          border-left: 2px solid var(--accent);
+          background: var(--accent-dim);
           color: var(--text);
         }
         .terminal-tab-label {
@@ -582,12 +583,12 @@ export default function TerminalPanel({
           padding: 6px 8px;
           font-size: 14px;
           text-align: left;
-          border-top: 1px solid var(--border);
+          border-top: 1px solid var(--border-hairline);
           margin-top: auto;
         }
         .terminal-tab-add:hover {
           color: var(--text);
-          background: var(--bg-hover);
+          background: var(--surface-4);
         }
         .terminal-confirm-overlay {
           position: absolute;
@@ -633,7 +634,7 @@ export default function TerminalPanel({
         }
         .terminal-confirm-dialog {
           background: var(--bg-mid);
-          border: 1px solid var(--border);
+          border: 1px solid var(--border-subtle);
           border-radius: 6px;
           padding: 16px;
           max-width: 300px;

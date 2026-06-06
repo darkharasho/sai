@@ -750,14 +750,14 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             placeholder="~/projects"
             value={defaultProjectDir}
             onChange={e => handleDefaultProjectDirChange(e.target.value)}
-            style={{ width: 180, fontSize: 12, padding: '4px 8px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)' }}
+            style={{ width: 180, fontSize: 12, padding: '4px 8px', background: 'var(--surface-1)', border: '1px solid var(--border-hairline)', borderRadius: 6, color: 'var(--text)' }}
           />
           <button
             onClick={async () => {
               const folder = await window.sai.selectFolder(defaultProjectDir || undefined);
               if (folder) handleDefaultProjectDirChange(folder);
             }}
-            style={{ fontSize: 11, padding: '4px 8px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 5, color: 'var(--text-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+            style={{ fontSize: 11, padding: '4px 8px', background: 'var(--surface-1)', border: '1px solid var(--border-hairline)', borderRadius: 5, color: 'var(--text-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
           >
             Browse
           </button>
@@ -774,7 +774,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
           placeholder="~/.claude/mcp.json"
           value={mcpConfigPath}
           onChange={e => handleMcpConfigChange(e.target.value)}
-          style={{ width: 220, fontSize: 12, padding: '4px 8px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)' }}
+          style={{ width: 220, fontSize: 12, padding: '4px 8px', background: 'var(--surface-1)', border: '1px solid var(--border-hairline)', borderRadius: 6, color: 'var(--text)' }}
         />
       </div>
 
@@ -1030,7 +1030,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
           }
           .settings-modal {
             background: var(--bg-elevated);
-            border: 1px solid var(--border);
+            border: 1px solid var(--border-subtle);
             border-radius: 10px;
             width: 720px;
             box-shadow: 0 24px 64px rgba(0,0,0,0.5);
@@ -1041,7 +1041,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             align-items: center;
             justify-content: space-between;
             padding: 16px 20px;
-            border-bottom: 1px solid var(--border);
+            border-bottom: 1px solid var(--border-hairline);
           }
           .settings-header-right {
             display: flex;
@@ -1058,7 +1058,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             border-radius: 4px;
             display: flex;
           }
-          .settings-close:hover { color: var(--text); background: var(--bg-hover); }
+          .settings-close:hover { color: var(--text); background: var(--surface-4); }
           .sync-dot {
             width: 7px;
             height: 7px;
@@ -1103,8 +1103,8 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
           .settings-sidebar {
             width: 185px;
             min-width: 185px;
-            background: var(--bg-primary);
-            border-right: 1px solid var(--border);
+            background: var(--surface-1);
+            border-right: 1px solid var(--border-subtle);
             padding: 12px 0;
             display: flex;
             flex-direction: column;
@@ -1123,10 +1123,10 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             text-align: left;
             width: 100%;
           }
-          .settings-nav-item:hover { color: var(--text); background: var(--bg-hover); }
+          .settings-nav-item:hover { color: var(--text); background: var(--surface-4); }
           .settings-nav-item.active {
-            color: var(--text);
-            background: rgba(255,255,255,0.05);
+            color: var(--accent);
+            background: var(--accent-dim);
             border-left-color: var(--accent);
           }
           .settings-nav-sub {
@@ -1143,10 +1143,10 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             text-align: left;
             width: 100%;
           }
-          .settings-nav-sub:hover { color: var(--text); background: var(--bg-hover); }
+          .settings-nav-sub:hover { color: var(--text); background: var(--surface-4); }
           .settings-nav-sub.active {
-            color: var(--text);
-            background: rgba(255,255,255,0.05);
+            color: var(--accent);
+            background: var(--accent-dim);
           }
           .settings-content {
             flex: 1;
@@ -1170,13 +1170,13 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
           .settings-row-spaced { margin-top: 12px; }
           .settings-row-name { font-size: 13px; font-weight: 500; color: var(--text); }
           .settings-row-desc { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
-          .settings-divider { height: 1px; background: var(--border); margin: 16px 0; }
+          .settings-divider { height: 1px; background: var(--border-hairline); margin: 16px 0; }
           .settings-toggle {
             width: 36px;
             height: 20px;
             border-radius: 10px;
-            border: 1px solid var(--border);
-            background: var(--bg-secondary);
+            border: 1px solid var(--border-hairline);
+            background: var(--surface-1);
             cursor: pointer;
             position: relative;
             flex-shrink: 0;
@@ -1195,8 +1195,8 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
           }
           .settings-toggle.on .settings-toggle-thumb { transform: translateX(16px); background: #000; }
           .settings-select {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
+            background: var(--surface-1);
+            border: 1px solid var(--border-hairline);
             border-radius: 5px;
             color: var(--text);
             font-size: 12px;
@@ -1213,8 +1213,8 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             display: flex;
             align-items: center;
             gap: 8px;
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
+            background: var(--surface-1);
+            border: 1px solid var(--border-hairline);
             border-radius: 5px;
             color: var(--text);
             font-size: 12px;
@@ -1240,7 +1240,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             top: calc(100% + 4px);
             right: 0;
             background: var(--bg-elevated);
-            border: 1px solid var(--border);
+            border: 1px solid var(--border-subtle);
             border-radius: 6px;
             box-shadow: 0 8px 24px rgba(0,0,0,0.4);
             overflow: hidden;
@@ -1260,8 +1260,8 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             cursor: pointer;
             text-align: left;
           }
-          .provider-dropdown-item:hover { background: var(--bg-hover); }
-          .provider-dropdown-item.active { background: var(--bg-secondary); }
+          .provider-dropdown-item:hover { background: var(--surface-4); }
+          .provider-dropdown-item.active { background: var(--accent-dim); }
           .settings-sync-note {
             font-size: 11px;
             color: var(--text-muted);
@@ -1269,7 +1269,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
           }
           .settings-sync-note code {
             font-family: 'Geist Mono', 'JetBrains Mono', monospace;
-            background: var(--bg-secondary);
+            background: var(--surface-1);
             padding: 1px 4px;
             border-radius: 3px;
             color: var(--accent);

@@ -113,8 +113,8 @@ export default function McpRegistryDetail({ server, onBack, onInstall }: McpRegi
       <style>{`
         .mcp-registry-detail {
           width: var(--sidebar-width);
-          background: var(--bg-secondary);
-          border-right: 1px solid var(--border);
+          background: var(--surface-1);
+          border-right: 1px solid var(--border-subtle);
           overflow-y: auto;
           flex-shrink: 0;
         }
@@ -124,7 +124,7 @@ export default function McpRegistryDetail({ server, onBack, onInstall }: McpRegi
           gap: 6px;
           padding: 8px 12px;
           border: none;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--border-hairline);
           background: none;
           color: var(--text-muted);
           cursor: pointer;
@@ -137,12 +137,12 @@ export default function McpRegistryDetail({ server, onBack, onInstall }: McpRegi
           align-items: center;
           gap: 10px;
           padding: 12px;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--border-hairline);
         }
         .mcp-registry-detail .detail-icon {
           width: 36px;
           height: 36px;
-          background: var(--bg-hover);
+          background: var(--surface-4);
           border-radius: 8px;
           display: flex;
           align-items: center;
@@ -167,7 +167,7 @@ export default function McpRegistryDetail({ server, onBack, onInstall }: McpRegi
           display: flex;
           gap: 6px;
           padding: 12px;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--border-hairline);
           flex-wrap: wrap;
         }
         .mcp-registry-detail .detail-btn {
@@ -182,10 +182,10 @@ export default function McpRegistryDetail({ server, onBack, onInstall }: McpRegi
           font-weight: 500;
         }
         .mcp-registry-detail .detail-btn.link {
-          background: var(--bg-hover);
+          background: var(--surface-4);
           color: var(--text);
         }
-        .mcp-registry-detail .detail-btn.link:hover { background: var(--border); }
+        .mcp-registry-detail .detail-btn.link:hover { background: var(--border-subtle); }
         .mcp-registry-detail .detail-btn.install {
           background: var(--accent);
           color: #fff;
@@ -218,7 +218,7 @@ export default function McpRegistryDetail({ server, onBack, onInstall }: McpRegi
           display: inline-block;
           padding: 2px 8px;
           background: var(--bg-input);
-          border: 1px solid var(--border);
+          border: 1px solid var(--border-hairline);
           border-radius: 4px;
           font-size: 10px;
           font-family: 'Geist Mono', monospace;
@@ -248,7 +248,7 @@ export default function McpRegistryDetail({ server, onBack, onInstall }: McpRegi
         }
         .mcp-registry-detail .detail-package {
           background: var(--bg-input);
-          border: 1px solid var(--border);
+          border: 1px solid var(--border-hairline);
           border-radius: 6px;
           padding: 8px;
           margin-bottom: 6px;
@@ -263,7 +263,7 @@ export default function McpRegistryDetail({ server, onBack, onInstall }: McpRegi
           font-weight: 600;
           text-transform: uppercase;
           color: var(--accent);
-          background: var(--bg-hover);
+          background: var(--surface-4);
           padding: 1px 5px;
           border-radius: 3px;
         }
@@ -280,7 +280,7 @@ export default function McpRegistryDetail({ server, onBack, onInstall }: McpRegi
         }
         .mcp-registry-detail .detail-pkg-envs {
           margin-top: 6px;
-          border-top: 1px solid var(--border);
+          border-top: 1px solid var(--border-hairline);
           padding-top: 6px;
         }
         .mcp-registry-detail .detail-pkg-env-title {

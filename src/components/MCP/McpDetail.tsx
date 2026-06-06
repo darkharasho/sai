@@ -92,8 +92,8 @@ export default function McpDetail({ server, onBack, onRemove, onToggleEnabled, o
       <style>{`
         .mcp-detail {
           width: var(--sidebar-width);
-          background: var(--bg-secondary);
-          border-right: 1px solid var(--border);
+          background: var(--surface-1);
+          border-right: 1px solid var(--border-subtle);
           overflow-y: auto;
           flex-shrink: 0;
         }
@@ -103,7 +103,7 @@ export default function McpDetail({ server, onBack, onRemove, onToggleEnabled, o
           gap: 6px;
           padding: 8px 12px;
           border: none;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--border-hairline);
           background: none;
           color: var(--text-muted);
           cursor: pointer;
@@ -116,12 +116,12 @@ export default function McpDetail({ server, onBack, onRemove, onToggleEnabled, o
           align-items: center;
           gap: 10px;
           padding: 12px;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--border-hairline);
         }
         .detail-icon {
           width: 36px;
           height: 36px;
-          background: var(--bg-hover);
+          background: var(--surface-4);
           border-radius: 8px;
           display: flex;
           align-items: center;
@@ -144,7 +144,7 @@ export default function McpDetail({ server, onBack, onRemove, onToggleEnabled, o
           display: flex;
           gap: 6px;
           padding: 12px;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--border-hairline);
         }
         .detail-btn {
           display: flex;
@@ -156,8 +156,8 @@ export default function McpDetail({ server, onBack, onRemove, onToggleEnabled, o
           font-size: 10px;
           cursor: pointer;
         }
-        .detail-btn.restart { background: var(--bg-hover); color: var(--accent); }
-        .detail-btn.toggle { background: var(--bg-hover); color: var(--text-muted); }
+        .detail-btn.restart { background: var(--surface-4); color: var(--accent); }
+        .detail-btn.toggle { background: var(--surface-4); color: var(--text-muted); }
         .detail-btn.danger { background: var(--red); color: #fff; }
         .detail-section { padding: 12px; }
         .detail-label {
@@ -192,7 +192,7 @@ export default function McpDetail({ server, onBack, onRemove, onToggleEnabled, o
           font-size: 10px;
           color: var(--text-secondary);
           line-height: 1.6;
-          border: 1px solid var(--border);
+          border: 1px solid var(--border-hairline);
         }
         .config-key { color: var(--text-muted); }
       `}</style>

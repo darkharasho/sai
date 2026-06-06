@@ -80,8 +80,8 @@ export default function PluginRegistryDetail({ plugin, onBack, onInstall }: Plug
       <style>{`
         .plugin-registry-detail {
           width: var(--sidebar-width);
-          background: var(--bg-secondary);
-          border-right: 1px solid var(--border);
+          background: var(--surface-1);
+          border-right: 1px solid var(--border-subtle);
           overflow-y: auto;
           flex-shrink: 0;
         }
@@ -91,7 +91,7 @@ export default function PluginRegistryDetail({ plugin, onBack, onInstall }: Plug
           gap: 6px;
           padding: 8px 12px;
           border: none;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--border-hairline);
           background: none;
           color: var(--text-muted);
           cursor: pointer;
@@ -104,12 +104,12 @@ export default function PluginRegistryDetail({ plugin, onBack, onInstall }: Plug
           align-items: center;
           gap: 10px;
           padding: 12px;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--border-hairline);
         }
         .plugin-registry-detail .detail-icon {
           width: 36px;
           height: 36px;
-          background: var(--bg-hover);
+          background: var(--surface-4);
           border-radius: 8px;
           display: flex;
           align-items: center;
@@ -126,7 +126,7 @@ export default function PluginRegistryDetail({ plugin, onBack, onInstall }: Plug
           display: flex;
           gap: 6px;
           padding: 12px;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--border-hairline);
         }
         .plugin-registry-detail .detail-btn {
           display: flex;
@@ -140,10 +140,10 @@ export default function PluginRegistryDetail({ plugin, onBack, onInstall }: Plug
           font-weight: 500;
         }
         .plugin-registry-detail .detail-btn.link {
-          background: var(--bg-hover);
+          background: var(--surface-4);
           color: var(--text);
         }
-        .plugin-registry-detail .detail-btn.link:hover { background: var(--border); }
+        .plugin-registry-detail .detail-btn.link:hover { background: var(--border-subtle); }
         .plugin-registry-detail .detail-btn.install {
           background: var(--accent);
           color: #fff;
@@ -176,7 +176,7 @@ export default function PluginRegistryDetail({ plugin, onBack, onInstall }: Plug
         }
         .plugin-registry-detail .detail-chip {
           padding: 3px 8px;
-          background: var(--bg-input);
+          background: var(--surface-4);
           border-radius: 4px;
           font-size: 11px;
           color: var(--text-secondary);

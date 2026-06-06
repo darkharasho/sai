@@ -162,8 +162,8 @@ export default function McpAddServer({ onBack, onAdd }: McpAddServerProps) {
       <style>{`
         .mcp-add-server {
           width: var(--sidebar-width);
-          background: var(--bg-secondary);
-          border-right: 1px solid var(--border);
+          background: var(--surface-1);
+          border-right: 1px solid var(--border-subtle);
           overflow-y: auto;
           flex-shrink: 0;
         }
@@ -173,7 +173,7 @@ export default function McpAddServer({ onBack, onAdd }: McpAddServerProps) {
           gap: 6px;
           padding: 8px 12px;
           border: none;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--border-hairline);
           background: none;
           color: var(--text-muted);
           cursor: pointer;
@@ -191,12 +191,12 @@ export default function McpAddServer({ onBack, onAdd }: McpAddServerProps) {
           margin-bottom: 4px;
           font-weight: 600;
         }
-        .form-optional { color: var(--border); }
+        .form-optional { color: var(--text-muted); }
         .form-input {
           width: 100%;
           padding: 6px 10px;
           background: var(--bg-input);
-          border: 1px solid var(--border);
+          border: 1px solid var(--border-hairline);
           border-radius: 6px;
           color: var(--text);
           font-size: 11px;
@@ -208,7 +208,7 @@ export default function McpAddServer({ onBack, onAdd }: McpAddServerProps) {
         .transport-toggle { display: flex; gap: 4px; }
         .transport-btn {
           padding: 4px 10px;
-          background: var(--bg-hover);
+          background: var(--surface-4);
           border: none;
           border-radius: 4px;
           font-size: 10px;
