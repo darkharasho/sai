@@ -102,7 +102,7 @@ export default function StashMenu({ projectPath, onRefresh, disabled }: StashMen
                   onChange={e => setMessageInput(e.target.value)}
                   placeholder="Stash message…"
                   aria-label="Stash message"
-                  style={{ flex: 1, background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', borderRadius: 3, color: 'var(--text)', fontSize: 11, padding: '3px 6px', outline: 'none', fontFamily: 'inherit' }}
+                  style={{ flex: 1, background: 'var(--surface-2)', border: '1px solid var(--border-subtle)', borderRadius: 3, color: 'var(--text)', fontSize: 11, padding: '3px 6px', outline: 'none', fontFamily: 'inherit' }}
                   onKeyDown={e => {
                     if (e.key === 'Enter' && messageInput.trim()) run(() => (window.sai as any).gitStash(projectPath, messageInput.trim()));
                     if (e.key === 'Escape') { setShowMessageInput(false); setMessageInput(''); }

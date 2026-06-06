@@ -657,7 +657,7 @@ export default function ChatHistorySidebar({
         }
         .chat-history-rename-input {
           width: 100%;
-          background: var(--bg-elevated);
+          background: var(--surface-2);
           border: 1px solid var(--accent);
           border-radius: 4px;
           padding: 4px 8px;

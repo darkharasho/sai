@@ -240,7 +240,7 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
       />
 
       {error && (
-        <div style={{ margin: '8px 12px', padding: '12px', background: 'var(--bg-input)', borderLeft: '2px solid var(--red)', borderRadius: 3, textAlign: 'center' as const }}>
+        <div style={{ margin: '8px 12px', padding: '12px', background: 'var(--surface-2)', borderLeft: '2px solid var(--red)', borderRadius: 3, textAlign: 'center' as const }}>
           <div style={{ marginBottom: 4, display: 'flex', justifyContent: 'center' }}><AlertTriangle size={18} color="var(--red)" /></div>
           <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--red)', marginBottom: 4 }}>Git unavailable</div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>{error}</div>

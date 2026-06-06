@@ -149,9 +149,9 @@ export default function GitHubAuthModal({ onSuccess, onClose }: Props) {
             backdrop-filter: blur(4px);
           }
           .gh-modal {
-            background: var(--bg-elevated);
-            border: 1px solid var(--border);
-            border-radius: 10px;
+            background: var(--surface-3);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-xl);
             padding: 24px;
             width: 360px;
             position: relative;
@@ -169,7 +169,7 @@ export default function GitHubAuthModal({ onSuccess, onClose }: Props) {
             border-radius: 4px;
             display: flex;
           }
-          .gh-modal-close:hover { color: var(--text); background: var(--bg-hover); }
+          .gh-modal-close:hover { color: var(--text); background: var(--surface-4); }
           .gh-modal-header {
             display: flex;
             align-items: center;
@@ -214,8 +214,8 @@ export default function GitHubAuthModal({ onSuccess, onClose }: Props) {
             width: 18px;
             height: 18px;
             border-radius: 50%;
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
+            background: var(--surface-2);
+            border: 1px solid var(--border-subtle);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -229,15 +229,15 @@ export default function GitHubAuthModal({ onSuccess, onClose }: Props) {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
-            border-radius: 8px;
+            background: var(--surface-2);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
             padding: 12px 16px;
             cursor: pointer;
             margin-bottom: 10px;
             transition: border-color 0.15s;
           }
-          .gh-code-block:hover { border-color: var(--accent); }
+          .gh-code-block:hover { border-color: var(--border-strong); }
           .gh-code-text {
             font-family: 'Geist Mono', 'JetBrains Mono', monospace;
             font-size: 22px;
@@ -260,11 +260,11 @@ export default function GitHubAuthModal({ onSuccess, onClose }: Props) {
             gap: 7px;
             background: var(--accent);
             border: none;
-            border-radius: 6px;
+            border-radius: var(--radius-sm);
             color: #000;
-            font-size: 13px;
+            font-size: var(--text-sm);
             font-weight: 600;
-            padding: 9px 16px;
+            padding: 5px var(--sp-2);
             cursor: pointer;
             margin-bottom: 14px;
           }

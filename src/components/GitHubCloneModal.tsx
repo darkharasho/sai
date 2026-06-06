@@ -257,9 +257,9 @@ export default function GitHubCloneModal({ onCloned, onClose }: Props) {
             backdrop-filter: blur(4px);
           }
           .clone-modal {
-            background: var(--bg-elevated);
-            border: 1px solid var(--border);
-            border-radius: 10px;
+            background: var(--surface-3);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-xl);
             padding: 24px;
             width: 480px;
             max-height: 80vh;
@@ -280,7 +280,7 @@ export default function GitHubCloneModal({ onCloned, onClose }: Props) {
             border-radius: 4px;
             display: flex;
           }
-          .clone-modal-close:hover { color: var(--text); background: var(--bg-hover); }
+          .clone-modal-close:hover { color: var(--text); background: var(--surface-4); }
           .clone-modal-header {
             display: flex;
             align-items: center;
@@ -304,21 +304,21 @@ export default function GitHubCloneModal({ onCloned, onClose }: Props) {
           }
           .clone-search {
             width: 100%;
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
-            border-radius: 6px;
+            background: var(--surface-2);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
             padding: 8px 10px 8px 30px;
             font-size: 13px;
             color: var(--text);
             box-sizing: border-box;
           }
-          .clone-search:focus { outline: none; border-color: var(--accent); }
+          .clone-search:focus { outline: none; border-color: var(--border-strong); }
 
           .clone-repo-list {
             flex: 1;
             overflow-y: auto;
-            border: 1px solid var(--border);
-            border-radius: 6px;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
             max-height: 280px;
             margin-bottom: 12px;
           }
@@ -330,13 +330,13 @@ export default function GitHubCloneModal({ onCloned, onClose }: Props) {
             padding: 10px 12px;
             background: none;
             border: none;
-            border-bottom: 1px solid var(--border);
+            border-bottom: 1px solid var(--border-hairline);
             color: var(--text);
             cursor: pointer;
             text-align: left;
           }
           .clone-repo-item:last-child { border-bottom: none; }
-          .clone-repo-item:hover { background: var(--bg-hover); }
+          .clone-repo-item:hover { background: var(--surface-4); }
           .clone-repo-item.selected {
             background: var(--accent);
             color: #000;
@@ -385,12 +385,12 @@ export default function GitHubCloneModal({ onCloned, onClose }: Props) {
             padding: 8px;
             background: none;
             border: none;
-            border-top: 1px solid var(--border);
+            border-top: 1px solid var(--border-hairline);
             color: var(--accent);
             font-size: 12px;
             cursor: pointer;
           }
-          .clone-load-more:hover { background: var(--bg-hover); }
+          .clone-load-more:hover { background: var(--surface-4); }
 
           .clone-target-section {
             display: flex;
@@ -410,20 +410,20 @@ export default function GitHubCloneModal({ onCloned, onClose }: Props) {
           }
           .clone-target-input {
             flex: 1;
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
-            border-radius: 5px;
+            background: var(--surface-2);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
             padding: 7px 10px;
             font-size: 13px;
             color: var(--text);
             font-family: 'JetBrains Mono', monospace;
             box-sizing: border-box;
           }
-          .clone-target-input:focus { outline: none; border-color: var(--accent); }
+          .clone-target-input:focus { outline: none; border-color: var(--border-strong); }
           .clone-target-browse {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
-            border-radius: 5px;
+            background: var(--surface-2);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
             padding: 7px 10px;
             color: var(--text-secondary);
             cursor: pointer;
@@ -446,31 +446,33 @@ export default function GitHubCloneModal({ onCloned, onClose }: Props) {
             background: none;
             border: none;
             color: var(--text-muted);
-            font-size: 13px;
+            font-size: var(--text-sm);
             cursor: pointer;
-            padding: 7px 12px;
-            border-radius: 5px;
+            padding: 5px var(--sp-2);
+            border-radius: var(--radius-sm);
           }
-          .clone-cancel-btn:hover { color: var(--text); }
+          .clone-cancel-btn:hover { color: var(--text); background: var(--surface-4); }
           .clone-action-btn {
-            background: none;
-            border: 1px solid var(--accent);
-            color: var(--accent);
-            border-radius: 5px;
-            padding: 7px 16px;
-            font-size: 13px;
+            background: var(--accent);
+            border: none;
+            color: #000;
+            border-radius: var(--radius-sm);
+            padding: 5px var(--sp-2);
+            font-size: var(--text-sm);
+            font-weight: 600;
             cursor: pointer;
             display: flex;
             align-items: center;
             gap: 6px;
           }
-          .clone-action-btn:hover { background: rgba(199,145,12,0.1); }
+          .clone-action-btn:hover { opacity: 0.9; }
           .clone-action-btn:disabled {
-            border-color: var(--border);
+            background: var(--surface-3);
+            border: 1px solid var(--border-subtle);
             color: var(--text-muted);
             cursor: not-allowed;
           }
-          .clone-action-btn:disabled:hover { background: none; }
+          .clone-action-btn:disabled:hover { opacity: 1; }
 
           .clone-status {
             display: flex;

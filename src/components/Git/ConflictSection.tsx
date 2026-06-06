@@ -82,7 +82,7 @@ export default function ConflictSection({ projectPath, conflictFiles, onRefresh,
   return (
     <div style={{
       margin: '8px 12px 0',
-      background: 'var(--bg-input)',
+      background: 'var(--surface-2)',
       borderLeft: '3px solid var(--red)',
       borderRadius: '0 4px 4px 0',
       padding: '8px 10px',

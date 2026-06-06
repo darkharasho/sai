@@ -283,7 +283,7 @@ export default function PluginsSidebar() {
         .sidebar-search {
           width: 100%;
           padding: 6px 10px 6px 28px;
-          background: var(--bg-input);
+          background: var(--surface-2);
           border: 1px solid var(--border-hairline);
           border-radius: 6px;
           color: var(--text);
@@ -302,7 +302,7 @@ export default function PluginsSidebar() {
           align-items: center;
           gap: 8px;
           padding: 10px;
-          background: var(--bg-input);
+          background: var(--surface-2);
           border-radius: 6px;
           margin-bottom: 4px;
           cursor: pointer;

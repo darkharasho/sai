@@ -195,7 +195,7 @@ export default function McpAddServer({ onBack, onAdd }: McpAddServerProps) {
         .form-input {
           width: 100%;
           padding: 6px 10px;
-          background: var(--bg-input);
+          background: var(--surface-2);
           border: 1px solid var(--border-hairline);
           border-radius: 6px;
           color: var(--text);

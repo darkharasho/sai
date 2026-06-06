@@ -496,12 +496,12 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
           align-items: center;
           justify-content: space-between;
           padding: 4px 16px;
-          border-top: 1px solid var(--border);
+          border-top: 1px solid var(--border-hairline);
           font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 11px;
           color: var(--text-muted);
           flex-shrink: 0;
-          background: var(--bg-secondary);
+          background: var(--surface-2);
         }
         .monaco-dirty-dot {
           width: 8px;
@@ -512,16 +512,16 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
         }
         .md-editor-preview-btn {
           background: none;
-          border: 1px solid var(--border);
-          border-radius: 3px;
+          border: 1px solid var(--border-subtle);
+          border-radius: var(--radius-sm);
           color: var(--text-muted);
-          font-size: 11px;
+          font-size: var(--text-sm);
           padding: 1px 8px;
           cursor: pointer;
           font-family: 'Geist Mono', 'JetBrains Mono', monospace;
         }
         .md-editor-preview-btn:hover {
-          background: var(--bg-hover);
+          background: var(--surface-4);
           color: var(--text);
         }
         .git-gutter-added {

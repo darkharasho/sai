@@ -88,7 +88,7 @@ export default function GitActivity({ commits }: GitActivityProps) {
                   style={{
                     padding: '1px 6px',
                     borderRadius: 999,
-                    background: 'var(--bg-tertiary)',
+                    background: 'var(--surface-3)',
                     color: 'var(--text-secondary)',
                   }}
                 >

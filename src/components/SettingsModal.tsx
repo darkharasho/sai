@@ -1029,7 +1029,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             backdrop-filter: blur(4px);
           }
           .settings-modal {
-            background: var(--bg-elevated);
+            background: var(--surface-3);
             border: 1px solid var(--border-subtle);
             border-radius: 10px;
             width: 720px;
@@ -1239,7 +1239,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             position: absolute;
             top: calc(100% + 4px);
             right: 0;
-            background: var(--bg-elevated);
+            background: var(--surface-3);
             border: 1px solid var(--border-subtle);
             border-radius: 6px;
             box-shadow: 0 8px 24px rgba(0,0,0,0.4);

@@ -622,7 +622,7 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen, metaRunti
         }
         .project-action-btn:hover {
           color: var(--accent);
-          background: var(--bg-hover);
+          background: var(--surface-4);
         }
       `}</style>
     </div>
@@ -650,7 +650,7 @@ function InlineNameInput({ initialValue, onSubmit, onCancel }: { initialValue: s
       onBlur={() => onCancel()}
       style={{
         flex: 1,
-        background: 'var(--bg-input)',
+        background: 'var(--surface-2)',
         border: '1px solid var(--accent)',
         borderRadius: 3,
         color: 'var(--text)',

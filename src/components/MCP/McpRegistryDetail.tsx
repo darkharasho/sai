@@ -217,7 +217,7 @@ export default function McpRegistryDetail({ server, onBack, onInstall }: McpRegi
         .mcp-registry-detail .detail-transport-badge {
           display: inline-block;
           padding: 2px 8px;
-          background: var(--bg-input);
+          background: var(--surface-2);
           border: 1px solid var(--border-hairline);
           border-radius: 4px;
           font-size: 10px;
@@ -229,7 +229,7 @@ export default function McpRegistryDetail({ server, onBack, onInstall }: McpRegi
           gap: 6px;
           align-items: baseline;
           padding: 4px 8px;
-          background: var(--bg-input);
+          background: var(--surface-2);
           border-radius: 4px;
           margin-bottom: 3px;
         }
@@ -247,7 +247,7 @@ export default function McpRegistryDetail({ server, onBack, onInstall }: McpRegi
           word-break: break-all;
         }
         .mcp-registry-detail .detail-package {
-          background: var(--bg-input);
+          background: var(--surface-2);
           border: 1px solid var(--border-hairline);
           border-radius: 6px;
           padding: 8px;

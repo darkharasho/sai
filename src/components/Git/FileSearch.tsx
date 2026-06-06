@@ -14,8 +14,8 @@ export default function FileSearch({ value, onChange, matchCount }: FileSearchPr
           display: 'flex',
           alignItems: 'center',
           gap: 6,
-          background: value ? 'var(--bg-input)' : 'var(--bg-secondary)',
-          border: `1px solid ${value ? 'var(--accent)' : 'var(--border)'}`,
+          background: 'var(--surface-2)',
+          border: `1px solid ${value ? 'var(--border-strong)' : 'var(--border-subtle)'}`,
           borderRadius: 4,
           padding: '3px 8px',
         }}

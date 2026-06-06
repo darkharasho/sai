@@ -149,7 +149,7 @@ export default function PluginDetail({ plugin, onBack, onUninstall, onToggleEnab
         .detail-skills { display: flex; flex-wrap: wrap; gap: 4px; }
         .skill-chip {
           padding: 3px 8px;
-          background: var(--bg-input);
+          background: var(--surface-2);
           border-radius: 4px;
           font-size: 11px;
           color: var(--text-secondary);

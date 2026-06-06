@@ -170,7 +170,7 @@ export default function McpDetail({ server, onBack, onRemove, onToggleEnabled, o
         }
         .tool-row {
           padding: 6px 10px;
-          background: var(--bg-input);
+          background: var(--surface-2);
           border-radius: 4px;
           margin-bottom: 3px;
           display: flex;
@@ -186,7 +186,7 @@ export default function McpDetail({ server, onBack, onRemove, onToggleEnabled, o
         }
         .config-block {
           padding: 8px 10px;
-          background: var(--bg-input);
+          background: var(--surface-2);
           border-radius: 6px;
           font-family: 'Geist Mono', monospace;
           font-size: 10px;

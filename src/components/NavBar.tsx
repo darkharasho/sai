@@ -203,7 +203,7 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, sw
         .nav-divider {
           width: 24px;
           height: 1px;
-          background: var(--border);
+          background: var(--border-hairline);
           margin: 4px 0;
         }
         .nav-status-indicator {

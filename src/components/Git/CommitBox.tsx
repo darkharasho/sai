@@ -236,7 +236,7 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
                 onChange={e => { setBranchFilter(e.target.value); setFocusedBranchIndex(0); }}
                 style={{
                   width: '100%',
-                  background: 'var(--bg-input)',
+                  background: 'var(--surface-2)',
                   border: '1px solid var(--border-subtle)',
                   borderRadius: 3,
                   color: 'var(--text)',
@@ -331,7 +331,7 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
                     autoFocus
                     style={{
                       flex: 1,
-                      background: 'var(--bg-input)',
+                      background: 'var(--surface-2)',
                       border: '1px solid var(--border-subtle)',
                       borderRadius: 3,
                       color: 'var(--text)',
@@ -349,7 +349,7 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
                     onClick={handleCreate}
                     disabled={!newBranchName.trim()}
                     style={{
-                      background: newBranchName.trim() ? 'var(--accent)' : 'var(--bg-hover)',
+                      background: newBranchName.trim() ? 'var(--accent)' : 'var(--surface-4)',
                       color: newBranchName.trim() ? '#000' : 'var(--text-muted)',
                       border: 'none',
                       borderRadius: 3,
@@ -385,7 +385,7 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
             alignItems: 'flex-start',
             gap: 6,
             padding: '6px 8px',
-            background: 'var(--bg-input)',
+            background: 'var(--surface-2)',
             borderLeft: '2px solid var(--red)',
             borderRadius: 3,
             fontSize: 11,
@@ -423,7 +423,7 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
         style={{
           width: '100%',
           resize: 'vertical' as const,
-          background: 'var(--bg-input)',
+          background: 'var(--surface-2)',
           border: '1px solid var(--border-subtle)',
           borderRadius: 4,
           color: 'var(--text)',
@@ -561,7 +561,7 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
           left: 0;
           right: 0;
           margin-bottom: 4px;
-          background: var(--bg-elevated);
+          background: var(--surface-3);
           border: 1px solid var(--border-subtle);
           border-radius: 6px;
           box-shadow: 0 -4px 16px rgba(0,0,0,0.3);
