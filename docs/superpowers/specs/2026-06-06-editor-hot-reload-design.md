@@ -28,30 +28,41 @@ app's existing reload-and-conflict machinery — instead of waiting for the poll
 
 ## Design
 
-### Unit 1 — `detectFileEdits(toolCalls, projectRoot)` (pure, new module)
+### Mechanism note: the raw `claude:message` stream
 
-New file `src/components/CodePanel/detectFileEdits.ts`:
+The renderer's `claude:message` handler receives **raw** Claude CLI messages, not the
+app's assembled `ToolCall` objects:
+
+- An **assistant** message carries `msg.message.content` — an array of blocks; a
+  `tool_use` block is `{ type:'tool_use', id, name, input }` (with `input.file_path` etc).
+- A **tool result** arrives as a **user** message whose `msg.message.content` has
+  `tool_result` blocks `{ type:'tool_result', tool_use_id, content, is_error }`
+  (`electron/services/claude.ts:344-360, 935-948`).
+
+So an edit's *path* (from `tool_use`) and its *completion* (from `tool_result`) arrive in
+separate messages and must be correlated by id.
+
+### Unit 1 — two pure extractors (`src/components/CodePanel/detectFileEdits.ts`)
 
 ```ts
-export function detectFileEdits(
-  toolCalls: ToolCall[] | undefined,
+export function extractEditToolUses(
+  content: unknown,        // an assistant message's content blocks
   projectRoot: string,
 ): { id: string; path: string }[];
+
+export function successfulToolResultIds(
+  content: unknown,        // a user message's content blocks
+): string[];
 ```
 
-Returns, for each *completed, non-errored* file-editing tool call, its tool-call `id`
-and the **absolute** edited path:
+- `extractEditToolUses`: for each `tool_use` block whose `name` is `Write`, `Edit`,
+  `MultiEdit`, or `NotebookEdit`, read `input.file_path` (or `input.notebook_path`),
+  resolve to an **absolute** path (`isAbsolute(p) ? p : join(projectRoot, p)`), and return
+  `{ id, path }`. Skip blocks with no path. Non-array `content` → `[]`.
+- `successfulToolResultIds`: return the `tool_use_id` of every `tool_result` block where
+  `is_error` is not true. Non-array `content` → `[]`.
 
-- Include tool names `Write`, `Edit`, `MultiEdit`, `NotebookEdit`.
-- The call must have a truthy `output` (completed) and that output must not be a tool
-  error (reuse the existing `parseToolError` helper from `ToolCallCard`, or a shared copy).
-- Parse the call's `input` JSON; take `file_path` (or `notebook_path` for `NotebookEdit`).
-- Resolve to absolute: if already absolute, use as-is; else join with `projectRoot`
-  (reuse the resolution approach already used by `extractToolPath`/`toolProjectLinkName`
-  in `ToolCallCard.tsx`).
-- Skip calls with no parsable path. Returns `[]` for undefined/empty input.
-
-Pure, unit-testable. Depends on: `ToolCall` type, `parseToolError`, path join util.
+Both pure and unit-testable. Depend on: a path join/isAbsolute util only (no React).
 
 ### Unit 2 — `applyExternalChange(path)` (extracted reload-or-banner action)
 
@@ -72,50 +83,56 @@ already tells us the file changed, so no mtime comparison is needed there).
 
 ### Unit 3 — instant trigger wiring (`App.tsx`)
 
-In the `claude:message` handler (where incoming assistant messages update state), after
-the existing state update:
+In the existing `claude:message` handler (`App.tsx:2118`), keep a
+`pendingEditsRef = useRef(new Map<string, string>())` (tool_use_id → absolute path):
 
-1. Resolve the active project root for the message's workspace.
-2. `const edits = detectFileEdits(message.toolCalls, projectRoot)`.
-3. Keep a `processedEditIds` ref (a `Set<string>`). For each `edit` whose `id` is not yet
-   processed, mark it processed and — **if `edit.path` matches an open file** in that
-   workspace — call `applyExternalChange(edit.path)`.
+1. Resolve the project root for `msg.projectPath` (the workspace's path).
+2. If `msg.type === 'assistant'`: for each `{id, path}` from
+   `extractEditToolUses(msg.message?.content, projectRoot)`, `pendingEditsRef.current.set(id, path)`.
+3. If `msg.type === 'user'`: for each `id` from `successfulToolResultIds(msg.message?.content)`,
+   look up `pendingEditsRef.current.get(id)`; if present, `delete` it and — **if that path
+   matches an open file** in `msg.projectPath`'s workspace — call `applyExternalChange(path)`.
 
-Dedup by tool-call `id` prevents re-firing as a streaming message re-renders with the
-same completed tool call. Edits to files that aren't open are ignored.
+Correlating by id and deleting on completion makes each edit fire exactly once. Edits to
+files that aren't open are ignored (the entry is still deleted, so the map doesn't grow).
 
 ## Data flow
 
 ```
-AI Write/Edit tool completes
-  → claude:message (toolCalls carry file_path + output)
-  → detectFileEdits() → [{id, absPath}]
-  → for each new id matching an open file: applyExternalChange(absPath)
+AI assistant message  → extractEditToolUses(content) → pendingEdits[id] = absPath
+AI tool_result (user)  → successfulToolResultIds(content) → for each id:
+    path = pendingEdits.delete(id)
+    if path is an open file → applyExternalChange(absPath)
        ├─ file clean → reload content/savedContent/diskMtime, clear isDirty (hot reload)
        └─ file dirty → add to externallyModified → existing banner (Reload / Keep edits)
 ```
 
 ## Error handling
 
-- `detectFileEdits` parses JSON in try/catch; malformed input → that call is skipped.
+- The extractors tolerate non-array/missing `content` and unexpected block shapes
+  (return `[]` / skip), so a malformed message never throws into the handler.
 - `applyExternalChange` reads the file via the existing `fsReadFile`/`fsMtime` IPC; on a
   read failure it leaves state unchanged (no throw to the message handler).
-- Tool-error outputs are excluded, so a failed edit never triggers a reload.
+- `is_error` tool_results are excluded, so a failed edit never triggers a reload.
 
 ## Testing
 
 New `tests/unit/components/CodePanel/detectFileEdits.test.ts`:
-- A completed `Write` with `{file_path}` and output → returns `{id, absolutePath}`.
-- A completed `Edit` with a relative `file_path` → resolves against the project root.
-- `NotebookEdit` with `notebook_path` → returned.
-- A `Read` tool, or a `Write` with no `output` (incomplete), or a `Write` whose output is
-  a tool error → excluded.
-- Multiple edits in one `toolCalls` array → all returned with distinct ids.
-- `undefined`/empty toolCalls → `[]`.
+- `extractEditToolUses`:
+  - a `Write` tool_use with absolute `file_path` → `{id, path}` unchanged.
+  - an `Edit` tool_use with a relative `file_path` → resolved against the project root.
+  - a `NotebookEdit` with `notebook_path` → returned.
+  - a `Read` tool_use, and a `tool_use` with no path → excluded.
+  - multiple edit tool_uses in one content array → all returned with their ids.
+  - non-array / missing content → `[]`.
+- `successfulToolResultIds`:
+  - returns ids of `tool_result` blocks with `is_error` falsy.
+  - excludes `is_error: true` blocks.
+  - non-array / missing content → `[]`.
 
 The `applyExternalChange` extraction is covered behaviorally by the existing poll (no
-behavior change to it). The thin App wiring (dedup + open-file match) is verified by the
-detector tests plus manual smoke (open a file, have the AI edit it, confirm instant
+behavior change to it). The thin App wiring (id correlation + open-file match) is verified
+by the extractor tests plus manual smoke (open a file, have the AI edit it, confirm instant
 reload; open a file with unsaved edits, confirm the banner appears instantly).
 
 ## Rollout / risk
