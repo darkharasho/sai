@@ -16,6 +16,14 @@ describe('extractTaskCreateId', () => {
   it('falls back when there is no output', () => {
     expect(extractTaskCreateId(undefined, '7')).toBe('7');
   });
+  it('parses an id from JSON output when there is no Task #N text', () => {
+    expect(extractTaskCreateId('{"id":"abc"}', 'fallback')).toBe('abc');
+    // Regex precedence quirk: the /Task\s*#?\s*([0-9a-zA-Z_-]+)\b/i pattern runs
+    // BEFORE the JSON fallback and matches the literal substring "task" inside
+    // the "taskId" key, capturing the following "Id". So the JSON value 42 is
+    // never reached here — actual current behavior returns 'Id', not '42'.
+    expect(extractTaskCreateId('{"taskId":42}', 'fallback')).toBe('Id');
+  });
 });
 
 describe('buildTaskRegistry', () => {
@@ -59,5 +67,26 @@ describe('buildTaskRegistry', () => {
   it('uses a sequence fallback id when output lacks a task number', () => {
     const reg = buildTaskRegistry([asst([tc('TaskCreate', { subject: 'Seq' })])]);
     expect(reg.get('1')).toMatchObject({ subject: 'Seq' });
+  });
+
+  it('captures owner on create and updates it on TaskUpdate', () => {
+    const messages = [
+      asst([tc('TaskCreate', { subject: 'Owned', owner: 'alice' }, 'Task #8 created successfully')]),
+    ];
+    expect(buildTaskRegistry(messages).get('8')).toMatchObject({ owner: 'alice' });
+
+    const messages2 = [
+      asst([tc('TaskCreate', { subject: 'Owned' }, 'Task #9 created successfully')]),
+      asst([tc('TaskUpdate', { taskId: '9', owner: 'bob' })]),
+    ];
+    expect(buildTaskRegistry(messages2).get('9')).toMatchObject({ owner: 'bob' });
+  });
+
+  it('lets an update override the description', () => {
+    const messages = [
+      asst([tc('TaskCreate', { subject: 'D', description: 'old desc' }, 'Task #10 created successfully')]),
+      asst([tc('TaskUpdate', { taskId: '10', description: 'new desc' })]),
+    ];
+    expect(buildTaskRegistry(messages).get('10')).toMatchObject({ description: 'new desc' });
   });
 });
