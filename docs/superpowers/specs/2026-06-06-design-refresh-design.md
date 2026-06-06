@@ -100,7 +100,7 @@ Components use these tokens rather than ad-hoc pixel values. Sidebar items: `--s
 - Background: `--surface-0` (darkest — visually recedes)
 - Icon size: 32×32px touch target, 16px icon
 - Active state: `--accent-dim` background, `--accent` icon color
-- No border between nav and sidebar — depth alone separates them
+- No explicit border between nav and sidebar — `--surface-0` vs `--surface-1` provides the separation through depth alone
 
 ### Sidebar Panels
 - Background: `--surface-1`
