@@ -35,7 +35,7 @@ const MD_PLUGINS = {
   rehypePlugins: [rehypeHighlight, rehypeFilePaths],
   urlTransform: (url: string) =>
     url.startsWith('sai-file://') ? url : defaultUrlTransform(url),
-} as const;
+};
 
 const FILE_PATH_RE = /(?<![:/])\b((?:\.{1,2}\/)?(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte))(?::(\d+))?\b|(?<![:/.\w])((?:\/[\w.-]+)+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte))(?::(\d+))?\b/g;
 
