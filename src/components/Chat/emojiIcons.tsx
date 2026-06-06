@@ -100,9 +100,9 @@ import {
 } from 'lucide-react';
 
 // Emoji → Lucide icon. Curated for what assistant messages typically reach
-// for; everything not in here falls through to OpenMoji Black (a free,
-// comprehensive monochrome line-art SVG set) so coverage stays at 100% with
-// a consistent line-icon aesthetic.
+// for; everything not in here falls through to the Fluent High-Contrast SVG set
+// (a free, comprehensive monochrome line-art collection) so coverage stays at
+// 100% with a consistent line-icon aesthetic.
 export const EMOJI_TO_ICON: Record<string, LucideIcon> = {
   // status / outcomes
   '✅': CheckCircle2,
@@ -277,7 +277,7 @@ export const EMOJI_TO_ICON: Record<string, LucideIcon> = {
 
 // Comprehensive emoji matcher (Unicode-spec accurate) — matches *any* emoji,
 // not just the ones we have Lucide mappings for. The renderer falls back to
-// a Twemoji SVG for unmapped graphemes so coverage is 100%.
+// a Fluent High-Contrast SVG for unmapped graphemes so coverage is 100%.
 export function makeEmojiRegex(): RegExp {
   return emojiRegex();
 }
