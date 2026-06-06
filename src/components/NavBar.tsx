@@ -194,7 +194,7 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, sw
         }
         .nav-btn:hover {
           color: var(--text);
-          background: var(--surface-2);
+          background: var(--surface-4);
         }
         .nav-btn.active {
           color: var(--accent);
