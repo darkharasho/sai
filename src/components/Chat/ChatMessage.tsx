@@ -876,7 +876,7 @@ function ChatMessage({
         }
         .chat-msg-user {
           background: var(--bg-input);
-          border: 1px solid var(--border);
+          border: 1px solid var(--border-subtle);
           border-radius: 14px 14px 4px 14px; /* chat tail (sharp bottom-right) */
           padding: 10px 14px;
           margin-left: auto;   /* push the bubble to the right */
@@ -939,7 +939,7 @@ function ChatMessage({
           -webkit-mask-repeat: no-repeat;
           mask-repeat: no-repeat;
         }
-        .chat-msg-body { color: var(--text); line-height: 1.6; flex: 1; min-width: 0; }
+        .chat-msg-body { color: var(--text); font-size: var(--text-md); line-height: 1.55; flex: 1; min-width: 0; }
         .chat-msg-duration {
           font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-variant-numeric: tabular-nums;
@@ -956,11 +956,11 @@ function ChatMessage({
         .chat-msg-body li { margin: 2px 0; }
         .chat-msg-body li > p { margin: 0; }
         .chat-msg-body code {
-          background: var(--bg-hover);
-          padding: 2px 6px;
-          border-radius: 3px;
-          font-size: 12px;
-          border: 1px solid var(--border);
+          background: var(--surface-3);
+          border: 1px solid var(--border-hairline);
+          border-radius: var(--radius-xs);
+          font-size: var(--text-sm);
+          padding: 1px 4px;
         }
         .chat-msg-body a { color: var(--accent); text-decoration: underline; cursor: pointer; }
         .chat-msg-body a:hover { opacity: 0.8; }
@@ -995,8 +995,9 @@ function ChatMessage({
           cursor: default;
         }
         .chat-msg-body pre {
-          background: var(--bg-secondary);
-          border-radius: 6px;
+          background: var(--surface-2);
+          border: 1px solid var(--border-subtle);
+          border-radius: var(--radius-md);
           padding: 12px;
           overflow-x: auto;
           margin: 8px 0;
@@ -1037,7 +1038,7 @@ function ChatMessage({
         }
         .chat-msg-body th,
         .chat-msg-body td {
-          border: 1px solid var(--border);
+          border: 1px solid var(--border-hairline);
           padding: 6px 12px;
           text-align: left;
           white-space: nowrap;
@@ -1114,7 +1115,7 @@ function ChatMessage({
         .img-modal-ctx {
           position: fixed;
           background: var(--bg-primary, #1e1e1e);
-          border: 1px solid var(--border, #333);
+          border: 1px solid var(--border-subtle, #333);
           border-radius: 6px;
           padding: 4px;
           z-index: 2001;
