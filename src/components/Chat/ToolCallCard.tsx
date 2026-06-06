@@ -841,7 +841,11 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
   const { truncated, isTruncated } = truncateCode(code, MAX_PREVIEW_LINES);
   const renderMarkdown = !diff && isMarkdownBody(label, code);
   const [mdView, setMdView] = useState<'rendered' | 'source'>('rendered');
-  const search = !diff && !renderMarkdown && isSearchTool(toolCall.name, toolCall.output || '');
+  const search = !diff && !renderMarkdown
+    && toolCall.type !== 'terminal_command'
+    && toolCall.name !== 'TodoWrite'
+    && toolCall.name !== 'AskUserQuestion'
+    && isSearchTool(toolCall.name, toolCall.output || '');
   const searchParsed = search && toolCall.output && !parseToolError(toolCall.output).isToolError
     ? parseSearchResults(toolCall.output)
     : null;

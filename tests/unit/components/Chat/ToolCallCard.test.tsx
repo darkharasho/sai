@@ -231,4 +231,18 @@ describe('ToolCallCard search rendering', () => {
     const { container } = render(<ToolCallCard toolCall={read} />);
     expect(container.querySelector('.search-result')).toBeNull();
   });
+
+  it('does not render search results for a Bash card with file-list output', () => {
+    const bash = {
+      id: 'b1',
+      type: 'terminal_command' as const,
+      name: 'Bash',
+      input: JSON.stringify({ command: 'ls src' }),
+      output: 'src/a.ts\nsrc/b.ts\nsrc/c.ts',
+    };
+    const { container } = render(<ToolCallCard toolCall={bash} />);
+    expect(container.querySelector('.search-result')).toBeNull();
+    // Bash keeps its dedicated IN/OUT rendering
+    expect(container.querySelector('.bash-inout-body')).toBeTruthy();
+  });
 });
