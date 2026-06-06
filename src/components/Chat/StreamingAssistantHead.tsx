@@ -31,7 +31,12 @@ export default function StreamingAssistantHead({ streaming, content, durationMs,
   const revealedRef = useRef(false);
 
   useEffect(() => {
-    if (streaming) { setPhase('thinking'); return; }
+    // `streaming` is driven by an idle debounce (streamSettled), so it can flip
+    // false→true mid-reply on a token pause. Once we've revealed, STAY revealed —
+    // never strip already-shown text back to the thinking state (that could strand a
+    // reply hidden if the final completion is then guarded out). Before first reveal,
+    // a resume just returns to the thinking animation.
+    if (streaming) { if (!revealedRef.current) setPhase('thinking'); return; }
     if (phase === 'revealed') return;
     if (!content) return;
     if (revealedRef.current) return;
@@ -63,6 +68,10 @@ export default function StreamingAssistantHead({ streaming, content, durationMs,
 
   const isStatic = phase !== 'thinking';
   const clock = isStatic ? formatMs(durationMs ?? frozenMsRef.current) : driver.clockText;
+  // While thinking, always show the live running clock. Once static, only show the
+  // duration stamp when there's a real per-segment duration (mirrors the legacy head,
+  // which hid the stamp for replies without a durationMs — e.g. complete arrivals).
+  const showClock = !isStatic || typeof durationMs === 'number';
 
   return (
     <div className="chat-msg-content sah-root" data-phase={phase}>
@@ -73,9 +82,11 @@ export default function StreamingAssistantHead({ streaming, content, durationMs,
         color="#c7913b"
       />
       <div className="chat-msg-body">
-        <div className={`chat-msg-duration sah-clock${isStatic ? ' sah-clock--done' : ''}`}>
-          [{clock}]
-        </div>
+        {showClock && (
+          <div className={`chat-msg-duration sah-clock${isStatic ? ' sah-clock--done' : ''}`}>
+            [{clock}]
+          </div>
+        )}
         {phase !== 'revealed' && (
           <span className={`sah-status${phase === 'morphing' ? ' sah-status--gone' : ''}`}>
             {driver.displayText}

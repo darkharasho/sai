@@ -1466,9 +1466,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const isSaiProvider = aiProvider !== 'gemini' && aiProvider !== 'codex';
   const saiMorphActive = isSaiProvider && saiAnimationEnabled;
   const lastMsg = messages[messages.length - 1];
-  // An assistant segment is currently streaming → its morph head shows the thinking row.
-  const hasStreamingAssistantSegment = !streamSettled && lastMsg?.role === 'assistant';
-  // SAI morph path: only a pending tail row when no assistant segment is streaming yet.
+  // Whenever the last message is an assistant segment, ITS morph head carries the
+  // thinking row (even across idle settles), so the pending tail row must stand down.
+  // (Don't gate on streamSettled: it's a 250ms idle debounce, so gating on it would
+  // make the pending row and the segment head flicker on together mid-stream.)
+  const hasStreamingAssistantSegment = lastMsg?.role === 'assistant';
+  // SAI morph path: only a pending tail row when no assistant segment exists yet.
   const showPendingSaiThinking = showThinking && saiMorphActive && !hasStreamingAssistantSegment;
   // Detached banner: non-SAI providers, OR SAI with the animation pref off (today's fallback).
   const showDetachedBanner = showThinking && !saiMorphActive;

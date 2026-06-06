@@ -123,6 +123,38 @@ describe('StreamingAssistantHead', () => {
     expect(container.querySelector('.sah-clock')?.textContent).toBe('[00:07.8]');
   });
 
+  it('does not strand the reply hidden when streaming resumes after an idle settle', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { container, rerender } = render(
+      <StreamingAssistantHead streaming content=""><p>{''}</p></StreamingAssistantHead>
+    );
+    // idle settle mid-reply: streaming flips false with partial content (premature)
+    await act(async () => {
+      rerender(<StreamingAssistantHead streaming={false} content="partial"><p>partial</p></StreamingAssistantHead>);
+    });
+    await act(async () => { vi.advanceTimersByTime(300); });
+    // tokens resume: streaming true again with more content
+    await act(async () => {
+      rerender(<StreamingAssistantHead streaming content="partial more"><p>partial more</p></StreamingAssistantHead>);
+    });
+    // true completion with the real duration
+    await act(async () => {
+      rerender(
+        <StreamingAssistantHead streaming={false} content="partial more final" durationMs={5000}>
+          <p>partial more final</p>
+        </StreamingAssistantHead>
+      );
+    });
+    await act(async () => { vi.advanceTimersByTime(300); });
+
+    const md = container.querySelector('.sah-md') as HTMLElement;
+    expect(md).toBeTruthy();
+    expect(md.style.display).not.toBe('none');            // NOT stranded hidden
+    expect(md.textContent).toContain('partial more final');
+    expect(container.querySelector('.sah-root')?.getAttribute('data-phase')).toBe('revealed');
+    expect(container.querySelector('.sah-clock')?.textContent).toBe('[00:05.0]');
+  });
+
   it('reveals exactly once under StrictMode (no cancel-on-cleanup force-complete)', () => {
     // Regression for commit 34660bf: StrictMode double-invokes effects; a
     // cancel-on-cleanup would force-complete the reveal before the real run.
