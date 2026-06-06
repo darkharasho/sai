@@ -46,13 +46,19 @@ export default function StreamingAssistantHead({ streaming, content, durationMs,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streaming, content]);
 
+  // Reveal exactly once when we reach the revealed phase. Deliberately NO
+  // cancel-on-cleanup: under StrictMode the cleanup would force-complete the reveal
+  // (showAll) before the real second run, killing the animation (see commit 34660bf).
+  // revealWords self-terminates if the container unmounts (it checks isConnected).
+  const revealStartedRef = useRef(false);
   useEffect(() => {
     if (phase !== 'revealed') return;
+    if (revealStartedRef.current) return;
     if (prefersReducedMotion()) return;
     const el = mdRef.current;
     if (!el) return;
-    const ctrl = revealWords(el);
-    return () => ctrl.cancel();
+    revealStartedRef.current = true;
+    revealWords(el);
   }, [phase]);
 
   const isStatic = phase !== 'thinking';

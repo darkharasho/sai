@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, render } from '@testing-library/react';
 import { installMockSai } from '../../../helpers/ipc-mock';
@@ -120,5 +121,18 @@ describe('StreamingAssistantHead', () => {
     });
     await act(async () => { vi.advanceTimersByTime(300); });
     expect(container.querySelector('.sah-clock')?.textContent).toBe('[00:07.8]');
+  });
+
+  it('reveals exactly once under StrictMode (no cancel-on-cleanup force-complete)', () => {
+    // Regression for commit 34660bf: StrictMode double-invokes effects; a
+    // cancel-on-cleanup would force-complete the reveal before the real run.
+    render(
+      <StrictMode>
+        <StreamingAssistantHead streaming={false} content="already done">
+          <p>already done</p>
+        </StreamingAssistantHead>
+      </StrictMode>
+    );
+    expect(revealSpy).toHaveBeenCalledTimes(1);
   });
 });
