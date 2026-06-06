@@ -16,6 +16,7 @@ import PlanReviewCard from './PlanReviewCard';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { CARD_MD_CLASS, CARD_MD_STYLES } from './markdownCardStyles';
+import { parseSearchResults, isSearchTool, highlightMatches, type SearchRow } from './searchResults';
 
 function parseMcpName(name: string): { server: string; tool: string } | null {
   if (!name.startsWith('mcp__')) return null;
@@ -240,6 +241,7 @@ interface FormatResult {
   code: string;
   langOverride?: string;
   diff?: { oldString: string; newString: string; fileLang: string };
+  query?: { pattern?: string; path?: string; glob?: string; type?: string };
 }
 
 function formatInput(toolCall: ToolCall): FormatResult {
@@ -279,7 +281,11 @@ function formatInput(toolCall: ToolCall): FormatResult {
       if (parsed.glob) parts.push(`glob: ${parsed.glob}`);
       if (parsed.type) parts.push(`type: ${parsed.type}`);
       const isGlob = toolCall.name?.toLowerCase().includes('glob');
-      return { label: isGlob ? `glob: ${parsed.pattern}` : `grep: ${parsed.pattern}`, code: parts.length > 1 ? parts.join('\n') : '' };
+      return {
+        label: isGlob ? `glob: ${parsed.pattern}` : `grep: ${parsed.pattern}`,
+        code: parts.length > 1 ? parts.join('\n') : '',
+        query: { pattern: parsed.pattern, path: parsed.path, glob: parsed.glob, type: parsed.type },
+      };
     }
 
     // WebFetch / WebSearch
@@ -390,6 +396,77 @@ function ToolCardMarkdown({ code }: { code: string }) {
   return (
     <div className={`tool-call-md ${CARD_MD_CLASS}`}>
       <ReactMarkdown remarkPlugins={MD_REMARK_PLUGINS}>{code}</ReactMarkdown>
+    </div>
+  );
+}
+
+function SearchQueryView({ query }: { query: NonNullable<FormatResult['query']> }) {
+  const fields: [string, string | undefined][] = [
+    ['pattern', query.pattern],
+    ['path', query.path],
+    ['glob', query.glob],
+    ['type', query.type],
+  ];
+  const present = fields.filter(([, v]) => v != null && v !== '');
+  if (present.length === 0) return null;
+  return (
+    <div className="search-query">
+      {present.map(([k, v]) => (
+        <div key={k} className="search-query-row">
+          <span className="search-query-key">{k}</span>
+          <span className="search-query-val">{v}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const SEARCH_MAX_ROWS = 12;
+
+function SearchResultLine({ text, pattern }: { text: string; pattern?: string }) {
+  const segments = highlightMatches(text, pattern || '');
+  return (
+    <span className="search-line-text">
+      {segments.map((s, i) =>
+        s.hit ? <mark key={i} className="search-hit">{s.text}</mark> : <span key={i}>{s.text}</span>
+      )}
+    </span>
+  );
+}
+
+function SearchResultView({ rows, pattern }: { rows: SearchRow[]; pattern?: string }) {
+  const [showAll, setShowAll] = useState(false);
+  if (rows.length === 0) return null;
+  const visible = showAll ? rows : rows.slice(0, SEARCH_MAX_ROWS);
+  const hiddenCount = rows.length - visible.length;
+  return (
+    <div className="search-result">
+      {visible.map((row, i) => {
+        if (row.type === 'separator') return <div key={i} className="search-sep" aria-hidden />;
+        if (row.type === 'file') {
+          return (
+            <div key={i} className="search-row search-row-file">
+              <span className="search-dot" aria-hidden />
+              <span className="search-path">{row.path}</span>
+            </div>
+          );
+        }
+        if (row.type === 'match') {
+          return (
+            <div key={i} className="search-row search-row-match">
+              <span className="search-path">{row.path}</span>
+              <span className="search-gutter">:{row.line}:</span>
+              <SearchResultLine text={row.text} pattern={pattern} />
+            </div>
+          );
+        }
+        return <div key={i} className="search-row search-row-raw">{row.text}</div>;
+      })}
+      {(hiddenCount > 0 || showAll) && rows.length > SEARCH_MAX_ROWS && (
+        <button className="tool-call-show-more" onClick={() => setShowAll(prev => !prev)}>
+          {showAll ? 'Show less' : `Show all (${rows.length} results)`}
+        </button>
+      )}
     </div>
   );
 }
