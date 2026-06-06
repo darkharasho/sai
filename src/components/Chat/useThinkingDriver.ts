@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Dot, Minus, Plus, Asterisk, SunDim, SunMedium, Sun } from 'lucide-react';
 import type { SaiLogoMode } from '../SaiLogo';
+import { useSaiAnimationPref } from './useSaiAnimationPref';
 
 const CHAIN_POOL: Array<{ mode: SaiLogoMode; dur: number }> = [
   { mode: 'pulse', dur: 2400 }, { mode: 'scatter', dur: 4800 }, { mode: 'wave', dur: 2600 },
@@ -89,12 +90,6 @@ const FALLBACK_WORDS = [
 
 const SPINNER_ICONS = [Dot, Minus, Plus, Asterisk, SunDim, SunMedium, Sun];
 
-let saiAnimationPref = true;
-if (typeof window !== 'undefined' && (window as any).sai?.settingsGet) {
-  (window as any).sai.settingsGet('saiAnimationEnabled', true)
-    .then((v: boolean) => { saiAnimationPref = v !== false; });
-}
-
 export interface ThinkingDriver {
   saiAnimationEnabled: boolean;
   chainMode: SaiLogoMode;
@@ -109,7 +104,7 @@ export function useThinkingDriver(active = true): ThinkingDriver {
   const [charIndex, setCharIndex] = useState(0);
   const [phase, setPhase] = useState<'typing' | 'pause' | 'erasing'>('typing');
   const [iconIndex, setIconIndex] = useState(0);
-  const [saiAnimationEnabled, setSaiAnimationEnabled] = useState(saiAnimationPref);
+  const saiAnimationEnabled = useSaiAnimationPref();
   const [chainMode, setChainMode] = useState<SaiLogoMode>(
     () => CHAIN_POOL[Math.floor(Math.random() * CHAIN_POOL.length)].mode);
 
@@ -140,12 +135,6 @@ export function useThinkingDriver(active = true): ThinkingDriver {
     const interval = setInterval(() => setIconIndex(i => i + 1), 150);
     return () => clearInterval(interval);
   }, [saiAnimationEnabled, active]);
-
-  useEffect(() => {
-    const onPref = (e: Event) => setSaiAnimationEnabled(!!(e as CustomEvent).detail);
-    window.addEventListener('sai-pref-sai-animation', onPref);
-    return () => window.removeEventListener('sai-pref-sai-animation', onPref);
-  }, []);
 
   useEffect(() => {
     if (!saiAnimationEnabled || !active) return;

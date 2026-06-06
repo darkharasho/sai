@@ -6,18 +6,13 @@ import ThinkingAnimation from '../ThinkingAnimation';
 import SaiLogo from '../SaiLogo';
 import MotionPresence from './MotionPresence';
 import { SPRING, DISTANCE, EASING, useReducedMotionTransition } from './motion';
+import { useSaiAnimationPref } from './useSaiAnimationPref';
 
 // Projects whose brainstorm seed has already been consumed (or attempted) in
 // this renderer process. The seed is one-shot, but the chat start-effect can
 // re-run on config changes (model/scope/permission). Without this guard we'd
 // re-probe (and log a noisy ENOENT) on every re-run.
 const consumedBrainstormSeeds = new Set<string>();
-
-let saiAnimationPref = true;
-if (typeof window !== 'undefined' && (window as any).sai?.settingsGet) {
-  (window as any).sai.settingsGet('saiAnimationEnabled', true)
-    .then((v: boolean) => { saiAnimationPref = v !== false; });
-}
 
 function tweenScrollToBottom(container: HTMLElement, durationMs = 280) {
   if (typeof window === 'undefined') return;
@@ -625,12 +620,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   // instead of waiting for end-of-turn.
   const STREAM_IDLE_MS = 250;
   const [streamSettled, setStreamSettled] = useState(true);
-  const [saiAnimationEnabled, setSaiAnimationEnabled] = useState(saiAnimationPref);
-  useEffect(() => {
-    const onPref = (e: Event) => setSaiAnimationEnabled(!!(e as CustomEvent).detail);
-    window.addEventListener('sai-pref-sai-animation', onPref);
-    return () => window.removeEventListener('sai-pref-sai-animation', onPref);
-  }, []);
+  const saiAnimationEnabled = useSaiAnimationPref();
   const streamIdleTimerRef = useRef<number | null>(null);
   const flushStreamingText = useCallback(() => {
     if (streamRafRef.current != null) {
@@ -1481,7 +1471,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   // SAI morph path: only a pending tail row when no assistant segment is streaming yet.
   const showPendingSaiThinking = showThinking && saiMorphActive && !hasStreamingAssistantSegment;
   // Detached banner: non-SAI providers, OR SAI with the animation pref off (today's fallback).
-  const showProviderBanner = showThinking && !saiMorphActive;
+  const showDetachedBanner = showThinking && !saiMorphActive;
   const hasHiddenMessages = renderStart > 0;
 
   useEffect(() => {
@@ -1855,7 +1845,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           </>
         )}
         <MotionPresence>
-          {showProviderBanner && (
+          {showDetachedBanner && (
             <motion.div
               key="thinking"
               initial={{ opacity: 0, y: DISTANCE.lift }}

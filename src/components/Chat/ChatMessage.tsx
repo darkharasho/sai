@@ -19,6 +19,7 @@ import SaiLogo from '../SaiLogo';
 import { matchLinkPreview } from './linkPreview';
 import LinkPreviewChip from './LinkPreviewChip';
 import StreamingAssistantHead from './StreamingAssistantHead';
+import { useSaiAnimationPref } from './useSaiAnimationPref';
 
 // Message IDs that have already played their entry animation. Prevents the
 // animation from replaying if a message remounts (e.g. workspace swap, list
@@ -35,11 +36,6 @@ const MD_PLUGINS = {
   urlTransform: (url: string) =>
     url.startsWith('sai-file://') ? url : defaultUrlTransform(url),
 } as const;
-
-let saiAnimationPref = true;
-if (typeof window !== 'undefined' && (window as any).sai?.settingsGet) {
-  (window as any).sai.settingsGet('saiAnimationEnabled', true).then((v: boolean) => { saiAnimationPref = v !== false; });
-}
 
 const FILE_PATH_RE = /(?<![:/])\b((?:\.{1,2}\/)?(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte))(?::(\d+))?\b|(?<![:/.\w])((?:\/[\w.-]+)+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte))(?::(\d+))?\b/g;
 
@@ -418,12 +414,7 @@ function ChatMessage({
       }
     : entryProps;
 
-  const [saiAnimationEnabled, setSaiAnimationEnabled] = useState(saiAnimationPref);
-  useEffect(() => {
-    const onPref = (e: Event) => setSaiAnimationEnabled(!!(e as CustomEvent).detail);
-    window.addEventListener('sai-pref-sai-animation', onPref);
-    return () => window.removeEventListener('sai-pref-sai-animation', onPref);
-  }, []);
+  const saiAnimationEnabled = useSaiAnimationPref();
 
   if (message.error) {
     const { title, status, message: errMsg, requestId, details, errorType } = message.error;
