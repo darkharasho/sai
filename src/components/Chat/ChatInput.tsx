@@ -1497,7 +1497,7 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
           content: '';
           position: absolute;
           inset: -2px;
-          border-radius: 14px;
+          border-radius: calc(var(--radius-md) + 2px);
           padding: 2px;
           background: linear-gradient(135deg, var(--accent) 0%, var(--orange) 20%, var(--red) 50%, var(--orange) 80%, var(--accent) 100%);
           background-size: 300% 300%;
@@ -1720,9 +1720,9 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
           bottom: calc(100% + 8px);
           right: 0;
           min-width: 380px;
-          background: var(--bg-elevated);
+          background: var(--surface-3);
           border: 1px solid var(--border-subtle);
-          border-radius: 8px;
+          border-radius: var(--radius-md);
           box-shadow: 0 -4px 16px rgba(0,0,0,0.3);
           z-index: 60;
           overflow: hidden;
@@ -1887,9 +1887,9 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
           bottom: calc(100% + 8px);
           right: 0;
           min-width: 320px;
-          background: var(--bg-elevated);
+          background: var(--surface-3);
           border: 1px solid var(--border-subtle);
-          border-radius: 8px;
+          border-radius: var(--radius-md);
           box-shadow: 0 -4px 16px rgba(0,0,0,0.3);
           z-index: 60;
           overflow: hidden;
