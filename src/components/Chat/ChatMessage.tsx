@@ -1,4 +1,4 @@
-import React, { memo, useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
+import React, { memo, useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
@@ -18,6 +18,7 @@ import { getActiveTerminalId } from '../../terminalBuffer';
 import SaiLogo from '../SaiLogo';
 import { matchLinkPreview } from './linkPreview';
 import LinkPreviewChip from './LinkPreviewChip';
+import StreamingAssistantHead from './StreamingAssistantHead';
 
 // Message IDs that have already played their entry animation. Prevents the
 // animation from replaying if a message remounts (e.g. workspace swap, list
@@ -28,6 +29,13 @@ const SEEN_MESSAGES = new Set<string>();
 const STREAMED_MESSAGES = new Set<string>();
 // A message counts as "fresh" (vs. history) if it arrived within this window.
 const REVEAL_FRESH_MS = 8000;
+const MD_PLUGINS = {
+  remarkPlugins: [remarkGfm],
+  rehypePlugins: [rehypeHighlight, rehypeFilePaths],
+  urlTransform: (url: string) =>
+    url.startsWith('sai-file://') ? url : defaultUrlTransform(url),
+} as const;
+
 let saiAnimationPref = true;
 if (typeof window !== 'undefined' && (window as any).sai?.settingsGet) {
   (window as any).sai.settingsGet('saiAnimationEnabled', true).then((v: boolean) => { saiAnimationPref = v !== false; });
@@ -715,28 +723,71 @@ function ChatMessage({
   }
 
   const isAssistantStreaming = isStreaming && message.role === 'assistant';
+  const streamedThisSession = STREAMED_MESSAGES.has(message.id);
+  const fresh = Date.now() - (message.timestamp ?? 0) <= REVEAL_FRESH_MS;
+  const useMorphHead =
+    message.role === 'assistant' &&
+    saiAnimationEnabled &&
+    aiProvider !== 'gemini' &&
+    aiProvider !== 'codex' &&
+    (isAssistantStreaming || streamedThisSession || fresh);
   useLayoutEffect(() => {
     if (message.role !== 'assistant') return;
-    if (isAssistantStreaming) { STREAMED_MESSAGES.add(message.id); return; }
+    if (isAssistantStreaming) { STREAMED_MESSAGES.add(message.id); }
+    if (useMorphHead) return;            // StreamingAssistantHead owns the reveal
+    if (isAssistantStreaming) return;
     if (revealedRef.current) return;
     if (!message.content) return;
     // Reveal a reply generated this session (streamed → completed, any duration) or a
     // fresh complete arrival; never history (not streamed this session + old timestamp).
-    const streamedThisSession = STREAMED_MESSAGES.has(message.id);
-    const fresh = Date.now() - (message.timestamp ?? 0) <= REVEAL_FRESH_MS;
+    // The outer `streamedThisSession`/`fresh` are safe to reuse: the add() at the top
+    // of this effect only runs when isAssistantStreaming=true, which causes an early
+    // return before we reach this point, so the set hasn't changed here.
     if (!streamedThisSession && !fresh) return;
     if (prefersReducedMotion()) return;
     const el = mdRef.current;
     if (!el) return;
     revealedRef.current = true;
     revealWords(el);
-  }, [isAssistantStreaming, message.id, message.role, message.content, message.timestamp]);
+  }, [isAssistantStreaming, message.id, message.role, message.content, message.timestamp, useMorphHead]);
   // When the parent passes an allowlist (main chat), only render watchers it explicitly
   // owns — prevents duplicates when the same run URL shows up in multiple messages. Other
   // callers (orchestrator, tests) don't pass an allowlist and get the full set.
   const watcherTargets = watcherUrlAllowlist
     ? detectWatchTargets(message).filter(t => watcherUrlAllowlist.has(t.url))
     : detectWatchTargets(message);
+
+  const markdownComponents = useMemo(() => ({
+    pre: ({ children, ...props }: any) => (
+      <CodeBlock {...props}>{children}</CodeBlock>
+    ),
+    a: ({ href, children }: any) => {
+      const preview = href ? matchLinkPreview(href) : null;
+      if (preview) {
+        return <LinkPreviewChip preview={preview}>{children}</LinkPreviewChip>;
+      }
+      return (
+        <a
+          href={href}
+          onClick={(e) => {
+            e.preventDefault();
+            if (href?.startsWith('sai-file://') && onFileOpen) {
+              const raw = href.slice('sai-file://'.length);
+              const lineMatch = raw.match(/:(\d+)$/);
+              const line = lineMatch ? parseInt(lineMatch[1], 10) : undefined;
+              const rel = lineMatch ? raw.slice(0, -lineMatch[0].length) : raw;
+              const abs = rel.startsWith('/') ? rel : `${projectPath}/${rel}`;
+              onFileOpen(abs, line);
+            } else if (href) {
+              window.sai.openExternal(href);
+            }
+          }}
+        >
+          {children}
+        </a>
+      );
+    },
+  }), [onFileOpen, projectPath]);
 
   return (
     <>
@@ -752,7 +803,18 @@ function ChatMessage({
       layoutId={flipActive ? undefined : pinnedLayoutId}
       {...effectiveEntryProps}
     >
-      {message.content && !isAssistantStreaming && (
+      {useMorphHead && (isAssistantStreaming || message.content) && (
+        <StreamingAssistantHead
+          streaming={!!isAssistantStreaming}
+          content={typeof message.content === 'string' ? message.content : String(message.content ?? '')}
+          durationMs={message.durationMs}
+        >
+          <ReactMarkdown {...MD_PLUGINS} components={markdownComponents}>
+            {typeof message.content === 'string' ? message.content : String(message.content ?? '')}
+          </ReactMarkdown>
+        </StreamingAssistantHead>
+      )}
+      {!useMorphHead && message.content && !isAssistantStreaming && (
         <div className="chat-msg-content">
           {message.role === 'user'
             ? <Terminal size={14} color="var(--green)" strokeWidth={2.5} className="chat-msg-dot chat-msg-chevron" />
@@ -769,42 +831,7 @@ function ChatMessage({
             )}
             {
               <div ref={mdRef} className="chat-msg-md">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                rehypePlugins={[rehypeHighlight, rehypeFilePaths]}
-                urlTransform={(url) => url.startsWith('sai-file://') ? url : defaultUrlTransform(url)}
-                components={{
-                  pre: ({ children, ...props }) => (
-                    <CodeBlock {...props}>{children}</CodeBlock>
-                  ),
-                  a: ({ href, children }) => {
-                    const preview = href ? matchLinkPreview(href) : null;
-                    if (preview) {
-                      return <LinkPreviewChip preview={preview}>{children}</LinkPreviewChip>;
-                    }
-                    return (
-                      <a
-                        href={href}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          if (href?.startsWith('sai-file://') && onFileOpen) {
-                            const raw = href.slice('sai-file://'.length);
-                            const lineMatch = raw.match(/:(\d+)$/);
-                            const line = lineMatch ? parseInt(lineMatch[1], 10) : undefined;
-                            const rel = lineMatch ? raw.slice(0, -lineMatch[0].length) : raw;
-                            const abs = rel.startsWith('/') ? rel : `${projectPath}/${rel}`;
-                            onFileOpen(abs, line);
-                          } else if (href) {
-                            window.sai.openExternal(href);
-                          }
-                        }}
-                      >
-                        {children}
-                      </a>
-                    );
-                  },
-                }}
-              >{(() => {
+              <ReactMarkdown {...MD_PLUGINS} components={markdownComponents}>{(() => {
                 const raw = typeof message.content === 'string' ? message.content : String(message.content ?? '');
                 // Preserve user newlines as hard line breaks (trailing double-space)
                 // so Shift+Enter in the chat input renders visually.

@@ -70,15 +70,20 @@ describe('ChatMessage', () => {
     expect(screen.getByTestId('markdown').textContent).toBe('Hello world');
   });
 
-  it('hides assistant text content while streaming (no plain text, no markdown)', () => {
-    // While streaming, the content block is suppressed entirely so no partial
-    // text flashes — the thinking animation (rendered by ChatPanel) covers the
-    // turn. Tool-call cards (separate block) are unaffected.
+  it('hides assistant text content while streaming (no plain text, no visible markdown)', () => {
+    // While streaming, a SAI assistant routes through the morph head, which sits in
+    // its "thinking" phase: the markdown body is kept in the DOM but display:none so
+    // no partial text flashes. The morph head itself owns the thinking animation.
     const msg = makeMessage({ role: 'assistant', content: 'partial chunk' });
     const { container } = render(<ChatMessage message={msg} isStreaming />);
     expect(container.querySelector('.chat-msg-stream-text')).toBeNull();
-    expect(container.querySelector('[data-testid="markdown"]')).toBeNull();
-    expect(container.querySelector('.chat-msg-content')).toBeNull();
+    // Morph head is present and in the thinking phase.
+    const head = container.querySelector('.sah-root');
+    expect(head).toBeTruthy();
+    expect(head?.getAttribute('data-phase')).toBe('thinking');
+    // The markdown body is rendered but hidden (no visible partial text).
+    const md = container.querySelector('.sah-md') as HTMLElement | null;
+    expect(md?.style.display).toBe('none');
   });
 
   it('renders assistant content via markdown when not streaming', () => {
@@ -301,13 +306,14 @@ describe('ChatMessage', () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
-  it('does not render content block while streaming (no chat-streaming-tail)', () => {
+  it('does not render the static content block while streaming (no chat-streaming-tail)', () => {
     const { container } = render(
       <ChatMessage isStreaming message={{ id: 's-1', role: 'assistant', content: 'partial', timestamp: 0 }} />
     );
-    // Content block is hidden during streaming — tail class is gone with it.
+    // No streaming-tail class. The static content block is suppressed; while streaming
+    // the SAI morph head (also .chat-msg-content) covers the turn in its thinking phase.
     expect(container.querySelector('.chat-streaming-tail')).toBeFalsy();
-    expect(container.querySelector('.chat-msg-content')).toBeFalsy();
+    expect(container.querySelector('.sah-root')).toBeTruthy();
   });
 
   it('does not mark non-streaming text with chat-streaming-tail', () => {
@@ -389,19 +395,21 @@ describe('ChatMessage', () => {
 
   describe('durationMs display', () => {
     it('renders frozen clock when assistant message has durationMs', () => {
+      // Fresh SAI assistant routes through the morph head, which renders the clock
+      // as .sah-clock (not the static block's data-testid="msg-duration").
       const msg = makeMessage({ role: 'assistant', durationMs: 3750 });
-      render(<ChatMessage message={msg} />);
-      const el = document.querySelector('[data-testid="msg-duration"]');
+      const { container } = render(<ChatMessage message={msg} />);
+      const el = container.querySelector('.sah-clock');
       expect(el).toBeTruthy();
-      expect(el?.textContent).toMatch(/^\[\d{2}:\d{2}\.\d\]$/);
+      expect(el?.textContent?.trim()).toMatch(/^\[\d{2}:\d{2}\.\d\]$/);
     });
 
     it('renders correct formatted time for durationMs', () => {
       // 75300 ms = 1 min 15.3 sec
       const msg = makeMessage({ role: 'assistant', durationMs: 75300 });
-      render(<ChatMessage message={msg} />);
-      const el = document.querySelector('[data-testid="msg-duration"]');
-      expect(el?.textContent).toBe('[01:15.3]');
+      const { container } = render(<ChatMessage message={msg} />);
+      const el = container.querySelector('.sah-clock');
+      expect(el?.textContent?.trim()).toBe('[01:15.3]');
     });
 
     it('does not render clock when durationMs is undefined', () => {
@@ -417,8 +425,9 @@ describe('ChatMessage', () => {
     });
 
     it('duration element is a descendant of .chat-msg-body, not next to the icon', () => {
+      // Morph head renders the clock (.sah-clock / .chat-msg-duration) inside .chat-msg-body.
       const { container } = render(<ChatMessage message={makeMessage({ durationMs: 3750 })} />);
-      expect(container.querySelector('.chat-msg-body [data-testid="msg-duration"]')).toBeTruthy();
+      expect(container.querySelector('.chat-msg-body .chat-msg-duration')).toBeTruthy();
     });
   });
 
@@ -456,12 +465,20 @@ describe('ChatMessage', () => {
   });
 
   it('reveals a message after it finishes streaming', () => {
-    const msg = { id: 'rv-stream', role: 'assistant' as const, content: 'streamed then done', timestamp: Date.now() };
-    const { container, rerender } = render(
-      <ChatMessage message={msg} projectPath="/p" isStreaming={true} />
-    );
-    rerender(<ChatMessage message={msg} projectPath="/p" isStreaming={false} />);
-    expect(container.querySelectorAll('.rv-word').length).toBeGreaterThan(0);
+    // The SAI morph head morphs from thinking → revealed over a short blur (250ms)
+    // before it word-reveals, so advance timers past that transition.
+    vi.useFakeTimers();
+    try {
+      const msg = { id: 'rv-stream', role: 'assistant' as const, content: 'streamed then done', timestamp: Date.now() };
+      const { container, rerender } = render(
+        <ChatMessage message={msg} projectPath="/p" isStreaming={true} />
+      );
+      rerender(<ChatMessage message={msg} projectPath="/p" isStreaming={false} />);
+      act(() => { vi.advanceTimersByTime(300); });
+      expect(container.querySelectorAll('.rv-word').length).toBeGreaterThan(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('reveal survives a post-completion re-render (e.g. durationMs added)', () => {
@@ -472,8 +489,8 @@ describe('ChatMessage', () => {
     expect(container.querySelectorAll('.rv-word').length).toBeGreaterThan(0);
     // A new message object (same content) lands right after completion — must NOT wipe the reveal.
     rerender(<ChatMessage message={{ ...base, durationMs: 1234 }} projectPath="/p" isStreaming={false} />);
-    // Verify the re-render actually happened (durationMs should now be shown).
-    expect(container.querySelector('[data-testid="msg-duration"]')).toBeTruthy();
+    // Verify the re-render actually happened (the morph head clock reflects durationMs).
+    expect(container.querySelector('.sah-clock')?.textContent?.trim()).toBe('[00:01.2]');
     expect(container.querySelectorAll('.rv-word').length).toBeGreaterThan(0);
   });
 
@@ -495,5 +512,27 @@ describe('ChatMessage', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe('morph head routing', () => {
+    it('SAI assistant segment renders the morph head while streaming', () => {
+      const { container } = render(
+        <ChatMessage
+          message={{ id: 'a1', role: 'assistant', content: '', timestamp: Date.now() }}
+          projectPath="/tmp" aiProvider="claude" isStreaming
+        />
+      );
+      expect(container.querySelector('.sah-root')).toBeTruthy();
+    });
+
+    it('non-SAI provider does NOT use the morph head', () => {
+      const { container } = render(
+        <ChatMessage
+          message={{ id: 'a2', role: 'assistant', content: '', timestamp: Date.now() }}
+          projectPath="/tmp" aiProvider="gemini" isStreaming
+        />
+      );
+      expect(container.querySelector('.sah-root')).toBeNull();
+    });
   });
 });
