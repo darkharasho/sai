@@ -37,6 +37,15 @@ describe('parseSearchResults', () => {
   it('does not crash on a windows-style path', () => {
     expect(() => parseSearchResults('C:\\Users\\x\\a.ts')).not.toThrow();
   });
+
+  it('classifies output with both file and match rows as mixed', () => {
+    const { rows, kind } = parseSearchResults('src/a.ts\nsrc/b.ts:2:hit');
+    expect(rows).toEqual([
+      { type: 'file', path: 'src/a.ts' },
+      { type: 'match', path: 'src/b.ts', line: 2, text: 'hit' },
+    ]);
+    expect(kind).toBe('mixed');
+  });
 });
 
 describe('isSearchTool', () => {
@@ -56,6 +65,21 @@ describe('isSearchTool', () => {
   it('is false for trivial output', () => {
     expect(isSearchTool('Read', '')).toBe(false);
     expect(isSearchTool('Read', 'one line')).toBe(false);
+  });
+
+  it('is true at the 75% content-row ratio boundary', () => {
+    // 3 content rows + 1 raw row = 3/4 = 0.75 (>= 0.75 → true)
+    expect(isSearchTool('CustomSearch', 'src/a.ts:1:x\nsrc/b.ts:2:y\nsrc/c.ts\nsome prose line here')).toBe(true);
+  });
+
+  it('is false just below the 75% content-row ratio', () => {
+    // 2 content rows + 1 raw row = 2/3 ≈ 0.67 (< 0.75 → false)
+    expect(isSearchTool('CustomSearch', 'src/a.ts:1:x\nsrc/b.ts:2:y\nsome prose line here')).toBe(false);
+  });
+
+  it('excludes separators from the ratio denominator', () => {
+    // 2 content rows + 1 separator: denominator excludes separator → 2/2 = 1.0 → true
+    expect(isSearchTool('CustomSearch', 'src/a.ts:1:x\n--\nsrc/b.ts:2:y')).toBe(true);
   });
 });
 
