@@ -532,6 +532,7 @@ const MAX_PREVIEW_LINES = 20;
 interface Todo {
   id: string;
   content: string;
+  activeForm?: string;
   status: 'pending' | 'in_progress' | 'completed';
   priority?: string;
 }
@@ -545,14 +546,23 @@ function TodoListView({ input }: { input: string }) {
 
   if (!todos.length) return null;
 
+  const done = todos.filter(t => t.status === 'completed').length;
+
   return (
     <div className="tool-call-body todo-list-body">
+      <div className="todo-list-head">
+        <span className="todo-list-title">Tasks</span>
+        <span className="todo-list-count" data-testid="todo-count">{done}/{todos.length}</span>
+      </div>
       {todos.map((todo, i) => (
         <div key={todo.id || i} className={`todo-item todo-${todo.status}`}>
           <span className="todo-icon">
             {todo.status === 'completed' ? '✓' : todo.status === 'in_progress' ? '✦' : '○'}
           </span>
-          <span className="todo-content">{todo.content}</span>
+          <span className="todo-content">
+            {todo.status === 'in_progress' ? (todo.activeForm || todo.content) : todo.content}
+          </span>
+          {todo.priority && <span className="todo-priority">{todo.priority}</span>}
         </div>
       ))}
     </div>
@@ -1542,6 +1552,25 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
           .todo-in_progress .todo-content { color: var(--text); }
           .todo-pending .todo-icon { color: var(--text-muted); }
           .todo-pending .todo-content { color: var(--text-secondary); }
+          .todo-list-head {
+            display: flex; align-items: baseline; gap: 8px;
+            padding: 4px 12px 2px; border-bottom: 1px dashed var(--border); margin-bottom: 4px;
+          }
+          .todo-list-title {
+            font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); font-weight: 600;
+          }
+          .todo-list-count {
+            margin-left: auto; font-size: 10px; color: var(--text-muted);
+            font-variant-numeric: tabular-nums;
+            font-family: 'Geist Mono', 'JetBrains Mono', monospace;
+          }
+          .todo-priority {
+            margin-left: auto; flex-shrink: 0;
+            font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600;
+            padding: 1px 6px; border-radius: 3px;
+            background: color-mix(in srgb, var(--orange, #e6b84f) 18%, transparent);
+            color: var(--orange, #e6b84f);
+          }
           /* Status badge */
           .tool-status {
             display: inline-flex;

@@ -285,3 +285,29 @@ describe('ToolCallCard task rendering', () => {
     expect(getByText('Task #7')).toBeTruthy();
   });
 });
+
+describe('TodoWrite card enhancements', () => {
+  const todoCall = {
+    id: 'td1', type: 'todo' as const, name: 'TodoWrite',
+    input: JSON.stringify({ todos: [
+      { id: '1', content: 'First', status: 'completed' },
+      { id: '2', content: 'Second', activeForm: 'Doing second', status: 'in_progress', priority: 'high' },
+      { id: '3', content: 'Third', status: 'pending' },
+    ] }),
+  };
+
+  it('shows a done/total count header', () => {
+    const { getByTestId } = render(<ToolCallCard toolCall={todoCall} />);
+    expect(getByTestId('todo-count').textContent).toBe('1/3');
+  });
+
+  it('shows the activeForm for the in-progress item', () => {
+    const { getByText } = render(<ToolCallCard toolCall={todoCall} />);
+    expect(getByText('Doing second')).toBeTruthy();
+  });
+
+  it('renders a priority badge when a todo has priority', () => {
+    const { container } = render(<ToolCallCard toolCall={todoCall} />);
+    expect(container.querySelector('.todo-priority')?.textContent).toBe('high');
+  });
+});
