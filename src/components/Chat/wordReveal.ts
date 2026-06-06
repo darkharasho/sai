@@ -62,6 +62,17 @@ function collectItems(root: HTMLElement, snapMs: number): HTMLElement[] {
   return items;
 }
 
+/** The top-level block (direct child of `root`) that contains `node`, or null if
+ *  `node` is itself a direct child of root with no intervening block. Used to grow
+ *  the reveal block-by-block. */
+function topBlockOf(node: HTMLElement, root: HTMLElement): HTMLElement | null {
+  let el: HTMLElement = node;
+  while (el.parentElement && el.parentElement !== root) {
+    el = el.parentElement;
+  }
+  return el.parentElement === root ? el : null;
+}
+
 export function revealWords(container: HTMLElement, opts: RevealOpts = {}): RevealController {
   const cadenceMs = opts.cadenceMs ?? 52;
   const snapMs = opts.snapMs ?? 70;
@@ -70,12 +81,27 @@ export function revealWords(container: HTMLElement, opts: RevealOpts = {}): Reve
 
   const items = collectItems(container, snapMs);
 
-  const showAll = () => { for (const el of items) el.style.opacity = '1'; };
+  const showWords = () => { for (const el of items) el.style.opacity = '1'; };
 
   if (items.length === 0 || items.length > maxWords) {
-    showAll();
+    showWords();
     return { cancel() {} };
   }
+
+  // Grow as we reveal: hide each top-level block until its first word is reached, so the
+  // message expands block-by-block instead of reserving its full height up front (opacity:0
+  // words still occupy layout). Without this, a multi-line reply shows a tall blank region
+  // that fills in from the top. Within a block, words still fade in left-to-right.
+  const blockOf = items.map((it) => topBlockOf(it, container));
+  const hiddenBlocks = new Set<HTMLElement>();
+  for (const b of blockOf) {
+    if (b && b.style.display !== 'none') { b.style.display = 'none'; hiddenBlocks.add(b); }
+  }
+
+  const showAll = () => {
+    showWords();
+    for (const b of hiddenBlocks) b.style.display = '';
+  };
 
   // Honor the duration budget: short/medium replies reveal one item per tick at a
   // shrinking cadence; long replies keep an 8ms floor but reveal several items per
@@ -107,7 +133,10 @@ export function revealWords(container: HTMLElement, opts: RevealOpts = {}): Reve
     }
     let last = items[i];
     for (let k = 0; k < perTick && i < items.length; k++) {
-      last = items[i++];
+      const idx = i++;
+      const blk = blockOf[idx];
+      if (blk && blk.style.display === 'none') blk.style.display = '';
+      last = items[idx];
       last.style.opacity = '1';
     }
     last.parentNode?.insertBefore(caret, last.nextSibling);

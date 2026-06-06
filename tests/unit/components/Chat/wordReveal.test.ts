@@ -71,6 +71,34 @@ describe('revealWords', () => {
     expect(el.querySelector('.rv-caret')).toBeNull();
   });
 
+  it('grows block-by-block: unreached blocks reserve no layout until revealed', () => {
+    const el = mount('<p>one two three</p><p>four five six</p><p>seven eight nine</p>');
+    revealWords(el, { cadenceMs: 10, snapMs: 0, budgetMs: 1000 });
+    const blocks = el.querySelectorAll<HTMLElement>('p');
+    // First block enters layout immediately; later blocks are display:none (no reserved space)
+    // so a multi-line reply doesn't show a tall blank region while it types in.
+    expect(blocks[0].style.display).not.toBe('none');
+    expect(blocks[1].style.display).toBe('none');
+    expect(blocks[2].style.display).toBe('none');
+    // Each block un-hides as the reveal reaches it.
+    vi.runAllTimers();
+    blocks.forEach(b => expect(b.style.display).not.toBe('none'));
+  });
+
+  it('cancel() un-hides every block (no content left reserved-but-hidden)', () => {
+    const el = mount('<p>aa bb</p><p>cc dd</p>');
+    const ctrl = revealWords(el, { cadenceMs: 10 });
+    ctrl.cancel();
+    el.querySelectorAll<HTMLElement>('p').forEach(b => expect(b.style.display).not.toBe('none'));
+  });
+
+  it('does not hide blocks on the instant (over-maxWords) path', () => {
+    const many = Array.from({ length: 50 }, (_, i) => 'w' + i).join(' ');
+    const el = mount('<p>' + many + '</p><p>tail end here</p>');
+    revealWords(el, { maxWords: 10 });
+    el.querySelectorAll<HTMLElement>('p').forEach(b => expect(b.style.display).not.toBe('none'));
+  });
+
   it('respects the duration budget for long replies by batching', () => {
     const many = Array.from({ length: 300 }, (_, i) => 'w' + i).join(' ');
     const el = mount('<p>' + many + '</p>');

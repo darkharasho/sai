@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import SaiLogo from '../SaiLogo';
 import { useThinkingDriver } from './useThinkingDriver';
 import { revealWords } from './wordReveal';
@@ -55,8 +55,13 @@ export default function StreamingAssistantHead({ streaming, content, durationMs,
   // cancel-on-cleanup: under StrictMode the cleanup would force-complete the reveal
   // (showAll) before the real second run, killing the animation (see commit 34660bf).
   // revealWords self-terminates if the container unmounts (it checks isConnected).
+  // useLayoutEffect (not useEffect): the md flips from display:none to visible when we
+  // reach 'revealed', so the reveal prep (hiding trailing blocks + words) must run before
+  // the browser paints — otherwise the full-height content flashes for a frame, then
+  // collapses to the block-by-block reveal. The self-guard keeps it to one run under
+  // StrictMode; we still do NOT cancel on cleanup (see note above).
   const revealStartedRef = useRef(false);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (phase !== 'revealed') return;
     if (revealStartedRef.current) return;
     if (prefersReducedMotion()) return;
