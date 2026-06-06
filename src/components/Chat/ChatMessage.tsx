@@ -22,33 +22,9 @@ import LinkPreviewChip from './LinkPreviewChip';
 // animation from replaying if a message remounts (e.g. workspace swap, list
 // re-keying), so existing history doesn't shimmer in on every render.
 const SEEN_MESSAGES = new Set<string>();
-// Per-message typewriter progress, kept outside component state so a streaming
-// message survives unmount/remount (workspace swap, list re-keying) without
-// replaying the typewriter from zero.
-const TYPEWRITER_PROGRESS = new Map<string, number>();
-
-// Live preference cached at module scope so every mounted ChatMessage shares
-// one value without each one doing an IPC roundtrip. Hydrated once on first
-// import; SettingsModal broadcasts updates via the `sai-pref-typewriter`
-// window event so toggling the setting takes effect without remounting.
-let typewriterPref = true;
 let saiAnimationPref = true;
 if (typeof window !== 'undefined' && (window as any).sai?.settingsGet) {
-  (window as any).sai.settingsGet('typewriterEnabled', true).then((v: boolean) => { typewriterPref = v !== false; });
   (window as any).sai.settingsGet('saiAnimationEnabled', true).then((v: boolean) => { saiAnimationPref = v !== false; });
-}
-
-// Walk back to the nearest whitespace at-or-before `len` so the visible text
-// only advances on word boundaries. Prevents mid-word twitching and stops
-// react-markdown / highlight.js from re-tokenizing half-finished tokens.
-function snapToWordBoundary(text: string, len: number): number {
-  if (len >= text.length) return text.length;
-  if (len <= 0) return 0;
-  for (let i = len; i > 0; i--) {
-    const c = text.charCodeAt(i);
-    if (c === 32 /* space */ || c === 10 /* \n */ || c === 9 /* \t */) return i;
-  }
-  return 0;
 }
 
 const FILE_PATH_RE = /(?<![:/])\b((?:\.{1,2}\/)?(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte))(?::(\d+))?\b|(?<![:/.\w])((?:\/[\w.-]+)+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte))(?::(\d+))?\b/g;
@@ -425,97 +401,12 @@ function ChatMessage({
       }
     : entryProps;
 
-  const rawAssistantContent = (message.role === 'assistant' && typeof message.content === 'string')
-    ? message.content
-    : '';
-  const isAssistantStreamingFlag = isStreaming && message.role === 'assistant';
-  const [typewriterEnabled, setTypewriterEnabled] = useState(typewriterPref);
-  useEffect(() => {
-    const onPref = (e: Event) => setTypewriterEnabled(!!(e as CustomEvent).detail);
-    window.addEventListener('sai-pref-typewriter', onPref);
-    return () => window.removeEventListener('sai-pref-typewriter', onPref);
-  }, []);
   const [saiAnimationEnabled, setSaiAnimationEnabled] = useState(saiAnimationPref);
   useEffect(() => {
     const onPref = (e: Event) => setSaiAnimationEnabled(!!(e as CustomEvent).detail);
     window.addEventListener('sai-pref-sai-animation', onPref);
     return () => window.removeEventListener('sai-pref-sai-animation', onPref);
   }, []);
-  const tickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastSeenContentLenRef = useRef(0);
-  // Null the ref alongside clearing — otherwise the typewriter effect's
-  // `if (tickTimerRef.current) return` early-out treats the canceled timer ID
-  // as a still-pending timer and never schedules a replacement, freezing the
-  // typewriter at displayLen=0. (Surfaces in StrictMode dev: cleanup-between-
-  // effect-runs cancels the just-scheduled timer; without nulling, the second
-  // run bails and no tick ever fires.)
-  useEffect(() => () => {
-    if (tickTimerRef.current) {
-      clearTimeout(tickTimerRef.current);
-      tickTimerRef.current = null;
-    }
-  }, []);
-  // Typewriter stays active even after `isStreaming` flips false — short
-  // replies often finalize before the typewriter has time to drip, so we
-  // keep dripping until the visible text catches up to the buffer. A live
-  // entry in TYPEWRITER_PROGRESS marks "this message has been typing."
-  const typewriterActive = typewriterEnabled && message.role === 'assistant' && (isAssistantStreamingFlag || TYPEWRITER_PROGRESS.has(message.id));
-  const [displayLen, setDisplayLen] = useState(() => {
-    if (!typewriterActive) return rawAssistantContent.length;
-    return TYPEWRITER_PROGRESS.get(message.id) ?? 0;
-  });
-  useEffect(() => {
-    if (!typewriterActive) {
-      if (tickTimerRef.current) { clearTimeout(tickTimerRef.current); tickTimerRef.current = null; }
-      if (displayLen !== rawAssistantContent.length) setDisplayLen(rawAssistantContent.length);
-      lastSeenContentLenRef.current = rawAssistantContent.length;
-      return;
-    }
-    if (displayLen >= rawAssistantContent.length) {
-      // Caught up — clear the marker so a future re-mount of this message
-      // (workspace swap, list re-keying) renders the full content instantly
-      // instead of replaying the typewriter.
-      TYPEWRITER_PROGRESS.delete(message.id);
-      lastSeenContentLenRef.current = rawAssistantContent.length;
-      return;
-    }
-    // First tick after a streaming start — make sure the marker is set so
-    // the post-stream finalization path keeps the typewriter alive.
-    if (!TYPEWRITER_PROGRESS.has(message.id)) TYPEWRITER_PROGRESS.set(message.id, displayLen);
-    // Detect a single large IPC chunk (code block / big paragraph dump) by
-    // measuring the *delta since last evaluation*, not total backlog. Backlog
-    // naturally grows whenever the model streams faster than ~560 chars/sec,
-    // so a backlog threshold trips on every fast stream and stops dripping
-    // entirely. A per-flush delta only trips when the model hands us a true
-    // burst in one go.
-    const burstDelta = rawAssistantContent.length - lastSeenContentLenRef.current;
-    lastSeenContentLenRef.current = rawAssistantContent.length;
-    if (burstDelta > 1200) {
-      if (tickTimerRef.current) { clearTimeout(tickTimerRef.current); tickTimerRef.current = null; }
-      setDisplayLen(rawAssistantContent.length);
-      TYPEWRITER_PROGRESS.set(message.id, rawAssistantContent.length);
-      return;
-    }
-    const remaining = rawAssistantContent.length - displayLen;
-    // Don't reschedule if a tick is already pending — letting it fire is
-    // what guarantees forward progress when content updates arrive on the
-    // same cadence as the tick (the stream-buffer flush is also ~33ms, so
-    // restarting the timer on every flush would starve the typewriter).
-    if (tickTimerRef.current) return;
-    // Drain to zero in at most ~15 ticks (~480ms at 32ms cadence). A larger
-    // ratio on big bursts cuts the number of markdown/highlight.js re-renders
-    // in half versus a slow drain, which is what makes auto-scroll feel
-    // jittery during long replies. Floor keeps short replies readable.
-    const step = Math.max(18, Math.ceil(remaining / 15));
-    tickTimerRef.current = setTimeout(() => {
-      tickTimerRef.current = null;
-      setDisplayLen(d => {
-        const next = Math.min(d + step, rawAssistantContent.length);
-        TYPEWRITER_PROGRESS.set(message.id, next);
-        return next;
-      });
-    }, 32);
-  }, [typewriterActive, rawAssistantContent.length, displayLen, message.id]);
 
   if (message.error) {
     const { title, status, message: errMsg, requestId, details, errorType } = message.error;
@@ -815,7 +706,6 @@ function ChatMessage({
   }
 
   const isAssistantStreaming = isStreaming && message.role === 'assistant';
-  const isTyping = typewriterActive && displayLen < rawAssistantContent.length;
   // When the parent passes an allowlist (main chat), only render watchers it explicitly
   // owns — prevents duplicates when the same run URL shows up in multiple messages. Other
   // callers (orchestrator, tests) don't pass an allowlist and get the full set.
@@ -832,7 +722,7 @@ function ChatMessage({
       data-flip-transition={flipActive ? JSON.stringify(flipTransition) : undefined}
       data-entry-transition={JSON.stringify(entryTransition)}
       data-entry-y={String(entryDistance)}
-      className={`chat-msg chat-msg-${message.role}${isAssistantStreaming ? ' chat-msg-streaming' : ''}${isTyping ? ' chat-msg-typing' : ''}`}
+      className={`chat-msg chat-msg-${message.role}${isAssistantStreaming ? ' chat-msg-streaming' : ''}`}
       style={flipPhase === 'measuring' ? { visibility: 'hidden' } : undefined}
       layoutId={flipActive ? undefined : pinnedLayoutId}
       {...effectiveEntryProps}
@@ -902,7 +792,6 @@ function ChatMessage({
                 // Preserve user newlines as hard line breaks (trailing double-space)
                 // so Shift+Enter in the chat input renders visually.
                 if (message.role === 'user') return raw.replace(/\n/g, '  \n');
-                if (typewriterActive && displayLen < rawAssistantContent.length) return raw.slice(0, snapToWordBoundary(raw, displayLen));
                 return raw;
               })()}</ReactMarkdown>
             )}
@@ -938,25 +827,6 @@ function ChatMessage({
         .chat-msg {
           margin-bottom: 16px;
           padding: 0 16px;
-        }
-        /* Typing cursor — pseudo-element on the last block of the rendered
-           markdown so it sits inline at the end of the streaming text instead
-           of dropping to a new line below the last paragraph. */
-        .chat-msg-typing .chat-msg-body > *:last-child::after {
-          content: '';
-          display: inline-block;
-          width: 7px;
-          height: 1em;
-          margin-left: 3px;
-          vertical-align: -2px;
-          background: var(--accent);
-          border-radius: 1px;
-          box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
-          animation: chat-cursor-blink 1.1s ease-in-out infinite;
-        }
-        @keyframes chat-cursor-blink {
-          0%, 100% { opacity: 0.25; }
-          50%      { opacity: 1; }
         }
         .chat-msg-streaming .chat-msg-claude,
         .chat-msg-streaming .chat-msg-openai,
