@@ -894,6 +894,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
                       <button
                         type="button"
                         data-testid="md-view-rendered"
+                        aria-pressed={mdView === 'rendered'}
                         className={`tool-call-md-seg${mdView === 'rendered' ? ' tool-call-md-seg-on' : ''}`}
                         onClick={() => setMdView('rendered')}
                       >
@@ -902,6 +903,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
                       <button
                         type="button"
                         data-testid="md-view-source"
+                        aria-pressed={mdView === 'source'}
                         className={`tool-call-md-seg${mdView === 'source' ? ' tool-call-md-seg-on' : ''}`}
                         onClick={() => setMdView('source')}
                       >
