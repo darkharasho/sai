@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, fireEvent, waitFor } from '@testing-library/react';
 
 // Mock shiki (used by ToolCallCard)
 vi.mock('shiki', () => ({
@@ -111,5 +111,57 @@ describe('isMarkdownBody', () => {
   it('is false for empty body with no md label', () => {
     expect(isMarkdownBody('', '')).toBe(false);
     expect(isMarkdownBody('app.tsx', '')).toBe(false);
+  });
+});
+
+describe('ToolCallCard markdown body', () => {
+  const mdWrite = {
+    id: 'w1',
+    type: 'file_edit' as const,
+    name: 'Write',
+    input: JSON.stringify({ file_path: 'docs/plan.md', content: '# Plan\n\n- a\n- b\n' }),
+  };
+
+  it('renders a .md Write as markdown by default', () => {
+    const { container } = render(<ToolCallCard toolCall={mdWrite} />);
+    expect(container.querySelector('.card-md')).toBeTruthy();
+    expect(container.querySelector('.card-md h1')?.textContent).toBe('Plan');
+  });
+
+  it('shows a rendered/source toggle for markdown bodies', () => {
+    const { getByTestId } = render(<ToolCallCard toolCall={mdWrite} />);
+    expect(getByTestId('md-view-toggle')).toBeTruthy();
+  });
+
+  it('flips to highlighted source when toggled', () => {
+    const { container, getByTestId } = render(<ToolCallCard toolCall={mdWrite} />);
+    expect(container.querySelector('.card-md')).toBeTruthy();
+    fireEvent.click(getByTestId('md-view-source'));
+    expect(container.querySelector('.card-md')).toBeNull();
+    expect(container.querySelector('.highlighted-code, .plain-code')).toBeTruthy();
+  });
+
+  it('does not render markdown or toggle for a non-md Write', () => {
+    const tsWrite = {
+      id: 'w2',
+      type: 'file_edit' as const,
+      name: 'Write',
+      input: JSON.stringify({ file_path: 'src/app.ts', content: 'const x = 1;\nexport default x;' }),
+    };
+    const { container, queryByTestId } = render(<ToolCallCard toolCall={tsWrite} />);
+    expect(container.querySelector('.card-md')).toBeNull();
+    expect(queryByTestId('md-view-toggle')).toBeNull();
+  });
+
+  it('keeps Edit of a .md file as a diff, not markdown', async () => {
+    const mdEdit = {
+      id: 'e1',
+      type: 'file_edit' as const,
+      name: 'Edit',
+      input: JSON.stringify({ file_path: 'docs/plan.md', old_string: '# Old', new_string: '# New' }),
+    };
+    const { container } = render(<ToolCallCard toolCall={mdEdit} />);
+    await waitFor(() => expect(container.querySelector('.diff-highlighted')).toBeTruthy());
+    expect(container.querySelector('.card-md')).toBeNull();
   });
 });

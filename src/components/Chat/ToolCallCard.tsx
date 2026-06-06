@@ -13,6 +13,9 @@ import { getShikiHighlighter, getActiveHighlightTheme } from '../../themes';
 import { DOT_MASK_URL } from '../../lib/assets';
 import { owningLink } from '../../lib/syntheticRoot';
 import PlanReviewCard from './PlanReviewCard';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { CARD_MD_CLASS, CARD_MD_STYLES } from './markdownCardStyles';
 
 function parseMcpName(name: string): { server: string; tool: string } | null {
   if (!name.startsWith('mcp__')) return null;
@@ -379,6 +382,16 @@ function resolveIcon(name: string, type: string): typeof Wrench {
   if (name.includes('Cron')) return Timer;
   // Type-based fallback
   return iconByType[type] || Wrench;
+}
+
+const MD_REMARK_PLUGINS = [remarkGfm];
+
+function ToolCardMarkdown({ code }: { code: string }) {
+  return (
+    <div className={`tool-call-md ${CARD_MD_CLASS}`}>
+      <ReactMarkdown remarkPlugins={MD_REMARK_PLUGINS}>{code}</ReactMarkdown>
+    </div>
+  );
 }
 
 const MAX_PREVIEW_LINES = 20;
@@ -749,6 +762,8 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
   const { label, code, langOverride, diff } = formatInput(toolCall);
   const lang = langOverride || detectLang(toolCall);
   const { truncated, isTruncated } = truncateCode(code, MAX_PREVIEW_LINES);
+  const renderMarkdown = !diff && isMarkdownBody(label, code);
+  const [mdView, setMdView] = useState<'rendered' | 'source'>('rendered');
   const entryTransition = useReducedMotionTransition(SPRING.pop);
   const badgeTransition = useReducedMotionTransition(SPRING.flick);
   const chevronTransition = useReducedMotionTransition(SPRING.flick);
@@ -873,10 +888,42 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
               <div className="tool-call-body">
                 {diff ? (
                   <DiffHighlightedCode oldString={diff.oldString} newString={diff.newString} lang={diff.fileLang} />
+                ) : renderMarkdown ? (
+                  <>
+                    <div className="tool-call-md-toggle" data-testid="md-view-toggle" onClick={e => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        data-testid="md-view-rendered"
+                        className={`tool-call-md-seg${mdView === 'rendered' ? ' tool-call-md-seg-on' : ''}`}
+                        onClick={() => setMdView('rendered')}
+                      >
+                        Rendered
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="md-view-source"
+                        className={`tool-call-md-seg${mdView === 'source' ? ' tool-call-md-seg-on' : ''}`}
+                        onClick={() => setMdView('source')}
+                      >
+                        Source
+                      </button>
+                    </div>
+                    {mdView === 'rendered'
+                      ? <ToolCardMarkdown code={code} />
+                      : <HighlightedCode code={showAllCode ? code : truncated} lang={lang} />}
+                    {mdView === 'source' && isTruncated && (
+                      <button
+                        className="tool-call-show-more"
+                        onClick={() => setShowAllCode(prev => !prev)}
+                      >
+                        {showAllCode ? 'Show less' : `Show all (${code.split('\n').length} lines)`}
+                      </button>
+                    )}
+                  </>
                 ) : (
                   <HighlightedCode code={showAllCode ? code : truncated} lang={lang} />
                 )}
-                {isTruncated && (
+                {!renderMarkdown && !diff && isTruncated && (
                   <button
                     className="tool-call-show-more"
                     onClick={() => setShowAllCode(prev => !prev)}
@@ -1032,6 +1079,39 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             font-size: 12px;
             background: transparent;
             border-radius: 0;
+          }
+          .tool-call-md {
+            padding: 10px 12px;
+            font-size: 12.5px;
+            line-height: 1.55;
+            color: var(--text);
+            max-height: 420px;
+            overflow-y: auto;
+          }
+          .tool-call-md-toggle {
+            display: inline-flex;
+            gap: 2px;
+            margin: 8px 12px 0;
+            padding: 2px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-secondary);
+          }
+          .tool-call-md-seg {
+            font-family: inherit;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            padding: 3px 9px;
+            border: none;
+            border-radius: 4px;
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+          }
+          .tool-call-md-seg-on {
+            background: color-mix(in srgb, var(--accent) 16%, transparent);
+            color: var(--accent);
           }
           .diff-highlighted {
             margin: 0;
@@ -1438,7 +1518,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             color: var(--text-muted);
             font-style: italic;
           }
-        `}</style>
+        ` + CARD_MD_STYLES}</style>
       </motion.div>
     </>
   );
