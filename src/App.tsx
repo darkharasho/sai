@@ -4409,8 +4409,9 @@ export default function App() {
             <motion.div
               key="sidebar-files"
               className="sidebar-slot"
-              exit={{ opacity: 0, x: -12 }}
-              transition={{ duration: 0.16, ease: 'easeIn' }}
+              exit={{ opacity: 0, width: 0 }}
+              transition={{ duration: 0.18, ease: [0.4, 0, 1, 1] }}
+              style={{ overflow: 'hidden' }}
             >
               <FileExplorerSidebar
                 projectPath={projectPath}
@@ -4423,8 +4424,9 @@ export default function App() {
             <motion.div
               key="sidebar-git"
               className="sidebar-slot"
-              exit={{ opacity: 0, x: -12 }}
-              transition={{ duration: 0.16, ease: 'easeIn' }}
+              exit={{ opacity: 0, width: 0 }}
+              transition={{ duration: 0.18, ease: [0.4, 0, 1, 1] }}
+              style={{ overflow: 'hidden' }}
             >
               {activeMetaRuntime && activeMetaRuntime.syntheticRoot === projectPath
                 ? <MetaGitSidebar runtime={activeMetaRuntime} onFileClick={handleFileClick} commitMessageProvider={commitMessageProvider} />
@@ -4435,8 +4437,9 @@ export default function App() {
             <motion.div
               key="sidebar-search"
               className="sidebar-slot"
-              exit={{ opacity: 0, x: -12 }}
-              transition={{ duration: 0.16, ease: 'easeIn' }}
+              exit={{ opacity: 0, width: 0 }}
+              transition={{ duration: 0.18, ease: [0.4, 0, 1, 1] }}
+              style={{ overflow: 'hidden' }}
             >
               <SearchPanel
                 projectPath={projectPath}
@@ -4453,8 +4456,9 @@ export default function App() {
             <motion.div
               key="sidebar-chats"
               className="sidebar-slot"
-              exit={{ opacity: 0, x: -12 }}
-              transition={{ duration: 0.16, ease: 'easeIn' }}
+              exit={{ opacity: 0, width: 0 }}
+              transition={{ duration: 0.18, ease: [0.4, 0, 1, 1] }}
+              style={{ overflow: 'hidden' }}
             >
               <ChatHistorySidebar
                 sessions={sessions}
@@ -4476,8 +4480,9 @@ export default function App() {
             <motion.div
               key="sidebar-plugins"
               className="sidebar-slot"
-              exit={{ opacity: 0, x: -12 }}
-              transition={{ duration: 0.16, ease: 'easeIn' }}
+              exit={{ opacity: 0, width: 0 }}
+              transition={{ duration: 0.18, ease: [0.4, 0, 1, 1] }}
+              style={{ overflow: 'hidden' }}
             >
               <PluginsSidebar />
             </motion.div>
@@ -4486,8 +4491,9 @@ export default function App() {
             <motion.div
               key="sidebar-mcp"
               className="sidebar-slot"
-              exit={{ opacity: 0, x: -12 }}
-              transition={{ duration: 0.16, ease: 'easeIn' }}
+              exit={{ opacity: 0, width: 0 }}
+              transition={{ duration: 0.18, ease: [0.4, 0, 1, 1] }}
+              style={{ overflow: 'hidden' }}
             >
               <McpSidebar />
             </motion.div>
@@ -4496,8 +4502,9 @@ export default function App() {
             <motion.div
               key="sidebar-swarm"
               className="sidebar-slot"
-              exit={{ opacity: 0, x: -12 }}
-              transition={{ duration: 0.16, ease: 'easeIn' }}
+              exit={{ opacity: 0, width: 0 }}
+              transition={{ duration: 0.18, ease: [0.4, 0, 1, 1] }}
+              style={{ overflow: 'hidden' }}
             >
               <SwarmSidebar
                 tasks={swarmTasksByWs.get(activeProjectPath) ?? []}
