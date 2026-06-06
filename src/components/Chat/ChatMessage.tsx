@@ -970,10 +970,13 @@ function ChatMessage({
         .chat-msg-user {
           background: var(--bg-input);
           border: 1px solid var(--border);
-          border-radius: 10px;
+          border-radius: 14px 14px 4px 14px; /* chat tail (sharp bottom-right) */
           padding: 10px 14px;
-          margin-left: 14px;
+          margin-left: auto;   /* push the bubble to the right */
           margin-right: 14px;
+          margin-top: 18px;    /* inter-turn gap (replaces the removed divider) */
+          width: fit-content;  /* shrink-wrap to the message text */
+          max-width: 76%;      /* but never the full width */
         }
         .chat-msg-assistant {
           padding: 4px 14px;
