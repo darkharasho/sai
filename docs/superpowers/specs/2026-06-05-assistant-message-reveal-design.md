@@ -75,13 +75,15 @@ appearance of a finished message's DOM.
   `sai-pref-typewriter` listener, `TYPEWRITER_PROGRESS`, `displayLen`, `tickTimerRef`,
   `lastSeenContentLenRef`, `snapToWordBoundary`, and the typewriter `useEffect`(s). The
   assistant body renders full markdown directly once not streaming.
-- **Add** a ref on `.chat-msg-body` and a `useLayoutEffect` that calls `revealWords(ref)`
-  **exactly once** when ALL of: `message.role === 'assistant'`, not streaming
-  (`!isAssistantStreaming`), `message.content` non-empty, message is first-seen this
-  session (existing `SEEN_MESSAGES` / `shouldAnimateEntry` gate), and reduced-motion is
-  off. Guard with a ref flag so it never re-runs. (A token-streamed message mounts while
-  streaming, so it never satisfies the not-streaming-at-first-paint condition — append
-  already revealed it.)
+- **Add** a ref on the rendered markdown and a `useLayoutEffect` that calls
+  `revealWords(ref)` **exactly once** when ALL of: `message.role === 'assistant'`, not
+  streaming (`!isAssistantStreaming`), `message.content` non-empty, reduced-motion off,
+  the message **did not stream this session** (a module `STREAMED_MESSAGES` set records
+  any id seen with `isAssistantStreaming === true`), and the message is **fresh**
+  (`Date.now() - message.timestamp < ~8s`, which excludes history/reopened chats —
+  `SEEN_MESSAGES` alone can't, since history is also "first seen"). Guard with a ref flag
+  so it never re-runs. (A token-streamed reply is in `STREAMED_MESSAGES`, so its
+  post-stream re-render never reveals — append already showed it.)
 - **Entrance:** for assistant messages, replace the `SPRING.pop` entry transition with a
   calm fade (opacity 0→1, ≈180ms ease-out, no `y`). User/system entrances unchanged.
 
