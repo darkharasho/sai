@@ -83,15 +83,16 @@ export default function ChangedFiles({ title, files, onAction, actionLabel, onFi
       <div
         style={{
           padding: '4px 12px',
-          fontSize: 10,
-          fontWeight: 700,
+          fontSize: 'var(--text-xs)',
+          fontWeight: 600,
           textTransform: 'uppercase' as const,
-          letterSpacing: '0.6px',
-          color: 'var(--text-muted)',
+          letterSpacing: '0.06em',
+          color: 'var(--text-secondary)',
           userSelect: 'none' as const,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
+          borderBottom: '1px solid var(--border-hairline)',
         }}
       >
         <span>{title} ({files.length})</span>
@@ -115,8 +116,8 @@ export default function ChangedFiles({ title, files, onAction, actionLabel, onFi
               gap: 3,
               borderRadius: 3,
             }}
-            onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.background = 'var(--bg-hover)'; }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'none'; }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.background = 'var(--surface-4)'; }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-secondary)'; e.currentTarget.style.background = 'none'; }}
           >
             <Plus size={10} /> Stage All
           </button>
@@ -147,9 +148,9 @@ export default function ChangedFiles({ title, files, onAction, actionLabel, onFi
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                padding: '3px 12px',
+                padding: `3px var(--sp-3)`,
                 gap: 6,
-                background: isHovered ? 'var(--bg-hover)' : 'transparent',
+                background: isHovered ? 'var(--surface-4)' : 'transparent',
                 cursor: 'pointer',
                 minWidth: 0,
               }}
@@ -169,7 +170,7 @@ export default function ChangedFiles({ title, files, onAction, actionLabel, onFi
               <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
                 <span
                   style={{
-                    fontSize: 12,
+                    fontSize: 'var(--text-sm)',
                     color: 'var(--text)',
                     whiteSpace: 'nowrap' as const,
                     overflow: 'hidden',
@@ -241,8 +242,8 @@ export default function ChangedFiles({ title, files, onAction, actionLabel, onFi
             position: 'fixed',
             left: contextMenu.x,
             top: contextMenu.y,
-            background: '#1c2128',
-            border: '1px solid var(--border)',
+            background: 'var(--surface-1)',
+            border: '1px solid var(--border-subtle)',
             borderRadius: 6,
             padding: '4px 0',
             minWidth: 180,
@@ -255,16 +256,16 @@ export default function ChangedFiles({ title, files, onAction, actionLabel, onFi
           <div
             onClick={() => { onAction(contextMenu.file); setContextMenu(null); }}
             style={{ padding: '6px 16px', color: 'var(--text)', cursor: 'pointer' }}
-            onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
+            onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-4)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
           >
             {staged ? 'Unstage' : 'Stage'}
           </div>
-          <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
+          <div style={{ height: 1, background: 'var(--border-hairline)', margin: '4px 0' }} />
           <div
             onClick={() => { onDiscard?.(contextMenu.file); setContextMenu(null); }}
             style={{ padding: '6px 16px', color: 'var(--red)', cursor: 'pointer' }}
-            onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
+            onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-4)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
           >
             Discard Changes

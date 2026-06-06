@@ -192,8 +192,8 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
         style={{
           width: 'var(--sidebar-width)',
           minWidth: 'var(--sidebar-width)',
-          background: 'var(--bg-secondary)',
-          borderRight: '1px solid var(--border)',
+          background: 'var(--surface-1)',
+          borderRight: '1px solid var(--border-subtle)',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
@@ -244,7 +244,7 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
           <div style={{ marginBottom: 4, display: 'flex', justifyContent: 'center' }}><AlertTriangle size={18} color="var(--red)" /></div>
           <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--red)', marginBottom: 4 }}>Git unavailable</div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>{error}</div>
-          <button onClick={refresh} style={{ background: 'var(--bg-hover)', border: '1px solid var(--border)', borderRadius: 3, padding: '3px 10px', fontSize: 11, color: 'var(--text-secondary)', cursor: 'pointer' }}>Retry</button>
+          <button onClick={refresh} style={{ background: 'var(--surface-3)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', padding: '5px var(--sp-2)', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', cursor: 'pointer' }}>Retry</button>
         </div>
       )}
 
@@ -352,8 +352,8 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
       style={{
         width: 'var(--sidebar-width)',
         minWidth: 'var(--sidebar-width)',
-        background: 'var(--bg-secondary)',
-        borderRight: '1px solid var(--border)',
+        background: 'var(--surface-1)',
+        borderRight: '1px solid var(--border-subtle)',
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
@@ -366,12 +366,12 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
           display: 'flex',
           alignItems: 'center',
           padding: '0 12px',
-          fontSize: 11,
+          fontSize: 'var(--text-xs)',
           fontWeight: 600,
           textTransform: 'uppercase' as const,
-          letterSpacing: '0.5px',
-          color: 'var(--text-muted)',
-          borderBottom: '1px solid var(--border)',
+          letterSpacing: '0.06em',
+          color: 'var(--text-secondary)',
+          borderBottom: '1px solid var(--border-hairline)',
           flexShrink: 0,
         }}
       >

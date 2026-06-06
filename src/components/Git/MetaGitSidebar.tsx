@@ -22,8 +22,8 @@ export function MetaGitSidebar({ runtime, onFileClick, commitMessageProvider }: 
         .meta-git-sidebar {
           width: var(--sidebar-width);
           min-width: var(--sidebar-width);
-          background: var(--bg-secondary);
-          border-right: 1px solid var(--border);
+          background: var(--surface-1);
+          border-right: 1px solid var(--border-subtle);
           display: flex;
           flex-direction: column;
           overflow: hidden;
@@ -35,38 +35,38 @@ export function MetaGitSidebar({ runtime, onFileClick, commitMessageProvider }: 
           align-items: center;
           gap: 6px;
           padding: 0 12px;
-          font-size: 11px;
+          font-size: var(--text-xs);
           font-weight: 600;
           text-transform: uppercase;
-          letter-spacing: 0.5px;
-          color: var(--text-muted);
-          border-bottom: 1px solid var(--border);
+          letter-spacing: 0.06em;
+          color: var(--text-secondary);
+          border-bottom: 1px solid var(--border-hairline);
           flex-shrink: 0;
         }
         .meta-git-header span {
           flex: 1;
         }
         .meta-git-header button {
-          background: transparent;
-          border: 1px solid var(--border);
-          border-radius: 3px;
-          padding: 2px 7px;
-          font-size: 10px;
-          color: var(--text-muted);
+          background: var(--surface-3);
+          border: 1px solid var(--border-subtle);
+          border-radius: var(--radius-sm);
+          padding: 5px var(--sp-2);
+          font-size: var(--text-sm);
+          color: var(--text-secondary);
           cursor: pointer;
           text-transform: none;
           letter-spacing: 0;
         }
         .meta-git-header button:hover {
           color: var(--text);
-          background: var(--bg-hover);
+          background: var(--surface-4);
         }
         .meta-git-sections {
           flex: 1;
           overflow-y: auto;
         }
         .meta-git-section {
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--border-hairline);
         }
         .meta-git-section header {
           display: flex;
@@ -75,10 +75,10 @@ export function MetaGitSidebar({ runtime, onFileClick, commitMessageProvider }: 
           padding: 6px 10px;
           cursor: pointer;
           user-select: none;
-          background: var(--bg-secondary);
+          background: var(--surface-1);
         }
         .meta-git-section header:hover {
-          background: var(--bg-hover);
+          background: var(--surface-4);
         }
         .meta-git-section .caret {
           font-size: 12px;
@@ -91,7 +91,7 @@ export function MetaGitSidebar({ runtime, onFileClick, commitMessageProvider }: 
           transform: rotate(-90deg);
         }
         .meta-git-section header strong {
-          font-size: 12px;
+          font-size: var(--text-sm);
           font-weight: 600;
           color: var(--text);
         }
@@ -104,7 +104,7 @@ export function MetaGitSidebar({ runtime, onFileClick, commitMessageProvider }: 
           white-space: nowrap;
         }
         .meta-git-section .embedded-git {
-          border-top: 1px solid var(--border);
+          border-top: 1px solid var(--border-hairline);
         }
       `}</style>
       <div className="meta-git-header">
