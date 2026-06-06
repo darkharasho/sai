@@ -24,7 +24,7 @@ vi.mock('shiki', () => ({
 import ChatMessage from '../../../../src/components/Chat/ChatMessage';
 import type { ChatMessage as ChatMessageType } from '../../../../src/types';
 import { setFlipRect, _resetFlipRegistry } from '../../../../src/components/Chat/flipRegistry';
-import { SPRING, DISTANCE } from '../../../../src/components/Chat/motion';
+import { SPRING, DISTANCE, FADE_IN } from '../../../../src/components/Chat/motion';
 
 function makeMessage(overrides: Partial<ChatMessageType> = {}): ChatMessageType {
   return {
@@ -62,7 +62,8 @@ describe('ChatMessage', () => {
   });
 
   it('renders message content via markdown', () => {
-    const msg = makeMessage({ content: 'Hello world' });
+    // Use timestamp:0 (old message) so word-reveal doesn't mutate the DOM.
+    const msg = makeMessage({ content: 'Hello world', timestamp: 0 });
     render(<ChatMessage message={msg} />);
     expect(screen.getByTestId('markdown')).toBeTruthy();
     expect(screen.getByTestId('markdown').textContent).toBe('Hello world');
@@ -184,13 +185,13 @@ describe('ChatMessage', () => {
     act(() => { window.dispatchEvent(new CustomEvent('sai-pref-sai-animation', { detail: true })); });
   });
 
-  it('uses pop spring with slide distance for assistant message entry', () => {
+  it('uses fade-in with zero distance for assistant message entry', () => {
     const { container } = render(
       <ChatMessage message={{ id: 'a-1', role: 'assistant', content: 'hello', timestamp: 0 }} />
     );
     const node = container.querySelector('[data-testid="chat-msg"]');
-    expect(node?.getAttribute('data-entry-transition')).toBe(JSON.stringify(SPRING.pop));
-    expect(node?.getAttribute('data-entry-y')).toBe(String(DISTANCE.slide));
+    expect(node?.getAttribute('data-entry-transition')).toBe(JSON.stringify(FADE_IN));
+    expect(node?.getAttribute('data-entry-y')).toBe('0');
   });
 
   it('strips entry transition under reduced motion', () => {
@@ -415,5 +416,38 @@ describe('ChatMessage', () => {
       const { container } = render(<ChatMessage message={makeMessage({ durationMs: 3750 })} />);
       expect(container.querySelector('.chat-msg-body [data-testid="msg-duration"]')).toBeTruthy();
     });
+  });
+
+  it('word-reveals a fresh, complete assistant message', () => {
+    const { container } = render(
+      <ChatMessage
+        message={{ id: 'rv-1', role: 'assistant', content: 'hello brave new world', timestamp: Date.now() }}
+        projectPath="/p"
+        isStreaming={false}
+      />
+    );
+    expect(container.querySelectorAll('.rv-word').length).toBeGreaterThan(0);
+  });
+
+  it('does not reveal a streaming assistant message', () => {
+    const { container } = render(
+      <ChatMessage
+        message={{ id: 'rv-2', role: 'assistant', content: 'partial text', timestamp: Date.now() }}
+        projectPath="/p"
+        isStreaming={true}
+      />
+    );
+    expect(container.querySelectorAll('.rv-word').length).toBe(0);
+  });
+
+  it('does not reveal an old (history) assistant message', () => {
+    const { container } = render(
+      <ChatMessage
+        message={{ id: 'rv-3', role: 'assistant', content: 'old reply', timestamp: 1 }}
+        projectPath="/p"
+        isStreaming={false}
+      />
+    );
+    expect(container.querySelectorAll('.rv-word').length).toBe(0);
   });
 });

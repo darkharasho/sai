@@ -1,4 +1,4 @@
-import React, { memo, useState, useRef, useCallback, useEffect } from 'react';
+import React, { memo, useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
@@ -11,7 +11,8 @@ import GitHubWatcherCard from './GitHubWatcherCard';
 import { detectWatchTargets } from './githubWatcher';
 import Stagger from './Stagger';
 import { readFlipRect, hasFlipRect } from './flipRegistry';
-import { SPRING, DISTANCE, useReducedMotionTransition } from './motion';
+import { SPRING, DISTANCE, FADE_IN, useReducedMotionTransition, prefersReducedMotion } from './motion';
+import { revealWords } from './wordReveal';
 import type { ChatMessage as ChatMessageType, MetaWorkspaceRuntime } from '../../types';
 import { getActiveTerminalId } from '../../terminalBuffer';
 import SaiLogo from '../SaiLogo';
@@ -22,6 +23,11 @@ import LinkPreviewChip from './LinkPreviewChip';
 // animation from replaying if a message remounts (e.g. workspace swap, list
 // re-keying), so existing history doesn't shimmer in on every render.
 const SEEN_MESSAGES = new Set<string>();
+// Records ids that streamed token-by-token this session, so their post-stream
+// re-render is NOT word-revealed (the live append already showed them).
+const STREAMED_MESSAGES = new Set<string>();
+// A message counts as "fresh" (vs. history) if it arrived within this window.
+const REVEAL_FRESH_MS = 8000;
 let saiAnimationPref = true;
 if (typeof window !== 'undefined' && (window as any).sai?.settingsGet) {
   (window as any).sai.settingsGet('saiAnimationEnabled', true).then((v: boolean) => { saiAnimationPref = v !== false; });
@@ -306,8 +312,11 @@ function ChatMessage({
   const [shouldAnimateEntry] = useState(() => !SEEN_MESSAGES.has(message.id));
   useEffect(() => { SEEN_MESSAGES.add(message.id); }, [message.id]);
   const flipNodeRef = useRef<HTMLDivElement | null>(null);
-  const entryTransition = useReducedMotionTransition(SPRING.pop);
-  const entryDistance = DISTANCE.slide;
+  const mdRef = useRef<HTMLDivElement | null>(null);
+  const revealedRef = useRef(false);
+  const isAssistantMsg = message.role === 'assistant';
+  const entryTransition = useReducedMotionTransition(isAssistantMsg ? FADE_IN : SPRING.pop);
+  const entryDistance = isAssistantMsg ? 0 : DISTANCE.slide;
   const entryProps = shouldAnimateEntry
     ? { initial: { opacity: 0, y: entryDistance }, animate: { opacity: 1, y: 0 }, transition: entryTransition }
     : { initial: false as const, animate: { opacity: 1, y: 0 } };
@@ -706,6 +715,20 @@ function ChatMessage({
   }
 
   const isAssistantStreaming = isStreaming && message.role === 'assistant';
+  useLayoutEffect(() => {
+    if (isAssistantStreaming) STREAMED_MESSAGES.add(message.id);
+    if (revealedRef.current) return;
+    if (message.role !== 'assistant' || isAssistantStreaming) return;
+    if (!message.content) return;
+    if (STREAMED_MESSAGES.has(message.id)) return;
+    if (prefersReducedMotion()) return;
+    if (Date.now() - (message.timestamp ?? 0) > REVEAL_FRESH_MS) return;
+    const el = mdRef.current;
+    if (!el) return;
+    revealedRef.current = true;
+    const ctrl = revealWords(el);
+    return () => ctrl.cancel();
+  }, [isAssistantStreaming, message.id, message.role, message.content]);
   // When the parent passes an allowlist (main chat), only render watchers it explicitly
   // owns — prevents duplicates when the same run URL shows up in multiple messages. Other
   // callers (orchestrator, tests) don't pass an allowlist and get the full set.
@@ -752,6 +775,7 @@ function ChatMessage({
                 {typeof message.content === 'string' ? message.content : String(message.content ?? '')}
               </div>
             ) : (
+              <div ref={mdRef} className="chat-msg-md">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 rehypePlugins={[rehypeHighlight, rehypeFilePaths]}
@@ -794,6 +818,7 @@ function ChatMessage({
                 if (message.role === 'user') return raw.replace(/\n/g, '  \n');
                 return raw;
               })()}</ReactMarkdown>
+              </div>
             )}
           </div>
         </div>

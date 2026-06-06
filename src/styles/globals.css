@@ -226,3 +226,15 @@ pre {
   background-position: top left;
   background-size: 100% 1px;
 }
+
+/* Assistant message word-reveal (see specs/2026-06-05-assistant-message-reveal-design.md) */
+.rv-word { will-change: opacity; }
+.rv-caret {
+  color: var(--accent);
+  margin-left: 1px;
+  animation: rv-caret-blink 1s steps(2) infinite;
+}
+@keyframes rv-caret-blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .rv-caret { animation: none; }
+}
