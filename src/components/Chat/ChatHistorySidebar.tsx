@@ -445,8 +445,8 @@ export default function ChatHistorySidebar({
       <style>{`
         .chat-history-sidebar {
           width: var(--sidebar-width);
-          background: var(--bg-secondary);
-          border-right: 1px solid var(--border);
+          background: var(--surface-1);
+          border-right: 1px solid var(--border-subtle);
           display: flex;
           flex-direction: column;
           flex-shrink: 0;
@@ -454,7 +454,7 @@ export default function ChatHistorySidebar({
         }
         .chat-history-search {
           padding: 8px 10px;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--border-hairline);
           display: flex;
           align-items: center;
           gap: 6px;
@@ -490,9 +490,9 @@ export default function ChatHistorySidebar({
         .chat-history-new-btn {
           margin: 6px 10px;
           padding: 5px 10px;
-          background: var(--bg-hover);
-          border: 1px solid var(--border);
-          border-radius: 5px;
+          background: var(--surface-4);
+          border: 1px solid var(--border-subtle);
+          border-radius: var(--radius-sm);
           color: var(--text);
           cursor: pointer;
           font-size: 12px;
@@ -503,7 +503,7 @@ export default function ChatHistorySidebar({
           transition: background 0.15s;
         }
         .chat-history-new-btn:hover {
-          background: var(--bg-elevated);
+          background: var(--surface-3);
         }
         .chat-history-list {
           flex: 1;
@@ -521,11 +521,12 @@ export default function ChatHistorySidebar({
           gap: 14px;
         }
         .chat-history-group-label {
-          padding: 8px 12px 4px;
-          font-size: 10px;
+          padding: var(--sp-2) var(--sp-3) var(--sp-1);
+          font-size: var(--text-xs);
+          font-weight: 600;
           text-transform: uppercase;
-          letter-spacing: 0.5px;
-          color: var(--text-muted);
+          letter-spacing: 0.06em;
+          color: var(--text-secondary);
           display: flex;
           align-items: center;
           gap: 4px;
@@ -538,14 +539,14 @@ export default function ChatHistorySidebar({
           transition: background 0.15s;
         }
         .chat-history-card:hover {
-          background: rgba(255,255,255,0.04);
+          background: var(--surface-4);
         }
         .history-card-active {
           border-left: 2px solid var(--accent);
-          background: rgba(199,145,12,0.12);
+          background: var(--accent-dim);
         }
         .history-card-active:hover {
-          background: rgba(199,145,12,0.15);
+          background: rgba(212,160,23,0.18);
         }
         .chat-history-card-header {
           display: flex;
