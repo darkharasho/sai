@@ -70,4 +70,17 @@ describe('revealWords', () => {
     });
     expect(el.querySelector('.rv-caret')).toBeNull();
   });
+
+  it('respects the duration budget for long replies by batching', () => {
+    const many = Array.from({ length: 300 }, (_, i) => 'w' + i).join(' ');
+    const el = mount('<p>' + many + '</p>');
+    revealWords(el, { budgetMs: 200, maxWords: 1000 });
+    // With a 200ms budget and an 8ms floor, items reveal in batches; the whole
+    // thing must finish well under the naive 300*8=2400ms.
+    vi.advanceTimersByTime(260);
+    el.querySelectorAll<HTMLElement>('.rv-word').forEach(w => {
+      expect(w.style.opacity).toBe('1');
+    });
+    expect(el.querySelector('.rv-caret')).toBeNull();
+  });
 });

@@ -450,4 +450,13 @@ describe('ChatMessage', () => {
     );
     expect(container.querySelectorAll('.rv-word').length).toBe(0);
   });
+
+  it('does not reveal a message that streamed then completed', () => {
+    const msg = { id: 'rv-stream', role: 'assistant' as const, content: 'streamed then done', timestamp: Date.now() };
+    const { container, rerender } = render(
+      <ChatMessage message={msg} projectPath="/p" isStreaming={true} />
+    );
+    rerender(<ChatMessage message={msg} projectPath="/p" isStreaming={false} />);
+    expect(container.querySelectorAll('.rv-word').length).toBe(0);
+  });
 });

@@ -77,7 +77,16 @@ export function revealWords(container: HTMLElement, opts: RevealOpts = {}): Reve
     return { cancel() {} };
   }
 
-  const step = Math.max(8, Math.min(cadenceMs, Math.floor(budgetMs / items.length)));
+  // Honor the duration budget: short/medium replies reveal one item per tick at a
+  // shrinking cadence; long replies keep an 8ms floor but reveal several items per
+  // tick so the whole reveal still finishes within ~budgetMs.
+  const MIN_STEP = 8;
+  const idealStep = Math.floor(budgetMs / items.length);
+  let step: number;
+  let perTick: number;
+  if (idealStep >= cadenceMs) { step = cadenceMs; perTick = 1; }
+  else if (idealStep >= MIN_STEP) { step = idealStep; perTick = 1; }
+  else { step = MIN_STEP; perTick = Math.ceil((items.length * MIN_STEP) / budgetMs); }
 
   const caret = container.ownerDocument.createElement('span');
   caret.className = 'rv-caret';
@@ -96,9 +105,12 @@ export function revealWords(container: HTMLElement, opts: RevealOpts = {}): Reve
       caret.remove();
       return;
     }
-    const el = items[i++];
-    el.style.opacity = '1';
-    el.parentNode?.insertBefore(caret, el.nextSibling);
+    let last = items[i];
+    for (let k = 0; k < perTick && i < items.length; k++) {
+      last = items[i++];
+      last.style.opacity = '1';
+    }
+    last.parentNode?.insertBefore(caret, last.nextSibling);
     timer = setTimeout(tick, step);
   };
   tick();
