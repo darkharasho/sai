@@ -20,6 +20,8 @@ import { matchLinkPreview } from './linkPreview';
 import LinkPreviewChip from './LinkPreviewChip';
 import StreamingAssistantHead from './StreamingAssistantHead';
 import { useSaiAnimationPref } from './useSaiAnimationPref';
+import { rehypeEmojiIcons } from './rehypeEmojiIcons';
+import { renderEmojiSpan } from './emojiIcons';
 
 // Message IDs that have already played their entry animation. Prevents the
 // animation from replaying if a message remounts (e.g. workspace swap, list
@@ -35,6 +37,13 @@ const MD_PLUGINS = {
   rehypePlugins: [rehypeHighlight, rehypeFilePaths],
   urlTransform: (url: string) =>
     url.startsWith('sai-file://') ? url : defaultUrlTransform(url),
+};
+
+// Assistant messages also convert emoji to accent-colored SVG icons. User messages
+// keep MD_PLUGINS (no conversion) so typed emoji are left as-is.
+const ASSISTANT_MD_PLUGINS = {
+  ...MD_PLUGINS,
+  rehypePlugins: [rehypeHighlight, rehypeFilePaths, rehypeEmojiIcons],
 };
 
 const FILE_PATH_RE = /(?<![:/])\b((?:\.{1,2}\/)?(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte))(?::(\d+))?\b|(?<![:/.\w])((?:\/[\w.-]+)+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte))(?::(\d+))?\b/g;
@@ -752,6 +761,7 @@ function ChatMessage({
     pre: ({ children, ...props }: any) => (
       <CodeBlock {...props}>{children}</CodeBlock>
     ),
+    span: (props: any) => renderEmojiSpan(props),
     a: ({ href, children }: any) => {
       const preview = href ? matchLinkPreview(href) : null;
       if (preview) {
@@ -800,7 +810,7 @@ function ChatMessage({
           content={typeof message.content === 'string' ? message.content : String(message.content ?? '')}
           durationMs={message.durationMs}
         >
-          <ReactMarkdown {...MD_PLUGINS} components={markdownComponents}>
+          <ReactMarkdown {...ASSISTANT_MD_PLUGINS} components={markdownComponents}>
             {typeof message.content === 'string' ? message.content : String(message.content ?? '')}
           </ReactMarkdown>
         </StreamingAssistantHead>
@@ -822,7 +832,7 @@ function ChatMessage({
             )}
             {
               <div ref={mdRef} className="chat-msg-md">
-              <ReactMarkdown {...MD_PLUGINS} components={markdownComponents}>{(() => {
+              <ReactMarkdown {...(message.role === 'assistant' ? ASSISTANT_MD_PLUGINS : MD_PLUGINS)} components={markdownComponents}>{(() => {
                 const raw = typeof message.content === 'string' ? message.content : String(message.content ?? '');
                 // Preserve user newlines as hard line breaks (trailing double-space)
                 // so Shift+Enter in the chat input renders visually.
