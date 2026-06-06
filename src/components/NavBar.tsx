@@ -91,13 +91,13 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, sw
       <style>{`
         .navbar {
           width: var(--nav-width);
-          background: var(--bg-secondary);
+          background: var(--surface-0);
           display: flex;
           flex-direction: column;
           align-items: center;
           padding-top: 8px;
           gap: 2px;
-          border-right: 1px solid var(--border);
+          border-right: 1px solid var(--border-hairline);
           flex-shrink: 0;
         }
         .nav-btn {
@@ -194,11 +194,11 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, sw
         }
         .nav-btn:hover {
           color: var(--text);
-          background: var(--bg-hover);
+          background: var(--surface-2);
         }
         .nav-btn.active {
           color: var(--accent);
-          background: rgba(199, 145, 12, 0.08);
+          background: var(--accent-dim);
         }
         .nav-divider {
           width: 24px;
