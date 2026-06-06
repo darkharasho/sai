@@ -32,11 +32,13 @@ status. Enrich `TaskCreate` and the `TodoWrite` list similarly.
 ## Scope
 
 In scope: `TaskCreate`, `TaskUpdate`, and `TodoWrite` cards; a shared task-registry
-module; a registry context provided in `ChatPanel`.
+module; a registry context provided in `ChatPanel`; and a light enrichment of the
+`TodoProgress` follower popover (the ring + popover in the input toolbar,
+`ChatInput.tsx:953`).
 
 Out of scope (unchanged): all other tool cards (Bash/Read/Write/Edit/Grep-Glob/markdown);
-the `TodoProgress` ring's behavior and appearance (only its internals are refactored to
-call the shared registry); the remote (`src/renderer-remote`) and mobile surfaces.
+the `TodoProgress` ring itself (count, progress arc, dismiss, open/close, visibility
+gating); the remote (`src/renderer-remote`) and mobile surfaces.
 
 ## Design
 
@@ -134,6 +136,23 @@ testable without context.
   uses `content`).
 - When `todo.priority` is present, render a small priority badge after the content.
 
+### Unit 6 — `TodoProgress` follower popover enrichment
+
+Per the chosen scope ("priority plus title"), the follower's popover list
+(`TodoProgress.tsx`, the `todos.map(...)` at ~line 210) gains:
+- A small **priority badge** after the item text when `todo.priority` is present.
+  (Priority comes from legacy `TodoWrite` items; `Task`-sourced items have none and
+  render no badge.)
+- The **title** is always the task's `content` (subject). Today the in-progress item
+  shows `activeForm || content`, which can hide the actual title behind the gerund
+  ("Running tests" instead of "Run the test suite"). Change the active item to show the
+  **title (`content`)** as the primary text, with `activeForm` rendered as a secondary
+  muted line beneath it when present and different from `content`. Non-active items keep
+  showing `content`.
+
+No description is added. The ring, count, progress arc, dismiss, open/close, and
+visibility gating are unchanged.
+
 ## Data flow
 
 `messages` → `buildTaskRegistry` (in `ChatPanel`, memoized) → `TaskRegistryContext` →
@@ -168,8 +187,12 @@ New `ToolCallCard.test.tsx` cases:
 - `TodoWrite` card shows a `done/total` count and renders `activeForm` for an in-progress item.
 - Regression: a Grep card still renders search results (task wiring didn't disturb it).
 
-`TodoProgress.test.tsx`: existing tests must still pass after the registry refactor
-(no behavior change).
+`TodoProgress.test.tsx`: existing tests must still pass after the registry refactor.
+Add cases:
+- A popover item whose todo has a `priority` renders a priority badge; one without
+  renders none.
+- The in-progress item shows its `content` (title) as primary text, with `activeForm`
+  as a secondary line when it differs from `content`.
 
 Run with `vitest --maxWorkers=2`.
 
