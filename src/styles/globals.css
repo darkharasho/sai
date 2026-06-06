@@ -173,7 +173,7 @@ html.rounded-corners body {
 
 html.rounded-corners #root {
   border-radius: 10px;
-  background: var(--bg-primary);
+  background: var(--surface-1);
 }
 
 html.rounded-corners.window-maximized #root {
@@ -241,7 +241,7 @@ html.rounded-corners.window-maximized .drag-overlay {
 code { font-family: 'Geist Mono', 'JetBrains Mono', 'Fira Code', monospace; }
 
 pre {
-  background: var(--bg-secondary);
+  background: var(--surface-2);
   border-radius: 6px;
   padding: 12px;
   overflow-x: auto;
