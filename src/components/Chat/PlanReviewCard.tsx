@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { FileText, Check, X, ChevronRight, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SPRING, useReducedMotionTransition } from './motion';
+import { CARD_MD_CLASS, CARD_MD_STYLES } from './markdownCardStyles';
 
 interface PlanReviewCardProps {
   plan: string;
@@ -105,10 +106,10 @@ export default function PlanReviewCard({
               transition={expandTransition}
               style={{ overflow: 'hidden' }}
             >
-              <div className="plan-review-body">
+              <div className="plan-review-body dashed-divider-top">
                 <div
                   ref={contentRef}
-                  className={`plan-review-content${!overflows || expanded ? ' plan-review-content-expanded' : ''}`}
+                  className={`${CARD_MD_CLASS} plan-review-content${!overflows || expanded ? ' plan-review-content-expanded' : ''}`}
                 >
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {plan}
@@ -139,7 +140,7 @@ export default function PlanReviewCard({
           )}
         </AnimatePresence>
       </motion.div>
-      <style>{STYLES}</style>
+      <style>{STYLES + CARD_MD_STYLES}</style>
     </>
   );
 }
@@ -169,7 +170,7 @@ const STYLES = `
     border: 1px solid color-mix(in srgb, #f85149 35%, transparent);
   }
   .plan-review-body {
-    border-top: 1px solid var(--border);
+    /* dashed header↔body separator supplied by .dashed-divider-top */
   }
   .plan-review-content {
     padding: 12px 14px;
@@ -181,73 +182,6 @@ const STYLES = `
   }
   .plan-review-content-expanded {
     max-height: none;
-  }
-  .plan-review-content h1,
-  .plan-review-content h2,
-  .plan-review-content h3 {
-    margin: 14px 0 6px;
-    font-weight: 700;
-    color: var(--text);
-  }
-  .plan-review-content h1 { font-size: 15px; }
-  .plan-review-content h2 { font-size: 13.5px; }
-  .plan-review-content h3 { font-size: 12.5px; }
-  .plan-review-content h1:first-child,
-  .plan-review-content h2:first-child,
-  .plan-review-content h3:first-child { margin-top: 0; }
-  .plan-review-content p { margin: 6px 0; }
-  .plan-review-content ul,
-  .plan-review-content ol {
-    margin: 4px 0;
-    padding-left: 20px;
-  }
-  .plan-review-content li { margin: 2px 0; }
-  .plan-review-content code {
-    font-family: 'Geist Mono', 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 11.5px;
-    background: var(--bg-secondary);
-    padding: 1px 4px;
-    border-radius: 3px;
-  }
-  .plan-review-content pre {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 8px 10px;
-    overflow-x: auto;
-    margin: 8px 0;
-  }
-  .plan-review-content pre code {
-    background: transparent;
-    padding: 0;
-  }
-  .plan-review-content table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 8px 0;
-    font-size: 11.5px;
-  }
-  .plan-review-content th,
-  .plan-review-content td {
-    border: 1px solid var(--border);
-    padding: 4px 8px;
-    text-align: left;
-  }
-  .plan-review-content th {
-    background: var(--bg-secondary);
-    font-weight: 600;
-  }
-  .plan-review-content hr {
-    border: none;
-    border-top: 1px solid var(--border);
-    margin: 12px 0;
-  }
-  .plan-review-content strong { color: var(--text); }
-  .plan-review-content blockquote {
-    margin: 6px 0;
-    padding: 4px 12px;
-    border-left: 3px solid var(--border);
-    color: var(--text-muted);
   }
   .plan-review-actions {
     display: flex;

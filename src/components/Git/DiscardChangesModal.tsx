@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 
 interface DiscardChangesModalProps {
   filePath: string;
@@ -16,8 +17,13 @@ export default function DiscardChangesModal({ filePath, onConfirm, onCancel }: D
     return () => document.removeEventListener('keydown', handler);
   }, [onConfirm, onCancel]);
 
-  return (
+  // Portal to <body>: the modal is invoked from inside the git sidebar, whose
+  // Framer-Motion `.sidebar-slot` wrapper applies a transform — that establishes a
+  // containing block for `position: fixed`, trapping this overlay inside the narrow
+  // sidebar ("wall to wall"). Rendering into <body> escapes it so it covers the window.
+  return createPortal(
     <div
+      data-discard-modal
       onClick={onCancel}
       style={{
         position: 'fixed',
@@ -103,6 +109,7 @@ export default function DiscardChangesModal({ filePath, onConfirm, onCancel }: D
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

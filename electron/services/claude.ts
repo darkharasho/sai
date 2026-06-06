@@ -1,7 +1,7 @@
 import { spawn, ChildProcess, execFile } from 'node:child_process';
 import { BrowserWindow, ipcMain, app } from 'electron';
 import { getOrCreate, get, getClaude, touchActivity, listAllWorkspaces } from './workspace';
-import type { PendingToolUse } from './workspace';
+import type { PendingToolUse, WorkspaceClaude } from './workspace';
 import { sweepIdleScopes, IDLE_SCOPE_MS, SWEEP_INTERVAL_MS } from './idleScopeSweep';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
@@ -329,6 +329,16 @@ function ensureProcess(
         // forward the assistant message that contains the tool_use itself (so
         // the card shows), then start buffering from the very next message. ---
         if (claude.awaitingQuestionAnswer) {
+          if (msg.type === 'result') {
+            // The CLI's auto-dismissed turn for this question just ended. If the user has
+            // already answered, inject now; otherwise note it drained so a later answer
+            // injects immediately.
+            claude.questionTurnDrained = true;
+            if (claude.pendingQuestionAnswer) flushPendingQuestionAnswer(claude);
+          } else if (claude.pendingQuestionAnswer) {
+            // Answer is held but the dismissed turn is still streaming — keep deferring.
+            armQuestionAnswerFallback(claude);
+          }
           continue;
         }
 
@@ -431,6 +441,12 @@ function ensureProcess(
         if (askUserQuestionId) {
           claude.awaitingQuestionAnswer = true;
           claude.pendingQuestionId = askUserQuestionId;
+          claude.questionTurnDrained = false;
+          claude.pendingQuestionAnswer = null;
+          if (claude.questionAnswerFallbackTimer) {
+            clearTimeout(claude.questionAnswerFallbackTimer);
+            claude.questionAnswerFallbackTimer = null;
+          }
           const wsName = ws.projectPath.split('/').pop() || ws.projectPath;
           const questions = claude.pendingToolUse?.input?.questions;
           const firstQuestion = Array.isArray(questions) && questions[0]?.question
@@ -504,6 +520,12 @@ function ensureProcess(
     claude.awaitingApproval = false;
     claude.awaitingQuestionAnswer = false;
     claude.pendingQuestionId = null;
+    claude.pendingQuestionAnswer = null;
+    claude.questionTurnDrained = false;
+    if (claude.questionAnswerFallbackTimer) {
+      clearTimeout(claude.questionAnswerFallbackTimer);
+      claude.questionAnswerFallbackTimer = null;
+    }
     claude.awaitingPlanReview = false;
     claude.pendingPlanReviewId = null;
     claude.streaming = false;
@@ -523,6 +545,12 @@ function ensureProcess(
     claude.awaitingApproval = false;
     claude.awaitingQuestionAnswer = false;
     claude.pendingQuestionId = null;
+    claude.pendingQuestionAnswer = null;
+    claude.questionTurnDrained = false;
+    if (claude.questionAnswerFallbackTimer) {
+      clearTimeout(claude.questionAnswerFallbackTimer);
+      claude.questionAnswerFallbackTimer = null;
+    }
     claude.awaitingPlanReview = false;
     claude.pendingPlanReviewId = null;
     claude.streaming = false;
@@ -648,6 +676,44 @@ export function interruptImpl(projectPath: string, scope?: string): void {
   }
 }
 
+/** Inject the held AskUserQuestion answer into the CLI as a corrective user message and
+ *  re-open the output gate. Called once the CLI's auto-dismissed turn has fully drained
+ *  (its `result` was seen) or, as a fallback, after a grace period if the CLI blocked. */
+function flushPendingQuestionAnswer(claude: WorkspaceClaude): void {
+  const pending = claude.pendingQuestionAnswer;
+  if (!pending) return;
+  if (claude.questionAnswerFallbackTimer) {
+    clearTimeout(claude.questionAnswerFallbackTimer);
+    claude.questionAnswerFallbackTimer = null;
+  }
+  claude.awaitingQuestionAnswer = false;
+  claude.pendingQuestionId = null;
+  claude.questionTurnDrained = false;
+  claude.pendingQuestionAnswer = null;
+  const proc = claude.process;
+  if (proc?.stdin && !proc.stdin.destroyed) {
+    const followUp = JSON.stringify({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: `[AskUserQuestion answers for tool call ${pending.toolUseId}]\nThe user picked the following answers (the earlier placeholder tool_result for this tool call should be disregarded):\n${JSON.stringify(pending.answers, null, 2)}`,
+      },
+    });
+    proc.stdin.write(followUp + '\n');
+  }
+}
+
+/** (Re)arm the grace timer that flushes a held answer if the CLI never emits a turn-end
+ *  `result` (i.e. it blocked rather than auto-dismissing). Reset on each gated message so
+ *  a still-streaming auto-dismissed turn keeps deferring until its `result` arrives. */
+function armQuestionAnswerFallback(claude: WorkspaceClaude): void {
+  if (claude.questionAnswerFallbackTimer) clearTimeout(claude.questionAnswerFallbackTimer);
+  claude.questionAnswerFallbackTimer = setTimeout(() => {
+    claude.questionAnswerFallbackTimer = null;
+    flushPendingQuestionAnswer(claude);
+  }, 1500);
+}
+
 export async function answerQuestionImpl(
   projectPath: string,
   toolUseId: string,
@@ -659,14 +725,7 @@ export async function answerQuestionImpl(
   const effectiveScope = scope || 'chat';
   const claude = getClaude(ws, effectiveScope);
 
-  // Stop buffering CLI output now that the user has answered. The buffered
-  // messages (placeholder tool_result + cancellation acknowledgment) are
-  // dropped — the corrective user message below replaces them.
-  if (claude.awaitingQuestionAnswer && claude.pendingQuestionId === toolUseId) {
-    claude.awaitingQuestionAnswer = false;
-    claude.pendingQuestionId = null;
-  }
-
+  // Mark the card answered in the UI immediately.
   emitChatMessage({
     type: 'question_answered',
     projectPath: ws.projectPath,
@@ -675,6 +734,22 @@ export async function answerQuestionImpl(
     answers,
   });
 
+  // Deferred injection: the CLI auto-answers AskUserQuestion itself with a placeholder
+  // "dismissed" tool_result and keeps streaming that turn. We keep dropping that turn's
+  // output until it fully drains, THEN inject the real answer — otherwise releasing the
+  // gate the instant the user answers leaks the half-streamed "dismissed" reply. If the
+  // turn already drained, inject now; otherwise wait for its `result` (or the grace timer).
+  if (claude.awaitingQuestionAnswer && claude.pendingQuestionId === toolUseId) {
+    claude.pendingQuestionAnswer = { toolUseId, answers };
+    if (claude.questionTurnDrained) {
+      flushPendingQuestionAnswer(claude);
+    } else {
+      armQuestionAnswerFallback(claude);
+    }
+    return true;
+  }
+
+  // Gate already released (e.g. answered after the flow reset): inject directly.
   const proc = claude.process;
   if (proc?.stdin && !proc.stdin.destroyed) {
     const followUp = JSON.stringify({

@@ -33,6 +33,14 @@ export interface WorkspaceClaude {
   // AskUserQuestion flow state — buffer CLI output between the tool_use and the user's answer
   awaitingQuestionAnswer: boolean;
   pendingQuestionId: string | null;
+  // The user's answer, held until the CLI's auto-dismissed turn fully drains so the
+  // hidden "dismissed" output never leaks. Flushed to stdin by flushPendingQuestionAnswer.
+  pendingQuestionAnswer: { toolUseId: string; answers: Record<string, string | string[]> } | null;
+  // True once the auto-dismissed turn's `result` has been seen (the turn drained).
+  questionTurnDrained: boolean;
+  // Grace timer: if the CLI blocked instead of auto-dismissing (no `result` to wait for),
+  // inject the answer anyway so it's never stranded. Reset while the dismissed turn streams.
+  questionAnswerFallbackTimer: ReturnType<typeof setTimeout> | null;
   // ExitPlanMode flow state — buffer CLI output until the user approves/rejects the plan
   awaitingPlanReview: boolean;
   pendingPlanReviewId: string | null;
@@ -115,6 +123,9 @@ function newClaudeScope(cwd: string): WorkspaceClaude {
     awaitingApproval: false,
     awaitingQuestionAnswer: false,
     pendingQuestionId: null,
+    pendingQuestionAnswer: null,
+    questionTurnDrained: false,
+    questionAnswerFallbackTimer: null,
     awaitingPlanReview: false,
     pendingPlanReviewId: null,
     kind: 'chat',

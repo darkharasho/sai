@@ -8,6 +8,7 @@ import FileExplorerSidebar from './components/FileExplorer/FileExplorerSidebar';
 import SearchPanel from './components/SearchPanel/SearchPanel';
 import TitleBar from './components/TitleBar';
 import CodePanel from './components/CodePanel/CodePanel';
+import { extractEditToolUses, successfulToolResultIds } from './components/CodePanel/detectFileEdits';
 import UnsavedChangesModal from './components/UnsavedChangesModal';
 import WorkspaceToast, { type ToastTone } from './components/WorkspaceToast';
 import { computeChatToasts } from './lib/chatToasts';
@@ -280,6 +281,9 @@ export default function App() {
   // the ref re-syncs, so without this guard the same task fires task_completed
   // twice (visible as duplicate inline cards).
   const emittedLifecycleRef = useRef<Set<string>>(new Set());
+  // tool_use_ids of in-flight AI file edits, awaiting their tool_result so we can
+  // hot-reload open files the instant an edit completes.
+  const pendingEditsRef = useRef<Set<string>>(new Set());
   // Per-workspace activity ring buffers powering the orchestrator sparklines.
   // - tools: timed tool_use events (filtered per task for SpawnTaskCard)
   // - activeBuckets: 12-element ring of `streaming+queued+awaiting_approval`
@@ -2027,41 +2031,67 @@ export default function App() {
     return () => clearInterval(id);
   }, [projectPath]);
 
+  // Reload-or-banner decision for a single open file whose on-disk content changed.
+  // Clean file → swap in the new content (hot reload); dirty file → flag the conflict
+  // banner so the user chooses. Shared by the 5s poll and the instant AI-edit trigger.
+  const applyExternalChange = useCallback(async (projectPath: string, filePath: string) => {
+    const ws = workspacesRef.current.get(projectPath);
+    const file = ws?.openFiles.find(f => f.path === filePath);
+    if (!file) return;
+    if (file.isDirty) {
+      setExternallyModified(prev => (prev.has(filePath) ? prev : new Set([...prev, filePath])));
+      return;
+    }
+    try {
+      const [content, { mtime }] = await Promise.all([
+        window.sai.fsReadFile(filePath) as Promise<string>,
+        window.sai.fsMtime(filePath) as Promise<{ mtime: number }>,
+      ]);
+      updateWorkspace(projectPath, w => ({
+        ...w,
+        openFiles: w.openFiles.map(f =>
+          f.path === filePath
+            ? { ...f, content, savedContent: content, isDirty: false, diskMtime: mtime }
+            : f
+        ),
+      }));
+    } catch {
+      // File may have been deleted/moved between the signal and the read; ignore.
+    }
+  }, [updateWorkspace]);
+
+  // Re-check each open editor file's mtime and hot-reload (or flag a conflict) any that
+  // changed on disk. Reads each file by ITS OWN path, so it's robust to path-normalization
+  // differences (e.g. a `/home` → `/var/home` home symlink) between the editor's open path
+  // and whatever absolute form an external writer — including the AI — reports. Shared by
+  // the 5s poll and the instant AI-edit trigger.
+  const resyncOpenFiles = useCallback(async (projectPath: string) => {
+    const ws = workspacesRef.current.get(projectPath);
+    if (!ws) return;
+    const editorFiles = ws.openFiles.filter(
+      f => f.viewMode === 'editor' && f.diskMtime !== undefined
+    );
+    for (const file of editorFiles) {
+      try {
+        const { mtime } = await (window.sai.fsMtime(file.path) as Promise<{ mtime: number }>);
+        if (mtime <= file.diskMtime!) continue;
+        await applyExternalChange(projectPath, file.path);
+      } catch {
+        // File may have been deleted or moved; ignore
+      }
+    }
+  }, [applyExternalChange]);
+
+  // The claude:message effect subscribes once (empty deps) and reads live values via refs,
+  // so expose the latest resync through a ref to avoid a stale closure.
+  const resyncOpenFilesRef = useRef(resyncOpenFiles);
+  resyncOpenFilesRef.current = resyncOpenFiles;
+
   useEffect(() => {
     if (!projectPath) return;
-    const id = setInterval(async () => {
-      const ws = workspacesRef.current.get(projectPath);
-      if (!ws) return;
-      const editorFiles = ws.openFiles.filter(
-        f => f.viewMode === 'editor' && f.diskMtime !== undefined
-      );
-      for (const file of editorFiles) {
-        try {
-          const { mtime } = await (window.sai.fsMtime(file.path) as Promise<{ mtime: number }>);
-          if (mtime <= file.diskMtime!) continue;
-          if (!file.isDirty) {
-            const content = await (window.sai.fsReadFile(file.path) as Promise<string>);
-            updateWorkspace(projectPath, w => ({
-              ...w,
-              openFiles: w.openFiles.map(f =>
-                f.path === file.path
-                  ? { ...f, content, savedContent: content, isDirty: false, diskMtime: mtime }
-                  : f
-              ),
-            }));
-          } else {
-            setExternallyModified(prev => {
-              if (prev.has(file.path)) return prev;
-              return new Set([...prev, file.path]);
-            });
-          }
-        } catch {
-          // File may have been deleted or moved; ignore
-        }
-      }
-    }, 5000);
+    const id = setInterval(() => { void resyncOpenFiles(projectPath); }, 5000);
     return () => clearInterval(id);
-  }, [projectPath, updateWorkspace]);
+  }, [projectPath, resyncOpenFiles]);
 
   // Global Ctrl+H handler for chat history sidebar
   useKeybinding('chatHistory.toggle', useCallback((e) => {
@@ -2117,6 +2147,21 @@ export default function App() {
   useEffect(() => {
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
       if (!msg.projectPath) return;
+      // Hot-reload open files the AI edits: note each edit tool_use, then when its
+      // tool_result reports success, re-sync open files by mtime. We don't match the AI's
+      // reported path against open files — they can differ (symlinked home, normalization);
+      // the mtime resync reads each open file by its own path, which always resolves.
+      if (msg.type === 'assistant') {
+        for (const { id } of extractEditToolUses(msg.message?.content, msg.projectPath)) {
+          pendingEditsRef.current.add(id);
+        }
+      } else if (msg.type === 'user') {
+        let editCompleted = false;
+        for (const id of successfulToolResultIds(msg.message?.content)) {
+          if (pendingEditsRef.current.delete(id)) editCompleted = true;
+        }
+        if (editCompleted) void resyncOpenFilesRef.current(msg.projectPath);
+      }
       // Use composite key (projectPath:scope) for turnSeq tracking
       const scopeKey = `${msg.projectPath}:${msg.scope || 'chat'}`;
       // Swarm status mirror — runs for every workspace+scope so background
@@ -2886,6 +2931,24 @@ export default function App() {
     }
   }, [activeProjectPath, workspaces, handleToggleMdPreview]));
 
+  // Mark a workspace's active session as viewed — bump lastViewedAt (persisted +
+  // in-memory), the same signal that clears a session's unread "!". Without this,
+  // visiting a workspace clears the raw completed flag but computeCompletedWorkspaces
+  // re-flags it as unread (updatedAt > lastViewedAt) the moment focus moves away, so
+  // the green "completed" squircle never durably clears on visit.
+  const markActiveSessionViewed = useCallback((projectPath: string) => {
+    const ws = workspacesRef.current.get(projectPath);
+    const sid = ws?.activeSession?.id;
+    if (!ws || !sid) return;
+    const viewedAt = Date.now();
+    void dbPatchSessionMeta(projectPath, sid, { lastViewedAt: viewedAt }).catch(() => {});
+    updateWorkspace(projectPath, w => ({
+      ...w,
+      activeSession: { ...w.activeSession, lastViewedAt: viewedAt },
+      sessions: w.sessions.map(s => s.id === sid ? { ...s, lastViewedAt: viewedAt } : s),
+    }));
+  }, [updateWorkspace]);
+
   const handleProjectSwitch = useCallback((newPath: string) => {
     setActiveMetaRuntime(null);
     if (newPath === activeProjectPath) return;
@@ -2923,7 +2986,10 @@ export default function App() {
       next.delete(newPath);
       return next;
     });
-  }, [activeProjectPath, workspaces]);
+    // Tie the green-squircle clear to the unread "!" mechanism: visiting marks the
+    // workspace's active session viewed so it isn't re-flagged after you switch away.
+    markActiveSessionViewed(newPath);
+  }, [activeProjectPath, workspaces, markActiveSessionViewed]);
 
   const handleMetaWorkspaceActivate = useCallback(async (id: string) => {
     const runtime = await window.sai.metaWorkspaceActivate?.(id);
@@ -2966,7 +3032,8 @@ export default function App() {
       next.delete(runtime.syntheticRoot);
       return next;
     });
-  }, [activeProjectPath]);
+    markActiveSessionViewed(runtime.syntheticRoot);
+  }, [activeProjectPath, markActiveSessionViewed]);
 
   const handleMetaWorkspaceCreated = useCallback((runtime: MetaWorkspaceRuntime) => {
     setMetaWorkspaces(prev => {

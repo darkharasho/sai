@@ -984,4 +984,141 @@ describe('ChatPanel', () => {
     expect(assistantMsg.durationMs).toBe(2500);
     expect(assistantMsg.startedAt).toBe(1000);
   });
+
+  it('does not render between-turn dividers (removed in chat message list refresh)', async () => {
+    const props = {
+      ...baseProps(),
+      initialMessages: [
+        { id: 'u1', role: 'user' as const, content: 'first', timestamp: 0 },
+        { id: 'a1', role: 'assistant' as const, content: 'reply one', timestamp: 1 },
+        { id: 'u2', role: 'user' as const, content: 'second', timestamp: 2 },
+        { id: 'a2', role: 'assistant' as const, content: 'reply two', timestamp: 3 },
+      ],
+    };
+    const { container } = render(<ChatPanel {...props} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const dividers = container.querySelectorAll('.chat-turn-divider');
+    expect(dividers.length).toBe(0);
+    // and confirm the map still renders every message (no Fragment regression)
+    expect(container.querySelectorAll('[data-testid="chat-message"]').length).toBe(4);
+  });
+
+  describe('SAI thinking row relocation', () => {
+    it('SAI: shows a pending thinking row when streaming with no assistant segment yet', async () => {
+      const props = { ...baseProps(), aiProvider: 'claude' as const };
+      const { container, rerender } = render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+      // Only a user message exists; no assistant segment is streaming yet.
+      await act(async () => {
+        for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+          (handler as (msg: any) => void)({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+        }
+      });
+      rerender(<ChatPanel {...props} isStreaming />);
+
+      // The detached/pending tail row renders the ThinkingAnimation.
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+    });
+
+    it('SAI: no detached banner once an assistant segment is streaming', async () => {
+      const props = { ...baseProps(), aiProvider: 'claude' as const };
+      const { container, rerender } = render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+      // Text deltas arrive: the first appends an assistant segment; the second hits the
+      // streaming fast-path and sets streamSettled=false, so the per-segment morph head
+      // (not the tail row) carries the thinking visuals.
+      const delta = (text: string) => ({
+        type: 'assistant',
+        message: { content: [{ type: 'text', delta: true, text }] },
+        projectPath: '/project',
+        scope: 'chat',
+      });
+      await act(async () => {
+        for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+          (handler as (msg: any) => void)({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+          (handler as (msg: any) => void)(delta('think'));
+        }
+      });
+      // Second delta in a separate act so the first has committed to messagesRef,
+      // letting the streaming fast-path fire and flip streamSettled=false.
+      await act(async () => {
+        for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+          (handler as (msg: any) => void)(delta('ing...'));
+        }
+      });
+      rerender(<ChatPanel {...props} isStreaming />);
+
+      // No standalone thinking banner at the tail.
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeNull();
+      // The morph head lives inside the streaming assistant ChatMessage (mocked).
+      const streamingMsg = container.querySelector('[data-testid="chat-message"][data-streaming="true"]');
+      expect(streamingMsg).toBeTruthy();
+    });
+
+    it('non-SAI provider keeps the detached banner', async () => {
+      const props = { ...baseProps(), aiProvider: 'gemini' as const };
+      const { container, rerender } = render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+      await act(async () => {
+        for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+          (handler as (msg: any) => void)({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+        }
+      });
+      rerender(<ChatPanel {...props} isStreaming />);
+
+      // Gemini banner present (cross-slide hint is gemini-specific).
+      expect(container.querySelector('.gemini-hint-slide')).toBeTruthy();
+    });
+  });
+
+  describe('thinking continuity across tool calls', () => {
+    // An assistant event carrying a tool_use block (optionally preceded by typed text).
+    // streamSettled stays true here (no pure-text-delta path runs), mirroring the real
+    // idle state while a tool executes.
+    const toolUseEvent = (text?: string) => ({
+      type: 'assistant',
+      message: {
+        content: [
+          ...(text ? [{ type: 'text', text }] : []),
+          { type: 'tool_use', id: 'tool-1', name: 'Read', input: { file: 'x.ts' } },
+        ],
+      },
+      projectPath: '/project',
+      scope: 'chat',
+    });
+
+    it('SAI: keeps a thinking row during a no-preamble tool call', async () => {
+      const props = { ...baseProps(), aiProvider: 'claude' as const };
+      const { container, rerender } = render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+      await act(async () => {
+        for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+          (handler as (m: any) => void)({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+          (handler as (m: any) => void)(toolUseEvent());
+        }
+      });
+      rerender(<ChatPanel {...props} isStreaming />);
+      // The tool is running and the AI is still working → a thinking row must remain.
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+    });
+
+    it('SAI: keeps a thinking row when a typed response leads into a tool call', async () => {
+      const props = { ...baseProps(), aiProvider: 'claude' as const };
+      const { container, rerender } = render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+      await act(async () => {
+        for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+          (handler as (m: any) => void)({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+          (handler as (m: any) => void)(toolUseEvent('Let me check that file.'));
+        }
+      });
+      rerender(<ChatPanel {...props} isStreaming />);
+      // The typed text reveals (in the mocked ChatMessage) AND a thinking row remains
+      // below it while the tool runs — the animation must not vanish.
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+    });
+  });
 });

@@ -13,6 +13,9 @@ export const EASING = {
   inOut: [0.65, 0, 0.35, 1] as const,
 };
 
+// Calm, no-overshoot entrance for assistant messages (the word reveal carries the motion).
+export const FADE_IN = { duration: 0.18, ease: EASING.out } as const satisfies Transition;
+
 export const STAGGER = { tight: 30, default: 55, loose: 90 } as const;
 export const DISTANCE = { nudge: 4, slide: 12, lift: 24 } as const;
 

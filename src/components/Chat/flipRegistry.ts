@@ -1,7 +1,7 @@
 // Pending source rect for the most recent user-message FLIP animation.
 // Module-level so ChatPanel (writer) and ChatMessage (reader) don't have to
-// thread a ref through props. Mirrors the SEEN_MESSAGES / TYPEWRITER_PROGRESS
-// pattern already used in ChatMessage.tsx.
+// thread a ref through props. Mirrors the SEEN_MESSAGES pattern already used
+// in ChatMessage.tsx.
 //
 // Reads are non-destructive — React 18 StrictMode mounts components twice in
 // dev, and a destructive consume would silently disable the animation in dev

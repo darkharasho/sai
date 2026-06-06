@@ -6,6 +6,7 @@ import ThinkingAnimation from '../ThinkingAnimation';
 import SaiLogo from '../SaiLogo';
 import MotionPresence from './MotionPresence';
 import { SPRING, DISTANCE, EASING, useReducedMotionTransition } from './motion';
+import { useSaiAnimationPref } from './useSaiAnimationPref';
 
 // Projects whose brainstorm seed has already been consumed (or attempted) in
 // this renderer process. The seed is one-shot, but the chat start-effect can
@@ -286,6 +287,7 @@ import ChatInput, { type ContextItem } from './ChatInput';
 import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, QueuedMessage, TerminalTab } from '../../types';
 import type { MetaWorkspaceRuntime } from '../../types';
 import { buildHelpMessage } from './helpText';
+import { buildTaskRegistry, TaskRegistryContext } from './taskRegistry';
 import { parseAiError, looksLikeApiError } from './parseAiError';
 import { buildMetaPreamble } from '../../lib/metaSystemPrompt';
 
@@ -597,6 +599,7 @@ const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
 export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(initialMessages || []);
+  const taskRegistry = useMemo(() => buildTaskRegistry(messages), [messages]);
   const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);
   const setMessages = useCallback((updater: ChatMessageType[] | ((prev: ChatMessageType[]) => ChatMessageType[])) => {
     setMessagesRaw(prev => {
@@ -619,6 +622,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   // instead of waiting for end-of-turn.
   const STREAM_IDLE_MS = 250;
   const [streamSettled, setStreamSettled] = useState(true);
+  const saiAnimationEnabled = useSaiAnimationPref();
   const streamIdleTimerRef = useRef<number | null>(null);
   const flushStreamingText = useCallback(() => {
     if (streamRafRef.current != null) {
@@ -1087,6 +1091,19 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           // skip the setMessages entirely. Only applies when the last message is
           // already a pure-text assistant bubble we can append to.
           const lastNow = messagesRef.current[messagesRef.current.length - 1];
+          // Mark the assistant bubble as actively streaming and (re)arm the idle timer
+          // so markdown renders mid-turn on a pause and the thinking head stays in its
+          // thinking phase. Used by both the fast path and the slow path's text branch.
+          const markStreamingActive = () => {
+            setStreamSettled(s => s ? false : s);
+            if (streamIdleTimerRef.current != null) {
+              clearTimeout(streamIdleTimerRef.current);
+            }
+            streamIdleTimerRef.current = window.setTimeout(() => {
+              streamIdleTimerRef.current = null;
+              setStreamSettled(true);
+            }, STREAM_IDLE_MS);
+          };
           if (
             isPureTextDelta
             && tools.length === 0
@@ -1100,16 +1117,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
                 flushStreamingText();
               });
             }
-            // Mark the bubble as in-flight and (re)arm the idle timer so
-            // markdown renders mid-turn when streaming pauses.
-            setStreamSettled(s => s ? false : s);
-            if (streamIdleTimerRef.current != null) {
-              clearTimeout(streamIdleTimerRef.current);
-            }
-            streamIdleTimerRef.current = window.setTimeout(() => {
-              streamIdleTimerRef.current = null;
-              setStreamSettled(true);
-            }, STREAM_IDLE_MS);
+            markStreamingActive();
             return;
           }
           setMessages(prev => {
@@ -1147,7 +1155,13 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
               toolCalls: tools.length > 0 ? tools : undefined,
             }];
           });
-
+          // A text segment created/updated via the slow path (e.g. the first delta of a
+          // turn, or follow-up text after a tool) must also flip streamSettled=false so
+          // its head stays in the thinking phase — otherwise the head reveals the first
+          // chunk prematurely and the pending row briefly double-shows. Tool-only events
+          // (no text) intentionally leave streamSettled alone so the pending row keeps a
+          // thinking indicator alive while the tool runs.
+          if (text && tools.length === 0) markStreamingActive();
         }
       }
 
@@ -1461,6 +1475,20 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     return owner;
   }, [messages]);
   const showThinking = isStreaming && !awaitingQuestion;
+  const isSaiProvider = aiProvider !== 'gemini' && aiProvider !== 'codex';
+  const saiMorphActive = isSaiProvider && saiAnimationEnabled;
+  const lastMsg = messages[messages.length - 1];
+  // A segment head shows the thinking row only while it is ACTIVELY streaming text
+  // (`!streamSettled`). Once it settles — text revealed, or a tool is running, or it's
+  // between segments — the head goes quiet, so the trailing pending row must take over
+  // to keep a thinking indicator alive while the turn continues (e.g. during a tool
+  // call after a typed response). The first-text-delta no longer leaves a stale window
+  // here because the slow path now clears streamSettled when it creates a text segment.
+  const hasStreamingAssistantSegment = !streamSettled && lastMsg?.role === 'assistant';
+  // SAI morph path: only a pending tail row when no segment head is actively thinking.
+  const showPendingSaiThinking = showThinking && saiMorphActive && !hasStreamingAssistantSegment;
+  // Detached banner: non-SAI providers, OR SAI with the animation pref off (today's fallback).
+  const showDetachedBanner = showThinking && !saiMorphActive;
   const hasHiddenMessages = renderStart > 0;
 
   useEffect(() => {
@@ -1806,6 +1834,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
                 <span className="chat-load-sentinel-text">Loading earlier messages...</span>
               </div>
             )}
+            <TaskRegistryContext.Provider value={taskRegistry}>
             {visibleMessages.map(msg => msg.role === 'user'
                 ? (
                   <div
@@ -1831,10 +1860,11 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
                 )
                 : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} renderToolCall={renderToolCall} renderMessage={renderMessage} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} watcherUrlAllowlist={watcherUrlsByMessageId.get(msg.id) ?? EMPTY_URL_SET} />
               )}
+            </TaskRegistryContext.Provider>
           </>
         )}
         <MotionPresence>
-          {showThinking && (
+          {showDetachedBanner && (
             <motion.div
               key="thinking"
               initial={{ opacity: 0, y: DISTANCE.lift }}
@@ -1845,6 +1875,17 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
               {aiProvider === 'gemini' ? <GeminiThinkingAnimation loadingPhrases={geminiLoadingPhrases} />
                 : aiProvider === 'codex' ? <CodexThinkingAnimation />
                 : <ThinkingAnimation />}
+            </motion.div>
+          )}
+          {showPendingSaiThinking && (
+            <motion.div
+              key="thinking-pending"
+              initial={{ opacity: 0, y: DISTANCE.lift }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={thinkingTransition}
+            >
+              <ThinkingAnimation />
             </motion.div>
           )}
         </MotionPresence>

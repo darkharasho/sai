@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useContext } from 'react';
 import {
   Terminal, FileText, Wrench, ChevronRight, Globe, AlertCircle,
   FilePen, FilePlus, SearchCode, FolderSearch, ListTodo, Bot,
   ClipboardList, ClipboardCheck, Zap, Send, GitBranch, GitMerge,
   Activity, AlarmClock, Timer, TimerOff, SquareTerminal, CircleStop,
-  Radio, MessageCircleQuestion, NotebookPen, Plug,
+  Radio, MessageCircleQuestion, NotebookPen, Plug, ListChecks,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import type { ToolCall, MetaWorkspaceRuntime } from '../../types';
@@ -13,6 +13,11 @@ import { getShikiHighlighter, getActiveHighlightTheme } from '../../themes';
 import { DOT_MASK_URL } from '../../lib/assets';
 import { owningLink } from '../../lib/syntheticRoot';
 import PlanReviewCard from './PlanReviewCard';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { CARD_MD_CLASS, CARD_MD_STYLES } from './markdownCardStyles';
+import { parseSearchResults, isSearchTool, highlightMatches, type SearchRow } from './searchResults';
+import { TaskRegistryContext, type TaskInfo } from './taskRegistry';
 
 function parseMcpName(name: string): { server: string; tool: string } | null {
   if (!name.startsWith('mcp__')) return null;
@@ -62,6 +67,26 @@ function detectLang(toolCall: ToolCall): string {
   if (input.trim().startsWith('{') || input.trim().startsWith('[')) return 'json';
   if (input.includes('function ') || input.includes('const ') || input.includes('import ')) return 'typescript';
   return 'text';
+}
+
+/** Decide whether a tool-card body should render as formatted markdown.
+ *  True when the label is a .md/.markdown path, or the body shows clear
+ *  markdown structure. Conservative: plain prose / plain code stays as source. */
+export function isMarkdownBody(label: string, code: string): boolean {
+  if (/\.(md|markdown)$/i.test(label.trim())) return true;
+  const body = code || '';
+  // Require non-trivial content so a single value line doesn't promote.
+  if (body.split('\n').filter(l => l.trim()).length < 2) return false;
+  // ATX heading
+  if (/^#{1,6}\s+\S/m.test(body)) return true;
+  // Fenced code block (a ``` on its own line)
+  if (/^```/m.test(body)) return true;
+  // GFM table: a pipe row immediately followed by a separator row (---/:--/| ---)
+  if (/^.*\|.*\n[ \t]*\|?[ \t]*:?-{3,}/m.test(body)) return true;
+  // Two or more list items
+  const listItems = (body.match(/^\s*([-*+]|\d+\.)\s+\S/gm) || []).length;
+  if (listItems >= 2) return true;
+  return false;
 }
 
 function HighlightedCode({ code, lang, showLineNumbers }: { code: string; lang: string; showLineNumbers?: boolean }) {
@@ -217,6 +242,7 @@ interface FormatResult {
   code: string;
   langOverride?: string;
   diff?: { oldString: string; newString: string; fileLang: string };
+  query?: { pattern?: string; path?: string; glob?: string; type?: string };
 }
 
 function formatInput(toolCall: ToolCall): FormatResult {
@@ -256,7 +282,11 @@ function formatInput(toolCall: ToolCall): FormatResult {
       if (parsed.glob) parts.push(`glob: ${parsed.glob}`);
       if (parsed.type) parts.push(`type: ${parsed.type}`);
       const isGlob = toolCall.name?.toLowerCase().includes('glob');
-      return { label: isGlob ? `glob: ${parsed.pattern}` : `grep: ${parsed.pattern}`, code: parts.length > 1 ? parts.join('\n') : '' };
+      return {
+        label: isGlob ? `glob: ${parsed.pattern}` : `grep: ${parsed.pattern}`,
+        code: parts.length > 1 ? parts.join('\n') : '',
+        query: { pattern: parsed.pattern, path: parsed.path, glob: parsed.glob, type: parsed.type },
+      };
     }
 
     // WebFetch / WebSearch
@@ -300,6 +330,8 @@ const nameToIcon: Record<string, typeof Wrench> = {
   EnterPlanMode: ClipboardList,
   ExitPlanMode: ClipboardCheck,
   TodoWrite: ListTodo,
+  TaskCreate: ListTodo,
+  TaskUpdate: ListChecks,
   // Agent & orchestration
   Agent: Bot,
   Skill: Zap,
@@ -361,11 +393,146 @@ function resolveIcon(name: string, type: string): typeof Wrench {
   return iconByType[type] || Wrench;
 }
 
+const MD_REMARK_PLUGINS = [remarkGfm];
+
+function ToolCardMarkdown({ code }: { code: string }) {
+  return (
+    <div className={`tool-call-md ${CARD_MD_CLASS}`}>
+      <ReactMarkdown remarkPlugins={MD_REMARK_PLUGINS}>{code}</ReactMarkdown>
+    </div>
+  );
+}
+
+function SearchQueryView({ query }: { query: NonNullable<FormatResult['query']> }) {
+  const fields: [string, string | undefined][] = [
+    ['pattern', query.pattern],
+    ['path', query.path],
+    ['glob', query.glob],
+    ['type', query.type],
+  ];
+  const present = fields.filter(([, v]) => v != null && v !== '');
+  if (present.length === 0) return null;
+  return (
+    <div className="search-query">
+      {present.map(([k, v]) => (
+        <div key={k} className="search-query-row">
+          <span className="search-query-key">{k}</span>
+          <span className="search-query-val">{v}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const SEARCH_MAX_ROWS = 12;
+
+function SearchResultLine({ text, pattern }: { text: string; pattern?: string }) {
+  const segments = highlightMatches(text, pattern || '');
+  return (
+    <span className="search-line-text">
+      {segments.map((s, i) =>
+        s.hit ? <mark key={i} className="search-hit">{s.text}</mark> : <span key={i}>{s.text}</span>
+      )}
+    </span>
+  );
+}
+
+function SearchResultView({ rows, pattern }: { rows: SearchRow[]; pattern?: string }) {
+  const [showAll, setShowAll] = useState(false);
+  if (rows.length === 0) return null;
+  const visible = showAll ? rows : rows.slice(0, SEARCH_MAX_ROWS);
+  const hiddenCount = rows.length - visible.length;
+  return (
+    <div className="search-result">
+      {visible.map((row, i) => {
+        if (row.type === 'separator') return <div key={i} className="search-sep" aria-hidden />;
+        if (row.type === 'file') {
+          return (
+            <div key={i} className="search-row search-row-file">
+              <span className="search-dot" aria-hidden />
+              <span className="search-path">{row.path}</span>
+            </div>
+          );
+        }
+        if (row.type === 'match') {
+          return (
+            <div key={i} className="search-row search-row-match">
+              <span className="search-path">{row.path}</span>
+              <span className="search-gutter">:{row.line}:</span>
+              <SearchResultLine text={row.text} pattern={pattern} />
+            </div>
+          );
+        }
+        return <div key={i} className="search-row search-row-raw">{row.text}</div>;
+      })}
+      {(hiddenCount > 0 || showAll) && rows.length > SEARCH_MAX_ROWS && (
+        <button className="tool-call-show-more" onClick={() => setShowAll(prev => !prev)}>
+          {showAll ? 'Show less' : `Show all (${rows.length} results)`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+interface TaskFields {
+  taskId?: string;
+  subject?: string;
+  description?: string;
+  activeForm?: string;
+  status?: string;
+  owner?: string;
+  addBlocks?: string[];
+  addBlockedBy?: string[];
+}
+
+function parseTaskFields(input: string): TaskFields {
+  try {
+    const p = JSON.parse(input || '{}');
+    return {
+      taskId: p.taskId != null ? String(p.taskId) : undefined,
+      subject: typeof p.subject === 'string' ? p.subject : undefined,
+      description: typeof p.description === 'string' ? p.description : undefined,
+      activeForm: typeof p.activeForm === 'string' ? p.activeForm : undefined,
+      status: typeof p.status === 'string' ? p.status : undefined,
+      owner: typeof p.owner === 'string' ? p.owner : undefined,
+      addBlocks: Array.isArray(p.addBlocks) ? p.addBlocks.map(String) : undefined,
+      addBlockedBy: Array.isArray(p.addBlockedBy) ? p.addBlockedBy.map(String) : undefined,
+    };
+  } catch { return {}; }
+}
+
+function TaskCardView({ kind, fields, resolved }: { kind: 'create' | 'update'; fields: TaskFields; resolved?: TaskInfo }) {
+  const title = fields.subject || resolved?.subject || `Task #${fields.taskId ?? '?'}`;
+  const description = fields.description || (kind === 'update' ? resolved?.description : undefined);
+  const activeForm = fields.activeForm || (kind === 'update' ? resolved?.activeForm : undefined);
+  const badge = kind === 'create'
+    ? { cls: 'created', label: 'Created' }
+    : fields.status
+      ? { cls: fields.status, label: fields.status.replace(/_/g, ' ') }
+      : { cls: 'updated', label: 'Updated' };
+  return (
+    <div className="tool-call-body task-card">
+      <div className="task-card-head">
+        <span className="task-card-title">{title}</span>
+        <span className={`task-badge task-badge-${badge.cls}`}>{badge.label}</span>
+      </div>
+      {description && <div className="task-card-desc">{description}</div>}
+      <div className="task-card-meta">
+        {activeForm && <span className="task-chip">{activeForm}</span>}
+        {fields.owner && <span className="task-chip">owner: {fields.owner}</span>}
+        {fields.addBlocks && fields.addBlocks.length > 0 && <span className="task-chip">blocks {fields.addBlocks.length}</span>}
+        {fields.addBlockedBy && fields.addBlockedBy.length > 0 && <span className="task-chip">blocked by {fields.addBlockedBy.length}</span>}
+      </div>
+    </div>
+  );
+}
+
 const MAX_PREVIEW_LINES = 20;
 
 interface Todo {
   id: string;
   content: string;
+  activeForm?: string;
   status: 'pending' | 'in_progress' | 'completed';
   priority?: string;
 }
@@ -379,14 +546,23 @@ function TodoListView({ input }: { input: string }) {
 
   if (!todos.length) return null;
 
+  const done = todos.filter(t => t.status === 'completed').length;
+
   return (
     <div className="tool-call-body todo-list-body">
+      <div className="todo-list-head">
+        <span className="todo-list-title">Tasks</span>
+        <span className="todo-list-count" data-testid="todo-count">{done}/{todos.length}</span>
+      </div>
       {todos.map((todo, i) => (
         <div key={todo.id || i} className={`todo-item todo-${todo.status}`}>
           <span className="todo-icon">
             {todo.status === 'completed' ? '✓' : todo.status === 'in_progress' ? '✦' : '○'}
           </span>
-          <span className="todo-content">{todo.content}</span>
+          <span className="todo-content">
+            {todo.status === 'in_progress' ? (todo.activeForm || todo.content) : todo.content}
+          </span>
+          {todo.priority && <span className="todo-priority">{todo.priority}</span>}
         </div>
       ))}
     </div>
@@ -726,9 +902,19 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
   const [showAllCode, setShowAllCode] = useState(false);
   const [showAllOutput, setShowAllOutput] = useState(false);
   const Icon = resolveIcon(toolCall.name, toolCall.type);
-  const { label, code, langOverride, diff } = formatInput(toolCall);
+  const { label, code, langOverride, diff, query } = formatInput(toolCall);
   const lang = langOverride || detectLang(toolCall);
   const { truncated, isTruncated } = truncateCode(code, MAX_PREVIEW_LINES);
+  const renderMarkdown = !diff && isMarkdownBody(label, code);
+  const [mdView, setMdView] = useState<'rendered' | 'source'>('rendered');
+  const search = !diff && !renderMarkdown
+    && toolCall.type !== 'terminal_command'
+    && toolCall.name !== 'TodoWrite'
+    && toolCall.name !== 'AskUserQuestion'
+    && isSearchTool(toolCall.name, toolCall.output || '');
+  const searchParsed = search && toolCall.output && !parseToolError(toolCall.output).isToolError
+    ? parseSearchResults(toolCall.output)
+    : null;
   const entryTransition = useReducedMotionTransition(SPRING.pop);
   const badgeTransition = useReducedMotionTransition(SPRING.flick);
   const chevronTransition = useReducedMotionTransition(SPRING.flick);
@@ -737,6 +923,12 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
   const isBash = toolCall.type === 'terminal_command';
   const isTodo = toolCall.name === 'TodoWrite';
   const isAskUserQuestion = toolCall.name === 'AskUserQuestion';
+  const isTaskCreate = toolCall.name === 'TaskCreate';
+  const isTaskUpdate = toolCall.name === 'TaskUpdate';
+  const isTask = isTaskCreate || isTaskUpdate;
+  const taskRegistry = useContext(TaskRegistryContext);
+  const taskFields = isTask ? parseTaskFields(toolCall.input || '') : null;
+  const taskResolved = isTaskUpdate && taskFields?.taskId ? taskRegistry.get(taskFields.taskId) : undefined;
   const askAnswered = isAskUserQuestion && (() => {
     try { return Object.keys(JSON.parse(toolCall.input || '{}').answers || {}).length > 0; } catch { return false; }
   })();
@@ -746,7 +938,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
     toolCall.output && parseToolError(toolCall.output).isToolError ? 'error' :
     toolCall.output ? 'done' : 'running';
 
-  const hasBody = isAskUserQuestion ? true : isBash ? !!toolCall.output : isTodo ? true : !!code;
+  const hasBody = isAskUserQuestion ? true : isTask ? true : isBash ? !!toolCall.output : isTodo ? true : search ? (!!toolCall.output || !!query) : !!code;
 
   const sigClass =
     (toolCall.name.includes('Edit') || toolCall.name === 'Write' || toolCall.type === 'file_edit') ? 'tool-sig-wipe' :
@@ -827,7 +1019,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
           {expanded && hasBody && (
             <motion.div
               key="tool-call-expand"
-              className="tool-call-expand"
+              className="tool-call-expand dashed-divider-top"
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
@@ -842,6 +1034,9 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
               />
             )}
             {isTodo && <TodoListView input={toolCall.input || ''} />}
+            {isTask && taskFields && (
+              <TaskCardView kind={isTaskCreate ? 'create' : 'update'} fields={taskFields} resolved={taskResolved} />
+            )}
             {isAskUserQuestion && (
               <AskUserQuestionView
                 toolUseId={toolCall.id}
@@ -849,14 +1044,71 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
                 onAnswerQuestion={onAnswerQuestion}
               />
             )}
-            {!isBash && !isTodo && !isAskUserQuestion && code && (
+            {search && !isTask && (
+              <div className="tool-call-body search-tool-body">
+                {query && <SearchQueryView query={query} />}
+                {toolCall.output && (() => {
+                  const parsedOutput = parseToolError(toolCall.output);
+                  if (parsedOutput.isToolError) {
+                    return (
+                      <div className="tool-call-output">
+                        <ToolErrorDisplay message={parsedOutput.message} />
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="tool-call-output">
+                      <div className="tool-call-output-header">
+                        <span className="tool-call-output-label">Results</span>
+                      </div>
+                      <SearchResultView rows={searchParsed?.rows || []} pattern={query?.pattern} />
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+            {!isBash && !isTodo && !isAskUserQuestion && !search && !isTask && code && (
               <div className="tool-call-body">
                 {diff ? (
                   <DiffHighlightedCode oldString={diff.oldString} newString={diff.newString} lang={diff.fileLang} />
+                ) : renderMarkdown ? (
+                  <>
+                    <div className="tool-call-md-toggle" data-testid="md-view-toggle" onClick={e => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        data-testid="md-view-rendered"
+                        aria-pressed={mdView === 'rendered'}
+                        className={`tool-call-md-seg${mdView === 'rendered' ? ' tool-call-md-seg-on' : ''}`}
+                        onClick={() => setMdView('rendered')}
+                      >
+                        Rendered
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="md-view-source"
+                        aria-pressed={mdView === 'source'}
+                        className={`tool-call-md-seg${mdView === 'source' ? ' tool-call-md-seg-on' : ''}`}
+                        onClick={() => setMdView('source')}
+                      >
+                        Source
+                      </button>
+                    </div>
+                    {mdView === 'rendered'
+                      ? <ToolCardMarkdown code={code} />
+                      : <HighlightedCode code={showAllCode ? code : truncated} lang={lang} />}
+                    {mdView === 'source' && isTruncated && (
+                      <button
+                        className="tool-call-show-more"
+                        onClick={() => setShowAllCode(prev => !prev)}
+                      >
+                        {showAllCode ? 'Show less' : `Show all (${code.split('\n').length} lines)`}
+                      </button>
+                    )}
+                  </>
                 ) : (
                   <HighlightedCode code={showAllCode ? code : truncated} lang={lang} />
                 )}
-                {isTruncated && (
+                {!renderMarkdown && !diff && isTruncated && (
                   <button
                     className="tool-call-show-more"
                     onClick={() => setShowAllCode(prev => !prev)}
@@ -995,7 +1247,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             flex-shrink: 0;
           }
           .tool-call-body {
-            border-top: 1px solid var(--border);
+            /* header↔body separator is the dashed line on .tool-call-expand (.dashed-divider-top) */
           }
           .tool-call-body .highlighted-code {
             font-size: 12px;
@@ -1012,6 +1264,124 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             font-size: 12px;
             background: transparent;
             border-radius: 0;
+          }
+          .tool-call-md {
+            padding: 10px 12px;
+            font-size: 12.5px;
+            line-height: 1.55;
+            color: var(--text);
+            max-height: 420px;
+            overflow-y: auto;
+          }
+          .tool-call-md-toggle {
+            display: inline-flex;
+            gap: 2px;
+            margin: 8px 12px 0;
+            padding: 2px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-secondary);
+          }
+          .tool-call-md-seg {
+            font-family: inherit;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            padding: 3px 9px;
+            border: none;
+            border-radius: 4px;
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+          }
+          .tool-call-md-seg-on {
+            background: color-mix(in srgb, var(--accent) 16%, transparent);
+            color: var(--accent);
+          }
+          .search-tool-body { padding-bottom: 4px; }
+          .search-query {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            padding: 10px 12px 6px;
+          }
+          .search-query-row {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+            font-family: 'Geist Mono', 'JetBrains Mono', monospace;
+            font-size: 11.5px;
+          }
+          .search-query-key {
+            flex-shrink: 0;
+            min-width: 56px;
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            padding-top: 1px;
+          }
+          .search-query-val { color: var(--text); word-break: break-all; }
+          .search-result {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            padding: 4px 0;
+          }
+          .search-row {
+            display: flex;
+            align-items: baseline;
+            gap: 6px;
+            padding: 1px 12px;
+            font-family: 'Geist Mono', 'JetBrains Mono', monospace;
+            font-size: 11.5px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-word;
+          }
+          .search-dot {
+            flex-shrink: 0;
+            width: 4px;
+            height: 4px;
+            border-radius: 50%;
+            background: var(--accent);
+            opacity: 0.7;
+            transform: translateY(-2px);
+          }
+          .search-path { color: var(--accent); flex-shrink: 0; }
+          .search-row-match .search-path { opacity: 0.85; }
+          .search-gutter { color: var(--text-muted); flex-shrink: 0; }
+          .search-line-text { color: var(--text-secondary); }
+          .search-hit {
+            background: color-mix(in srgb, var(--accent) 30%, transparent);
+            color: var(--text);
+            border-radius: 2px;
+            padding: 0 1px;
+          }
+          .search-row-raw { color: var(--text-muted); }
+          .search-sep {
+            height: 0;
+            border-top: 1px dashed var(--border);
+            margin: 3px 12px;
+          }
+          .task-card { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+          .task-card-head { display: flex; align-items: baseline; gap: 8px; }
+          .task-card-title { font-size: 12.5px; color: var(--text); font-weight: 600; flex: 1; word-break: break-word; }
+          .task-badge {
+            flex-shrink: 0; font-size: 9px; text-transform: uppercase; letter-spacing: 0.4px;
+            font-weight: 600; padding: 2px 7px; border-radius: 4px;
+            background: color-mix(in srgb, var(--text-muted) 18%, transparent); color: var(--text-secondary);
+          }
+          .task-badge-created { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+          .task-badge-in_progress { background: color-mix(in srgb, var(--orange, #e6b84f) 20%, transparent); color: var(--orange, #e6b84f); }
+          .task-badge-completed { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); }
+          .task-badge-deleted { background: color-mix(in srgb, var(--red, #f85149) 16%, transparent); color: var(--red, #f85149); }
+          .task-card-desc { font-size: 11.5px; color: var(--text-muted); line-height: 1.5; word-break: break-word; }
+          .task-card-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+          .task-chip {
+            font-size: 10px; padding: 2px 7px; border-radius: 4px;
+            background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-secondary);
+            font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           }
           .diff-highlighted {
             margin: 0;
@@ -1182,6 +1552,25 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
           .todo-in_progress .todo-content { color: var(--text); }
           .todo-pending .todo-icon { color: var(--text-muted); }
           .todo-pending .todo-content { color: var(--text-secondary); }
+          .todo-list-head {
+            display: flex; align-items: baseline; gap: 8px;
+            padding: 4px 12px 2px; border-bottom: 1px dashed var(--border); margin-bottom: 4px;
+          }
+          .todo-list-title {
+            font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); font-weight: 600;
+          }
+          .todo-list-count {
+            margin-left: auto; font-size: 10px; color: var(--text-muted);
+            font-variant-numeric: tabular-nums;
+            font-family: 'Geist Mono', 'JetBrains Mono', monospace;
+          }
+          .todo-priority {
+            margin-left: auto; flex-shrink: 0;
+            font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600;
+            padding: 1px 6px; border-radius: 3px;
+            background: color-mix(in srgb, var(--orange, #e6b84f) 18%, transparent);
+            color: var(--orange, #e6b84f);
+          }
           /* Status badge */
           .tool-status {
             display: inline-flex;
@@ -1418,7 +1807,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             color: var(--text-muted);
             font-style: italic;
           }
-        `}</style>
+        ` + CARD_MD_STYLES}</style>
       </motion.div>
     </>
   );

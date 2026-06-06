@@ -1,4 +1,4 @@
-import React, { memo, useState, useRef, useCallback, useEffect } from 'react';
+import React, { memo, useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
@@ -11,45 +11,40 @@ import GitHubWatcherCard from './GitHubWatcherCard';
 import { detectWatchTargets } from './githubWatcher';
 import Stagger from './Stagger';
 import { readFlipRect, hasFlipRect } from './flipRegistry';
-import { SPRING, DISTANCE, useReducedMotionTransition } from './motion';
+import { SPRING, DISTANCE, FADE_IN, useReducedMotionTransition, prefersReducedMotion } from './motion';
+import { revealWords } from './wordReveal';
 import type { ChatMessage as ChatMessageType, MetaWorkspaceRuntime } from '../../types';
 import { getActiveTerminalId } from '../../terminalBuffer';
 import SaiLogo from '../SaiLogo';
 import { matchLinkPreview } from './linkPreview';
 import LinkPreviewChip from './LinkPreviewChip';
+import StreamingAssistantHead from './StreamingAssistantHead';
+import { useSaiAnimationPref } from './useSaiAnimationPref';
+import { rehypeEmojiIcons } from './rehypeEmojiIcons';
+import { renderEmojiSpan } from './emojiIcons';
 
 // Message IDs that have already played their entry animation. Prevents the
 // animation from replaying if a message remounts (e.g. workspace swap, list
 // re-keying), so existing history doesn't shimmer in on every render.
 const SEEN_MESSAGES = new Set<string>();
-// Per-message typewriter progress, kept outside component state so a streaming
-// message survives unmount/remount (workspace swap, list re-keying) without
-// replaying the typewriter from zero.
-const TYPEWRITER_PROGRESS = new Map<string, number>();
+// Records ids that streamed token-by-token this session, so their post-stream
+// re-render is NOT word-revealed (the live append already showed them).
+const STREAMED_MESSAGES = new Set<string>();
+// A message counts as "fresh" (vs. history) if it arrived within this window.
+const REVEAL_FRESH_MS = 8000;
+const MD_PLUGINS = {
+  remarkPlugins: [remarkGfm],
+  rehypePlugins: [rehypeHighlight, rehypeFilePaths],
+  urlTransform: (url: string) =>
+    url.startsWith('sai-file://') ? url : defaultUrlTransform(url),
+};
 
-// Live preference cached at module scope so every mounted ChatMessage shares
-// one value without each one doing an IPC roundtrip. Hydrated once on first
-// import; SettingsModal broadcasts updates via the `sai-pref-typewriter`
-// window event so toggling the setting takes effect without remounting.
-let typewriterPref = true;
-let saiAnimationPref = true;
-if (typeof window !== 'undefined' && (window as any).sai?.settingsGet) {
-  (window as any).sai.settingsGet('typewriterEnabled', true).then((v: boolean) => { typewriterPref = v !== false; });
-  (window as any).sai.settingsGet('saiAnimationEnabled', true).then((v: boolean) => { saiAnimationPref = v !== false; });
-}
-
-// Walk back to the nearest whitespace at-or-before `len` so the visible text
-// only advances on word boundaries. Prevents mid-word twitching and stops
-// react-markdown / highlight.js from re-tokenizing half-finished tokens.
-function snapToWordBoundary(text: string, len: number): number {
-  if (len >= text.length) return text.length;
-  if (len <= 0) return 0;
-  for (let i = len; i > 0; i--) {
-    const c = text.charCodeAt(i);
-    if (c === 32 /* space */ || c === 10 /* \n */ || c === 9 /* \t */) return i;
-  }
-  return 0;
-}
+// Assistant messages also convert emoji to accent-colored SVG icons. User messages
+// keep MD_PLUGINS (no conversion) so typed emoji are left as-is.
+const ASSISTANT_MD_PLUGINS = {
+  ...MD_PLUGINS,
+  rehypePlugins: [rehypeHighlight, rehypeFilePaths, rehypeEmojiIcons],
+};
 
 const FILE_PATH_RE = /(?<![:/])\b((?:\.{1,2}\/)?(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte))(?::(\d+))?\b|(?<![:/.\w])((?:\/[\w.-]+)+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte))(?::(\d+))?\b/g;
 
@@ -330,8 +325,11 @@ function ChatMessage({
   const [shouldAnimateEntry] = useState(() => !SEEN_MESSAGES.has(message.id));
   useEffect(() => { SEEN_MESSAGES.add(message.id); }, [message.id]);
   const flipNodeRef = useRef<HTMLDivElement | null>(null);
-  const entryTransition = useReducedMotionTransition(SPRING.pop);
-  const entryDistance = DISTANCE.slide;
+  const mdRef = useRef<HTMLDivElement | null>(null);
+  const revealedRef = useRef(false);
+  const isAssistantMsg = message.role === 'assistant';
+  const entryTransition = useReducedMotionTransition(isAssistantMsg ? FADE_IN : SPRING.pop);
+  const entryDistance = isAssistantMsg ? 0 : DISTANCE.slide;
   const entryProps = shouldAnimateEntry
     ? { initial: { opacity: 0, y: entryDistance }, animate: { opacity: 1, y: 0 }, transition: entryTransition }
     : { initial: false as const, animate: { opacity: 1, y: 0 } };
@@ -425,97 +423,7 @@ function ChatMessage({
       }
     : entryProps;
 
-  const rawAssistantContent = (message.role === 'assistant' && typeof message.content === 'string')
-    ? message.content
-    : '';
-  const isAssistantStreamingFlag = isStreaming && message.role === 'assistant';
-  const [typewriterEnabled, setTypewriterEnabled] = useState(typewriterPref);
-  useEffect(() => {
-    const onPref = (e: Event) => setTypewriterEnabled(!!(e as CustomEvent).detail);
-    window.addEventListener('sai-pref-typewriter', onPref);
-    return () => window.removeEventListener('sai-pref-typewriter', onPref);
-  }, []);
-  const [saiAnimationEnabled, setSaiAnimationEnabled] = useState(saiAnimationPref);
-  useEffect(() => {
-    const onPref = (e: Event) => setSaiAnimationEnabled(!!(e as CustomEvent).detail);
-    window.addEventListener('sai-pref-sai-animation', onPref);
-    return () => window.removeEventListener('sai-pref-sai-animation', onPref);
-  }, []);
-  const tickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastSeenContentLenRef = useRef(0);
-  // Null the ref alongside clearing — otherwise the typewriter effect's
-  // `if (tickTimerRef.current) return` early-out treats the canceled timer ID
-  // as a still-pending timer and never schedules a replacement, freezing the
-  // typewriter at displayLen=0. (Surfaces in StrictMode dev: cleanup-between-
-  // effect-runs cancels the just-scheduled timer; without nulling, the second
-  // run bails and no tick ever fires.)
-  useEffect(() => () => {
-    if (tickTimerRef.current) {
-      clearTimeout(tickTimerRef.current);
-      tickTimerRef.current = null;
-    }
-  }, []);
-  // Typewriter stays active even after `isStreaming` flips false — short
-  // replies often finalize before the typewriter has time to drip, so we
-  // keep dripping until the visible text catches up to the buffer. A live
-  // entry in TYPEWRITER_PROGRESS marks "this message has been typing."
-  const typewriterActive = typewriterEnabled && message.role === 'assistant' && (isAssistantStreamingFlag || TYPEWRITER_PROGRESS.has(message.id));
-  const [displayLen, setDisplayLen] = useState(() => {
-    if (!typewriterActive) return rawAssistantContent.length;
-    return TYPEWRITER_PROGRESS.get(message.id) ?? 0;
-  });
-  useEffect(() => {
-    if (!typewriterActive) {
-      if (tickTimerRef.current) { clearTimeout(tickTimerRef.current); tickTimerRef.current = null; }
-      if (displayLen !== rawAssistantContent.length) setDisplayLen(rawAssistantContent.length);
-      lastSeenContentLenRef.current = rawAssistantContent.length;
-      return;
-    }
-    if (displayLen >= rawAssistantContent.length) {
-      // Caught up — clear the marker so a future re-mount of this message
-      // (workspace swap, list re-keying) renders the full content instantly
-      // instead of replaying the typewriter.
-      TYPEWRITER_PROGRESS.delete(message.id);
-      lastSeenContentLenRef.current = rawAssistantContent.length;
-      return;
-    }
-    // First tick after a streaming start — make sure the marker is set so
-    // the post-stream finalization path keeps the typewriter alive.
-    if (!TYPEWRITER_PROGRESS.has(message.id)) TYPEWRITER_PROGRESS.set(message.id, displayLen);
-    // Detect a single large IPC chunk (code block / big paragraph dump) by
-    // measuring the *delta since last evaluation*, not total backlog. Backlog
-    // naturally grows whenever the model streams faster than ~560 chars/sec,
-    // so a backlog threshold trips on every fast stream and stops dripping
-    // entirely. A per-flush delta only trips when the model hands us a true
-    // burst in one go.
-    const burstDelta = rawAssistantContent.length - lastSeenContentLenRef.current;
-    lastSeenContentLenRef.current = rawAssistantContent.length;
-    if (burstDelta > 1200) {
-      if (tickTimerRef.current) { clearTimeout(tickTimerRef.current); tickTimerRef.current = null; }
-      setDisplayLen(rawAssistantContent.length);
-      TYPEWRITER_PROGRESS.set(message.id, rawAssistantContent.length);
-      return;
-    }
-    const remaining = rawAssistantContent.length - displayLen;
-    // Don't reschedule if a tick is already pending — letting it fire is
-    // what guarantees forward progress when content updates arrive on the
-    // same cadence as the tick (the stream-buffer flush is also ~33ms, so
-    // restarting the timer on every flush would starve the typewriter).
-    if (tickTimerRef.current) return;
-    // Drain to zero in at most ~15 ticks (~480ms at 32ms cadence). A larger
-    // ratio on big bursts cuts the number of markdown/highlight.js re-renders
-    // in half versus a slow drain, which is what makes auto-scroll feel
-    // jittery during long replies. Floor keeps short replies readable.
-    const step = Math.max(18, Math.ceil(remaining / 15));
-    tickTimerRef.current = setTimeout(() => {
-      tickTimerRef.current = null;
-      setDisplayLen(d => {
-        const next = Math.min(d + step, rawAssistantContent.length);
-        TYPEWRITER_PROGRESS.set(message.id, next);
-        return next;
-      });
-    }, 32);
-  }, [typewriterActive, rawAssistantContent.length, displayLen, message.id]);
+  const saiAnimationEnabled = useSaiAnimationPref();
 
   if (message.error) {
     const { title, status, message: errMsg, requestId, details, errorType } = message.error;
@@ -815,13 +723,72 @@ function ChatMessage({
   }
 
   const isAssistantStreaming = isStreaming && message.role === 'assistant';
-  const isTyping = typewriterActive && displayLen < rawAssistantContent.length;
+  const streamedThisSession = STREAMED_MESSAGES.has(message.id);
+  const fresh = Date.now() - (message.timestamp ?? 0) <= REVEAL_FRESH_MS;
+  const useMorphHead =
+    message.role === 'assistant' &&
+    saiAnimationEnabled &&
+    aiProvider !== 'gemini' &&
+    aiProvider !== 'codex' &&
+    (isAssistantStreaming || streamedThisSession || fresh);
+  useLayoutEffect(() => {
+    if (message.role !== 'assistant') return;
+    if (isAssistantStreaming) { STREAMED_MESSAGES.add(message.id); }
+    if (useMorphHead) return;            // StreamingAssistantHead owns the reveal
+    if (isAssistantStreaming) return;
+    if (revealedRef.current) return;
+    if (!message.content) return;
+    // Reveal a reply generated this session (streamed → completed, any duration) or a
+    // fresh complete arrival; never history (not streamed this session + old timestamp).
+    // The outer `streamedThisSession`/`fresh` are safe to reuse: the add() at the top
+    // of this effect only runs when isAssistantStreaming=true, which causes an early
+    // return before we reach this point, so the set hasn't changed here.
+    if (!streamedThisSession && !fresh) return;
+    if (prefersReducedMotion()) return;
+    const el = mdRef.current;
+    if (!el) return;
+    revealedRef.current = true;
+    revealWords(el);
+  }, [isAssistantStreaming, message.id, message.role, message.content, message.timestamp, useMorphHead]);
   // When the parent passes an allowlist (main chat), only render watchers it explicitly
   // owns — prevents duplicates when the same run URL shows up in multiple messages. Other
   // callers (orchestrator, tests) don't pass an allowlist and get the full set.
   const watcherTargets = watcherUrlAllowlist
     ? detectWatchTargets(message).filter(t => watcherUrlAllowlist.has(t.url))
     : detectWatchTargets(message);
+
+  const markdownComponents = useMemo(() => ({
+    pre: ({ children, ...props }: any) => (
+      <CodeBlock {...props}>{children}</CodeBlock>
+    ),
+    span: (props: any) => renderEmojiSpan(props),
+    a: ({ href, children }: any) => {
+      const preview = href ? matchLinkPreview(href) : null;
+      if (preview) {
+        return <LinkPreviewChip preview={preview}>{children}</LinkPreviewChip>;
+      }
+      return (
+        <a
+          href={href}
+          onClick={(e) => {
+            e.preventDefault();
+            if (href?.startsWith('sai-file://') && onFileOpen) {
+              const raw = href.slice('sai-file://'.length);
+              const lineMatch = raw.match(/:(\d+)$/);
+              const line = lineMatch ? parseInt(lineMatch[1], 10) : undefined;
+              const rel = lineMatch ? raw.slice(0, -lineMatch[0].length) : raw;
+              const abs = rel.startsWith('/') ? rel : `${projectPath}/${rel}`;
+              onFileOpen(abs, line);
+            } else if (href) {
+              window.sai.openExternal(href);
+            }
+          }}
+        >
+          {children}
+        </a>
+      );
+    },
+  }), [onFileOpen, projectPath]);
 
   return (
     <>
@@ -832,12 +799,23 @@ function ChatMessage({
       data-flip-transition={flipActive ? JSON.stringify(flipTransition) : undefined}
       data-entry-transition={JSON.stringify(entryTransition)}
       data-entry-y={String(entryDistance)}
-      className={`chat-msg chat-msg-${message.role}${isAssistantStreaming ? ' chat-msg-streaming' : ''}${isTyping ? ' chat-msg-typing' : ''}`}
+      className={`chat-msg chat-msg-${message.role}`}
       style={flipPhase === 'measuring' ? { visibility: 'hidden' } : undefined}
       layoutId={flipActive ? undefined : pinnedLayoutId}
       {...effectiveEntryProps}
     >
-      {message.content && (
+      {useMorphHead && (isAssistantStreaming || message.content) && (
+        <StreamingAssistantHead
+          streaming={!!isAssistantStreaming}
+          content={typeof message.content === 'string' ? message.content : String(message.content ?? '')}
+          durationMs={message.durationMs}
+        >
+          <ReactMarkdown {...ASSISTANT_MD_PLUGINS} components={markdownComponents}>
+            {typeof message.content === 'string' ? message.content : String(message.content ?? '')}
+          </ReactMarkdown>
+        </StreamingAssistantHead>
+      )}
+      {!useMorphHead && message.content && !isAssistantStreaming && (
         <div className="chat-msg-content">
           {message.role === 'user'
             ? <Terminal size={14} color="var(--green)" strokeWidth={2.5} className="chat-msg-dot chat-msg-chevron" />
@@ -846,66 +824,23 @@ function ChatMessage({
                 ? <SaiLogo mode="static" size={16} className="chat-msg-dot chat-msg-sai" />
                 : <span className={`chat-msg-dot ${aiProvider === 'gemini' ? 'chat-msg-gemini' : aiProvider === 'codex' ? 'chat-msg-openai' : 'chat-msg-claude'}`} />)
             : <Circle size={8} fill={dotColor} stroke={dotColor} className="chat-msg-dot" />}
-          <div className={`chat-msg-body${isAssistantStreaming ? ' chat-streaming-tail' : ''}`}>
+          <div className="chat-msg-body">
             {message.role === 'assistant' && typeof message.durationMs === 'number' && (
               <div className="chat-msg-duration" data-testid="msg-duration">
                 [{formatMs(message.durationMs)}]
               </div>
             )}
-            {isAssistantStreaming ? (
-              // While the assistant message is actively streaming, render plain
-              // text. Running ReactMarkdown + rehypeHighlight on every chunk
-              // re-tokenizes the entire growing buffer ~50×/sec and is the
-              // dominant driver of RAM/CPU spikes during a turn. Once streaming
-              // ends, the memo re-renders this branch with full markdown.
-              <div className="chat-msg-stream-text">
-                {typeof message.content === 'string' ? message.content : String(message.content ?? '')}
-              </div>
-            ) : (
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                rehypePlugins={[rehypeHighlight, rehypeFilePaths]}
-                urlTransform={(url) => url.startsWith('sai-file://') ? url : defaultUrlTransform(url)}
-                components={{
-                  pre: ({ children, ...props }) => (
-                    <CodeBlock {...props}>{children}</CodeBlock>
-                  ),
-                  a: ({ href, children }) => {
-                    const preview = href ? matchLinkPreview(href) : null;
-                    if (preview) {
-                      return <LinkPreviewChip preview={preview}>{children}</LinkPreviewChip>;
-                    }
-                    return (
-                      <a
-                        href={href}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          if (href?.startsWith('sai-file://') && onFileOpen) {
-                            const raw = href.slice('sai-file://'.length);
-                            const lineMatch = raw.match(/:(\d+)$/);
-                            const line = lineMatch ? parseInt(lineMatch[1], 10) : undefined;
-                            const rel = lineMatch ? raw.slice(0, -lineMatch[0].length) : raw;
-                            const abs = rel.startsWith('/') ? rel : `${projectPath}/${rel}`;
-                            onFileOpen(abs, line);
-                          } else if (href) {
-                            window.sai.openExternal(href);
-                          }
-                        }}
-                      >
-                        {children}
-                      </a>
-                    );
-                  },
-                }}
-              >{(() => {
+            {
+              <div ref={mdRef} className="chat-msg-md">
+              <ReactMarkdown {...(message.role === 'assistant' ? ASSISTANT_MD_PLUGINS : MD_PLUGINS)} components={markdownComponents}>{(() => {
                 const raw = typeof message.content === 'string' ? message.content : String(message.content ?? '');
                 // Preserve user newlines as hard line breaks (trailing double-space)
                 // so Shift+Enter in the chat input renders visually.
                 if (message.role === 'user') return raw.replace(/\n/g, '  \n');
-                if (typewriterActive && displayLen < rawAssistantContent.length) return raw.slice(0, snapToWordBoundary(raw, displayLen));
                 return raw;
               })()}</ReactMarkdown>
-            )}
+              </div>
+            }
           </div>
         </div>
       )}
@@ -939,41 +874,16 @@ function ChatMessage({
           margin-bottom: 16px;
           padding: 0 16px;
         }
-        /* Typing cursor — pseudo-element on the last block of the rendered
-           markdown so it sits inline at the end of the streaming text instead
-           of dropping to a new line below the last paragraph. */
-        .chat-msg-typing .chat-msg-body > *:last-child::after {
-          content: '';
-          display: inline-block;
-          width: 7px;
-          height: 1em;
-          margin-left: 3px;
-          vertical-align: -2px;
-          background: var(--accent);
-          border-radius: 1px;
-          box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
-          animation: chat-cursor-blink 1.1s ease-in-out infinite;
-        }
-        @keyframes chat-cursor-blink {
-          0%, 100% { opacity: 0.25; }
-          50%      { opacity: 1; }
-        }
-        .chat-msg-streaming .chat-msg-claude,
-        .chat-msg-streaming .chat-msg-openai,
-        .chat-msg-streaming .chat-msg-gemini {
-          animation: chat-dot-breathe 1.6s ease-in-out infinite;
-        }
-        @keyframes chat-dot-breathe {
-          0%, 100% { transform: scale(1); filter: drop-shadow(0 0 0 transparent); opacity: 0.85; }
-          50%      { transform: scale(1.18); filter: drop-shadow(0 0 6px var(--accent)); opacity: 1; }
-        }
         .chat-msg-user {
           background: var(--bg-input);
           border: 1px solid var(--border);
-          border-radius: 10px;
+          border-radius: 14px 14px 4px 14px; /* chat tail (sharp bottom-right) */
           padding: 10px 14px;
-          margin-left: 14px;
+          margin-left: auto;   /* push the bubble to the right */
           margin-right: 14px;
+          margin-top: 18px;    /* inter-turn gap (replaces the removed divider) */
+          width: fit-content;  /* shrink-wrap to the message text */
+          max-width: 76%;      /* but never the full width */
         }
         .chat-msg-assistant {
           padding: 4px 14px;
@@ -1030,7 +940,6 @@ function ChatMessage({
           mask-repeat: no-repeat;
         }
         .chat-msg-body { color: var(--text); line-height: 1.6; flex: 1; min-width: 0; }
-        .chat-msg-stream-text { white-space: pre-wrap; word-break: break-word; }
         .chat-msg-duration {
           font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-variant-numeric: tabular-nums;
@@ -1039,27 +948,6 @@ function ChatMessage({
           letter-spacing: 0.04em;
           margin-bottom: 4px;
           user-select: none;
-        }
-        @media (prefers-reduced-motion: no-preference) {
-          @keyframes chat-streaming-tail-sweep {
-            from { background-position: -120% 0; }
-            to   { background-position:  120% 0; }
-          }
-          .chat-streaming-tail {
-            background-image: linear-gradient(
-              90deg,
-              transparent 0%,
-              transparent 70%,
-              color-mix(in srgb, var(--accent) 35%, transparent) 85%,
-              transparent 100%
-            );
-            background-size: 200% 100%;
-            background-repeat: no-repeat;
-            background-position: 100% 0;
-            animation: chat-streaming-tail-sweep 1.6s ease-in-out infinite;
-            -webkit-background-clip: text;
-                    background-clip: text;
-          }
         }
         .chat-msg-body p { margin: 0 0 8px 0; }
         .chat-msg-body p:last-child { margin-bottom: 0; }

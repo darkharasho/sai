@@ -19,6 +19,12 @@
   --red: #E35535;
   --yellow: #c7910c;
   --turquoise: #38c7bd;
+  /* Papery dash divider — tracks the active theme's accent. */
+  --divider-dash: repeating-linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 45%, transparent) 0 7px,
+    transparent 7px 13px
+  );
 
   --nav-width: 48px;
   --sidebar-width: 300px;
@@ -203,4 +209,60 @@ pre {
 @keyframes overlay-in {
   from { opacity: 0; backdrop-filter: blur(0px); }
   to   { opacity: 1; backdrop-filter: blur(4px); }
+}
+
+/* Papery dash — reusable dividers (see specs/2026-06-05-ui-papery-dash-refresh-design.md) */
+.dashed-rule {
+  height: 1px;
+  min-height: 1px;
+  flex-shrink: 0; /* never collapse to 0 when used as a flex child */
+  border: 0;
+  background: var(--divider-dash);
+}
+
+.dashed-divider-top {
+  background-image: var(--divider-dash);
+  background-repeat: no-repeat;
+  background-position: top left;
+  background-size: 100% 1px;
+}
+
+/* Assistant message word-reveal (see specs/2026-06-05-assistant-message-reveal-design.md) */
+.rv-word { will-change: opacity; }
+.rv-caret {
+  color: var(--accent);
+  margin-left: 1px;
+  animation: rv-caret-blink 1s steps(2) infinite;
+}
+@keyframes rv-caret-blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .rv-caret { animation: none; }
+}
+.sai-emoji-icon {
+  display: inline-block;
+  width: 1.3em;
+  height: 1.3em;
+  vertical-align: -0.2em;
+  margin: 0 0.1em;
+  color: var(--accent);
+}
+.sai-emoji-mask {
+  display: inline-block;
+  width: 1.3em;
+  height: 1.3em;
+  vertical-align: -0.2em;
+  margin: 0 0.1em;
+  background-color: var(--accent);
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+}
+.sai-emoji-jumbo .sai-emoji-icon,
+.sai-emoji-jumbo .sai-emoji-mask {
+  width: 2.2em;
+  height: 2.2em;
+  vertical-align: -0.35em;
 }
