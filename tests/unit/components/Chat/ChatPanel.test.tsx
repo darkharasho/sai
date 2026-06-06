@@ -985,7 +985,7 @@ describe('ChatPanel', () => {
     expect(assistantMsg.startedAt).toBe(1000);
   });
 
-  it('renders a dashed turn divider between turns but not before the first turn', async () => {
+  it('does not render between-turn dividers (removed in chat message list refresh)', async () => {
     const props = {
       ...baseProps(),
       initialMessages: [
@@ -997,8 +997,7 @@ describe('ChatPanel', () => {
     };
     const { container } = render(<ChatPanel {...props} />);
     await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
-    // Two turns => exactly one divider (before the second user message).
     const dividers = container.querySelectorAll('.chat-turn-divider');
-    expect(dividers.length).toBe(1);
+    expect(dividers.length).toBe(0);
   });
 });
