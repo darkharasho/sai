@@ -559,8 +559,8 @@ function ChatMessage({
           .chat-msg-error-wrap { margin-bottom: 16px; }
           .chat-msg-error {
             background: var(--bg-secondary);
-            border: 1px solid var(--border);
-            border-radius: 6px;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
             overflow: hidden;
             color: var(--text);
             font-size: 13px;
@@ -572,7 +572,7 @@ function ChatMessage({
             gap: 8px;
             padding: 6px 12px;
             background: var(--bg-input);
-            border-bottom: 1px solid var(--border);
+            border-bottom: 1px solid var(--border-hairline);
             font-size: 11px;
             letter-spacing: 0.06em;
           }
@@ -611,7 +611,7 @@ function ChatMessage({
           .chat-msg-error-meta-key { color: var(--text-muted); }
           .chat-msg-error-meta-val { color: var(--text-secondary); }
           .chat-msg-error-details-panel {
-            border-top: 1px solid var(--border);
+            border-top: 1px solid var(--border-hairline);
           }
           .chat-msg-error-details-header {
             display: flex;
@@ -654,7 +654,7 @@ function ChatMessage({
             gap: 4px;
             padding: 6px 8px;
             background: var(--bg-input);
-            border-top: 1px solid var(--border);
+            border-top: 1px solid var(--border-hairline);
           }
           .chat-msg-error-retry {
             display: inline-flex;
