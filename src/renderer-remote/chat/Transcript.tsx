@@ -9,6 +9,8 @@ import GitHubWatcherCard from './GitHubWatcherCard';
 import { detectWatchTargets } from './githubWatcher';
 import type { GithubWatcherStore } from './githubWatcherStore';
 import { useVisualViewportHeight } from '../lib/useVisualViewport';
+import { rehypeEmojiIcons } from '../../components/Chat/rehypeEmojiIcons';
+import { renderEmojiSpan } from '../../components/Chat/emojiIcons';
 
 const mdComponents = {
   p: (props: any) => <p style={{ margin: '0 0 8px 0', lineHeight: 1.5 }} {...props} />,
@@ -55,6 +57,7 @@ const mdComponents = {
   th: (props: any) => <th style={{ border: '1px solid var(--border)', padding: '4px 8px', textAlign: 'left' }} {...props} />,
   td: (props: any) => <td style={{ border: '1px solid var(--border)', padding: '4px 8px' }} {...props} />,
   strong: (props: any) => <strong style={{ fontWeight: 600 }} {...props} />,
+  span: (props: any) => renderEmojiSpan(props),
 };
 
 export interface TranscriptMessage {
@@ -232,7 +235,7 @@ export default function Transcript({ messages, streaming = false, awaitingQuesti
                 {isUser ? (
                   <pre className="pwa-chat-msg-user-text">{m.text}</pre>
                 ) : (
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeEmojiIcons]} components={mdComponents}>
                     {m.text ?? ''}
                   </ReactMarkdown>
                 )}

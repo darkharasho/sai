@@ -3,3 +3,26 @@
 
 /* Be explicit so Tailwind scans the chat/ subtree */
 @source "./**/*.{ts,tsx,html}";
+
+.sai-emoji-icon {
+  display: inline-block;
+  width: 1.1em;
+  height: 1.1em;
+  vertical-align: -0.2em;
+  margin: 0 0.1em;
+  color: var(--accent);
+}
+.sai-emoji-mask {
+  display: inline-block;
+  width: 1.1em;
+  height: 1.1em;
+  vertical-align: -0.2em;
+  margin: 0 0.1em;
+  background-color: var(--accent);
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+}
