@@ -716,13 +716,16 @@ function ChatMessage({
 
   const isAssistantStreaming = isStreaming && message.role === 'assistant';
   useLayoutEffect(() => {
-    if (isAssistantStreaming) STREAMED_MESSAGES.add(message.id);
+    if (message.role !== 'assistant') return;
+    if (isAssistantStreaming) { STREAMED_MESSAGES.add(message.id); return; }
     if (revealedRef.current) return;
-    if (message.role !== 'assistant' || isAssistantStreaming) return;
     if (!message.content) return;
-    if (STREAMED_MESSAGES.has(message.id)) return;
+    // Reveal a reply generated this session (streamed → completed, any duration) or a
+    // fresh complete arrival; never history (not streamed this session + old timestamp).
+    const streamedThisSession = STREAMED_MESSAGES.has(message.id);
+    const fresh = Date.now() - (message.timestamp ?? 0) <= REVEAL_FRESH_MS;
+    if (!streamedThisSession && !fresh) return;
     if (prefersReducedMotion()) return;
-    if (Date.now() - (message.timestamp ?? 0) > REVEAL_FRESH_MS) return;
     const el = mdRef.current;
     if (!el) return;
     revealedRef.current = true;
@@ -745,12 +748,12 @@ function ChatMessage({
       data-flip-transition={flipActive ? JSON.stringify(flipTransition) : undefined}
       data-entry-transition={JSON.stringify(entryTransition)}
       data-entry-y={String(entryDistance)}
-      className={`chat-msg chat-msg-${message.role}${isAssistantStreaming ? ' chat-msg-streaming' : ''}`}
+      className={`chat-msg chat-msg-${message.role}`}
       style={flipPhase === 'measuring' ? { visibility: 'hidden' } : undefined}
       layoutId={flipActive ? undefined : pinnedLayoutId}
       {...effectiveEntryProps}
     >
-      {message.content && (
+      {message.content && !isAssistantStreaming && (
         <div className="chat-msg-content">
           {message.role === 'user'
             ? <Terminal size={14} color="var(--green)" strokeWidth={2.5} className="chat-msg-dot chat-msg-chevron" />
@@ -759,22 +762,13 @@ function ChatMessage({
                 ? <SaiLogo mode="static" size={16} className="chat-msg-dot chat-msg-sai" />
                 : <span className={`chat-msg-dot ${aiProvider === 'gemini' ? 'chat-msg-gemini' : aiProvider === 'codex' ? 'chat-msg-openai' : 'chat-msg-claude'}`} />)
             : <Circle size={8} fill={dotColor} stroke={dotColor} className="chat-msg-dot" />}
-          <div className={`chat-msg-body${isAssistantStreaming ? ' chat-streaming-tail' : ''}`}>
+          <div className="chat-msg-body">
             {message.role === 'assistant' && typeof message.durationMs === 'number' && (
               <div className="chat-msg-duration" data-testid="msg-duration">
                 [{formatMs(message.durationMs)}]
               </div>
             )}
-            {isAssistantStreaming ? (
-              // While the assistant message is actively streaming, render plain
-              // text. Running ReactMarkdown + rehypeHighlight on every chunk
-              // re-tokenizes the entire growing buffer ~50×/sec and is the
-              // dominant driver of RAM/CPU spikes during a turn. Once streaming
-              // ends, the memo re-renders this branch with full markdown.
-              <div className="chat-msg-stream-text">
-                {typeof message.content === 'string' ? message.content : String(message.content ?? '')}
-              </div>
-            ) : (
+            {(
               <div ref={mdRef} className="chat-msg-md">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
@@ -853,15 +847,6 @@ function ChatMessage({
           margin-bottom: 16px;
           padding: 0 16px;
         }
-        .chat-msg-streaming .chat-msg-claude,
-        .chat-msg-streaming .chat-msg-openai,
-        .chat-msg-streaming .chat-msg-gemini {
-          animation: chat-dot-breathe 1.6s ease-in-out infinite;
-        }
-        @keyframes chat-dot-breathe {
-          0%, 100% { transform: scale(1); filter: drop-shadow(0 0 0 transparent); opacity: 0.85; }
-          50%      { transform: scale(1.18); filter: drop-shadow(0 0 6px var(--accent)); opacity: 1; }
-        }
         .chat-msg-user {
           background: var(--bg-input);
           border: 1px solid var(--border);
@@ -928,7 +913,6 @@ function ChatMessage({
           mask-repeat: no-repeat;
         }
         .chat-msg-body { color: var(--text); line-height: 1.6; flex: 1; min-width: 0; }
-        .chat-msg-stream-text { white-space: pre-wrap; word-break: break-word; }
         .chat-msg-duration {
           font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-variant-numeric: tabular-nums;
@@ -937,27 +921,6 @@ function ChatMessage({
           letter-spacing: 0.04em;
           margin-bottom: 4px;
           user-select: none;
-        }
-        @media (prefers-reduced-motion: no-preference) {
-          @keyframes chat-streaming-tail-sweep {
-            from { background-position: -120% 0; }
-            to   { background-position:  120% 0; }
-          }
-          .chat-streaming-tail {
-            background-image: linear-gradient(
-              90deg,
-              transparent 0%,
-              transparent 70%,
-              color-mix(in srgb, var(--accent) 35%, transparent) 85%,
-              transparent 100%
-            );
-            background-size: 200% 100%;
-            background-repeat: no-repeat;
-            background-position: 100% 0;
-            animation: chat-streaming-tail-sweep 1.6s ease-in-out infinite;
-            -webkit-background-clip: text;
-                    background-clip: text;
-          }
         }
         .chat-msg-body p { margin: 0 0 8px 0; }
         .chat-msg-body p:last-child { margin-bottom: 0; }

@@ -69,14 +69,15 @@ describe('ChatMessage', () => {
     expect(screen.getByTestId('markdown').textContent).toBe('Hello world');
   });
 
-  it('renders streaming assistant content as plain text, not via markdown', () => {
-    // Perf fix: while streaming, skip ReactMarkdown + rehypeHighlight so the
-    // growing buffer isn't re-tokenized on every chunk.
+  it('hides assistant text content while streaming (no plain text, no markdown)', () => {
+    // While streaming, the content block is suppressed entirely so no partial
+    // text flashes — the thinking animation (rendered by ChatPanel) covers the
+    // turn. Tool-call cards (separate block) are unaffected.
     const msg = makeMessage({ role: 'assistant', content: 'partial chunk' });
     const { container } = render(<ChatMessage message={msg} isStreaming />);
-    expect(container.querySelector('.chat-msg-stream-text')).toBeTruthy();
-    expect(container.querySelector('.chat-msg-stream-text')!.textContent).toBe('partial chunk');
+    expect(container.querySelector('.chat-msg-stream-text')).toBeNull();
     expect(container.querySelector('[data-testid="markdown"]')).toBeNull();
+    expect(container.querySelector('.chat-msg-content')).toBeNull();
   });
 
   it('renders assistant content via markdown when not streaming', () => {
@@ -299,11 +300,13 @@ describe('ChatMessage', () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
-  it('marks streaming text with chat-streaming-tail class', () => {
+  it('does not render content block while streaming (no chat-streaming-tail)', () => {
     const { container } = render(
       <ChatMessage isStreaming message={{ id: 's-1', role: 'assistant', content: 'partial', timestamp: 0 }} />
     );
-    expect(container.querySelector('.chat-streaming-tail')).toBeTruthy();
+    // Content block is hidden during streaming — tail class is gone with it.
+    expect(container.querySelector('.chat-streaming-tail')).toBeFalsy();
+    expect(container.querySelector('.chat-msg-content')).toBeFalsy();
   });
 
   it('does not mark non-streaming text with chat-streaming-tail', () => {
@@ -451,12 +454,12 @@ describe('ChatMessage', () => {
     expect(container.querySelectorAll('.rv-word').length).toBe(0);
   });
 
-  it('does not reveal a message that streamed then completed', () => {
+  it('reveals a message after it finishes streaming', () => {
     const msg = { id: 'rv-stream', role: 'assistant' as const, content: 'streamed then done', timestamp: Date.now() };
     const { container, rerender } = render(
       <ChatMessage message={msg} projectPath="/p" isStreaming={true} />
     );
     rerender(<ChatMessage message={msg} projectPath="/p" isStreaming={false} />);
-    expect(container.querySelectorAll('.rv-word').length).toBe(0);
+    expect(container.querySelectorAll('.rv-word').length).toBeGreaterThan(0);
   });
 });
