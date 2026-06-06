@@ -1002,4 +1002,75 @@ describe('ChatPanel', () => {
     // and confirm the map still renders every message (no Fragment regression)
     expect(container.querySelectorAll('[data-testid="chat-message"]').length).toBe(4);
   });
+
+  describe('SAI thinking row relocation', () => {
+    it('SAI: shows a pending thinking row when streaming with no assistant segment yet', async () => {
+      const props = { ...baseProps(), aiProvider: 'claude' as const };
+      const { container, rerender } = render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+      // Only a user message exists; no assistant segment is streaming yet.
+      await act(async () => {
+        for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+          (handler as (msg: any) => void)({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+        }
+      });
+      rerender(<ChatPanel {...props} isStreaming />);
+
+      // The detached/pending tail row renders the ThinkingAnimation.
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+    });
+
+    it('SAI: no detached banner once an assistant segment is streaming', async () => {
+      const props = { ...baseProps(), aiProvider: 'claude' as const };
+      const { container, rerender } = render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+      // Text deltas arrive: the first appends an assistant segment; the second hits the
+      // streaming fast-path and sets streamSettled=false, so the per-segment morph head
+      // (not the tail row) carries the thinking visuals.
+      const delta = (text: string) => ({
+        type: 'assistant',
+        message: { content: [{ type: 'text', delta: true, text }] },
+        projectPath: '/project',
+        scope: 'chat',
+      });
+      await act(async () => {
+        for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+          (handler as (msg: any) => void)({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+          (handler as (msg: any) => void)(delta('think'));
+        }
+      });
+      // Second delta in a separate act so the first has committed to messagesRef,
+      // letting the streaming fast-path fire and flip streamSettled=false.
+      await act(async () => {
+        for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+          (handler as (msg: any) => void)(delta('ing...'));
+        }
+      });
+      rerender(<ChatPanel {...props} isStreaming />);
+
+      // No standalone thinking banner at the tail.
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeNull();
+      // The morph head lives inside the streaming assistant ChatMessage (mocked).
+      const streamingMsg = container.querySelector('[data-testid="chat-message"][data-streaming="true"]');
+      expect(streamingMsg).toBeTruthy();
+    });
+
+    it('non-SAI provider keeps the detached banner', async () => {
+      const props = { ...baseProps(), aiProvider: 'gemini' as const };
+      const { container, rerender } = render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+      await act(async () => {
+        for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+          (handler as (msg: any) => void)({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+        }
+      });
+      rerender(<ChatPanel {...props} isStreaming />);
+
+      // Gemini banner present (cross-slide hint is gemini-specific).
+      expect(container.querySelector('.gemini-hint-slide')).toBeTruthy();
+    });
+  });
 });

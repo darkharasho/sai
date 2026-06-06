@@ -13,6 +13,12 @@ import { SPRING, DISTANCE, EASING, useReducedMotionTransition } from './motion';
 // re-probe (and log a noisy ENOENT) on every re-run.
 const consumedBrainstormSeeds = new Set<string>();
 
+let saiAnimationPref = true;
+if (typeof window !== 'undefined' && (window as any).sai?.settingsGet) {
+  (window as any).sai.settingsGet('saiAnimationEnabled', true)
+    .then((v: boolean) => { saiAnimationPref = v !== false; });
+}
+
 function tweenScrollToBottom(container: HTMLElement, durationMs = 280) {
   if (typeof window === 'undefined') return;
   if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
@@ -619,6 +625,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   // instead of waiting for end-of-turn.
   const STREAM_IDLE_MS = 250;
   const [streamSettled, setStreamSettled] = useState(true);
+  const [saiAnimationEnabled, setSaiAnimationEnabled] = useState(saiAnimationPref);
+  useEffect(() => {
+    const onPref = (e: Event) => setSaiAnimationEnabled(!!(e as CustomEvent).detail);
+    window.addEventListener('sai-pref-sai-animation', onPref);
+    return () => window.removeEventListener('sai-pref-sai-animation', onPref);
+  }, []);
   const streamIdleTimerRef = useRef<number | null>(null);
   const flushStreamingText = useCallback(() => {
     if (streamRafRef.current != null) {
@@ -1461,6 +1473,15 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     return owner;
   }, [messages]);
   const showThinking = isStreaming && !awaitingQuestion;
+  const isSaiProvider = aiProvider !== 'gemini' && aiProvider !== 'codex';
+  const saiMorphActive = isSaiProvider && saiAnimationEnabled;
+  const lastMsg = messages[messages.length - 1];
+  // An assistant segment is currently streaming → its morph head shows the thinking row.
+  const hasStreamingAssistantSegment = !streamSettled && lastMsg?.role === 'assistant';
+  // SAI morph path: only a pending tail row when no assistant segment is streaming yet.
+  const showPendingSaiThinking = showThinking && saiMorphActive && !hasStreamingAssistantSegment;
+  // Detached banner: non-SAI providers, OR SAI with the animation pref off (today's fallback).
+  const showProviderBanner = showThinking && !saiMorphActive;
   const hasHiddenMessages = renderStart > 0;
 
   useEffect(() => {
@@ -1834,7 +1855,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           </>
         )}
         <MotionPresence>
-          {showThinking && (
+          {showProviderBanner && (
             <motion.div
               key="thinking"
               initial={{ opacity: 0, y: DISTANCE.lift }}
@@ -1845,6 +1866,17 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
               {aiProvider === 'gemini' ? <GeminiThinkingAnimation loadingPhrases={geminiLoadingPhrases} />
                 : aiProvider === 'codex' ? <CodexThinkingAnimation />
                 : <ThinkingAnimation />}
+            </motion.div>
+          )}
+          {showPendingSaiThinking && (
+            <motion.div
+              key="thinking-pending"
+              initial={{ opacity: 0, y: DISTANCE.lift }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={thinkingTransition}
+            >
+              <ThinkingAnimation />
             </motion.div>
           )}
         </MotionPresence>
