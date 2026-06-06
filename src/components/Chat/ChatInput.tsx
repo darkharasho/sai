@@ -1353,9 +1353,9 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
           bottom: 100%;
           left: 16px;
           right: 16px;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
-          border-radius: 8px;
+          background: var(--surface-3);
+          border: 1px solid var(--border-subtle);
+          border-radius: var(--radius-md);
           margin-bottom: 4px;
           max-height: 400px;
           overflow-y: auto;
@@ -1371,7 +1371,7 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
           font-size: 13px;
         }
         .autocomplete-item:hover, .autocomplete-item.selected {
-          background: var(--bg-hover);
+          background: var(--surface-4);
         }
         .ac-icon { color: var(--accent); flex-shrink: 0; display: flex; }
         .ac-label { font-family: 'Geist Mono', 'JetBrains Mono', monospace; font-size: 12px; color: var(--text); }
@@ -1487,9 +1487,9 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
         }
 
         .input-box {
-          background: var(--bg-input);
-          border: none;
-          border-radius: 12px;
+          background: var(--surface-2);
+          border: 1px solid var(--border-subtle);
+          border-radius: var(--radius-md);
           overflow: visible;
           position: relative;
         }
@@ -1510,6 +1510,9 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
           z-index: 0;
           opacity: 0.7;
           transition: opacity 0.2s ease;
+        }
+        .input-box:focus-within {
+          border-color: var(--border-strong);
         }
         .input-box:focus-within::before {
           opacity: 1;
@@ -1627,7 +1630,7 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
           margin-left: 4px;
           padding: 2px 7px;
           background: var(--bg-hover);
-          border: 1px solid var(--border);
+          border: 1px solid var(--border-subtle);
           border-radius: 4px;
           font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 11px;
@@ -1718,7 +1721,7 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
           right: 0;
           min-width: 380px;
           background: var(--bg-elevated);
-          border: 1px solid var(--border);
+          border: 1px solid var(--border-subtle);
           border-radius: 8px;
           box-shadow: 0 -4px 16px rgba(0,0,0,0.3);
           z-index: 60;
@@ -1728,7 +1731,7 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
           padding: 8px 12px;
         }
         .usage-tooltip-section + .usage-tooltip-section {
-          border-top: 1px solid var(--border);
+          border-top: 1px solid var(--border-hairline);
         }
         .usage-tooltip-title {
           display: flex;
@@ -1818,7 +1821,7 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
         .context-breakdown {
           margin-top: 8px;
           padding-top: 6px;
-          border-top: 1px solid var(--border);
+          border-top: 1px solid var(--border-hairline);
           display: flex;
           flex-direction: column;
           gap: 3px;
@@ -1856,7 +1859,7 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
           transition: all 0.15s;
         }
         .effort-btn:hover {
-          border-color: var(--border);
+          border-color: var(--border-subtle);
         }
         .effort-label {
           font-size: 11px;
@@ -1872,7 +1875,7 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
           transition: all 0.15s;
         }
         .model-btn:hover {
-          border-color: var(--border);
+          border-color: var(--border-subtle);
         }
         .model-label {
           font-size: 11px;
@@ -1885,7 +1888,7 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
           right: 0;
           min-width: 320px;
           background: var(--bg-elevated);
-          border: 1px solid var(--border);
+          border: 1px solid var(--border-subtle);
           border-radius: 8px;
           box-shadow: 0 -4px 16px rgba(0,0,0,0.3);
           z-index: 60;
@@ -1962,7 +1965,8 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
           color: #000;
           cursor: pointer;
           padding: 6px;
-          border-radius: 6px;
+          border-radius: var(--radius-sm);
+          font-weight: 600;
           display: flex;
           align-items: center;
           justify-content: center;
