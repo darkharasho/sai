@@ -54,4 +54,4 @@
 - [x] hot reloading files when in the editor 
 - [ ] answering askuserquestions makes it think its dismissed "The question was dismissed — I'll go with the clean default that matches how you've been working: two separate PRs, and I'll leave PR #43 as-is (the stray release.json ignore line is harmless and avoids a needless force-push; the release PR just won't re-touch .gitignore). Easy to redirect if you'd rather combine."
 - [x] custom svg like otto for emoji
-- [ ] green squircle still not clearing on visiting a workspace, tie it to the !
+- [x] green squircle still not clearing on visiting a workspace, tie it to the !
