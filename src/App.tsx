@@ -8,6 +8,7 @@ import FileExplorerSidebar from './components/FileExplorer/FileExplorerSidebar';
 import SearchPanel from './components/SearchPanel/SearchPanel';
 import TitleBar from './components/TitleBar';
 import CodePanel from './components/CodePanel/CodePanel';
+import { extractEditToolUses, successfulToolResultIds } from './components/CodePanel/detectFileEdits';
 import UnsavedChangesModal from './components/UnsavedChangesModal';
 import WorkspaceToast, { type ToastTone } from './components/WorkspaceToast';
 import { computeChatToasts } from './lib/chatToasts';
@@ -280,6 +281,9 @@ export default function App() {
   // the ref re-syncs, so without this guard the same task fires task_completed
   // twice (visible as duplicate inline cards).
   const emittedLifecycleRef = useRef<Set<string>>(new Set());
+  // tool_use_id → absolute path of an in-flight AI file edit, awaiting its tool_result
+  // so we can hot-reload the open file the instant the edit completes.
+  const pendingEditsRef = useRef<Map<string, string>>(new Map());
   // Per-workspace activity ring buffers powering the orchestrator sparklines.
   // - tools: timed tool_use events (filtered per task for SpawnTaskCard)
   // - activeBuckets: 12-element ring of `streaming+queued+awaiting_approval`
@@ -2027,6 +2031,40 @@ export default function App() {
     return () => clearInterval(id);
   }, [projectPath]);
 
+  // Reload-or-banner decision for a single open file whose on-disk content changed.
+  // Clean file → swap in the new content (hot reload); dirty file → flag the conflict
+  // banner so the user chooses. Shared by the 5s poll and the instant AI-edit trigger.
+  const applyExternalChange = useCallback(async (projectPath: string, filePath: string) => {
+    const ws = workspacesRef.current.get(projectPath);
+    const file = ws?.openFiles.find(f => f.path === filePath);
+    if (!file) return;
+    if (file.isDirty) {
+      setExternallyModified(prev => (prev.has(filePath) ? prev : new Set([...prev, filePath])));
+      return;
+    }
+    try {
+      const [content, { mtime }] = await Promise.all([
+        window.sai.fsReadFile(filePath) as Promise<string>,
+        window.sai.fsMtime(filePath) as Promise<{ mtime: number }>,
+      ]);
+      updateWorkspace(projectPath, w => ({
+        ...w,
+        openFiles: w.openFiles.map(f =>
+          f.path === filePath
+            ? { ...f, content, savedContent: content, isDirty: false, diskMtime: mtime }
+            : f
+        ),
+      }));
+    } catch {
+      // File may have been deleted/moved between the signal and the read; ignore.
+    }
+  }, [updateWorkspace]);
+
+  // The claude:message effect subscribes once (empty deps) and reads live values via refs,
+  // so expose the latest applyExternalChange through a ref to avoid a stale closure.
+  const applyExternalChangeRef = useRef(applyExternalChange);
+  applyExternalChangeRef.current = applyExternalChange;
+
   useEffect(() => {
     if (!projectPath) return;
     const id = setInterval(async () => {
@@ -2039,29 +2077,14 @@ export default function App() {
         try {
           const { mtime } = await (window.sai.fsMtime(file.path) as Promise<{ mtime: number }>);
           if (mtime <= file.diskMtime!) continue;
-          if (!file.isDirty) {
-            const content = await (window.sai.fsReadFile(file.path) as Promise<string>);
-            updateWorkspace(projectPath, w => ({
-              ...w,
-              openFiles: w.openFiles.map(f =>
-                f.path === file.path
-                  ? { ...f, content, savedContent: content, isDirty: false, diskMtime: mtime }
-                  : f
-              ),
-            }));
-          } else {
-            setExternallyModified(prev => {
-              if (prev.has(file.path)) return prev;
-              return new Set([...prev, file.path]);
-            });
-          }
+          await applyExternalChange(projectPath, file.path);
         } catch {
           // File may have been deleted or moved; ignore
         }
       }
     }, 5000);
     return () => clearInterval(id);
-  }, [projectPath, updateWorkspace]);
+  }, [projectPath, updateWorkspace, applyExternalChange]);
 
   // Global Ctrl+H handler for chat history sidebar
   useKeybinding('chatHistory.toggle', useCallback((e) => {
@@ -2117,6 +2140,23 @@ export default function App() {
   useEffect(() => {
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
       if (!msg.projectPath) return;
+      // Hot-reload open files the AI edits: correlate an edit tool_use (which carries the
+      // path) with its later successful tool_result (which signals the write completed).
+      if (msg.type === 'assistant') {
+        for (const { id, path } of extractEditToolUses(msg.message?.content, msg.projectPath)) {
+          pendingEditsRef.current.set(id, path);
+        }
+      } else if (msg.type === 'user') {
+        const ws = workspacesRef.current.get(msg.projectPath);
+        for (const id of successfulToolResultIds(msg.message?.content)) {
+          const editedPath = pendingEditsRef.current.get(id);
+          if (editedPath === undefined) continue;
+          pendingEditsRef.current.delete(id);
+          if (ws?.openFiles.some(f => f.path === editedPath)) {
+            void applyExternalChangeRef.current(msg.projectPath, editedPath);
+          }
+        }
+      }
       // Use composite key (projectPath:scope) for turnSeq tracking
       const scopeKey = `${msg.projectPath}:${msg.scope || 'chat'}`;
       // Swarm status mirror — runs for every workspace+scope so background
