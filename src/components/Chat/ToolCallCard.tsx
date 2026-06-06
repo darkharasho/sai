@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useContext } from 'react';
 import {
   Terminal, FileText, Wrench, ChevronRight, Globe, AlertCircle,
   FilePen, FilePlus, SearchCode, FolderSearch, ListTodo, Bot,
   ClipboardList, ClipboardCheck, Zap, Send, GitBranch, GitMerge,
   Activity, AlarmClock, Timer, TimerOff, SquareTerminal, CircleStop,
-  Radio, MessageCircleQuestion, NotebookPen, Plug,
+  Radio, MessageCircleQuestion, NotebookPen, Plug, ListChecks,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import type { ToolCall, MetaWorkspaceRuntime } from '../../types';
@@ -17,6 +17,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { CARD_MD_CLASS, CARD_MD_STYLES } from './markdownCardStyles';
 import { parseSearchResults, isSearchTool, highlightMatches, type SearchRow } from './searchResults';
+import { TaskRegistryContext, type TaskInfo } from './taskRegistry';
 
 function parseMcpName(name: string): { server: string; tool: string } | null {
   if (!name.startsWith('mcp__')) return null;
@@ -329,6 +330,8 @@ const nameToIcon: Record<string, typeof Wrench> = {
   EnterPlanMode: ClipboardList,
   ExitPlanMode: ClipboardCheck,
   TodoWrite: ListTodo,
+  TaskCreate: ListTodo,
+  TaskUpdate: ListChecks,
   // Agent & orchestration
   Agent: Bot,
   Skill: Zap,
@@ -467,6 +470,59 @@ function SearchResultView({ rows, pattern }: { rows: SearchRow[]; pattern?: stri
           {showAll ? 'Show less' : `Show all (${rows.length} results)`}
         </button>
       )}
+    </div>
+  );
+}
+
+interface TaskFields {
+  taskId?: string;
+  subject?: string;
+  description?: string;
+  activeForm?: string;
+  status?: string;
+  owner?: string;
+  addBlocks?: string[];
+  addBlockedBy?: string[];
+}
+
+function parseTaskFields(input: string): TaskFields {
+  try {
+    const p = JSON.parse(input || '{}');
+    return {
+      taskId: p.taskId != null ? String(p.taskId) : undefined,
+      subject: typeof p.subject === 'string' ? p.subject : undefined,
+      description: typeof p.description === 'string' ? p.description : undefined,
+      activeForm: typeof p.activeForm === 'string' ? p.activeForm : undefined,
+      status: typeof p.status === 'string' ? p.status : undefined,
+      owner: typeof p.owner === 'string' ? p.owner : undefined,
+      addBlocks: Array.isArray(p.addBlocks) ? p.addBlocks.map(String) : undefined,
+      addBlockedBy: Array.isArray(p.addBlockedBy) ? p.addBlockedBy.map(String) : undefined,
+    };
+  } catch { return {}; }
+}
+
+function TaskCardView({ kind, fields, resolved }: { kind: 'create' | 'update'; fields: TaskFields; resolved?: TaskInfo }) {
+  const title = fields.subject || resolved?.subject || `Task #${fields.taskId ?? '?'}`;
+  const description = fields.description || (kind === 'update' ? resolved?.description : undefined);
+  const activeForm = fields.activeForm || (kind === 'update' ? resolved?.activeForm : undefined);
+  const badge = kind === 'create'
+    ? { cls: 'created', label: 'Created' }
+    : fields.status
+      ? { cls: fields.status, label: fields.status.replace('_', ' ') }
+      : { cls: 'updated', label: 'Updated' };
+  return (
+    <div className="tool-call-body task-card">
+      <div className="task-card-head">
+        <span className="task-card-title">{title}</span>
+        <span className={`task-badge task-badge-${badge.cls}`}>{badge.label}</span>
+      </div>
+      {description && <div className="task-card-desc">{description}</div>}
+      <div className="task-card-meta">
+        {activeForm && <span className="task-chip">{activeForm}</span>}
+        {fields.owner && <span className="task-chip">owner: {fields.owner}</span>}
+        {fields.addBlocks && fields.addBlocks.length > 0 && <span className="task-chip">blocks {fields.addBlocks.length}</span>}
+        {fields.addBlockedBy && fields.addBlockedBy.length > 0 && <span className="task-chip">blocked by {fields.addBlockedBy.length}</span>}
+      </div>
     </div>
   );
 }
@@ -857,6 +913,12 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
   const isBash = toolCall.type === 'terminal_command';
   const isTodo = toolCall.name === 'TodoWrite';
   const isAskUserQuestion = toolCall.name === 'AskUserQuestion';
+  const isTaskCreate = toolCall.name === 'TaskCreate';
+  const isTaskUpdate = toolCall.name === 'TaskUpdate';
+  const isTask = isTaskCreate || isTaskUpdate;
+  const taskRegistry = useContext(TaskRegistryContext);
+  const taskFields = isTask ? parseTaskFields(toolCall.input || '') : null;
+  const taskResolved = isTaskUpdate && taskFields?.taskId ? taskRegistry.get(taskFields.taskId) : undefined;
   const askAnswered = isAskUserQuestion && (() => {
     try { return Object.keys(JSON.parse(toolCall.input || '{}').answers || {}).length > 0; } catch { return false; }
   })();
@@ -866,7 +928,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
     toolCall.output && parseToolError(toolCall.output).isToolError ? 'error' :
     toolCall.output ? 'done' : 'running';
 
-  const hasBody = isAskUserQuestion ? true : isBash ? !!toolCall.output : isTodo ? true : search ? (!!toolCall.output || !!query) : !!code;
+  const hasBody = isAskUserQuestion ? true : isTask ? true : isBash ? !!toolCall.output : isTodo ? true : search ? (!!toolCall.output || !!query) : !!code;
 
   const sigClass =
     (toolCall.name.includes('Edit') || toolCall.name === 'Write' || toolCall.type === 'file_edit') ? 'tool-sig-wipe' :
@@ -962,6 +1024,9 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
               />
             )}
             {isTodo && <TodoListView input={toolCall.input || ''} />}
+            {isTask && taskFields && (
+              <TaskCardView kind={isTaskCreate ? 'create' : 'update'} fields={taskFields} resolved={taskResolved} />
+            )}
             {isAskUserQuestion && (
               <AskUserQuestionView
                 toolUseId={toolCall.id}
@@ -969,7 +1034,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
                 onAnswerQuestion={onAnswerQuestion}
               />
             )}
-            {search && (
+            {search && !isTask && (
               <div className="tool-call-body search-tool-body">
                 {query && <SearchQueryView query={query} />}
                 {toolCall.output && (() => {
@@ -992,7 +1057,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
                 })()}
               </div>
             )}
-            {!isBash && !isTodo && !isAskUserQuestion && !search && code && (
+            {!isBash && !isTodo && !isAskUserQuestion && !search && !isTask && code && (
               <div className="tool-call-body">
                 {diff ? (
                   <DiffHighlightedCode oldString={diff.oldString} newString={diff.newString} lang={diff.fileLang} />
@@ -1288,6 +1353,25 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             height: 0;
             border-top: 1px dashed var(--border);
             margin: 3px 12px;
+          }
+          .task-card { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+          .task-card-head { display: flex; align-items: baseline; gap: 8px; }
+          .task-card-title { font-size: 12.5px; color: var(--text); font-weight: 600; flex: 1; word-break: break-word; }
+          .task-badge {
+            flex-shrink: 0; font-size: 9px; text-transform: uppercase; letter-spacing: 0.4px;
+            font-weight: 600; padding: 2px 7px; border-radius: 4px;
+            background: color-mix(in srgb, var(--text-muted) 18%, transparent); color: var(--text-secondary);
+          }
+          .task-badge-created { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+          .task-badge-in_progress { background: color-mix(in srgb, var(--orange, #e6b84f) 20%, transparent); color: var(--orange, #e6b84f); }
+          .task-badge-completed { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); }
+          .task-badge-deleted { background: color-mix(in srgb, var(--red, #f85149) 16%, transparent); color: var(--red, #f85149); }
+          .task-card-desc { font-size: 11.5px; color: var(--text-muted); line-height: 1.5; word-break: break-word; }
+          .task-card-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+          .task-chip {
+            font-size: 10px; padding: 2px 7px; border-radius: 4px;
+            background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-secondary);
+            font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           }
           .diff-highlighted {
             margin: 0;

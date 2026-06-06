@@ -10,6 +10,7 @@ vi.mock('shiki', () => ({
 
 import ToolCallCard, { isMarkdownBody } from '../../../../src/components/Chat/ToolCallCard';
 import { SPRING } from '../../../../src/components/Chat/motion';
+import { TaskRegistryContext } from '../../../../src/components/Chat/taskRegistry';
 
 describe('ToolCallCard', () => {
   it('renders without crashing', () => {
@@ -244,5 +245,43 @@ describe('ToolCallCard search rendering', () => {
     expect(container.querySelector('.search-result')).toBeNull();
     // Bash keeps its dedicated IN/OUT rendering
     expect(container.querySelector('.bash-inout-body')).toBeTruthy();
+  });
+});
+
+describe('ToolCallCard task rendering', () => {
+  it('renders a TaskCreate card with subject title and a created badge', () => {
+    const create = {
+      id: 'tc1', type: 'task' as const, name: 'TaskCreate',
+      input: JSON.stringify({ subject: 'Build the parser', description: 'parse search output' }),
+      output: 'Task #1 created successfully',
+    };
+    const { container, getByText } = render(<ToolCallCard toolCall={create} />);
+    expect(container.querySelector('.task-card')).toBeTruthy();
+    expect(getByText('Build the parser')).toBeTruthy();
+    expect(container.querySelector('.task-badge-created')).toBeTruthy();
+  });
+
+  it('resolves a TaskUpdate subject from the registry context', () => {
+    const update = {
+      id: 'tu1', type: 'task' as const, name: 'TaskUpdate',
+      input: JSON.stringify({ taskId: '1', status: 'completed' }),
+    };
+    const registry = new Map([['1', { id: '1', subject: 'Build the parser', status: 'completed' as const }]]);
+    const { getByText, container } = render(
+      <TaskRegistryContext.Provider value={registry}>
+        <ToolCallCard toolCall={update} />
+      </TaskRegistryContext.Provider>
+    );
+    expect(getByText('Build the parser')).toBeTruthy();
+    expect(container.querySelector('.task-badge-completed')).toBeTruthy();
+  });
+
+  it('falls back to Task #id when the update is unresolved', () => {
+    const update = {
+      id: 'tu2', type: 'task' as const, name: 'TaskUpdate',
+      input: JSON.stringify({ taskId: '7', status: 'in_progress' }),
+    };
+    const { getByText } = render(<ToolCallCard toolCall={update} />);
+    expect(getByText('Task #7')).toBeTruthy();
   });
 });
