@@ -508,7 +508,7 @@ function TaskCardView({ kind, fields, resolved }: { kind: 'create' | 'update'; f
   const badge = kind === 'create'
     ? { cls: 'created', label: 'Created' }
     : fields.status
-      ? { cls: fields.status, label: fields.status.replace('_', ' ') }
+      ? { cls: fields.status, label: fields.status.replace(/_/g, ' ') }
       : { cls: 'updated', label: 'Updated' };
   return (
     <div className="tool-call-body task-card">
