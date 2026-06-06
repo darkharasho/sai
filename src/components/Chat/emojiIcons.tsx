@@ -317,6 +317,12 @@ export function fluentEmojiUrl(emoji: string): string | null {
   return `https://api.iconify.design/fluent-emoji-high-contrast/${slug}.svg`;
 }
 
+/** The emoji's human-readable name (e.g. "party popper"), skin-tone-tolerant. */
+export function emojiName(emoji: string): string | null {
+  const entry = EMOJI_DATA[emoji] ?? EMOJI_DATA[emoji.replace(SKIN_TONE_RANGE, '')];
+  return entry ? entry.name : null;
+}
+
 import React from 'react';
 
 /** Map an emoji to its Lucide icon, retrying with skin-tone modifiers stripped
@@ -328,9 +334,10 @@ export function lookupIcon(emoji: string): LucideIcon | undefined {
 /** Render one emoji as an accent-colored SVG: a Lucide icon when mapped, else a
  *  CSS-masked Fluent High-Contrast SVG, else the raw emoji text (unknown grapheme). */
 export function EmojiIcon({ emoji }: { emoji: string }): React.ReactElement {
+  const title = emojiName(emoji) ?? emoji;
   const Icon = lookupIcon(emoji);
   if (Icon) {
-    return <Icon className="sai-emoji-icon" strokeWidth={2.25} aria-label={emoji} />;
+    return <Icon className="sai-emoji-icon" strokeWidth={2.25} aria-label={emoji} {...({ title } as Record<string, string>)} />;
   }
   const url = fluentEmojiUrl(emoji);
   if (url) {
@@ -338,6 +345,7 @@ export function EmojiIcon({ emoji }: { emoji: string }): React.ReactElement {
       <span
         role="img"
         aria-label={emoji}
+        title={title}
         className="sai-emoji-mask"
         style={{ WebkitMaskImage: `url(${url})`, maskImage: `url(${url})` }}
       />

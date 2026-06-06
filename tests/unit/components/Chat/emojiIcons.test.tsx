@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { render } from '@testing-library/react';
 import ReactMarkdown from 'react-markdown';
 import { rehypeEmojiIcons } from '../../../../src/components/Chat/rehypeEmojiIcons';
-import { renderEmojiSpan, lookupIcon, fluentEmojiSlug } from '../../../../src/components/Chat/emojiIcons';
+import { renderEmojiSpan, lookupIcon, fluentEmojiSlug, emojiName } from '../../../../src/components/Chat/emojiIcons';
 
 const components = { span: renderEmojiSpan } as any;
 function renderMd(text: string) {
@@ -52,5 +52,41 @@ describe('lookupIcon / fluentEmojiSlug', () => {
   it('returns undefined/null for a non-emoji', () => {
     expect(lookupIcon('x')).toBeUndefined();
     expect(fluentEmojiSlug('x')).toBeNull();
+  });
+});
+
+describe('emojiName', () => {
+  it('returns the human name of a mapped emoji', () => {
+    expect(emojiName('✅')).toBe('check mark button');
+  });
+  it('resolves the base name with skin tone stripped', () => {
+    expect(emojiName('👍🏽')).toBe(emojiName('👍'));
+    expect(emojiName('👍')).toBeTruthy();
+  });
+  it('returns null for a non-emoji', () => {
+    expect(emojiName('x')).toBeNull();
+  });
+});
+
+describe('emoji tooltip + jumbo', () => {
+  it('sets a title tooltip equal to the emoji name on the icon', () => {
+    const { container } = renderMd('ok ✅');
+    expect(container.querySelector('.sai-emoji-icon')?.getAttribute('title')).toBe(emojiName('✅'));
+  });
+
+  it('marks an emoji-only paragraph with sai-emoji-jumbo', () => {
+    const { container } = renderMd('🎉✅');
+    expect(container.querySelector('p.sai-emoji-jumbo')).toBeTruthy();
+  });
+
+  it('does NOT mark a mixed-content paragraph as jumbo', () => {
+    const { container } = renderMd('done ✅');
+    expect(container.querySelector('p.sai-emoji-jumbo')).toBeNull();
+    expect(container.querySelector('p')).toBeTruthy();
+  });
+
+  it('marks an emoji-only list item jumbo', () => {
+    const { container } = renderMd('- 🎉');
+    expect(container.querySelector('.sai-emoji-jumbo .sai-emoji-icon')).toBeTruthy();
   });
 });
