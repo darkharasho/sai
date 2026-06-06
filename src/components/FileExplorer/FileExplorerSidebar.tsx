@@ -461,7 +461,7 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen, metaRunti
       >
         <div
           className={`tree-row project-root-row ${dragOverPath === projectPath ? 'drag-over' : ''}`}
-          style={{ paddingLeft: 8, fontWeight: 700, fontSize: 11, color: 'var(--text-secondary)' }}
+          style={{ color: 'var(--text-secondary)' }}
           onContextMenu={e => handleContextMenu(e, null, projectPath)}
           onDragOver={e => handleDragOver(e, projectPath)}
           onDragLeave={handleDragLeave}
