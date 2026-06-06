@@ -1073,4 +1073,52 @@ describe('ChatPanel', () => {
       expect(container.querySelector('.gemini-hint-slide')).toBeTruthy();
     });
   });
+
+  describe('thinking continuity across tool calls', () => {
+    // An assistant event carrying a tool_use block (optionally preceded by typed text).
+    // streamSettled stays true here (no pure-text-delta path runs), mirroring the real
+    // idle state while a tool executes.
+    const toolUseEvent = (text?: string) => ({
+      type: 'assistant',
+      message: {
+        content: [
+          ...(text ? [{ type: 'text', text }] : []),
+          { type: 'tool_use', id: 'tool-1', name: 'Read', input: { file: 'x.ts' } },
+        ],
+      },
+      projectPath: '/project',
+      scope: 'chat',
+    });
+
+    it('SAI: keeps a thinking row during a no-preamble tool call', async () => {
+      const props = { ...baseProps(), aiProvider: 'claude' as const };
+      const { container, rerender } = render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+      await act(async () => {
+        for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+          (handler as (m: any) => void)({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+          (handler as (m: any) => void)(toolUseEvent());
+        }
+      });
+      rerender(<ChatPanel {...props} isStreaming />);
+      // The tool is running and the AI is still working → a thinking row must remain.
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+    });
+
+    it('SAI: keeps a thinking row when a typed response leads into a tool call', async () => {
+      const props = { ...baseProps(), aiProvider: 'claude' as const };
+      const { container, rerender } = render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+      await act(async () => {
+        for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+          (handler as (m: any) => void)({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+          (handler as (m: any) => void)(toolUseEvent('Let me check that file.'));
+        }
+      });
+      rerender(<ChatPanel {...props} isStreaming />);
+      // The typed text reveals (in the mocked ChatMessage) AND a thinking row remains
+      // below it while the tool runs — the animation must not vanish.
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+    });
+  });
 });

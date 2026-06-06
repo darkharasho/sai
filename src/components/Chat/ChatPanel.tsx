@@ -1089,6 +1089,19 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           // skip the setMessages entirely. Only applies when the last message is
           // already a pure-text assistant bubble we can append to.
           const lastNow = messagesRef.current[messagesRef.current.length - 1];
+          // Mark the assistant bubble as actively streaming and (re)arm the idle timer
+          // so markdown renders mid-turn on a pause and the thinking head stays in its
+          // thinking phase. Used by both the fast path and the slow path's text branch.
+          const markStreamingActive = () => {
+            setStreamSettled(s => s ? false : s);
+            if (streamIdleTimerRef.current != null) {
+              clearTimeout(streamIdleTimerRef.current);
+            }
+            streamIdleTimerRef.current = window.setTimeout(() => {
+              streamIdleTimerRef.current = null;
+              setStreamSettled(true);
+            }, STREAM_IDLE_MS);
+          };
           if (
             isPureTextDelta
             && tools.length === 0
@@ -1102,16 +1115,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
                 flushStreamingText();
               });
             }
-            // Mark the bubble as in-flight and (re)arm the idle timer so
-            // markdown renders mid-turn when streaming pauses.
-            setStreamSettled(s => s ? false : s);
-            if (streamIdleTimerRef.current != null) {
-              clearTimeout(streamIdleTimerRef.current);
-            }
-            streamIdleTimerRef.current = window.setTimeout(() => {
-              streamIdleTimerRef.current = null;
-              setStreamSettled(true);
-            }, STREAM_IDLE_MS);
+            markStreamingActive();
             return;
           }
           setMessages(prev => {
@@ -1149,7 +1153,13 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
               toolCalls: tools.length > 0 ? tools : undefined,
             }];
           });
-
+          // A text segment created/updated via the slow path (e.g. the first delta of a
+          // turn, or follow-up text after a tool) must also flip streamSettled=false so
+          // its head stays in the thinking phase — otherwise the head reveals the first
+          // chunk prematurely and the pending row briefly double-shows. Tool-only events
+          // (no text) intentionally leave streamSettled alone so the pending row keeps a
+          // thinking indicator alive while the tool runs.
+          if (text && tools.length === 0) markStreamingActive();
         }
       }
 
@@ -1466,12 +1476,14 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const isSaiProvider = aiProvider !== 'gemini' && aiProvider !== 'codex';
   const saiMorphActive = isSaiProvider && saiAnimationEnabled;
   const lastMsg = messages[messages.length - 1];
-  // Whenever the last message is an assistant segment, ITS morph head carries the
-  // thinking row (even across idle settles), so the pending tail row must stand down.
-  // (Don't gate on streamSettled: it's a 250ms idle debounce, so gating on it would
-  // make the pending row and the segment head flicker on together mid-stream.)
-  const hasStreamingAssistantSegment = lastMsg?.role === 'assistant';
-  // SAI morph path: only a pending tail row when no assistant segment exists yet.
+  // A segment head shows the thinking row only while it is ACTIVELY streaming text
+  // (`!streamSettled`). Once it settles — text revealed, or a tool is running, or it's
+  // between segments — the head goes quiet, so the trailing pending row must take over
+  // to keep a thinking indicator alive while the turn continues (e.g. during a tool
+  // call after a typed response). The first-text-delta no longer leaves a stale window
+  // here because the slow path now clears streamSettled when it creates a text segment.
+  const hasStreamingAssistantSegment = !streamSettled && lastMsg?.role === 'assistant';
+  // SAI morph path: only a pending tail row when no segment head is actively thinking.
   const showPendingSaiThinking = showThinking && saiMorphActive && !hasStreamingAssistantSegment;
   // Detached banner: non-SAI providers, OR SAI with the animation pref off (today's fallback).
   const showDetachedBanner = showThinking && !saiMorphActive;
