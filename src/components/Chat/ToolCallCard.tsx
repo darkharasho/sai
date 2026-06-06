@@ -76,8 +76,8 @@ export function isMarkdownBody(label: string, code: string): boolean {
   if (/^#{1,6}\s+\S/m.test(body)) return true;
   // Fenced code block (a ``` on its own line)
   if (/^```/m.test(body)) return true;
-  // GFM table: a row with a pipe followed by a separator row of ---/:--
-  if (/^.*\|.*$/m.test(body) && /^\s*\|?\s*:?-{3,}.*$/m.test(body)) return true;
+  // GFM table: a pipe row immediately followed by a separator row (---/:--/| ---)
+  if (/^.*\|.*\n[ \t]*\|?[ \t]*:?-{3,}/m.test(body)) return true;
   // Two or more list items
   const listItems = (body.match(/^\s*([-*+]|\d+\.)\s+\S/gm) || []).length;
   if (listItems >= 2) return true;

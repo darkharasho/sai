@@ -87,6 +87,10 @@ describe('isMarkdownBody', () => {
     expect(isMarkdownBody('', 'col a | col b\n--- | ---\n1 | 2')).toBe(true);
   });
 
+  it('is false for code with a pipe line and a separate dashed divider (non-adjacent)', () => {
+    expect(isMarkdownBody('', 'cat foo | grep bar\nsome code\n--------')).toBe(false);
+  });
+
   it('is true for a multi-item markdown list', () => {
     expect(isMarkdownBody('', '- one\n- two\n- three')).toBe(true);
   });
