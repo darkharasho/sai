@@ -999,5 +999,7 @@ describe('ChatPanel', () => {
     await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
     const dividers = container.querySelectorAll('.chat-turn-divider');
     expect(dividers.length).toBe(0);
+    // and confirm the map still renders every message (no Fragment regression)
+    expect(container.querySelectorAll('[data-testid="chat-message"]').length).toBe(4);
   });
 });
