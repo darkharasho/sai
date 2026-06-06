@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import React from 'react';
 import { act, render, screen, fireEvent } from '@testing-library/react';
 import { installMockSai } from '../../../helpers/ipc-mock';
 
@@ -474,5 +475,25 @@ describe('ChatMessage', () => {
     // Verify the re-render actually happened (durationMs should now be shown).
     expect(container.querySelector('[data-testid="msg-duration"]')).toBeTruthy();
     expect(container.querySelectorAll('.rv-word').length).toBeGreaterThan(0);
+  });
+
+  it('reveal is not force-completed by StrictMode double-invoke (still animates)', () => {
+    vi.useFakeTimers();
+    try {
+      const content = Array.from({ length: 20 }, (_, i) => 'word' + i).join(' ');
+      const msg = { id: 'rv-strict', role: 'assistant' as const, content, timestamp: Date.now() };
+      const { container } = render(
+        <React.StrictMode>
+          <ChatMessage message={msg} projectPath="/p" isStreaming={false} />
+        </React.StrictMode>
+      );
+      const spans = Array.from(container.querySelectorAll<HTMLElement>('.rv-word'));
+      expect(spans.length).toBeGreaterThan(0);
+      // If StrictMode's cleanup cancelled the reveal, showAll() set EVERY span to opacity 1.
+      // A healthy in-progress reveal still has hidden (opacity 0) spans before timers run.
+      expect(spans.some(s => s.style.opacity === '0')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
