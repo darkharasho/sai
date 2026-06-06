@@ -45,3 +45,13 @@
 - [x] show a spinner in the titlebar if theres a background workspace currently with an active conversation. have a faint number for how many workspaces are actively mid conversation
 - [x] spellchecker needs to be faster, auto complete even if the user has moved on from the word
 - [x] whats new shows every launch
+
+
+
+- [x] render md in tool cards
+- [ ] syntax highlighting better in tool cards like grep and glob
+- [ ] task updates more info
+- [ ] hot reloading files when in the editor 
+- [ ] answering askuserquestions makes it think its dismissed "The question was dismissed — I'll go with the clean default that matches how you've been working: two separate PRs, and I'll leave PR #43 as-is (the stray release.json ignore line is harmless and avoids a needless force-push; the release PR just won't re-touch .gitignore). Easy to redirect if you'd rather combine."
+- [ ] custom svg like otto for emoji
+- [ ] green squircle still not clearing on visiting a workspace, tie it to the !
