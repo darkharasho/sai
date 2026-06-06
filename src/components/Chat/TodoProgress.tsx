@@ -119,7 +119,7 @@ export default function TodoProgress({ messages, isStreaming }: TodoProgressProp
       title={open ? undefined : `${completed}/${total} · ${activeLabel}`}
     >
       <svg className="todo-ring-svg" width="22" height="22" viewBox="0 0 22 22">
-        <circle cx="11" cy="11" r={RADIUS} fill="none" stroke="var(--border)" strokeWidth="2.5" />
+        <circle cx="11" cy="11" r={RADIUS} fill="none" stroke="var(--border-hairline)" strokeWidth="2.5" />
         <motion.circle
           cx="11" cy="11" r={RADIUS}
           fill="none"
@@ -210,8 +210,8 @@ export default function TodoProgress({ messages, isStreaming }: TodoProgressProp
           bottom: calc(100% + 8px);
           left: 0;
           width: 320px;
-          background: var(--bg-secondary);
-          border: 1px solid var(--border);
+          background: var(--surface-3);
+          border: 1px solid var(--border-subtle);
           border-radius: 8px;
           padding: 0;
           box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
@@ -224,7 +224,7 @@ export default function TodoProgress({ messages, isStreaming }: TodoProgressProp
           align-items: center;
           gap: 8px;
           padding: 6px 10px 6px 12px;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--border-hairline);
           font-size: 11px;
         }
         .todo-ring-popover-title { font-weight: 600; color: var(--text); }

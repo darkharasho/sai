@@ -418,8 +418,8 @@ export default function CommandPalette({
           left: 50%;
           transform: translateX(-50%);
           width: 520px;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
+          background: var(--surface-3);
+          border: 1px solid var(--border-subtle);
           border-radius: 10px;
           box-shadow: 0 16px 48px rgba(0,0,0,0.5);
           z-index: 9999;
@@ -429,7 +429,7 @@ export default function CommandPalette({
         }
         .cp-input-row {
           padding: 12px 16px;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--border-hairline);
           display: flex;
           align-items: center;
           gap: 10px;
@@ -449,7 +449,7 @@ export default function CommandPalette({
         }
         .cp-modes {
           padding: 6px 16px;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--border-hairline);
           display: flex;
           gap: 4px;
         }
@@ -558,7 +558,7 @@ export default function CommandPalette({
         }
         .cp-footer {
           padding: 8px 16px;
-          border-top: 1px solid var(--border);
+          border-top: 1px solid var(--border-hairline);
           display: flex;
           gap: 16px;
           font-size: 11px;
@@ -566,10 +566,10 @@ export default function CommandPalette({
           font-family: 'Geist Mono', monospace;
         }
         .cp-footer kbd {
-          background: var(--bg-input);
+          background: var(--surface-2);
           padding: 1px 5px;
           border-radius: 3px;
-          border: 1px solid var(--border);
+          border: 1px solid var(--border-hairline);
           color: var(--text-secondary);
           font-size: 10px;
         }

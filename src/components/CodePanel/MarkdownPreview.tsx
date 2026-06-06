@@ -46,7 +46,7 @@ export default function MarkdownPreview({ content, onTogglePreview }: MarkdownPr
           color: var(--text);
           line-height: 1.6;
           font-size: 14px;
-          background: var(--bg-primary);
+          background: var(--surface-1);
         }
         .md-preview-body p { margin: 0 0 8px 0; }
         .md-preview-body p:last-child { margin-bottom: 0; }
@@ -55,19 +55,19 @@ export default function MarkdownPreview({ content, onTogglePreview }: MarkdownPr
           color: var(--text);
           margin: 16px 0 8px 0;
         }
-        .md-preview-body h1 { font-size: 1.8em; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
-        .md-preview-body h2 { font-size: 1.4em; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+        .md-preview-body h1 { font-size: 1.8em; border-bottom: 1px solid var(--border-hairline); padding-bottom: 6px; }
+        .md-preview-body h2 { font-size: 1.4em; border-bottom: 1px solid var(--border-hairline); padding-bottom: 4px; }
         .md-preview-body h3 { font-size: 1.2em; }
         .md-preview-body code {
-          background: var(--bg-hover);
+          background: var(--surface-4);
           padding: 2px 6px;
           border-radius: 3px;
           font-size: 12px;
-          border: 1px solid var(--border);
+          border: 1px solid var(--border-hairline);
         }
         .md-preview-body pre code { background: none; padding: 0; border: none; }
         .md-preview-body pre {
-          background: var(--bg-secondary);
+          background: var(--surface-2);
           border-radius: 6px;
           padding: 12px;
           overflow-x: auto;
@@ -83,17 +83,17 @@ export default function MarkdownPreview({ content, onTogglePreview }: MarkdownPr
         }
         .md-preview-body th,
         .md-preview-body td {
-          border: 1px solid var(--border);
+          border: 1px solid var(--border-hairline);
           padding: 6px 12px;
           text-align: left;
         }
         .md-preview-body th {
-          background: var(--bg-secondary);
+          background: var(--surface-2);
           font-weight: 600;
           color: var(--text);
         }
         .md-preview-body td { color: var(--text-secondary); }
-        .md-preview-body tr:hover td { background: var(--bg-secondary); }
+        .md-preview-body tr:hover td { background: var(--surface-2); }
         .md-preview-body ul, .md-preview-body ol { padding-left: 24px; margin: 4px 0 8px 0; }
         .md-preview-body li { margin: 2px 0; }
         .md-preview-body blockquote {
@@ -103,7 +103,7 @@ export default function MarkdownPreview({ content, onTogglePreview }: MarkdownPr
           color: var(--text-muted);
         }
         .md-preview-body img { max-width: 100%; border-radius: 6px; }
-        .md-preview-body hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+        .md-preview-body hr { border: none; border-top: 1px solid var(--border-hairline); margin: 16px 0; }
         .md-preview-body pre code.hljs.language-diff .hljs-addition {
           color: var(--text);
           background: rgba(72, 100, 40, 0.35);
@@ -137,12 +137,12 @@ export default function MarkdownPreview({ content, onTogglePreview }: MarkdownPr
           align-items: center;
           justify-content: space-between;
           padding: 4px 16px;
-          border-top: 1px solid var(--border);
+          border-top: 1px solid var(--border-hairline);
           font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 11px;
           color: var(--text-muted);
           flex-shrink: 0;
-          background: var(--bg-secondary);
+          background: var(--surface-1);
         }
       `}</style>
     </div>

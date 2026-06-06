@@ -26,7 +26,7 @@ export default function ApprovalActionCard({ toolCall, tasks = [], approvals = [
       <span style={{ color }}>{isApprove ? '✓' : '✗'}</span>
       <span>
         {isApprove ? 'Approved' : 'Denied'}{' '}
-        <code style={{ fontFamily: "'Geist Mono', monospace", background: 'var(--bg-secondary)', padding: '1px 4px', borderRadius: 3 }}>
+        <code style={{ fontFamily: "'Geist Mono', monospace", background: 'var(--surface-2)', padding: '1px 4px', borderRadius: 3 }}>
           {tool}
         </code>{' '}
         on <b>{taskLabel}</b>

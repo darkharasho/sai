@@ -50,7 +50,7 @@ function ContextMeter({ used, total }: { used: number; total: number }) {
   return (
     <div className="context-meter" title={`Context: ${Math.round(pct)}% (${(used / 1000).toFixed(0)}K / ${(total / 1000).toFixed(0)}K tokens)`}>
       <svg width="22" height="22" viewBox="0 0 22 22">
-        <circle cx="11" cy="11" r={radius} fill="none" stroke="var(--border)" strokeWidth="2.5" />
+        <circle cx="11" cy="11" r={radius} fill="none" stroke="var(--border-hairline)" strokeWidth="2.5" />
         <circle
           cx="11" cy="11" r={radius} fill="none"
           stroke={color} strokeWidth="2.5"
@@ -1998,16 +1998,16 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           height: 32px;
           padding: 0;
           border-radius: 50%;
-          border: 1px solid var(--border);
-          background: var(--bg-secondary);
+          border: 1px solid var(--border-subtle);
+          background: var(--surface-2);
           color: var(--accent);
           cursor: pointer;
           box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
           transition: background 0.15s, border-color 0.15s;
         }
         .follow-btn:hover {
-          background: color-mix(in srgb, var(--bg-secondary) 70%, var(--accent) 10%);
-          border-color: color-mix(in srgb, var(--border) 60%, var(--accent) 40%);
+          background: color-mix(in srgb, var(--surface-2) 70%, var(--accent) 10%);
+          border-color: color-mix(in srgb, var(--border-subtle) 60%, var(--accent) 40%);
         }
         .follow-btn-unread {
           position: absolute;
@@ -2017,7 +2017,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           height: 6px;
           border-radius: 50%;
           background: var(--accent);
-          box-shadow: 0 0 0 2px var(--bg-secondary);
+          box-shadow: 0 0 0 2px var(--surface-2);
         }
         @media (prefers-reduced-motion: no-preference) {
           @keyframes follow-btn-unread-pulse {
@@ -2032,8 +2032,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         .pinned-prompt-bar {
           flex-shrink: 0;
           padding: 0 16px 0 0;
-          border-bottom: 1px solid var(--border);
-          background: color-mix(in srgb, var(--bg-secondary) 80%, transparent);
+          border-bottom: 1px solid var(--border-hairline);
+          background: color-mix(in srgb, var(--surface-2) 80%, transparent);
           backdrop-filter: blur(12px);
           -webkit-backdrop-filter: blur(12px);
           display: flex;
@@ -2177,8 +2177,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           font-size: 12px;
         }
         .chat-empty-hint kbd {
-          background: var(--bg-input);
-          border: 1px solid var(--border);
+          background: var(--surface-2);
+          border: 1px solid var(--border-hairline);
           border-radius: 4px;
           padding: 2px 7px;
           font-family: 'Geist Mono', 'JetBrains Mono', monospace;

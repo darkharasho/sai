@@ -77,7 +77,7 @@ export default function OrchestratorView({
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '10px 18px',
-          borderBottom: '1px solid var(--border)',
+          borderBottom: '1px solid var(--border-hairline)',
           gap: 12,
           flexShrink: 0,
         }}
@@ -115,7 +115,7 @@ export default function OrchestratorView({
               alignItems: 'center',
               gap: 3,
               background: 'none',
-              border: '1px solid var(--border)',
+              border: '1px solid var(--border-subtle)',
               color: 'var(--text-muted)',
               padding: '2px 6px',
               borderRadius: 4,
@@ -171,7 +171,7 @@ export default function OrchestratorView({
               font-size: 11px;
             }
             .orch-non-claude-banner code {
-              background: var(--bg-elevated);
+              background: var(--surface-3);
               padding: 1px 5px;
               border-radius: 3px;
               font-size: 10px;

@@ -44,7 +44,7 @@ export default function SwarmTaskHeader({ task, onPause, onDiscard, onLand, onOp
         .swarm-task-header {
           display: flex; align-items: center; gap: 12px;
           height: 28px; padding: 0 10px;
-          background: var(--bg-secondary); border-bottom: 1px solid var(--border);
+          background: var(--surface-2); border-bottom: 1px solid var(--border-hairline);
           font-size: 11px;
         }
         .swarm-task-header .title { font-weight: 600; color: var(--text); }
@@ -65,10 +65,10 @@ export default function SwarmTaskHeader({ task, onPause, onDiscard, onLand, onOp
         .swarm-task-header .actions { margin-left: auto; display: flex; gap: 4px; }
         .swarm-task-header .actions button {
           display: inline-flex; align-items: center; gap: 4px;
-          background: none; border: 1px solid var(--border); color: var(--text-muted);
+          background: none; border: 1px solid var(--border-subtle); color: var(--text-muted);
           padding: 2px 6px; border-radius: 4px; cursor: pointer; font-size: 11px;
         }
-        .swarm-task-header .actions button:hover:not(:disabled) { color: var(--text); background: var(--bg-hover); }
+        .swarm-task-header .actions button:hover:not(:disabled) { color: var(--text); background: var(--surface-4); }
         .swarm-task-header .actions button:disabled { opacity: 0.4; cursor: not-allowed; }
       `}</style>
     </div>

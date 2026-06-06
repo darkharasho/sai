@@ -10,9 +10,9 @@ const inputStyle: React.CSSProperties = {
   width: '100%',
   padding: '6px 10px',
   fontSize: 12,
-  background: 'var(--bg-secondary)',
+  background: 'var(--surface-2)',
   color: 'var(--text)',
-  border: '1px solid var(--border)',
+  border: '1px solid var(--border-subtle)',
   borderRadius: 6,
   fontFamily: 'inherit',
 };
@@ -20,9 +20,9 @@ const inputStyle: React.CSSProperties = {
 const buttonStyle: React.CSSProperties = {
   padding: '6px 14px',
   fontSize: 12,
-  background: 'var(--bg-secondary)',
-  color: 'var(--text)',
-  border: '1px solid var(--border)',
+  background: 'var(--surface-3)',
+  color: 'var(--text-secondary)',
+  border: '1px solid var(--border-subtle)',
   borderRadius: 6,
   cursor: 'pointer',
   fontFamily: 'inherit',
@@ -34,7 +34,7 @@ const buttonStyle: React.CSSProperties = {
 const sectionStyle: React.CSSProperties = {
   marginBottom: 24,
   paddingBottom: 24,
-  borderBottom: '1px solid var(--border)',
+  borderBottom: '1px solid var(--border-hairline)',
 };
 
 const labelStyle: React.CSSProperties = {

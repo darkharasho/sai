@@ -48,8 +48,8 @@ export default function WhatsNewModal({ isOpen, version, releases, fetchStatus, 
         data-testid="whats-new-modal"
         className="sai-modal-in"
         style={{
-          background: 'var(--bg-elevated)',
-          border: '1px solid var(--border)',
+          background: 'var(--surface-3)',
+          border: '1px solid var(--border-subtle)',
           borderRadius: 10,
           width: 560,
           maxHeight: '80vh',
@@ -66,7 +66,7 @@ export default function WhatsNewModal({ isOpen, version, releases, fetchStatus, 
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '16px 20px',
-          borderBottom: '1px solid var(--border)',
+          borderBottom: '1px solid var(--border-hairline)',
           flexShrink: 0,
         }}>
           <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -135,7 +135,7 @@ export default function WhatsNewModal({ isOpen, version, releases, fetchStatus, 
                       color: 'var(--text)',
                       margin: i === 0 ? '0 0 8px' : '20px 0 8px',
                       paddingBottom: 6,
-                      borderBottom: '1px solid var(--border)',
+                      borderBottom: '1px solid var(--border-hairline)',
                     }}>
                       v{r.version}
                     </h2>
@@ -150,7 +150,7 @@ export default function WhatsNewModal({ isOpen, version, releases, fetchStatus, 
         {/* Footer */}
         <div style={{
           padding: '12px 20px',
-          borderTop: '1px solid var(--border)',
+          borderTop: '1px solid var(--border-hairline)',
           display: 'flex',
           justifyContent: 'flex-end',
           flexShrink: 0,
@@ -188,7 +188,7 @@ export default function WhatsNewModal({ isOpen, version, releases, fetchStatus, 
         .whats-new-markdown ol { margin: 0 0 8px; padding-left: 20px; }
         .whats-new-markdown li { margin-bottom: 3px; }
         .whats-new-markdown code {
-          background: var(--bg-secondary);
+          background: var(--surface-2);
           border-radius: 3px;
           padding: 1px 4px;
           font-family: 'Geist Mono', 'JetBrains Mono', monospace;

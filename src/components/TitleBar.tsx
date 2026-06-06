@@ -420,13 +420,13 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                         flex: 1, display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
                         gap: 5, color: 'var(--accent)', fontSize: 13, borderRadius: '4px 0 0 4px',
                       }}
-                      onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent-hover)'; e.currentTarget.style.background = 'var(--bg-elevated)'; }}
+                      onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent-hover)'; e.currentTarget.style.background = 'var(--surface-3)'; }}
                       onMouseLeave={e => { e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.background = 'transparent'; }}
                     >
                       <FolderOpen size={13} />
                       Open Project
                     </button>
-                    <div style={{ width: 1, height: 16, background: 'var(--border)', flexShrink: 0 }} />
+                    <div style={{ width: 1, height: 16, background: 'var(--border-hairline)', flexShrink: 0 }} />
                     <button
                       className="dropdown-item"
                       onClick={() => { setOpen(false); onNewProject?.(); }}
@@ -434,7 +434,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                         flex: 1, display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
                         gap: 5, color: 'var(--accent)', fontSize: 13, borderRadius: '0 4px 4px 0',
                       }}
-                      onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent-hover)'; e.currentTarget.style.background = 'var(--bg-elevated)'; }}
+                      onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent-hover)'; e.currentTarget.style.background = 'var(--surface-3)'; }}
                       onMouseLeave={e => { e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.background = 'transparent'; }}
                     >
                       <FolderPlus size={13} />
@@ -563,7 +563,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                       display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
                       gap: 5, color: 'var(--accent)', fontSize: 13,
                     }}
-                    onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent-hover)'; e.currentTarget.style.background = 'var(--bg-elevated)'; }}
+                    onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent-hover)'; e.currentTarget.style.background = 'var(--surface-3)'; }}
                     onMouseLeave={e => { e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.background = 'transparent'; }}
                   >
                     <Layers size={13} />
@@ -696,7 +696,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
       <style>{`
         .titlebar {
           height: var(--titlebar-height);
-          background: var(--bg-secondary);
+          background: var(--surface-0);
           border-bottom: none;
           display: flex;
           align-items: center;
@@ -762,7 +762,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           transition: background-color 120ms ease, color 120ms ease;
         }
         .window-ctrl:hover {
-          background: var(--bg-hover);
+          background: var(--surface-4);
           color: var(--text);
         }
         .window-ctrl-close:hover {
@@ -803,8 +803,8 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           display: flex;
           align-items: center;
           gap: 5px;
-          background: var(--bg-secondary);
-          border: 1px solid var(--border);
+          background: var(--surface-2);
+          border: 1px solid var(--border-subtle);
           border-radius: 5px;
           color: var(--text-secondary);
           font-size: 11px;
@@ -826,7 +826,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           padding: 2px 6px;
           color: var(--text-secondary);
         }
-        .gh-user-btn:hover { background: var(--bg-hover); border-color: var(--border); color: var(--text); }
+        .gh-user-btn:hover { background: var(--surface-4); border-color: var(--border-subtle); color: var(--text); }
         .gh-avatar-wrap { position: relative; flex-shrink: 0; }
         .gh-avatar {
           width: 18px;
@@ -842,7 +842,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           width: 6px;
           height: 6px;
           border-radius: 50%;
-          border: 1px solid var(--bg-secondary);
+          border: 1px solid var(--surface-0);
         }
         .gh-sync-dot.syncing { background: var(--accent); animation: sync-pulse 1s ease-in-out infinite; }
         .gh-sync-dot.error { background: #f87171; }
@@ -862,8 +862,8 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           position: absolute;
           top: calc(100% + 6px);
           right: 0;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
+          background: var(--surface-3);
+          border: 1px solid var(--border-subtle);
           border-radius: 8px;
           min-width: 200px;
           box-shadow: 0 8px 24px rgba(0,0,0,0.4);
@@ -894,7 +894,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         }
         .gh-dropdown-divider {
           height: 1px;
-          background: var(--border);
+          background: var(--border-hairline);
         }
         .gh-dropdown-item {
           display: flex;
@@ -909,7 +909,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           cursor: pointer;
           text-align: left;
         }
-        .gh-dropdown-item:hover { background: var(--bg-hover); }
+        .gh-dropdown-item:hover { background: var(--surface-4); }
         .gh-dropdown-item.danger { color: #f87171; }
         .gh-dropdown-item.danger:hover { background: rgba(248,113,113,0.08); }
         .project-dropdown-wrapper {
@@ -1031,8 +1031,8 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           opacity: 0.8;
         }
         .project-selector:hover {
-          background: var(--bg-hover);
-          border-color: var(--border);
+          background: var(--surface-4);
+          border-color: var(--border-subtle);
         }
         .project-dropdown {
           position: absolute;
@@ -1040,8 +1040,8 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           left: 50%;
           transform: translateX(-50%);
           margin-top: 4px;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
+          background: var(--surface-3);
+          border: 1px solid var(--border-subtle);
           border-radius: 8px;
           width: 420px;
           box-shadow: 0 8px 24px rgba(0,0,0,0.4);
@@ -1071,7 +1071,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           font-size: 13px;
         }
         .dropdown-item:hover {
-          background: var(--bg-hover);
+          background: var(--surface-4);
         }
         .dropdown-item.active {
           background: var(--accent);
@@ -1093,7 +1093,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         }
         .dropdown-divider {
           height: 1px;
-          background: var(--border);
+          background: var(--border-hairline);
           margin: 4px 0;
         }
         .dropdown-inactive-scroll {
@@ -1105,7 +1105,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           width: 8px;
         }
         .dropdown-inactive-scroll::-webkit-scrollbar-thumb {
-          background: var(--border);
+          background: var(--border-hairline);
           border-radius: 4px;
         }
         .dropdown-inactive-scroll::-webkit-scrollbar-thumb:hover {
@@ -1176,7 +1176,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           opacity: 1;
         }
         .workspace-overflow-btn:hover {
-          background: var(--bg-secondary);
+          background: var(--surface-4);
           color: var(--text);
         }
         .workspace-submenu {
@@ -1184,8 +1184,8 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           right: 8px;
           top: calc(100% - 4px);
           z-index: 200;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
+          background: var(--surface-3);
+          border: 1px solid var(--border-subtle);
           border-radius: 6px;
           padding: 4px 0;
           min-width: 120px;
@@ -1206,7 +1206,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           -webkit-app-region: no-drag;
         }
         .workspace-submenu-item:hover {
-          background: var(--bg-hover);
+          background: var(--surface-4);
         }
         .workspace-submenu-item.danger {
           color: #f87171;
@@ -1216,7 +1216,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         }
         .picker-tabs {
           display: flex;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--border-hairline);
           padding: 4px 8px 0;
           gap: 2px;
         }
@@ -1235,7 +1235,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         }
         .picker-tabs button:hover {
           color: var(--text);
-          background: var(--bg-hover);
+          background: var(--surface-4);
         }
         .picker-tabs button.active {
           color: var(--accent);
@@ -1299,7 +1299,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         }
         .meta-workspace-manage-btn:hover {
           color: var(--text);
-          background: var(--bg-hover);
+          background: var(--surface-4);
         }
         .meta-workspace-item {
           flex-direction: row !important;

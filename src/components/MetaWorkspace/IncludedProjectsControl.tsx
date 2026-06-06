@@ -85,8 +85,8 @@ export function IncludedProjectsControl({ runtime, onMentionInsert }: Props) {
             right: 0;
             min-width: 220px;
             max-width: 340px;
-            background: var(--bg-elevated);
-            border: 1px solid var(--border);
+            background: var(--surface-3);
+            border: 1px solid var(--border-subtle);
             border-radius: 6px;
             box-shadow: 0 4px 16px rgba(0,0,0,0.24);
             z-index: 200;
@@ -108,7 +108,7 @@ export function IncludedProjectsControl({ runtime, onMentionInsert }: Props) {
             color: var(--text-primary);
           }
           .ipc-popover-row:hover:not(:disabled) {
-            background: var(--bg-hover);
+            background: var(--surface-4);
           }
           .ipc-popover-row.unavailable {
             opacity: 0.45;
@@ -172,7 +172,7 @@ export function IncludedProjectsControl({ runtime, onMentionInsert }: Props) {
         }
         .ipc-chip.unavailable {
           color: var(--text-muted);
-          border-color: var(--border);
+          border-color: var(--border-subtle);
           opacity: 0.5;
           cursor: not-allowed;
         }

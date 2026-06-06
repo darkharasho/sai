@@ -36,8 +36,8 @@ export default function UnsavedChangesModal({ fileName, onSave, onDiscard, onCan
         className="sai-modal-in"
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: 'var(--bg-elevated)',
-          border: '1px solid var(--border)',
+          background: 'var(--surface-3)',
+          border: '1px solid var(--border-subtle)',
           borderRadius: 8,
           padding: '24px 28px',
           width: 360,
@@ -62,7 +62,7 @@ export default function UnsavedChangesModal({ fileName, onSave, onDiscard, onCan
             onClick={onCancel}
             style={{
               background: 'none',
-              border: '1px solid var(--border)',
+              border: '1px solid var(--border-subtle)',
               color: 'var(--text-muted)',
               borderRadius: 5,
               padding: '6px 14px',
@@ -75,7 +75,7 @@ export default function UnsavedChangesModal({ fileName, onSave, onDiscard, onCan
             }}
             onMouseLeave={(e) => {
               (e.currentTarget as HTMLElement).style.color = 'var(--text-muted)';
-              (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)';
+              (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-subtle)';
             }}
           >
             Cancel
@@ -84,7 +84,7 @@ export default function UnsavedChangesModal({ fileName, onSave, onDiscard, onCan
             onClick={onDiscard}
             style={{
               background: 'none',
-              border: '1px solid var(--border)',
+              border: '1px solid var(--border-subtle)',
               color: 'var(--text-secondary)',
               borderRadius: 5,
               padding: '6px 14px',
@@ -97,7 +97,7 @@ export default function UnsavedChangesModal({ fileName, onSave, onDiscard, onCan
             }}
             onMouseLeave={(e) => {
               (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)';
-              (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)';
+              (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-subtle)';
             }}
           >
             Don't Save

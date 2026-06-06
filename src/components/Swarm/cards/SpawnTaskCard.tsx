@@ -156,8 +156,8 @@ export default function SpawnTaskCard({
                 gap: 8,
                 padding: '6px 8px',
                 borderRadius: 4,
-                background: 'var(--bg-secondary)',
-                border: '1px solid var(--border)',
+                background: 'var(--surface-2)',
+                border: '1px solid var(--border-subtle)',
               }}
             >
               <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

@@ -43,8 +43,8 @@ export default function ChatHistoryContextMenu({ x, y, pinned, onAction, onClose
     position: 'fixed',
     left: x,
     top: y,
-    background: 'var(--bg-elevated)',
-    border: '1px solid var(--border)',
+    background: 'var(--surface-3)',
+    border: '1px solid var(--border-subtle)',
     borderRadius: 6,
     padding: '4px 0',
     minWidth: 200,
@@ -79,8 +79,8 @@ export default function ChatHistoryContextMenu({ x, y, pinned, onAction, onClose
               onClick={() => setConfirmingDelete(false)}
               style={{
                 padding: '4px 12px',
-                background: 'var(--bg-hover)',
-                border: '1px solid var(--border)',
+                background: 'var(--surface-4)',
+                border: '1px solid var(--border-subtle)',
                 borderRadius: 4,
                 color: 'var(--text)',
                 cursor: 'pointer',
@@ -110,7 +110,7 @@ export default function ChatHistoryContextMenu({ x, y, pinned, onAction, onClose
           <button
             style={itemStyle}
             onClick={() => onAction('rename')}
-            onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
+            onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-4)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
           >
             <Pencil size={14} /> Rename
@@ -118,7 +118,7 @@ export default function ChatHistoryContextMenu({ x, y, pinned, onAction, onClose
           <button
             style={itemStyle}
             onClick={() => onAction('pin')}
-            onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
+            onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-4)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
           >
             {pinned ? <PinOff size={14} /> : <Pin size={14} />}
@@ -127,16 +127,16 @@ export default function ChatHistoryContextMenu({ x, y, pinned, onAction, onClose
           <button
             style={itemStyle}
             onClick={() => onAction('export')}
-            onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
+            onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-4)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
           >
             <Download size={14} /> Export as Markdown
           </button>
-          <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
+          <div style={{ height: 1, background: 'var(--border-hairline)', margin: '4px 0' }} />
           <button
             style={{ ...itemStyle, color: 'var(--red)' }}
             onClick={() => setConfirmingDelete(true)}
-            onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
+            onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-4)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
           >
             <Trash2 size={14} /> Delete

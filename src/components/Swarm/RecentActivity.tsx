@@ -29,7 +29,7 @@ export default function RecentActivity({ items }: Props) {
     <section
       aria-label="recent activity"
       style={{
-        borderBottom: '1px solid var(--border)',
+        borderBottom: '1px solid var(--border-hairline)',
         padding: 8,
         display: 'flex',
         flexDirection: 'column',
@@ -46,7 +46,7 @@ export default function RecentActivity({ items }: Props) {
               borderRadius: 3,
               textTransform: 'uppercase',
               opacity: 0.8,
-              border: '1px solid var(--border)',
+              border: '1px solid var(--border-hairline)',
             }}>{t.status}</span>
             <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {t.title}

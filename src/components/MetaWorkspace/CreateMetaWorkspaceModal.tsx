@@ -89,8 +89,8 @@ export function CreateMetaWorkspaceModal({ recentProjects, onClose, onCreated }:
   const availableRecent = recentProjects.filter(p => !addedPaths.has(p));
 
   const inputStyle: React.CSSProperties = {
-    background: 'var(--bg-secondary)',
-    border: '1px solid var(--border)',
+    background: 'var(--surface-2)',
+    border: '1px solid var(--border-subtle)',
     borderRadius: 5,
     padding: '7px 10px',
     fontSize: 13,
@@ -136,7 +136,7 @@ export function CreateMetaWorkspaceModal({ recentProjects, onClose, onCreated }:
               onClick={handlePickFolder}
               style={{
                 display: 'flex', alignItems: 'center', gap: 4,
-                background: 'none', border: '1px solid var(--border)', borderRadius: 4,
+                background: 'none', border: '1px solid var(--border-subtle)', borderRadius: 4,
                 color: 'var(--accent)', fontSize: 11, padding: '3px 8px', cursor: 'pointer',
               }}
             >
@@ -156,7 +156,7 @@ export function CreateMetaWorkspaceModal({ recentProjects, onClose, onCreated }:
               key={draft.path}
               style={{
                 display: 'flex', flexDirection: 'column', gap: 6,
-                background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+                background: 'var(--surface-2)', border: '1px solid var(--border-subtle)',
                 borderRadius: 6, padding: '8px 10px',
               }}
             >
@@ -211,7 +211,7 @@ export function CreateMetaWorkspaceModal({ recentProjects, onClose, onCreated }:
                     cursor: 'pointer', textAlign: 'left', width: '100%',
                     fontFamily: "'JetBrains Mono', monospace",
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-hover)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-4)'; e.currentTarget.style.borderColor = 'var(--border-subtle)'; }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.borderColor = 'transparent'; }}
                 >
                   <Plus size={11} style={{ flexShrink: 0, color: 'var(--accent)' }} />
@@ -223,7 +223,7 @@ export function CreateMetaWorkspaceModal({ recentProjects, onClose, onCreated }:
         )}
 
         {/* Divider */}
-        <div style={{ height: 1, background: 'var(--border)', marginBottom: 16 }} />
+        <div style={{ height: 1, background: 'var(--border-hairline)', marginBottom: 16 }} />
 
         {/* Error */}
         {error && (
@@ -245,7 +245,7 @@ export function CreateMetaWorkspaceModal({ recentProjects, onClose, onCreated }:
             disabled={!canCreate}
             style={{
               background: 'none',
-              border: `1px solid ${canCreate ? 'var(--accent)' : 'var(--border)'}`,
+              border: `1px solid ${canCreate ? 'var(--accent)' : 'var(--border-subtle)'}`,
               color: canCreate ? 'var(--accent)' : 'var(--text-muted)',
               borderRadius: 5, padding: '7px 16px', fontSize: 13,
               cursor: canCreate ? 'pointer' : 'not-allowed',
@@ -270,8 +270,8 @@ export function CreateMetaWorkspaceModal({ recentProjects, onClose, onCreated }:
           backdrop-filter: blur(2px);
         }
         .cmwm-modal {
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
+          background: var(--surface-3);
+          border: 1px solid var(--border-subtle);
           border-radius: 10px;
           padding: 24px 28px;
           width: 520px;
@@ -283,7 +283,7 @@ export function CreateMetaWorkspaceModal({ recentProjects, onClose, onCreated }:
           flex-direction: column;
         }
         .cmwm-modal::-webkit-scrollbar { width: 6px; }
-        .cmwm-modal::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        .cmwm-modal::-webkit-scrollbar-thumb { background: var(--border-hairline); border-radius: 3px; }
         .cmwm-modal::-webkit-scrollbar-track { background: transparent; }
       `}</style>
     </div>

@@ -69,8 +69,8 @@ export default function ActivityRibbon({ active, ready, approvals, cost, tokRate
         padding: '0 18px',
         fontSize: 11,
         color: 'var(--text)',
-        background: 'var(--bg-secondary)',
-        borderBottom: '1px solid var(--border)',
+        background: 'var(--surface-1)',
+        borderBottom: '1px solid var(--border-hairline)',
         flexShrink: 0,
         opacity: segments.length === 0 ? 0.5 : 1,
       }}

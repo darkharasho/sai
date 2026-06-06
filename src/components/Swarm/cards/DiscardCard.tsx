@@ -17,7 +17,7 @@ export default function DiscardCard({ toolCall }: Props) {
       <span>🗑</span>
       <span>
         Discarded{' '}
-        <code style={{ fontFamily: "'Geist Mono', monospace", background: 'var(--bg-secondary)', padding: '1px 4px', borderRadius: 3 }}>
+        <code style={{ fontFamily: "'Geist Mono', monospace", background: 'var(--surface-2)', padding: '1px 4px', borderRadius: 3 }}>
           {branch}
         </code>
       </span>
