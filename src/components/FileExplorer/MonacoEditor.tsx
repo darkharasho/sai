@@ -31,25 +31,25 @@ self.MonacoEnvironment = {
   },
 };
 
-// Register SAI dark theme
+// Register SAI dark theme — colors kept in sync with --surface-* CSS vars
 monaco.editor.defineTheme('sai-dark', {
   base: 'vs-dark',
   inherit: true,
   rules: [],
   colors: {
-    'editor.background': '#111418',
+    'editor.background': '#0f1318',
     'editor.foreground': '#bec6d0',
-    'editorLineNumber.foreground': '#475262',
+    'editorLineNumber.foreground': '#5a6a7a',
     'editorLineNumber.activeForeground': '#a0acbb',
-    'editor.selectionBackground': '#21292f',
-    'editor.lineHighlightBackground': '#161a1f',
-    'editorWidget.background': '#0c0f11',
-    'editorWidget.border': '#2a2e35',
-    'input.background': '#161a1f',
-    'input.border': '#2a2e35',
-    'dropdown.background': '#1c2128',
-    'list.hoverBackground': '#21292f',
-    'minimap.background': '#0c0f11',
+    'editor.selectionBackground': '#252d3a',
+    'editor.lineHighlightBackground': '#161b22',
+    'editorWidget.background': '#090c0e',
+    'editorWidget.border': '#1e2228',
+    'input.background': '#161b22',
+    'input.border': '#1e2228',
+    'dropdown.background': '#1d2430',
+    'list.hoverBackground': '#252d3a',
+    'minimap.background': '#090c0e',
     'scrollbar.shadow': '#00000000',
     'editorOverviewRuler.border': '#00000000',
   },
@@ -359,19 +359,16 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
     editorRef.current = editor;
     registerMonacoEditor(filePath, editor);
 
-    // Apply saved highlight theme
-    const hlTheme = getActiveHighlightTheme();
-    if (hlTheme !== 'monokai') {
-      buildMonacoThemeData(hlTheme).then(data => {
-        monaco.editor.defineTheme('sai-dark', {
-          base: data.base,
-          inherit: true,
-          rules: data.rules,
-          colors: data.colors,
-        });
-        monaco.editor.setTheme('sai-dark');
+    // Apply saved highlight theme — always call so CSS vars drive chrome colors
+    buildMonacoThemeData(getActiveHighlightTheme()).then(data => {
+      monaco.editor.defineTheme('sai-dark', {
+        base: data.base,
+        inherit: true,
+        rules: data.rules,
+        colors: data.colors,
       });
-    }
+      monaco.editor.setTheme('sai-dark');
+    });
 
     editor.onDidChangeModelContent(() => {
       if (applyingExternalRef.current) return;
