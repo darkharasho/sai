@@ -450,8 +450,8 @@ describe('ChatPanel', () => {
     expect(container.querySelector('.thinking-clock')?.textContent).toMatch(/^\[\d{2}:\d{2}\.\d\]$/);
   });
 
-  it('Codex thinking applies wave to Working text when streaming', async () => {
-    const props = { ...baseProps(), aiProvider: 'codex' as const };
+  it('Codex thinking shows SAI ThinkingAnimation when streaming with animations off', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const, saiAnimationEnabled: false };
     const { container, rerender } = render(<ChatPanel {...props} />);
 
     await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
@@ -463,10 +463,11 @@ describe('ChatPanel', () => {
     });
     rerender(<ChatPanel {...props} isStreaming />);
 
-    expect(container.querySelector('.codex-working-wave')).toBeTruthy();
+    // Provider-specific animations removed — Codex no longer gets its own "Working" wave
+    expect(container.querySelector('.codex-working-wave')).toBeFalsy();
   });
 
-  it('Gemini thinking hint has cross-slide class when streaming', async () => {
+  it('Gemini thinking uses SAI animation system (no provider-specific hint)', async () => {
     const props = { ...baseProps(), aiProvider: 'gemini' as const };
     const { container, rerender } = render(<ChatPanel {...props} />);
 
@@ -479,7 +480,7 @@ describe('ChatPanel', () => {
     });
     rerender(<ChatPanel {...props} isStreaming />);
 
-    expect(container.querySelector('.gemini-hint-slide')).toBeTruthy();
+    expect(container.querySelector('.gemini-hint-slide')).toBeFalsy();
   });
 
   it('wraps the bottom strip in a LayoutGroup', () => {
@@ -1057,7 +1058,7 @@ describe('ChatPanel', () => {
       expect(streamingMsg).toBeTruthy();
     });
 
-    it('non-SAI provider keeps the detached banner', async () => {
+    it('all providers use SAI animation system — no provider-specific banners', async () => {
       const props = { ...baseProps(), aiProvider: 'gemini' as const };
       const { container, rerender } = render(<ChatPanel {...props} />);
       await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
@@ -1069,8 +1070,8 @@ describe('ChatPanel', () => {
       });
       rerender(<ChatPanel {...props} isStreaming />);
 
-      // Gemini banner present (cross-slide hint is gemini-specific).
-      expect(container.querySelector('.gemini-hint-slide')).toBeTruthy();
+      // Provider-specific animations removed — gemini-hint-slide no longer exists.
+      expect(container.querySelector('.gemini-hint-slide')).toBeFalsy();
     });
   });
 
