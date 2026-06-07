@@ -4023,7 +4023,11 @@ export default function App() {
                   activeFilePath={ws.activeFilePath}
                   onFileOpen={handleFileOpen}
                   isActive={wsPath === activeProjectPath}
-                  isStreaming={streamingScopes.has(`${wsPath}:${ws.activeSession.id}`)}
+                  isStreaming={
+                    aiProvider === 'claude'
+                      ? streamingScopes.has(`${wsPath}:${ws.activeSession.id}`)
+                      : streamingScopes.has(`${wsPath}:chat`)
+                  }
                   awaitingQuestion={awaitingQuestionWorkspaces.has(wsPath)}
                   initialDraft={chatDraftsRef.current.get(wsPath) || ''}
                   onDraftChange={(draft: string) => handleDraftChange(wsPath, draft)}
