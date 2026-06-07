@@ -338,7 +338,7 @@ export function registerCodexHandlers(win: BrowserWindow) {
     ws.codex.busy = true;
     ws.codex.buffer = '';
 
-    safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: ws.codex.turnSeq });
+    safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: ws.codex.turnSeq, sessionId: ws.codex.sessionId ?? null });
 
     proc.stdout?.on('data', (data: Buffer) => {
       if (ws.codex.process !== proc) return;

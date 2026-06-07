@@ -4045,10 +4045,14 @@ export default function App() {
                       ? streamingScopes.has(`${wsPath}:${ws.activeSession.id}`)
                       // Gemini/Codex use 'chat' as a fixed scope — multiple sessions can
                       // exist concurrently (background stream keeps running after New Chat).
-                      // Only show the thinking animation when the streaming ACP session
-                      // matches this session's own session ID.
+                      // Only show the thinking animation when the streaming session ID
+                      // matches this session's own provider session ID.
                       : streamingScopes.has(`${wsPath}:chat`) &&
-                        chatStreamingSessionRef.current.get(wsPath) === (ws.activeSession.geminiSessionId ?? null)
+                        chatStreamingSessionRef.current.get(wsPath) === (
+                          aiProvider === 'gemini'
+                            ? (ws.activeSession.geminiSessionId ?? null)
+                            : (ws.activeSession.codexSessionId ?? null)
+                        )
                   }
                   awaitingQuestion={awaitingQuestionWorkspaces.has(wsPath)}
                   initialDraft={chatDraftsRef.current.get(wsPath) || ''}
