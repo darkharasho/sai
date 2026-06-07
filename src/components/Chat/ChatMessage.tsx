@@ -899,42 +899,6 @@ function ChatMessage({
         .chat-msg-sai {
           margin-top: 1px;
         }
-        .chat-msg-claude {
-          width: 14px;
-          height: 14px;
-          margin-top: 2px;
-          background-color: var(--accent);
-          -webkit-mask-image: url('svg/claude.svg');
-          mask-image: url('svg/claude.svg');
-          -webkit-mask-size: contain;
-          mask-size: contain;
-          -webkit-mask-repeat: no-repeat;
-          mask-repeat: no-repeat;
-        }
-        .chat-msg-openai {
-          width: 14px;
-          height: 14px;
-          margin-top: 2px;
-          background-color: var(--accent);
-          -webkit-mask-image: url('svg/codex.svg');
-          mask-image: url('svg/codex.svg');
-          -webkit-mask-size: contain;
-          mask-size: contain;
-          -webkit-mask-repeat: no-repeat;
-          mask-repeat: no-repeat;
-        }
-        .chat-msg-gemini {
-          width: 14px;
-          height: 14px;
-          margin-top: 2px;
-          background-color: var(--accent, #c7910c);
-          -webkit-mask-image: url('svg/Google-gemini-icon.svg');
-          mask-image: url('svg/Google-gemini-icon.svg');
-          -webkit-mask-size: contain;
-          mask-size: contain;
-          -webkit-mask-repeat: no-repeat;
-          mask-repeat: no-repeat;
-        }
         .chat-msg-body { color: var(--text); font-size: var(--text-md); line-height: 1.55; flex: 1; min-width: 0; }
         .chat-msg-duration {
           font-family: 'Geist Mono', 'JetBrains Mono', monospace;
