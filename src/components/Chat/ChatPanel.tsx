@@ -66,7 +66,25 @@ function ContextMeter({ used, total }: { used: number; total: number }) {
   );
 }
 
-function CodexThinkingAnimation() {
+function useElapsedSeconds(startedAt: number | undefined): number {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!startedAt) return;
+    const update = () => setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    update();
+    const id = setInterval(update, 1000);
+    return () => clearInterval(id);
+  }, [startedAt]);
+  return elapsed;
+}
+
+function formatElapsed(secs: number): string {
+  if (secs < 60) return `${secs}s`;
+  return `${Math.floor(secs / 60)}m ${secs % 60}s`;
+}
+
+function CodexThinkingAnimation({ startedAt }: { startedAt?: number }) {
+  const elapsed = useElapsedSeconds(startedAt);
   return (
     <div className="codex-thinking">
       <span className="codex-thinking-dot">•</span>
@@ -75,6 +93,7 @@ function CodexThinkingAnimation() {
           <span key={i} style={{ animationDelay: `${i * 50}ms` }}>{c}</span>
         ))}
       </span>
+      {elapsed >= 5 && <span className="thinking-elapsed">{formatElapsed(elapsed)}</span>}
     </div>
   );
 }
@@ -215,12 +234,13 @@ function getGeminiHints(mode: 'witty' | 'tips' | 'all' | 'off'): string[] {
 }
 
 
-function GeminiThinkingAnimation({ loadingPhrases = 'all' }: { loadingPhrases?: 'witty' | 'tips' | 'all' | 'off' }) {
+function GeminiThinkingAnimation({ loadingPhrases = 'all', startedAt }: { loadingPhrases?: 'witty' | 'tips' | 'all' | 'off'; startedAt?: number }) {
   const hints = useMemo(() => getGeminiHints(loadingPhrases), [loadingPhrases]);
   const [frame, setFrame] = useState(0);
   const [color, setColor] = useState(GEMINI_COLORS[0]);
   const [hintIndex, setHintIndex] = useState(() => hints.length > 0 ? Math.floor(Math.random() * hints.length) : 0);
   const hintTransition = useReducedMotionTransition({ duration: 0.18, ease: EASING.out });
+  const elapsed = useElapsedSeconds(startedAt);
 
   // Braille spinner at 80ms
   useEffect(() => {
@@ -275,6 +295,7 @@ function GeminiThinkingAnimation({ loadingPhrases = 'all' }: { loadingPhrases?: 
           {hints.length > 0 ? hints[hintIndex] : 'Thinking...'}
         </motion.span>
       </AnimatePresence>
+      {elapsed >= 5 && <span className="thinking-elapsed">{formatElapsed(elapsed)}</span>}
     </div>
   );
 }
@@ -1888,8 +1909,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
               exit={{ opacity: 0 }}
               transition={thinkingTransition}
             >
-              {aiProvider === 'gemini' ? <GeminiThinkingAnimation loadingPhrases={geminiLoadingPhrases} />
-                : aiProvider === 'codex' ? <CodexThinkingAnimation />
+              {aiProvider === 'gemini' ? <GeminiThinkingAnimation loadingPhrases={geminiLoadingPhrases} startedAt={turnStartedAtRef.current ?? undefined} />
+                : aiProvider === 'codex' ? <CodexThinkingAnimation startedAt={turnStartedAtRef.current ?? undefined} />
                 : <ThinkingAnimation />}
             </motion.div>
           )}
@@ -2324,6 +2345,13 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           font-size: 13px;
           font-style: italic;
           color: var(--text);
+        }
+        .thinking-elapsed {
+          font-size: 11px;
+          color: var(--text-secondary, rgba(255,255,255,0.35));
+          font-variant-numeric: tabular-nums;
+          margin-left: 4px;
+          flex-shrink: 0;
         }
       `}</style>
     </div>

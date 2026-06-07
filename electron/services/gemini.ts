@@ -690,14 +690,18 @@ export function registerGeminiHandlers(win: BrowserWindow) {
           turnSeq: ws.gemini.turnSeq,
         });
 
-        const result = await client.request<any>('session/prompt', {
+        const PROMPT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes — ACP can hang silently
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Gemini request timed out after 5 minutes')), PROMPT_TIMEOUT_MS)
+        );
+        const result = await Promise.race([timeoutPromise, client.request<any>('session/prompt', {
           sessionId,
           scope,
           prompt: buildPromptItems(message, imagePaths, bootstrapText),
           approvalMode: approvalMode || 'auto_edit',
           conversationMode,
           model: conversationMode === 'fast' ? 'gemini-2.5-flash' : (model || GEMINI_DEFAULT_MODEL),
-        });
+        })]);
 
         if (bootstrapText) {
           ws.gemini.bootstrappedSessionIds.add(sessionId);
