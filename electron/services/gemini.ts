@@ -218,6 +218,52 @@ function renderToolContent(content: any[] | undefined): string {
   }).filter(Boolean).join('\n');
 }
 
+// Map Gemini ACP tool_call `kind` values to Claude-equivalent tool names so that
+// ChatPanel's icon/type inference (which checks block.name) works for Gemini.
+function geminiKindToName(kind: string | undefined, title: string | undefined): string {
+  switch (kind) {
+    case 'read_file': return 'Read';
+    case 'write_file': case 'create_file': return 'Write';
+    case 'replace_in_file': case 'edit_file': case 'patch_file': return 'Edit';
+    case 'run_shell_command': case 'shell_command': case 'shell': return 'Bash';
+    case 'search_file_content': case 'search_files': return 'Grep';
+    case 'glob': case 'list_directory': case 'list_files': return 'Glob';
+    case 'web_search': return 'WebSearch';
+    case 'web_fetch': return 'WebFetch';
+    default: return title || kind || 'tool';
+  }
+}
+
+// Format the input object so the tool card shows useful information
+// (file paths, commands) rather than the raw {kind, locations} envelope.
+function geminiKindToInput(kind: string | undefined, locations: string[] | undefined, title: string | undefined): Record<string, unknown> {
+  const primaryPath = locations?.[0];
+  switch (kind) {
+    case 'read_file':
+    case 'write_file':
+    case 'create_file':
+    case 'replace_in_file':
+    case 'edit_file':
+    case 'patch_file':
+      return primaryPath
+        ? (locations!.length > 1 ? { file_path: primaryPath, paths: locations } : { file_path: primaryPath })
+        : { kind, locations };
+    case 'run_shell_command':
+    case 'shell_command':
+    case 'shell':
+      return title ? { command: title } : { kind };
+    case 'list_directory':
+    case 'glob':
+    case 'list_files':
+      return primaryPath ? { pattern: primaryPath } : { kind, locations };
+    case 'search_file_content':
+    case 'search_files':
+      return primaryPath ? { pattern: locations![0], paths: locations!.slice(1) } : { kind, locations };
+    default:
+      return { kind, ...(primaryPath ? { file_path: primaryPath } : {}), ...(locations && locations.length > 1 ? { locations } : {}) };
+  }
+}
+
 function translateAcpEvent(msg: any, projectPath: string, scope: string): any | null {
   if (msg?.method === 'session/update') {
     const update = msg.params?.update;
@@ -245,11 +291,8 @@ function translateAcpEvent(msg: any, projectPath: string, scope: string): any | 
           content: [{
             id: update.toolCallId,
             type: 'tool_use',
-            name: update.title || 'tool',
-            input: {
-              kind: update.kind,
-              locations: update.locations,
-            },
+            name: geminiKindToName(update.kind, update.title),
+            input: geminiKindToInput(update.kind, update.locations, update.title),
           }],
         },
       };
