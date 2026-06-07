@@ -2589,10 +2589,27 @@ export default function App() {
       // so the titlebar spinner doesn't stay stuck if the 'done' message is lost.
       if (msg.type === 'result' || msg.type === 'done') {
         setAwaitingQuestionWorkspaces(prev => applyQuestionEvent(prev, msg));
-        // For 'done', ignore stale messages from a previous turn (per scope)
+        // For 'done', ignore stale messages from a previous turn (per scope).
+        // BUT still decrement busyScopeCountRef — the stale done represents a
+        // cancelled turn that did end. Without the decrement, the interrupt
+        // scenario (stop + immediate new send) leaves the count at 2→1 instead
+        // of 2→1→0, keeping busyWorkspaces permanently set.
         if (msg.type === 'done' && msg.turnSeq != null) {
           const expected = wsTurnSeqRef.current.get(scopeKey);
-          if (expected != null && msg.turnSeq !== expected) return;
+          if (expected != null && msg.turnSeq !== expected) {
+            const staleCount = busyScopeCountRef.current.get(msg.projectPath) || 0;
+            const staleNext = Math.max(0, staleCount - 1);
+            busyScopeCountRef.current.set(msg.projectPath, staleNext);
+            if (staleNext === 0) {
+              setBusyWorkspaces(prev => {
+                if (!prev.has(msg.projectPath)) return prev;
+                const next = new Set(prev);
+                next.delete(msg.projectPath);
+                return next;
+              });
+            }
+            return;
+          }
         }
         wsTurnSeqRef.current.set(scopeKey, -1);
         // Swarm-aware completion notification (gated by swarm.notifyOnComplete).
