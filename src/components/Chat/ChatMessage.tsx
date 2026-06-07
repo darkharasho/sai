@@ -815,7 +815,7 @@ function ChatMessage({
           </ReactMarkdown>
         </StreamingAssistantHead>
       )}
-      {!useMorphHead && message.content && !isAssistantStreaming && (
+      {!useMorphHead && message.content && (
         <div className="chat-msg-content">
           {message.role === 'user'
             ? <Terminal size={14} color="var(--green)" strokeWidth={2.5} className="chat-msg-dot chat-msg-chevron" />
