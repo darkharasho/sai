@@ -2695,15 +2695,17 @@ export default function App() {
             }
             return next;
           });
-          // Clear chatStreamingWorkspaces in the same React batch as busyWorkspaces
-          if ((msg.scope || 'chat') === 'chat') {
-            setChatStreamingWorkspaces(prev => {
-              if (!prev.has(msg.projectPath)) return prev;
-              const next = new Set(prev);
-              next.delete(msg.projectPath);
-              return next;
-            });
-          }
+        }
+        // Clear chatStreamingWorkspaces whenever the chat scope ends.
+        // Placed after setBusyWorkspaces; React 18 auto-batches all setState
+        // calls in the same synchronous handler so no extra render is produced.
+        if ((msg.scope || 'chat') === 'chat') {
+          setChatStreamingWorkspaces(prev => {
+            if (!prev.has(msg.projectPath)) return prev;
+            const next = new Set(prev);
+            next.delete(msg.projectPath);
+            return next;
+          });
         }
       }
     });

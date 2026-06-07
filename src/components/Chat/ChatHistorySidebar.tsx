@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { DOT_MASK_URL } from '../../lib/assets';
 import { Search, X, Plus, Pin } from 'lucide-react';
+import { WorkspaceSquircle, StatusSlot } from '../shared/WorkspaceSquircle';
 import SaiLogo from '../SaiLogo';
 import { formatSessionDate, formatSessionTime, exportSessionAsMarkdown } from '../../sessions';
 import { dbGetMessages, dbDeleteSession, dbSaveSession } from '../../chatDb';
@@ -339,53 +339,32 @@ export default function ChatHistorySidebar({
                           <>
                             <div className="chat-history-card-header">
                               {(() => {
-                                // Mirror the TitleBar workspace status pattern:
-                                // a single leading slot showing whichever of
-                                // busy / awaiting / error / unread / suspended
-                                // applies. Inactive viewed sessions render no
-                                // dot, matching workspace dropdown rows.
                                 const isRunning = streamingSessionIds.has(session.id);
                                 const isAwaiting = awaitingSessionIds.has(session.id);
                                 const isError = errorSessionIds.has(session.id);
                                 const isSuspended = suspendedSessionIds.has(session.id);
-                                if (isAwaiting) return (
-                                  <span
-                                    className="workspace-approval-icon"
-                                    data-testid={`sidebar-status-${session.id}-awaiting`}
-                                    title="Approval needed"
-                                  >!</span>
+                                const state = isAwaiting || isError ? 'approval'
+                                  : isRunning ? 'busy'
+                                  : isUnread ? 'done'
+                                  : isSuspended ? 'inactive'
+                                  : null;
+                                const title = isAwaiting ? 'Approval needed'
+                                  : isError ? 'Error'
+                                  : isRunning ? 'Working...'
+                                  : isUnread ? 'Response complete'
+                                  : isSuspended ? 'Suspended after 30 min idle — send a message to resume'
+                                  : undefined;
+                                const testId = isAwaiting ? `sidebar-status-${session.id}-awaiting`
+                                  : isError ? `sidebar-status-${session.id}-error`
+                                  : isRunning ? `sidebar-status-${session.id}-busy`
+                                  : isUnread ? `sidebar-status-${session.id}-done`
+                                  : isSuspended ? `sidebar-status-${session.id}-suspended`
+                                  : undefined;
+                                return (
+                                  <StatusSlot>
+                                    {state && <WorkspaceSquircle state={state} title={title} data-testid={testId} />}
+                                  </StatusSlot>
                                 );
-                                if (isError) return (
-                                  <span
-                                    className="workspace-approval-icon"
-                                    style={{ background: 'var(--red)' }}
-                                    data-testid={`sidebar-status-${session.id}-error`}
-                                    title="Error"
-                                  >!</span>
-                                );
-                                if (isRunning) return (
-                                  <span
-                                    className="titlebar-busy-spinner"
-                                    data-testid={`sidebar-status-${session.id}-busy`}
-                                    title="Working..."
-                                  />
-                                );
-                                if (isUnread) return (
-                                  <span
-                                    className="workspace-done-dot"
-                                    data-testid={`sidebar-status-${session.id}-done`}
-                                    title="Response complete"
-                                  />
-                                );
-                                if (isSuspended) return (
-                                  <span
-                                    className="chat-history-suspended-dot"
-                                    data-testid={`sidebar-status-${session.id}-suspended`}
-                                    title="Suspended after 30 min idle — send a message to resume"
-                                  />
-                                );
-                                // Reserve the slot so titles stay aligned.
-                                return <span className="chat-history-status-spacer" aria-hidden="true" />;
                               })()}
                               <span
                                 className="chat-history-card-title"
@@ -553,67 +532,6 @@ export default function ChatHistorySidebar({
           align-items: center;
           gap: 6px;
           margin-bottom: 3px;
-        }
-        .chat-history-suspended-dot {
-          display: inline-block;
-          width: 9px;
-          height: 9px;
-          background: #d4a72c;
-          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-          flex-shrink: 0;
-        }
-        .chat-history-status-spacer {
-          display: inline-block;
-          width: 9px;
-          height: 9px;
-          flex-shrink: 0;
-        }
-        .workspace-approval-icon {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          width: 14px;
-          height: 14px;
-          border-radius: 50%;
-          background: #f59e0b;
-          color: #000;
-          font-size: 10px;
-          font-weight: 800;
-          flex-shrink: 0;
-          animation: approval-blink 1s ease-in-out infinite;
-        }
-        @keyframes approval-blink {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.2; }
-        }
-        .titlebar-busy-spinner {
-          display: inline-block;
-          width: 9px;
-          height: 9px;
-          background: var(--accent);
-          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-          animation: dot-spinner-pulse 2.2s ease-in-out infinite;
-          flex-shrink: 0;
-        }
-        @keyframes dot-spinner-pulse {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50%      { opacity: 0.35; transform: scale(0.75); }
-        }
-        .workspace-done-dot {
-          display: inline-block;
-          width: 9px;
-          height: 9px;
-          background: var(--green);
-          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-          flex-shrink: 0;
-          animation: done-pulse 2s ease-in-out infinite;
-        }
-        @keyframes done-pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.4; }
         }
         .chat-history-card-title {
           font-weight: 500;
