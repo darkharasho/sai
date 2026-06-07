@@ -211,4 +211,29 @@ describe('ChatHistorySidebar', () => {
     />);
     expect(screen.queryByTestId('sidebar-status-v-done')).not.toBeInTheDocument();
   });
+
+  it('shows only sessions matching the active provider, inferring from session IDs for untagged sessions', () => {
+    const claudeTagged = makeSession({ title: 'Claude tagged', aiProvider: 'claude' });
+    const claudeInferred = makeSession({ title: 'Claude inferred', claudeSessionId: 'c-123' });
+    const claudeDefault = makeSession({ title: 'Claude default' }); // no aiProvider, no sessionIds → infers claude
+    const geminiTagged = makeSession({ title: 'Gemini tagged', aiProvider: 'gemini' });
+    const geminiInferred = makeSession({ title: 'Gemini inferred', geminiSessionId: 'g-123' });
+
+    const { getByText, queryByText } = render(
+      <ChatHistorySidebar
+        {...baseProps}
+        aiProvider="claude"
+        sessions={[claudeTagged, claudeInferred, claudeDefault, geminiTagged, geminiInferred]}
+      />
+    );
+
+    // Claude sessions should be visible
+    expect(getByText('Claude tagged')).toBeTruthy();
+    expect(getByText('Claude inferred')).toBeTruthy();
+    expect(getByText('Claude default')).toBeTruthy();
+
+    // Gemini sessions must NOT appear when filtering for claude
+    expect(queryByText('Gemini tagged')).toBeNull();
+    expect(queryByText('Gemini inferred')).toBeNull();
+  });
 });

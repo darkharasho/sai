@@ -6,6 +6,7 @@ import { formatSessionDate, formatSessionTime, exportSessionAsMarkdown } from '.
 import { dbGetMessages, dbDeleteSession, dbSaveSession } from '../../chatDb';
 import ChatHistoryContextMenu from './ChatHistoryContextMenu';
 import type { ChatSession } from '../../types';
+import { inferSessionProvider } from '../../lib/sessionProvider';
 
 interface ChatHistorySidebarProps {
   sessions: ChatSession[];
@@ -110,7 +111,7 @@ export default function ChatHistorySidebar({
 
   // Filter sessions by provider
   const providerSessions = useMemo(
-    () => sessions.filter(s => !s.aiProvider || s.aiProvider === aiProvider),
+    () => sessions.filter(s => inferSessionProvider(s) === aiProvider),
     [sessions, aiProvider]
   );
 
