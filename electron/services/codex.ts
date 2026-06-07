@@ -381,9 +381,10 @@ export function registerCodexHandlers(win: BrowserWindow) {
     proc.stderr?.on('data', (data: Buffer) => {
       if (ws.codex.process !== proc) return;
       const text = data.toString().trim();
-      if (text) {
-        safeSend(win, 'claude:message', { type: 'error', text, projectPath: ws.projectPath, scope: effectiveScope });
-      }
+      // Codex CLI prints this to stderr when stdin is a pipe (non-TTY). It
+      // is informational — the CLI continues normally — so we suppress it.
+      if (!text || text.toLowerCase().includes('reading additional input from stdin')) return;
+      safeSend(win, 'claude:message', { type: 'error', text, projectPath: ws.projectPath, scope: effectiveScope });
     });
 
     proc.on('exit', () => {
