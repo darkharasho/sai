@@ -1,8 +1,9 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { exposeInMainWorld, send } = vi.hoisted(() => ({
+const { exposeInMainWorld, send, invoke } = vi.hoisted(() => ({
   exposeInMainWorld: vi.fn(),
   send: vi.fn(),
+  invoke: vi.fn(),
 }));
 
 vi.mock('electron', () => ({
@@ -11,7 +12,7 @@ vi.mock('electron', () => ({
   },
   ipcRenderer: {
     send,
-    invoke: vi.fn(),
+    invoke,
     on: vi.fn(),
     removeListener: vi.fn(),
   },
@@ -19,10 +20,16 @@ vi.mock('electron', () => ({
 
 import '../../electron/preload';
 
-describe('electron preload bridge', () => {
-  it('exposes geminiSetSessionId and forwards the optional scope argument', () => {
-    const exposed = exposeInMainWorld.mock.calls[0]?.[1] as Record<string, any>;
+// Get the exposed sai object once after preload import
+const exposed = exposeInMainWorld.mock.calls[0]?.[1] as Record<string, any>;
 
+describe('electron preload bridge', () => {
+  beforeEach(() => {
+    send.mockClear();
+    invoke.mockClear();
+  });
+
+  it('exposes geminiSetSessionId and forwards the optional scope argument', () => {
     expect(exposed).toBeTruthy();
     expect(typeof exposed.geminiSetSessionId).toBe('function');
 
@@ -32,8 +39,6 @@ describe('electron preload bridge', () => {
   });
 
   it('exposes geminiSend and forwards the optional scope argument', () => {
-    const exposed = exposeInMainWorld.mock.calls[0]?.[1] as Record<string, any>;
-
     expect(exposed).toBeTruthy();
     expect(typeof exposed.geminiSend).toBe('function');
 
@@ -48,6 +53,39 @@ describe('electron preload bridge', () => {
       'planning',
       'auto-gemini-3',
       'chat',
+    );
+  });
+});
+
+describe('characterization: existing IPC routing', () => {
+  beforeEach(() => {
+    send.mockClear();
+    invoke.mockClear();
+  });
+
+  it('claudeSend forwards to claude:send with all positional args', () => {
+    exposed.claudeSend('/proj', 'hi', ['/img.png'], 'default', 'medium', 'sonnet', 'chat');
+    expect(send).toHaveBeenCalledWith(
+      'claude:send', '/proj', 'hi', ['/img.png'], 'default', 'medium', 'sonnet', 'chat'
+    );
+  });
+
+  it('codexSend forwards to codex:send with all positional args', () => {
+    exposed.codexSend('/proj', 'hi', [], 'auto', 'codex-mini');
+    expect(send).toHaveBeenCalledWith(
+      'codex:send', '/proj', 'hi', [], 'auto', 'codex-mini'
+    );
+  });
+
+  it('geminiStart forwards to gemini:start', () => {
+    exposed.geminiStart('/proj', 'meta');
+    expect(invoke).toHaveBeenCalledWith('gemini:start', '/proj', 'meta');
+  });
+
+  it('claudeStart forwards to claude:start', () => {
+    exposed.claudeStart('/proj', 'chat', 'chat', undefined, undefined, 'meta');
+    expect(invoke).toHaveBeenCalledWith(
+      'claude:start', '/proj', 'chat', 'chat', undefined, undefined, 'meta'
     );
   });
 });
