@@ -1,7 +1,9 @@
 import { FolderClosed, GitBranch, MessagesSquare, Puzzle, Server, Search, Zap } from 'lucide-react';
+import { WorkspaceSquircle } from './shared/WorkspaceSquircle';
+import type { IndicatorState } from '../lib/workspaceStatus';
 import { DOT_MASK_URL } from '../lib/assets';
 
-type OverallStatus = 'approval' | 'completed' | 'busy' | null;
+type OverallStatus = 'approval' | 'done' | 'busy' | null;
 
 interface NavBarProps {
   activeSidebar: string | null;
@@ -85,7 +87,7 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, sw
       </button>
       {overallStatus && (
         <div className="nav-status-indicator">
-          <span className={`nav-status-dot nav-status-${overallStatus}`} />
+          <WorkspaceSquircle state={overallStatus as IndicatorState} />
         </div>
       )}
       <style>{`
@@ -212,37 +214,6 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, sw
           display: flex;
           align-items: center;
           justify-content: center;
-        }
-        .nav-status-dot {
-          display: block;
-          width: 10px;
-          height: 10px;
-          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-        }
-        .nav-status-approval {
-          background: #f59e0b;
-          animation: nav-status-blink 1s ease-in-out infinite;
-        }
-        .nav-status-completed {
-          background: var(--green);
-          animation: nav-status-pulse 2s ease-in-out infinite;
-        }
-        .nav-status-busy {
-          background: var(--accent);
-          animation: nav-status-spin 2.2s ease-in-out infinite;
-        }
-        @keyframes nav-status-blink {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.2; }
-        }
-        @keyframes nav-status-pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.4; }
-        }
-        @keyframes nav-status-spin {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.35; transform: scale(0.75); }
         }
       `}</style>
     </div>

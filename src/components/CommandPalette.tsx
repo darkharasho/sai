@@ -3,7 +3,7 @@ import { Search, File, ChevronRight, FileCode2, MessageSquare } from 'lucide-rea
 import { fuzzyMatch } from '../utils/fuzzyMatch';
 import { basename } from '../utils/pathUtils';
 import SaiLogo from './SaiLogo';
-import { DOT_MASK_URL } from '../lib/assets';
+import { WorkspaceSquircle, StatusSlot } from './shared/WorkspaceSquircle';
 
 type PaletteMode = 'files' | 'commands' | 'grep' | 'sessions';
 
@@ -378,7 +378,9 @@ export default function CommandPalette({
                 onClick={() => { onWorkspaceSwitch(w.projectPath); onClose(); }}
                 onMouseEnter={() => setSelectedIndex(i)}
               >
-                <div className="cp-status-dot" style={{ background: isActive ? 'var(--green)' : 'var(--text-muted)' }} />
+                <StatusSlot>
+                  <WorkspaceSquircle state={isActive ? 'alive' : 'inactive'} />
+                </StatusSlot>
                 <div className="cp-result-info">
                   <div className="cp-result-name">{name}</div>
                   <div className="cp-result-path">{w.projectPath}</div>
@@ -499,14 +501,6 @@ export default function CommandPalette({
           font-size: 11px;
           font-weight: 600;
           font-family: 'Geist Mono', monospace;
-        }
-        .cp-status-dot {
-          display: inline-block;
-          width: 9px;
-          height: 9px;
-          flex-shrink: 0;
-          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
         }
         .cp-result-info {
           flex: 1;

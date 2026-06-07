@@ -4413,7 +4413,7 @@ export default function App() {
           gitChangeCount={gitChangeCount}
           swarmApprovalCount={swarmApprovalCount}
           chatNotificationCount={chatNotificationCount}
-          overallStatus={approvalSessions.size > 0 ? 'approval' : completedWorkspaces.size > 0 ? 'completed' : busyWorkspaces.size > 0 ? 'busy' : null}
+          overallStatus={approvalSessions.size > 0 ? 'approval' : completedWorkspaces.size > 0 ? 'done' : busyWorkspaces.size > 0 ? 'busy' : null}
         />
         <AnimatePresence initial={false} mode="popLayout">
           {sidebarOpen === 'files' && (
