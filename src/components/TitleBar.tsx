@@ -831,6 +831,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           cursor: pointer;
           padding: 2px 6px;
           color: var(--text-secondary);
+          font-family: 'Onest', sans-serif;
         }
         .gh-user-btn:hover { background: var(--surface-4); border-color: var(--border-subtle); color: var(--text); }
         .gh-avatar-wrap { position: relative; flex-shrink: 0; }
@@ -928,6 +929,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           background: transparent;
           border: 1px solid transparent;
           color: var(--text);
+          font-family: 'Onest', sans-serif;
           font-size: 12px;
           cursor: pointer;
           padding: 4px 12px;

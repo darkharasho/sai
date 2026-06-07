@@ -145,7 +145,7 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, sw
         .nav-label {
           font-size: 8px;
           font-weight: 500;
-          font-family: 'Geist', sans-serif;
+          font-family: inherit;
           letter-spacing: 0.3px;
           line-height: 1;
         }

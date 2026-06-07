@@ -205,7 +205,7 @@ export default function SetupTab({
           onChange={e => { setContext(e.target.value); onClearContextBadge(); }}
           placeholder="What is this project for? e.g. 'A CLI tool for processing CSV files.'"
           rows={3}
-          style={{ ...inputStyle, fontFamily: 'system-ui, sans-serif', resize: 'vertical', lineHeight: 1.5 }}
+          style={{ ...inputStyle, fontFamily: 'inherit', resize: 'vertical', lineHeight: 1.5 }}
         />
       </div>
 
