@@ -688,6 +688,10 @@ export function registerGeminiHandlers(win: BrowserWindow) {
           projectPath: ws.projectPath,
           scope,
           turnSeq: ws.gemini.turnSeq,
+          // Include the ACP session ID so isStreaming can be scoped to the
+          // active SAI session — prevents a background streaming turn from
+          // showing the thinking animation in a newly opened empty session.
+          sessionId,
         });
 
         // Idle timeout: fire if no ACP event arrives for 2 minutes. Resets on

@@ -3250,15 +3250,6 @@ export default function App() {
   const handleNewChat = () => {
     if (!activeProjectPath) return;
     flushAndPersist(activeProjectPath);
-    // Cancel any in-progress turn before starting fresh. For Gemini, the 'chat'
-    // scope is shared across all sessions — without stopping, a streaming turn
-    // keeps streamingScopes set, so the new empty session shows the thinking
-    // animation immediately. For Codex, stop ensures the process is clean.
-    if (aiProvider === 'gemini' && (window.sai as any).geminiStop) {
-      (window.sai as any).geminiStop(activeProjectPath, 'chat');
-    } else if (aiProvider === 'codex') {
-      window.sai.codexStop?.(activeProjectPath);
-    }
     // Clear backend sessions so next message starts fresh
     (window.sai as any).codexSetSessionId(activeProjectPath, undefined);
     window.sai.geminiSetSessionId?.(activeProjectPath, undefined, 'chat');
@@ -4052,7 +4043,12 @@ export default function App() {
                   isStreaming={
                     aiProvider === 'claude'
                       ? streamingScopes.has(`${wsPath}:${ws.activeSession.id}`)
-                      : streamingScopes.has(`${wsPath}:chat`)
+                      // Gemini/Codex use 'chat' as a fixed scope — multiple sessions can
+                      // exist concurrently (background stream keeps running after New Chat).
+                      // Only show the thinking animation when the streaming ACP session
+                      // matches this session's own session ID.
+                      : streamingScopes.has(`${wsPath}:chat`) &&
+                        chatStreamingSessionRef.current.get(wsPath) === (ws.activeSession.geminiSessionId ?? null)
                   }
                   awaitingQuestion={awaitingQuestionWorkspaces.has(wsPath)}
                   initialDraft={chatDraftsRef.current.get(wsPath) || ''}
