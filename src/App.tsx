@@ -4333,6 +4333,8 @@ export default function App() {
           if (key === 'geminiModel') handleGeminiModelChange(value);
           if (key === 'geminiApprovalMode') handleGeminiApprovalModeChange(value);
           if (key === 'geminiConversationMode') handleGeminiConversationModeChange(value);
+          if (key === 'codexModel') handleCodexModelChange(value);
+          if (key === 'codexPermission') handleCodexPermissionChange(value);
           if (key === 'focusedChat') { setFocusedChat(value); if (value) { setExpanded(['chat', 'terminal']); setSplitRatio(0.66); } }
           if (key === 'defaultView') { /* persisted only, applies on next launch */ }
           if (key === 'sidebarWidth') document.documentElement.style.setProperty('--sidebar-width', `${value}px`);

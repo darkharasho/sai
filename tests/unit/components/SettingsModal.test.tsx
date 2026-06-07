@@ -254,13 +254,13 @@ describe('SettingsModal', () => {
     });
   });
 
-  it('shows Codex guidance page when Codex nav is clicked', async () => {
+  it('shows Codex settings page when Codex nav is clicked', async () => {
     render(<SettingsModal {...defaultProps} />);
     const codexNav = screen.getByText('Codex');
     fireEvent.click(codexNav);
     await waitFor(() => {
-      expect(screen.getByText(/chat toolbar controls/i)).toBeTruthy();
-      expect(screen.getByText(/model and permission mode/i)).toBeTruthy();
+      expect(screen.getByText(/default permission mode/i)).toBeTruthy();
+      expect(screen.getByText(/how codex handles file system/i)).toBeTruthy();
     });
   });
 

@@ -92,6 +92,9 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [geminiDefaultModel, setGeminiDefaultModel] = useState('auto-gemini-3');
   const [geminiDefaultApprovalMode, setGeminiDefaultApprovalMode] = useState<'default' | 'auto_edit' | 'yolo' | 'plan'>('default');
   const [geminiDefaultConversationMode, setGeminiDefaultConversationMode] = useState<'planning' | 'fast'>('planning');
+  const [codexDefaultModel, setCodexDefaultModel] = useState('');
+  const [codexDefaultPermission, setCodexDefaultPermission] = useState<'auto' | 'read-only' | 'full-access'>('auto');
+  const [codexAvailableModels, setCodexAvailableModels] = useState<{ id: string; name: string }[]>([]);
   const [systemNotifications, setSystemNotifications] = useState(false);
   const [toolCallsExpanded, setToolCallsExpanded] = useState(true);
   const [saiAnimationEnabled, setSaiAnimationEnabled] = useState(true);
@@ -123,6 +126,16 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if (g.approvalMode === 'default' || g.approvalMode === 'auto_edit' || g.approvalMode === 'yolo' || g.approvalMode === 'plan') setGeminiDefaultApprovalMode(g.approvalMode);
       if (g.conversationMode === 'planning' || g.conversationMode === 'fast') setGeminiDefaultConversationMode(g.conversationMode);
     });
+    window.sai.settingsGet('codex', {}).then((c: any) => {
+      if (c.model) setCodexDefaultModel(c.model);
+      if (c.permission === 'auto' || c.permission === 'read-only' || c.permission === 'full-access') setCodexDefaultPermission(c.permission);
+    });
+    (window.sai as any).codexModels?.().then((result: { models: { id: string; name: string }[]; defaultModel: string } | undefined) => {
+      if (result?.models?.length) {
+        setCodexAvailableModels(result.models);
+        setCodexDefaultModel(prev => prev || result.defaultModel || '');
+      }
+    }).catch(() => {});
     window.sai.settingsGet('systemNotifications', false).then((v: boolean) => setSystemNotifications(v));
     window.sai.settingsGet('toolCallsExpanded', true).then((v: boolean) => setToolCallsExpanded(v));
     window.sai.settingsGet('saiAnimationEnabled', true).then((v: boolean) => setSaiAnimationEnabled(v !== false));
@@ -318,6 +331,22 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       window.sai.settingsSet('gemini', { ...existing, conversationMode: mode });
     });
     onSettingChange?.('geminiConversationMode', mode);
+  };
+
+  const handleCodexDefaultModelChange = (model: string) => {
+    setCodexDefaultModel(model);
+    window.sai.settingsGet('codex', {}).then((existing: any) => {
+      window.sai.settingsSet('codex', { ...existing, model });
+    });
+    onSettingChange?.('codexModel', model);
+  };
+
+  const handleCodexDefaultPermissionChange = (permission: 'auto' | 'read-only' | 'full-access') => {
+    setCodexDefaultPermission(permission);
+    window.sai.settingsGet('codex', {}).then((existing: any) => {
+      window.sai.settingsSet('codex', { ...existing, permission });
+    });
+    onSettingChange?.('codexPermission', permission);
   };
 
   const handleFocusedChatChange = (value: boolean) => {
@@ -847,17 +876,37 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const renderCodexPage = () => (
     <section className="settings-section">
       <div className="settings-section-label">Codex</div>
+      {codexAvailableModels.length > 0 && (
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <div className="settings-row-name">Default model</div>
+            <div className="settings-row-desc">Pre-selected model when starting a new Codex session</div>
+          </div>
+          <select
+            className="settings-select"
+            value={codexDefaultModel}
+            onChange={e => handleCodexDefaultModelChange(e.target.value)}
+          >
+            {codexAvailableModels.map(m => (
+              <option key={m.id} value={m.id}>{m.name || m.id}</option>
+            ))}
+          </select>
+        </div>
+      )}
       <div className="settings-row">
         <div className="settings-row-info">
-          <div className="settings-row-name">Chat toolbar controls</div>
-          <div className="settings-row-desc">Model and permission mode for Codex live in the chat toolbar so you can change them per conversation.</div>
+          <div className="settings-row-name">Default permission mode</div>
+          <div className="settings-row-desc">How Codex handles file system and shell access</div>
         </div>
-      </div>
-      <div className="settings-row">
-        <div className="settings-row-info">
-          <div className="settings-row-name">What to configure here</div>
-          <div className="settings-row-desc">Use the Provider page to choose Codex as your chat or commit-message provider. Use the chat toolbar when you need to change runtime behavior.</div>
-        </div>
+        <select
+          className="settings-select"
+          value={codexDefaultPermission}
+          onChange={e => handleCodexDefaultPermissionChange(e.target.value as any)}
+        >
+          <option value="auto">Auto (sandboxed)</option>
+          <option value="read-only">Read-only</option>
+          <option value="full-access">Full access</option>
+        </select>
       </div>
     </section>
   );
