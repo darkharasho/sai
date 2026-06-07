@@ -15,9 +15,10 @@ interface NavBarProps {
    *  sidebar is collapsed (mirrors the workspace dropdown badge pattern). */
   chatNotificationCount?: number;
   overallStatus?: OverallStatus;
+  hasOrchestrator?: boolean;
 }
 
-export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, swarmApprovalCount = 0, chatNotificationCount = 0, overallStatus = null }: NavBarProps) {
+export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, swarmApprovalCount = 0, chatNotificationCount = 0, overallStatus = null, hasOrchestrator = true }: NavBarProps) {
   const badgeLabel = gitChangeCount > 100 ? '99+' : `${gitChangeCount}`;
   const swarmBadgeLabel = swarmApprovalCount > 100 ? '99+' : `${swarmApprovalCount}`;
   const chatBadgeLabel = chatNotificationCount > 100 ? '99+' : `${chatNotificationCount}`;
@@ -58,16 +59,18 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, sw
         <span className="nav-label">Chats</span>
         {chatNotificationCount > 0 && <span className="nav-badge">{chatBadgeLabel}</span>}
       </button>
-      <button
-        className={`nav-btn ${activeSidebar === 'swarm' ? 'active' : ''}`}
-        onClick={() => onToggle('swarm')}
-        title="Swarm"
-        aria-label="Swarm"
-      >
-        <Zap size={18} />
-        <span className="nav-label">Swarm</span>
-        {swarmApprovalCount > 0 && <span className="nav-badge">{swarmBadgeLabel}</span>}
-      </button>
+      {hasOrchestrator && (
+        <button
+          className={`nav-btn ${activeSidebar === 'swarm' ? 'active' : ''}`}
+          onClick={() => onToggle('swarm')}
+          title="Swarm"
+          aria-label="Swarm"
+        >
+          <Zap size={18} />
+          <span className="nav-label">Swarm</span>
+          {swarmApprovalCount > 0 && <span className="nav-badge">{swarmBadgeLabel}</span>}
+        </button>
+      )}
       <div className="nav-divider" />
       <button
         className={`nav-btn ${activeSidebar === 'plugins' ? 'active' : ''}`}

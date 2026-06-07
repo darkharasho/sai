@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, fireEvent } from '@testing-library/react';
+import { render, fireEvent, screen } from '@testing-library/react';
 
 import NavBar from '../../../src/components/NavBar';
 
@@ -163,4 +163,26 @@ describe('NavBar', () => {
     expect(mcpBtn.className).toContain('active');
   });
 
+});
+
+const defaultProps = {
+  activeSidebar: null as string | null,
+  onToggle: () => {},
+};
+
+describe('NavBar swarm button visibility', () => {
+  it('shows Swarm button when hasOrchestrator is true', () => {
+    render(<NavBar {...defaultProps} hasOrchestrator={true} />);
+    expect(screen.getByTitle('Swarm')).toBeInTheDocument();
+  });
+
+  it('hides Swarm button when hasOrchestrator is false', () => {
+    render(<NavBar {...defaultProps} hasOrchestrator={false} />);
+    expect(screen.queryByTitle('Swarm')).not.toBeInTheDocument();
+  });
+
+  it('shows Swarm button by default when prop is omitted', () => {
+    render(<NavBar {...defaultProps} />);
+    expect(screen.getByTitle('Swarm')).toBeInTheDocument();
+  });
 });

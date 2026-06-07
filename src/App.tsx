@@ -68,6 +68,7 @@ import { isImageFile } from './utils/imageFiles';
 import { getMonacoEditorFor } from './utils/monacoEditorRegistry';
 import * as monaco from 'monaco-editor';
 import { motion, AnimatePresence } from 'motion/react';
+import { getCapabilities } from './providers/capabilities';
 
 function applyEditsClientSide(content: string, edits: { line: number; column: number; length: number; replacement: string }[]): string {
   const sorted = [...edits].sort((a, b) => b.line - a.line || b.column - a.column);
@@ -4414,6 +4415,7 @@ export default function App() {
           swarmApprovalCount={swarmApprovalCount}
           chatNotificationCount={chatNotificationCount}
           overallStatus={approvalSessions.size > 0 ? 'approval' : completedWorkspaces.size > 0 ? 'done' : busyWorkspaces.size > 0 ? 'busy' : null}
+          hasOrchestrator={getCapabilities(aiProvider).hasOrchestrator}
         />
         <AnimatePresence initial={false} mode="popLayout">
           {sidebarOpen === 'files' && (
