@@ -2152,6 +2152,13 @@ export default function App() {
       // tool_result reports success, re-sync open files by mtime. We don't match the AI's
       // reported path against open files — they can differ (symlinked home, normalization);
       // the mtime resync reads each open file by its own path, which always resolves.
+      // Codex sends session_id after streaming_start (it comes from the first
+      // Codex output line). Update chatStreamingSessionRef so isStreaming stays
+      // true — without this, isStreaming flips false the moment session_id
+      // arrives because chatStreamingSessionRef still has null from streaming_start.
+      if (msg.type === 'session_id' && (msg.scope || 'chat') === 'chat' && msg.sessionId) {
+        chatStreamingSessionRef.current.set(msg.projectPath, msg.sessionId);
+      }
       if (msg.type === 'assistant') {
         for (const { id } of extractEditToolUses(msg.message?.content, msg.projectPath)) {
           pendingEditsRef.current.add(id);
