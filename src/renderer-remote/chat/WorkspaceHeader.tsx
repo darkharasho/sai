@@ -73,7 +73,7 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
       return <span className="ws-tab-indicator-dot ws-tab-indicator-completed" title="Response complete" />;
     }
     if (summary.includes('busy')) {
-      return <span className="ws-tab-indicator-busy" title="Working..." />;
+      return <WorkspaceSquircle state="busy" title="Working..." />;
     }
     return null;
   };
