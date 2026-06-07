@@ -110,7 +110,7 @@ export default function BrainstormTab({
             flex: 1,
             background: 'transparent', border: 'none', outline: 'none',
             padding: '6px 8px', fontSize: 13, color: 'var(--text)',
-            fontFamily: 'system-ui, sans-serif', resize: 'none', lineHeight: 1.45,
+            fontFamily: 'inherit', resize: 'none', lineHeight: 1.45,
           }}
         />
         <button

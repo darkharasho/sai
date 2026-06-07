@@ -443,7 +443,7 @@ export default function CommandPalette({
           outline: none;
           color: var(--text);
           font-size: 14px;
-          font-family: 'Geist', sans-serif;
+          font-family: inherit;
           caret-color: var(--accent);
         }
         .cp-input::placeholder {
@@ -509,7 +509,7 @@ export default function CommandPalette({
         .cp-result-name {
           font-size: 13px;
           color: var(--text);
-          font-family: 'Geist', sans-serif;
+          font-family: inherit;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;

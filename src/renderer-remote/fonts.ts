@@ -1,9 +1,17 @@
-// Vite-resolved asset URLs for the Geist family. Bundled into the PWA so
+// Vite-resolved asset URLs for fonts. Bundled into the PWA so
 // the phone doesn't need to fetch fonts from a CDN at runtime.
+import onestUrl from '../assets/fonts/Onest-Variable.woff2?url';
 const geistSansUrl = new URL('../../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2', import.meta.url).href;
 const geistMonoUrl = new URL('../../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2', import.meta.url).href;
 
 const css = `
+@font-face {
+  font-family: 'Onest';
+  src: url('${onestUrl}') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
 @font-face {
   font-family: 'Geist';
   src: url('${geistSansUrl}') format('woff2');

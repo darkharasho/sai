@@ -70,6 +70,8 @@
     ]
   },
   "dependencies": {
+    "@fontsource-variable/onest": "^5.2.11",
+    "@fontsource-variable/plus-jakarta-sans": "^5.2.8",
     "@icons-pack/react-simple-icons": "^13.11.1",
     "@xterm/addon-canvas": "^0.7.0",
     "@xterm/addon-fit": "^0.10.0",

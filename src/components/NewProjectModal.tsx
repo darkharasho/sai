@@ -52,7 +52,7 @@ const replaceBtnStyle: React.CSSProperties = {
   border: '1px solid var(--border-subtle)',
   color: 'var(--text)',
   fontSize: 11, padding: '4px 10px', borderRadius: 4, cursor: 'pointer',
-  fontFamily: 'system-ui, sans-serif',
+  fontFamily: 'inherit',
   transition: 'border-color 120ms ease, color 120ms ease',
 };
 
