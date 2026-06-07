@@ -44,7 +44,11 @@ function collectItems(root: HTMLElement, snapMs: number): HTMLElement[] {
             items.push(span);
           }
         }
-        child.parentNode?.replaceChild(frag, child);
+        // Insert spans before the text node rather than replacing it.
+        // replaceChild() orphans the text node, breaking React's removeChild()
+        // call during fiber cleanup (React still holds a reference to it).
+        child.parentNode?.insertBefore(frag, child);
+        child.textContent = '';
       } else if (child.nodeType === Node.ELEMENT_NODE) {
         const el = child as HTMLElement;
         if (ATOMIC_TAGS.has(el.tagName)) {
