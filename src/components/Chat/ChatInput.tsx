@@ -14,6 +14,7 @@ import {
   getTerminalById, getTerminalByName, getTerminalByIndex,
   getTerminalLastCommandById, getTerminalLastCommandByIndex,
 } from '../../terminalBuffer';
+import { getCapabilities } from '../../providers/capabilities';
 
 type EffortLevel = 'low' | 'medium' | 'high' | 'max';
 type ModelChoice = 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan';
@@ -1118,7 +1119,7 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
           })()}
 
           {/* Effort level — Claude only */}
-          {aiProvider === 'claude' && (() => {
+          {getCapabilities(aiProvider).hasEffortMode && (() => {
             const cfg = EFFORT_CONFIG[effortLevel];
             const Icon = cfg.icon;
             return (
@@ -1243,7 +1244,7 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
           )}
 
           {/* Conversation mode — Gemini */}
-          {aiProvider === 'gemini' && (
+          {getCapabilities(aiProvider).hasConversationMode && (
           <button
             className="toolbar-btn"
             onClick={() => {
