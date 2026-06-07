@@ -2344,6 +2344,12 @@ export default function App() {
         const count = busyScopeCountRef.current.get(msg.projectPath) || 0;
         busyScopeCountRef.current.set(msg.projectPath, count + 1);
         setBusyWorkspaces(prev => new Set(prev).add(msg.projectPath));
+        setCompletedWorkspaces(prev => {
+          if (!prev.has(msg.projectPath)) return prev;
+          const next = new Set(prev);
+          next.delete(msg.projectPath);
+          return next;
+        });
         if ((msg.scope || 'chat') === 'chat') {
           chatStreamingSessionRef.current.set(msg.projectPath, (msg.sessionId ?? null) as string | null);
           setChatStreamingWorkspaces(prev => prev.has(msg.projectPath) ? prev : new Set(prev).add(msg.projectPath));
@@ -2658,12 +2664,6 @@ export default function App() {
         }
         if ((msg.scope || 'chat') === 'chat') {
           chatStreamingSessionRef.current.delete(msg.projectPath);
-          setChatStreamingWorkspaces(prev => {
-            if (!prev.has(msg.projectPath)) return prev;
-            const next = new Set(prev);
-            next.delete(msg.projectPath);
-            return next;
-          });
         }
         setStreamingScopes(prev => {
           if (!prev.has(scopeKey)) return prev;
@@ -2695,6 +2695,15 @@ export default function App() {
             }
             return next;
           });
+          // Clear chatStreamingWorkspaces in the same React batch as busyWorkspaces
+          if ((msg.scope || 'chat') === 'chat') {
+            setChatStreamingWorkspaces(prev => {
+              if (!prev.has(msg.projectPath)) return prev;
+              const next = new Set(prev);
+              next.delete(msg.projectPath);
+              return next;
+            });
+          }
         }
       }
     });
