@@ -690,18 +690,44 @@ export function registerGeminiHandlers(win: BrowserWindow) {
           turnSeq: ws.gemini.turnSeq,
         });
 
-        const PROMPT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes — ACP can hang silently
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Gemini request timed out after 5 minutes')), PROMPT_TIMEOUT_MS)
-        );
-        const result = await Promise.race([timeoutPromise, client.request<any>('session/prompt', {
-          sessionId,
-          scope,
-          prompt: buildPromptItems(message, imagePaths, bootstrapText),
-          approvalMode: approvalMode || 'auto_edit',
-          conversationMode,
-          model: conversationMode === 'fast' ? 'gemini-2.5-flash' : (model || GEMINI_DEFAULT_MODEL),
-        })]);
+        // Idle timeout: fire if no ACP event arrives for 2 minutes. Resets on
+        // every onEvent so active streaming turns never hit it, but a truly
+        // silent/stuck ACP is caught. A fixed total timeout fires even when
+        // content has already streamed — this idle approach avoids that.
+        const IDLE_TIMEOUT_MS = 2 * 60 * 1000;
+        let idleHandle: ReturnType<typeof setTimeout> | null = null;
+        let timeoutReject: ((e: Error) => void) | null = null;
+        const resetIdle = () => {
+          if (idleHandle) clearTimeout(idleHandle);
+          if (timeoutReject) {
+            idleHandle = setTimeout(
+              () => timeoutReject!(new Error('Gemini request timed out: no response for 2 minutes')),
+              IDLE_TIMEOUT_MS,
+            );
+          }
+        };
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutReject = reject;
+          resetIdle();
+        });
+        const unsubIdle = client.onEvent(() => resetIdle());
+
+        let result: any;
+        try {
+          result = await Promise.race([timeoutPromise, client.request<any>('session/prompt', {
+            sessionId,
+            scope,
+            prompt: buildPromptItems(message, imagePaths, bootstrapText),
+            approvalMode: approvalMode || 'auto_edit',
+            conversationMode,
+            model: conversationMode === 'fast' ? 'gemini-2.5-flash' : (model || GEMINI_DEFAULT_MODEL),
+          })]);
+        } finally {
+          // Always cancel the idle timer and unsubscribe once session/prompt settles.
+          if (idleHandle) clearTimeout(idleHandle);
+          timeoutReject = null;
+          unsubIdle();
+        }
 
         if (bootstrapText) {
           ws.gemini.bootstrappedSessionIds.add(sessionId);
