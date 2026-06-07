@@ -89,6 +89,9 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [commitProviderOpen, setCommitProviderOpen] = useState(false);
   const commitProviderRef = useRef<HTMLDivElement>(null);
   const [geminiLoadingPhrases, setGeminiLoadingPhrases] = useState<'witty' | 'tips' | 'all' | 'off'>('all');
+  const [geminiDefaultModel, setGeminiDefaultModel] = useState('auto-gemini-3');
+  const [geminiDefaultApprovalMode, setGeminiDefaultApprovalMode] = useState<'default' | 'auto_edit' | 'yolo' | 'plan'>('default');
+  const [geminiDefaultConversationMode, setGeminiDefaultConversationMode] = useState<'planning' | 'fast'>('planning');
   const [systemNotifications, setSystemNotifications] = useState(false);
   const [toolCallsExpanded, setToolCallsExpanded] = useState(true);
   const [saiAnimationEnabled, setSaiAnimationEnabled] = useState(true);
@@ -116,6 +119,9 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.settingsGet('editorMinimap', true).then((v: boolean) => setEditorMinimap(v));
     window.sai.settingsGet('gemini', {}).then((g: any) => {
       if (g.loadingPhrases === 'witty' || g.loadingPhrases === 'tips' || g.loadingPhrases === 'all' || g.loadingPhrases === 'off') setGeminiLoadingPhrases(g.loadingPhrases);
+      if (g.model) setGeminiDefaultModel(g.model);
+      if (g.approvalMode === 'default' || g.approvalMode === 'auto_edit' || g.approvalMode === 'yolo' || g.approvalMode === 'plan') setGeminiDefaultApprovalMode(g.approvalMode);
+      if (g.conversationMode === 'planning' || g.conversationMode === 'fast') setGeminiDefaultConversationMode(g.conversationMode);
     });
     window.sai.settingsGet('systemNotifications', false).then((v: boolean) => setSystemNotifications(v));
     window.sai.settingsGet('toolCallsExpanded', true).then((v: boolean) => setToolCallsExpanded(v));
@@ -288,6 +294,30 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       window.sai.settingsSet('gemini', { ...existing, loadingPhrases: value });
     });
     onSettingChange?.('geminiLoadingPhrases', value);
+  };
+
+  const handleGeminiDefaultModelChange = (model: string) => {
+    setGeminiDefaultModel(model);
+    window.sai.settingsGet('gemini', {}).then((existing: any) => {
+      window.sai.settingsSet('gemini', { ...existing, model });
+    });
+    onSettingChange?.('geminiModel', model);
+  };
+
+  const handleGeminiDefaultApprovalModeChange = (mode: 'default' | 'auto_edit' | 'yolo' | 'plan') => {
+    setGeminiDefaultApprovalMode(mode);
+    window.sai.settingsGet('gemini', {}).then((existing: any) => {
+      window.sai.settingsSet('gemini', { ...existing, approvalMode: mode });
+    });
+    onSettingChange?.('geminiApprovalMode', mode);
+  };
+
+  const handleGeminiDefaultConversationModeChange = (mode: 'planning' | 'fast') => {
+    setGeminiDefaultConversationMode(mode);
+    window.sai.settingsGet('gemini', {}).then((existing: any) => {
+      window.sai.settingsSet('gemini', { ...existing, conversationMode: mode });
+    });
+    onSettingChange?.('geminiConversationMode', mode);
   };
 
   const handleFocusedChatChange = (value: boolean) => {
@@ -835,6 +865,55 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const renderGeminiPage = () => (
     <section className="settings-section">
       <div className="settings-section-label">Gemini</div>
+      <div className="settings-row">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Default model</div>
+          <div className="settings-row-desc">Pre-selected model when starting a new Gemini session</div>
+        </div>
+        <select
+          className="settings-select"
+          value={geminiDefaultModel}
+          onChange={e => handleGeminiDefaultModelChange(e.target.value)}
+        >
+          <option value="auto-gemini-3">auto-gemini-3</option>
+          <option value="auto-gemini-2.5">auto-gemini-2.5</option>
+          <option value="gemini-3.1-pro">gemini-3.1-pro</option>
+          <option value="gemini-3-flash-preview">gemini-3-flash-preview</option>
+          <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+          <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+          <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
+        </select>
+      </div>
+      <div className="settings-row">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Default approval mode</div>
+          <div className="settings-row-desc">How Gemini handles file edits and tool calls</div>
+        </div>
+        <select
+          className="settings-select"
+          value={geminiDefaultApprovalMode}
+          onChange={e => handleGeminiDefaultApprovalModeChange(e.target.value as any)}
+        >
+          <option value="default">Default</option>
+          <option value="auto_edit">Auto Edit</option>
+          <option value="yolo">Yolo</option>
+          <option value="plan">Plan</option>
+        </select>
+      </div>
+      <div className="settings-row">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Default conversation mode</div>
+          <div className="settings-row-desc">Planning uses extended thinking; Fast is quicker</div>
+        </div>
+        <select
+          className="settings-select"
+          value={geminiDefaultConversationMode}
+          onChange={e => handleGeminiDefaultConversationModeChange(e.target.value as any)}
+        >
+          <option value="planning">Planning</option>
+          <option value="fast">Fast</option>
+        </select>
+      </div>
       <div className="settings-row">
         <div className="settings-row-info">
           <div className="settings-row-name">Loading phrases</div>
