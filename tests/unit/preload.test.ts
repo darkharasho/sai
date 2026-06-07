@@ -162,4 +162,21 @@ describe('window.sai.provider routing', () => {
       expect(send).toHaveBeenCalledWith('codex:stop', '/proj');
     });
   });
+
+  describe('provider.setSessionId', () => {
+    it('routes claude to claude:setSessionId with scope', () => {
+      (exposed as any).provider.setSessionId('claude', '/proj', 'sess-1', 'chat');
+      expect(send).toHaveBeenCalledWith('claude:setSessionId', '/proj', 'sess-1', 'chat');
+    });
+
+    it('routes gemini to gemini:setSessionId with scope', () => {
+      (exposed as any).provider.setSessionId('gemini', '/proj', 'sess-2', 'chat');
+      expect(send).toHaveBeenCalledWith('gemini:setSessionId', '/proj', 'sess-2', 'chat');
+    });
+
+    it('routes codex to codex:setSessionId without scope', () => {
+      (exposed as any).provider.setSessionId('codex', '/proj', 'sess-3');
+      expect(send).toHaveBeenCalledWith('codex:setSessionId', '/proj', 'sess-3');
+    });
+  });
 });
