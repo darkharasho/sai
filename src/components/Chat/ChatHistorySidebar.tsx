@@ -347,9 +347,8 @@ export default function ChatHistorySidebar({
                                 const state = isAwaiting || isError ? 'approval'
                                   : isRunning ? 'busy'
                                   : isUnread ? 'done'
-                                  : isSuspended ? 'inactive'
                                   : isActive ? 'alive'
-                                  : null;
+                                  : 'inactive';
                                 const title = isAwaiting ? 'Approval needed'
                                   : isError ? 'Error'
                                   : isRunning ? 'Working...'
@@ -365,7 +364,7 @@ export default function ChatHistorySidebar({
                                   : undefined;
                                 return (
                                   <StatusSlot>
-                                    {state && <WorkspaceSquircle state={state} title={title} data-testid={testId} />}
+                                    <WorkspaceSquircle state={state} title={title} data-testid={testId} />
                                   </StatusSlot>
                                 );
                               })()}
