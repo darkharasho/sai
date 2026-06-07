@@ -95,6 +95,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [codexDefaultModel, setCodexDefaultModel] = useState('');
   const [codexDefaultPermission, setCodexDefaultPermission] = useState<'auto' | 'read-only' | 'full-access'>('auto');
   const [codexAvailableModels, setCodexAvailableModels] = useState<{ id: string; name: string }[]>([]);
+  const [geminiAvailableModels, setGeminiAvailableModels] = useState<{ id: string; name: string }[]>([]);
   const [systemNotifications, setSystemNotifications] = useState(false);
   const [toolCallsExpanded, setToolCallsExpanded] = useState(true);
   const [saiAnimationEnabled, setSaiAnimationEnabled] = useState(true);
@@ -134,6 +135,12 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if (result?.models?.length) {
         setCodexAvailableModels(result.models);
         setCodexDefaultModel(prev => prev || result.defaultModel || '');
+      }
+    }).catch(() => {});
+    (window.sai as any).geminiModels?.().then((result: { models: { id: string; name: string }[]; defaultModel: string } | undefined) => {
+      if (result?.models?.length) {
+        setGeminiAvailableModels(result.models);
+        setGeminiDefaultModel(prev => prev || result.defaultModel || '');
       }
     }).catch(() => {});
     window.sai.settingsGet('systemNotifications', false).then((v: boolean) => setSystemNotifications(v));
@@ -914,25 +921,23 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const renderGeminiPage = () => (
     <section className="settings-section">
       <div className="settings-section-label">Gemini</div>
-      <div className="settings-row">
-        <div className="settings-row-info">
-          <div className="settings-row-name">Default model</div>
-          <div className="settings-row-desc">Pre-selected model when starting a new Gemini session</div>
+      {geminiAvailableModels.length > 0 && (
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <div className="settings-row-name">Default model</div>
+            <div className="settings-row-desc">Pre-selected model when starting a new Gemini session</div>
+          </div>
+          <select
+            className="settings-select"
+            value={geminiDefaultModel}
+            onChange={e => handleGeminiDefaultModelChange(e.target.value)}
+          >
+            {geminiAvailableModels.map(m => (
+              <option key={m.id} value={m.id}>{m.name || m.id}</option>
+            ))}
+          </select>
         </div>
-        <select
-          className="settings-select"
-          value={geminiDefaultModel}
-          onChange={e => handleGeminiDefaultModelChange(e.target.value)}
-        >
-          <option value="auto-gemini-3">auto-gemini-3</option>
-          <option value="auto-gemini-2.5">auto-gemini-2.5</option>
-          <option value="gemini-3.1-pro">gemini-3.1-pro</option>
-          <option value="gemini-3-flash-preview">gemini-3-flash-preview</option>
-          <option value="gemini-2.5-pro">gemini-2.5-pro</option>
-          <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-          <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
-        </select>
-      </div>
+      )}
       <div className="settings-row">
         <div className="settings-row-info">
           <div className="settings-row-name">Default approval mode</div>

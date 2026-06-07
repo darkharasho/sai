@@ -251,6 +251,8 @@ describe('SettingsModal', () => {
     fireEvent.click(geminiNav);
     await waitFor(() => {
       expect(screen.getByText('Loading phrases')).toBeTruthy();
+      expect(screen.getByText('Default approval mode')).toBeTruthy();
+      expect(screen.getByText('Default conversation mode')).toBeTruthy();
     });
   });
 
