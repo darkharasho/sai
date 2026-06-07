@@ -173,22 +173,78 @@ The current Gemini settings page shows only a "Loading phrases" control. It is e
 
 ## Testing
 
-### Unit tests
-- `capabilities.ts` — assert each provider's flags are correct values
-- Unified IPC routing — assert `provider.send('claude', ...)` invokes `ipcRenderer.send('claude:send', ...)` with correct args; same for gemini and codex
-- Session `provider` field back-compat migration — sessions with only `claudeSessionId` set get `provider: 'claude'`
+The project already has 188 test files with `ChatPanel.test.tsx` (1,125 lines), `ChatInput.test.tsx` (310 lines), `claude.test.ts` (44KB), `gemini.test.ts` (18KB), and `codex.test.ts` (36KB). The testing strategy here is phased to maximize regression safety without writing tests for their own sake.
 
-### Component tests
-- `ChatPanel` — orchestrator tab absent when provider is gemini
-- `ChatInput` — effort mode absent for gemini, conversation mode present for gemini, approval mode present for gemini
-- `ChatHistorySidebar` — only sessions matching active provider are shown
+### Phase 0 — Characterization tests (written before any code changes)
+
+These lock in current behavior. They are written first, run green on the unmodified codebase, and then serve as the regression net throughout the refactor.
+
+**`tests/unit/preload.test.ts` additions:**
+- `claudeSend` invokes `ipcRenderer.send('claude:send', ...)` with all positional args in the correct order
+- `geminiSend` invokes `ipcRenderer.send('gemini:send', ...)` with correct args
+- `codexSend` invokes `ipcRenderer.send('codex:send', ...)` with correct args
+- `claudeStart` invokes `ipcRenderer.invoke('claude:start', ...)`
+
+**`tests/unit/components/Chat/ChatPanel.test.tsx` additions:**
+- Orchestrator tab IS present when `aiProvider='claude'`
+- Effort mode IS present in ChatInput when `aiProvider='claude'`
+- Gemini conversation mode IS present when `aiProvider='gemini'`
+- Codex approval mode IS present when `aiProvider='codex'`
+
+These four tests must pass before a single line of implementation code is written.
+
+### Phase 1 — TDD for the two new seams
+
+Written before each seam is implemented, in the same commit.
+
+**New file: `tests/unit/providers/capabilities.test.ts`**
+- `getCapabilities('claude')` returns `hasOrchestrator: true`, `hasEffortMode: true`, `hasSlashCommands: true`, `hasConversationMode: false`, `hasApprovalMode: false`
+- `getCapabilities('gemini')` returns `hasOrchestrator: false`, `hasConversationMode: true`, `hasApprovalMode: true`, `hasEffortMode: false`
+- `getCapabilities('codex')` returns `hasOrchestrator: false`, `hasApprovalMode: true`, `hasEffortMode: false`, `hasConversationMode: false`
+- All three providers have `supportsImages: true`
+
+**`tests/unit/preload.test.ts` additions for the unified routing layer:**
+- `provider.send('claude', path, msg, opts)` dispatches to `claude:send` with correct arg mapping
+- `provider.send('gemini', path, msg, opts)` dispatches to `gemini:send` with correct arg mapping
+- `provider.send('codex', path, msg, opts)` dispatches to `codex:send` with correct arg mapping
+- `provider.start('claude', cwd, opts)` dispatches to `claude:start`
+- `provider.start('gemini', cwd, opts)` dispatches to `gemini:start`
+- `provider.getModels('codex')` dispatches to `codex:models`
+
+**Session migration: `tests/unit/lib/chatSession.test.ts` (or nearest existing session test):**
+- Session with only `claudeSessionId` set → `provider: 'claude'`
+- Session with only `geminiSessionId` set → `provider: 'gemini'`
+- Session with only `codexSessionId` set → `provider: 'codex'`
+- Session with none set → `provider: 'claude'` (safe fallback)
+- Session with `provider` already set → unchanged
+
+### Phase 2 — Capability gate tests (one test per gate, written with the gate)
+
+Each capability gate in the UI is written alongside its test — not after.
+
+**`ChatPanel.test.tsx` additions:**
+- Orchestrator tab absent when `aiProvider='gemini'`
+- Orchestrator tab absent when `aiProvider='codex'`
+- Slash command palette not mounted when `aiProvider='gemini'`
+- Provider switch from Claude → Gemini calls session teardown and creates new session with `provider: 'gemini'`
+- Provider switch from Gemini → Claude creates new session with `provider: 'claude'`
+
+**`ChatInput.test.tsx` additions:**
+- Effort mode button absent when `aiProvider='gemini'`
+- Effort mode button absent when `aiProvider='codex'`
+- Conversation mode toggle absent when `aiProvider='claude'`
+- Conversation mode toggle absent when `aiProvider='codex'`
+- Approval mode toggle absent when `aiProvider='claude'`
+
+**`ChatHistorySidebar.test.tsx` (new or existing):**
+- With mixed sessions (claude/gemini/codex), only claude sessions shown when `aiProvider='claude'`
+- Switching `aiProvider` to gemini shows only gemini sessions
 
 ### Manual smoke test checklist
-1. Switch provider Claude → Gemini in settings
-2. Verify chat sidebar shows only Gemini sessions (empty if first use)
-3. Verify orchestrator tab is gone
-4. Verify toolbar shows conversation mode + approval mode, no effort level
-5. Change Gemini default model in settings, start new session — verify model pre-selected
-6. Change default approval mode, start new session — verify approval mode pre-set
-7. Switch back to Claude — verify Claude session history returns, orchestrator tab reappears
-8. Verify no console errors during provider switch
+1. Switch provider Claude → Gemini in settings — sidebar clears to Gemini history, orchestrator tab gone, effort mode gone
+2. Verify toolbar shows conversation mode + approval mode for Gemini
+3. Change Gemini default model in settings, start new session — verify model pre-selected
+4. Change default approval mode, start new session — verify approval mode pre-set
+5. Switch Claude → Gemini mid-session — active session torn down, fresh Gemini session started
+6. Switch back to Claude — Claude history returns, orchestrator tab reappears, effort mode reappears
+7. All existing Claude flows work identically to before (the characterization tests cover this)
