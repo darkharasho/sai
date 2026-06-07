@@ -3495,7 +3495,7 @@ export default function App() {
 
   const renderPanel = (panel: PanelId) => {
     const isOpen = expanded.includes(panel);
-    const providerSvg = aiProvider === 'codex' ? 'svg/openai.svg' : aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : 'svg/claude.svg';
+    const providerSvg = aiProvider === 'codex' ? 'svg/codex.svg' : aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : 'svg/claude.svg';
     const providerColor = aiProvider === 'codex' ? 'var(--text)' : aiProvider === 'gemini' ? '#4285f4' : '#e27b4a';
     const icon = panel === 'chat'
       ? <span className="accordion-provider-icon" style={{

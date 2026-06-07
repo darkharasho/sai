@@ -916,8 +916,8 @@ function ChatMessage({
           height: 14px;
           margin-top: 2px;
           background-color: var(--accent);
-          -webkit-mask-image: url('svg/openai.svg');
-          mask-image: url('svg/openai.svg');
+          -webkit-mask-image: url('svg/codex.svg');
+          mask-image: url('svg/codex.svg');
           -webkit-mask-size: contain;
           mask-size: contain;
           -webkit-mask-repeat: no-repeat;

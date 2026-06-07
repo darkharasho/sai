@@ -920,8 +920,8 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
           <div className="chat-placeholder" onClick={() => textareaRef.current?.focus()}>
             {!isStreaming && (
               <span className="chat-placeholder-icon" style={{
-                maskImage: `url('${aiProvider === 'codex' ? 'svg/openai.svg' : aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : 'svg/claude.svg'}')`,
-                WebkitMaskImage: `url('${aiProvider === 'codex' ? 'svg/openai.svg' : aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : 'svg/claude.svg'}')`,
+                maskImage: `url('${aiProvider === 'codex' ? 'svg/codex.svg' : aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : 'svg/claude.svg'}')`,
+                WebkitMaskImage: `url('${aiProvider === 'codex' ? 'svg/codex.svg' : aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : 'svg/claude.svg'}')`,
                 backgroundColor: 'var(--text-muted)',
               }} />
             )}

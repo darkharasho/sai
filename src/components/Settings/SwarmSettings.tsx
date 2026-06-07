@@ -7,7 +7,7 @@ interface Props {
 
 const PROVIDERS: { value: AIProvider; label: string }[] = [
   { value: 'claude', label: 'Claude' },
-  { value: 'codex', label: 'Codex CLI' },
+  { value: 'codex', label: 'Codex' },
   { value: 'gemini', label: 'Gemini CLI' },
 ];
 
