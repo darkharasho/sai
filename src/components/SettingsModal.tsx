@@ -73,7 +73,7 @@ function formatRelative(ts: number): string {
 
 const PROVIDER_OPTIONS: { id: 'claude' | 'codex' | 'gemini'; label: string; svg: string; color: string }[] = [
   { id: 'claude', label: 'Claude', svg: 'svg/claude.svg', color: '#e27b4a' },
-  { id: 'codex', label: 'Codex', svg: 'svg/codex.svg', color: '#fff' },
+  { id: 'codex', label: 'Codex', svg: 'svg/codex-color.svg', color: '#fff' },
   { id: 'gemini', label: 'Gemini CLI', svg: 'svg/Google-gemini-icon.svg', color: '#4285f4' },
 ];
 

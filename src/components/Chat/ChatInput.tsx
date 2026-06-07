@@ -919,13 +919,11 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
         {!value && (
           <div className="chat-placeholder" onClick={() => textareaRef.current?.focus()}>
             {!isStreaming && (
-              aiProvider === 'codex'
-                ? <img src="svg/codex.svg" className="chat-placeholder-icon chat-placeholder-icon--img" alt="Codex" />
-                : <span className="chat-placeholder-icon" style={{
-                    maskImage: `url('${aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : 'svg/claude.svg'}')`,
-                    WebkitMaskImage: `url('${aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : 'svg/claude.svg'}')`,
-                    backgroundColor: 'var(--text-muted)',
-                  }} />
+              <span className="chat-placeholder-icon" style={{
+                maskImage: `url('${aiProvider === 'codex' ? 'svg/codex.svg' : aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : 'svg/claude.svg'}')`,
+                WebkitMaskImage: `url('${aiProvider === 'codex' ? 'svg/codex.svg' : aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : 'svg/claude.svg'}')`,
+                backgroundColor: 'var(--text-muted)',
+              }} />
             )}
             <span>{isStreaming ? 'Queue another message...' : `Message ${aiProvider === 'codex' ? 'Codex' : aiProvider === 'gemini' ? 'Gemini' : 'Claude'}...`}</span>
           </div>
@@ -1551,12 +1549,6 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
           -webkit-mask-repeat: no-repeat;
           mask-position: center;
           -webkit-mask-position: center;
-        }
-        .chat-placeholder-icon--img {
-          mask-image: none;
-          -webkit-mask-image: none;
-          background-color: transparent;
-          object-fit: contain;
         }
         .input-box.ticker-up .chat-textarea {
           animation: ticker-slide-up 0.2s ease-out;
