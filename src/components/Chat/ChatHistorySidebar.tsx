@@ -343,11 +343,13 @@ export default function ChatHistorySidebar({
                                 const isAwaiting = awaitingSessionIds.has(session.id);
                                 const isError = errorSessionIds.has(session.id);
                                 const isSuspended = suspendedSessionIds.has(session.id);
+                                const isActive = session.id === activeSessionId;
                                 const state = isAwaiting || isError ? 'approval'
                                   : isRunning ? 'busy'
                                   : isUnread ? 'done'
                                   : isSuspended ? 'inactive'
-                                  : 'alive';
+                                  : isActive ? 'alive'
+                                  : null;
                                 const title = isAwaiting ? 'Approval needed'
                                   : isError ? 'Error'
                                   : isRunning ? 'Working...'
@@ -359,7 +361,8 @@ export default function ChatHistorySidebar({
                                   : isRunning ? `sidebar-status-${session.id}-busy`
                                   : isUnread ? `sidebar-status-${session.id}-done`
                                   : isSuspended ? `sidebar-status-${session.id}-suspended`
-                                  : `sidebar-status-${session.id}-alive`;
+                                  : isActive ? `sidebar-status-${session.id}-alive`
+                                  : undefined;
                                 return (
                                   <StatusSlot>
                                     {state && <WorkspaceSquircle state={state} title={title} data-testid={testId} />}
