@@ -343,10 +343,12 @@ export default function ChatHistorySidebar({
                                 const isAwaiting = awaitingSessionIds.has(session.id);
                                 const isError = errorSessionIds.has(session.id);
                                 const isSuspended = suspendedSessionIds.has(session.id);
+                                const isActive = session.id === activeSessionId;
                                 const state = isAwaiting || isError ? 'approval'
                                   : isRunning ? 'busy'
                                   : isUnread ? 'done'
                                   : isSuspended ? 'inactive'
+                                  : isActive ? 'alive'
                                   : null;
                                 const title = isAwaiting ? 'Approval needed'
                                   : isError ? 'Error'
@@ -359,6 +361,7 @@ export default function ChatHistorySidebar({
                                   : isRunning ? `sidebar-status-${session.id}-busy`
                                   : isUnread ? `sidebar-status-${session.id}-done`
                                   : isSuspended ? `sidebar-status-${session.id}-suspended`
+                                  : isActive ? `sidebar-status-${session.id}-alive`
                                   : undefined;
                                 return (
                                   <StatusSlot>
