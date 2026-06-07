@@ -168,27 +168,30 @@ describe('ChatMessage', () => {
     expect(container.querySelector('.chat-msg-sai')).toBeTruthy();
   });
 
-  it('uses claude provider class when SAI animation is disabled', () => {
+  it('uses SAI logo dot for all providers (no provider-specific classes)', () => {
     const msg = makeMessage({ role: 'assistant' });
     const { container } = render(<ChatMessage message={msg} />);
     act(() => { window.dispatchEvent(new CustomEvent('sai-pref-sai-animation', { detail: false })); });
-    expect(container.querySelector('.chat-msg-claude')).toBeTruthy();
+    expect(container.querySelector('.chat-msg-claude')).toBeFalsy();
+    expect(container.querySelector('.chat-msg-sai')).toBeTruthy();
     act(() => { window.dispatchEvent(new CustomEvent('sai-pref-sai-animation', { detail: true })); });
   });
 
-  it('uses gemini provider class when SAI animation is disabled', () => {
+  it('gemini assistant message uses SAI logo dot, not gemini-specific class', () => {
     const msg = makeMessage({ role: 'assistant' });
     const { container } = render(<ChatMessage message={msg} aiProvider="gemini" />);
     act(() => { window.dispatchEvent(new CustomEvent('sai-pref-sai-animation', { detail: false })); });
-    expect(container.querySelector('.chat-msg-gemini')).toBeTruthy();
+    expect(container.querySelector('.chat-msg-gemini')).toBeFalsy();
+    expect(container.querySelector('.chat-msg-sai')).toBeTruthy();
     act(() => { window.dispatchEvent(new CustomEvent('sai-pref-sai-animation', { detail: true })); });
   });
 
-  it('uses openai provider class when SAI animation is disabled for codex', () => {
+  it('codex assistant message uses SAI logo dot, not openai-specific class', () => {
     const msg = makeMessage({ role: 'assistant' });
     const { container } = render(<ChatMessage message={msg} aiProvider="codex" />);
     act(() => { window.dispatchEvent(new CustomEvent('sai-pref-sai-animation', { detail: false })); });
-    expect(container.querySelector('.chat-msg-openai')).toBeTruthy();
+    expect(container.querySelector('.chat-msg-openai')).toBeFalsy();
+    expect(container.querySelector('.chat-msg-sai')).toBeTruthy();
     act(() => { window.dispatchEvent(new CustomEvent('sai-pref-sai-animation', { detail: true })); });
   });
 
@@ -525,14 +528,15 @@ describe('ChatMessage', () => {
       expect(container.querySelector('.sah-root')).toBeTruthy();
     });
 
-    it('non-SAI provider does NOT use the morph head', () => {
+    it('Gemini uses the morph head (all providers unified on SAI animation)', () => {
       const { container } = render(
         <ChatMessage
           message={{ id: 'a2', role: 'assistant', content: '', timestamp: Date.now() }}
           projectPath="/tmp" aiProvider="gemini" isStreaming
         />
       );
-      expect(container.querySelector('.sah-root')).toBeNull();
+      // Provider-specific exclusion removed — gemini now also uses StreamingAssistantHead
+      expect(container.querySelector('.sah-root')).toBeTruthy();
     });
   });
 });
