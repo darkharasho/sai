@@ -102,7 +102,6 @@ interface ChatPanelProps {
   onGeminiApprovalModeChange: (mode: 'default' | 'auto_edit' | 'yolo' | 'plan') => void;
   geminiConversationMode: 'planning' | 'fast';
   onGeminiConversationModeChange: (mode: 'planning' | 'fast') => void;
-  geminiLoadingPhrases?: 'witty' | 'tips' | 'all' | 'off';
   initialMessages?: ChatMessageType[];
   onMessagesChange?: (messages: ChatMessageType[]) => void;
   onTurnComplete?: () => void;
@@ -385,7 +384,7 @@ const FAKE_ERROR_VARIANTS = {
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(initialMessages || []);
   const taskRegistry = useMemo(() => buildTaskRegistry(messages), [messages]);
   const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);

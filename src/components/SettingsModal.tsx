@@ -88,7 +88,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [lockCommitProvider, setLockCommitProvider] = useState(false);
   const [commitProviderOpen, setCommitProviderOpen] = useState(false);
   const commitProviderRef = useRef<HTMLDivElement>(null);
-  const [geminiLoadingPhrases, setGeminiLoadingPhrases] = useState<'witty' | 'tips' | 'all' | 'off'>('all');
   const [geminiDefaultModel, setGeminiDefaultModel] = useState('auto-gemini-3');
   const [geminiDefaultApprovalMode, setGeminiDefaultApprovalMode] = useState<'default' | 'auto_edit' | 'yolo' | 'plan'>('default');
   const [geminiDefaultConversationMode, setGeminiDefaultConversationMode] = useState<'planning' | 'fast'>('planning');
@@ -122,7 +121,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.settingsGet('editorFontSize', 13).then((v: number) => setEditorFontSize(v));
     window.sai.settingsGet('editorMinimap', true).then((v: boolean) => setEditorMinimap(v));
     window.sai.settingsGet('gemini', {}).then((g: any) => {
-      if (g.loadingPhrases === 'witty' || g.loadingPhrases === 'tips' || g.loadingPhrases === 'all' || g.loadingPhrases === 'off') setGeminiLoadingPhrases(g.loadingPhrases);
       if (g.model) setGeminiDefaultModel(g.model);
       if (g.approvalMode === 'default' || g.approvalMode === 'auto_edit' || g.approvalMode === 'yolo' || g.approvalMode === 'plan') setGeminiDefaultApprovalMode(g.approvalMode);
       if (g.conversationMode === 'planning' || g.conversationMode === 'fast') setGeminiDefaultConversationMode(g.conversationMode);
@@ -308,13 +306,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     }
   };
 
-  const handleGeminiLoadingPhrasesChange = (value: 'witty' | 'tips' | 'all' | 'off') => {
-    setGeminiLoadingPhrases(value);
-    window.sai.settingsGet('gemini', {}).then((existing: any) => {
-      window.sai.settingsSet('gemini', { ...existing, loadingPhrases: value });
-    });
-    onSettingChange?.('geminiLoadingPhrases', value);
-  };
 
   const handleGeminiDefaultModelChange = (model: string) => {
     setGeminiDefaultModel(model);
@@ -966,22 +957,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
         >
           <option value="planning">Planning</option>
           <option value="fast">Fast</option>
-        </select>
-      </div>
-      <div className="settings-row">
-        <div className="settings-row-info">
-          <div className="settings-row-name">Loading phrases</div>
-          <div className="settings-row-desc">What to show while Gemini is thinking</div>
-        </div>
-        <select
-          className="settings-select"
-          value={geminiLoadingPhrases}
-          onChange={e => handleGeminiLoadingPhrasesChange(e.target.value as any)}
-        >
-          <option value="all">All (witty + tips)</option>
-          <option value="witty">Witty phrases</option>
-          <option value="tips">Informative tips</option>
-          <option value="off">Off</option>
         </select>
       </div>
     </section>

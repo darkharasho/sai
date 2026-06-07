@@ -178,7 +178,6 @@ export default function App() {
   const [geminiModels, setGeminiModels] = useState<{ id: string; name: string }[]>([]);
   const [geminiApprovalMode, setGeminiApprovalMode] = useState<GeminiApprovalMode>('default');
   const [geminiConversationMode, setGeminiConversationMode] = useState<GeminiConversationMode>('planning');
-  const [geminiLoadingPhrases, setGeminiLoadingPhrases] = useState<'witty' | 'tips' | 'all' | 'off'>('all');
   const [workspaces, setWorkspaces] = useState<Map<string, WorkspaceContext>>(new Map());
   const [swarmTasksByWs, setSwarmTasksByWs] = useState<Map<string, SwarmTask[]>>(new Map());
   const [swarmApprovalsByWs, setSwarmApprovalsByWs] = useState<Map<string, SwarmApproval[]>>(new Map());
@@ -1731,7 +1730,6 @@ export default function App() {
       if (g.model) setGeminiModel(g.model);
       if (g.approvalMode === 'default' || g.approvalMode === 'auto_edit' || g.approvalMode === 'yolo' || g.approvalMode === 'plan') setGeminiApprovalMode(g.approvalMode);
       if (g.conversationMode === 'planning' || g.conversationMode === 'fast') setGeminiConversationMode(g.conversationMode);
-      if (g.loadingPhrases === 'witty' || g.loadingPhrases === 'tips' || g.loadingPhrases === 'all' || g.loadingPhrases === 'off') setGeminiLoadingPhrases(g.loadingPhrases);
     });
     // Migrate flat keys to nested (one-time)
     Promise.all([
@@ -3475,10 +3473,6 @@ export default function App() {
     saveGeminiSetting('conversationMode', mode);
   };
 
-  const handleGeminiLoadingPhrasesChange = (mode: 'witty' | 'tips' | 'all' | 'off') => {
-    setGeminiLoadingPhrases(mode);
-    saveGeminiSetting('loadingPhrases', mode);
-  };
 
   const chatOpen = expanded.includes('chat');
   const editorOpen = expanded.includes('editor');
@@ -3722,8 +3716,7 @@ export default function App() {
                       onGeminiApprovalModeChange={handleGeminiApprovalModeChange}
                       geminiConversationMode={geminiConversationMode}
                       onGeminiConversationModeChange={handleGeminiConversationModeChange}
-                      geminiLoadingPhrases={geminiLoadingPhrases}
-                      initialMessages={orchMessages}
+                                            initialMessages={orchMessages}
                       activeFilePath={ws.activeFilePath}
                       onFileOpen={handleFileOpen}
                       isActive={wsPath === activeProjectPath}
@@ -4041,8 +4034,7 @@ export default function App() {
                   onGeminiApprovalModeChange={handleGeminiApprovalModeChange}
                   geminiConversationMode={geminiConversationMode}
                   onGeminiConversationModeChange={handleGeminiConversationModeChange}
-                  geminiLoadingPhrases={geminiLoadingPhrases}
-                  initialMessages={ws.activeSession.messages}
+                                    initialMessages={ws.activeSession.messages}
                   initialPendingApproval={approvalSessions.get(wsPath)?.get(ws.activeSession.id) ?? null}
                   activeFilePath={ws.activeFilePath}
                   onFileOpen={handleFileOpen}
@@ -4367,7 +4359,6 @@ export default function App() {
           if (key === 'aiProvider') { setAiProvider(value); handleNewChat(); }
           if (key === 'commitMessageProvider') setCommitMessageProvider(value);
           if (key === 'aiTitleGeneration') setAiTitleGeneration(value);
-          if (key === 'geminiLoadingPhrases') handleGeminiLoadingPhrasesChange(value);
           if (key === 'geminiModel') handleGeminiModelChange(value);
           if (key === 'geminiApprovalMode') handleGeminiApprovalModeChange(value);
           if (key === 'geminiConversationMode') handleGeminiConversationModeChange(value);
