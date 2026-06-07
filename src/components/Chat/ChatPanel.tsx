@@ -1532,21 +1532,34 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
   const handleApprove = (modifiedCommand?: string) => {
     if (!pendingApproval) return;
-    window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, true, modifiedCommand, claudeScope);
+    if (aiProvider === 'gemini') {
+      (window.sai as any).geminiApprove?.(projectPath, pendingApproval.toolUseId, true, modifiedCommand, 'chat');
+    } else {
+      window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, true, modifiedCommand, claudeScope);
+    }
     setPendingApproval(null);
   };
 
   const handleDeny = () => {
     if (!pendingApproval) return;
-    window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, false, undefined, claudeScope);
+    if (aiProvider === 'gemini') {
+      (window.sai as any).geminiApprove?.(projectPath, pendingApproval.toolUseId, false, undefined, 'chat');
+    } else {
+      window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, false, undefined, claudeScope);
+    }
     setPendingApproval(null);
   };
 
   const handleAlwaysAllow = async () => {
     if (!pendingApproval) return;
-    const pattern = `${pendingApproval.toolName}(*)`;
-    await window.sai.claudeAlwaysAllow(projectPath, pattern);
-    window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, true, undefined, claudeScope);
+    if (aiProvider === 'gemini') {
+      // Gemini doesn't support always-allow patterns — just approve this instance
+      (window.sai as any).geminiApprove?.(projectPath, pendingApproval.toolUseId, true, undefined, 'chat');
+    } else {
+      const pattern = `${pendingApproval.toolName}(*)`;
+      await window.sai.claudeAlwaysAllow(projectPath, pattern);
+      window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, true, undefined, claudeScope);
+    }
     setPendingApproval(null);
   };
 

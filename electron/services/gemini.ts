@@ -545,6 +545,10 @@ export function registerGeminiHandlers(win: BrowserWindow) {
     const ws = get(projectPath);
     if (!ws) return;
     const sessionId = getScopeSessionId(ws, scope);
+    // Capture turnSeq before any async work. If gemini:send arrives and increments
+    // turnSeq while session/cancel is awaited, this done should still carry the
+    // original turn number so App.tsx's stale-done guard can reject it.
+    const stoppedTurnSeq = ws.gemini.turnSeq;
 
     if (ws.gemini.transport && sessionId && ws.gemini.busy) {
       try {
@@ -564,8 +568,30 @@ export function registerGeminiHandlers(win: BrowserWindow) {
       type: 'done',
       projectPath: ws.projectPath,
       scope,
-      turnSeq: ws.gemini.turnSeq,
+      turnSeq: stoppedTurnSeq,
     });
+  });
+
+  ipcMain.on('gemini:approve', async (_event, projectPath: string, toolUseId: string, approved: boolean, modifiedCommand?: string, scope: string = 'chat') => {
+    const ws = get(projectPath);
+    if (!ws) return;
+    const pending = ws.gemini.pendingApproval;
+    if (!pending || pending.toolUseId !== toolUseId) return;
+    const sessionId = scope === 'chat' ? ws.gemini.chatSessionId : ws.gemini.terminalSessions.get(scope);
+    try {
+      await ws.gemini.transport?.request('tool/approve', {
+        sessionId,
+        scope,
+        toolUseId,
+        approved,
+        modifiedCommand,
+      });
+      ws.gemini.pendingApproval = null;
+      safeSend(win, 'claude:message', { type: 'approval_resolved', projectPath: ws.projectPath, scope });
+    } catch (error: any) {
+      ws.gemini.pendingApproval = null;
+      safeSend(win, 'claude:message', { type: 'error', projectPath: ws.projectPath, scope, text: `Gemini approval failed: ${error?.message || 'Unknown error'}` });
+    }
   });
 
   ipcMain.on(

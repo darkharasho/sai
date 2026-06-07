@@ -64,6 +64,8 @@ contextBridge.exposeInMainWorld('sai', {
   geminiSend: (projectPath: string, message: string, imagePaths?: string[], approvalMode?: string, conversationMode?: string, model?: string, scope?: string) =>
     ipcRenderer.send('gemini:send', projectPath, message, imagePaths, approvalMode, conversationMode, model, scope),
   geminiStop: (projectPath: string, scope?: string) => ipcRenderer.send('gemini:stop', projectPath, scope),
+  geminiApprove: (projectPath: string, toolUseId: string, approved: boolean, modifiedCommand?: string, scope?: string) =>
+    ipcRenderer.send('gemini:approve', projectPath, toolUseId, approved, modifiedCommand, scope),
   geminiSetSessionId: (projectPath: string, sessionId: string | undefined, scope?: string) =>
     ipcRenderer.send('gemini:setSessionId', projectPath, sessionId, scope),
   // Unified provider routing — dispatches to the correct per-provider channel.
