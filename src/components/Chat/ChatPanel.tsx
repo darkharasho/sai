@@ -778,9 +778,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     });
 
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
-      // Only process messages for this workspace and chat scope
+      // Only process messages for this workspace and chat scope.
+      // Claude uses session UUIDs as scopes for multi-scope isolation.
+      // Gemini and Codex use 'chat' as a fixed scope — match on projectPath only.
       if (msg.projectPath && msg.projectPath !== projectPath) return;
-      if (msg.scope && msg.scope !== claudeScope) return;
+      const expectedScope = aiProvider === 'claude' ? claudeScope : 'chat';
+      if (msg.scope && msg.scope !== expectedScope) return;
 
       // Flush any buffered streaming text before processing a non-delta event,
       // so the pending content is committed to state in the correct order.
