@@ -234,10 +234,24 @@ function geminiKindToName(kind: string | undefined, title: string | undefined): 
   }
 }
 
+// Extract a plain string from a location value — the Gemini ACP may send
+// locations as plain strings or as objects with a path/file/name field.
+function asPathString(loc: unknown): string {
+  if (typeof loc === 'string') return loc;
+  if (loc && typeof loc === 'object') {
+    const o = loc as Record<string, unknown>;
+    return String(o.path || o.file || o.name || JSON.stringify(loc));
+  }
+  return String(loc ?? '');
+}
+
 // Format the input object so the tool card shows useful information
 // (file paths, commands) rather than the raw {kind, locations} envelope.
-function geminiKindToInput(kind: string | undefined, locations: string[] | undefined, title: string | undefined): Record<string, unknown> {
-  const primaryPath = locations?.[0];
+// All values placed in file_path/pattern/command must be strings so that
+// ToolCallCard.formatInput never receives a non-string label.
+function geminiKindToInput(kind: string | undefined, locations: unknown[] | undefined, title: string | undefined): Record<string, unknown> {
+  const primaryPath = locations?.length ? asPathString(locations[0]) : undefined;
+  const allPaths = locations?.map(asPathString);
   switch (kind) {
     case 'read_file':
     case 'write_file':
@@ -246,21 +260,21 @@ function geminiKindToInput(kind: string | undefined, locations: string[] | undef
     case 'edit_file':
     case 'patch_file':
       return primaryPath
-        ? (locations!.length > 1 ? { file_path: primaryPath, paths: locations } : { file_path: primaryPath })
-        : { kind, locations };
+        ? (allPaths!.length > 1 ? { file_path: primaryPath, paths: allPaths } : { file_path: primaryPath })
+        : { kind };
     case 'run_shell_command':
     case 'shell_command':
     case 'shell':
-      return title ? { command: title } : { kind };
+      return title ? { command: String(title) } : { kind };
     case 'list_directory':
     case 'glob':
     case 'list_files':
-      return primaryPath ? { pattern: primaryPath } : { kind, locations };
+      return primaryPath ? { pattern: primaryPath } : { kind };
     case 'search_file_content':
     case 'search_files':
-      return primaryPath ? { pattern: locations![0], paths: locations!.slice(1) } : { kind, locations };
+      return primaryPath ? { pattern: primaryPath, ...(allPaths!.length > 1 ? { paths: allPaths!.slice(1) } : {}) } : { kind };
     default:
-      return { kind, ...(primaryPath ? { file_path: primaryPath } : {}), ...(locations && locations.length > 1 ? { locations } : {}) };
+      return { kind, ...(primaryPath ? { file_path: primaryPath } : {}) };
   }
 }
 
