@@ -115,10 +115,19 @@ export function createGeminiAcpClient(options: GeminiAcpClientOptions): GeminiAc
 
         for (const line of lines) {
           if (!line.trim()) continue;
+          let parsed: unknown;
           try {
-            handleMessage(JSON.parse(line));
+            parsed = JSON.parse(line);
           } catch {
-            // Ignore malformed transport lines.
+            continue; // malformed JSON — skip
+          }
+          try {
+            handleMessage(parsed);
+          } catch (err) {
+            // handleMessage threw (e.g. a buggy event listener) — reject all
+            // pending requests so callers don't hang waiting for a response
+            // that was already consumed but not dispatched.
+            rejectAllPending(err instanceof Error ? err : new Error(String(err)));
           }
         }
       });
@@ -179,6 +188,7 @@ export function createGeminiAcpClient(options: GeminiAcpClientOptions): GeminiAc
     },
 
     dispose() {
+      rejectAllPending(new Error('Gemini ACP transport disposed'));
       if (processHandle) {
         processHandle.kill();
         processHandle = null;
