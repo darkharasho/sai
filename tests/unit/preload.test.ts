@@ -89,3 +89,77 @@ describe('characterization: existing IPC routing', () => {
     );
   });
 });
+
+describe('window.sai.provider routing', () => {
+  beforeEach(() => {
+    send.mockClear();
+    invoke.mockClear();
+  });
+
+  describe('provider.send', () => {
+    it('routes claude to claude:send with mapped args', () => {
+      exposed.provider.send('claude', '/proj', 'hello', {
+        imagePaths: ['/a.png'], permMode: 'default', effortLevel: 'high',
+        model: 'sonnet', scope: 'chat',
+      });
+      expect(send).toHaveBeenCalledWith(
+        'claude:send', '/proj', 'hello', ['/a.png'], 'default', 'high', 'sonnet', 'chat'
+      );
+    });
+
+    it('routes gemini to gemini:send with mapped args', () => {
+      exposed.provider.send('gemini', '/proj', 'hello', {
+        imagePaths: [], approvalMode: 'auto_edit', conversationMode: 'fast',
+        model: 'gemini-2.5-flash', scope: 'chat',
+      });
+      expect(send).toHaveBeenCalledWith(
+        'gemini:send', '/proj', 'hello', [], 'auto_edit', 'fast', 'gemini-2.5-flash', 'chat'
+      );
+    });
+
+    it('routes codex to codex:send with mapped args', () => {
+      exposed.provider.send('codex', '/proj', 'hello', {
+        imagePaths: [], permMode: 'auto', model: 'codex-mini',
+      });
+      expect(send).toHaveBeenCalledWith(
+        'codex:send', '/proj', 'hello', [], 'auto', 'codex-mini'
+      );
+    });
+  });
+
+  describe('provider.start', () => {
+    it('routes claude to claude:start', () => {
+      exposed.provider.start('claude', '/proj', { scope: 'chat', kind: 'chat', metaPreamble: 'meta' });
+      expect(invoke).toHaveBeenCalledWith(
+        'claude:start', '/proj', 'chat', 'chat', undefined, undefined, 'meta'
+      );
+    });
+
+    it('routes gemini to gemini:start', () => {
+      exposed.provider.start('gemini', '/proj', { metaPreamble: 'meta' });
+      expect(invoke).toHaveBeenCalledWith('gemini:start', '/proj', 'meta');
+    });
+
+    it('routes codex to codex:start', () => {
+      exposed.provider.start('codex', '/proj', { metaPreamble: 'meta' });
+      expect(invoke).toHaveBeenCalledWith('codex:start', '/proj', 'meta');
+    });
+  });
+
+  describe('provider.stop', () => {
+    it('routes claude to claude:stop', () => {
+      exposed.provider.stop('claude', '/proj');
+      expect(send).toHaveBeenCalledWith('claude:stop', '/proj', undefined);
+    });
+
+    it('routes gemini to gemini:stop', () => {
+      exposed.provider.stop('gemini', '/proj', 'chat');
+      expect(send).toHaveBeenCalledWith('gemini:stop', '/proj', 'chat');
+    });
+
+    it('routes codex to codex:stop', () => {
+      exposed.provider.stop('codex', '/proj');
+      expect(send).toHaveBeenCalledWith('codex:stop', '/proj');
+    });
+  });
+});
