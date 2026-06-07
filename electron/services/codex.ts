@@ -329,9 +329,13 @@ export function registerCodexHandlers(win: BrowserWindow) {
     const proc = spawn('codex', args, {
       cwd: ws.codex.cwd || projectPath,
       env: getEnrichedEnv(),
-      stdio: ['ignore', 'pipe', 'pipe'],
+      // Use 'pipe' for stdin and close it immediately so Codex sees a clean
+      // EOF rather than /dev/null — 'ignore' can trigger "Reading additional
+      // input from stdin..." warnings on some Codex CLI versions.
+      stdio: ['pipe', 'pipe', 'pipe'],
       shell: process.platform === 'win32',
     });
+    proc.stdin?.end();
 
     ws.codex.process = proc;
     ws.codex.turnSeq++;
