@@ -607,6 +607,17 @@ export default function App() {
 
   // Keep sidebarOpenRef in sync so workspace-switch can read the current value.
   useEffect(() => { sidebarOpenRef.current = sidebarOpen; }, [sidebarOpen]);
+
+  // Close provider-specific sidebars when switching to a provider that doesn't support them.
+  useEffect(() => {
+    const caps = getCapabilities(aiProvider);
+    setSidebarOpen(prev => {
+      if (prev === 'mcp' && !caps.hasMcp) return null;
+      if (prev === 'plugins' && !caps.hasPlugins) return null;
+      if (prev === 'swarm' && !caps.hasOrchestrator) return null;
+      return prev;
+    });
+  }, [aiProvider]);
   const swarmSelectedRef = useRef<string>('overview');
   useEffect(() => { swarmSelectedRef.current = swarmSelected; }, [swarmSelected]);
 
@@ -4450,6 +4461,8 @@ export default function App() {
           chatNotificationCount={chatNotificationCount}
           overallStatus={approvalSessions.size > 0 ? 'approval' : completedWorkspaces.size > 0 ? 'done' : busyWorkspaces.size > 0 ? 'busy' : null}
           hasOrchestrator={getCapabilities(aiProvider).hasOrchestrator}
+          hasMcp={getCapabilities(aiProvider).hasMcp}
+          hasPlugins={getCapabilities(aiProvider).hasPlugins}
         />
         <AnimatePresence initial={false} mode="popLayout">
           {sidebarOpen === 'files' && (

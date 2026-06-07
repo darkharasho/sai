@@ -9,6 +9,8 @@ export interface ProviderCapabilities {
   supportsImages: boolean;
   supportsTerminalScope: boolean;
   supportsMultiScope: boolean;
+  hasMcp: boolean;
+  hasPlugins: boolean;
 }
 
 const CAPABILITIES: Record<AIProvider, ProviderCapabilities> = {
@@ -21,6 +23,8 @@ const CAPABILITIES: Record<AIProvider, ProviderCapabilities> = {
     supportsImages: true,
     supportsTerminalScope: true,
     supportsMultiScope: true,
+    hasMcp: true,
+    hasPlugins: true,
   },
   gemini: {
     hasOrchestrator: false,
@@ -31,6 +35,8 @@ const CAPABILITIES: Record<AIProvider, ProviderCapabilities> = {
     supportsImages: true,
     supportsTerminalScope: true,
     supportsMultiScope: true,
+    hasMcp: false,
+    hasPlugins: false,
   },
   codex: {
     hasOrchestrator: false,
@@ -41,6 +47,8 @@ const CAPABILITIES: Record<AIProvider, ProviderCapabilities> = {
     supportsImages: true,
     supportsTerminalScope: false,
     supportsMultiScope: false,
+    hasMcp: false,
+    hasPlugins: false,
   },
 };
 
