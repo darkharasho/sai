@@ -13,6 +13,14 @@ const css = `
   font-display: swap;
 }
 @font-face {
+  font-family: 'Onest';
+  src: url('${geistSansUrl}') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0060;
+}
+@font-face {
   font-family: 'Geist';
   src: url('${geistSansUrl}') format('woff2');
   font-weight: 100 900;
