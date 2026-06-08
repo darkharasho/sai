@@ -28,3 +28,9 @@
   max-width: 92vw;
   max-height: 92vh;
 }
+.tool-call-image-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px 4px;
+}

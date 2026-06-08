@@ -18,6 +18,7 @@ import remarkGfm from 'remark-gfm';
 import { CARD_MD_CLASS, CARD_MD_STYLES } from './markdownCardStyles';
 import { parseSearchResults, isSearchTool, highlightMatches, type SearchRow } from './searchResults';
 import { TaskRegistryContext, type TaskInfo } from './taskRegistry';
+import { ToolResultImagePreview } from './ToolResultImagePreview';
 
 function parseMcpName(name: string): { server: string; tool: string } | null {
   if (!name.startsWith('mcp__')) return null;
@@ -1128,6 +1129,13 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             </motion.span>
           )}
         </div>
+        {toolCall.resultImages?.length ? (
+          <div className="tool-call-image-strip" onClick={(e) => e.stopPropagation()}>
+            {toolCall.resultImages.map((img, i) => (
+              <ToolResultImagePreview key={i} image={img} />
+            ))}
+          </div>
+        ) : null}
         <AnimatePresence initial={false}>
           {expanded && hasBody && (
             <motion.div
