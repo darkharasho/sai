@@ -3,7 +3,7 @@ import { WorkspaceSquircle } from './shared/WorkspaceSquircle';
 import type { IndicatorState } from '../lib/workspaceStatus';
 import { DOT_MASK_URL } from '../lib/assets';
 
-type OverallStatus = 'approval' | 'done' | 'busy' | null;
+type OverallStatus = 'approval' | 'done' | 'busy' | 'busy-done' | null;
 
 interface NavBarProps {
   activeSidebar: string | null;

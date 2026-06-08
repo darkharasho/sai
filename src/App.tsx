@@ -4467,7 +4467,7 @@ export default function App() {
           gitChangeCount={gitChangeCount}
           swarmApprovalCount={swarmApprovalCount}
           chatNotificationCount={chatNotificationCount}
-          overallStatus={approvalSessions.size > 0 ? 'approval' : completedWorkspaces.size > 0 ? 'done' : busyWorkspaces.size > 0 ? 'busy' : null}
+          overallStatus={approvalSessions.size > 0 ? 'approval' : busyWorkspaces.size > 0 && completedWorkspaces.size > 0 ? 'busy-done' : completedWorkspaces.size > 0 ? 'done' : busyWorkspaces.size > 0 ? 'busy' : null}
           hasOrchestrator={getCapabilities(aiProvider).hasOrchestrator}
           hasMcp={getCapabilities(aiProvider).hasMcp}
           hasPlugins={getCapabilities(aiProvider).hasPlugins}
