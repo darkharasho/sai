@@ -19,6 +19,7 @@ import {
 import type { SessionBus } from './remote/session-bus';
 import { clamp, type PermMode } from './remote/clamp';
 import { exitTerminalEvents } from './claudeExit';
+import { imageReadResult } from './imageFiles';
 
 const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
 
@@ -941,6 +942,7 @@ export async function approveImpl(
   // --- Local tool execution (Bash, Write, Edit, Read) ---
   let result = '';
   let isError = false;
+  let resultImages: Array<{ path: string; media_type: string }> | null = null;
 
   try {
     if (pending.toolName === 'Bash' || pending.toolName === 'bash') {
@@ -998,13 +1000,26 @@ export async function approveImpl(
         result = `File not found: ${filePath}`;
         isError = true;
       } else {
-        result = fs.readFileSync(filePath, 'utf-8');
+        const img = imageReadResult(filePath);
+        if (img) {
+          result = img.text;
+          resultImages = [img.image];
+        } else {
+          result = fs.readFileSync(filePath, 'utf-8');
+        }
       }
     }
   } catch (err: any) {
     result = err.message || 'Command execution failed';
     isError = true;
   }
+
+  const toolResultContent = resultImages
+    ? [
+        { type: 'text', text: result },
+        ...resultImages.map(im => ({ type: 'image', source: { type: 'sai-file', path: im.path, media_type: im.media_type } })),
+      ]
+    : result;
 
   // Send the real tool result to the renderer as if the CLI produced it
   emitChatMessage({
@@ -1016,7 +1031,7 @@ export async function approveImpl(
       content: [{
         type: 'tool_result',
         tool_use_id: pending.toolUseId,
-        content: result,
+        content: toolResultContent,
         is_error: isError,
       }],
     },
