@@ -295,6 +295,10 @@ export const test = base.extend<{ window: Page; saiMock: SaiMockOverrides }>({
           base[key] = new Function('return (' + fnSource + ')')();
         }
         (window as any).sai = base;
+        // Expose the real app version so per-test settingsGet overrides can
+        // suppress the What's New modal without hardcoding a version that goes
+        // stale on the next release bump.
+        (window as any).__APP_VERSION = appVersion;
         // Expose helper to fire saved event-listener callbacks from tests.
         (window as any).__saiTriggers = (window as any).__saiTriggers || {};
       },

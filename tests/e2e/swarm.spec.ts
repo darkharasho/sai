@@ -50,7 +50,7 @@ test.describe('Swarm', () => {
 
     // Open the Swarm sidebar.
     await window.click('[aria-label="Swarm"]');
-    await expect(window.getByText('Swarm Overview')).toBeVisible({ timeout: 10000 });
+    await expect(window.locator('.overview-title', { hasText: 'Swarm Overview' })).toBeVisible({ timeout: 10000 });
 
     // Click the "+ NEW" button to open the popover.
     await window.locator('button.new-task').click();

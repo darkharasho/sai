@@ -8,7 +8,7 @@ test.describe('Keybindings', () => {
       settingsGet: (key: string, def: any) => {
         const stored = (window as any).__keybindings_overrides ?? {};
         if (key === 'keybindings') return Promise.resolve(stored);
-        if (key === 'lastSeenVersion') return Promise.resolve('0.8.36');
+        if (key === 'lastSeenVersion') return Promise.resolve((window as any).__APP_VERSION);
         return Promise.resolve(def ?? null);
       },
       settingsSet: (key: string, value: any) => {
