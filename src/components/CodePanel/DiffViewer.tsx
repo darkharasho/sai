@@ -126,20 +126,17 @@ export default function DiffViewer({ projectPath, filePath, staged, mode, minima
     return () => window.removeEventListener('sai-monaco-theme', handler);
   }, []);
 
-  // Apply saved highlight theme on mount
+  // Apply saved highlight theme on mount — always call so CSS vars drive chrome colors
   useEffect(() => {
-    const hlTheme = getActiveHighlightTheme();
-    if (hlTheme !== 'monokai') {
-      buildMonacoThemeData(hlTheme).then(data => {
-        monaco.editor.defineTheme('sai-dark', {
-          base: data.base,
-          inherit: true,
-          rules: data.rules,
-          colors: data.colors,
-        });
-        monaco.editor.setTheme('sai-dark');
+    buildMonacoThemeData(getActiveHighlightTheme()).then(data => {
+      monaco.editor.defineTheme('sai-dark', {
+        base: data.base,
+        inherit: true,
+        rules: data.rules,
+        colors: data.colors,
       });
-    }
+      monaco.editor.setTheme('sai-dark');
+    });
   }, []);
 
   return (

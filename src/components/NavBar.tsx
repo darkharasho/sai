@@ -16,9 +16,11 @@ interface NavBarProps {
   chatNotificationCount?: number;
   overallStatus?: OverallStatus;
   hasOrchestrator?: boolean;
+  hasMcp?: boolean;
+  hasPlugins?: boolean;
 }
 
-export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, swarmApprovalCount = 0, chatNotificationCount = 0, overallStatus = null, hasOrchestrator = true }: NavBarProps) {
+export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, swarmApprovalCount = 0, chatNotificationCount = 0, overallStatus = null, hasOrchestrator = true, hasMcp = true, hasPlugins = true }: NavBarProps) {
   const badgeLabel = gitChangeCount > 100 ? '99+' : `${gitChangeCount}`;
   const swarmBadgeLabel = swarmApprovalCount > 100 ? '99+' : `${swarmApprovalCount}`;
   const chatBadgeLabel = chatNotificationCount > 100 ? '99+' : `${chatNotificationCount}`;
@@ -71,23 +73,27 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, sw
           {swarmApprovalCount > 0 && <span className="nav-badge">{swarmBadgeLabel}</span>}
         </button>
       )}
-      <div className="nav-divider" />
-      <button
-        className={`nav-btn ${activeSidebar === 'plugins' ? 'active' : ''}`}
-        onClick={() => onToggle('plugins')}
-        title="Plugins"
-      >
-        <Puzzle size={18} />
-        <span className="nav-label">Plugins</span>
-      </button>
-      <button
-        className={`nav-btn ${activeSidebar === 'mcp' ? 'active' : ''}`}
-        onClick={() => onToggle('mcp')}
-        title="MCP Servers"
-      >
-        <Server size={18} />
-        <span className="nav-label">MCP</span>
-      </button>
+      {(hasPlugins || hasMcp) && <div className="nav-divider" />}
+      {hasPlugins && (
+        <button
+          className={`nav-btn ${activeSidebar === 'plugins' ? 'active' : ''}`}
+          onClick={() => onToggle('plugins')}
+          title="Plugins"
+        >
+          <Puzzle size={18} />
+          <span className="nav-label">Plugins</span>
+        </button>
+      )}
+      {hasMcp && (
+        <button
+          className={`nav-btn ${activeSidebar === 'mcp' ? 'active' : ''}`}
+          onClick={() => onToggle('mcp')}
+          title="MCP Servers"
+        >
+          <Server size={18} />
+          <span className="nav-label">MCP</span>
+        </button>
+      )}
       {overallStatus && (
         <div className="nav-status-indicator">
           <WorkspaceSquircle state={overallStatus as IndicatorState} />

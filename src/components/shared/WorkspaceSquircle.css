@@ -1,6 +1,6 @@
 .ws-sq { display: inline-block; flex-shrink: 0; }
 .ws-sq-inactive { background: #555; width: 9px; height: 9px; }
-.ws-sq-alive    { background: #22c55e; width: 9px; height: 9px; animation: ws-sq-breathe 2.5s ease-in-out infinite; }
+.ws-sq-alive    { background: #22c55e; width: 9px; height: 9px; }
 .ws-sq-busy     { background: #d4a72c; width: 9px; height: 9px; animation: ws-sq-shrink 1.4s ease-in-out infinite; }
 .ws-sq-done     { background: #e0e0e0; width: 9px; height: 9px; animation: ws-sq-blink 1.8s ease-in-out infinite; }
 .ws-sq-approval { background: #f97316; width: 16px; height: 16px; animation: ws-sq-flash 1.2s ease-in-out infinite; }
