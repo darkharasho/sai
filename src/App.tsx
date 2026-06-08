@@ -70,6 +70,19 @@ import * as monaco from 'monaco-editor';
 import { motion, AnimatePresence } from 'motion/react';
 import { getCapabilities } from './providers/capabilities';
 
+declare global {
+  interface Window {
+    __saiTest?: {
+      setWorkspaceBusy(id: string): void;
+      setWorkspaceDone(id: string): void;
+      setWorkspaceIdle(id: string): void;
+      clearWorkspaces(): void;
+      getOverallStatus(): 'approval' | 'done' | 'busy' | 'busy-done' | null;
+      getState(): { busyWorkspaces: string[]; completedWorkspaces: string[] };
+    };
+  }
+}
+
 function applyEditsClientSide(content: string, edits: { line: number; column: number; length: number; replacement: string }[]): string {
   const sorted = [...edits].sort((a, b) => b.line - a.line || b.column - a.column);
   const lines = content.split('\n');
@@ -4344,6 +4357,40 @@ export default function App() {
     prevStreamingRef.current = streamingSessionIds;
     prevAwaitingRef.current = awaitingSessionIds;
   }, [streamingSessionIds, awaitingSessionIds, sessions, activeSession?.id]);
+
+  // Dev-only test bridge — lets Playwright drive workspace state directly.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    window.__saiTest = {
+      setWorkspaceBusy: (id: string) => {
+        setBusyWorkspaces(prev => new Set([...prev, id]));
+        setCompletedWorkspaces(prev => { const n = new Set(prev); n.delete(id); return n; });
+      },
+      setWorkspaceDone: (id: string) => {
+        setCompletedWorkspaces(prev => new Set([...prev, id]));
+        setBusyWorkspaces(prev => { const n = new Set(prev); n.delete(id); return n; });
+      },
+      setWorkspaceIdle: (id: string) => {
+        setBusyWorkspaces(prev => { const n = new Set(prev); n.delete(id); return n; });
+        setCompletedWorkspaces(prev => { const n = new Set(prev); n.delete(id); return n; });
+      },
+      clearWorkspaces: () => {
+        setBusyWorkspaces(new Set());
+        setCompletedWorkspaces(new Set());
+      },
+      getOverallStatus: () => {
+        if (busyWorkspaces.size > 0 && completedWorkspaces.size > 0) return 'busy-done';
+        if (completedWorkspaces.size > 0) return 'done';
+        if (busyWorkspaces.size > 0) return 'busy';
+        return null;
+      },
+      getState: () => ({
+        busyWorkspaces: [...busyWorkspaces],
+        completedWorkspaces: [...completedWorkspaces],
+      }),
+    };
+    return () => { delete window.__saiTest; };
+  }, [busyWorkspaces, completedWorkspaces, setBusyWorkspaces, setCompletedWorkspaces]);
 
   // Surface session-level unread/error state up to the workspace level so the
   // TitleBar workspace switcher shows the green '!' even when the workspace
