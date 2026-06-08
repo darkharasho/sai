@@ -1088,6 +1088,15 @@ export function registerClaudeHandlers(win: BrowserWindow) {
     if (!ws) return;
     const claude = getClaude(ws, scope || 'chat');
     if (claude.process) {
+      // If this scope was mid-stream, synthesize a done so the renderer clears
+      // streamingScopes and busy state. Without this, switching back to a session
+      // that is still streaming kills the process silently and leaves the chat
+      // permanently stuck in the streaming/busy UI state.
+      if (claude.streaming || claude.busy) {
+        claude.busy = false;
+        claude.streaming = false;
+        emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope: scope || 'chat', turnSeq: claude.turnSeq });
+      }
       claude.process.kill();
       claude.process = null;
       claude.processConfig = null;

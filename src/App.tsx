@@ -224,6 +224,8 @@ export default function App() {
   // orchestrator's own session id) can drive the ChatPanel thinking animation.
   // Keys are `${projectPath}:${scope}` — scope defaults to 'chat'.
   const [streamingScopes, setStreamingScopes] = useState<Set<string>>(new Set());
+  const streamingScopesRef = useRef<Set<string>>(new Set());
+  streamingScopesRef.current = streamingScopes;
   // Unsent draft text and attached context per workspace, persisted across
   // workspace switches and session-key remounts so partial messages survive
   // navigation.
@@ -1926,7 +1928,13 @@ export default function App() {
         // so the yellow indicator survives an app restart. (The backend
         // doesn't restore live processes; sessions stay "suspended" until
         // the user sends a message that respawns them.)
-        const reseed = sessions.filter(s => s.scopeSuspended).map(s => `${activeProjectPath}:${s.id}`);
+        const reseed = sessions
+          .filter(s => s.scopeSuspended)
+          .map(s => `${activeProjectPath}:${s.id}`)
+          // Don't re-add a scope that streaming_start already cleared in-flight.
+          // Without this guard a stale DB read races the async scopeSuspended:false
+          // patch and re-marks actively-streaming sessions as suspended.
+          .filter(k => !streamingScopesRef.current.has(k));
         if (reseed.length > 0) {
           setSuspendedScopes(prev => {
             const next = new Set(prev);
