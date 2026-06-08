@@ -91,8 +91,18 @@ export interface ToolCall {
   name: string;
   input: string;
   output?: string;
+  resultImages?: ToolResultImage[];
   startedAt?: number;
   durationMs?: number;
+}
+
+export interface ToolResultImage {
+  /** Path on disk; the renderer lazily re-reads via window.sai.fsReadFileBase64. Preferred — no bytes stored. */
+  filePath?: string;
+  /** Inline base64 data URI; used when there is no file to point at (stream-only images). */
+  dataUrl?: string;
+  /** e.g. "image/png". Optional, informational. */
+  mimeType?: string;
 }
 
 export interface PendingApproval {
