@@ -13,10 +13,16 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     ...devices['Desktop Chrome'],
   },
+  expect: {
+    toHaveScreenshot: {
+      maxDiffPixelRatio: 0.02,
+    },
+  },
   webServer: {
     command: 'PLAYWRIGHT=1 npx vite',
     port: 5173,
     reuseExistingServer: !process.env.CI,
     timeout: 30000,
   },
+  snapshotDir: 'tests/e2e/screenshots',
 });
