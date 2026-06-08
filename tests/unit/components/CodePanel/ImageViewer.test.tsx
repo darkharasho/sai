@@ -55,7 +55,7 @@ vi.mock('monaco-editor/esm/vs/language/typescript/ts.worker?worker', () => ({
 // Mock highlight themes
 vi.mock('../../../../src/themes', () => ({
   getActiveHighlightTheme: vi.fn().mockReturnValue('monokai'),
-  buildMonacoThemeData: vi.fn().mockReturnValue({ base: 'vs-dark', inherit: true, rules: [], colors: {} }),
+  buildMonacoThemeData: vi.fn().mockResolvedValue({ base: 'vs-dark', inherit: true, rules: [], colors: {} }),
 }));
 
 import ImageViewer from '../../../../src/components/CodePanel/ImageViewer';
