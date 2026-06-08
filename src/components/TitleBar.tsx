@@ -247,13 +247,13 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
 
             const projectIndicator = projApproval > 0
               ? <WorkspaceSquircle state="approval" title="Approval needed" />
-              : projCompleted > 0
-                ? <WorkspaceSquircle state="done" title="Response complete" />
-                : projBusy > 0
-                  ? <span className="titlebar-busy-indicator">
-                      <WorkspaceSquircle state="busy" />
-                      {projBusy > 1 && <span className="titlebar-busy-count">{projBusy}</span>}
-                    </span>
+              : projBusy > 0
+                ? <span className="titlebar-busy-indicator">
+                    <WorkspaceSquircle state="busy" />
+                    {projBusy > 1 && <span className="titlebar-busy-count">{projBusy}</span>}
+                  </span>
+                : projCompleted > 0
+                  ? <WorkspaceSquircle state="done" title="Response complete" />
                   : null;
 
             const metaCls = metaApproval > 0 ? 'approval'
