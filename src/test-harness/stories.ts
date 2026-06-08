@@ -1,5 +1,6 @@
 import React from 'react';
 import { workspaceSquircleStory } from './stories/workspace-squircle';
+import { toolResultImageStory } from './stories/tool-result-image';
 
 export type Story = {
   component: React.ComponentType<any>;
@@ -8,4 +9,5 @@ export type Story = {
 
 export const stories: Record<string, Story> = {
   'workspace-squircle': workspaceSquircleStory,
+  'tool-result-image': toolResultImageStory,
 };
