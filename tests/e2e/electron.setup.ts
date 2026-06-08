@@ -14,6 +14,7 @@
 
 import { test as base, expect, Page } from '@playwright/test';
 import path from 'path';
+import { version as APP_VERSION } from '../../package.json';
 
 const FIXTURE_PROJECT = path.resolve(__dirname, 'fixtures/test-project');
 
@@ -32,9 +33,10 @@ export function buildDefaultSaiMock(fixturePath: string): Record<string, any> {
     openRecentProject: () => {},
     settingsGet: (key: string, defaultVal?: any) => {
       // Suppress the What's New modal in tests by pretending the user has already
-      // seen the current version. Tests that need to assert What's New behavior
-      // can override settingsGet via the saiMock fixture.
-      if (key === 'lastSeenVersion') return Promise.resolve('0.8.36');
+      // seen the current version. useWhatsNew compares lastSeenVersion against
+      // package.json's version with strict !==, so this MUST track the real
+      // version or the modal renders a full-screen overlay that blocks clicks.
+      if (key === 'lastSeenVersion') return Promise.resolve(APP_VERSION);
       return Promise.resolve(defaultVal ?? null);
     },
     settingsSet: () => Promise.resolve(),
@@ -158,7 +160,7 @@ export const test = base.extend<{ window: Page; saiMock: SaiMockOverrides }>({
   saiMock: [{}, { option: true }],
   window: async ({ page, saiMock }, use) => {
     await page.addInitScript(
-      ({ fixturePath, overrides }: { fixturePath: string; overrides: Record<string, string> }) => {
+      ({ fixturePath, appVersion, overrides }: { fixturePath: string; appVersion: string; overrides: Record<string, string> }) => {
         const noop = () => () => {};
         // NOTE: This object is a deliberate duplicate of buildDefaultSaiMock() above.
         // The structured-clone boundary prevents passing live functions across addInitScript,
@@ -173,9 +175,10 @@ export const test = base.extend<{ window: Page; saiMock: SaiMockOverrides }>({
           openRecentProject: () => {},
           settingsGet: (key: string, defaultVal?: any) => {
             // Suppress the What's New modal in tests by pretending the user has already
-            // seen the current version. Tests that need to assert What's New behavior
-            // can override settingsGet via the saiMock fixture.
-            if (key === 'lastSeenVersion') return Promise.resolve('0.8.36');
+            // seen the current version. useWhatsNew compares lastSeenVersion against
+            // package.json's version with strict !==, so this MUST track the real
+            // version or the modal renders a full-screen overlay that blocks clicks.
+            if (key === 'lastSeenVersion') return Promise.resolve(appVersion);
             return Promise.resolve(defaultVal ?? null);
           },
           settingsSet: () => Promise.resolve(),
@@ -297,6 +300,7 @@ export const test = base.extend<{ window: Page; saiMock: SaiMockOverrides }>({
       },
       {
         fixturePath: FIXTURE_PROJECT,
+        appVersion: APP_VERSION,
         // Serialize each override function to source so it survives the structured-clone boundary.
         overrides: Object.fromEntries(
           Object.entries(saiMock).map(([k, v]) => [k, typeof v === 'function' ? v.toString() : `() => (${JSON.stringify(v)})`])
