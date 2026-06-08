@@ -27,6 +27,10 @@ import { renderEmojiSpan } from './emojiIcons';
 // animation from replaying if a message remounts (e.g. workspace swap, list
 // re-keying), so existing history doesn't shimmer in on every render.
 const SEEN_MESSAGES = new Set<string>();
+// Word-reveal animation runs once per message ID for the lifetime of the
+// renderer process. Using a module-level set (not a per-instance ref) so
+// workspace/session switches that remount ChatMessage don't replay it.
+const REVEALED_MESSAGES = new Set<string>();
 // Records ids that streamed token-by-token this session, so their post-stream
 // re-render is NOT word-revealed (the live append already showed them).
 const STREAMED_MESSAGES = new Set<string>();
@@ -326,7 +330,6 @@ function ChatMessage({
   useEffect(() => { SEEN_MESSAGES.add(message.id); }, [message.id]);
   const flipNodeRef = useRef<HTMLDivElement | null>(null);
   const mdRef = useRef<HTMLDivElement | null>(null);
-  const revealedRef = useRef(false);
   const isAssistantMsg = message.role === 'assistant';
   const entryTransition = useReducedMotionTransition(isAssistantMsg ? FADE_IN : SPRING.pop);
   const entryDistance = isAssistantMsg ? 0 : DISTANCE.slide;
@@ -734,7 +737,7 @@ function ChatMessage({
     if (isAssistantStreaming) { STREAMED_MESSAGES.add(message.id); }
     if (useMorphHead) return;            // StreamingAssistantHead owns the reveal
     if (isAssistantStreaming) return;
-    if (revealedRef.current) return;
+    if (REVEALED_MESSAGES.has(message.id)) return;
     if (!message.content) return;
     // Reveal a reply generated this session (streamed → completed, any duration) or a
     // fresh complete arrival; never history (not streamed this session + old timestamp).
@@ -745,7 +748,7 @@ function ChatMessage({
     if (prefersReducedMotion()) return;
     const el = mdRef.current;
     if (!el) return;
-    revealedRef.current = true;
+    REVEALED_MESSAGES.add(message.id);
     revealWords(el);
   }, [isAssistantStreaming, message.id, message.role, message.content, message.timestamp, useMorphHead]);
   // When the parent passes an allowlist (main chat), only render watchers it explicitly
