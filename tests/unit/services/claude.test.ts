@@ -491,13 +491,16 @@ describe('Session management', () => {
     expect(spawnedProcesses.length).toBe(count1);
   });
 
-  it('claude:setSessionId kills process and stores new session_id', async () => {
+  it('claude:setSessionId kills idle process and stores new session_id', async () => {
     const ws = workspaceState.getOrCreate(PROJECT);
     ws.claudeScopes.get('chat')!.cwd = PROJECT;
 
+    // Start a turn then let it complete so the scope is idle (not streaming)
     mockIpcMain._emit('claude:send', PROJECT, 'hi', []);
     await flushAsync();
     const proc = getLatestProcess();
+    pushLines(proc, { type: 'result', result: 'done', stop_reason: 'end_turn' });
+    await flushAsync();
 
     mockIpcMain._emit('claude:setSessionId', PROJECT, 'new-session-id');
     await flushAsync();
@@ -505,6 +508,22 @@ describe('Session management', () => {
     expect(proc.kill).toHaveBeenCalled();
     expect(ws.claudeScopes.get('chat')!.sessionId).toBe('new-session-id');
     expect(ws.claudeScopes.get('chat')!.process).toBeNull();
+  });
+
+  it('claude:setSessionId preserves streaming process and skips sessionId update', async () => {
+    const ws = workspaceState.getOrCreate(PROJECT);
+    ws.claudeScopes.get('chat')!.cwd = PROJECT;
+
+    mockIpcMain._emit('claude:send', PROJECT, 'hi', []);
+    await flushAsync();
+    const proc = getLatestProcess();
+    // process is still streaming/busy — setSessionId should leave it alone
+    mockIpcMain._emit('claude:setSessionId', PROJECT, 'new-session-id');
+    await flushAsync();
+
+    expect(proc.kill).not.toHaveBeenCalled();
+    // sessionId should NOT have been updated while streaming
+    expect(ws.claudeScopes.get('chat')!.sessionId).not.toBe('new-session-id');
   });
 
   it('claude:setSessionId can clear session_id with undefined', async () => {
