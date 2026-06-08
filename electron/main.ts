@@ -73,6 +73,12 @@ if (process.env.SAI_REMOTE_DEBUG) {
   app.commandLine.appendSwitch('remote-debugging-port', process.env.SAI_REMOTE_DEBUG);
 }
 
+// On Linux, EGL context loss from Mesa/driver bugs can freeze the renderer entirely.
+// Disable GPU acceleration so the app stays functional.
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('disable-gpu');
+}
+
 let mainWindow: BrowserWindow | null = null;
 let quitConfirmed = false;
 

@@ -19,6 +19,20 @@ const TRI_MASK = `url("${TRIANGLE_MASK_URL}") center / contain no-repeat`;
 
 export function WorkspaceSquircle({ state, title, className, 'data-testid': testId }: WorkspaceSquircleProps) {
   const isApproval = state === 'approval';
+
+  if (state === 'busy-done') {
+    return (
+      <span
+        className={`ws-sq ws-sq-busy-done-wrap${className ? ` ${className}` : ''}`}
+        title={title}
+        data-testid={testId}
+      >
+        <span className="ws-sq ws-sq-busy" style={{ WebkitMask: SQ_MASK, mask: SQ_MASK }} />
+        <span className="ws-sq ws-sq-inner" style={{ WebkitMask: SQ_MASK, mask: SQ_MASK }} />
+      </span>
+    );
+  }
+
   return (
     <span
       className={`ws-sq ws-sq-${state}${className ? ` ${className}` : ''}`}

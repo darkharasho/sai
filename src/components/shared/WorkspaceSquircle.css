@@ -4,18 +4,9 @@
 .ws-sq-busy     { background: #d4a72c; width: 9px; height: 9px; animation: ws-sq-shrink 1.4s ease-in-out infinite; }
 .ws-sq-done     { background: #e0e0e0; width: 9px; height: 9px; animation: ws-sq-blink 1.8s ease-in-out infinite; }
 .ws-sq-approval  { background: #f97316; width: 16px; height: 16px; animation: ws-sq-flash 1.2s ease-in-out infinite; }
-.ws-sq-busy-done { background: #d4a72c; width: 9px; height: 9px; animation: ws-sq-shrink 1.4s ease-in-out infinite; position: relative; }
-.ws-sq-busy-done::after {
-  content: '';
-  position: absolute;
-  width: 4px;
-  height: 4px;
-  background: white;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  animation: ws-sq-blink 1.8s ease-in-out infinite;
-}
+.ws-sq-busy-done-wrap { display: inline-block; position: relative; width: 9px; height: 9px; flex-shrink: 0; }
+.ws-sq-busy-done-wrap .ws-sq-busy { position: absolute; inset: 0; }
+.ws-sq-inner { position: absolute; width: 5px; height: 5px; background: white; top: 50%; left: 50%; transform: translate(-50%, -50%); animation: ws-sq-blink 1.8s ease-in-out infinite; }
 
 @keyframes ws-sq-breathe { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
 @keyframes ws-sq-shrink  { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.82); } }
