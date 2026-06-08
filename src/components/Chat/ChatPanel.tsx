@@ -7,6 +7,7 @@ import SaiLogo from '../SaiLogo';
 import MotionPresence from './MotionPresence';
 import { SPRING, DISTANCE, EASING, useReducedMotionTransition } from './motion';
 import { useSaiAnimationPref } from './useSaiAnimationPref';
+import { parseToolResultBlocks } from '../../lib/toolResultContent';
 
 // Projects whose brainstorm seed has already been consumed (or attempted) in
 // this renderer process. The seed is one-shot, but the chat start-effect can
@@ -780,13 +781,11 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
       // Tool results come back as user messages with tool_result content blocks
       if (msg.type === 'user' && msg.message?.content) {
-        const results: Array<{ tool_use_id: string; output: string }> = [];
+        const results: Array<{ tool_use_id: string; output: string; images?: import('../../types').ToolResultImage[] }> = [];
         for (const block of msg.message.content) {
           if (block.type === 'tool_result' && block.tool_use_id) {
-            const text = Array.isArray(block.content)
-              ? block.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('')
-              : typeof block.content === 'string' ? block.content : '';
-            results.push({ tool_use_id: block.tool_use_id, output: text });
+            const { text, images } = parseToolResultBlocks(block.content);
+            results.push({ tool_use_id: block.tool_use_id, output: text, images });
           }
         }
         if (results.length > 0) {
@@ -803,7 +802,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
                   if (result) {
                     updated = true;
                     const durationMs = typeof tc.startedAt === 'number' ? now - tc.startedAt : undefined;
-                    return { ...tc, output: result.output, ...(durationMs != null ? { durationMs } : {}) };
+                    return {
+                      ...tc,
+                      output: result.output,
+                      ...(result.images ? { resultImages: result.images } : {}),
+                      ...(durationMs != null ? { durationMs } : {}),
+                    };
                   }
                   return tc;
                 });
