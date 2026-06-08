@@ -218,6 +218,29 @@ function renderToolContent(content: any[] | undefined): string {
   }).filter(Boolean).join('\n');
 }
 
+/**
+ * Convert an ACP tool-call content array into a tool_result `content` value.
+ * Returns a plain string when there are no images (unchanged behavior); returns
+ * an array of text + Anthropic-style image blocks when image content is present.
+ * Best-effort: only the known image shape is recognized.
+ */
+export function acpContentToToolResult(content: any[] | undefined): string | any[] {
+  if (!Array.isArray(content) || content.length === 0) return '';
+  const images: Array<{ media_type: string; data: string }> = [];
+  for (const item of content) {
+    const inner = item?.content;
+    if (item?.type === 'content' && inner?.type === 'image' && inner.data) {
+      images.push({ media_type: inner.mimeType || 'application/octet-stream', data: inner.data });
+    }
+  }
+  if (images.length === 0) return renderToolContent(content);
+  const textOnly = content.filter(item => !(item?.type === 'content' && item?.content?.type === 'image'));
+  return [
+    { type: 'text', text: renderToolContent(textOnly) },
+    ...images.map(im => ({ type: 'image', source: { type: 'base64', media_type: im.media_type, data: im.data } })),
+  ];
+}
+
 // Map Gemini ACP tool_call `kind` values to Claude-equivalent tool names so that
 // ChatPanel's icon/type inference (which checks block.name) works for Gemini.
 function geminiKindToName(kind: string | undefined, title: string | undefined): string {
@@ -321,7 +344,7 @@ function translateAcpEvent(msg: any, projectPath: string, scope: string): any | 
           content: [{
             type: 'tool_result',
             tool_use_id: update.toolCallId,
-            content: renderToolContent(update.content),
+            content: acpContentToToolResult(update.content),
             is_error: update.status === 'failed',
           }],
         },
