@@ -105,15 +105,24 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
   // Reset the recent filter when switching tabs so it doesn't carry over.
   useEffect(() => { setRecentQuery(''); }, [pickerTab]);
 
-  // Close dropdown on outside click
+  // Close dropdown on outside click or Escape
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setOpen(false);
       }
     };
-    if (open) document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    if (open) {
+      document.addEventListener('mousedown', handleClick);
+      document.addEventListener('keydown', handleKey);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKey);
+    };
   }, [open]);
 
   const handleSuspend = async (path: string) => {
