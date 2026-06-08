@@ -77,7 +77,7 @@ declare global {
       setWorkspaceDone(id: string): void;
       setWorkspaceIdle(id: string): void;
       clearWorkspaces(): void;
-      getOverallStatus(): 'approval' | 'done' | 'busy' | 'busy-done' | null;
+      getOverallStatus(): 'done' | 'busy' | 'busy-done' | null;
       getState(): { busyWorkspaces: string[]; completedWorkspaces: string[] };
     };
   }
