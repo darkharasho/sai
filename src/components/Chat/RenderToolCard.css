@@ -72,9 +72,8 @@
 .sai-rc-wrap { display: flex; justify-content: flex-start; width: 100%; }
 
 .sai-rc {
-  display: flex;
+  display: inline-flex;
   flex-direction: column;
-  width: 100%;
   max-width: 100%;
   background: var(--surface-3);
   border: 1px solid var(--border-subtle);
@@ -92,14 +91,16 @@
   border-bottom: 1px solid var(--border-hairline);
 }
 .sai-rc__title {
-  flex: 1 1 auto; min-width: 0;
-  display: inline-flex; align-items: center; gap: 6px;
+  flex: 1 1 0; min-width: 0;
+  display: flex; align-items: center; gap: 6px;
   font-size: 12px; color: var(--text); overflow: hidden;
 }
 .sai-rc__icon { flex: 0 0 auto; color: var(--accent); }
 .sai-rc__brand { font-weight: 600; flex: 0 0 auto; }
 .sai-rc__sep { color: var(--text-muted); flex: 0 0 auto; }
-.sai-rc__name { color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* basis 0 → the (possibly long) mock name never forces the card wider than
+   the render; it just fills leftover header space and truncates. */
+.sai-rc__name { flex: 1 1 0; min-width: 0; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Header buttons — code toggle (gold outline) + open-in-browser (ghost) */
 .sai-rc__codebtn,
@@ -126,16 +127,19 @@
 }
 .sai-rc__openbtn:hover { color: var(--text); border-color: var(--border-strong); background: var(--surface-2); }
 
-/* Render pane — fills the card width; razor-thin frame on all sides */
+/* Render pane — hugs the mock's natural width; razor-thin frame on all sides.
+   The mock's own width drives the card width (capped to the message list), so
+   normal mocks stay their actual size and only genuinely wide mocks fill out. */
 .sai-rc__render {
-  flex: 1 1 auto;
-  min-width: 0;
+  flex: 0 0 auto;
+  align-self: stretch;
   padding: 3px;
   background: var(--surface-2);
-  display: flex; align-items: stretch; justify-content: stretch;
+  display: flex; align-items: stretch;
 }
 .sai-rc__render [data-render-region] {
-  width: 100% !important;
+  flex: 1 1 auto;
+  min-width: 0;
   max-width: 100%;
   border-radius: var(--radius-md);
   overflow: hidden;
