@@ -97,3 +97,14 @@ describe('native tools', () => {
     expect(SAI_TOOL_SCHEMA.find((t) => t.name === 'clipboard')!.input_schema.required).toContain('text');
   });
 });
+
+describe('confirm/choose tools', () => {
+  it('registers confirm and choose as chat tools', () => {
+    expect(SAI_TOOL_NAMES.has('confirm')).toBe(true);
+    expect(SAI_TOOL_NAMES.has('choose')).toBe(true);
+    expect(SAI_TOOL_SCHEMA.find((t) => t.name === 'confirm')!.input_schema.required).toContain('message');
+    const choose = SAI_TOOL_SCHEMA.find((t) => t.name === 'choose')!;
+    expect(choose.input_schema.required).toEqual(expect.arrayContaining(['message', 'options']));
+    expect(choose.toolset).toBe('chat');
+  });
+});
