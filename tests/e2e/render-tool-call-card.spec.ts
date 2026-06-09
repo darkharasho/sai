@@ -86,3 +86,12 @@ test('confirm card returns true when the confirm button is clicked', async ({ ha
   await expect(el.locator('[data-testid="form-result"]')).toContainText('"value":true');
   await expect(el.locator('[data-testid="form-result"]')).toContainText('"ok":true');
 });
+
+test('choose card returns the picked option string', async ({ harness }) => {
+  const el = await harness.render('render-tool-call-card', { kind: 'choose', w: '420' });
+  const card = el.locator('[data-testid="render-tool-call-card"]');
+  await expect(card).toBeVisible();
+  await card.frameLocator('iframe').getByRole('button', { name: 'Green' }).click();
+  await expect(el.locator('[data-testid="form-result"]')).toContainText('"value":"Green"');
+  await expect(el.locator('[data-testid="form-result"]')).toContainText('"ok":true');
+});

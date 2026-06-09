@@ -35,7 +35,7 @@ export function buildChoiceHtml(input: { message: string; choices: Choice[] }): 
     .join('');
   const script =
     '<script>document.querySelectorAll(\'[data-sai-value]\').forEach(function(b){' +
-    'b.addEventListener(\'click\',function(){saiSubmit(JSON.parse(b.getAttribute(\'data-sai-value\')));});' +
+    'b.addEventListener(\'click\',function(){window.saiSubmit(JSON.parse(b.getAttribute(\'data-sai-value\')));});' +
     '});<\/script>';
   return (
     `<div style="font:14px system-ui,sans-serif;color:#e6e6e6;padding:14px">` +

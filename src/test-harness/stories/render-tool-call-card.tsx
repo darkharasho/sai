@@ -3,9 +3,17 @@ import { RenderToolCallCard } from '../../components/Chat/RenderToolCallCard';
 import { registerPendingForm, type FormResult } from '../../render/formBridge';
 import type { ToolCall } from '../../types';
 
-type Kind = 'html' | 'chart' | 'diff' | 'mermaid' | 'theme' | 'form' | 'confirm';
+type Kind = 'html' | 'chart' | 'diff' | 'mermaid' | 'theme' | 'form' | 'confirm' | 'choose';
 
 function makeTc(width: number, kind: Kind): ToolCall {
+  if (kind === 'choose') {
+    return {
+      id: `tc-choose-${width}`,
+      type: 'mcp',
+      name: 'mcp__swarm__sai_choose',
+      input: JSON.stringify({ message: 'Pick a color', options: ['Red', 'Green', 'Blue'], width }),
+    };
+  }
   if (kind === 'confirm') {
     return {
       id: `tc-confirm-${width}`,
@@ -110,7 +118,7 @@ export const renderToolCallCardStory = {
   // right-aligned layout. ?w=<px> sets the mock width (>460 → code drops below).
   // ?kind=html|chart|diff selects which renderer tool the card displays.
   component: ({ w, kind }: { w: number; kind: Kind }) =>
-    kind === 'form' || kind === 'confirm' ? (
+    kind === 'form' || kind === 'confirm' || kind === 'choose' ? (
       <FormStory w={w} kind={kind} />
     ) : (
       <div style={{ width: 760, maxWidth: '100%' }}>
@@ -119,7 +127,7 @@ export const renderToolCallCardStory = {
     ),
   parseProps: (params: URLSearchParams) => {
     const k = params.get('kind');
-    const allowed = k === 'chart' || k === 'diff' || k === 'mermaid' || k === 'theme' || k === 'form' || k === 'confirm';
+    const allowed = k === 'chart' || k === 'diff' || k === 'mermaid' || k === 'theme' || k === 'form' || k === 'confirm' || k === 'choose';
     return {
       w: Number(params.get('w')) || 320,
       kind: (allowed ? k : 'html') as Kind,
