@@ -1,4 +1,4 @@
-export type RenderKind = 'html' | 'component';
+export type RenderKind = 'html' | 'component' | 'mermaid';
 export type RenderStatus = 'rendering' | 'ready' | 'error';
 
 export interface RenderEntry {

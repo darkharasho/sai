@@ -80,4 +80,20 @@ describe('dispatchSaiRenderTool', () => {
     dispatchSaiRenderTool('render_diff', { before: 'a', after: 'b' }, 'rid-dt');
     expect(renderStore.get('rid-dt')?.title).toBe('Diff');
   });
+
+  it('render_mermaid upserts a mermaid entry with the diagram payload', () => {
+    const res = dispatchSaiRenderTool('render_mermaid', { diagram: 'graph TD; A-->B', title: 'Flow' }, 'rid-mmd');
+    expect(res.ok).toBe(true);
+    const e = renderStore.get('rid-mmd');
+    expect(e?.kind).toBe('mermaid');
+    expect(e?.payload).toEqual({ diagram: 'graph TD; A-->B' });
+    expect(e?.title).toBe('Flow');
+  });
+
+  it('render_mermaid rejects a missing/empty diagram', () => {
+    const res = dispatchSaiRenderTool('render_mermaid', { diagram: '' }, 'rid-mmd2');
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/diagram/i);
+    expect(renderStore.get('rid-mmd2')).toBeUndefined();
+  });
 });
