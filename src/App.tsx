@@ -60,7 +60,7 @@ import { installRemoteProxyHandler } from './lib/remoteProxyClient';
 import { applyQuestionEvent } from './lib/awaitingQuestionTracker';
 
 const SWARM_DEFAULT_CAP = 5;
-const SWARM_STALE_THRESHOLD_MS = 10 * 60 * 1000; // 10 min of no activity → presumed dead
+const SWARM_STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 min of no activity → presumed dead. Heartbeats (deriveSwarmMirror) refresh activity on any stream traffic; this headroom covers a single silent long-running tool/sub-agent.
 const SWARM_WATCHDOG_INTERVAL_MS = 60 * 1000;    // sweep cadence
 import { swarmBranchName } from './lib/swarmSlug';
 import { shouldRequireApproval } from './lib/swarmApprovalPolicy';

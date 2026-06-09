@@ -9,7 +9,8 @@ import { isTurnErrored } from './chatActivity';
 
 export type SwarmTaskPatch =
   | { kind: 'status'; status: 'done' | 'failed'; costEstimate?: number; lastActivityAt: number }
-  | { kind: 'toolCount'; delta: number; lastActivityAt: number };
+  | { kind: 'toolCount'; delta: number; lastActivityAt: number }
+  | { kind: 'heartbeat'; lastActivityAt: number };
 
 export interface MirrorResult {
   taskId: string;
@@ -49,9 +50,9 @@ export function deriveSwarmMirror(
 
   // Only a fatal error (process crash / spawn failure, flagged by the provider)
   // fails the task. Benign stderr lines arrive as non-fatal error messages and
-  // must not mark a healthy task failed.
-  if (msg.type === 'error') {
-    if (msg.fatal === true && (task.status === 'streaming' || task.status === 'awaiting_approval' || task.status === 'queued')) {
+  // must not mark a healthy task failed — they fall through to the heartbeat below.
+  if (msg.type === 'error' && msg.fatal === true) {
+    if (task.status === 'streaming' || task.status === 'awaiting_approval' || task.status === 'queued') {
       return { taskId: task.id, patch: { kind: 'status', status: 'failed', lastActivityAt: now } };
     }
     return null;
@@ -68,6 +69,15 @@ export function deriveSwarmMirror(
     }
   }
 
+  // Any other stream traffic for a streaming task — assistant text/thinking,
+  // tool_result (`user`) messages, non-fatal stderr, system events — is a sign
+  // of life. Refresh lastActivityAt via a heartbeat so the stale-task watchdog
+  // doesn't cull a task that is busy on a long step which hasn't yet emitted a
+  // new tool_use (a long-running tool, a sub-agent, or a stretch of reasoning).
+  if (task.status === 'streaming') {
+    return { taskId: task.id, patch: { kind: 'heartbeat', lastActivityAt: now } };
+  }
+
   return null;
 }
 
@@ -80,6 +90,9 @@ export function applySwarmPatch(task: SwarmTask, patch: SwarmTaskPatch): SwarmTa
       lastActivityAt: patch.lastActivityAt,
       ...(patch.costEstimate != null ? { costEstimate: patch.costEstimate } : {}),
     };
+  }
+  if (patch.kind === 'heartbeat') {
+    return { ...task, lastActivityAt: patch.lastActivityAt };
   }
   return {
     ...task,

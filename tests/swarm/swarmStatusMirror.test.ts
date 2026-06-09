@@ -61,7 +61,9 @@ describe('deriveSwarmMirror', () => {
 
   it('marks failed only on a fatal error message, not benign stderr', () => {
     const t = makeTask();
-    expect(deriveSwarmMirror({ type: 'error', scope: 'sess-abc', text: 'warning: deprecated' }, [t], 50)).toBeNull();
+    // Benign stderr is not fatal — it must not fail the task (a heartbeat is fine).
+    const benign = deriveSwarmMirror({ type: 'error', scope: 'sess-abc', text: 'warning: deprecated' }, [t], 50);
+    expect(benign?.patch).not.toMatchObject({ kind: 'status', status: 'failed' });
     const r = deriveSwarmMirror({ type: 'error', scope: 'sess-abc', fatal: true, text: 'crash' }, [t], 50);
     expect(r).toEqual({ taskId: 't1', patch: { kind: 'status', status: 'failed', lastActivityAt: 50 } });
   });
@@ -103,8 +105,39 @@ describe('deriveSwarmMirror', () => {
     });
   });
 
-  it('returns null for assistant messages with no tool_use blocks', () => {
+  it('emits a heartbeat for assistant messages with no tool_use blocks while streaming', () => {
     const t = makeTask();
+    const msg = { type: 'assistant', scope: 'sess-abc', message: { content: [{ type: 'text', text: 'hi' }] } };
+    expect(deriveSwarmMirror(msg, [t], 7)).toEqual({
+      taskId: 't1',
+      patch: { kind: 'heartbeat', lastActivityAt: 7 },
+    });
+  });
+
+  it('emits a heartbeat for tool_result (user) messages while streaming', () => {
+    const t = makeTask();
+    const msg = {
+      type: 'user',
+      scope: 'sess-abc',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'x', content: 'done' }] },
+    };
+    expect(deriveSwarmMirror(msg, [t], 7)).toEqual({
+      taskId: 't1',
+      patch: { kind: 'heartbeat', lastActivityAt: 7 },
+    });
+  });
+
+  it('emits a heartbeat for non-fatal error (stderr) messages while streaming', () => {
+    const t = makeTask();
+    const msg = { type: 'error', scope: 'sess-abc', text: 'warning: deprecated' };
+    expect(deriveSwarmMirror(msg, [t], 7)).toEqual({
+      taskId: 't1',
+      patch: { kind: 'heartbeat', lastActivityAt: 7 },
+    });
+  });
+
+  it('does not heartbeat for a non-streaming task', () => {
+    const t = makeTask({ status: 'done' });
     const msg = { type: 'assistant', scope: 'sess-abc', message: { content: [{ type: 'text', text: 'hi' }] } };
     expect(deriveSwarmMirror(msg, [t])).toBeNull();
   });
@@ -123,6 +156,14 @@ describe('applySwarmPatch', () => {
     const next = applySwarmPatch(t, { kind: 'toolCount', delta: 2, lastActivityAt: 12 });
     expect(next.toolCallCount).toBe(5);
     expect(next.lastActivityAt).toBe(12);
+  });
+
+  it('refreshes lastActivityAt on a heartbeat without changing status or tool count', () => {
+    const t = makeTask({ status: 'streaming', toolCallCount: 4, lastActivityAt: 1 });
+    const next = applySwarmPatch(t, { kind: 'heartbeat', lastActivityAt: 99 });
+    expect(next.lastActivityAt).toBe(99);
+    expect(next.status).toBe('streaming');
+    expect(next.toolCallCount).toBe(4);
   });
 
   it('applies costEstimate from a status patch when present', () => {
