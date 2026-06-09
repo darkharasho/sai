@@ -1505,7 +1505,7 @@ export default function App() {
         return;
       }
 
-      if (req.tool === 'render_form') {
+      if (req.tool === 'render_form' || req.tool === 'confirm' || req.tool === 'choose') {
         const { promise } = registerPendingForm(formTimeoutMs(req.input));
         void promise.then(
           (result) => sai.respondSwarmTool(req.id, result),
@@ -4212,7 +4212,9 @@ export default function App() {
                       n.endsWith('sai_render_diff') ||
                       n.endsWith('sai_render_mermaid') ||
                       n.endsWith('sai_render_theme') ||
-                      n.endsWith('sai_render_form')
+                      n.endsWith('sai_render_form') ||
+                      n.endsWith('sai_confirm') ||
+                      n.endsWith('sai_choose')
                     ) {
                       return <RenderToolCallCard tc={tc} />;
                     }
