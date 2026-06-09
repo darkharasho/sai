@@ -132,10 +132,13 @@ export const CHAT_RENDER_NUDGE =
   'design, mock up, build, show, preview, or iterate on a UI element, component, page, ' +
   'or visual style, FIRST render it in-app with the render_html tool (write a ' +
   'self-contained HTML/CSS/JS snippet) — or render_component to mount a registered ' +
-  'project component — so the user can see it and give feedback. Prefer rendering over ' +
-  'writing files for these requests; only write or scaffold files when the user explicitly ' +
-  'asks to save, add, or wire the component into the codebase. You can re-render to iterate ' +
-  'on feedback.';
+  'project component — so the user can see it and give feedback. This also applies when ' +
+  'asked to screenshot, capture, verify, or otherwise show a working or finished UI ' +
+  'result: prefer the in-app renderer, which returns the screenshot to you directly, over ' +
+  'spinning up an external browser (Playwright/Chrome) or a separate server. Prefer ' +
+  'rendering over writing files for these requests; only write or scaffold files when the ' +
+  'user explicitly asks to save, add, or wire the component into the codebase. You can ' +
+  're-render to iterate on feedback.';
 
 /**
  * Build CLI args for the persistent process based on current config.
