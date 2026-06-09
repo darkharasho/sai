@@ -288,6 +288,7 @@ Mirror v1's layers (vitest unit/integration + Playwright harness e2e):
 - ✅ `render_mermaid` (`sai-render-mermaid`) — new `mermaid` render kind; mermaid dep dynamically imported (code-split); agent capture rides the offscreen `renderCaptureHtml` path.
 
 - ✅ `render_theme` + **offscreen component capture** (`sai-offscreen-component-capture`) — a hidden `BrowserWindow` loads a minimal prod-safe `/render-host` route and `capturePage`s real registered components under candidate CSS vars. **Also fixed `render_component`'s missing agent screenshot** (it now captures via the same offscreen path). Shared `ThemedComponents` keeps the live card and captured output identical. See `2026-06-09-sai-offscreen-component-capture-design.md`.
+- ✅ **`render_form` — Tier 3 bidirectional keystone** (`sai-render-form`) — the agent renders an interactive form in the chat card; the tool **blocks** until the user submits, returning `{ ok:true, value }`. A sandboxed-iframe `window.saiSubmit(value)` bridge posts to the parent; `formBridge` (FIFO + timeout) correlates submit→call; main's tool timeout is extended for `render_form`. SAI's render surface is now bidirectional. See `2026-06-09-sai-render-form-design.md`.
 
 **Blocked / re-scoped (discovered during implementation):**
 - ⛔ `read_app_state` — **parked.** Only `renderStore` is reachable from the renderer that handles tool calls (low value); `workspaceStatusStore`/`githubWatcherStore` live in the separate `src/renderer-remote/` PWA bundle, unreachable. Revisit only if a reachable, valuable store appears.
@@ -295,7 +296,7 @@ Mirror v1's layers (vitest unit/integration + Playwright harness e2e):
 **Remaining:**
 - Native interaction tools `pick_*`/`notify`/`clipboard` — need **Framework Delta A** (main-only).
 - `freezeAtMs` / filmstrip capture.
-- Tier 3 `render_form` / `confirm` — the bidirectional channel.
+- `confirm` / `choose` — convenience tools on the shipped `formBridge` channel.
 - Expand `componentRegistry` with more presentational components (makes `render_theme`/`render_component` more useful; additive).
 
 ## Open Questions
