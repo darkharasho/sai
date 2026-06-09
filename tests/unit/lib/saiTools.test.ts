@@ -86,3 +86,14 @@ describe('render_form tool', () => {
     expect(f.input_schema.required).toContain('html');
   });
 });
+
+describe('native tools', () => {
+  it('registers pick_file, notify, clipboard as chat tools', () => {
+    for (const n of ['pick_file', 'notify', 'clipboard']) {
+      expect(SAI_TOOL_NAMES.has(n)).toBe(true);
+      expect(SAI_TOOL_SCHEMA.find((t) => t.name === n)!.toolset).toBe('chat');
+    }
+    expect(SAI_TOOL_SCHEMA.find((t) => t.name === 'notify')!.input_schema.required).toContain('title');
+    expect(SAI_TOOL_SCHEMA.find((t) => t.name === 'clipboard')!.input_schema.required).toContain('text');
+  });
+});

@@ -161,6 +161,12 @@ contextBridge.exposeInMainWorld('sai', {
   fsReadFileBase64: (filePath: string) => ipcRenderer.invoke('fs:readFileBase64', filePath),
   captureRegion: (rect: { x: number; y: number; width: number; height: number }): Promise<string | null> =>
     ipcRenderer.invoke('sai:capture-region', rect),
+  pickFile: (opts: { mode?: 'open' | 'save' | 'directory'; filters?: { name: string; extensions: string[] }[]; multi?: boolean }): Promise<string[] | null> =>
+    ipcRenderer.invoke('sai:pick-file', opts),
+  notify: (args: { title: string; body?: string }): Promise<boolean> =>
+    ipcRenderer.invoke('sai:notify', args),
+  clipboardWrite: (text: string): Promise<boolean> =>
+    ipcRenderer.invoke('sai:clipboard-write', text),
   fsMtime: (filePath: string) => ipcRenderer.invoke('fs:mtime', filePath),
   fsWriteFile: (filePath: string, content: string) => ipcRenderer.invoke('fs:writeFile', filePath, content),
   fsRename: (oldPath: string, newPath: string) => ipcRenderer.invoke('fs:rename', oldPath, newPath),
