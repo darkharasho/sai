@@ -23,3 +23,26 @@ test('inline render card shows the live mock and toggles code', async ({ harness
   await card.getByTestId('render-code-toggle').click();
   await expect(card.locator('[data-testid="render-code"]')).not.toBeVisible();
 });
+
+test('render_chart card renders an inline SVG chart in the live iframe', async ({ harness }) => {
+  const el = await harness.render('render-tool-call-card', { kind: 'chart', w: '420' });
+  const card = el.locator('[data-testid="render-tool-call-card"]');
+  await expect(card).toBeVisible();
+
+  const iframe = card.locator('iframe');
+  await expect(iframe).toHaveCount(1);
+  // The chart builds five bars; assert the SVG painted inside the sandboxed frame.
+  const rects = card.frameLocator('iframe').locator('svg rect');
+  await expect.poll(async () => rects.count(), { timeout: 4000 }).toBe(5);
+});
+
+test('render_diff card renders both variants side-by-side', async ({ harness }) => {
+  const el = await harness.render('render-tool-call-card', { kind: 'diff', w: '460' });
+  const card = el.locator('[data-testid="render-tool-call-card"]');
+  await expect(card).toBeVisible();
+
+  const frame = card.frameLocator('iframe');
+  await expect(frame.getByText('Current')).toBeVisible();
+  await expect(frame.getByText('Proposed')).toBeVisible();
+  await expect(frame.getByRole('button', { name: 'Save' })).toHaveCount(2);
+});

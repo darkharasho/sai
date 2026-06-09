@@ -152,6 +152,10 @@ describe('buildArgs — chat session MCP config', () => {
     const idx = args.indexOf('--append-system-prompt');
     expect(args[idx + 1]).toBe(CHAT_RENDER_NUDGE);
     expect(CHAT_RENDER_NUDGE).toMatch(/render_html/);
+    // Covers capture/verify intents (not just design/build), so a "screenshot
+    // the working feature" request steers to the in-app renderer too.
+    expect(CHAT_RENDER_NUDGE).toMatch(/screenshot/);
+    expect(CHAT_RENDER_NUDGE).toMatch(/Playwright/);
   });
 
   it('does NOT append the render nudge when chat has no workspace (tool not attached)', () => {

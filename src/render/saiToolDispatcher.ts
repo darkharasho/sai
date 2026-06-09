@@ -1,5 +1,6 @@
 import { renderStore } from './renderStore';
 import { getRegisteredComponent, registeredComponentKeys } from './componentRegistry';
+import { buildChartHtml, buildDiffHtml, type ChartInput, type DiffInput } from './builtinRenderers';
 
 export interface DispatchResult {
   ok: boolean;
@@ -31,6 +32,30 @@ export function dispatchSaiRenderTool(name: string, input: any, renderId: string
       }
       const props = inp.props && typeof inp.props === 'object' ? inp.props : {};
       renderStore.upsert({ renderId, kind: 'component', payload: { component: inp.component, props }, title, width, background, status: 'rendering' });
+      return { ok: true };
+    }
+    case 'render_chart': {
+      let html: string;
+      try {
+        html = buildChartHtml(inp as ChartInput);
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : 'invalid chart input' };
+      }
+      renderStore.upsert({ renderId, kind: 'html', payload: { html }, title: title || 'Chart', width, background, status: 'rendering' });
+      return { ok: true };
+    }
+    case 'render_diff': {
+      if (typeof inp.before !== 'string' || inp.before.length === 0 ||
+          typeof inp.after !== 'string' || inp.after.length === 0) {
+        return { ok: false, error: 'render_diff requires non-empty "before" and "after" HTML strings' };
+      }
+      let html: string;
+      try {
+        html = buildDiffHtml(inp as DiffInput);
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : 'invalid diff input' };
+      }
+      renderStore.upsert({ renderId, kind: 'html', payload: { html }, title: title || 'Diff', width, background, status: 'rendering' });
       return { ok: true };
     }
     default:

@@ -37,4 +37,47 @@ describe('dispatchSaiRenderTool', () => {
     const res = dispatchSaiRenderTool('render_potato', {}, 'rid-5');
     expect(res).toEqual({ ok: false, error: 'unknown tool: render_potato' });
   });
+
+  it('render_chart upserts an html entry built from chart input', () => {
+    const res = dispatchSaiRenderTool(
+      'render_chart',
+      { chart: 'bar', labels: ['A', 'B'], values: [1, 2], title: 'Counts' },
+      'rid-chart',
+    );
+    expect(res.ok).toBe(true);
+    const e = renderStore.get('rid-chart');
+    expect(e?.kind).toBe('html');
+    expect(String(e?.payload.html)).toContain('<svg');
+    expect(e?.title).toBe('Counts');
+  });
+
+  it('render_chart rejects a labels/values mismatch with an error result', () => {
+    const res = dispatchSaiRenderTool('render_chart', { chart: 'bar', labels: ['A'], values: [1, 2] }, 'rid-bad');
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/labels and values/i);
+    expect(renderStore.get('rid-bad')).toBeUndefined();
+  });
+
+  it('render_diff rejects empty before/after strings', () => {
+    const res = dispatchSaiRenderTool('render_diff', { before: '', after: '<i>y</i>' }, 'rid-empty');
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/non-empty/i);
+    expect(renderStore.get('rid-empty')).toBeUndefined();
+  });
+
+  it('render_diff upserts an html entry containing both snippets', () => {
+    const res = dispatchSaiRenderTool('render_diff', { before: '<i>x</i>', after: '<i>y</i>' }, 'rid-diff');
+    expect(res.ok).toBe(true);
+    const e = renderStore.get('rid-diff');
+    expect(e?.kind).toBe('html');
+    expect(String(e?.payload.html)).toContain('<i>x</i>');
+    expect(String(e?.payload.html)).toContain('<i>y</i>');
+  });
+
+  it('render_chart/render_diff default the title when none is given', () => {
+    dispatchSaiRenderTool('render_chart', { chart: 'bar', labels: ['A'], values: [1] }, 'rid-ct');
+    expect(renderStore.get('rid-ct')?.title).toBe('Chart');
+    dispatchSaiRenderTool('render_diff', { before: 'a', after: 'b' }, 'rid-dt');
+    expect(renderStore.get('rid-dt')?.title).toBe('Diff');
+  });
 });

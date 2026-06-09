@@ -5,6 +5,7 @@ import type { RenderEntry } from '../../render/renderStore';
 import { RenderRegion } from './RenderToolCard';
 import { getShikiHighlighter, getActiveHighlightTheme } from '../../themes';
 import { AppWindow } from 'lucide-react';
+import { buildChartHtml, buildDiffHtml, type ChartInput, type DiffInput } from '../../render/builtinRenderers';
 
 function parseInput(raw: string): Record<string, unknown> {
   try {
@@ -24,7 +25,7 @@ function hashString(s: string): number {
   return h;
 }
 
-function entryFromToolCall(tc: ToolCall): { entry: RenderEntry; code: string } | null {
+export function entryFromToolCall(tc: ToolCall): { entry: RenderEntry; code: string } | null {
   const name = tc.name || '';
   const input = parseInput(tc.input);
   const width = typeof input.width === 'number' && input.width > 0 ? input.width : 360;
@@ -49,6 +50,29 @@ function entryFromToolCall(tc: ToolCall): { entry: RenderEntry; code: string } |
         status: 'ready',
       },
       code: JSON.stringify({ component, props }, null, 2),
+    };
+  }
+
+  if (name.endsWith('sai_render_chart')) {
+    let html: string;
+    try {
+      html = buildChartHtml(input as unknown as ChartInput);
+    } catch {
+      return null;
+    }
+    return {
+      entry: { renderId, kind: 'html', payload: { html }, title: title || 'Chart', width, background, status: 'ready' },
+      code: html,
+    };
+  }
+
+  if (name.endsWith('sai_render_diff')) {
+    if (typeof input.before !== 'string' || input.before.length === 0 ||
+        typeof input.after !== 'string' || input.after.length === 0) return null;
+    const html = buildDiffHtml(input as unknown as DiffInput);
+    return {
+      entry: { renderId, kind: 'html', payload: { html }, title: title || 'Diff', width, background, status: 'ready' },
+      code: html,
     };
   }
 
