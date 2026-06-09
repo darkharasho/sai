@@ -46,6 +46,49 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
       required: ['component'],
     },
   },
+  {
+    name: 'render_chart',
+    description:
+      'Render a bar or line chart from JSON data live inside the SAI app and return a screenshot. ' +
+      'USE THIS to SHOW the user numbers — metrics, benchmarks, timings, counts — instead of describing ' +
+      'them in prose. Renders as inline SVG (no network).',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        chart: { type: 'string', description: "'bar' or 'line'." },
+        labels: { type: 'array', items: { type: 'string' }, description: 'X-axis labels, one per value.' },
+        values: { type: 'array', items: { type: 'number' }, description: 'Numeric values; same length as labels.' },
+        color: { type: 'string', description: 'Bar/line color (CSS color).' },
+        title: { type: 'string', description: 'Label shown on the card/panel.' },
+        width: { type: 'number', description: 'Viewport width in px (default 360).' },
+        background: { type: 'string', description: 'Canvas background behind the chart.' },
+      },
+      required: ['chart', 'labels', 'values'],
+    },
+  },
+  {
+    name: 'render_diff',
+    description:
+      'Render two HTML snippets side-by-side (or stacked) live inside the SAI app and return a screenshot. ' +
+      'USE THIS to compare two UI variants — old vs new, option A vs B — so the user sees them together. ' +
+      'Each snippet runs sandboxed (no network, no app access).',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        before: { type: 'string', description: 'First variant HTML.' },
+        after: { type: 'string', description: 'Second variant HTML.' },
+        layout: { type: 'string', description: "'side-by-side' (default) or 'stacked'." },
+        beforeLabel: { type: 'string', description: "Label over the first variant (default 'Before')." },
+        afterLabel: { type: 'string', description: "Label over the second variant (default 'After')." },
+        title: { type: 'string', description: 'Label shown on the card/panel.' },
+        width: { type: 'number', description: 'Viewport width in px (default 360).' },
+        background: { type: 'string', description: 'Canvas background behind the diff.' },
+      },
+      required: ['before', 'after'],
+    },
+  },
 ];
 
 export const SAI_TOOL_NAMES = new Set(SAI_TOOL_SCHEMA.map((t) => t.name));

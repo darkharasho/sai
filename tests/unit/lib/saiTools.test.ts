@@ -33,3 +33,16 @@ describe('saiTools registry', () => {
     expect(SAI_TOOL_NAMES.has('render_component')).toBe(true);
   });
 });
+
+describe('Tier 1 chart/diff tools', () => {
+  it('registers render_chart and render_diff as chat tools', () => {
+    expect(SAI_TOOL_NAMES.has('render_chart')).toBe(true);
+    expect(SAI_TOOL_NAMES.has('render_diff')).toBe(true);
+    const chart = SAI_TOOL_SCHEMA.find((t) => t.name === 'render_chart')!;
+    expect(chart.toolset).toBe('chat');
+    expect(chart.input_schema.required).toContain('chart');
+    expect(chart.input_schema.required).toContain('values');
+    const diff = SAI_TOOL_SCHEMA.find((t) => t.name === 'render_diff')!;
+    expect(diff.input_schema.required).toEqual(expect.arrayContaining(['before', 'after']));
+  });
+});
