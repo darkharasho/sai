@@ -45,10 +45,16 @@ export function dispatchSaiRenderTool(name: string, input: any, renderId: string
       return { ok: true };
     }
     case 'render_diff': {
-      if (typeof inp.before !== 'string' || typeof inp.after !== 'string') {
-        return { ok: false, error: 'render_diff requires "before" and "after" HTML strings' };
+      if (typeof inp.before !== 'string' || inp.before.length === 0 ||
+          typeof inp.after !== 'string' || inp.after.length === 0) {
+        return { ok: false, error: 'render_diff requires non-empty "before" and "after" HTML strings' };
       }
-      const html = buildDiffHtml(inp as DiffInput);
+      let html: string;
+      try {
+        html = buildDiffHtml(inp as DiffInput);
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : 'invalid diff input' };
+      }
       renderStore.upsert({ renderId, kind: 'html', payload: { html }, title, width, background, status: 'rendering' });
       return { ok: true };
     }

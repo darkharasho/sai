@@ -58,6 +58,13 @@ describe('dispatchSaiRenderTool', () => {
     expect(renderStore.get('rid-bad')).toBeUndefined();
   });
 
+  it('render_diff rejects empty before/after strings', () => {
+    const res = dispatchSaiRenderTool('render_diff', { before: '', after: '<i>y</i>' }, 'rid-empty');
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/non-empty/i);
+    expect(renderStore.get('rid-empty')).toBeUndefined();
+  });
+
   it('render_diff upserts an html entry containing both snippets', () => {
     const res = dispatchSaiRenderTool('render_diff', { before: '<i>x</i>', after: '<i>y</i>' }, 'rid-diff');
     expect(res.ok).toBe(true);

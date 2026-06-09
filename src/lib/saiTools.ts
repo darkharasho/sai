@@ -56,7 +56,7 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
     input_schema: {
       type: 'object',
       properties: {
-        chart: { type: 'string', description: "'bar' or 'line'." },
+        chart: { type: 'string', enum: ['bar', 'line'], description: "'bar' or 'line'." },
         labels: { type: 'array', items: { type: 'string' }, description: 'X-axis labels, one per value.' },
         values: { type: 'array', items: { type: 'number' }, description: 'Numeric values; same length as labels.' },
         color: { type: 'string', description: 'Bar/line color (CSS color).' },
