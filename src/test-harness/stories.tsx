@@ -10,6 +10,18 @@ export type Story = {
 
 // Generic registry-backed story so harness stories and agent-renderable
 // components stay one allow-list.
+// Parse the `props` query param as a JSON object, tolerating malformed input
+// (a bad URL should not crash the harness page).
+function safeJsonObject(raw: string | null): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 // /test-harness?story=registry&component=WorkspaceSquircle&props={...}
 const registryStory: Story = {
   component: ({ component, props }: { component: string; props: Record<string, unknown> }) => {
@@ -20,7 +32,7 @@ const registryStory: Story = {
   },
   parseProps: (params) => ({
     component: params.get('component') ?? '',
-    props: JSON.parse(params.get('props') ?? '{}'),
+    props: safeJsonObject(params.get('props')),
   }),
 };
 
