@@ -123,6 +123,21 @@ function defaultMcpServerScriptPath(): string {
 }
 
 /**
+ * Appended to chat sessions' system prompt so the agent reaches for the in-app
+ * renderer on visual/UI requests instead of silently writing files. Names the
+ * tools directly so it is robust to MCP namespacing.
+ */
+export const CHAT_RENDER_NUDGE =
+  'This app (SAI) can render UI live inside its own window. When the user asks you to ' +
+  'design, mock up, build, show, preview, or iterate on a UI element, component, page, ' +
+  'or visual style, FIRST render it in-app with the render_html tool (write a ' +
+  'self-contained HTML/CSS/JS snippet) — or render_component to mount a registered ' +
+  'project component — so the user can see it and give feedback. Prefer rendering over ' +
+  'writing files for these requests; only write or scaffold files when the user explicitly ' +
+  'asks to save, add, or wire the component into the codebase. You can re-render to iterate ' +
+  'on feedback.';
+
+/**
  * Build CLI args for the persistent process based on current config.
  * Exported for unit tests and to support orchestrator-kind sessions which
  * need extra `--mcp-config` / `--strict-mcp-config` / `--tools` flags.
@@ -216,6 +231,10 @@ export function buildArgs(options: BuildArgsOptions = {}): string[] {
         toolset: 'chat',
       });
       args.push('--mcp-config', cfgPath);
+      // Steer the chat agent to actually use the in-app renderer: without this
+      // the model treats "make me a button" as a write-a-file task (and the
+      // frontend-design skill reinforces that), never reaching for the tool.
+      args.push('--append-system-prompt', CHAT_RENDER_NUDGE);
     }
 
     // Chat/task: pass through user MCP config path(s) from SAI settings.

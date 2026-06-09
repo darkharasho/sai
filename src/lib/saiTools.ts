@@ -11,7 +11,11 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
   {
     name: 'render_html',
     description:
-      'Render a self-contained HTML/CSS/JS mock inside SAI and return a screenshot. Use for sketching UI. The mock runs sandboxed and cannot access the app.',
+      'Render a self-contained HTML/CSS/JS snippet live inside the SAI app and return a screenshot. ' +
+      'USE THIS whenever the user asks you to design, mock up, build, show, preview, or iterate on a ' +
+      'UI element, component, page, or visual style (e.g. "make me a stylish button") — render it here ' +
+      'so they can see it in-app, rather than writing a file. Re-call to iterate on feedback. ' +
+      'The snippet runs sandboxed (no network, no app access).',
     toolset: 'chat',
     input_schema: {
       type: 'object',
@@ -27,7 +31,9 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
   {
     name: 'render_component',
     description:
-      'Mount a registered SAI project component with props and return a screenshot. Use to iterate on real components. Only allow-listed components can be mounted.',
+      'Mount a registered SAI project component (by name, with props) live inside the app and return a ' +
+      'screenshot. USE THIS to show or iterate on an existing project component visually, instead of ' +
+      'describing it or editing files blindly. Only allow-listed components can be mounted.',
     toolset: 'chat',
     input_schema: {
       type: 'object',

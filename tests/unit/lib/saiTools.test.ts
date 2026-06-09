@@ -20,6 +20,13 @@ describe('saiTools registry', () => {
     }
   });
 
+  it('render tool descriptions steer the model on when to use them', () => {
+    const byName = Object.fromEntries(SAI_TOOL_SCHEMA.map((t) => [t.name, t.description]));
+    // Should tell the model to render in-app for UI requests rather than writing files.
+    expect(byName['render_html']).toMatch(/design|mock|preview|show/i);
+    expect(byName['render_html']).toMatch(/in-app|inside the SAI app|live/i);
+  });
+
   it('SAI_TOOL_NAMES is the set of all tool names', () => {
     expect(SAI_TOOL_NAMES.size).toBe(SAI_TOOL_SCHEMA.length);
     expect(SAI_TOOL_NAMES.has('render_html')).toBe(true);

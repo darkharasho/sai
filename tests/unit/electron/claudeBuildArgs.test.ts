@@ -62,7 +62,7 @@ vi.mock('node:child_process', async (importOriginal) => {
   };
 });
 
-import { buildArgs } from '../../../electron/services/claude';
+import { buildArgs, CHAT_RENDER_NUDGE } from '../../../electron/services/claude';
 
 describe('buildArgs — chat session MCP config', () => {
   it('includes --mcp-config when kind=chat and workspace is provided', () => {
@@ -136,6 +136,35 @@ describe('buildArgs — chat session MCP config', () => {
     expect(writeMock).toHaveBeenCalledWith(
       expect.objectContaining({ toolset: 'chat' }),
     );
+  });
+
+  it('appends the render-tool nudge to the system prompt for chat sessions', () => {
+    const args = buildArgs({
+      kind: 'chat',
+      workspace: '/w',
+      getMcpHandle: () => ({ socketPath: 's', secret: 'x' }),
+      writeMcpConfig: () => '/tmp/cfg.json',
+      resolveMcpServerScriptPath: () => 'srv.js',
+      resolveElectronExecPath: () => 'elec',
+      readSetting: () => undefined,
+    });
+    expect(args).toContain('--append-system-prompt');
+    const idx = args.indexOf('--append-system-prompt');
+    expect(args[idx + 1]).toBe(CHAT_RENDER_NUDGE);
+    expect(CHAT_RENDER_NUDGE).toMatch(/render_html/);
+  });
+
+  it('does NOT append the render nudge when chat has no workspace (tool not attached)', () => {
+    const args = buildArgs({
+      kind: 'chat',
+      workspace: undefined,
+      getMcpHandle: () => ({ socketPath: 's', secret: 'x' }),
+      writeMcpConfig: () => '/tmp/cfg.json',
+      resolveMcpServerScriptPath: () => 'srv.js',
+      resolveElectronExecPath: () => 'elec',
+      readSetting: () => undefined,
+    });
+    expect(args).not.toContain('--append-system-prompt');
   });
 
   it('orchestrator still gets --strict-mcp-config and --tools', () => {
