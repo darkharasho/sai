@@ -18,10 +18,7 @@ test('done indicator shown when workspace completes', async ({ window, appState 
 test('busy-done indicator shown with mixed workspace states', async ({ window, appState }) => {
   await appState.setWorkspaceBusy('/projects/ws1');
   await appState.setWorkspaceDone('/projects/ws2');
-  const wrapper = window.locator('.nav-status-indicator .ws-sq-busy-done-wrap');
-  await expect(wrapper).toBeVisible();
-  await expect(wrapper.locator('.ws-sq-busy')).toBeVisible();
-  await expect(wrapper.locator('.ws-sq-inner')).toBeVisible();
+  await expect(window.locator('.nav-status-indicator .ws-sq-busy-done')).toBeVisible();
 });
 
 test('overall status transitions: nothing → busy → busy-done → done → nothing', async ({ window, appState }) => {
@@ -37,7 +34,7 @@ test('overall status transitions: nothing → busy → busy-done → done → no
   // one done → busy-done
   await appState.setWorkspaceDone('/projects/ws1');
   expect(await appState.getOverallStatus()).toBe('busy-done');
-  await expect(window.locator('.nav-status-indicator .ws-sq-busy-done-wrap')).toBeVisible();
+  await expect(window.locator('.nav-status-indicator .ws-sq-busy-done')).toBeVisible();
 
   // other done → done
   await appState.setWorkspaceDone('/projects/ws2');

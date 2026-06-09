@@ -24,5 +24,5 @@ test('html mock renders as a sandboxed iframe and mirrors in the panel', async (
 
 test('component mock mounts WorkspaceSquircle busy-done in the card', async ({ harness }) => {
   const el = await harness.render('sai-render', { kind: 'component' });
-  await expect(el.locator('[data-testid="render-tool-card"] .ws-sq-busy-done-wrap')).toBeVisible();
+  await expect(el.locator('[data-testid="render-tool-card"] .ws-sq-busy-done')).toBeVisible();
 });

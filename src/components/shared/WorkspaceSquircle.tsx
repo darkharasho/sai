@@ -20,19 +20,9 @@ const TRI_MASK = `url("${TRIANGLE_MASK_URL}") center / contain no-repeat`;
 export function WorkspaceSquircle({ state, title, className, 'data-testid': testId }: WorkspaceSquircleProps) {
   const isApproval = state === 'approval';
 
-  if (state === 'busy-done') {
-    return (
-      <span
-        className={`ws-sq ws-sq-busy-done-wrap${className ? ` ${className}` : ''}`}
-        title={title}
-        data-testid={testId}
-      >
-        <span className="ws-sq ws-sq-busy" style={{ WebkitMask: SQ_MASK, mask: SQ_MASK }} />
-        <span className="ws-sq ws-sq-inner" style={{ WebkitMask: SQ_MASK, mask: SQ_MASK }} />
-      </span>
-    );
-  }
-
+  // busy-done ("something busy + something done") is a single squircle split
+  // diagonally into the busy (gold) and done (grey) colors — see the CSS. It
+  // falls through the shared single-span path below, masked like the others.
   return (
     <span
       className={`ws-sq ws-sq-${state}${className ? ` ${className}` : ''}`}
