@@ -1,6 +1,7 @@
 import React from 'react';
 import { workspaceSquircleStory } from './stories/workspace-squircle';
 import { toolResultImageStory } from './stories/tool-result-image';
+import { saiRenderStory } from './stories/sai-render';
 import { componentRegistry } from '../render/componentRegistry';
 
 export type Story = {
@@ -39,5 +40,6 @@ const registryStory: Story = {
 export const stories: Record<string, Story> = {
   'workspace-squircle': workspaceSquircleStory,
   'tool-result-image': toolResultImageStory,
+  'sai-render': saiRenderStory,
   registry: registryStory,
 };
