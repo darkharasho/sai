@@ -65,6 +65,7 @@ import {
   syntheticRootFor, materialize, reconcile, deleteSyntheticRoot, resolveLinkName,
 } from './services/metaSyntheticRoot';
 import { renderHostSearch, type RenderHostParams } from './renderHostUrl';
+import { formTimeoutMs } from '../src/render/formTimeout';
 
 // Allow E2E tests to isolate userData
 if (process.env.SAI_USER_DATA_DIR) {
@@ -491,12 +492,15 @@ function createWindow() {
           input: req.input,
           workspace: req.workspace,
         });
+        // render_form blocks on human input — give it the form's own (clamped)
+        // timeout as a backstop above the renderer's; everything else stays 60s.
+        const timeoutMs = req.tool === 'render_form' ? formTimeoutMs(req.input) + 5_000 : 60_000;
         setTimeout(() => {
           if (pendingMcpCalls.has(id)) {
             pendingMcpCalls.delete(id);
-            reject(new Error(`tool call ${req.tool} timed out after 60s`));
+            reject(new Error(`tool call ${req.tool} timed out after ${Math.round(timeoutMs / 1000)}s`));
           }
-        }, 60_000);
+        }, timeoutMs);
       });
     });
 
