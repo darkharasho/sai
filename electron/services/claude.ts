@@ -199,6 +199,21 @@ export function buildArgs(options: BuildArgsOptions = {}): string[] {
     });
     args.push('--system-prompt', buildOrchestratorSystemPrompt(ctx));
   } else {
+    // Chat sessions get SAI-native tools (render_html / render_component) via an
+    // MCP config, but keep all built-in tools (no --strict-mcp-config).
+    if (kind === 'chat' && workspace) {
+      const handle = getMcpHandle();
+      const cfgPath = writeMcpConfig({
+        socketPath: handle.socketPath,
+        secret: handle.secret,
+        workspace,
+        mcpServerScriptPath: resolveMcpServerScriptPath(),
+        electronExecPath: resolveElectronExecPath(),
+        toolset: 'chat',
+      });
+      args.push('--mcp-config', cfgPath);
+    }
+
     // Chat/task: pass through user MCP config path(s) from SAI settings.
     const mcpConfig = readSetting('mcpConfigPath');
     if (mcpConfig) {
