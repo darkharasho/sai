@@ -6,6 +6,7 @@ import * as crypto from 'node:crypto';
 import {
   handleRequest,
   makeSocketTransport,
+  setToolset,
   type JsonRpcRequest,
   type JsonRpcSuccess,
   type JsonRpcError,
@@ -33,6 +34,8 @@ function asError(res: unknown): JsonRpcError {
 }
 
 describe('swarm MCP server protocol', () => {
+  beforeEach(() => setToolset('orchestrator'));
+
   it('responds to initialize with protocol version and server info', async () => {
     const req: JsonRpcRequest = { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} };
     const res = asSuccess(await handleRequest(req, noopTransport));
@@ -75,6 +78,8 @@ describe('swarm MCP server protocol', () => {
 });
 
 describe('tools/call dispatch', () => {
+  beforeEach(() => setToolset('orchestrator'));
+
   function makeMockTransport(impl: (tool: string, input: unknown) => Promise<unknown>) {
     const calls: Array<{ tool: string; input: unknown }> = [];
     const transport: SwarmCallTransport = {
@@ -323,6 +328,55 @@ describe('swarmMcpHost socket', () => {
 
     a.socket.destroy();
     b.socket.destroy();
+  });
+});
+
+describe('sai tools over MCP', () => {
+  const noopTransport: SwarmCallTransport = { call: async () => ({ ok: true }) };
+
+  beforeEach(() => setToolset('orchestrator'));
+
+  it('lists sai_render_html when toolset=chat', async () => {
+    setToolset('chat');
+    const res: any = await handleRequest({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, noopTransport);
+    const names = res.result.tools.map((t: any) => t.name);
+    expect(names).toContain('sai_render_html');
+    expect(names).not.toContain('swarm_spawn_task');
+  });
+
+  it('lists swarm tools when toolset=orchestrator', async () => {
+    setToolset('orchestrator');
+    const res: any = await handleRequest({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, noopTransport);
+    const names = res.result.tools.map((t: any) => t.name);
+    expect(names).toContain('swarm_spawn_task');
+    expect(names).not.toContain('sai_render_html');
+  });
+
+  it('dispatches a sai_ tool call through the transport', async () => {
+    setToolset('chat');
+    const calls: Array<{ tool: string; input: unknown }> = [];
+    const transport: SwarmCallTransport = {
+      call: async (tool: string, input: unknown) => { calls.push({ tool, input }); return { ok: true }; },
+    };
+    const res: any = await handleRequest(
+      { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'sai_render_html', arguments: { html: '<b>x</b>' } } },
+      transport,
+    );
+    expect(calls).toEqual([{ tool: 'render_html', input: { html: '<b>x</b>' } }]);
+    expect(res.result.content[0].type).toBe('text');
+  });
+
+  it('appends an image content block when the result carries __mcpImage', async () => {
+    setToolset('chat');
+    const transport: SwarmCallTransport = {
+      call: async () => ({ renderId: 'r', __mcpImage: { base64: 'AAAA', mimeType: 'image/png' } }),
+    };
+    const res: any = await handleRequest(
+      { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'sai_render_component', arguments: { component: 'WorkspaceSquircle' } } },
+      transport,
+    );
+    const img = res.result.content.find((c: any) => c.type === 'image');
+    expect(img).toEqual({ type: 'image', data: 'AAAA', mimeType: 'image/png' });
   });
 });
 

@@ -15,6 +15,10 @@ import { createInterface } from 'node:readline';
 import * as net from 'node:net';
 import * as crypto from 'node:crypto';
 import { SWARM_TOOL_SCHEMA } from '../src/lib/swarmOrchestratorTools';
+import { toolsForToolset, SAI_TOOL_NAMES, type SaiToolset } from '../src/lib/saiTools';
+
+let toolset: SaiToolset = (process.env.SAI_MCP_TOOLSET as SaiToolset) || 'orchestrator';
+export function setToolset(t: SaiToolset): void { toolset = t; }
 
 export interface JsonRpcRequest {
   jsonrpc: '2.0';
@@ -61,13 +65,16 @@ const PROTOCOL_VERSION = '2024-11-05';
 const SWARM_TOOL_NAMES = new Set(SWARM_TOOL_SCHEMA.map((t) => t.name));
 
 function listTools() {
-  return {
-    tools: SWARM_TOOL_SCHEMA.map((tool) => ({
-      name: `swarm_${tool.name}`,
-      description: tool.description,
-      inputSchema: tool.input_schema,
-    })),
-  };
+  const tools: Array<{ name: string; description: string; inputSchema: unknown }> = [];
+  if (toolset === 'orchestrator') {
+    for (const tool of SWARM_TOOL_SCHEMA) {
+      tools.push({ name: `swarm_${tool.name}`, description: tool.description, inputSchema: tool.input_schema });
+    }
+  }
+  for (const tool of toolsForToolset(toolset)) {
+    tools.push({ name: `sai_${tool.name}`, description: tool.description, inputSchema: tool.input_schema });
+  }
+  return { tools };
 }
 
 /**
@@ -114,31 +121,26 @@ export async function handleRequest(
       const fullName = typeof params.name === 'string' ? params.name : '';
       const input = (params.arguments ?? {}) as unknown;
 
-      if (!fullName.startsWith('swarm_')) {
-        return {
-          jsonrpc: '2.0',
-          id,
-          error: { code: -32602, message: `unknown tool: ${fullName}` },
-        };
+      let toolName: string | null = null;
+      if (fullName.startsWith('swarm_') && SWARM_TOOL_NAMES.has(fullName.slice(6))) {
+        toolName = fullName.slice(6);
+      } else if (fullName.startsWith('sai_') && SAI_TOOL_NAMES.has(fullName.slice(4))) {
+        toolName = fullName.slice(4);
       }
-      const toolName = fullName.slice('swarm_'.length);
-      if (!SWARM_TOOL_NAMES.has(toolName)) {
-        return {
-          jsonrpc: '2.0',
-          id,
-          error: { code: -32602, message: `unknown tool: ${fullName}` },
-        };
+      if (!toolName) {
+        return { jsonrpc: '2.0', id, error: { code: -32602, message: `unknown tool: ${fullName}` } };
       }
 
       try {
-        const result = await transport.call(toolName, input);
-        return {
-          jsonrpc: '2.0',
-          id,
-          result: {
-            content: [{ type: 'text', text: JSON.stringify(result) }],
-          },
-        };
+        const result = (await transport.call(toolName, input)) as any;
+        const content: Array<Record<string, unknown>> = [];
+        const image = result && typeof result === 'object' ? result.__mcpImage : undefined;
+        const textPayload = image ? { ...result, __mcpImage: undefined } : result;
+        content.push({ type: 'text', text: JSON.stringify(textPayload) });
+        if (image && typeof image.base64 === 'string') {
+          content.push({ type: 'image', data: image.base64, mimeType: image.mimeType ?? 'image/png' });
+        }
+        return { jsonrpc: '2.0', id, result: { content } };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return {
@@ -382,6 +384,7 @@ export function startStdioLoop(
 export async function main(): Promise<void> {
   const env = readEnvOrExit();
   setEnv(env);
+  setToolset((process.env.SAI_MCP_TOOLSET as SaiToolset) || 'orchestrator');
 
   const transport = makeSocketTransport();
   try {
