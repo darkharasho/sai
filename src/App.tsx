@@ -51,6 +51,8 @@ import { runSwarmTask } from './lib/swarmTaskRunner';
 import { landTask, discardTask, rebaseRetry } from './lib/swarmLanding';
 import { ensureOrchestratorSession } from './lib/swarmOrchestratorSession';
 import { handleSwarmToolRequest, type SwarmHost } from './lib/swarmOrchestratorDispatcher';
+import { handleRenderToolRequest } from './render/handleRenderToolRequest';
+import { captureRenderRegion } from './render/captureRenderRegion';
 import { executeSlashCommand } from './lib/orchestratorSlashCommands';
 import { isOrchestratorToolDrift, describeToolDrift } from './lib/orchestratorToolDrift';
 import { resolveTaskRef } from './lib/swarmRef';
@@ -1407,6 +1409,19 @@ export default function App() {
     if (typeof sai?.onSwarmToolRequest !== 'function') return; // mocks / tests
 
     const unsub = sai.onSwarmToolRequest((req: { id: string; tool: string; input: any; workspace: string }) => {
+      // SAI render tools (render_html / render_component) are handled in the
+      // renderer: dispatch into the render store, capture the painted region,
+      // and respond over the same IPC channel swarm tools use. renderId = req.id.
+      if (typeof req.tool === 'string' && req.tool.startsWith('render_')) {
+        void handleRenderToolRequest(
+          { tool: req.tool, input: req.input, renderId: req.id },
+          { captureRenderRegion },
+        ).then(
+          (result) => sai.respondSwarmTool(req.id, result),
+          (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
+        );
+        return;
+      }
       void handleSwarmToolRequest(req, {
         activeWorkspace: activeProjectPathRef.current,
         host: swarmHostRef.current,
