@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, Menu, MenuItem, screen } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, Menu, MenuItem, screen, clipboard, Notification } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -808,6 +808,39 @@ function createWindow() {
       title: 'Select File',
     });
     return result.filePaths[0] || null;
+  });
+
+  ipcMain.handle('sai:pick-file', async (_evt, opts: { mode?: 'open' | 'save' | 'directory'; filters?: { name: string; extensions: string[] }[]; multi?: boolean }): Promise<string[] | null> => {
+    if (!mainWindow || mainWindow.isDestroyed()) return null;
+    const filters = Array.isArray(opts?.filters) ? opts.filters : undefined;
+    if (opts?.mode === 'save') {
+      const r = await dialog.showSaveDialog(mainWindow, { filters });
+      return r.canceled || !r.filePath ? null : [r.filePath];
+    }
+    const properties: Array<'openFile' | 'openDirectory' | 'multiSelections'> =
+      opts?.mode === 'directory' ? ['openDirectory'] : ['openFile'];
+    if (opts?.multi && opts.mode !== 'directory') properties.push('multiSelections');
+    const r = await dialog.showOpenDialog(mainWindow, { properties, filters });
+    return r.canceled || r.filePaths.length === 0 ? null : r.filePaths;
+  });
+
+  ipcMain.handle('sai:notify', async (_evt, args: { title: string; body?: string }): Promise<boolean> => {
+    if (!Notification.isSupported()) return false;
+    try {
+      new Notification({ title: String(args?.title ?? ''), body: typeof args?.body === 'string' ? args.body : undefined }).show();
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  ipcMain.handle('sai:clipboard-write', async (_evt, text: string): Promise<boolean> => {
+    try {
+      clipboard.writeText(String(text ?? ''));
+      return true;
+    } catch {
+      return false;
+    }
   });
 
   ipcMain.handle('project:getRecent', () => getRecentProjects());
