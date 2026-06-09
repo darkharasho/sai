@@ -73,4 +73,11 @@ describe('dispatchSaiRenderTool', () => {
     expect(String(e?.payload.html)).toContain('<i>x</i>');
     expect(String(e?.payload.html)).toContain('<i>y</i>');
   });
+
+  it('render_chart/render_diff default the title when none is given', () => {
+    dispatchSaiRenderTool('render_chart', { chart: 'bar', labels: ['A'], values: [1] }, 'rid-ct');
+    expect(renderStore.get('rid-ct')?.title).toBe('Chart');
+    dispatchSaiRenderTool('render_diff', { before: 'a', after: 'b' }, 'rid-dt');
+    expect(renderStore.get('rid-dt')?.title).toBe('Diff');
+  });
 });

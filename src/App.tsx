@@ -1410,7 +1410,7 @@ export default function App() {
     if (typeof sai?.onSwarmToolRequest !== 'function') return; // mocks / tests
 
     const unsub = sai.onSwarmToolRequest((req: { id: string; tool: string; input: any; workspace: string }) => {
-      // SAI render tools (render_html / render_component) are handled in the
+      // SAI render tools (render_html / render_component / render_chart / render_diff) are handled in the
       // renderer: dispatch into the render store, then (for html) screenshot the
       // mock headlessly so the agent can SEE its render without opening a browser
       // tab. renderId = req.id; response goes over the swarm tool channel.
@@ -1427,8 +1427,8 @@ export default function App() {
           }
         } else if (
           req.tool === 'render_diff' &&
-          typeof req.input?.before === 'string' &&
-          typeof req.input?.after === 'string'
+          typeof req.input?.before === 'string' && req.input.before.length > 0 &&
+          typeof req.input?.after === 'string' && req.input.after.length > 0
         ) {
           htmlInput = buildDiffHtml(req.input as DiffInput);
         }

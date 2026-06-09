@@ -44,9 +44,11 @@ export function buildChartHtml(input: ChartInput): string {
         return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="${color}" rx="2"/>`;
       })
       .join('');
-  } else {
+  } else if (chart === 'line') {
     const points = values.map((v, i) => `${xFor(i).toFixed(1)},${yFor(v).toFixed(1)}`).join(' ');
     body = `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="2"/>`;
+  } else {
+    throw new Error(`unknown chart type: ${chart}`);
   }
 
   const labelEls = labels

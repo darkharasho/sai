@@ -341,6 +341,8 @@ describe('sai tools over MCP', () => {
     const res: any = await handleRequest({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, noopTransport);
     const names = res.result.tools.map((t: any) => t.name);
     expect(names).toContain('sai_render_html');
+    expect(names).toContain('sai_render_chart');
+    expect(names).toContain('sai_render_diff');
     expect(names).not.toContain('swarm_spawn_task');
   });
 

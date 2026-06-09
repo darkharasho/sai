@@ -40,6 +40,11 @@ describe('buildChartHtml', () => {
     expect(heights.length).toBe(2);
     for (const h of heights) expect(h).toBeGreaterThanOrEqual(0);
   });
+
+  it('throws on an unknown chart type', () => {
+    // @ts-expect-error deliberately invalid chart type
+    expect(() => buildChartHtml({ chart: 'pie', labels: ['A'], values: [1] })).toThrow(/unknown chart type/i);
+  });
 });
 
 describe('buildDiffHtml', () => {

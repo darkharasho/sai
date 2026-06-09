@@ -41,7 +41,7 @@ export function dispatchSaiRenderTool(name: string, input: any, renderId: string
       } catch (e) {
         return { ok: false, error: e instanceof Error ? e.message : 'invalid chart input' };
       }
-      renderStore.upsert({ renderId, kind: 'html', payload: { html }, title, width, background, status: 'rendering' });
+      renderStore.upsert({ renderId, kind: 'html', payload: { html }, title: title || 'Chart', width, background, status: 'rendering' });
       return { ok: true };
     }
     case 'render_diff': {
@@ -55,7 +55,7 @@ export function dispatchSaiRenderTool(name: string, input: any, renderId: string
       } catch (e) {
         return { ok: false, error: e instanceof Error ? e.message : 'invalid diff input' };
       }
-      renderStore.upsert({ renderId, kind: 'html', payload: { html }, title, width, background, status: 'rendering' });
+      renderStore.upsert({ renderId, kind: 'html', payload: { html }, title: title || 'Diff', width, background, status: 'rendering' });
       return { ok: true };
     }
     default:
