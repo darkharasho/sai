@@ -148,6 +148,52 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
     },
   },
   {
+    name: 'pick_file',
+    description:
+      'Open a native file/folder picker and return the path(s) the user chooses. USE THIS when you need a ' +
+      'file or directory from the user — they pick it in a real OS dialog; you only receive the chosen path.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', description: "'open' (default), 'save', or 'directory'." },
+        filters: { type: 'array', items: { type: 'object' }, description: 'Open-dialog file filters: [{name, extensions:[...]}].' },
+        multi: { type: 'boolean', description: 'Allow selecting multiple files (open mode).' },
+      },
+    },
+  },
+  {
+    name: 'notify',
+    description:
+      'Show an OS notification to the user (e.g. a long task finished). Fire-and-forget; returns ok. Use ' +
+      'sparingly for things worth interrupting the user about.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Notification title.' },
+        body: { type: 'string', description: 'Notification body text.' },
+        level: { type: 'string', description: "Optional hint: 'info' | 'warn' | 'error'." },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'clipboard',
+    description:
+      'Write text to the system clipboard for the user to paste. WRITE-ONLY — reading the clipboard is not ' +
+      'supported. Use to hand the user a result (a command, a snippet) they can paste elsewhere.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', description: "Only 'write' is supported." },
+        text: { type: 'string', description: 'Text to copy to the clipboard.' },
+      },
+      required: ['text'],
+    },
+  },
+  {
     name: 'inspect_element',
     description:
       "Return the computed box and CSS of a live element in the running SAI app, by CSS selector. " +
