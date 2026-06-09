@@ -55,6 +55,7 @@ import { handleRenderToolRequest } from './render/handleRenderToolRequest';
 import { registeredComponentKeys } from './render/componentRegistry';
 import { renderMermaidToSvg } from './render/renderMermaid';
 import { handleSaiQueryToolRequest } from './render/saiQueryTools';
+import { handleSaiNativeToolRequest } from './render/saiNativeTools';
 import { buildChartHtml, buildDiffHtml, type ChartInput, type DiffInput } from './render/builtinRenderers';
 import { registerPendingForm } from './render/formBridge';
 import { formTimeoutMs } from './render/formTimeout';
@@ -1480,6 +1481,25 @@ export default function App() {
           deps,
         ).then(
           (result) => sai.respondSwarmTool(req.id, result),
+          (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
+        );
+        return;
+      }
+
+      if (req.tool === 'pick_file' || req.tool === 'notify' || req.tool === 'clipboard') {
+        const saiAny = sai as {
+          pickFile?: (o: unknown) => Promise<string[] | null>;
+          notify?: (a: { title: string; body?: string }) => Promise<boolean>;
+          clipboardWrite?: (t: string) => Promise<boolean>;
+        };
+        void handleSaiNativeToolRequest(
+          { tool: req.tool, input: req.input },
+          { pickFile: saiAny.pickFile, notify: saiAny.notify, clipboardWrite: saiAny.clipboardWrite },
+        ).then(
+          (result) =>
+            result === null
+              ? sai.respondSwarmToolError(req.id, `unhandled native tool: ${req.tool}`)
+              : sai.respondSwarmTool(req.id, result),
           (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
         );
         return;
