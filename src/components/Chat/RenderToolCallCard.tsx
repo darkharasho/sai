@@ -100,6 +100,15 @@ export function entryFromToolCall(tc: ToolCall): { entry: RenderEntry; code: str
     };
   }
 
+  if (name.endsWith('sai_render_form')) {
+    const html = typeof input.html === 'string' ? input.html : '';
+    if (!html) return null;
+    return {
+      entry: { renderId, kind: 'form', payload: { html }, title: title || 'Form', width, background, status: 'ready' },
+      code: html,
+    };
+  }
+
   // default: html
   const html = typeof input.html === 'string' ? input.html : '';
   if (!html) return null;

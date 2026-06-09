@@ -33,3 +33,14 @@ describe('entryFromToolCall — render_theme defaults', () => {
     expect(comps).toContain('WorkspaceSquircle');
   });
 });
+
+it('builds a form entry from a sai_render_form call', () => {
+  const built = entryFromToolCall(tc('sai_render_form', { html: '<button>go</button>' }));
+  expect(built?.entry.kind).toBe('form');
+  expect(String(built?.entry.payload.html)).toContain('<button>go</button>');
+});
+
+it('returns null for a form call with empty html', () => {
+  const built = entryFromToolCall(tc('sai_render_form', { html: '' }));
+  expect(built).toBeNull();
+});
