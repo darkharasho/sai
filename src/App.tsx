@@ -52,6 +52,7 @@ import { landTask, discardTask, rebaseRetry } from './lib/swarmLanding';
 import { ensureOrchestratorSession } from './lib/swarmOrchestratorSession';
 import { handleSwarmToolRequest, type SwarmHost } from './lib/swarmOrchestratorDispatcher';
 import { handleRenderToolRequest } from './render/handleRenderToolRequest';
+import { buildChartHtml, buildDiffHtml, type ChartInput, type DiffInput } from './render/builtinRenderers';
 import { RenderToolCallCard } from './components/Chat/RenderToolCallCard';
 import { executeSlashCommand } from './lib/orchestratorSlashCommands';
 import { isOrchestratorToolDrift, describeToolDrift } from './lib/orchestratorToolDrift';
@@ -1415,9 +1416,22 @@ export default function App() {
       // tab. renderId = req.id; response goes over the swarm tool channel.
       if (typeof req.tool === 'string' && req.tool.startsWith('render_')) {
         const saiAny = sai as { renderCaptureHtml?: (a: { html: string; width?: number }) => Promise<string | null> };
-        const htmlInput = req.tool === 'render_html' && req.input && typeof req.input.html === 'string'
-          ? (req.input.html as string)
-          : null;
+        let htmlInput: string | null = null;
+        if (req.tool === 'render_html' && req.input && typeof req.input.html === 'string') {
+          htmlInput = req.input.html as string;
+        } else if (req.tool === 'render_chart') {
+          try {
+            htmlInput = buildChartHtml(req.input as ChartInput);
+          } catch {
+            htmlInput = null;
+          }
+        } else if (
+          req.tool === 'render_diff' &&
+          typeof req.input?.before === 'string' &&
+          typeof req.input?.after === 'string'
+        ) {
+          htmlInput = buildDiffHtml(req.input as DiffInput);
+        }
         const deps = htmlInput && typeof saiAny.renderCaptureHtml === 'function'
           ? {
               captureRenderRegion: async () => {
@@ -4087,7 +4101,12 @@ export default function App() {
                   onModelChange={handleModelChange}
                   renderToolCall={(tc) => {
                     const n = tc.name || '';
-                    if (n.endsWith('sai_render_html') || n.endsWith('sai_render_component')) {
+                    if (
+                      n.endsWith('sai_render_html') ||
+                      n.endsWith('sai_render_component') ||
+                      n.endsWith('sai_render_chart') ||
+                      n.endsWith('sai_render_diff')
+                    ) {
                       return <RenderToolCallCard tc={tc} />;
                     }
                     return null;

@@ -53,7 +53,7 @@ export function entryFromToolCall(tc: ToolCall): { entry: RenderEntry; code: str
     };
   }
 
-  if (name.endsWith('render_chart')) {
+  if (name.endsWith('sai_render_chart')) {
     let html: string;
     try {
       html = buildChartHtml(input as unknown as ChartInput);
@@ -66,8 +66,9 @@ export function entryFromToolCall(tc: ToolCall): { entry: RenderEntry; code: str
     };
   }
 
-  if (name.endsWith('render_diff')) {
-    if (typeof input.before !== 'string' || typeof input.after !== 'string') return null;
+  if (name.endsWith('sai_render_diff')) {
+    if (typeof input.before !== 'string' || input.before.length === 0 ||
+        typeof input.after !== 'string' || input.after.length === 0) return null;
     const html = buildDiffHtml(input as unknown as DiffInput);
     return {
       entry: { renderId, kind: 'html', payload: { html }, title: title || 'Diff', width, background, status: 'ready' },
