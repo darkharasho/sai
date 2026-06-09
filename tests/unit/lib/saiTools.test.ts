@@ -47,6 +47,15 @@ describe('Tier 1 chart/diff tools', () => {
   });
 });
 
+describe('render_mermaid tool', () => {
+  it('registers render_mermaid as a chat tool requiring diagram', () => {
+    expect(SAI_TOOL_NAMES.has('render_mermaid')).toBe(true);
+    const m = SAI_TOOL_SCHEMA.find((t) => t.name === 'render_mermaid')!;
+    expect(m.toolset).toBe('chat');
+    expect(m.input_schema.required).toContain('diagram');
+  });
+});
+
 describe('Tier 2 inspect/capture tools', () => {
   it('registers inspect_element and capture_app as chat tools', () => {
     expect(SAI_TOOL_NAMES.has('inspect_element')).toBe(true);
