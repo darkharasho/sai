@@ -64,6 +64,7 @@ import {
 import {
   syntheticRootFor, materialize, reconcile, deleteSyntheticRoot, resolveLinkName,
 } from './services/metaSyntheticRoot';
+import { renderHostSearch, type RenderHostParams } from './renderHostUrl';
 
 // Allow E2E tests to isolate userData
 if (process.env.SAI_USER_DATA_DIR) {
@@ -862,6 +863,51 @@ function createWindow() {
       return image.toPNG().toString('base64');
     } catch (err) {
       console.error('[render] captureHtml failed:', err);
+      return null;
+    } finally {
+      try { win?.destroy(); } catch { /* noop */ }
+    }
+  });
+
+  ipcMain.handle('render:captureComponent', async (_event, params: RenderHostParams): Promise<string | null> => {
+    const width = typeof params?.width === 'number' && params.width > 0 ? Math.min(Math.round(params.width), 2000) : 360;
+    let win: BrowserWindow | null = null;
+    try {
+      win = new BrowserWindow({
+        width,
+        height: 1200,
+        show: false,
+        x: -32000,
+        y: -32000,
+        frame: false,
+        skipTaskbar: true,
+        webPreferences: { preload: path.join(__dirname, 'preload.js'), sandbox: false, javascript: true, backgroundThrottling: false },
+      });
+      const search = renderHostSearch({ ...params, width });
+      if (process.env.VITE_DEV_SERVER_URL) {
+        await win.loadURL(`${process.env.VITE_DEV_SERVER_URL.replace(/\/$/, '')}/render-host?${search}`);
+      } else {
+        await win.loadFile(path.join(__dirname, '../dist/index.html'), { search });
+      }
+      // Poll for the host's ready flag (set after layout + fonts), max ~3s.
+      const deadline = Date.now() + 3000;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const ready = (await win.webContents.executeJavaScript('window.__renderReady === true').catch(() => false)) as boolean;
+        if (ready) break;
+        if (Date.now() >= deadline) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      const h = (await win.webContents.executeJavaScript(
+        "(function(){var el=document.getElementById('render-host-root');return el?Math.ceil(el.getBoundingClientRect().height):0;})() || 200",
+      )) as number;
+      const height = Math.min(Math.max(Math.round(h), 40), 4000);
+      win.setContentSize(width, height);
+      await new Promise((r) => setTimeout(r, 60));
+      const image = await win.webContents.capturePage({ x: 0, y: 0, width, height });
+      return image.toPNG().toString('base64');
+    } catch (err) {
+      console.error('[render] captureComponent failed:', err);
       return null;
     } finally {
       try { win?.destroy(); } catch { /* noop */ }
