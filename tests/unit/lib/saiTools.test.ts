@@ -46,3 +46,16 @@ describe('Tier 1 chart/diff tools', () => {
     expect(diff.input_schema.required).toEqual(expect.arrayContaining(['before', 'after']));
   });
 });
+
+describe('Tier 2 inspect/capture tools', () => {
+  it('registers inspect_element and capture_app as chat tools', () => {
+    expect(SAI_TOOL_NAMES.has('inspect_element')).toBe(true);
+    expect(SAI_TOOL_NAMES.has('capture_app')).toBe(true);
+    const inspect = SAI_TOOL_SCHEMA.find((t) => t.name === 'inspect_element')!;
+    expect(inspect.toolset).toBe('chat');
+    expect(inspect.input_schema.required).toContain('selector');
+    const cap = SAI_TOOL_SCHEMA.find((t) => t.name === 'capture_app')!;
+    expect(cap.toolset).toBe('chat');
+    expect(cap.input_schema.required ?? []).toEqual([]);
+  });
+});

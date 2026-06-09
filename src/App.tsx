@@ -52,6 +52,7 @@ import { landTask, discardTask, rebaseRetry } from './lib/swarmLanding';
 import { ensureOrchestratorSession } from './lib/swarmOrchestratorSession';
 import { handleSwarmToolRequest, type SwarmHost } from './lib/swarmOrchestratorDispatcher';
 import { handleRenderToolRequest } from './render/handleRenderToolRequest';
+import { handleSaiQueryToolRequest } from './render/saiQueryTools';
 import { buildChartHtml, buildDiffHtml, type ChartInput, type DiffInput } from './render/builtinRenderers';
 import { RenderToolCallCard } from './components/Chat/RenderToolCallCard';
 import { executeSlashCommand } from './lib/orchestratorSlashCommands';
@@ -1410,6 +1411,21 @@ export default function App() {
     if (typeof sai?.onSwarmToolRequest !== 'function') return; // mocks / tests
 
     const unsub = sai.onSwarmToolRequest((req: { id: string; tool: string; input: any; workspace: string }) => {
+      if (req.tool === 'inspect_element' || req.tool === 'capture_app') {
+        const saiAny = sai as { captureRegion?: (r: { x: number; y: number; width: number; height: number }) => Promise<string | null> };
+        void handleSaiQueryToolRequest(
+          { tool: req.tool, input: req.input },
+          { captureRegion: saiAny.captureRegion },
+        ).then(
+          (result) =>
+            result === null
+              ? sai.respondSwarmToolError(req.id, `unhandled query tool: ${req.tool}`)
+              : sai.respondSwarmTool(req.id, result),
+          (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
+        );
+        return;
+      }
+
       // SAI render tools (render_html / render_component / render_chart / render_diff) are handled in the
       // renderer: dispatch into the render store, then (for html) screenshot the
       // mock headlessly so the agent can SEE its render without opening a browser

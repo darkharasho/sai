@@ -89,6 +89,40 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
       required: ['before', 'after'],
     },
   },
+  {
+    name: 'inspect_element',
+    description:
+      "Return the computed box and CSS of a live element in the running SAI app, by CSS selector. " +
+      "USE THIS to ground UI reasoning in what is ACTUALLY rendered — actual size, position, and " +
+      "computed styles — instead of guessing from source or blaming stale builds/HMR. Read-only.",
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: 'CSS selector to inspect in the live app.' },
+        props: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Computed style property names to return; omit for a useful default set.',
+        },
+      },
+      required: ['selector'],
+    },
+  },
+  {
+    name: 'capture_app',
+    description:
+      'Screenshot the live SAI app window (or a single element by selector) and return the image. ' +
+      'USE THIS to SEE the real current state of the running app — not a mock — when diagnosing or ' +
+      'confirming UI. Read-only.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: 'Optional CSS selector; omit to capture the whole window.' },
+      },
+    },
+  },
 ];
 
 export const SAI_TOOL_NAMES = new Set(SAI_TOOL_SCHEMA.map((t) => t.name));
