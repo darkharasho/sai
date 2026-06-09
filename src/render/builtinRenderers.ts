@@ -64,6 +64,7 @@ export function buildChartHtml(input: ChartInput): string {
   );
 }
 
+/** Input for the render_diff tool — renders two HTML snippets side-by-side or stacked. */
 export interface DiffInput {
   before: string;
   after: string;
