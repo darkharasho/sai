@@ -119,4 +119,9 @@ describe('dispatchSaiRenderTool', () => {
     expect(res.error).toMatch(/vars/i);
     expect(renderStore.get('rid-th3')).toBeUndefined();
   });
+
+  it('render_theme includes props in the payload when provided', () => {
+    dispatchSaiRenderTool('render_theme', { vars: { '--a': '1' }, components: ['WorkspaceSquircle'], props: { state: 'busy-done' } }, 'rid-thp');
+    expect((renderStore.get('rid-thp')?.payload as { props?: unknown }).props).toEqual({ state: 'busy-done' });
+  });
 });

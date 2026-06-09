@@ -91,8 +91,10 @@ export function entryFromToolCall(tc: ToolCall): { entry: RenderEntry; code: str
     const components = Array.isArray(input.components) && input.components.length > 0
       ? (input.components as unknown[]).filter((c): c is string => typeof c === 'string')
       : [];
+    const props = input.props && typeof input.props === 'object' && !Array.isArray(input.props)
+      ? (input.props as Record<string, unknown>) : undefined;
     return {
-      entry: { renderId, kind: 'theme', payload: { components, vars }, title: title || 'Theme', width, background, status: 'ready' },
+      entry: { renderId, kind: 'theme', payload: { components, vars, ...(props ? { props } : {}) }, title: title || 'Theme', width, background, status: 'ready' },
       code: JSON.stringify(vars, null, 2),
     };
   }

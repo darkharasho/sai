@@ -63,6 +63,7 @@ export function RenderRegion({ entry }: { entry: RenderEntry }) {
         <ThemedComponents
           components={(entry.payload as { components: string[] }).components}
           vars={(entry.payload as { vars: Record<string, string> }).vars}
+          props={(entry.payload as { props?: Record<string, unknown> }).props}
         />
       ) : (
         <MountComponent

@@ -119,6 +119,7 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
       properties: {
         vars: { type: 'object', description: 'CSS custom properties, e.g. {"--accent":"#6aa9ff"}.' },
         components: { type: 'array', items: { type: 'string' }, description: 'Registry keys to preview; omit for all registered.' },
+        props: { type: 'object', description: 'Representative props passed to each previewed component (e.g. {"state":"busy-done"}).' },
         title: { type: 'string', description: 'Label shown on the card/panel.' },
         width: { type: 'number', description: 'Viewport width in px (default 360).' },
         background: { type: 'string', description: 'Canvas background behind the preview.' },

@@ -72,7 +72,9 @@ export function dispatchSaiRenderTool(name: string, input: any, renderId: string
       const components = Array.isArray(inp.components) && inp.components.length > 0
         ? (inp.components as unknown[]).filter((c): c is string => typeof c === 'string')
         : registeredComponentKeys();
-      renderStore.upsert({ renderId, kind: 'theme', payload: { components, vars: inp.vars }, title: title || 'Theme', width, background, status: 'rendering' });
+      const payload: Record<string, unknown> = { components, vars: inp.vars };
+      if (inp.props && typeof inp.props === 'object' && !Array.isArray(inp.props)) payload.props = inp.props;
+      renderStore.upsert({ renderId, kind: 'theme', payload, title: title || 'Theme', width, background, status: 'rendering' });
       return { ok: true };
     }
     default:
