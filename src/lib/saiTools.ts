@@ -156,7 +156,7 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
     input_schema: {
       type: 'object',
       properties: {
-        mode: { type: 'string', description: "'open' (default), 'save', or 'directory'." },
+        mode: { type: 'string', enum: ['open', 'save', 'directory'], description: "'open' (default), 'save', or 'directory'." },
         filters: { type: 'array', items: { type: 'object' }, description: 'Open-dialog file filters: [{name, extensions:[...]}].' },
         multi: { type: 'boolean', description: 'Allow selecting multiple files (open mode).' },
       },
@@ -173,7 +173,6 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
       properties: {
         title: { type: 'string', description: 'Notification title.' },
         body: { type: 'string', description: 'Notification body text.' },
-        level: { type: 'string', description: "Optional hint: 'info' | 'warn' | 'error'." },
       },
       required: ['title'],
     },

@@ -55,7 +55,7 @@ import { handleRenderToolRequest } from './render/handleRenderToolRequest';
 import { registeredComponentKeys } from './render/componentRegistry';
 import { renderMermaidToSvg } from './render/renderMermaid';
 import { handleSaiQueryToolRequest } from './render/saiQueryTools';
-import { handleSaiNativeToolRequest } from './render/saiNativeTools';
+import { handleSaiNativeToolRequest, type PickFileOpts } from './render/saiNativeTools';
 import { buildChartHtml, buildDiffHtml, type ChartInput, type DiffInput } from './render/builtinRenderers';
 import { registerPendingForm } from './render/formBridge';
 import { formTimeoutMs } from './render/formTimeout';
@@ -1488,7 +1488,7 @@ export default function App() {
 
       if (req.tool === 'pick_file' || req.tool === 'notify' || req.tool === 'clipboard') {
         const saiAny = sai as {
-          pickFile?: (o: unknown) => Promise<string[] | null>;
+          pickFile?: (o: PickFileOpts) => Promise<string[] | null>;
           notify?: (a: { title: string; body?: string }) => Promise<boolean>;
           clipboardWrite?: (t: string) => Promise<boolean>;
         };
