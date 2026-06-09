@@ -1,7 +1,7 @@
 import { RenderToolCallCard } from '../../components/Chat/RenderToolCallCard';
 import type { ToolCall } from '../../types';
 
-type Kind = 'html' | 'chart' | 'diff';
+type Kind = 'html' | 'chart' | 'diff' | 'mermaid';
 
 function makeTc(width: number, kind: Kind): ToolCall {
   if (kind === 'chart') {
@@ -36,6 +36,14 @@ function makeTc(width: number, kind: Kind): ToolCall {
       }),
     };
   }
+  if (kind === 'mermaid') {
+    return {
+      id: `tc-mermaid-${width}`,
+      type: 'mcp',
+      name: 'mcp__swarm__sai_render_mermaid',
+      input: JSON.stringify({ title: 'Flow', width, diagram: 'graph TD; A[Start]-->B[Next]; B-->C[Done]' }),
+    };
+  }
   const wide = width > 460;
   const html = wide
     ? `<div style="min-height:200px;display:flex;gap:16px;align-items:center;justify-content:center;background:#0a0b0f;padding:24px">
@@ -61,10 +69,11 @@ export const renderToolCallCardStory = {
     </div>
   ),
   parseProps: (params: URLSearchParams) => {
-    const kind = params.get('kind');
+    const k = params.get('kind');
+    const allowed = k === 'chart' || k === 'diff' || k === 'mermaid';
     return {
       w: Number(params.get('w')) || 320,
-      kind: (kind === 'chart' || kind === 'diff' ? kind : 'html') as Kind,
+      kind: (allowed ? k : 'html') as Kind,
     };
   },
 };
