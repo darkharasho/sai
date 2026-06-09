@@ -1,9 +1,24 @@
+import { useEffect, useState } from 'react';
 import { RenderToolCallCard } from '../../components/Chat/RenderToolCallCard';
+import { registerPendingForm, type FormResult } from '../../render/formBridge';
 import type { ToolCall } from '../../types';
 
-type Kind = 'html' | 'chart' | 'diff' | 'mermaid' | 'theme';
+type Kind = 'html' | 'chart' | 'diff' | 'mermaid' | 'theme' | 'form';
 
 function makeTc(width: number, kind: Kind): ToolCall {
+  if (kind === 'form') {
+    return {
+      id: `tc-form-${width}`,
+      type: 'mcp',
+      name: 'mcp__swarm__sai_render_form',
+      input: JSON.stringify({
+        title: 'Pick one',
+        width,
+        html: '<button id="b" style="padding:10px 18px">Pick B</button>' +
+          '<script>document.getElementById("b").addEventListener("click",function(){saiSubmit("picked-B");});<\/script>',
+      }),
+    };
+  }
   if (kind === 'chart') {
     return {
       id: `tc-chart-${width}`,
@@ -67,18 +82,35 @@ function makeTc(width: number, kind: Kind): ToolCall {
   };
 }
 
+function FormStory({ w }: { w: number }) {
+  const [result, setResult] = useState<FormResult | null>(null);
+  useEffect(() => {
+    const { promise } = registerPendingForm(10_000);
+    promise.then(setResult);
+  }, []);
+  return (
+    <div style={{ width: 760, maxWidth: '100%' }}>
+      <RenderToolCallCard tc={makeTc(w, 'form')} />
+      <div data-testid="form-result">{result ? JSON.stringify(result) : 'waiting'}</div>
+    </div>
+  );
+}
+
 export const renderToolCallCardStory = {
   // Wrap in a block container ~chat width so the harness shows the true
   // right-aligned layout. ?w=<px> sets the mock width (>460 → code drops below).
   // ?kind=html|chart|diff selects which renderer tool the card displays.
-  component: ({ w, kind }: { w: number; kind: Kind }) => (
-    <div style={{ width: 760, maxWidth: '100%' }}>
-      <RenderToolCallCard tc={makeTc(w, kind)} />
-    </div>
-  ),
+  component: ({ w, kind }: { w: number; kind: Kind }) =>
+    kind === 'form' ? (
+      <FormStory w={w} />
+    ) : (
+      <div style={{ width: 760, maxWidth: '100%' }}>
+        <RenderToolCallCard tc={makeTc(w, kind)} />
+      </div>
+    ),
   parseProps: (params: URLSearchParams) => {
     const k = params.get('kind');
-    const allowed = k === 'chart' || k === 'diff' || k === 'mermaid' || k === 'theme';
+    const allowed = k === 'chart' || k === 'diff' || k === 'mermaid' || k === 'theme' || k === 'form';
     return {
       w: Number(params.get('w')) || 320,
       kind: (allowed ? k : 'html') as Kind,
