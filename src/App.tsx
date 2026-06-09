@@ -52,8 +52,6 @@ import { landTask, discardTask, rebaseRetry } from './lib/swarmLanding';
 import { ensureOrchestratorSession } from './lib/swarmOrchestratorSession';
 import { handleSwarmToolRequest, type SwarmHost } from './lib/swarmOrchestratorDispatcher';
 import { handleRenderToolRequest } from './render/handleRenderToolRequest';
-import { captureRenderRegion } from './render/captureRenderRegion';
-import { RenderOverlay } from './components/Chat/RenderOverlay';
 import { RenderToolCallCard } from './components/Chat/RenderToolCallCard';
 import { executeSlashCommand } from './lib/orchestratorSlashCommands';
 import { isOrchestratorToolDrift, describeToolDrift } from './lib/orchestratorToolDrift';
@@ -1417,7 +1415,7 @@ export default function App() {
       if (typeof req.tool === 'string' && req.tool.startsWith('render_')) {
         void handleRenderToolRequest(
           { tool: req.tool, input: req.input, renderId: req.id },
-          { captureRenderRegion },
+          {},
         ).then(
           (result) => sai.respondSwarmTool(req.id, result),
           (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
@@ -4972,7 +4970,6 @@ export default function App() {
           cursor: row-resize;
         }
       `}</style>
-      <RenderOverlay />
     </div>
   );
 }

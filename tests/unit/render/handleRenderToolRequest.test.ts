@@ -34,15 +34,24 @@ describe('handleRenderToolRequest', () => {
     expect(capture).not.toHaveBeenCalled();
   });
 
-  it('marks the entry error and returns the message if capture throws', async () => {
-    // Uses render_html (no registry dependency) so the test isolates the
-    // capture-throw path rather than coupling to a registered component.
+  it('returns ok (best-effort) and marks the entry ready if capture throws', async () => {
     const res: any = await handleRenderToolRequest(
       { tool: 'render_html', input: { html: '<b>x</b>' }, renderId: 'r3' },
       { captureRenderRegion: async () => { throw new Error('capture failed'); } },
     );
-    expect(res.ok).toBe(false);
-    expect(res.error).toBe('capture failed');
-    expect(renderStore.get('r3')?.status).toBe('error');
+    expect(res.ok).toBe(true);
+    expect(res.__mcpImage).toBeUndefined();
+    expect(renderStore.get('r3')?.status).toBe('ready');
+  });
+
+  it('returns ok without __mcpImage when no deps provided', async () => {
+    const res: any = await handleRenderToolRequest(
+      { tool: 'render_html', input: { html: '<b>x</b>' }, renderId: 'r4' },
+      {},
+    );
+    expect(res.ok).toBe(true);
+    expect(res.renderId).toBe('r4');
+    expect(res.__mcpImage).toBeUndefined();
+    expect(renderStore.get('r4')?.status).toBe('ready');
   });
 });

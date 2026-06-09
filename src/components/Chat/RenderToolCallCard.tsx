@@ -75,34 +75,26 @@ export function RenderToolCallCard({ tc }: { tc: ToolCall }) {
   return (
     <div className="sai-render-card" data-testid="render-tool-call-card">
       <div className="sai-render-card__bar">
-        <span className="sai-render-card__title">{entry.title || entry.kind}</span>
+        <span className="sai-render-card__title">
+          <span className="sai-render-card__glyph">✦</span>
+          {entry.title || (entry.kind === 'html' ? 'HTML' : entry.kind)}
+          <span className="sai-render-card__sub">{entry.kind === 'component' ? 'render_component' : 'render_html'}</span>
+        </span>
         <button
           type="button"
+          className="sai-render-card__codebtn"
           data-testid="render-code-toggle"
-          style={{ marginLeft: 'auto', cursor: 'pointer', fontSize: 12 }}
           aria-expanded={showCode}
           onClick={() => setShowCode((v) => !v)}
         >
           {showCode ? 'Hide code' : 'Show code'}
         </button>
       </div>
-      <RenderRegion entry={entry} />
+      <div className="sai-render-card__render">
+        <RenderRegion entry={entry} />
+      </div>
       {showCode && (
-        <pre
-          data-testid="render-code"
-          style={{
-            margin: 0,
-            padding: 12,
-            maxHeight: 280,
-            overflow: 'auto',
-            fontSize: 12,
-            borderTop: '1px solid var(--sai-border, #333)',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-          }}
-        >
-          {code}
-        </pre>
+        <pre className="sai-render-card__code" data-testid="render-code">{code}</pre>
       )}
     </div>
   );
