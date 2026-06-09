@@ -53,6 +53,7 @@ import { ensureOrchestratorSession } from './lib/swarmOrchestratorSession';
 import { handleSwarmToolRequest, type SwarmHost } from './lib/swarmOrchestratorDispatcher';
 import { handleRenderToolRequest } from './render/handleRenderToolRequest';
 import { captureRenderRegion } from './render/captureRenderRegion';
+import { RenderOverlay } from './components/Chat/RenderOverlay';
 import { executeSlashCommand } from './lib/orchestratorSlashCommands';
 import { isOrchestratorToolDrift, describeToolDrift } from './lib/orchestratorToolDrift';
 import { resolveTaskRef } from './lib/swarmRef';
@@ -4963,6 +4964,7 @@ export default function App() {
           cursor: row-resize;
         }
       `}</style>
+      <RenderOverlay />
     </div>
   );
 }
