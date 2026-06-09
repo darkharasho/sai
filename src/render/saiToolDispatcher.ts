@@ -1,5 +1,6 @@
 import { renderStore } from './renderStore';
 import { getRegisteredComponent, registeredComponentKeys } from './componentRegistry';
+import { buildChartHtml, buildDiffHtml, type ChartInput, type DiffInput } from './builtinRenderers';
 
 export interface DispatchResult {
   ok: boolean;
@@ -31,6 +32,24 @@ export function dispatchSaiRenderTool(name: string, input: any, renderId: string
       }
       const props = inp.props && typeof inp.props === 'object' ? inp.props : {};
       renderStore.upsert({ renderId, kind: 'component', payload: { component: inp.component, props }, title, width, background, status: 'rendering' });
+      return { ok: true };
+    }
+    case 'render_chart': {
+      let html: string;
+      try {
+        html = buildChartHtml(inp as ChartInput);
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : 'invalid chart input' };
+      }
+      renderStore.upsert({ renderId, kind: 'html', payload: { html }, title, width, background, status: 'rendering' });
+      return { ok: true };
+    }
+    case 'render_diff': {
+      if (typeof inp.before !== 'string' || typeof inp.after !== 'string') {
+        return { ok: false, error: 'render_diff requires "before" and "after" HTML strings' };
+      }
+      const html = buildDiffHtml(inp as DiffInput);
+      renderStore.upsert({ renderId, kind: 'html', payload: { html }, title, width, background, status: 'rendering' });
       return { ok: true };
     }
     default:
