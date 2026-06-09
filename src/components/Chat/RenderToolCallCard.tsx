@@ -85,6 +85,18 @@ export function entryFromToolCall(tc: ToolCall): { entry: RenderEntry; code: str
     };
   }
 
+  if (name.endsWith('sai_render_theme')) {
+    const vars = input.vars && typeof input.vars === 'object' ? (input.vars as Record<string, string>) : null;
+    if (!vars) return null;
+    const components = Array.isArray(input.components) && input.components.length > 0
+      ? (input.components as unknown[]).filter((c): c is string => typeof c === 'string')
+      : [];
+    return {
+      entry: { renderId, kind: 'theme', payload: { components, vars }, title: title || 'Theme', width, background, status: 'ready' },
+      code: JSON.stringify(vars, null, 2),
+    };
+  }
+
   // default: html
   const html = typeof input.html === 'string' ? input.html : '';
   if (!html) return null;
@@ -137,7 +149,7 @@ export function RenderToolCallCard({ tc }: { tc: ToolCall }) {
   const built = entryFromToolCall(tc);
   if (!built) return null;
   const { entry, code } = built;
-  const lang = entry.kind === 'component' ? 'json' : entry.kind === 'mermaid' ? 'text' : 'html';
+  const lang = entry.kind === 'component' || entry.kind === 'theme' ? 'json' : entry.kind === 'mermaid' ? 'text' : 'html';
   // Narrow mocks open the code pane to the right; wide mocks (where side-by-side
   // would overflow the thread) drop the code block below the render instead.
   const layout = entry.width > 460 ? 'stack' : 'side';
