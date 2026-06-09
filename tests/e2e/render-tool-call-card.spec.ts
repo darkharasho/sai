@@ -77,3 +77,12 @@ test('render_form submit round-trips the value back through formBridge', async (
   await expect(el.locator('[data-testid="form-result"]')).toContainText('picked-B');
   await expect(el.locator('[data-testid="form-result"]')).toContainText('"ok":true');
 });
+
+test('confirm card returns true when the confirm button is clicked', async ({ harness }) => {
+  const el = await harness.render('render-tool-call-card', { kind: 'confirm', w: '420' });
+  const card = el.locator('[data-testid="render-tool-call-card"]');
+  await expect(card).toBeVisible();
+  await card.frameLocator('iframe').getByRole('button', { name: 'Yes' }).click();
+  await expect(el.locator('[data-testid="form-result"]')).toContainText('"value":true');
+  await expect(el.locator('[data-testid="form-result"]')).toContainText('"ok":true');
+});
