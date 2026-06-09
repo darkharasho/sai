@@ -12,7 +12,14 @@ function seedStore(kind: 'html' | 'component', id: string): void {
     renderStore.upsert({
       renderId: id,
       kind: 'html',
-      payload: { html: '<b id="mock">hello mock</b>' },
+      // A tall, dark mock (like a real button sketch) — exercises iframe
+      // auto-grow: without it this content clips to the 150px iframe default.
+      payload: {
+        html:
+          '<div id="mock" style="min-height:360px;display:grid;place-items:center;background:#0a0b0f">' +
+          '<button style="padding:14px 28px;border-radius:12px;border:0;color:#fff;' +
+          'background:linear-gradient(135deg,#6d28d9,#2563eb);font:600 16px sans-serif">hello mock</button></div>',
+      },
       title: 'HTML',
       width: 320,
       status: 'ready',

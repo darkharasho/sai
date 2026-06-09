@@ -30,14 +30,26 @@ async function waitForVisibleRegion(
   intervalMs: number,
 ): Promise<HTMLElement> {
   const deadline = Date.now() + timeoutMs;
+  let lastHeight = -1;
+  let sawNonZero = false;
+  // Wait for the region to be present, non-zero, AND stable across two polls —
+  // html mocks auto-resize their iframe after load, so the box grows; capturing
+  // on the first non-zero frame would grab the initial (pre-resize) height.
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const el = document.querySelector(`[data-render-region="${renderId}"]`) as HTMLElement | null;
     if (el) {
       const r = el.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) return el;
+      if (r.width > 0 && r.height > 0) {
+        sawNonZero = true;
+        const h = Math.round(r.height);
+        if (h === lastHeight) return el;
+        lastHeight = h;
+      }
     }
     if (Date.now() >= deadline) {
+      // Present and was non-zero but still settling → capture what we have.
+      if (el && sawNonZero) return el;
       throw new Error(`render region ${renderId} not found or not visible after ${timeoutMs}ms`);
     }
     await sleep(intervalMs);

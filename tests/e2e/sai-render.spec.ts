@@ -13,6 +13,11 @@ test('html mock renders as a sandboxed iframe and mirrors in the panel', async (
   expect(srcdoc ?? '').toContain('hello mock');
   expect(srcdoc ?? '').toContain('Content-Security-Policy');
 
+  // Auto-grow: the iframe sizes to the (360px) mock instead of clipping at the
+  // 150px HTML default, so tall mocks aren't cut off / shown as a blank slice.
+  await expect.poll(async () => (await iframe.boundingBox())?.height ?? 0, { timeout: 4000 })
+    .toBeGreaterThan(300);
+
   // Panel mirrors the active render.
   await expect(el.locator('[data-testid="render-preview-panel"]')).toBeVisible();
 });

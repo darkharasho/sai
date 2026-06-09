@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react';
+import { useSyncExternalStore, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import './RenderToolCard.css';
 import { renderStore, type RenderEntry } from '../../render/renderStore';
@@ -64,14 +64,47 @@ export function RenderRegion({ entry }: { entry: RenderEntry }) {
   );
 }
 
+// Injected into the sandboxed mock so it can report its content height back to
+// the parent. allow-scripts permits this; postMessage to the parent works even
+// from the opaque (no same-origin) sandbox. The parent matches on event.source.
+const HEIGHT_REPORTER =
+  '<script>(function(){' +
+  'function h(){return Math.ceil(Math.max(document.documentElement.scrollHeight,(document.body?document.body.scrollHeight:0)));}' +
+  "function post(){try{parent.postMessage({__saiRender:1,height:h()},'*');}catch(e){}}" +
+  "window.addEventListener('load',post);window.addEventListener('resize',post);" +
+  'try{if(window.ResizeObserver){new ResizeObserver(post).observe(document.documentElement);}}catch(e){}' +
+  'post();setTimeout(post,50);setTimeout(post,300);' +
+  '})();<\/script>';
+
 function RenderedHtml({ entry }: { entry: RenderEntry }) {
   const userHtml = String((entry.payload as { html: string }).html);
-  const doc = `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${SANDBOX_CSP}"></head><body style="margin:0">${userHtml}</body></html>`;
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  // Iframes default to 150px; mocks are usually taller and center their content,
+  // so without auto-sizing the body renders below the fold (looks blank/black).
+  const [height, setHeight] = useState(300);
+  const doc =
+    `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${SANDBOX_CSP}"></head>` +
+    `<body style="margin:0">${userHtml}${HEIGHT_REPORTER}</body></html>`;
+
+  useEffect(() => {
+    function onMessage(e: MessageEvent) {
+      const win = iframeRef.current?.contentWindow;
+      if (!win || e.source !== win) return;
+      const data = e.data as { __saiRender?: number; height?: number } | null;
+      if (!data || !data.__saiRender) return;
+      const h = Number(data.height);
+      if (Number.isFinite(h) && h > 0) setHeight(Math.min(2000, Math.max(40, Math.ceil(h))));
+    }
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
   return (
     <iframe
+      ref={iframeRef}
       title={entry.title || 'render'}
       sandbox="allow-scripts"
-      style={{ width: '100%', border: 0 }}
+      style={{ width: '100%', height, border: 0, display: 'block' }}
       srcDoc={doc}
     />
   );
