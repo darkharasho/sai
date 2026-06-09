@@ -85,8 +85,9 @@ function makeTc(width: number, kind: Kind): ToolCall {
 function FormStory({ w }: { w: number }) {
   const [result, setResult] = useState<FormResult | null>(null);
   useEffect(() => {
-    const { promise } = registerPendingForm(10_000);
+    const { promise, cancel } = registerPendingForm(10_000);
     promise.then(setResult);
+    return cancel;
   }, []);
   return (
     <div style={{ width: 760, maxWidth: '100%' }}>

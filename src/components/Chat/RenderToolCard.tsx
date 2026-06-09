@@ -79,6 +79,10 @@ export function RenderRegion({ entry }: { entry: RenderEntry }) {
 
 // Injected only for form renders: exposes window.saiSubmit(value), which posts
 // the user's value to the parent. The only new capability given to the sandbox.
+// The target is '*' because the iframe runs without allow-same-origin (opaque
+// origin), so the parent's origin is unknowable from inside the sandbox; '*' is
+// the only viable target. The parent validates the sender via event.source
+// (matched against the iframe's contentWindow), so the wildcard target is safe.
 const SUBMIT_BRIDGE =
   '<script>window.saiSubmit=function(v){try{parent.postMessage({__saiFormSubmit:1,value:v},\'*\');}catch(e){}};<\/script>';
 
@@ -97,6 +101,7 @@ const HEIGHT_REPORTER =
 function RenderedHtml({ entry, enableSubmit }: { entry: RenderEntry; enableSubmit?: boolean }) {
   const userHtml = String((entry.payload as { html: string }).html);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const submittedRef = useRef(false);
   const [height, setHeight] = useState(300);
   const bridge = enableSubmit ? SUBMIT_BRIDGE : '';
   const doc =
@@ -112,7 +117,8 @@ function RenderedHtml({ entry, enableSubmit }: { entry: RenderEntry; enableSubmi
       if (data.__saiRender) {
         const h = Number(data.height);
         if (Number.isFinite(h) && h > 0) setHeight(Math.min(2000, Math.max(40, Math.ceil(h))));
-      } else if (enableSubmit && data.__saiFormSubmit) {
+      } else if (enableSubmit && data.__saiFormSubmit && !submittedRef.current) {
+        submittedRef.current = true;
         submitForm(data.value);
       }
     }

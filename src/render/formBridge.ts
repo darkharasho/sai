@@ -10,6 +10,9 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>;
 }
 
+// The agent blocks on one form at a time, so this queue is normally length 0
+// or 1. FIFO handles the degenerate concurrent case, but submit→form value
+// correlation assumes sequential (non-overlapping) form lifecycles.
 const queue: Pending[] = [];
 
 /**
