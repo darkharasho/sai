@@ -127,7 +127,8 @@ export async function handleRequest(
       let toolName: string | null = null;
       if (toolset === 'orchestrator' && fullName.startsWith('swarm_') && SWARM_TOOL_NAMES.has(fullName.slice(6))) {
         toolName = fullName.slice(6);
-      } else if (fullName.startsWith('sai_') && SAI_TOOL_NAMES.has(fullName.slice(4))) {
+      } else if (fullName.startsWith('sai_') && SAI_TOOL_NAMES.has(fullName.slice(4))
+                 && toolsForToolset(toolset).some((t) => t.name === fullName.slice(4))) {
         toolName = fullName.slice(4);
       }
       if (!toolName) {

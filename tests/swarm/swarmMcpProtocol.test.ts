@@ -381,6 +381,20 @@ describe('sai tools over MCP', () => {
     expect(res.error).toEqual({ code: -32602, message: 'unknown tool: swarm_spawn_task' });
   });
 
+  it('refuses to dispatch a sai_ tool when toolset=orchestrator (unlisted)', async () => {
+    setToolset('orchestrator');
+    const calls: string[] = [];
+    const transport: SwarmCallTransport = {
+      call: async (tool: string) => { calls.push(tool); return { ok: true }; },
+    };
+    const res: any = await handleRequest(
+      { jsonrpc: '2.0', id: 10, method: 'tools/call', params: { name: 'sai_render_html', arguments: { html: '<b>x</b>' } } },
+      transport,
+    );
+    expect(calls).toEqual([]);
+    expect(res.error).toEqual({ code: -32602, message: 'unknown tool: sai_render_html' });
+  });
+
   it('appends an image content block when the result carries __mcpImage', async () => {
     setToolset('chat');
     const transport: SwarmCallTransport = {
