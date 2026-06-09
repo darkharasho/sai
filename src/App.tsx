@@ -52,6 +52,7 @@ import { landTask, discardTask, rebaseRetry } from './lib/swarmLanding';
 import { ensureOrchestratorSession } from './lib/swarmOrchestratorSession';
 import { handleSwarmToolRequest, type SwarmHost } from './lib/swarmOrchestratorDispatcher';
 import { handleRenderToolRequest } from './render/handleRenderToolRequest';
+import { renderMermaidToSvg } from './render/renderMermaid';
 import { handleSaiQueryToolRequest } from './render/saiQueryTools';
 import { buildChartHtml, buildDiffHtml, type ChartInput, type DiffInput } from './render/builtinRenderers';
 import { RenderToolCallCard } from './components/Chat/RenderToolCallCard';
@@ -1421,6 +1422,32 @@ export default function App() {
             result === null
               ? sai.respondSwarmToolError(req.id, `unhandled query tool: ${req.tool}`)
               : sai.respondSwarmTool(req.id, result),
+          (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
+        );
+        return;
+      }
+
+      if (req.tool === 'render_mermaid') {
+        const saiAny = sai as { renderCaptureHtml?: (a: { html: string; width?: number }) => Promise<string | null> };
+        const diagram = typeof req.input?.diagram === 'string' ? req.input.diagram : '';
+        const deps = diagram && typeof saiAny.renderCaptureHtml === 'function'
+          ? {
+              captureRenderRegion: async () => {
+                const svg = await renderMermaidToSvg(diagram);
+                const b64 = await saiAny.renderCaptureHtml!({
+                  html: svg,
+                  width: typeof req.input?.width === 'number' ? req.input.width : undefined,
+                });
+                if (!b64) throw new Error('capture returned no image');
+                return { base64: b64, mimeType: 'image/png' as const };
+              },
+            }
+          : {};
+        void handleRenderToolRequest(
+          { tool: req.tool, input: req.input, renderId: req.id },
+          deps,
+        ).then(
+          (result) => sai.respondSwarmTool(req.id, result),
           (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
         );
         return;
@@ -4121,7 +4148,8 @@ export default function App() {
                       n.endsWith('sai_render_html') ||
                       n.endsWith('sai_render_component') ||
                       n.endsWith('sai_render_chart') ||
-                      n.endsWith('sai_render_diff')
+                      n.endsWith('sai_render_diff') ||
+                      n.endsWith('sai_render_mermaid')
                     ) {
                       return <RenderToolCallCard tc={tc} />;
                     }
