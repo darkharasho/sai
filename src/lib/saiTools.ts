@@ -148,6 +148,39 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
     },
   },
   {
+    name: 'confirm',
+    description:
+      'Ask the user a yes/no question and BLOCK until they answer; returns { value: true | false }. A ' +
+      'lightweight preset over render_form — use for a quick "proceed?" instead of authoring form HTML.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', description: 'The question to show.' },
+        confirmLabel: { type: 'string', description: "Confirm button label (default 'Confirm')." },
+        cancelLabel: { type: 'string', description: "Cancel button label (default 'Cancel')." },
+        timeoutMs: { type: 'number', description: 'How long to wait (10000-600000, default 180000).' },
+      },
+      required: ['message'],
+    },
+  },
+  {
+    name: 'choose',
+    description:
+      'Ask the user to pick ONE of several options and BLOCK until they choose; returns { value: <chosen ' +
+      'option string> }. A lightweight preset over render_form for a quick single choice.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', description: 'The prompt to show above the options.' },
+        options: { type: 'array', items: { type: 'string' }, description: 'The options to choose from (one button each).' },
+        timeoutMs: { type: 'number', description: 'How long to wait (10000-600000, default 180000).' },
+      },
+      required: ['message', 'options'],
+    },
+  },
+  {
     name: 'pick_file',
     description:
       'Open a native file/folder picker and return the path(s) the user chooses. USE THIS when you need a ' +

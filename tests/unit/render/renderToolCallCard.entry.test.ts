@@ -44,3 +44,26 @@ it('returns null for a form call with empty html', () => {
   const built = entryFromToolCall(tc('sai_render_form', { html: '' }));
   expect(built).toBeNull();
 });
+
+it('builds a confirm form with two buttons', () => {
+  const built = entryFromToolCall(tc('sai_confirm', { message: 'Proceed?' }));
+  expect(built?.entry.kind).toBe('form');
+  expect((String(built?.entry.payload.html).match(/<button/g) || []).length).toBe(2);
+  expect(String(built?.entry.payload.html)).toContain('data-sai-value="true"');
+  expect(String(built?.entry.payload.html)).toContain('data-sai-value="false"');
+});
+
+it('builds a choose form with one button per option', () => {
+  const built = entryFromToolCall(tc('sai_choose', { message: 'Pick', options: ['Red', 'Green', 'Blue'] }));
+  expect(built?.entry.kind).toBe('form');
+  expect((String(built?.entry.payload.html).match(/<button/g) || []).length).toBe(3);
+  expect(String(built?.entry.payload.html)).toContain('>Red</button>');
+});
+
+it('returns null for choose with no options', () => {
+  expect(entryFromToolCall(tc('sai_choose', { message: 'Pick', options: [] }))).toBeNull();
+});
+
+it('returns null for confirm with no message', () => {
+  expect(entryFromToolCall(tc('sai_confirm', {}))).toBeNull();
+});

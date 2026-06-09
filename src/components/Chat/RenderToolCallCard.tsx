@@ -6,6 +6,7 @@ import { RenderRegion } from './RenderToolCard';
 import { getShikiHighlighter, getActiveHighlightTheme } from '../../themes';
 import { AppWindow } from 'lucide-react';
 import { buildChartHtml, buildDiffHtml, type ChartInput, type DiffInput } from '../../render/builtinRenderers';
+import { buildChoiceHtml } from '../../render/buildChoiceHtml';
 import { registeredComponentKeys } from '../../render/componentRegistry';
 
 function parseInput(raw: string): Record<string, unknown> {
@@ -106,6 +107,31 @@ export function entryFromToolCall(tc: ToolCall): { entry: RenderEntry; code: str
     return {
       entry: { renderId, kind: 'form', payload: { html }, title: title || 'Form', width, background, status: 'ready' },
       code: html,
+    };
+  }
+
+  if (name.endsWith('sai_confirm')) {
+    const message = typeof input.message === 'string' ? input.message : '';
+    if (!message) return null;
+    const confirmLabel = typeof input.confirmLabel === 'string' ? input.confirmLabel : 'Confirm';
+    const cancelLabel = typeof input.cancelLabel === 'string' ? input.cancelLabel : 'Cancel';
+    const html = buildChoiceHtml({ message, choices: [{ label: confirmLabel, value: true }, { label: cancelLabel, value: false }] });
+    return {
+      entry: { renderId, kind: 'form', payload: { html }, title: title || 'Confirm', width, background, status: 'ready' },
+      code: message,
+    };
+  }
+
+  if (name.endsWith('sai_choose')) {
+    const message = typeof input.message === 'string' ? input.message : '';
+    const options = Array.isArray(input.options)
+      ? (input.options as unknown[]).filter((o): o is string => typeof o === 'string')
+      : [];
+    if (!message || options.length === 0) return null;
+    const html = buildChoiceHtml({ message, choices: options.map((o) => ({ label: o, value: o })) });
+    return {
+      entry: { renderId, kind: 'form', payload: { html }, title: title || 'Choose', width, background, status: 'ready' },
+      code: message,
     };
   }
 
