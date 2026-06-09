@@ -1,0 +1,5 @@
+.sai-render-card { border: 1px solid var(--sai-border, #333); border-radius: 8px; overflow: hidden; }
+.sai-render-card__bar { display: flex; align-items: center; gap: 8px; padding: 4px 8px; font-size: 12px; background: var(--sai-surface-2, #222); }
+.sai-render-card__title { font-weight: 600; }
+.sai-render-card__err { color: #f87171; }
+.sai-render-card__bar button { margin-left: auto; font-size: 12px; cursor: pointer; }
