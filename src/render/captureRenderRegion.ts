@@ -8,6 +8,10 @@ function nextFrame(): Promise<void> {
 
 /** Waits for paint + fonts, measures the render region, asks main to capture it. */
 export async function captureRenderRegion(renderId: string): Promise<CapturedImage> {
+  // renderId is interpolated into an attribute selector below. It is always a
+  // main-generated `mcp-<uuid>` today, but guard so a malformed id can never
+  // break the selector or match unintended elements.
+  if (!/^[\w-]+$/.test(renderId)) throw new Error(`invalid renderId: ${renderId}`);
   await nextFrame();
   await nextFrame();
   if (document.fonts?.ready) { try { await document.fonts.ready; } catch { /* noop */ } }
