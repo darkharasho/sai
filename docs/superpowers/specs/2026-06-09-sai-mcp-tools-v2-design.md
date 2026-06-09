@@ -290,16 +290,16 @@ Mirror v1's layers (vitest unit/integration + Playwright harness e2e):
 - ✅ `render_theme` + **offscreen component capture** (`sai-offscreen-component-capture`) — a hidden `BrowserWindow` loads a minimal prod-safe `/render-host` route and `capturePage`s real registered components under candidate CSS vars. **Also fixed `render_component`'s missing agent screenshot** (it now captures via the same offscreen path). Shared `ThemedComponents` keeps the live card and captured output identical. See `2026-06-09-sai-offscreen-component-capture-design.md`.
 - ✅ **`render_form` — Tier 3 bidirectional keystone** (`sai-render-form`) — the agent renders an interactive form in the chat card; the tool **blocks** until the user submits, returning `{ ok:true, value }`. A sandboxed-iframe `window.saiSubmit(value)` bridge posts to the parent; `formBridge` (FIFO + timeout) correlates submit→call; main's tool timeout is extended for `render_form`. SAI's render surface is now bidirectional. See `2026-06-09-sai-render-form-design.md`.
 - ✅ **Native interaction tools** `pick_file` / `notify` / `clipboard` (write-only) (`sai-native-tools`) — renderer-target, calling preload IPC bridges to main (dialog / Notification / clipboard). **Framework Delta A confirmed unneeded** and is now effectively retired — every Tier 2/native tool turned out renderer-reachable via preload IPC. Clipboard read deferred (privacy). See `2026-06-09-sai-native-tools-design.md`.
+- ✅ **`confirm` / `choose`** (`sai-confirm-choose`) — convenience presets that auto-generate form HTML (`buildChoiceHtml`) and ride the `render_form` `formBridge` channel; no new channel. `confirm`→`{value:true|false}`, `choose`→`{value:<option>}`. See `2026-06-09-sai-confirm-choose-design.md`.
 
 **Blocked / re-scoped (discovered during implementation):**
 - ⛔ `read_app_state` — **parked.** Only `renderStore` is reachable from the renderer that handles tool calls (low value); `workspaceStatusStore`/`githubWatcherStore` live in the separate `src/renderer-remote/` PWA bundle, unreachable. Revisit only if a reachable, valuable store appears.
 - 🗑️ **Framework Delta A** (the `target:'main'` MCP route) — **retired.** Never needed; all tools reach main via preload IPC from the renderer. Resurrect only for a genuinely headless main-only tool.
 
 **Remaining:**
-- `freezeAtMs` / filmstrip capture.
-- `confirm` / `choose` — convenience tools on the shipped `formBridge` channel.
-- Gated clipboard **read** (one-time native consent prompt), if wanted.
 - Expand `componentRegistry` with more presentational components (makes `render_theme`/`render_component` more useful; additive).
+- `freezeAtMs` / filmstrip capture.
+- Gated clipboard **read** (one-time native consent prompt), if wanted.
 
 ## Open Questions
 
