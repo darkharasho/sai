@@ -4,17 +4,25 @@ export interface MermaidApi {
 }
 
 let cached: MermaidApi | null = null;
+let pending: Promise<MermaidApi> | null = null;
 let counter = 0;
 
 // Dynamic import keeps mermaid (large) out of the main bundle; it loads only the
-// first time the agent renders a diagram.
+// first time the agent renders a diagram. Promise-cached so concurrent first
+// calls (e.g. the live card AND the screenshot path on the same render) share a
+// single import + initialize.
 async function loadMermaid(): Promise<MermaidApi> {
   if (cached) return cached;
-  const mod = (await import('mermaid')) as unknown as { default?: MermaidApi } & MermaidApi;
-  const api = (mod.default ?? mod) as MermaidApi;
-  api.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' });
-  cached = api;
-  return api;
+  if (!pending) {
+    pending = (async () => {
+      const mod = (await import('mermaid')) as unknown as { default?: MermaidApi } & MermaidApi;
+      const api = (mod.default ?? mod) as MermaidApi;
+      api.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' });
+      cached = api;
+      return api;
+    })();
+  }
+  return pending;
 }
 
 /**
