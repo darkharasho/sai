@@ -825,6 +825,49 @@ function createWindow() {
     }
   });
 
+  // Render a mock's HTML in a hidden off-screen window and screenshot it, so the
+  // agent can SEE its render without opening a visible browser tab. Returns a
+  // bare base64 PNG (or null on failure).
+  ipcMain.handle('render:captureHtml', async (_event, args: { html?: string; width?: number }) => {
+    const html = typeof args?.html === 'string' ? args.html : '';
+    if (!html) return null;
+    const width = Math.min(Math.max(Math.round(args?.width || 480), 80), 2000);
+    let win: BrowserWindow | null = null;
+    try {
+      win = new BrowserWindow({
+        width,
+        height: 1200,
+        show: false,
+        // Park it far off any display so it never flashes on screen.
+        x: -32000,
+        y: -32000,
+        frame: false,
+        skipTaskbar: true,
+        webPreferences: { sandbox: true, javascript: true, backgroundThrottling: false },
+      });
+      const doc =
+        `<!doctype html><html><head><meta charset="utf-8">` +
+        `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:;">` +
+        `</head><body style="margin:0">${html}</body></html>`;
+      await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(doc));
+      // Let layout, fonts and any inline scripts settle before measuring.
+      await new Promise((r) => setTimeout(r, 320));
+      const h = (await win.webContents.executeJavaScript(
+        'Math.ceil(Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)) || 200',
+      )) as number;
+      const height = Math.min(Math.max(Math.round(h), 40), 4000);
+      win.setContentSize(width, height);
+      await new Promise((r) => setTimeout(r, 60));
+      const image = await win.webContents.capturePage({ x: 0, y: 0, width, height });
+      return image.toPNG().toString('base64');
+    } catch (err) {
+      console.error('[render] captureHtml failed:', err);
+      return null;
+    } finally {
+      try { win?.destroy(); } catch { /* noop */ }
+    }
+  });
+
   // Write a render's HTML to a temp file and open it in the default browser.
   ipcMain.handle('render:openInBrowser', async (_event, html: string) => {
     if (typeof html !== 'string' || !html) return false;

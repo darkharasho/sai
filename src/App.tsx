@@ -1410,12 +1410,29 @@ export default function App() {
 
     const unsub = sai.onSwarmToolRequest((req: { id: string; tool: string; input: any; workspace: string }) => {
       // SAI render tools (render_html / render_component) are handled in the
-      // renderer: dispatch into the render store, capture the painted region,
-      // and respond over the same IPC channel swarm tools use. renderId = req.id.
+      // renderer: dispatch into the render store, then (for html) screenshot the
+      // mock headlessly so the agent can SEE its render without opening a browser
+      // tab. renderId = req.id; response goes over the swarm tool channel.
       if (typeof req.tool === 'string' && req.tool.startsWith('render_')) {
+        const saiAny = sai as { renderCaptureHtml?: (a: { html: string; width?: number }) => Promise<string | null> };
+        const htmlInput = req.tool === 'render_html' && req.input && typeof req.input.html === 'string'
+          ? (req.input.html as string)
+          : null;
+        const deps = htmlInput && typeof saiAny.renderCaptureHtml === 'function'
+          ? {
+              captureRenderRegion: async () => {
+                const b64 = await saiAny.renderCaptureHtml!({
+                  html: htmlInput,
+                  width: typeof req.input?.width === 'number' ? req.input.width : undefined,
+                });
+                if (!b64) throw new Error('capture returned no image');
+                return { base64: b64, mimeType: 'image/png' as const };
+              },
+            }
+          : {};
         void handleRenderToolRequest(
           { tool: req.tool, input: req.input, renderId: req.id },
-          {},
+          deps,
         ).then(
           (result) => sai.respondSwarmTool(req.id, result),
           (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
