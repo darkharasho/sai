@@ -54,6 +54,7 @@ import { handleSwarmToolRequest, type SwarmHost } from './lib/swarmOrchestratorD
 import { handleRenderToolRequest } from './render/handleRenderToolRequest';
 import { captureRenderRegion } from './render/captureRenderRegion';
 import { RenderOverlay } from './components/Chat/RenderOverlay';
+import { RenderToolCallCard } from './components/Chat/RenderToolCallCard';
 import { executeSlashCommand } from './lib/orchestratorSlashCommands';
 import { isOrchestratorToolDrift, describeToolDrift } from './lib/orchestratorToolDrift';
 import { resolveTaskRef } from './lib/swarmRef';
@@ -4069,6 +4070,13 @@ export default function App() {
                   onEffortChange={handleEffortChange}
                   modelChoice={modelChoice}
                   onModelChange={handleModelChange}
+                  renderToolCall={(tc) => {
+                    const n = tc.name || '';
+                    if (n.endsWith('sai_render_html') || n.endsWith('sai_render_component')) {
+                      return <RenderToolCallCard tc={tc} />;
+                    }
+                    return null;
+                  }}
                   aiProvider={aiProvider}
                   codexModel={codexModel}
                   onCodexModelChange={handleCodexModelChange}
