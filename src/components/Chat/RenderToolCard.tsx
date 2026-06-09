@@ -4,6 +4,12 @@ import './RenderToolCard.css';
 import { renderStore, type RenderEntry } from '../../render/renderStore';
 import { getRegisteredComponent } from '../../render/componentRegistry';
 
+// Policy enforced inside the html-mock iframe (via a <meta> in srcDoc).
+// `script-src 'unsafe-inline'` is intentional: mocks may include JS (a product
+// decision), and the iframe's `sandbox="allow-scripts"` does NOT override CSP —
+// with `default-src 'none'` and no script-src, inline scripts would be blocked.
+// `allow-scripts` (without allow-same-origin) provides the isolation; the CSP
+// additionally blocks all network/remote loads (only inline styles + data: imgs).
 const SANDBOX_CSP =
   "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:;";
 

@@ -203,8 +203,10 @@ image tool-result plumbing.
   `allow-same-origin` → the mock cannot reach `window.sai`, IPC, cookies, or the
   parent DOM. JS is allowed but jailed.
 - The iframe gets a strict CSP (`default-src 'none'; style-src 'unsafe-inline';
-  img-src data:`) so a mock cannot beacon out or load remote scripts. Inline
-  styles and data-URI images only.
+  script-src 'unsafe-inline'; img-src data:`) so a mock cannot beacon out or load
+  remote scripts. Inline styles, inline scripts (mocks may include JS — the
+  sandbox attribute does not override CSP, so `script-src 'unsafe-inline'` is
+  required to actually run them), and data-URI images only — no network.
 - `render_component` runs in-app (required for real CSS) and is gated by the
   allow-list registry; props must be JSON-serializable. No arbitrary import
   paths.
