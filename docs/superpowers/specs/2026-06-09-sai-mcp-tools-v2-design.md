@@ -287,15 +287,16 @@ Mirror v1's layers (vitest unit/integration + Playwright harness e2e):
 - ✅ `inspect_element`, `capture_app` (`sai-tier2-inspect-capture`) — renderer-target; **Framework Delta A was NOT needed** (capturePage is renderer-reachable via the `sai:capture-region` IPC). Delta A stays deferred until a genuinely main-only tool (native pickers).
 - ✅ `render_mermaid` (`sai-render-mermaid`) — new `mermaid` render kind; mermaid dep dynamically imported (code-split); agent capture rides the offscreen `renderCaptureHtml` path.
 
+- ✅ `render_theme` + **offscreen component capture** (`sai-offscreen-component-capture`) — a hidden `BrowserWindow` loads a minimal prod-safe `/render-host` route and `capturePage`s real registered components under candidate CSS vars. **Also fixed `render_component`'s missing agent screenshot** (it now captures via the same offscreen path). Shared `ThemedComponents` keeps the live card and captured output identical. See `2026-06-09-sai-offscreen-component-capture-design.md`.
+
 **Blocked / re-scoped (discovered during implementation):**
 - ⛔ `read_app_state` — **parked.** Only `renderStore` is reachable from the renderer that handles tool calls (low value); `workspaceStatusStore`/`githubWatcherStore` live in the separate `src/renderer-remote/` PWA bundle, unreachable. Revisit only if a reachable, valuable store appears.
-- ⛔ `render_theme` (and full-fidelity `render_component` screenshots) — **needs infrastructure.** `captureRenderRegion()` (live-region `capturePage`) is written + unit-tested but **`RenderPreviewPanel` is never mounted in the real app** (only the test harness), so component/theme renders have no on-screen region to capture. Shipping these requires integrating the preview surface into the app UI first. Component renders currently return no screenshot to the agent.
 
 **Remaining:**
-- `render_theme` (after the preview-surface integration above).
 - Native interaction tools `pick_*`/`notify`/`clipboard` — need **Framework Delta A** (main-only).
 - `freezeAtMs` / filmstrip capture.
 - Tier 3 `render_form` / `confirm` — the bidirectional channel.
+- Expand `componentRegistry` with more presentational components (makes `render_theme`/`render_component` more useful; additive).
 
 ## Open Questions
 
