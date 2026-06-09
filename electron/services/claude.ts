@@ -201,6 +201,10 @@ export function buildArgs(options: BuildArgsOptions = {}): string[] {
   } else {
     // Chat sessions get SAI-native tools (render_html / render_component) via an
     // MCP config, but keep all built-in tools (no --strict-mcp-config).
+    // getMcpHandle() (= swarmMcpHost.start()) is safe to call here regardless of
+    // session ordering: main.ts starts the host and registers its onToolCall
+    // handler unconditionally at app init, and start() is idempotent — this just
+    // returns the already-listening handle.
     if (kind === 'chat' && workspace) {
       const handle = getMcpHandle();
       const cfgPath = writeMcpConfig({
