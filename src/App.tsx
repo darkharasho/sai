@@ -1417,7 +1417,10 @@ export default function App() {
           { tool: req.tool, input: req.input },
           { captureRegion: saiAny.captureRegion },
         ).then(
-          (result) => sai.respondSwarmTool(req.id, result),
+          (result) =>
+            result === null
+              ? sai.respondSwarmToolError(req.id, `unhandled query tool: ${req.tool}`)
+              : sai.respondSwarmTool(req.id, result),
           (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
         );
         return;
