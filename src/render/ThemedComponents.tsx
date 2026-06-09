@@ -18,10 +18,10 @@ export function ThemedComponents({
       {components.map((key, i) => {
         const reg = getRegisteredComponent(key);
         if (!reg) {
-          return <div key={i} className="sai-render-card__err">unknown component: {key}</div>;
+          return <div key={`${key}-${i}`} className="sai-render-card__err">unknown component: {key}</div>;
         }
         const Cmp = reg.component;
-        return <Cmp key={i} {...(props ?? {})} />;
+        return <Cmp key={`${key}-${i}`} {...(props ?? {})} />;
       })}
     </div>
   );

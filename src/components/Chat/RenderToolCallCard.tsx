@@ -6,6 +6,7 @@ import { RenderRegion } from './RenderToolCard';
 import { getShikiHighlighter, getActiveHighlightTheme } from '../../themes';
 import { AppWindow } from 'lucide-react';
 import { buildChartHtml, buildDiffHtml, type ChartInput, type DiffInput } from '../../render/builtinRenderers';
+import { registeredComponentKeys } from '../../render/componentRegistry';
 
 function parseInput(raw: string): Record<string, unknown> {
   try {
@@ -90,7 +91,7 @@ export function entryFromToolCall(tc: ToolCall): { entry: RenderEntry; code: str
     if (!vars) return null;
     const components = Array.isArray(input.components) && input.components.length > 0
       ? (input.components as unknown[]).filter((c): c is string => typeof c === 'string')
-      : [];
+      : registeredComponentKeys();
     const props = input.props && typeof input.props === 'object' && !Array.isArray(input.props)
       ? (input.props as Record<string, unknown>) : undefined;
     return {

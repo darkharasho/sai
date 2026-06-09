@@ -895,7 +895,10 @@ function createWindow() {
       while (true) {
         const ready = (await win.webContents.executeJavaScript('window.__renderReady === true').catch(() => false)) as boolean;
         if (ready) break;
-        if (Date.now() >= deadline) break;
+        if (Date.now() >= deadline) {
+          console.warn('[render] captureComponent: ready flag timed out, capturing current frame');
+          break;
+        }
         await new Promise((r) => setTimeout(r, 50));
       }
       const h = (await win.webContents.executeJavaScript(
