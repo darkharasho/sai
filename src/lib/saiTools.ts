@@ -108,6 +108,25 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
     },
   },
   {
+    name: 'render_theme',
+    description:
+      'Apply candidate CSS custom properties to real registered SAI components and return a screenshot. ' +
+      'USE THIS to preview a theme/color change on ACTUAL components (not a mock) so the user sees the ' +
+      'real effect. Pass `vars` (CSS custom properties); optionally limit to specific `components`.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        vars: { type: 'object', description: 'CSS custom properties, e.g. {"--accent":"#6aa9ff"}.' },
+        components: { type: 'array', items: { type: 'string' }, description: 'Registry keys to preview; omit for all registered.' },
+        title: { type: 'string', description: 'Label shown on the card/panel.' },
+        width: { type: 'number', description: 'Viewport width in px (default 360).' },
+        background: { type: 'string', description: 'Canvas background behind the preview.' },
+      },
+      required: ['vars'],
+    },
+  },
+  {
     name: 'inspect_element',
     description:
       "Return the computed box and CSS of a live element in the running SAI app, by CSS selector. " +
