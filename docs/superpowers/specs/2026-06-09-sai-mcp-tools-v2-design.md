@@ -280,23 +280,25 @@ Mirror v1's layers (vitest unit/integration + Playwright harness e2e):
 | MCP server/config | `electron/swarm-mcp-server.ts`, `electron/services/swarmMcpConfig.ts` |
 | Inline card / panel | `src/components/Chat/RenderToolCallCard.tsx` |
 
-## Recommended Sequencing
+## Progress / Status (updated 2026-06-09)
 
-1. **Framework Delta A** (`target` field + main route) — small, unblocks Tier 2.
-2. **Tier 1 batch** — `render_chart` + `render_diff` ✅ **shipped**
-   (`sai-render-chart-diff`); `render_mermaid` + `render_theme` remain as their
-   own plans (mermaid needs a dep + async dispatch; theme needs a `renderStore`
-   payload change).
-3. **Tier 2** (`inspect_element` + `capture_app` first — highest self-utility;
-   then `read_app_state`, the native interaction tools `pick_*`/`notify`/
-   `clipboard`, then `freezeAtMs`).
-4. **Tier 3** (`render_form`, then `confirm`/`choose`) — its own plan; the
-   bidirectional contract.
+**Shipped to main:**
+- ✅ `render_chart`, `render_diff` (`sai-render-chart-diff`)
+- ✅ `inspect_element`, `capture_app` (`sai-tier2-inspect-capture`) — renderer-target; **Framework Delta A was NOT needed** (capturePage is renderer-reachable via the `sai:capture-region` IPC). Delta A stays deferred until a genuinely main-only tool (native pickers).
+- ✅ `render_mermaid` (`sai-render-mermaid`) — new `mermaid` render kind; mermaid dep dynamically imported (code-split); agent capture rides the offscreen `renderCaptureHtml` path.
+
+**Blocked / re-scoped (discovered during implementation):**
+- ⛔ `read_app_state` — **parked.** Only `renderStore` is reachable from the renderer that handles tool calls (low value); `workspaceStatusStore`/`githubWatcherStore` live in the separate `src/renderer-remote/` PWA bundle, unreachable. Revisit only if a reachable, valuable store appears.
+- ⛔ `render_theme` (and full-fidelity `render_component` screenshots) — **needs infrastructure.** `captureRenderRegion()` (live-region `capturePage`) is written + unit-tested but **`RenderPreviewPanel` is never mounted in the real app** (only the test harness), so component/theme renders have no on-screen region to capture. Shipping these requires integrating the preview surface into the app UI first. Component renders currently return no screenshot to the agent.
+
+**Remaining:**
+- `render_theme` (after the preview-surface integration above).
+- Native interaction tools `pick_*`/`notify`/`clipboard` — need **Framework Delta A** (main-only).
+- `freezeAtMs` / filmstrip capture.
+- Tier 3 `render_form` / `confirm` — the bidirectional channel.
 
 ## Open Questions
 
-- Tier 1 chart/mermaid: vendor a micro-lib inline vs hand-roll SVG? (CSP forbids
-  CDN either way.)
-- Tier 2 `read_app_state`: which stores are safe to expose, and read-only how?
+- `render_theme`/component capture: integrate `RenderPreviewPanel` into the app, or add a dedicated offscreen component-render path? (The html path uses an offscreen window via `renderCaptureHtml`; components need the live React tree.)
 - Tier 3: per-call timeout default and what the agent gets on timeout (null vs
   explicit "user dismissed").
