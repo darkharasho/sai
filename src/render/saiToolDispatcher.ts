@@ -58,6 +58,13 @@ export function dispatchSaiRenderTool(name: string, input: any, renderId: string
       renderStore.upsert({ renderId, kind: 'html', payload: { html }, title: title || 'Diff', width, background, status: 'rendering' });
       return { ok: true };
     }
+    case 'render_mermaid': {
+      if (typeof inp.diagram !== 'string' || inp.diagram.length === 0) {
+        return { ok: false, error: 'render_mermaid requires a non-empty "diagram" string' };
+      }
+      renderStore.upsert({ renderId, kind: 'mermaid', payload: { diagram: inp.diagram }, title: title || 'Diagram', width, background, status: 'rendering' });
+      return { ok: true };
+    }
     default:
       return { ok: false, error: `unknown tool: ${name}` };
   }

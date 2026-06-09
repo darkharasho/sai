@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react';
 import './RenderToolCard.css';
 import { renderStore, type RenderEntry } from '../../render/renderStore';
 import { getRegisteredComponent } from '../../render/componentRegistry';
+import { renderMermaidToSvg } from '../../render/renderMermaid';
 
 // Policy enforced inside the html-mock iframe (via a <meta> in srcDoc).
 // `script-src 'unsafe-inline'` is intentional: mocks may include JS (a product
@@ -55,6 +56,8 @@ export function RenderRegion({ entry }: { entry: RenderEntry }) {
     <div data-render-region={entry.renderId} data-testid="render-region" style={style}>
       {entry.kind === 'html' ? (
         <RenderedHtml entry={entry} />
+      ) : entry.kind === 'mermaid' ? (
+        <MermaidRender diagram={String((entry.payload as { diagram: string }).diagram)} />
       ) : (
         <MountComponent
           payload={entry.payload as { component: string; props: Record<string, unknown> }}
@@ -108,6 +111,26 @@ function RenderedHtml({ entry }: { entry: RenderEntry }) {
       srcDoc={doc}
     />
   );
+}
+
+function MermaidRender({ diagram }: { diagram: string }) {
+  const [svg, setSvg] = useState('');
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    let alive = true;
+    setSvg('');
+    setErr('');
+    renderMermaidToSvg(diagram).then(
+      (s) => { if (alive) setSvg(s); },
+      (e) => { if (alive) setErr(e instanceof Error ? e.message : 'mermaid error'); },
+    );
+    return () => { alive = false; };
+  }, [diagram]);
+
+  if (err) return <div className="sai-render-card__err">{err}</div>;
+  if (!svg) return <div style={{ padding: 12, opacity: 0.6, fontSize: 12 }}>Rendering diagram…</div>;
+  // svg is produced by mermaid with securityLevel:'strict' (sanitized).
+  return <div style={{ padding: 12 }} dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
 function MountComponent({

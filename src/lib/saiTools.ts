@@ -90,6 +90,24 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
     },
   },
   {
+    name: 'render_mermaid',
+    description:
+      'Render a Mermaid diagram (flowchart, sequence, class, state, ER, gantt) live inside the SAI app ' +
+      'and return a screenshot. USE THIS to SHOW structure or flow — an architecture, a sequence of calls, ' +
+      'a state machine — instead of describing it in prose. Pass Mermaid source.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        diagram: { type: 'string', description: 'Mermaid source, e.g. "graph TD; A-->B".' },
+        title: { type: 'string', description: 'Label shown on the card/panel.' },
+        width: { type: 'number', description: 'Viewport width in px (default 360).' },
+        background: { type: 'string', description: 'Canvas background behind the diagram.' },
+      },
+      required: ['diagram'],
+    },
+  },
+  {
     name: 'inspect_element',
     description:
       "Return the computed box and CSS of a live element in the running SAI app, by CSS selector. " +

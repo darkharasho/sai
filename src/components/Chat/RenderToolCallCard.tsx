@@ -76,6 +76,15 @@ export function entryFromToolCall(tc: ToolCall): { entry: RenderEntry; code: str
     };
   }
 
+  if (name.endsWith('sai_render_mermaid')) {
+    const diagram = typeof input.diagram === 'string' ? input.diagram : '';
+    if (!diagram) return null;
+    return {
+      entry: { renderId, kind: 'mermaid', payload: { diagram }, title: title || 'Diagram', width, background, status: 'ready' },
+      code: diagram,
+    };
+  }
+
   // default: html
   const html = typeof input.html === 'string' ? input.html : '';
   if (!html) return null;
@@ -128,7 +137,7 @@ export function RenderToolCallCard({ tc }: { tc: ToolCall }) {
   const built = entryFromToolCall(tc);
   if (!built) return null;
   const { entry, code } = built;
-  const lang = entry.kind === 'component' ? 'json' : 'html';
+  const lang = entry.kind === 'component' ? 'json' : entry.kind === 'mermaid' ? 'text' : 'html';
   // Narrow mocks open the code pane to the right; wide mocks (where side-by-side
   // would overflow the thread) drop the code block below the render instead.
   const layout = entry.width > 460 ? 'stack' : 'side';

@@ -46,3 +46,14 @@ test('render_diff card renders both variants side-by-side', async ({ harness }) 
   await expect(frame.getByText('Proposed')).toBeVisible();
   await expect(frame.getByRole('button', { name: 'Save' })).toHaveCount(2);
 });
+
+test('render_mermaid card renders the diagram as inline SVG', async ({ harness }) => {
+  const el = await harness.render('render-tool-call-card', { kind: 'mermaid', w: '420' });
+  const card = el.locator('[data-testid="render-tool-call-card"]');
+  await expect(card).toBeVisible();
+  // mermaid renders an <svg> once the dynamic import resolves.
+  // Use .flowchart to target the diagram SVG (not the icon SVG in the header).
+  const diagram = card.locator('svg.flowchart');
+  await expect(diagram).toBeVisible({ timeout: 8000 });
+  await expect(diagram).toContainText('Start');
+});
