@@ -13,6 +13,12 @@ const tc: ToolCall = {
 };
 
 export const renderToolCallCardStory = {
-  component: () => <RenderToolCallCard tc={tc} />,
+  // Wrap in a block container ~chat width so the harness shows the true
+  // full-width (beefy) layout — the harness root is inline-flex otherwise.
+  component: () => (
+    <div style={{ width: 720, maxWidth: '100%' }}>
+      <RenderToolCallCard tc={tc} />
+    </div>
+  ),
   parseProps: () => ({}),
 };
