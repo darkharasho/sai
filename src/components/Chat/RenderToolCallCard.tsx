@@ -104,10 +104,18 @@ export function RenderToolCallCard({ tc }: { tc: ToolCall }) {
   if (!built) return null;
   const { entry, code } = built;
   const lang = entry.kind === 'component' ? 'json' : 'html';
+  // Narrow mocks open the code pane to the right; wide mocks (where side-by-side
+  // would overflow the thread) drop the code block below the render instead.
+  const layout = entry.width > 460 ? 'stack' : 'side';
 
   return (
     <div className="sai-rc-wrap">
-      <div className="sai-rc" data-testid="render-tool-call-card" data-expanded={showCode ? 'true' : 'false'}>
+      <div
+        className="sai-rc"
+        data-testid="render-tool-call-card"
+        data-layout={layout}
+        data-expanded={showCode ? 'true' : 'false'}
+      >
         <div className="sai-rc__bar">
           <span className="sai-rc__title">
             <span className="sai-rc__glyph">✦</span>

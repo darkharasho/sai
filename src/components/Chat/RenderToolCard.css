@@ -69,62 +69,83 @@
 [data-render-region] { border-radius: var(--radius-md); overflow: hidden; }
 
 /* ── RenderToolCallCard — tight right-aligned card with animated code pane ─ */
-.sai-rc-wrap { display: flex; justify-content: flex-end; width: 100%; }
+.sai-rc-wrap { display: flex; justify-content: flex-start; width: 100%; }
 
 .sai-rc {
-  display: flex;
+  display: inline-flex;
   flex-direction: column;
+  max-width: 100%;
   background: var(--surface-3);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
   overflow: hidden;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
-  max-width: 100%;
 }
+
+/* Header — compact */
 .sai-rc__bar {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 4px 8px 4px 10px;
   border-bottom: 1px solid var(--border-hairline);
 }
-.sai-rc__title { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--text); }
-.sai-rc__glyph { color: var(--accent); }
+.sai-rc__title { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text); }
+.sai-rc__glyph { color: var(--accent); font-size: 11px; }
+
+/* Code toggle — dark button, thin gold outline */
 .sai-rc__codebtn {
   margin-left: auto;
   display: inline-flex; align-items: center; gap: 5px;
-  background: var(--accent); color: #1a1110;
-  border: 1px solid var(--accent);
-  padding: 3px 9px; border-radius: var(--radius-sm);
-  font: 600 11.5px 'Geist Mono','JetBrains Mono','Fira Code',monospace;
+  background: var(--surface-2);
+  color: var(--accent);
+  border: 1px solid rgba(212, 160, 23, 0.45);
+  padding: 2px 8px; border-radius: var(--radius-sm);
+  font: 600 11px 'Geist Mono','JetBrains Mono','Fira Code',monospace;
+  line-height: 1.55;
   cursor: pointer;
+  transition: background .12s ease, border-color .12s ease;
 }
-.sai-rc[data-expanded="true"] .sai-rc__codebtn { background: transparent; color: var(--accent); }
-.sai-rc__codebtn:hover { background: var(--accent-hover); color: #1a1110; border-color: var(--accent-hover); }
+.sai-rc__codebtn:hover { background: var(--surface-3); border-color: var(--accent); }
+.sai-rc[data-expanded="true"] .sai-rc__codebtn { background: var(--surface-4); border-color: var(--accent); }
 
-.sai-rc__panes { display: flex; align-items: stretch; }
+/* Render pane — sizes to the mock's actual width (capped to container) */
 .sai-rc__render {
-  flex: 0 0 340px; width: 340px;
-  padding: 14px; background: var(--surface-2);
+  flex: 0 0 auto;
+  align-self: stretch;
+  padding: 3px;
+  background: var(--surface-2);
   display: flex; align-items: center; justify-content: center;
-  min-height: 220px;
 }
-.sai-rc__render [data-render-region] { border-radius: var(--radius-md); overflow: hidden; }
+.sai-rc__render [data-render-region] { max-width: 100%; border-radius: var(--radius-md); overflow: hidden; }
 
-/* Code pane: width 0 collapsed, animates open to the right */
-.sai-rc__code {
-  width: 0; overflow: hidden;
-  background: var(--surface-0);
+/* Layout: narrow mock → code opens to the RIGHT; wide mock → code drops BELOW */
+.sai-rc__panes { display: flex; }
+.sai-rc[data-layout="side"] .sai-rc__panes { flex-direction: row; align-items: stretch; }
+.sai-rc[data-layout="stack"] .sai-rc__panes { flex-direction: column; }
+
+.sai-rc__code { overflow: hidden; background: var(--surface-0); }
+.sai-rc[data-layout="side"] .sai-rc__code {
+  width: 0;
   transition: width .22s cubic-bezier(.2, .8, .2, 1);
 }
-.sai-rc[data-expanded="true"] .sai-rc__code {
-  width: 340px;
+.sai-rc[data-layout="side"][data-expanded="true"] .sai-rc__code {
+  width: 360px;
   border-left: 1px solid var(--border-hairline);
 }
+.sai-rc[data-layout="stack"] .sai-rc__code {
+  max-height: 0;
+  transition: max-height .24s cubic-bezier(.2, .8, .2, 1);
+}
+.sai-rc[data-layout="stack"][data-expanded="true"] .sai-rc__code {
+  max-height: 460px;
+  border-top: 1px solid var(--border-hairline);
+}
+
 .sai-rc__codeplain,
 .sai-rc__codehl {
-  margin: 0; padding: 12px 14px; height: 100%; box-sizing: border-box;
-  overflow: auto; max-height: 420px;
+  margin: 0; padding: 12px 14px; box-sizing: border-box;
+  overflow: auto; max-height: 460px;
   font: 12px/1.6 'Geist Mono','JetBrains Mono','Fira Code',monospace;
   white-space: pre; color: var(--text);
 }
