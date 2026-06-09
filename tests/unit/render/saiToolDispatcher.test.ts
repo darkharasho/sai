@@ -96,4 +96,27 @@ describe('dispatchSaiRenderTool', () => {
     expect(res.error).toMatch(/diagram/i);
     expect(renderStore.get('rid-mmd2')).toBeUndefined();
   });
+
+  it('render_theme upserts a theme entry with components + vars', () => {
+    const res = dispatchSaiRenderTool('render_theme', { vars: { '--accent': '#f00' }, components: ['WorkspaceSquircle'], title: 'T' }, 'rid-th');
+    expect(res.ok).toBe(true);
+    const e = renderStore.get('rid-th');
+    expect(e?.kind).toBe('theme');
+    expect(e?.payload).toEqual({ components: ['WorkspaceSquircle'], vars: { '--accent': '#f00' } });
+    expect(e?.title).toBe('T');
+  });
+
+  it('render_theme defaults components to the full registry when omitted', () => {
+    const res = dispatchSaiRenderTool('render_theme', { vars: { '--accent': '#f00' } }, 'rid-th2');
+    expect(res.ok).toBe(true);
+    const e = renderStore.get('rid-th2');
+    expect((e?.payload as { components: string[] }).components).toContain('WorkspaceSquircle');
+  });
+
+  it('render_theme rejects a missing/non-object vars', () => {
+    const res = dispatchSaiRenderTool('render_theme', { vars: 'nope' }, 'rid-th3');
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/vars/i);
+    expect(renderStore.get('rid-th3')).toBeUndefined();
+  });
 });
