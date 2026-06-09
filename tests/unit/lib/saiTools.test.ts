@@ -21,6 +21,8 @@ describe('saiTools registry', () => {
   });
 
   it('SAI_TOOL_NAMES is the set of all tool names', () => {
+    expect(SAI_TOOL_NAMES.size).toBe(SAI_TOOL_SCHEMA.length);
     expect(SAI_TOOL_NAMES.has('render_html')).toBe(true);
+    expect(SAI_TOOL_NAMES.has('render_component')).toBe(true);
   });
 });

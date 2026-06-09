@@ -34,8 +34,8 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
       properties: {
         component: { type: 'string', description: "Registry key, e.g. 'WorkspaceSquircle'." },
         props: { type: 'object', description: 'JSON props passed to the component.' },
-        width: { type: 'number' },
-        background: { type: 'string' },
+        width: { type: 'number', description: 'Viewport width in px (default 360).' },
+        background: { type: 'string', description: 'Canvas background behind the component.' },
       },
       required: ['component'],
     },
