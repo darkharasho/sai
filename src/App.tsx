@@ -56,6 +56,8 @@ import { registeredComponentKeys } from './render/componentRegistry';
 import { renderMermaidToSvg } from './render/renderMermaid';
 import { handleSaiQueryToolRequest } from './render/saiQueryTools';
 import { buildChartHtml, buildDiffHtml, type ChartInput, type DiffInput } from './render/builtinRenderers';
+import { registerPendingForm } from './render/formBridge';
+import { formTimeoutMs } from './render/formTimeout';
 import { RenderToolCallCard } from './components/Chat/RenderToolCallCard';
 import { executeSlashCommand } from './lib/orchestratorSlashCommands';
 import { isOrchestratorToolDrift, describeToolDrift } from './lib/orchestratorToolDrift';
@@ -1477,6 +1479,15 @@ export default function App() {
           { tool: req.tool, input: req.input, renderId: req.id },
           deps,
         ).then(
+          (result) => sai.respondSwarmTool(req.id, result),
+          (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
+        );
+        return;
+      }
+
+      if (req.tool === 'render_form') {
+        const { promise } = registerPendingForm(formTimeoutMs(req.input));
+        void promise.then(
           (result) => sai.respondSwarmTool(req.id, result),
           (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
         );
@@ -4180,7 +4191,8 @@ export default function App() {
                       n.endsWith('sai_render_chart') ||
                       n.endsWith('sai_render_diff') ||
                       n.endsWith('sai_render_mermaid') ||
-                      n.endsWith('sai_render_theme')
+                      n.endsWith('sai_render_theme') ||
+                      n.endsWith('sai_render_form')
                     ) {
                       return <RenderToolCallCard tc={tc} />;
                     }
