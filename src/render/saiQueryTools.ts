@@ -33,6 +33,8 @@ export function inspectElement(input: InspectInput, doc: Document = document): I
   const r = el.getBoundingClientRect();
   const rect = { x: r.x, y: r.y, width: r.width, height: r.height };
 
+  // Callers pass the live renderer document, which always has a defaultView;
+  // the window fallback is only a defensive default.
   const view = doc.defaultView ?? window;
   const cs = view.getComputedStyle(el);
   const wanted = Array.isArray(input.props) && input.props.length > 0 ? input.props : DEFAULT_PROPS;
@@ -49,7 +51,10 @@ export interface SaiQueryDeps {
 
 export interface SaiQueryRequest { tool: string; input: any; }
 
-const FULL_WINDOW_RECT = { x: 0, y: 0, width: 100000, height: 100000 }; // clamped to content bounds in main
+// Deliberately larger than any window; the main-process `sai:capture-region`
+// IPC clamps the rect to the live window's content bounds, so this captures
+// the whole window without the renderer needing to know its size.
+const OVERSIZED_CAPTURE_RECT = { x: 0, y: 0, width: 100000, height: 100000 };
 
 /**
  * Handles the read-only SAI query tools. Returns the result object, or null if
@@ -67,14 +72,14 @@ export async function handleSaiQueryToolRequest(
     const capture = deps.captureRegion;
     if (!capture) return { ok: false, error: 'capture is unavailable' };
 
-    let rect = FULL_WINDOW_RECT;
+    let rect = OVERSIZED_CAPTURE_RECT;
     const selector = typeof req.input?.selector === 'string' ? req.input.selector : '';
     if (selector) {
-      let el: Element | null = null;
-      try { el = document.querySelector(selector); } catch { el = null; }
-      if (!el) return { ok: false, error: `capture_app: no element matches ${selector}` };
-      const r = el.getBoundingClientRect();
-      rect = { x: r.x, y: r.y, width: r.width, height: r.height };
+      const found = inspectElement({ selector });
+      if (!found.found || !found.rect) {
+        return { ok: false, error: `capture_app: no element matches ${selector}` };
+      }
+      rect = found.rect;
     }
 
     const base64 = await capture(rect);

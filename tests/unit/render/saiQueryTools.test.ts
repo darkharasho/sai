@@ -75,6 +75,12 @@ describe('handleSaiQueryToolRequest', () => {
     expect((r as any).error).toMatch(/capture/i);
   });
 
+  it('capture_app returns ok:false when no captureRegion dep is provided', async () => {
+    const r = await handleSaiQueryToolRequest({ tool: 'capture_app', input: {} }, {});
+    expect(r).toMatchObject({ ok: false });
+    expect((r as any).error).toMatch(/unavailable|capture/i);
+  });
+
   it('capture_app with a selector captures that element rect', async () => {
     const el = document.createElement('div');
     el.id = 'shot';
