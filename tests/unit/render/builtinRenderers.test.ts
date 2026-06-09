@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildChartHtml } from '../../../src/render/builtinRenderers';
-import { buildDiffHtml } from '../../../src/render/builtinRenderers';
+import { buildChartHtml, buildDiffHtml } from '../../../src/render/builtinRenderers';
 
 describe('buildChartHtml', () => {
   it('renders a bar chart with one <rect> per value and the labels', () => {
@@ -33,6 +32,13 @@ describe('buildChartHtml', () => {
     expect(() => buildChartHtml({ chart: 'bar', labels: ['A'], values: [1, 2] })).toThrow(
       /labels and values/i,
     );
+  });
+
+  it('clamps negative bar values to a non-negative height', () => {
+    const html = buildChartHtml({ chart: 'bar', labels: ['A', 'B'], values: [-5, 3] });
+    const heights = [...html.matchAll(/height="([\d.]+)"/g)].map((m) => Number(m[1]));
+    expect(heights.length).toBe(2);
+    for (const h of heights) expect(h).toBeGreaterThanOrEqual(0);
   });
 });
 

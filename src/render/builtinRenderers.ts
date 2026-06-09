@@ -31,13 +31,14 @@ export function buildChartHtml(input: ChartInput): string {
   const xFor = (i: number) => (n <= 1 ? PAD + plotW / 2 : PAD + (i * plotW) / (n - 1));
   const yFor = (v: number) => PAD + plotH - (v / max) * plotH;
 
+  const slot = plotW / Math.max(1, n);
+
   let body = '';
   if (chart === 'bar') {
-    const slot = plotW / Math.max(1, n);
     const barW = slot * 0.6;
     body = values
       .map((v, i) => {
-        const h = (v / max) * plotH;
+        const h = Math.max(0, (v / max) * plotH);
         const x = PAD + slot * i + (slot - barW) / 2;
         const y = PAD + plotH - h;
         return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="${color}" rx="2"/>`;
@@ -50,7 +51,6 @@ export function buildChartHtml(input: ChartInput): string {
 
   const labelEls = labels
     .map((label, i) => {
-      const slot = plotW / Math.max(1, n);
       const x = chart === 'bar' ? PAD + slot * i + slot / 2 : xFor(i);
       return `<text x="${x.toFixed(1)}" y="${CHART_H - 6}" font-size="9" text-anchor="middle" fill="#9aa3b2">${escapeHtml(label)}</text>`;
     })
