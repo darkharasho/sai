@@ -364,6 +364,21 @@ describe('sai tools over MCP', () => {
     );
     expect(calls).toEqual([{ tool: 'render_html', input: { html: '<b>x</b>' } }]);
     expect(res.result.content[0].type).toBe('text');
+    expect(JSON.parse(res.result.content[0].text)).toEqual({ ok: true });
+  });
+
+  it('refuses to dispatch a swarm_ tool when toolset=chat (unlisted)', async () => {
+    setToolset('chat');
+    const calls: string[] = [];
+    const transport: SwarmCallTransport = {
+      call: async (tool: string) => { calls.push(tool); return { ok: true }; },
+    };
+    const res: any = await handleRequest(
+      { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'swarm_spawn_task', arguments: { prompt: 'x' } } },
+      transport,
+    );
+    expect(calls).toEqual([]);
+    expect(res.error).toEqual({ code: -32602, message: 'unknown tool: swarm_spawn_task' });
   });
 
   it('appends an image content block when the result carries __mcpImage', async () => {

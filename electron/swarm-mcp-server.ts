@@ -121,8 +121,11 @@ export async function handleRequest(
       const fullName = typeof params.name === 'string' ? params.name : '';
       const input = (params.arguments ?? {}) as unknown;
 
+      // Only dispatch tools the current toolset actually advertises in
+      // tools/list — a buggy or hostile client must not be able to invoke an
+      // unlisted tool (e.g. swarm_spawn_task from a chat session).
       let toolName: string | null = null;
-      if (fullName.startsWith('swarm_') && SWARM_TOOL_NAMES.has(fullName.slice(6))) {
+      if (toolset === 'orchestrator' && fullName.startsWith('swarm_') && SWARM_TOOL_NAMES.has(fullName.slice(6))) {
         toolName = fullName.slice(6);
       } else if (fullName.startsWith('sai_') && SAI_TOOL_NAMES.has(fullName.slice(4))) {
         toolName = fullName.slice(4);
