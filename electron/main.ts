@@ -12,6 +12,7 @@ import { BlobStore } from './services/remote/blob-store';
 import { safeJoin } from './services/remote/safe-join';
 import { langFromPath, isTextLike, mimeFromPath } from './services/remote/lang';
 import { readDirImpl, readFileImpl, readFileBufImpl, statFileImpl, writeFileImpl } from './services/fs';
+import { clampRect, type Rect } from './capturePage';
 import { gitStatusImpl, gitDiffImpl, gitStageImpl, gitUnstageImpl, gitCommitImpl, gitPushImpl, gitPullImpl } from './services/git';
 import { enrichedEnv } from './services/shellEnv';
 import { execFile as _execFile } from 'node:child_process';
@@ -762,6 +763,14 @@ function createWindow() {
     recent.unshift(projectPath);
     fs.writeFileSync(recentProjectsFile, JSON.stringify(recent.slice(0, 50)));
   }
+
+  ipcMain.handle('sai:capture-region', async (_evt, rect: Rect): Promise<string | null> => {
+    if (!mainWindow || mainWindow.isDestroyed()) return null;
+    const bounds = mainWindow.getContentBounds();
+    const clamped = clampRect(rect, { width: bounds.width, height: bounds.height });
+    const image = await mainWindow.webContents.capturePage(clamped);
+    return image.toPNG().toString('base64'); // bare base64, no data: prefix
+  });
 
   ipcMain.handle('project:saveImage', async (_event, base64Data: string) => {
     const tmpDir = path.join(app.getPath('temp'), 'sai-images');
