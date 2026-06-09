@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import './RenderToolCard.css';
 import type { ToolCall } from '../../types';
 import type { RenderEntry } from '../../render/renderStore';
 import { RenderRegion } from './RenderToolCard';
+import { getShikiHighlighter, getActiveHighlightTheme } from '../../themes';
 
 function parseInput(raw: string): Record<string, unknown> {
   try {
@@ -67,35 +68,66 @@ function entryFromToolCall(tc: ToolCall): { entry: RenderEntry; code: string } |
   };
 }
 
+function RenderCode({ code, lang }: { code: string; lang: string }) {
+  const [html, setHtml] = useState('');
+  const [theme, setTheme] = useState(getActiveHighlightTheme());
+
+  useEffect(() => {
+    const h = () => setTheme(getActiveHighlightTheme());
+    window.addEventListener('sai-highlight-theme-change', h);
+    return () => window.removeEventListener('sai-highlight-theme-change', h);
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    getShikiHighlighter().then((hl) => {
+      if (!alive) return;
+      try {
+        setHtml(hl.codeToHtml(code, { lang, theme }));
+      } catch {
+        setHtml('');
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, [code, lang, theme]);
+
+  // Fallback to plain text until shiki resolves.
+  if (!html) return <pre className="sai-rc__codeplain">{code}</pre>;
+  return <div className="sai-rc__codehl" dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
 export function RenderToolCallCard({ tc }: { tc: ToolCall }) {
   const [showCode, setShowCode] = useState(false);
   const built = entryFromToolCall(tc);
   if (!built) return null;
   const { entry, code } = built;
+  const lang = entry.kind === 'component' ? 'json' : 'html';
+
   return (
-    <div className="sai-render-card" data-testid="render-tool-call-card">
-      <div className="sai-render-card__bar">
-        <span className="sai-render-card__title">
-          <span className="sai-render-card__glyph">✦</span>
-          {entry.title || (entry.kind === 'html' ? 'HTML' : entry.kind)}
-          <span className="sai-render-card__sub">{entry.kind === 'component' ? 'render_component' : 'render_html'}</span>
-        </span>
-        <button
-          type="button"
-          className="sai-render-card__codebtn"
-          data-testid="render-code-toggle"
-          aria-expanded={showCode}
-          onClick={() => setShowCode((v) => !v)}
-        >
-          {showCode ? 'Hide code' : 'Show code'}
-        </button>
+    <div className="sai-rc-wrap">
+      <div className="sai-rc" data-testid="render-tool-call-card" data-expanded={showCode ? 'true' : 'false'}>
+        <div className="sai-rc__bar">
+          <span className="sai-rc__title">
+            <span className="sai-rc__glyph">✦</span>
+            {entry.title || (entry.kind === 'html' ? 'HTML' : entry.kind)}
+          </span>
+          <button
+            type="button"
+            className="sai-rc__codebtn"
+            data-testid="render-code-toggle"
+            aria-expanded={showCode}
+            onClick={() => setShowCode((v) => !v)}
+          >
+            {showCode ? '</> Hide' : '</> Code'}
+          </button>
+        </div>
+        <div className="sai-rc__panes">
+          <div className="sai-rc__render"><RenderRegion entry={entry} /></div>
+          <div className="sai-rc__code" data-testid="render-code"><RenderCode code={code} lang={lang} /></div>
+        </div>
       </div>
-      <div className="sai-render-card__render">
-        <RenderRegion entry={entry} />
-      </div>
-      {showCode && (
-        <pre className="sai-render-card__code" data-testid="render-code">{code}</pre>
-      )}
     </div>
   );
 }
