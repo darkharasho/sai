@@ -4,6 +4,7 @@ import './RenderToolCard.css';
 import { renderStore, type RenderEntry } from '../../render/renderStore';
 import { getRegisteredComponent } from '../../render/componentRegistry';
 import { renderMermaidToSvg } from '../../render/renderMermaid';
+import { ThemedComponents } from '../../render/ThemedComponents';
 
 // Policy enforced inside the html-mock iframe (via a <meta> in srcDoc).
 // `script-src 'unsafe-inline'` is intentional: mocks may include JS (a product
@@ -58,6 +59,12 @@ export function RenderRegion({ entry }: { entry: RenderEntry }) {
         <RenderedHtml entry={entry} />
       ) : entry.kind === 'mermaid' ? (
         <MermaidRender diagram={String((entry.payload as { diagram: string }).diagram)} />
+      ) : entry.kind === 'theme' ? (
+        <ThemedComponents
+          components={(entry.payload as { components: string[] }).components}
+          vars={(entry.payload as { vars: Record<string, string> }).vars}
+          props={(entry.payload as { props?: Record<string, unknown> }).props}
+        />
       ) : (
         <MountComponent
           payload={entry.payload as { component: string; props: Record<string, unknown> }}

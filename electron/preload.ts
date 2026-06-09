@@ -256,6 +256,8 @@ contextBridge.exposeInMainWorld('sai', {
   renderOpenInBrowser: (html: string) => ipcRenderer.invoke('render:openInBrowser', html),
   renderCaptureHtml: (args: { html: string; width?: number }): Promise<string | null> =>
     ipcRenderer.invoke('render:captureHtml', args),
+  renderCaptureComponent: (a: { component?: string; components?: string[]; props?: Record<string, unknown>; vars?: Record<string, string>; width?: number }): Promise<string | null> =>
+    ipcRenderer.invoke('render:captureComponent', a),
   setBadgeCount: (count: number) => ipcRenderer.send('app:setBadgeCount', count),
   scaffoldProject: (options: any) => ipcRenderer.invoke('project:scaffold', options),
   brainstormStart: () => ipcRenderer.invoke('brainstorm:start'),

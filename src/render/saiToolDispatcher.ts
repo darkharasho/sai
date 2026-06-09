@@ -65,6 +65,18 @@ export function dispatchSaiRenderTool(name: string, input: any, renderId: string
       renderStore.upsert({ renderId, kind: 'mermaid', payload: { diagram: inp.diagram }, title: title || 'Diagram', width, background, status: 'rendering' });
       return { ok: true };
     }
+    case 'render_theme': {
+      if (!inp.vars || typeof inp.vars !== 'object' || Array.isArray(inp.vars)) {
+        return { ok: false, error: 'render_theme requires a "vars" object of CSS custom properties' };
+      }
+      const components = Array.isArray(inp.components) && inp.components.length > 0
+        ? (inp.components as unknown[]).filter((c): c is string => typeof c === 'string')
+        : registeredComponentKeys();
+      const payload: Record<string, unknown> = { components, vars: inp.vars };
+      if (inp.props && typeof inp.props === 'object' && !Array.isArray(inp.props)) payload.props = inp.props;
+      renderStore.upsert({ renderId, kind: 'theme', payload, title: title || 'Theme', width, background, status: 'rendering' });
+      return { ok: true };
+    }
     default:
       return { ok: false, error: `unknown tool: ${name}` };
   }

@@ -57,3 +57,12 @@ test('render_mermaid card renders the diagram as inline SVG', async ({ harness }
   await expect(diagram).toBeVisible({ timeout: 8000 });
   await expect(diagram).toContainText('Start');
 });
+
+test('render_theme card mounts the themed component', async ({ harness }) => {
+  const el = await harness.render('render-tool-call-card', { kind: 'theme', w: '420' });
+  const card = el.locator('[data-testid="render-tool-call-card"]');
+  await expect(card).toBeVisible();
+  // ThemedComponents wraps the registered component with the CSS vars applied.
+  await expect(card.locator('[data-themed-wrap]')).toBeVisible();
+  await expect(card.locator('.ws-sq')).toBeVisible();
+});

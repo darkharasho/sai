@@ -52,6 +52,7 @@ import { landTask, discardTask, rebaseRetry } from './lib/swarmLanding';
 import { ensureOrchestratorSession } from './lib/swarmOrchestratorSession';
 import { handleSwarmToolRequest, type SwarmHost } from './lib/swarmOrchestratorDispatcher';
 import { handleRenderToolRequest } from './render/handleRenderToolRequest';
+import { registeredComponentKeys } from './render/componentRegistry';
 import { renderMermaidToSvg } from './render/renderMermaid';
 import { handleSaiQueryToolRequest } from './render/saiQueryTools';
 import { buildChartHtml, buildDiffHtml, type ChartInput, type DiffInput } from './render/builtinRenderers';
@@ -1453,7 +1454,36 @@ export default function App() {
         return;
       }
 
-      // SAI render tools (render_html / render_component / render_chart / render_diff) are handled in the
+      if (req.tool === 'render_component' || req.tool === 'render_theme') {
+        const saiAny = sai as { renderCaptureComponent?: (a: { component?: string; components?: string[]; props?: Record<string, unknown>; vars?: Record<string, string>; width?: number }) => Promise<string | null> };
+        const deps = typeof saiAny.renderCaptureComponent === 'function'
+          ? {
+              captureRenderRegion: async () => {
+                const b64 = await saiAny.renderCaptureComponent!({
+                  component: typeof req.input?.component === 'string' ? req.input.component : undefined,
+                  components: Array.isArray(req.input?.components) && req.input.components.length > 0
+                    ? req.input.components
+                    : (req.tool === 'render_theme' ? registeredComponentKeys() : undefined),
+                  props: req.input?.props && typeof req.input.props === 'object' ? req.input.props : undefined,
+                  vars: req.input?.vars && typeof req.input.vars === 'object' ? req.input.vars : undefined,
+                  width: typeof req.input?.width === 'number' ? req.input.width : undefined,
+                });
+                if (!b64) throw new Error('capture returned no image');
+                return { base64: b64, mimeType: 'image/png' as const };
+              },
+            }
+          : {};
+        void handleRenderToolRequest(
+          { tool: req.tool, input: req.input, renderId: req.id },
+          deps,
+        ).then(
+          (result) => sai.respondSwarmTool(req.id, result),
+          (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
+        );
+        return;
+      }
+
+      // SAI render tools (render_html / render_chart / render_diff) are handled in the
       // renderer: dispatch into the render store, then (for html) screenshot the
       // mock headlessly so the agent can SEE its render without opening a browser
       // tab. renderId = req.id; response goes over the swarm tool channel.
@@ -4149,7 +4179,8 @@ export default function App() {
                       n.endsWith('sai_render_component') ||
                       n.endsWith('sai_render_chart') ||
                       n.endsWith('sai_render_diff') ||
-                      n.endsWith('sai_render_mermaid')
+                      n.endsWith('sai_render_mermaid') ||
+                      n.endsWith('sai_render_theme')
                     ) {
                       return <RenderToolCallCard tc={tc} />;
                     }

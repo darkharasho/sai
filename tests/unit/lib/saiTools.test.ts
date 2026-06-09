@@ -68,3 +68,12 @@ describe('Tier 2 inspect/capture tools', () => {
     expect(cap.input_schema.required ?? []).toEqual([]);
   });
 });
+
+describe('render_theme tool', () => {
+  it('registers render_theme as a chat tool requiring vars', () => {
+    expect(SAI_TOOL_NAMES.has('render_theme')).toBe(true);
+    const t = SAI_TOOL_SCHEMA.find((x) => x.name === 'render_theme')!;
+    expect(t.toolset).toBe('chat');
+    expect(t.input_schema.required).toContain('vars');
+  });
+});

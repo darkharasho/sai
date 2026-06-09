@@ -24,3 +24,12 @@ describe('entryFromToolCall — chart/diff', () => {
     expect(built).toBeNull();
   });
 });
+
+describe('entryFromToolCall — render_theme defaults', () => {
+  it('render_theme with no components defaults to the full registry', () => {
+    const built = entryFromToolCall(tc('sai_render_theme', { vars: { '--a': '1' } }));
+    const comps = (built?.entry.payload as { components: string[] }).components;
+    expect(comps.length).toBeGreaterThan(0);
+    expect(comps).toContain('WorkspaceSquircle');
+  });
+});
