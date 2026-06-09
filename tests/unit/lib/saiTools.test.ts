@@ -77,3 +77,12 @@ describe('render_theme tool', () => {
     expect(t.input_schema.required).toContain('vars');
   });
 });
+
+describe('render_form tool', () => {
+  it('registers render_form as a chat tool requiring html', () => {
+    expect(SAI_TOOL_NAMES.has('render_form')).toBe(true);
+    const f = SAI_TOOL_SCHEMA.find((x) => x.name === 'render_form')!;
+    expect(f.toolset).toBe('chat');
+    expect(f.input_schema.required).toContain('html');
+  });
+});

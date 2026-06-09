@@ -5,6 +5,7 @@ import { renderStore, type RenderEntry } from '../../render/renderStore';
 import { getRegisteredComponent } from '../../render/componentRegistry';
 import { renderMermaidToSvg } from '../../render/renderMermaid';
 import { ThemedComponents } from '../../render/ThemedComponents';
+import { submitForm } from '../../render/formBridge';
 
 // Policy enforced inside the html-mock iframe (via a <meta> in srcDoc).
 // `script-src 'unsafe-inline'` is intentional: mocks may include JS (a product
@@ -65,6 +66,8 @@ export function RenderRegion({ entry }: { entry: RenderEntry }) {
           vars={(entry.payload as { vars: Record<string, string> }).vars}
           props={(entry.payload as { props?: Record<string, unknown> }).props}
         />
+      ) : entry.kind === 'form' ? (
+        <RenderedHtml entry={entry} enableSubmit />
       ) : (
         <MountComponent
           payload={entry.payload as { component: string; props: Record<string, unknown> }}
@@ -73,6 +76,15 @@ export function RenderRegion({ entry }: { entry: RenderEntry }) {
     </div>
   );
 }
+
+// Injected only for form renders: exposes window.saiSubmit(value), which posts
+// the user's value to the parent. The only new capability given to the sandbox.
+// The target is '*' because the iframe runs without allow-same-origin (opaque
+// origin), so the parent's origin is unknowable from inside the sandbox; '*' is
+// the only viable target. The parent validates the sender via event.source
+// (matched against the iframe's contentWindow), so the wildcard target is safe.
+const SUBMIT_BRIDGE =
+  '<script>window.saiSubmit=function(v){try{parent.postMessage({__saiFormSubmit:1,value:v},\'*\');}catch(e){}};<\/script>';
 
 // Injected into the sandboxed mock so it can report its content height back to
 // the parent. allow-scripts permits this; postMessage to the parent works even
@@ -86,28 +98,33 @@ const HEIGHT_REPORTER =
   'post();setTimeout(post,50);setTimeout(post,300);' +
   '})();<\/script>';
 
-function RenderedHtml({ entry }: { entry: RenderEntry }) {
+function RenderedHtml({ entry, enableSubmit }: { entry: RenderEntry; enableSubmit?: boolean }) {
   const userHtml = String((entry.payload as { html: string }).html);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
-  // Iframes default to 150px; mocks are usually taller and center their content,
-  // so without auto-sizing the body renders below the fold (looks blank/black).
+  const submittedRef = useRef(false);
   const [height, setHeight] = useState(300);
+  const bridge = enableSubmit ? SUBMIT_BRIDGE : '';
   const doc =
     `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${SANDBOX_CSP}"></head>` +
-    `<body style="margin:0">${userHtml}${HEIGHT_REPORTER}</body></html>`;
+    `<body style="margin:0">${userHtml}${bridge}${HEIGHT_REPORTER}</body></html>`;
 
   useEffect(() => {
     function onMessage(e: MessageEvent) {
       const win = iframeRef.current?.contentWindow;
       if (!win || e.source !== win) return;
-      const data = e.data as { __saiRender?: number; height?: number } | null;
-      if (!data || !data.__saiRender) return;
-      const h = Number(data.height);
-      if (Number.isFinite(h) && h > 0) setHeight(Math.min(2000, Math.max(40, Math.ceil(h))));
+      const data = e.data as { __saiRender?: number; height?: number; __saiFormSubmit?: number; value?: unknown } | null;
+      if (!data) return;
+      if (data.__saiRender) {
+        const h = Number(data.height);
+        if (Number.isFinite(h) && h > 0) setHeight(Math.min(2000, Math.max(40, Math.ceil(h))));
+      } else if (enableSubmit && data.__saiFormSubmit && !submittedRef.current) {
+        submittedRef.current = true;
+        submitForm(data.value);
+      }
     }
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, []);
+  }, [enableSubmit]);
 
   return (
     <iframe

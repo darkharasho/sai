@@ -128,6 +128,26 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
     },
   },
   {
+    name: 'render_form',
+    description:
+      'Render an INTERACTIVE form/prompt in the SAI chat and BLOCK until the user submits, then return ' +
+      'their input. USE THIS to ask the user a rich, visual question (pick one of these options, set a ' +
+      'value, fill these fields) instead of plain text. Write self-contained HTML whose submit control ' +
+      'calls window.saiSubmit(value) with a JSON-serializable value; that value comes back as ' +
+      'result.value. The call blocks until the user submits or the form times out.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        html: { type: 'string', description: 'Form HTML; a control must call saiSubmit(value).' },
+        timeoutMs: { type: 'number', description: 'How long to wait for a submit (10000-600000, default 180000).' },
+        title: { type: 'string', description: 'Label shown on the card.' },
+        width: { type: 'number', description: 'Viewport width in px (default 360).' },
+      },
+      required: ['html'],
+    },
+  },
+  {
     name: 'inspect_element',
     description:
       "Return the computed box and CSS of a live element in the running SAI app, by CSS selector. " +

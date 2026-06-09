@@ -66,3 +66,14 @@ test('render_theme card mounts the themed component', async ({ harness }) => {
   await expect(card.locator('[data-themed-wrap]')).toBeVisible();
   await expect(card.locator('.ws-sq')).toBeVisible();
 });
+
+test('render_form submit round-trips the value back through formBridge', async ({ harness }) => {
+  const el = await harness.render('render-tool-call-card', { kind: 'form', w: '420' });
+  const card = el.locator('[data-testid="render-tool-call-card"]');
+  await expect(card).toBeVisible();
+  // The form button lives inside the sandboxed iframe.
+  await card.frameLocator('iframe').getByRole('button', { name: 'Pick B' }).click();
+  // formBridge resolves the pending form; the story renders the result.
+  await expect(el.locator('[data-testid="form-result"]')).toContainText('picked-B');
+  await expect(el.locator('[data-testid="form-result"]')).toContainText('"ok":true');
+});
