@@ -253,6 +253,7 @@ contextBridge.exposeInMainWorld('sai', {
   getRecentProjects: () => ipcRenderer.invoke('project:getRecent'),
   openRecentProject: (path: string) => ipcRenderer.invoke('project:openRecent', path),
   openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
+  renderOpenInBrowser: (html: string) => ipcRenderer.invoke('render:openInBrowser', html),
   setBadgeCount: (count: number) => ipcRenderer.send('app:setBadgeCount', count),
   scaffoldProject: (options: any) => ipcRenderer.invoke('project:scaffold', options),
   brainstormStart: () => ipcRenderer.invoke('brainstorm:start'),

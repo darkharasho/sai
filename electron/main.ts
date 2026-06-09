@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, shell, Menu, MenuItem, screen } fr
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import { RemoteModule } from './services/remote';
 import { PhoneTerminalRegistry } from './services/remote/terminal-store';
 import { BridgeServer } from './services/remote/bridge-server';
@@ -821,6 +822,22 @@ function createWindow() {
   ipcMain.handle('shell:openExternal', (_event, url: string) => {
     if (/^https?:\/\//i.test(url)) {
       return shell.openExternal(url);
+    }
+  });
+
+  // Write a render's HTML to a temp file and open it in the default browser.
+  ipcMain.handle('render:openInBrowser', async (_event, html: string) => {
+    if (typeof html !== 'string' || !html) return false;
+    try {
+      const dir = path.join(app.getPath('temp'), 'sai-renders');
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, `render-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.html`);
+      fs.writeFileSync(file, html, 'utf8');
+      await shell.openExternal(pathToFileURL(file).toString());
+      return true;
+    } catch (err) {
+      console.error('[render] openInBrowser failed:', err);
+      return false;
     }
   });
 

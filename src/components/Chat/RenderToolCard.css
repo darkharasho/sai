@@ -72,8 +72,9 @@
 .sai-rc-wrap { display: flex; justify-content: flex-start; width: 100%; }
 
 .sai-rc {
-  display: inline-flex;
+  display: flex;
   flex-direction: column;
+  width: 100%;
   max-width: 100%;
   background: var(--surface-3);
   border: 1px solid var(--border-subtle);
@@ -90,34 +91,55 @@
   padding: 4px 8px 4px 10px;
   border-bottom: 1px solid var(--border-hairline);
 }
-.sai-rc__title { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text); }
-.sai-rc__glyph { color: var(--accent); font-size: 11px; }
+.sai-rc__title {
+  flex: 1 1 auto; min-width: 0;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--text); overflow: hidden;
+}
+.sai-rc__icon { flex: 0 0 auto; color: var(--accent); }
+.sai-rc__brand { font-weight: 600; flex: 0 0 auto; }
+.sai-rc__sep { color: var(--text-muted); flex: 0 0 auto; }
+.sai-rc__name { color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* Code toggle — dark button, thin gold outline */
-.sai-rc__codebtn {
-  margin-left: auto;
+/* Header buttons — code toggle (gold outline) + open-in-browser (ghost) */
+.sai-rc__codebtn,
+.sai-rc__openbtn {
+  flex: 0 0 auto;
   display: inline-flex; align-items: center; gap: 5px;
-  background: var(--surface-2);
-  color: var(--accent);
-  border: 1px solid rgba(212, 160, 23, 0.45);
   padding: 2px 8px; border-radius: var(--radius-sm);
   font: 600 11px 'Geist Mono','JetBrains Mono','Fira Code',monospace;
   line-height: 1.55;
   cursor: pointer;
-  transition: background .12s ease, border-color .12s ease;
+  transition: background .12s ease, border-color .12s ease, color .12s ease;
+}
+.sai-rc__codebtn {
+  background: var(--surface-2);
+  color: var(--accent);
+  border: 1px solid rgba(212, 160, 23, 0.45);
 }
 .sai-rc__codebtn:hover { background: var(--surface-3); border-color: var(--accent); }
 .sai-rc[data-expanded="true"] .sai-rc__codebtn { background: var(--surface-4); border-color: var(--accent); }
+.sai-rc__openbtn {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+}
+.sai-rc__openbtn:hover { color: var(--text); border-color: var(--border-strong); background: var(--surface-2); }
 
-/* Render pane — sizes to the mock's actual width (capped to container) */
+/* Render pane — fills the card width; razor-thin frame on all sides */
 .sai-rc__render {
-  flex: 0 0 auto;
-  align-self: stretch;
+  flex: 1 1 auto;
+  min-width: 0;
   padding: 3px;
   background: var(--surface-2);
-  display: flex; align-items: center; justify-content: center;
+  display: flex; align-items: stretch; justify-content: stretch;
 }
-.sai-rc__render [data-render-region] { max-width: 100%; border-radius: var(--radius-md); overflow: hidden; }
+.sai-rc__render [data-render-region] {
+  width: 100% !important;
+  max-width: 100%;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
 
 /* Layout: narrow mock → code opens to the RIGHT; wide mock → code drops BELOW */
 .sai-rc__panes { display: flex; }
