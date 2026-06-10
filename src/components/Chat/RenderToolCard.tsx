@@ -99,7 +99,13 @@ const HEIGHT_REPORTER =
   '})();<\/script>';
 
 function RenderedHtml({ entry, enableSubmit }: { entry: RenderEntry; enableSubmit?: boolean }) {
-  const userHtml = String((entry.payload as { html: string }).html);
+  const payload = entry.payload as {
+    html?: string; mode?: string; cwd?: string; path?: string; baseDir?: string; height?: number;
+  };
+  if (payload.mode === 'file') {
+    return <FileRenderedHtml entry={entry} payload={payload} />;
+  }
+  const userHtml = String(payload.html ?? '');
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const submittedRef = useRef(false);
   const [height, setHeight] = useState(300);
@@ -133,6 +139,51 @@ function RenderedHtml({ entry, enableSubmit }: { entry: RenderEntry; enableSubmi
       sandbox="allow-scripts"
       style={{ width: '100%', height, border: 0, display: 'block' }}
       srcDoc={doc}
+    />
+  );
+}
+
+function FileRenderedHtml({
+  entry,
+  payload,
+}: {
+  entry: RenderEntry;
+  payload: { cwd?: string; path?: string; html?: string; baseDir?: string; height?: number };
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const height = payload.height && payload.height > 0 ? payload.height : 480;
+
+  useEffect(() => {
+    let token: string | null = null;
+    let alive = true;
+    const sai = (window as {
+      sai?: {
+        renderMintFileUrl?: (a: unknown) => Promise<{ ok: boolean; url?: string; token?: string; error?: string }>;
+        renderReleaseFileUrl?: (t: string) => void;
+      };
+    }).sai;
+    sai?.renderMintFileUrl?.({
+      cwd: payload.cwd, path: payload.path, html: payload.html, baseDir: payload.baseDir,
+    }).then((r) => {
+      if (!alive) return;
+      if (r.ok && r.url) { setUrl(r.url); token = r.token ?? null; }
+      else setErr(r.error ?? 'render blocked');
+    });
+    return () => {
+      alive = false;
+      if (token) sai?.renderReleaseFileUrl?.(token);
+    };
+  }, [payload.cwd, payload.path, payload.html, payload.baseDir]);
+
+  if (err) return <div className="sai-render-card__err">{err}</div>;
+  if (!url) return <div style={{ padding: 12, opacity: 0.6, fontSize: 12 }}>Loading…</div>;
+  return (
+    <iframe
+      title={entry.title || 'render'}
+      sandbox="allow-scripts allow-same-origin"
+      style={{ width: '100%', height, border: 0, display: 'block' }}
+      src={url}
     />
   );
 }
