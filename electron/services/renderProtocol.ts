@@ -91,9 +91,12 @@ export function resolveRenderAsset(
   if (rel === INLINE_ENTRY && entry.inlineHtml != null) {
     return { ok: true, inlineHtml: entry.inlineHtml };
   }
-  if (path.isAbsolute(rel)) return { ok: false, status: 403 };
+  const stripped = rel.startsWith('sai-render-base/')
+    ? rel.slice('sai-render-base/'.length)
+    : rel;
+  if (path.isAbsolute(stripped)) return { ok: false, status: 403 };
 
-  const candidate = path.resolve(entry.root, rel || 'index.html');
+  const candidate = path.resolve(entry.root, stripped || 'index.html');
   let realCandidate: string;
   try {
     realCandidate = fs.realpathSync(candidate);
@@ -130,4 +133,62 @@ const CONTENT_TYPES: Record<string, string> = {
 
 export function contentTypeFor(p: string): string {
   return CONTENT_TYPES[path.extname(p).toLowerCase()] ?? 'application/octet-stream';
+}
+
+export type PrepareResult =
+  | { ok: true; root: string; entry: string; inlineHtml?: string }
+  | { ok: false; error: string };
+
+// Relative-asset base for inline mode. The iframe loads
+// sai-render://<token>/__sai_inline__, so a relative <base> keeps asset URLs
+// pointing back through the protocol (resolved against the token root).
+const INLINE_BASE = '<base href="sai-render-base/">';
+
+function within(cwd: string, rel: string): string | null {
+  if (path.isAbsolute(rel)) return null;
+  const realCwd = fs.realpathSync(cwd);
+  const resolved = path.resolve(realCwd, rel);
+  if (resolved !== realCwd && !resolved.startsWith(realCwd + path.sep)) return null;
+  return resolved;
+}
+
+export function prepareRenderTarget(opts: {
+  cwd: string;
+  path?: string;
+  html?: string;
+  baseDir?: string;
+}): PrepareResult {
+  // path wins over html.
+  if (opts.path) {
+    const abs = within(opts.cwd, opts.path);
+    if (!abs) return { ok: false, error: `path escapes workspace: ${opts.path}` };
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(abs);
+    } catch {
+      return { ok: false, error: `path not found: ${opts.path}` };
+    }
+    if (stat.isDirectory()) {
+      return { ok: true, root: abs, entry: 'index.html' };
+    }
+    return { ok: true, root: path.dirname(abs), entry: path.basename(abs) };
+  }
+
+  if (typeof opts.html === 'string') {
+    const baseRel = opts.baseDir ?? '.';
+    const abs = within(opts.cwd, baseRel);
+    if (!abs) return { ok: false, error: `baseDir escapes workspace: ${opts.baseDir}` };
+    const withBase = injectBase(opts.html);
+    return { ok: true, root: abs, entry: INLINE_ENTRY, inlineHtml: withBase };
+  }
+
+  return { ok: false, error: 'render target requires path or html' };
+}
+
+function injectBase(html: string): string {
+  if (/<base\b/i.test(html)) return html;
+  if (/<head[^>]*>/i.test(html)) {
+    return html.replace(/<head[^>]*>/i, (m) => `${m}${INLINE_BASE}`);
+  }
+  return `${INLINE_BASE}${html}`;
 }

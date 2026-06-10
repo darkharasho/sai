@@ -8,6 +8,7 @@ import {
   resolveRenderAsset,
   RENDER_CSP,
   contentTypeFor,
+  prepareRenderTarget,
 } from '../../../electron/services/renderProtocol';
 
 let root: string;
@@ -65,6 +66,47 @@ describe('renderProtocol containment', () => {
     const r = resolveRenderAsset(store, token, '%E0%A4%A');
     expect(r.ok).toBe(false);
     expect(r.ok === false && r.status).toBe(400);
+  });
+
+  it('maps sai-render-base/ requests to the token root', () => {
+    const token = mintRenderToken(store, { root, inlineHtml: '<p>x</p>' });
+    const r = resolveRenderAsset(store, token, 'sai-render-base/assets/app.css');
+    expect(r.ok && r.filePath).toBe(path.join(root, 'assets', 'app.css'));
+  });
+});
+
+describe('prepareRenderTarget', () => {
+  it('path to a file → root is its dir, entry is the file name', () => {
+    const t = prepareRenderTarget({ cwd: root, path: 'index.html' });
+    expect(t.ok && t.root).toBe(root);
+    expect(t.ok && t.entry).toBe('index.html');
+  });
+
+  it('path to a folder → entry is index.html', () => {
+    const t = prepareRenderTarget({ cwd: root, path: '.' });
+    expect(t.ok && t.entry).toBe('index.html');
+  });
+
+  it('inline html + baseDir → root is baseDir, inline served at INLINE_ENTRY', () => {
+    const t = prepareRenderTarget({ cwd: root, html: '<p>x</p>', baseDir: 'assets' });
+    expect(t.ok && t.root).toBe(path.join(root, 'assets'));
+    expect(t.ok && t.inlineHtml).toContain('<p>x</p>');
+    expect(t.ok && t.entry).toBe('__sai_inline__');
+  });
+
+  it('path wins over html', () => {
+    const t = prepareRenderTarget({ cwd: root, path: 'index.html', html: '<p>ignored</p>' });
+    expect(t.ok && t.entry).toBe('index.html');
+    expect(t.ok && t.inlineHtml).toBeUndefined();
+  });
+
+  it('rejects a path outside cwd', () => {
+    expect(prepareRenderTarget({ cwd: root, path: '../escape' }).ok).toBe(false);
+  });
+
+  it('injects a <base> into inline html so relative assets resolve', () => {
+    const t = prepareRenderTarget({ cwd: root, html: '<link href="app.css">', baseDir: 'assets' });
+    expect(t.ok && t.inlineHtml).toContain('<base href="sai-render-base/">');
   });
 });
 
