@@ -27,6 +27,16 @@ describe('saiTools registry', () => {
     expect(byName['render_html']).toMatch(/in-app|inside the SAI app|live/i);
   });
 
+  it('render_html exposes file-access fields', () => {
+    const t = SAI_TOOL_SCHEMA.find((x) => x.name === 'render_html')!;
+    const props = t.input_schema.properties as Record<string, unknown>;
+    expect(props.path).toBeDefined();
+    expect(props.baseDir).toBeDefined();
+    expect(props.height).toBeDefined();
+    // html is no longer required (path-only renders are valid).
+    expect(t.input_schema.required ?? []).not.toContain('html');
+  });
+
   it('SAI_TOOL_NAMES is the set of all tool names', () => {
     expect(SAI_TOOL_NAMES.size).toBe(SAI_TOOL_SCHEMA.length);
     expect(SAI_TOOL_NAMES.has('render_html')).toBe(true);

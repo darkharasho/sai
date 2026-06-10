@@ -11,21 +11,24 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
   {
     name: 'render_html',
     description:
-      'Render a self-contained HTML/CSS/JS snippet live inside the SAI app and return a screenshot. ' +
-      'USE THIS whenever the user asks you to design, mock up, build, show, preview, or iterate on a ' +
-      'UI element, component, page, or visual style (e.g. "make me a stylish button") — render it here ' +
-      'so they can see it in-app, rather than writing a file. Re-call to iterate on feedback. ' +
-      'The snippet runs sandboxed (no network, no app access).',
+      'Render HTML live inside the SAI app and return a screenshot. Pass `html` for a ' +
+      'self-contained snippet, or `path` to render a real multi-file site from the workspace ' +
+      '(its CSS/JS/images resolve). Use `baseDir` to let an inline `html` snippet load workspace ' +
+      'assets. USE THIS whenever the user asks to design, mock up, build, show, preview, or iterate ' +
+      'on a UI. Re-call to iterate. NOTE: file-backed renders can read workspace files AND reach the ' +
+      'network — only render trusted content.',
     toolset: 'chat',
     input_schema: {
       type: 'object',
       properties: {
-        html: { type: 'string', description: 'Full snippet; may include <style> and <script>.' },
+        html: { type: 'string', description: 'Self-contained snippet; may include <style> and <script>.' },
+        path: { type: 'string', description: 'Workspace file or folder to render as a live site (folder → index.html).' },
+        baseDir: { type: 'string', description: 'For inline `html`: workspace dir that relative assets resolve against.' },
         title: { type: 'string', description: 'Label shown on the card/panel.' },
         width: { type: 'number', description: 'Viewport width in px (default 360).' },
+        height: { type: 'number', description: 'Viewport height in px for file-backed renders (default 480).' },
         background: { type: 'string', description: 'Canvas background behind the mock.' },
       },
-      required: ['html'],
     },
   },
   {
