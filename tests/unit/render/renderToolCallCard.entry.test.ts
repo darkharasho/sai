@@ -67,3 +67,41 @@ it('returns null for choose with no options', () => {
 it('returns null for confirm with no message', () => {
   expect(entryFromToolCall(tc('sai_confirm', {}))).toBeNull();
 });
+
+it('path → file-mode entry carrying cwd + path', () => {
+  const built = entryFromToolCall(
+    { id: 't1', name: 'mcp__swarm__sai_render_html', input: JSON.stringify({ path: 'site/index.html' }) } as any,
+    '/work',
+  );
+  expect(built?.entry.kind).toBe('html');
+  expect((built?.entry.payload as any).mode).toBe('file');
+  expect((built?.entry.payload as any).cwd).toBe('/work');
+  expect((built?.entry.payload as any).path).toBe('site/index.html');
+});
+
+it('html + baseDir → file-mode entry', () => {
+  const built = entryFromToolCall(
+    { id: 't2', name: 'mcp__swarm__sai_render_html', input: JSON.stringify({ html: '<p>x</p>', baseDir: 'assets' }) } as any,
+    '/work',
+  );
+  expect((built?.entry.payload as any).mode).toBe('file');
+  expect((built?.entry.payload as any).baseDir).toBe('assets');
+});
+
+it('html alone → inline (no mode field)', () => {
+  const built = entryFromToolCall(
+    { id: 't3', name: 'mcp__swarm__sai_render_html', input: JSON.stringify({ html: '<p>x</p>' }) } as any,
+    '/work',
+  );
+  expect((built?.entry.payload as any).mode).toBeUndefined();
+  expect((built?.entry.payload as any).html).toBe('<p>x</p>');
+});
+
+it('path wins over html', () => {
+  const built = entryFromToolCall(
+    { id: 't4', name: 'mcp__swarm__sai_render_html', input: JSON.stringify({ path: 'a.html', html: '<p>x</p>' }) } as any,
+    '/work',
+  );
+  expect((built?.entry.payload as any).mode).toBe('file');
+  expect((built?.entry.payload as any).path).toBe('a.html');
+});

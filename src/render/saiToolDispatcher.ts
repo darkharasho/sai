@@ -17,10 +17,27 @@ export function dispatchSaiRenderTool(name: string, input: any, renderId: string
 
   switch (name) {
     case 'render_html': {
-      if (typeof inp.html !== 'string' || inp.html.length === 0) {
+      const htmlPath = typeof inp.path === 'string' ? inp.path : '';
+      const baseDir = typeof inp.baseDir === 'string' ? inp.baseDir : '';
+      const html = typeof inp.html === 'string' ? inp.html : '';
+      const height = typeof inp.height === 'number' && inp.height > 0 ? inp.height : undefined;
+      const cwd = typeof inp.cwd === 'string' ? inp.cwd : '';
+      if (htmlPath || baseDir) {
+        renderStore.upsert({
+          renderId,
+          kind: 'html',
+          payload: { mode: 'file', cwd, path: htmlPath || undefined, html: html || undefined, baseDir: baseDir || undefined, height },
+          title: title || (htmlPath || 'Site'),
+          width,
+          background,
+          status: 'rendering',
+        });
+        return { ok: true };
+      }
+      if (html.length === 0) {
         return { ok: false, error: 'render_html requires a non-empty "html" string' };
       }
-      renderStore.upsert({ renderId, kind: 'html', payload: { html: inp.html }, title, width, background, status: 'rendering' });
+      renderStore.upsert({ renderId, kind: 'html', payload: { html }, title, width, background, status: 'rendering' });
       return { ok: true };
     }
     case 'render_component': {

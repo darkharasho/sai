@@ -1519,7 +1519,10 @@ export default function App() {
       // mock headlessly so the agent can SEE its render without opening a browser
       // tab. renderId = req.id; response goes over the swarm tool channel.
       if (typeof req.tool === 'string' && req.tool.startsWith('render_')) {
-        const saiAny = sai as { renderCaptureHtml?: (a: { html: string; width?: number }) => Promise<string | null> };
+        const saiAny = sai as {
+          renderCaptureHtml?: (a: { html: string; width?: number }) => Promise<string | null>;
+          renderCaptureFile?: (a: { cwd: string; path?: string; html?: string; baseDir?: string; width?: number; height?: number }) => Promise<string | null>;
+        };
         let htmlInput: string | null = null;
         if (req.tool === 'render_html' && req.input && typeof req.input.html === 'string') {
           htmlInput = req.input.html as string;
@@ -1536,20 +1539,44 @@ export default function App() {
         ) {
           htmlInput = buildDiffHtml(req.input as DiffInput);
         }
-        const deps = htmlInput && typeof saiAny.renderCaptureHtml === 'function'
-          ? {
-              captureRenderRegion: async () => {
-                const b64 = await saiAny.renderCaptureHtml!({
-                  html: htmlInput,
-                  width: typeof req.input?.width === 'number' ? req.input.width : undefined,
-                });
-                if (!b64) throw new Error('capture returned no image');
-                return { base64: b64, mimeType: 'image/png' as const };
-              },
-            }
-          : {};
+        const isFileMode =
+          req.tool === 'render_html' &&
+          (typeof req.input?.path === 'string' || typeof req.input?.baseDir === 'string');
+        let deps: Parameters<typeof handleRenderToolRequest>[1];
+        if (isFileMode && typeof saiAny.renderCaptureFile === 'function') {
+          deps = {
+            captureRenderRegion: async () => {
+              const b64 = await saiAny.renderCaptureFile!({
+                cwd: activeProjectPathRef.current ?? '',
+                path: typeof req.input?.path === 'string' ? req.input.path : undefined,
+                html: typeof req.input?.html === 'string' ? req.input.html : undefined,
+                baseDir: typeof req.input?.baseDir === 'string' ? req.input.baseDir : undefined,
+                width: typeof req.input?.width === 'number' ? req.input.width : undefined,
+                height: typeof req.input?.height === 'number' ? req.input.height : undefined,
+              });
+              if (!b64) throw new Error('capture returned no image');
+              return { base64: b64, mimeType: 'image/png' as const };
+            },
+          };
+        } else if (htmlInput && typeof saiAny.renderCaptureHtml === 'function') {
+          deps = {
+            captureRenderRegion: async () => {
+              const b64 = await saiAny.renderCaptureHtml!({
+                html: htmlInput,
+                width: typeof req.input?.width === 'number' ? req.input.width : undefined,
+              });
+              if (!b64) throw new Error('capture returned no image');
+              return { base64: b64, mimeType: 'image/png' as const };
+            },
+          };
+        } else {
+          deps = {};
+        }
+        const dispatchInput = isFileMode
+          ? { ...req.input, cwd: activeProjectPathRef.current ?? '' }
+          : req.input;
         void handleRenderToolRequest(
-          { tool: req.tool, input: req.input, renderId: req.id },
+          { tool: req.tool, input: dispatchInput, renderId: req.id },
           deps,
         ).then(
           (result) => sai.respondSwarmTool(req.id, result),
@@ -4216,7 +4243,7 @@ export default function App() {
                       n.endsWith('sai_confirm') ||
                       n.endsWith('sai_choose')
                     ) {
-                      return <RenderToolCallCard tc={tc} />;
+                      return <RenderToolCallCard tc={tc} cwd={projectPath} />;
                     }
                     return null;
                   }}

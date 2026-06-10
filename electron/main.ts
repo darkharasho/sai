@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, Menu, MenuItem, screen, clipboard, Notification } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, Menu, MenuItem, screen, clipboard, Notification, protocol } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -16,9 +16,27 @@ import { readDirImpl, readFileImpl, readFileBufImpl, statFileImpl, writeFileImpl
 import { clampRect, type Rect } from './capturePage';
 import { gitStatusImpl, gitDiffImpl, gitStageImpl, gitUnstageImpl, gitCommitImpl, gitPushImpl, gitPullImpl } from './services/git';
 import { enrichedEnv } from './services/shellEnv';
+import {
+  createRenderProtocolStore,
+  resolveRenderAsset,
+  RENDER_CSP,
+  contentTypeFor,
+  prepareRenderTarget,
+  mintRenderToken,
+  evictRenderToken,
+} from './services/renderProtocol';
 import { execFile as _execFile } from 'node:child_process';
 import { promisify as _promisify } from 'node:util';
 const _execFileP = _promisify(_execFile);
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'sai-render',
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
+  },
+]);
+
+const renderProtocolStore = createRenderProtocolStore();
 
 // Wrap `tailscale` shell calls with SAI's enrichedEnv (login-shell PATH).
 // Without this, Electron's stripped PATH may not find `/usr/bin/tailscale`.
@@ -906,6 +924,50 @@ function createWindow() {
     }
   });
 
+  // Render a FILE-backed site (workspace path or inline html + baseDir) in a
+  // hidden off-screen window via the sai-render:// protocol and screenshot it,
+  // so the agent can SEE a real multi-file render. Returns base64 PNG or null.
+  ipcMain.handle('render:captureFile', async (_event, args: { cwd?: string; path?: string; html?: string; baseDir?: string; width?: number; height?: number }) => {
+    if (!args || typeof args.cwd !== 'string' || !args.cwd) return null;
+    const target = prepareRenderTarget({ cwd: args.cwd, path: args.path, html: args.html, baseDir: args.baseDir });
+    if (!target.ok) return null;
+    const token = mintRenderToken(renderProtocolStore, { root: target.root, inlineHtml: target.inlineHtml });
+    const url = `sai-render://${token}/${encodeURIComponent(target.entry)}`;
+    const width = Math.min(Math.max(Math.round(args.width || 480), 80), 2000);
+    let win: BrowserWindow | null = null;
+    try {
+      win = new BrowserWindow({
+        width,
+        height: 1200,
+        show: false,
+        x: -32000,
+        y: -32000,
+        frame: false,
+        skipTaskbar: true,
+        webPreferences: { sandbox: true, javascript: true, backgroundThrottling: false },
+      });
+      await win.loadURL(url);
+      // Let layout, fonts and any scripts settle before measuring.
+      await new Promise((r) => setTimeout(r, 320));
+      const measured = (await win.webContents.executeJavaScript(
+        'Math.ceil(Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)) || 200',
+      )) as number;
+      const height = args.height && args.height > 0
+        ? Math.min(Math.max(Math.round(args.height), 40), 4000)
+        : Math.min(Math.max(Math.round(measured), 40), 4000);
+      win.setContentSize(width, height);
+      await new Promise((r) => setTimeout(r, 60));
+      const image = await win.webContents.capturePage({ x: 0, y: 0, width, height });
+      return image.toPNG().toString('base64');
+    } catch (err) {
+      console.error('[render] captureFile failed:', err);
+      return null;
+    } finally {
+      try { win?.destroy(); } catch { /* noop */ }
+      evictRenderToken(renderProtocolStore, token);
+    }
+  });
+
   ipcMain.handle('render:captureComponent', async (_event, params: RenderHostParams): Promise<string | null> => {
     const width = typeof params?.width === 'number' && params.width > 0 ? Math.min(Math.round(params.width), 2000) : 360;
     let win: BrowserWindow | null = null;
@@ -954,10 +1016,40 @@ function createWindow() {
     }
   });
 
-  // Write a render's HTML to a temp file and open it in the default browser.
-  ipcMain.handle('render:openInBrowser', async (_event, html: string) => {
-    if (typeof html !== 'string' || !html) return false;
+  ipcMain.handle(
+    'render:mintFileUrl',
+    async (_e, args: { cwd: string; path?: string; html?: string; baseDir?: string }) => {
+      if (!args || typeof args.cwd !== 'string' || !args.cwd) {
+        return { ok: false, error: 'missing cwd' };
+      }
+      const target = prepareRenderTarget(args);
+      if (!target.ok) return { ok: false, error: target.error };
+      const token = mintRenderToken(renderProtocolStore, {
+        root: target.root,
+        inlineHtml: target.inlineHtml,
+      });
+      return { ok: true, url: `sai-render://${token}/${encodeURIComponent(target.entry)}`, token };
+    },
+  );
+
+  ipcMain.handle('render:releaseFileUrl', async (_e, token: string) => {
+    if (typeof token === 'string') evictRenderToken(renderProtocolStore, token);
+    return true;
+  });
+
+  // Open a render in the default browser. Accepts EITHER inline HTML (written to a
+  // temp file) OR { cwd, path } to open the real on-disk file.
+  ipcMain.handle('render:openInBrowser', async (_event, arg: string | { cwd: string; path: string }) => {
     try {
+      if (arg && typeof arg === 'object' && typeof arg.path === 'string') {
+        const target = prepareRenderTarget({ cwd: arg.cwd, path: arg.path });
+        if (!target.ok) return false;
+        const file = path.join(target.root, target.entry);
+        await shell.openExternal(pathToFileURL(file).toString());
+        return true;
+      }
+      const html = arg as string;
+      if (typeof html !== 'string' || !html) return false;
       const dir = path.join(app.getPath('temp'), 'sai-renders');
       fs.mkdirSync(dir, { recursive: true });
       const file = path.join(dir, `render-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.html`);
@@ -1017,7 +1109,30 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught exception:', err);
 });
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  protocol.handle('sai-render', async (request) => {
+    const url = new URL(request.url); // sai-render://<token>/<path>
+    const token = url.hostname;
+    const rawPath = url.pathname; // leading slash included
+    const r = resolveRenderAsset(renderProtocolStore, token, rawPath);
+    if (!r.ok) {
+      return new Response('blocked', { status: r.status });
+    }
+    const headers: Record<string, string> = { 'Content-Security-Policy': RENDER_CSP };
+    if (r.inlineHtml != null) {
+      return new Response(r.inlineHtml, {
+        status: 200,
+        headers: { ...headers, 'Content-Type': 'text/html' },
+      });
+    }
+    const body = fs.readFileSync(r.filePath);
+    return new Response(new Uint8Array(body), {
+      status: 200,
+      headers: { ...headers, 'Content-Type': contentTypeFor(r.filePath) },
+    });
+  });
+  createWindow();
+});
 let _quitInProgress = false;
 app.on('before-quit', (e) => {
   try { swarmMcpHost.stop(); } catch { /* noop */ }

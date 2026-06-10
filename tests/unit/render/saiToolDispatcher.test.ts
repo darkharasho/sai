@@ -20,6 +20,27 @@ describe('dispatchSaiRenderTool', () => {
     expect(renderStore.get('rid-2')).toBeUndefined();
   });
 
+  it('render_html with path seeds a file-mode entry (cwd carried, no html required)', () => {
+    const res = dispatchSaiRenderTool('render_html', { path: 'site/index.html', cwd: '/work', height: 500 }, 'rid-file1');
+    expect(res.ok).toBe(true);
+    const e = renderStore.get('rid-file1');
+    expect(e?.kind).toBe('html');
+    expect(e?.payload).toEqual({ mode: 'file', cwd: '/work', path: 'site/index.html', html: undefined, baseDir: undefined, height: 500 });
+  });
+
+  it('render_html with baseDir + html seeds file mode', () => {
+    const res = dispatchSaiRenderTool('render_html', { html: '<p>x</p>', baseDir: 'assets', cwd: '/work' }, 'rid-file2');
+    expect(res.ok).toBe(true);
+    expect((renderStore.get('rid-file2')?.payload as any).mode).toBe('file');
+    expect((renderStore.get('rid-file2')?.payload as any).baseDir).toBe('assets');
+  });
+
+  it('render_html with neither html nor path nor baseDir still rejects', () => {
+    const res = dispatchSaiRenderTool('render_html', {}, 'rid-file3');
+    expect(res).toEqual({ ok: false, error: 'render_html requires a non-empty "html" string' });
+    expect(renderStore.get('rid-file3')).toBeUndefined();
+  });
+
   it('render_component upserts a component entry for a known key', () => {
     const res = dispatchSaiRenderTool('render_component', { component: 'WorkspaceSquircle', props: { state: 'busy-done' } }, 'rid-3');
     expect(res.ok).toBe(true);

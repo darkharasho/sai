@@ -27,7 +27,7 @@ function hashString(s: string): number {
   return h;
 }
 
-export function entryFromToolCall(tc: ToolCall): { entry: RenderEntry; code: string } | null {
+export function entryFromToolCall(tc: ToolCall, cwd = ''): { entry: RenderEntry; code: string } | null {
   const name = tc.name || '';
   const input = parseInput(tc.input);
   const width = typeof input.width === 'number' && input.width > 0 ? input.width : 360;
@@ -135,8 +135,27 @@ export function entryFromToolCall(tc: ToolCall): { entry: RenderEntry; code: str
     };
   }
 
-  // default: html
+  // default: html — file-backed when path or baseDir is present, else inline.
+  const htmlPath = typeof input.path === 'string' ? input.path : '';
   const html = typeof input.html === 'string' ? input.html : '';
+  const baseDir = typeof input.baseDir === 'string' ? input.baseDir : '';
+  const height = typeof input.height === 'number' && input.height > 0 ? input.height : undefined;
+
+  if (htmlPath || baseDir) {
+    return {
+      entry: {
+        renderId,
+        kind: 'html',
+        payload: { mode: 'file', cwd, path: htmlPath || undefined, html: html || undefined, baseDir: baseDir || undefined, height },
+        title: title || (htmlPath ? htmlPath : 'Site'),
+        width,
+        background,
+        status: 'ready',
+      },
+      code: html || `path: ${htmlPath}`,
+    };
+  }
+
   if (!html) return null;
   return {
     entry: {
@@ -182,9 +201,9 @@ function RenderCode({ code, lang }: { code: string; lang: string }) {
   return <div className="sai-rc__codehl" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-export function RenderToolCallCard({ tc }: { tc: ToolCall }) {
+export function RenderToolCallCard({ tc, cwd = '' }: { tc: ToolCall; cwd?: string }) {
   const [showCode, setShowCode] = useState(false);
-  const built = entryFromToolCall(tc);
+  const built = entryFromToolCall(tc, cwd);
   if (!built) return null;
   const { entry, code } = built;
   const lang = entry.kind === 'component' || entry.kind === 'theme' ? 'json' : entry.kind === 'mermaid' ? 'text' : 'html';
@@ -192,12 +211,17 @@ export function RenderToolCallCard({ tc }: { tc: ToolCall }) {
   // would overflow the thread) drop the code block below the render instead.
   const layout = entry.width > 460 ? 'stack' : 'side';
   const mockName = entry.title || (entry.kind === 'html' ? 'HTML' : entry.kind);
-  // Only html mocks are standalone documents we can open in a browser.
-  const openableHtml = entry.kind === 'html' ? code : null;
+  const payload = entry.payload as { mode?: string; cwd?: string; path?: string; html?: string };
+  const isFileMode = payload.mode === 'file';
+  // Inline html mocks are standalone documents we can open as a temp file.
+  const openableHtml = entry.kind === 'html' && !isFileMode ? code : null;
+  // File-mode renders open the real entry file by path.
+  const openablePath = isFileMode && payload.path ? { cwd: payload.cwd ?? cwd, path: payload.path } : null;
 
   const openInBrowser = () => {
-    const sai = (window as { sai?: { renderOpenInBrowser?: (html: string) => void } }).sai;
-    if (openableHtml && sai?.renderOpenInBrowser) sai.renderOpenInBrowser(openableHtml);
+    const sai = (window as { sai?: { renderOpenInBrowser?: (a: string | { cwd: string; path: string }) => void } }).sai;
+    if (openablePath && sai?.renderOpenInBrowser) sai.renderOpenInBrowser(openablePath);
+    else if (openableHtml && sai?.renderOpenInBrowser) sai.renderOpenInBrowser(openableHtml);
   };
 
   return (
@@ -215,7 +239,7 @@ export function RenderToolCallCard({ tc }: { tc: ToolCall }) {
             <span className="sai-rc__sep">—</span>
             <span className="sai-rc__name">{mockName}</span>
           </span>
-          {openableHtml && (
+          {(openableHtml || openablePath) && (
             <button
               type="button"
               className="sai-rc__openbtn"

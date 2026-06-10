@@ -259,9 +259,17 @@ contextBridge.exposeInMainWorld('sai', {
   getRecentProjects: () => ipcRenderer.invoke('project:getRecent'),
   openRecentProject: (path: string) => ipcRenderer.invoke('project:openRecent', path),
   openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
-  renderOpenInBrowser: (html: string) => ipcRenderer.invoke('render:openInBrowser', html),
+  renderOpenInBrowser: (arg: string | { cwd: string; path: string }) =>
+    ipcRenderer.invoke('render:openInBrowser', arg),
+  renderMintFileUrl: (args: { cwd: string; path?: string; html?: string; baseDir?: string }):
+    Promise<{ ok: true; url: string; token: string } | { ok: false; error: string }> =>
+    ipcRenderer.invoke('render:mintFileUrl', args),
+  renderReleaseFileUrl: (token: string): Promise<boolean> =>
+    ipcRenderer.invoke('render:releaseFileUrl', token),
   renderCaptureHtml: (args: { html: string; width?: number }): Promise<string | null> =>
     ipcRenderer.invoke('render:captureHtml', args),
+  renderCaptureFile: (args: { cwd: string; path?: string; html?: string; baseDir?: string; width?: number; height?: number }): Promise<string | null> =>
+    ipcRenderer.invoke('render:captureFile', args),
   renderCaptureComponent: (a: { component?: string; components?: string[]; props?: Record<string, unknown>; vars?: Record<string, string>; width?: number }): Promise<string | null> =>
     ipcRenderer.invoke('render:captureComponent', a),
   setBadgeCount: (count: number) => ipcRenderer.send('app:setBadgeCount', count),
