@@ -82,7 +82,12 @@ export function resolveRenderAsset(
   const entry = store.tokens.get(token);
   if (!entry) return { ok: false, status: 404 };
 
-  const rel = decodeURIComponent(rawPath).replace(/^\/+/, '');
+  let rel: string;
+  try {
+    rel = decodeURIComponent(rawPath).replace(/^\/+/, '');
+  } catch {
+    return { ok: false, status: 400 };
+  }
   if (rel === INLINE_ENTRY && entry.inlineHtml != null) {
     return { ok: true, inlineHtml: entry.inlineHtml };
   }

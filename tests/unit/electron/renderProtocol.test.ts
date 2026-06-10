@@ -59,6 +59,13 @@ describe('renderProtocol containment', () => {
     const r = resolveRenderAsset(store, token, '__sai_inline__');
     expect(r.ok && r.inlineHtml).toBe('<p>inline</p>');
   });
+
+  it('rejects malformed percent-encoding without throwing', () => {
+    const token = mintRenderToken(store, { root });
+    const r = resolveRenderAsset(store, token, '%E0%A4%A');
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.status).toBe(400);
+  });
 });
 
 describe('renderProtocol helpers', () => {
