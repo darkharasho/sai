@@ -211,12 +211,17 @@ export function RenderToolCallCard({ tc, cwd = '' }: { tc: ToolCall; cwd?: strin
   // would overflow the thread) drop the code block below the render instead.
   const layout = entry.width > 460 ? 'stack' : 'side';
   const mockName = entry.title || (entry.kind === 'html' ? 'HTML' : entry.kind);
-  // Only html mocks are standalone documents we can open in a browser.
-  const openableHtml = entry.kind === 'html' ? code : null;
+  const payload = entry.payload as { mode?: string; cwd?: string; path?: string; html?: string };
+  const isFileMode = payload.mode === 'file';
+  // Inline html mocks are standalone documents we can open as a temp file.
+  const openableHtml = entry.kind === 'html' && !isFileMode ? code : null;
+  // File-mode renders open the real entry file by path.
+  const openablePath = isFileMode && payload.path ? { cwd: payload.cwd ?? cwd, path: payload.path } : null;
 
   const openInBrowser = () => {
-    const sai = (window as { sai?: { renderOpenInBrowser?: (html: string) => void } }).sai;
-    if (openableHtml && sai?.renderOpenInBrowser) sai.renderOpenInBrowser(openableHtml);
+    const sai = (window as { sai?: { renderOpenInBrowser?: (a: string | { cwd: string; path: string }) => void } }).sai;
+    if (openablePath && sai?.renderOpenInBrowser) sai.renderOpenInBrowser(openablePath);
+    else if (openableHtml && sai?.renderOpenInBrowser) sai.renderOpenInBrowser(openableHtml);
   };
 
   return (
@@ -234,7 +239,7 @@ export function RenderToolCallCard({ tc, cwd = '' }: { tc: ToolCall; cwd?: strin
             <span className="sai-rc__sep">—</span>
             <span className="sai-rc__name">{mockName}</span>
           </span>
-          {openableHtml && (
+          {(openableHtml || openablePath) && (
             <button
               type="button"
               className="sai-rc__openbtn"

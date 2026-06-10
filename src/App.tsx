@@ -4216,7 +4216,7 @@ export default function App() {
                       n.endsWith('sai_confirm') ||
                       n.endsWith('sai_choose')
                     ) {
-                      return <RenderToolCallCard tc={tc} />;
+                      return <RenderToolCallCard tc={tc} cwd={projectPath} />;
                     }
                     return null;
                   }}
