@@ -393,7 +393,22 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                                 className={`dropdown-item workspace-item ${w.projectPath === projectPath ? 'active' : ''}`}
                                 onClick={() => { onProjectChange(w.projectPath); setOpen(false); }}
                               >
-                                <StatusSlot><WorkspaceSquircle state="inactive" /></StatusSlot>
+                                <StatusSlot>
+                                  <WorkspaceSquircle
+                                    state={
+                                      approvalWorkspaces?.has(w.projectPath) ? 'approval'
+                                      : busyWorkspaces?.has(w.projectPath) ? 'busy'
+                                      : completedWorkspaces?.has(w.projectPath) ? 'done'
+                                      : 'inactive'
+                                    }
+                                    title={
+                                      approvalWorkspaces?.has(w.projectPath) ? 'Approval needed'
+                                      : busyWorkspaces?.has(w.projectPath) ? 'Working...'
+                                      : completedWorkspaces?.has(w.projectPath) ? 'Response complete'
+                                      : undefined
+                                    }
+                                  />
+                                </StatusSlot>
                                 <span className="dropdown-item-name">{basename(w.projectPath)}</span>
                                 <span className="dropdown-item-path">{w.projectPath}</span>
                               </button>
@@ -981,8 +996,8 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           margin-left: 4px;
         }
         .dropdown-item.active .workspace-approval-label {
-          color: #000;
-          opacity: 0.8;
+          color: #f59e0b;
+          opacity: 1;
         }
         .project-selector:hover {
           background: var(--surface-4);
@@ -1028,12 +1043,23 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           background: var(--surface-4);
         }
         .dropdown-item.active {
+          background: var(--surface-4);
+          color: var(--text);
+          position: relative;
+        }
+        .dropdown-item.active::before {
+          content: '';
+          position: absolute;
+          left: 0;
+          top: 4px;
+          bottom: 4px;
+          width: 3px;
+          border-radius: 0 2px 2px 0;
           background: var(--accent);
-          color: #000;
         }
         .dropdown-item.active .dropdown-item-path {
-          color: #000;
-          opacity: 0.7;
+          color: var(--text-muted);
+          opacity: 1;
         }
         .dropdown-item-name {
           font-weight: 500;
@@ -1239,7 +1265,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           color: var(--text-muted);
         }
         .meta-workspace-item.active .meta-workspace-icon {
-          color: #000;
+          color: var(--text);
         }
         .meta-workspace-icon.approval { color: #f87171 !important; animation: approval-blink 1.2s ease-in-out infinite; }
         .meta-workspace-icon.busy { color: var(--accent) !important; animation: dot-spinner-pulse 2.2s ease-in-out infinite; }
