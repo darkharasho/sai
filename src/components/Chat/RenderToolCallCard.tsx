@@ -27,7 +27,7 @@ function hashString(s: string): number {
   return h;
 }
 
-export function entryFromToolCall(tc: ToolCall): { entry: RenderEntry; code: string } | null {
+export function entryFromToolCall(tc: ToolCall, cwd = ''): { entry: RenderEntry; code: string } | null {
   const name = tc.name || '';
   const input = parseInput(tc.input);
   const width = typeof input.width === 'number' && input.width > 0 ? input.width : 360;
@@ -135,8 +135,27 @@ export function entryFromToolCall(tc: ToolCall): { entry: RenderEntry; code: str
     };
   }
 
-  // default: html
+  // default: html — file-backed when path or baseDir is present, else inline.
+  const htmlPath = typeof input.path === 'string' ? input.path : '';
   const html = typeof input.html === 'string' ? input.html : '';
+  const baseDir = typeof input.baseDir === 'string' ? input.baseDir : '';
+  const height = typeof input.height === 'number' && input.height > 0 ? input.height : undefined;
+
+  if (htmlPath || baseDir) {
+    return {
+      entry: {
+        renderId,
+        kind: 'html',
+        payload: { mode: 'file', cwd, path: htmlPath || undefined, html: html || undefined, baseDir: baseDir || undefined, height },
+        title: title || (htmlPath ? htmlPath : 'Site'),
+        width,
+        background,
+        status: 'ready',
+      },
+      code: html || `path: ${htmlPath}`,
+    };
+  }
+
   if (!html) return null;
   return {
     entry: {
@@ -182,9 +201,9 @@ function RenderCode({ code, lang }: { code: string; lang: string }) {
   return <div className="sai-rc__codehl" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-export function RenderToolCallCard({ tc }: { tc: ToolCall }) {
+export function RenderToolCallCard({ tc, cwd = '' }: { tc: ToolCall; cwd?: string }) {
   const [showCode, setShowCode] = useState(false);
-  const built = entryFromToolCall(tc);
+  const built = entryFromToolCall(tc, cwd);
   if (!built) return null;
   const { entry, code } = built;
   const lang = entry.kind === 'component' || entry.kind === 'theme' ? 'json' : entry.kind === 'mermaid' ? 'text' : 'html';
