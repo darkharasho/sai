@@ -1,4 +1,4 @@
-import { useState, useRef, KeyboardEvent, useEffect } from 'react';
+import { useState, useRef, KeyboardEvent, useEffect, useMemo } from 'react';
 import type { PendingApproval, TerminalTab, ChatMessage as ChatMessageType, QueuedMessage, MetaWorkspaceRuntime } from '../../types';
 import TodoProgress from './TodoProgress';
 import MessageQueue from './MessageQueue';
@@ -16,7 +16,10 @@ import {
 } from '../../terminalBuffer';
 
 type EffortLevel = 'low' | 'medium' | 'high' | 'max';
-type ModelChoice = 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan';
+// Known CLI aliases plus any account-specific model id (e.g. 'claude-fable-5[1m]')
+// surfaced via claude:models — the CLI accepts arbitrary model strings.
+type ModelChoice = 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan' | (string & {});
+type ModelOption = { id: string; label: string; description: string; recommended?: boolean; oneM?: boolean; extra?: boolean };
 
 interface ChatInputProps {
   onSend: (message: string, images?: string[]) => void;
@@ -34,6 +37,7 @@ interface ChatInputProps {
   onEffortChange: (level: EffortLevel) => void;
   modelChoice: ModelChoice;
   onModelChange: (model: ModelChoice) => void;
+  availableModels?: ModelOption[];
   contextUsage?: { used: number; total: number; inputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; outputTokens: number };
   sessionUsage?: { inputTokens: number; outputTokens: number };
   sessionCost?: number;
@@ -112,16 +116,28 @@ const EFFORT_CONFIG: Record<EffortLevel, { icon: typeof ChevronDown; label: stri
   max:    { icon: ChevronsUp,  label: 'Max', color: 'var(--orange)', next: 'low' },
 };
 
+// Offline fallback, used only when claude:models can't detect the account's
+// allowed set (e.g. not logged in). The live list comes from `availableModels`.
 const MODEL_OPTIONS: { id: ModelChoice; label: string; description: string; color: string; recommended?: boolean }[] = [
-  { id: 'default',    label: 'Default',    description: 'Your account\u2019s recommended model',                                 color: 'var(--text-secondary)' },
-  { id: 'sonnet',     label: 'Sonnet',     description: 'Claude Sonnet 4.6 \u00b7 Best for everyday tasks',                      color: 'var(--accent)', recommended: true },
-  { id: 'opus',       label: 'Opus',       description: 'Claude Opus 4.7 \u00b7 Most capable for complex work',                  color: 'var(--orange)' },
-  { id: 'haiku',      label: 'Haiku',      description: 'Claude Haiku \u00b7 Fastest for quick answers',                         color: 'var(--green)' },
-  { id: 'best',       label: 'Best',       description: 'Most capable available (currently Opus)',                               color: 'var(--orange)' },
+  { id: 'default',    label: 'Default',    description: 'Your account\u2019s recommended model',                                 color: 'var(--text-secondary)', recommended: true },
+  { id: 'sonnet',     label: 'Sonnet',     description: 'Claude Sonnet 4.6 \u00b7 Efficient for routine tasks',                  color: 'var(--accent)' },
+  { id: 'opus',       label: 'Opus',       description: 'Claude Opus 4.8 \u00b7 Most capable for complex work',                  color: 'var(--orange)' },
+  { id: 'haiku',      label: 'Haiku',      description: 'Claude Haiku 4.5 \u00b7 Fastest for quick answers',                     color: 'var(--green)' },
+  { id: 'best',       label: 'Best',       description: 'Most capable available (currently Opus 4.8)',                           color: 'var(--orange)' },
   { id: 'opusplan',   label: 'Opus Plan',  description: 'Opus in plan mode, Sonnet for execution',                               color: 'var(--orange)' },
   { id: 'sonnet[1m]', label: 'Sonnet 1M',  description: 'Sonnet with 1M token context for long sessions',                        color: 'var(--accent)' },
   { id: 'opus[1m]',   label: 'Opus 1M',    description: 'Opus with 1M token context for long sessions',                          color: 'var(--orange)' },
 ];
+
+// Maps a model id to a toolbar accent color (live models from claude:models
+// don't carry one).
+function modelColor(id: string): string {
+  if (id.includes('fable')) return 'var(--purple, var(--orange))';
+  if (id.startsWith('opus')) return 'var(--orange)';
+  if (id.startsWith('sonnet')) return 'var(--accent)';
+  if (id.startsWith('haiku')) return 'var(--green)';
+  return 'var(--text-secondary)';
+}
 
 
 function formatTokens(n: number): string {
@@ -232,7 +248,15 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommands = [], isStreaming, messages = [], onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, contextUsage, sessionUsage, sessionCost, rateLimits, billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
+export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommands = [], isStreaming, messages = [], onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, contextUsage, sessionUsage, sessionCost, rateLimits, billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
+  // Live model list (account/org-aware) when available, else the static fallback.
+  const modelOptions = useMemo<{ id: ModelChoice; label: string; description: string; color: string; recommended?: boolean }[]>(() => {
+    if (availableModels && availableModels.length) {
+      return availableModels.map(m => ({ id: m.id, label: m.label, description: m.description, recommended: m.recommended, color: modelColor(m.id) }));
+    }
+    return MODEL_OPTIONS;
+  }, [availableModels]);
+
   const [value, setValue] = useState(initialDraft);
   const [suggestions, setSuggestions] = useState<AutocompleteItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -1140,15 +1164,15 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
             <button
               className="toolbar-btn model-btn"
               onClick={() => setModelMenuOpen(!modelMenuOpen)}
-              style={{ color: MODEL_OPTIONS.find(m => m.id === modelChoice)?.color }}
+              style={{ color: modelOptions.find(m => m.id === modelChoice)?.color }}
             >
-              <span className="model-label">{MODEL_OPTIONS.find(m => m.id === modelChoice)?.label}</span>
+              <span className="model-label">{modelOptions.find(m => m.id === modelChoice)?.label ?? modelChoice}</span>
               <ChevronDown size={11} style={{ opacity: 0.5 }} />
             </button>
             {modelMenuOpen && (
               <div className="model-dropdown">
                 <div className="model-dropdown-header">Select a model</div>
-                {MODEL_OPTIONS.map(opt => (
+                {modelOptions.map(opt => (
                   <button
                     key={opt.id}
                     className={`model-dropdown-item ${opt.id === modelChoice ? 'active' : ''}`}

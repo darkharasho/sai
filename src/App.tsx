@@ -77,9 +77,11 @@ function applyEditsClientSide(content: string, edits: { line: number; column: nu
 
 type PermissionMode = 'default' | 'bypass';
 type EffortLevel = 'low' | 'medium' | 'high' | 'max';
-type ModelChoice = 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan';
-const VALID_MODEL_CHOICES: readonly ModelChoice[] = ['default', 'best', 'sonnet', 'opus', 'haiku', 'sonnet[1m]', 'opus[1m]', 'opusplan'];
-const isModelChoice = (v: unknown): v is ModelChoice => typeof v === 'string' && (VALID_MODEL_CHOICES as readonly string[]).includes(v);
+type ModelChoice = 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan' | (string & {});
+type ClaudeModelOption = { id: string; label: string; description: string; recommended?: boolean; oneM?: boolean; extra?: boolean };
+// Persisted model can be a known alias or an account-specific id (e.g. Fable);
+// the CLI validates it, so accept any non-empty string here.
+const isModelChoice = (v: unknown): v is ModelChoice => typeof v === 'string' && v.length > 0;
 
 // Cap the in-memory active-session message window. Older messages stay in
 // IndexedDB and are paginated in via ChatPanel's startReached callback.
@@ -166,6 +168,7 @@ export default function App() {
   const [commitMessageProvider, setCommitMessageProvider] = useState<AIProvider>('claude');
   const [codexModel, setCodexModel] = useState('');
   const [codexModels, setCodexModels] = useState<{ id: string; name: string }[]>([]);
+  const [claudeModels, setClaudeModels] = useState<ClaudeModelOption[]>([]);
   const [codexPermission, setCodexPermission] = useState<CodexPermission>('auto');
   const [geminiModel, setGeminiModel] = useState('auto-gemini-3');
   const [geminiModels, setGeminiModels] = useState<{ id: string; name: string }[]>([]);
@@ -1675,6 +1678,25 @@ export default function App() {
       if (result?.defaultModel) setCodexModel(prev => prev || result.defaultModel);
     });
   }, []);
+
+  // Prefetch the Claude models this account/org can actually use. Orgs can
+  // restrict models and 1M context is gated per-org, so we don't assume every
+  // Anthropic model is available — claude:models derives the real set.
+  useEffect(() => {
+    (window.sai as any).claudeModels?.().then((result: { models: ClaudeModelOption[] }) => {
+      if (result?.models?.length) setClaudeModels(result.models);
+    }).catch(() => {});
+  }, []);
+
+  // If the selected model isn't in the account's allowed set (e.g. a persisted
+  // choice whose org access was revoked), fall back to the recommended/default
+  // model so we never spawn the CLI with a disallowed --model. Runs whenever the
+  // detected list or the selection changes, so it covers the settings-load race.
+  useEffect(() => {
+    if (!claudeModels.length) return;
+    if (claudeModels.some(m => m.id === modelChoice)) return;
+    setModelChoice(claudeModels.find(m => m.recommended)?.id ?? claudeModels[0].id);
+  }, [claudeModels, modelChoice]);
 
   // Prefetch Gemini models (hardcoded) at startup
   useEffect(() => {
@@ -3496,6 +3518,7 @@ export default function App() {
                       onEffortChange={handleEffortChange}
                       modelChoice={orchModel}
                       onModelChange={handleModelChange}
+                      availableModels={claudeModels}
                       aiProvider={orchProvider}
                       codexModel={codexModel}
                       onCodexModelChange={handleCodexModelChange}
@@ -3803,6 +3826,7 @@ export default function App() {
                   onEffortChange={handleEffortChange}
                   modelChoice={modelChoice}
                   onModelChange={handleModelChange}
+                  availableModels={claudeModels}
                   aiProvider={aiProvider}
                   codexModel={codexModel}
                   onCodexModelChange={handleCodexModelChange}

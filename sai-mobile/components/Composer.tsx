@@ -56,7 +56,7 @@ const EFFORT_CONFIG = {
 };
 
 const MODEL_OPTIONS = [
-  { value: 'claude-opus-4-7',           label: 'Opus',   hint: 'Most capable',  color: C.orange },
+  { value: 'claude-opus-4-8',           label: 'Opus',   hint: 'Most capable',  color: C.orange },
   { value: 'claude-sonnet-4-6',         label: 'Sonnet', hint: 'Balanced',      color: C.accent },
   { value: 'claude-haiku-4-5-20251001', label: 'Haiku',  hint: 'Fastest',       color: C.green },
 ];

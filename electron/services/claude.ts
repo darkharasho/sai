@@ -5,6 +5,7 @@ import type { PendingToolUse } from './workspace';
 import { sweepIdleScopes, IDLE_SCOPE_MS, SWEEP_INTERVAL_MS } from './idleScopeSweep';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import { enrichedEnv, withNodeMemoryCap } from './shellEnv';
 import { notifyCompletion, notifyApproval, notifyQuestion, notifyPlanReview } from './notify';
 import { extractCodexCommitMessage } from './commit-message-parser';
@@ -971,8 +972,80 @@ export async function approveImpl(
   return { result, isError };
 }
 
+export interface ClaudeModelOption {
+  id: string;
+  label: string;
+  description: string;
+  recommended?: boolean;
+  oneM?: boolean;
+  extra?: boolean;
+}
+
+// Built-in models shipped by the current Claude Code CLI. Account/org gating
+// (extra models like Fable, 1M-context access) is layered on top from the CLI's
+// own cache in ~/.claude.json so we don't advertise models the org disallows.
+const BASE_CLAUDE_MODELS: ClaudeModelOption[] = [
+  { id: 'default', label: 'Default', description: 'Your account’s recommended model', recommended: true },
+  { id: 'sonnet',  label: 'Sonnet',  description: 'Claude Sonnet 4.6 · Efficient for routine tasks' },
+  { id: 'opus',    label: 'Opus',    description: 'Claude Opus 4.8 · Most capable for complex work' },
+  { id: 'haiku',   label: 'Haiku',   description: 'Claude Haiku 4.5 · Fastest for quick answers' },
+];
+
+function readClaudeUserConfig(): any {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+// Derives the models actually available to this account/org rather than assuming
+// every Anthropic model is allowed. The Claude CLI has no "list models" command,
+// but it caches the relevant signals in ~/.claude.json:
+//   - additionalModelOptionsCache: account-specific extra models (e.g. Fable)
+//   - s1mAccessCache[orgUuid].hasAccess: whether the org can use 1M context
+//   - oauthAccount.organizationUuid: the key into s1mAccessCache
+// When not logged in (no cache) we fall back to the built-in set.
+export function getAvailableClaudeModels(): { models: ClaudeModelOption[]; detected: boolean } {
+  const cfg = readClaudeUserConfig();
+  if (!cfg || !cfg.oauthAccount) {
+    return { models: BASE_CLAUDE_MODELS, detected: false };
+  }
+
+  const orgUuid: string | undefined = cfg.oauthAccount.organizationUuid;
+  const has1m = !!(orgUuid && cfg.s1mAccessCache?.[orgUuid]?.hasAccess === true);
+
+  const [defaultModel, sonnet, opus, haiku] = BASE_CLAUDE_MODELS;
+  const models: ClaudeModelOption[] = [defaultModel];
+
+  // Extra account-specific models the CLI advertises (already shaped value/label/description).
+  const extras = Array.isArray(cfg.additionalModelOptionsCache) ? cfg.additionalModelOptionsCache : [];
+  for (const m of extras) {
+    if (m && typeof m.value === 'string') {
+      models.push({
+        id: m.value,
+        label: typeof m.label === 'string' && m.label ? m.label : m.value,
+        description: typeof m.description === 'string' ? m.description : '',
+        extra: true,
+        oneM: m.value.includes('[1m]'),
+      });
+    }
+  }
+
+  models.push(sonnet);
+  if (has1m) models.push({ id: 'sonnet[1m]', label: 'Sonnet 1M', description: 'Sonnet 4.6 with 1M context for long sessions', oneM: true });
+  models.push(opus);
+  if (has1m) models.push({ id: 'opus[1m]', label: 'Opus 1M', description: 'Opus 4.8 with 1M context for long sessions', oneM: true });
+  models.push(haiku);
+
+  return { models, detected: true };
+}
+
 export function registerClaudeHandlers(win: BrowserWindow) {
   mainWin = win;
+  // claude:models — which models this account/org can actually use (org allow-lists
+  // and 1M gating vary), derived from the CLI cache rather than hardcoded.
+  ipcMain.handle('claude:models', () => getAvailableClaudeModels());
   // claude:start — no longer spawns a probe. Just signals ready.
   // Sends cached slash commands immediately so they're available before the process init.
   ipcMain.handle('claude:start', (

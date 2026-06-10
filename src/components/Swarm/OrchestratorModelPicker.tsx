@@ -5,19 +5,28 @@ import type { AIProvider } from '../../types';
 
 type ModelChoice = 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan';
 
-// Mirrors MODEL_OPTIONS in src/components/Chat/ChatInput.tsx — duplicated
-// intentionally so the picker has no cross-component import on a non-exported
-// constant.
-const MODEL_OPTIONS: { id: ModelChoice; label: string; description: string; color: string; recommended?: boolean }[] = [
-  { id: 'default',    label: 'Default',    description: 'Your account’s recommended model',                color: 'var(--text-secondary)' },
-  { id: 'sonnet',     label: 'Sonnet',     description: 'Claude Sonnet 4.6 · Best for everyday tasks',     color: 'var(--accent)', recommended: true },
-  { id: 'opus',       label: 'Opus',       description: 'Claude Opus 4.7 · Most capable for complex work', color: 'var(--orange)' },
-  { id: 'haiku',      label: 'Haiku',      description: 'Claude Haiku · Fastest for quick answers',        color: 'var(--green)' },
-  { id: 'best',       label: 'Best',       description: 'Most capable available (currently Opus)',              color: 'var(--orange)' },
+type ModelOption = { id: string; label: string; description: string; color: string; recommended?: boolean };
+
+// Offline fallback, mirroring MODEL_OPTIONS in src/components/Chat/ChatInput.tsx.
+// The live, account/org-aware list comes from window.sai.claudeModels() below.
+const MODEL_OPTIONS: ModelOption[] = [
+  { id: 'default',    label: 'Default',    description: 'Your account’s recommended model',                color: 'var(--text-secondary)', recommended: true },
+  { id: 'sonnet',     label: 'Sonnet',     description: 'Claude Sonnet 4.6 · Efficient for routine tasks', color: 'var(--accent)' },
+  { id: 'opus',       label: 'Opus',       description: 'Claude Opus 4.8 · Most capable for complex work', color: 'var(--orange)' },
+  { id: 'haiku',      label: 'Haiku',      description: 'Claude Haiku 4.5 · Fastest for quick answers',    color: 'var(--green)' },
+  { id: 'best',       label: 'Best',       description: 'Most capable available (currently Opus 4.8)',          color: 'var(--orange)' },
   { id: 'opusplan',   label: 'Opus Plan',  description: 'Opus in plan mode, Sonnet for execution',              color: 'var(--orange)' },
   { id: 'sonnet[1m]', label: 'Sonnet 1M',  description: 'Sonnet with 1M token context for long sessions',       color: 'var(--accent)' },
   { id: 'opus[1m]',   label: 'Opus 1M',    description: 'Opus with 1M token context for long sessions',         color: 'var(--orange)' },
 ];
+
+function modelColor(id: string): string {
+  if (id.includes('fable')) return 'var(--purple, var(--orange))';
+  if (id.startsWith('opus')) return 'var(--orange)';
+  if (id.startsWith('sonnet')) return 'var(--accent)';
+  if (id.startsWith('haiku')) return 'var(--green)';
+  return 'var(--text-secondary)';
+}
 
 const PROVIDERS: { id: AIProvider; label: string; enabled: boolean; defaultModel: string }[] = [
   { id: 'claude', label: 'Claude', enabled: true,  defaultModel: 'opus' },
@@ -32,9 +41,9 @@ interface Props {
   disabled?: boolean;
 }
 
-function modelLabel(provider: AIProvider, model: string): string {
+function modelLabel(provider: AIProvider, model: string, claudeOptions: ModelOption[]): string {
   if (provider === 'claude') {
-    const found = MODEL_OPTIONS.find(m => m.id === model);
+    const found = claudeOptions.find(m => m.id === model);
     return found ? found.label : (model || 'Default');
   }
   return model || 'Model';
@@ -45,6 +54,19 @@ export default function OrchestratorModelPicker({ provider, model, onChange, dis
   const wrapperRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [coords, setCoords] = useState<{ top: number; right: number } | null>(null);
+  const [liveModels, setLiveModels] = useState<ModelOption[] | null>(null);
+
+  // Fetch the account/org-aware Claude model list (cheap cached read). Falls back
+  // to the static list if detection fails (e.g. not logged in).
+  useEffect(() => {
+    (window.sai as any)?.claudeModels?.().then((r: { models?: { id: string; label: string; description: string; recommended?: boolean }[] }) => {
+      if (r?.models?.length) {
+        setLiveModels(r.models.map(m => ({ id: m.id, label: m.label, description: m.description, recommended: m.recommended, color: modelColor(m.id) })));
+      }
+    }).catch(() => {});
+  }, []);
+
+  const claudeOptions = liveModels ?? MODEL_OPTIONS;
 
   // Close on outside click — both wrapper (button) and dropdown (portaled)
   // count as inside.
@@ -68,7 +90,7 @@ export default function OrchestratorModelPicker({ provider, model, onChange, dis
   }, [open]);
 
   const providerLabel = PROVIDERS.find(p => p.id === provider)?.label ?? provider;
-  const mLabel = modelLabel(provider, model);
+  const mLabel = modelLabel(provider, model, claudeOptions);
 
   return (
     <div
@@ -171,7 +193,7 @@ export default function OrchestratorModelPicker({ provider, model, onChange, dis
           </div>
 
           {provider === 'claude' ? (
-            MODEL_OPTIONS.map(opt => {
+            claudeOptions.map(opt => {
               const isSelected = opt.id === model;
               return (
                 <button

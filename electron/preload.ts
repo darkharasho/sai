@@ -52,6 +52,7 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.invoke('remote:emit-workspace-status', projectPath, status),
   claudeAlwaysAllow: (projectPath: string, toolPattern: string) =>
     ipcRenderer.invoke('claude:alwaysAllow', projectPath, toolPattern),
+  claudeModels: () => ipcRenderer.invoke('claude:models'),
   // Codex CLI
   codexModels: () => ipcRenderer.invoke('codex:models'),
   codexStart: (cwd: string, metaPreamble?: string) => ipcRenderer.invoke('codex:start', cwd, metaPreamble),
