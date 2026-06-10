@@ -166,7 +166,10 @@ function FileRenderedHtml({
     sai?.renderMintFileUrl?.({
       cwd: payload.cwd, path: payload.path, html: payload.html, baseDir: payload.baseDir,
     }).then((r) => {
-      if (!alive) return;
+      if (!alive) {
+        if (r.ok && r.token) sai?.renderReleaseFileUrl?.(r.token);
+        return;
+      }
       if (r.ok && r.url) { setUrl(r.url); token = r.token ?? null; }
       else setErr(r.error ?? 'render blocked');
     });

@@ -34,4 +34,15 @@ describe('RenderedHtml file mode', () => {
     expect(iframe.hasAttribute('srcdoc')).toBe(true);
     expect(iframe.getAttribute('sandbox')).toBe('allow-scripts');
   });
+
+  it('file-mode render shows an error when mint is blocked', async () => {
+    (window as any).sai.renderMintFileUrl = vi.fn(async () => ({ ok: false, error: 'nope' }));
+    const entry = {
+      renderId: 'r3', kind: 'html', status: 'ready', width: 360,
+      payload: { mode: 'file', cwd: '/work', path: 'secret' },
+    } as any;
+    const { container, findByText } = render(<RenderRegion entry={entry} />);
+    await findByText('nope');
+    expect(container.querySelector('iframe')).toBeNull();
+  });
 });
