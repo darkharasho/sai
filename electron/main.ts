@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, Menu, MenuItem, screen, clipboard, Notification } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, Menu, MenuItem, screen, clipboard, Notification, protocol } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -16,9 +16,24 @@ import { readDirImpl, readFileImpl, readFileBufImpl, statFileImpl, writeFileImpl
 import { clampRect, type Rect } from './capturePage';
 import { gitStatusImpl, gitDiffImpl, gitStageImpl, gitUnstageImpl, gitCommitImpl, gitPushImpl, gitPullImpl } from './services/git';
 import { enrichedEnv } from './services/shellEnv';
+import {
+  createRenderProtocolStore,
+  resolveRenderAsset,
+  RENDER_CSP,
+  contentTypeFor,
+} from './services/renderProtocol';
 import { execFile as _execFile } from 'node:child_process';
 import { promisify as _promisify } from 'node:util';
 const _execFileP = _promisify(_execFile);
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'sai-render',
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
+  },
+]);
+
+const renderProtocolStore = createRenderProtocolStore();
 
 // Wrap `tailscale` shell calls with SAI's enrichedEnv (login-shell PATH).
 // Without this, Electron's stripped PATH may not find `/usr/bin/tailscale`.
@@ -1017,7 +1032,30 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught exception:', err);
 });
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  protocol.handle('sai-render', async (request) => {
+    const url = new URL(request.url); // sai-render://<token>/<path>
+    const token = url.hostname;
+    const rawPath = url.pathname; // leading slash included
+    const r = resolveRenderAsset(renderProtocolStore, token, rawPath);
+    if (!r.ok) {
+      return new Response('blocked', { status: r.status });
+    }
+    const headers: Record<string, string> = { 'Content-Security-Policy': RENDER_CSP };
+    if (r.inlineHtml != null) {
+      return new Response(r.inlineHtml, {
+        status: 200,
+        headers: { ...headers, 'Content-Type': 'text/html' },
+      });
+    }
+    const body = fs.readFileSync(r.filePath);
+    return new Response(new Uint8Array(body), {
+      status: 200,
+      headers: { ...headers, 'Content-Type': contentTypeFor(r.filePath) },
+    });
+  });
+  createWindow();
+});
 let _quitInProgress = false;
 app.on('before-quit', (e) => {
   try { swarmMcpHost.stop(); } catch { /* noop */ }
