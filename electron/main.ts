@@ -924,6 +924,50 @@ function createWindow() {
     }
   });
 
+  // Render a FILE-backed site (workspace path or inline html + baseDir) in a
+  // hidden off-screen window via the sai-render:// protocol and screenshot it,
+  // so the agent can SEE a real multi-file render. Returns base64 PNG or null.
+  ipcMain.handle('render:captureFile', async (_event, args: { cwd?: string; path?: string; html?: string; baseDir?: string; width?: number; height?: number }) => {
+    if (!args || typeof args.cwd !== 'string' || !args.cwd) return null;
+    const target = prepareRenderTarget({ cwd: args.cwd, path: args.path, html: args.html, baseDir: args.baseDir });
+    if (!target.ok) return null;
+    const token = mintRenderToken(renderProtocolStore, { root: target.root, inlineHtml: target.inlineHtml });
+    const url = `sai-render://${token}/${encodeURIComponent(target.entry)}`;
+    const width = Math.min(Math.max(Math.round(args.width || 480), 80), 2000);
+    let win: BrowserWindow | null = null;
+    try {
+      win = new BrowserWindow({
+        width,
+        height: 1200,
+        show: false,
+        x: -32000,
+        y: -32000,
+        frame: false,
+        skipTaskbar: true,
+        webPreferences: { sandbox: true, javascript: true, backgroundThrottling: false },
+      });
+      await win.loadURL(url);
+      // Let layout, fonts and any scripts settle before measuring.
+      await new Promise((r) => setTimeout(r, 320));
+      const measured = (await win.webContents.executeJavaScript(
+        'Math.ceil(Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)) || 200',
+      )) as number;
+      const height = args.height && args.height > 0
+        ? Math.min(Math.max(Math.round(args.height), 40), 4000)
+        : Math.min(Math.max(Math.round(measured), 40), 4000);
+      win.setContentSize(width, height);
+      await new Promise((r) => setTimeout(r, 60));
+      const image = await win.webContents.capturePage({ x: 0, y: 0, width, height });
+      return image.toPNG().toString('base64');
+    } catch (err) {
+      console.error('[render] captureFile failed:', err);
+      return null;
+    } finally {
+      try { win?.destroy(); } catch { /* noop */ }
+      evictRenderToken(renderProtocolStore, token);
+    }
+  });
+
   ipcMain.handle('render:captureComponent', async (_event, params: RenderHostParams): Promise<string | null> => {
     const width = typeof params?.width === 'number' && params.width > 0 ? Math.min(Math.round(params.width), 2000) : 360;
     let win: BrowserWindow | null = null;
@@ -984,7 +1028,7 @@ function createWindow() {
         root: target.root,
         inlineHtml: target.inlineHtml,
       });
-      return { ok: true, url: `sai-render://${token}/${target.entry}`, token };
+      return { ok: true, url: `sai-render://${token}/${encodeURIComponent(target.entry)}`, token };
     },
   );
 
