@@ -1420,7 +1420,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 
   // Idle-scope sweep: stop Claude scopes that have been inactive for >30 min
   const idleSweepTimer = setInterval(() => {
-    const records: { workspaceId: string; scope: string; lastActivityAt: number; streaming: boolean }[] = [];
+    const records: { workspaceId: string; scope: string; lastActivityAt: number; streaming: boolean; awaitingInput: boolean }[] = [];
     for (const ws of listAllWorkspaces()) {
       for (const [scope, claude] of ws.claudeScopes.entries()) {
         records.push({
@@ -1428,6 +1428,10 @@ export function registerClaudeHandlers(win: BrowserWindow) {
           scope,
           lastActivityAt: claude.lastActivityAt,
           streaming: claude.streaming,
+          // A scope waiting on the user (question/approval/plan review) must not
+          // be swept — interrupting it kills the process that the answer is
+          // injected into, leaving the prompt permanently unanswerable.
+          awaitingInput: claude.awaitingQuestionAnswer || claude.awaitingApproval || claude.awaitingPlanReview,
         });
       }
     }

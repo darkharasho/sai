@@ -137,6 +137,34 @@ describe('TitleBar', () => {
     });
   });
 
+  it('shows the completed (done) squircle on a suspended workspace that has unread activity', async () => {
+    // Regression: the title bar lights the white "done" squircle for any
+    // workspace (active OR suspended) with completed/unread activity, but the
+    // dropdown used to hard-code suspended rows to the grey "inactive" state —
+    // so the title showed a status with no matching row indicator.
+    const mock = createMockSai();
+    mock.workspaceGetAll.mockResolvedValue([
+      { projectPath: '/home/user/project-a', status: 'active', lastActivity: Date.now() },
+      { projectPath: '/home/user/project-b', status: 'suspended', lastActivity: Date.now() - 60000 },
+    ]);
+    installMockSai(mock);
+
+    const { container } = render(
+      <TitleBar
+        {...defaultProps}
+        completedWorkspaces={new Set(['/home/user/project-b'])}
+      />,
+    );
+    fireEvent.click(container.querySelector('.project-selector') as HTMLElement);
+
+    await waitFor(() => {
+      expect(screen.getByText('project-b')).toBeTruthy();
+    });
+    const suspendedRow = screen.getByText('project-b').closest('.workspace-item') as HTMLElement;
+    expect(suspendedRow.querySelector('.ws-sq-done')).toBeTruthy();
+    expect(suspendedRow.querySelector('.ws-sq-inactive')).toBeNull();
+  });
+
   it('calls onProjectChange when a workspace is selected', async () => {
     const onProjectChange = vi.fn();
     const mock = createMockSai();

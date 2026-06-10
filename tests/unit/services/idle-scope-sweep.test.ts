@@ -15,6 +15,24 @@ describe('sweepIdleScopes', () => {
     expect(stop).toHaveBeenCalledWith('/a', 's1');
   });
 
+  it('does not stop an idle scope that is awaiting user input', () => {
+    // A scope blocked on an AskUserQuestion / approval / plan review is not
+    // abandoned — the agent is waiting on the user. Killing it makes the
+    // pending question unanswerable (the answer is injected via the live
+    // process stdin, which no longer exists once interrupted).
+    const now = 10_000_000;
+    const stop = vi.fn();
+    sweepIdleScopes({
+      now,
+      idleMs: 30 * 60_000,
+      scopes: [
+        { workspaceId: '/a', scope: 'q', lastActivityAt: now - 60 * 60_000, streaming: false, awaitingInput: true },
+      ],
+      stop,
+    });
+    expect(stop).not.toHaveBeenCalled();
+  });
+
   it('does not stop scopes within the threshold even if not streaming', () => {
     const stop = vi.fn();
     sweepIdleScopes({

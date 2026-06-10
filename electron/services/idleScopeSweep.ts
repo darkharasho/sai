@@ -3,6 +3,11 @@ export interface IdleScopeRecord {
   scope: string;
   lastActivityAt: number;
   streaming: boolean;
+  /** The scope is blocked on required user input (AskUserQuestion / approval /
+   *  plan review). Such a scope looks idle — its lastActivityAt is stale because
+   *  the agent is politely waiting — but it must not be swept: killing it makes
+   *  the pending prompt unanswerable. */
+  awaitingInput?: boolean;
 }
 
 export interface SweepOptions {
@@ -15,6 +20,7 @@ export interface SweepOptions {
 export function sweepIdleScopes({ now, idleMs, scopes, stop }: SweepOptions): void {
   for (const r of scopes) {
     if (r.streaming) continue;
+    if (r.awaitingInput) continue;
     if (now - r.lastActivityAt > idleMs) stop(r.workspaceId, r.scope);
   }
 }
