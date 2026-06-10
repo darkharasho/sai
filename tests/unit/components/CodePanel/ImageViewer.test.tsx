@@ -12,7 +12,13 @@ vi.mock('monaco-editor', () => ({
       onDidChangeModelContent: vi.fn().mockReturnValue({ dispose: vi.fn() }),
       onDidChangeCursorPosition: vi.fn().mockReturnValue({ dispose: vi.fn() }),
       addCommand: vi.fn(),
-      getModel: vi.fn().mockReturnValue({ uri: { toString: () => 'file:///test' } }),
+      getModel: vi.fn().mockReturnValue({
+        uri: { toString: () => 'file:///test' },
+        getFullModelRange: vi.fn().mockReturnValue({}),
+        pushEditOperations: vi.fn(),
+      }),
+      saveViewState: vi.fn().mockReturnValue(null),
+      restoreViewState: vi.fn(),
       updateOptions: vi.fn(),
       layout: vi.fn(),
       focus: vi.fn(),
@@ -49,7 +55,7 @@ vi.mock('monaco-editor/esm/vs/language/typescript/ts.worker?worker', () => ({
 // Mock highlight themes
 vi.mock('../../../../src/themes', () => ({
   getActiveHighlightTheme: vi.fn().mockReturnValue('monokai'),
-  buildMonacoThemeData: vi.fn().mockReturnValue({ base: 'vs-dark', inherit: true, rules: [], colors: {} }),
+  buildMonacoThemeData: vi.fn().mockResolvedValue({ base: 'vs-dark', inherit: true, rules: [], colors: {} }),
 }));
 
 import ImageViewer from '../../../../src/components/CodePanel/ImageViewer';

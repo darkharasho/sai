@@ -17,6 +17,7 @@ declare global {
   interface Window {
     sai: Window['sai'] & {
       remote: SaiRemoteApi;
+      captureRegion: (rect: { x: number; y: number; width: number; height: number }) => Promise<string | null>;
     };
   }
 }

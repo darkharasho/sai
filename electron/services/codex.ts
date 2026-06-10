@@ -329,16 +329,20 @@ export function registerCodexHandlers(win: BrowserWindow) {
     const proc = spawn('codex', args, {
       cwd: ws.codex.cwd || projectPath,
       env: getEnrichedEnv(),
-      stdio: ['ignore', 'pipe', 'pipe'],
+      // Use 'pipe' for stdin and close it immediately so Codex sees a clean
+      // EOF rather than /dev/null — 'ignore' can trigger "Reading additional
+      // input from stdin..." warnings on some Codex CLI versions.
+      stdio: ['pipe', 'pipe', 'pipe'],
       shell: process.platform === 'win32',
     });
+    proc.stdin?.end();
 
     ws.codex.process = proc;
     ws.codex.turnSeq++;
     ws.codex.busy = true;
     ws.codex.buffer = '';
 
-    safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: ws.codex.turnSeq });
+    safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: ws.codex.turnSeq, sessionId: ws.codex.sessionId ?? null });
 
     proc.stdout?.on('data', (data: Buffer) => {
       if (ws.codex.process !== proc) return;
@@ -377,9 +381,10 @@ export function registerCodexHandlers(win: BrowserWindow) {
     proc.stderr?.on('data', (data: Buffer) => {
       if (ws.codex.process !== proc) return;
       const text = data.toString().trim();
-      if (text) {
-        safeSend(win, 'claude:message', { type: 'error', text, projectPath: ws.projectPath, scope: effectiveScope });
-      }
+      // Codex CLI prints this to stderr when stdin is a pipe (non-TTY). It
+      // is informational — the CLI continues normally — so we suppress it.
+      if (!text || text.toLowerCase().includes('reading additional input from stdin')) return;
+      safeSend(win, 'claude:message', { type: 'error', text, projectPath: ws.projectPath, scope: effectiveScope });
     });
 
     proc.on('exit', () => {

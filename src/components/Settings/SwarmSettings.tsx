@@ -7,7 +7,7 @@ interface Props {
 
 const PROVIDERS: { value: AIProvider; label: string }[] = [
   { value: 'claude', label: 'Claude' },
-  { value: 'codex', label: 'Codex CLI' },
+  { value: 'codex', label: 'Codex' },
   { value: 'gemini', label: 'Gemini CLI' },
 ];
 
@@ -117,8 +117,8 @@ export default function SwarmSettings({ onSettingChange }: Props) {
     width: 220,
     fontSize: 12,
     padding: '4px 8px',
-    background: 'var(--bg-secondary)',
-    border: '1px solid var(--border)',
+    background: 'var(--surface-2)',
+    border: '1px solid var(--border-subtle)',
     borderRadius: 6,
     color: 'var(--text-primary)',
   };

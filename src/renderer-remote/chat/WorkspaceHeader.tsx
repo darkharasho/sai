@@ -1,18 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Folder, Layers, ChevronDown, Search, X } from 'lucide-react';
 import type { WireClient } from '../wire';
-import type { WorkspaceStatus, WorkspaceStatusStore } from '../lib/workspaceStatusStore';
-import { DOT_MASK_URL } from '../../lib/assets';
-
-type DisplayPriority = 'idle' | 'busy' | 'completed' | 'approval';
-
-function displayPriority(status: WorkspaceStatus | undefined): DisplayPriority {
-  if (!status) return 'idle';
-  if (status.approval) return 'approval';
-  if (status.busy || status.streaming || status.awaitingQuestion) return 'busy';
-  if (status.completed) return 'completed';
-  return 'idle';
-}
+import type { WorkspaceStatusStore } from '../lib/workspaceStatusStore';
+import { WorkspaceSquircle, StatusSlot } from '../../components/shared/WorkspaceSquircle';
+import { workspaceDisplayState } from '../../lib/workspaceStatus';
 
 interface WorkspaceMeta {
   projectPath: string;
@@ -29,34 +20,6 @@ interface Props {
   statusStore: WorkspaceStatusStore;
 }
 
-interface StatusDotProps {
-  status: WorkspaceStatus | undefined;
-  /** When true, render a green squircle even if priority is 'idle' (used for current/active workspace rows). */
-  activeIdle?: boolean;
-  /** When true, render a gold squircle in idle state (used for suspended rows). */
-  suspendedIdle?: boolean;
-}
-
-function StatusDot({ status, activeIdle, suspendedIdle }: StatusDotProps) {
-  const p = displayPriority(status);
-
-  if (p === 'approval') {
-    return <span className="ws-dot ws-dot-approval" title="approval needed" />;
-  }
-  if (p === 'busy') {
-    return <span className="ws-dot ws-dot-busy" title="working" />;
-  }
-  if (p === 'completed') {
-    return <span className="ws-dot ws-dot-completed" title="completed" />;
-  }
-  if (activeIdle) {
-    return <span className="ws-dot ws-dot-active" title="active" />;
-  }
-  if (suspendedIdle) {
-    return <span className="ws-dot ws-dot-suspended" title="suspended" />;
-  }
-  return null;
-}
 
 export default function WorkspaceHeader({ client, currentProjectPath, onPick, statusStore }: Props) {
   const [, setTick] = useState(0);
@@ -102,15 +65,15 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
   const tabIndicator = (kind: 'project' | 'meta') => {
     const summary = workspaces
       .filter((w) => w.kind === kind)
-      .map((w) => displayPriority(statusStore.get(w.projectPath)));
+      .map((w) => workspaceDisplayState(statusStore.get(w.projectPath), { isOpen: w.state === 'active' || w.state === 'open' }));
     if (summary.includes('approval')) {
       return <span className="ws-tab-indicator-dot ws-tab-indicator-approval" title="Approval needed" />;
     }
-    if (summary.includes('completed')) {
+    if (summary.includes('done')) {
       return <span className="ws-tab-indicator-dot ws-tab-indicator-completed" title="Response complete" />;
     }
     if (summary.includes('busy')) {
-      return <span className="ws-tab-indicator-busy" title="Working..." />;
+      return <WorkspaceSquircle state="busy" title="Working..." />;
     }
     return null;
   };
@@ -174,15 +137,23 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
           // Summary indicator: reflects background activity in OTHER workspaces,
           // not the current one. Matches desktop titlebar behavior.
           const others = workspaces.filter((w) => w.projectPath !== currentProjectPath);
-          const priorities = others.map((w) => displayPriority(statusStore.get(w.projectPath)));
+          const priorities = others.map((w) => workspaceDisplayState(statusStore.get(w.projectPath), { isOpen: w.state === 'active' || w.state === 'open' }));
           if (priorities.includes('approval')) {
             return <span className="ws-approval-icon" title="Approval needed elsewhere">!</span>;
           }
           if (priorities.includes('busy')) {
-            return <span className="ws-dot ws-dot-busy" title="Working in another workspace" />;
+            return (
+              <StatusSlot>
+                <WorkspaceSquircle state="busy" title="Working in another workspace" />
+              </StatusSlot>
+            );
           }
-          if (priorities.includes('completed')) {
-            return <span className="ws-dot ws-dot-completed" title="Response complete elsewhere" />;
+          if (priorities.includes('done')) {
+            return (
+              <StatusSlot>
+                <WorkspaceSquircle state="done" title="Response complete elsewhere" />
+              </StatusSlot>
+            );
           }
           return null;
         })()}
@@ -342,7 +313,7 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
                     )}
                   </div>
                   {(() => {
-                    const p = displayPriority(statusStore.get(w.projectPath));
+                    const p = workspaceDisplayState(statusStore.get(w.projectPath), { isOpen: w.state === 'active' || w.state === 'open' });
                     if (p === 'approval') {
                       return (
                         <>
@@ -351,15 +322,14 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
                         </>
                       );
                     }
-                    if (p === 'completed' && !isActive) {
+                    if (p === 'done' && !isActive) {
                       return <span className="ws-completed-icon" title="Response complete">!</span>;
                     }
+                    if (p === 'inactive') return null;
                     return (
-                      <StatusDot
-                        status={statusStore.get(w.projectPath)}
-                        activeIdle={isActive}
-                        suspendedIdle={w.state === 'suspended'}
-                      />
+                      <StatusSlot>
+                        <WorkspaceSquircle state={p} />
+                      </StatusSlot>
                     );
                   })()}
                 </button>
@@ -441,52 +411,13 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
         </div>
       )}
       <style>{`
-  .ws-dot {
-    display: inline-block;
-    flex-shrink: 0;
-    width: 9px;
-    height: 9px;
-  }
-  .ws-dot-active {
-    background: #4ade80;
-    -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-    mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-  }
-  .ws-dot-busy {
-    background: var(--accent);
-    -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-    mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-    animation: ws-spinner-pulse 2.2s ease-in-out infinite;
-  }
-  .ws-dot-completed {
-    background: #4ade80;
-    -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-    mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-    animation: ws-done-pulse 2s ease-in-out infinite;
-  }
-  .ws-dot-suspended {
-    background: #d4a72c;
-    -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-    mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-  }
-  .ws-dot-approval {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: #f59e0b;
-    animation: ws-approval-blink 1s ease-in-out infinite;
-  }
-  @keyframes ws-spinner-pulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50%      { opacity: 0.35; transform: scale(0.75); }
+  @keyframes ws-approval-blink {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.2; }
   }
   @keyframes ws-done-pulse {
     0%, 100% { opacity: 1; }
     50%      { opacity: 0.4; }
-  }
-  @keyframes ws-approval-blink {
-    0%, 100% { opacity: 1; }
-    50%      { opacity: 0.2; }
   }
   .ws-approval-icon {
     display: inline-flex;
@@ -562,16 +493,6 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
   }
   .ws-tab-indicator-approval { background: #f59e0b; animation: ws-approval-blink 1s ease-in-out infinite; }
   .ws-tab-indicator-completed { background: #4ade80; }
-  .ws-tab-indicator-busy {
-    width: 9px;
-    height: 9px;
-    background: var(--accent);
-    -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-    mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-    display: inline-block;
-    flex-shrink: 0;
-    animation: ws-spinner-pulse 2.2s ease-in-out infinite;
-  }
 `}</style>
     </div>
   );

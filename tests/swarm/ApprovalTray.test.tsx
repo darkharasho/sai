@@ -21,4 +21,24 @@ describe('ApprovalTray', () => {
     const { container } = render(<ApprovalTray approvals={[]} onApprove={() => {}} onDeny={() => {}} onApproveAllReads={() => {}} onDenyAll={() => {}}/>);
     expect(container.firstChild).toBeNull();
   });
+
+  it('shows "approve all reads" for a real Grep tool row', () => {
+    const reads = [{
+      id: 'r1', taskId: 't1', taskTitle: 'inspect config',
+      toolName: 'Grep', command: 'rg foo', createdAt: 1,
+    }];
+    const onApproveAllReads = vi.fn();
+    render(
+      <ApprovalTray
+        approvals={reads}
+        onApprove={() => {}}
+        onDeny={() => {}}
+        onApproveAllReads={onApproveAllReads}
+        onDenyAll={() => {}}
+      />,
+    );
+    const btn = screen.getByRole('button', { name: /approve all reads/i });
+    fireEvent.click(btn);
+    expect(onApproveAllReads).toHaveBeenCalled();
+  });
 });

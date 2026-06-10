@@ -157,3 +157,29 @@ export async function swarmResolveApproval(id: string): Promise<void> {
     tx.onerror = () => reject(tx.error);
   });
 }
+
+export async function swarmGetApproval(id: string): Promise<SwarmApproval | undefined> {
+  const db = await openDb();
+  const tx = db.transaction(APPR, 'readonly');
+  return idbReq(tx.objectStore(APPR).get(id)) as Promise<SwarmApproval | undefined>;
+}
+
+export async function swarmDeleteApprovalsByTask(taskId: string): Promise<void> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(APPR, 'readwrite');
+    const store = tx.objectStore(APPR);
+    const idx = store.index('taskId');
+    const req = idx.openKeyCursor(IDBKeyRange.only(taskId));
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (cursor) {
+        store.delete(cursor.primaryKey);
+        cursor.continue();
+      }
+    };
+    req.onerror = () => reject(req.error);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}

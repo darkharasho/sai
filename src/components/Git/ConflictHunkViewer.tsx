@@ -18,13 +18,13 @@ export default function ConflictHunkViewer({ hunks, currentIndex, onNavigate, on
     <div style={{ margin: '4px 0' }}>
       {/* Raw conflict block */}
       <div style={{
-        background: 'var(--bg-elevated, #0d1117)',
+        background: 'var(--surface-2)',
         borderRadius: 3,
         padding: '6px 8px',
         fontFamily: "'JetBrains Mono', monospace",
         fontSize: 10,
         lineHeight: 1.6,
-        border: '1px solid var(--border)',
+        border: '1px solid var(--border-hairline)',
       }}>
         <div style={{ color: 'var(--green)', opacity: 0.7 }}>{'<<<<<<< ' + hunk.oursLabel}</div>
         {hunk.ours.map((line, i) => (
@@ -61,8 +61,8 @@ export default function ConflictHunkViewer({ hunks, currentIndex, onNavigate, on
           aria-label="Open in editor"
           disabled={disabled}
           style={{
-            flex: 1, background: 'var(--bg-hover)', color: 'var(--text-muted)',
-            border: '1px solid var(--border)', borderRadius: 3, padding: '3px 0',
+            flex: 1, background: 'var(--surface-4)', color: 'var(--text-muted)',
+            border: '1px solid var(--border-subtle)', borderRadius: 3, padding: '3px 0',
             fontSize: 10, cursor: 'pointer',
           }}
         >

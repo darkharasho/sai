@@ -51,12 +51,12 @@ export default function StashMenu({ projectPath, onRefresh, disabled }: StashMen
         onClick={() => setOpen(o => !o)}
         disabled={disabled || busy}
         style={{
-          background: open ? 'var(--accent)' : 'none',
-          color: open ? '#000' : 'var(--text-muted)',
-          border: 'none',
-          borderRadius: 3,
-          padding: '2px 6px',
-          fontSize: 10,
+          background: open ? 'var(--accent)' : 'var(--surface-3)',
+          color: open ? '#000' : 'var(--text-secondary)',
+          border: open ? 'none' : '1px solid var(--border-subtle)',
+          borderRadius: 'var(--radius-sm)',
+          padding: '5px var(--sp-2)',
+          fontSize: 'var(--text-sm)',
           cursor: 'pointer',
           fontFamily: 'inherit',
           whiteSpace: 'nowrap',
@@ -77,14 +77,14 @@ export default function StashMenu({ projectPath, onRefresh, disabled }: StashMen
             marginBottom: 4,
             minWidth: 220,
             background: 'var(--bg-elevated, #1c2128)',
-            border: '1px solid var(--border)',
+            border: '1px solid var(--border-subtle)',
             borderRadius: 6,
             boxShadow: '0 -4px 16px rgba(0,0,0,0.3)',
             zIndex: 100,
             overflow: 'hidden',
           }}
         >
-          <div style={{ padding: '4px 0', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ padding: '4px 0', borderBottom: '1px solid var(--border-hairline)' }}>
             <div style={{ padding: '2px 10px 4px', fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.5px', textTransform: 'uppercase' }}>
               Save
             </div>
@@ -102,7 +102,7 @@ export default function StashMenu({ projectPath, onRefresh, disabled }: StashMen
                   onChange={e => setMessageInput(e.target.value)}
                   placeholder="Stash message…"
                   aria-label="Stash message"
-                  style={{ flex: 1, background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 3, color: 'var(--text)', fontSize: 11, padding: '3px 6px', outline: 'none', fontFamily: 'inherit' }}
+                  style={{ flex: 1, background: 'var(--surface-2)', border: '1px solid var(--border-subtle)', borderRadius: 3, color: 'var(--text)', fontSize: 11, padding: '3px 6px', outline: 'none', fontFamily: 'inherit' }}
                   onKeyDown={e => {
                     if (e.key === 'Enter' && messageInput.trim()) run(() => (window.sai as any).gitStash(projectPath, messageInput.trim()));
                     if (e.key === 'Escape') { setShowMessageInput(false); setMessageInput(''); }
@@ -111,7 +111,7 @@ export default function StashMenu({ projectPath, onRefresh, disabled }: StashMen
                 <button
                   onClick={() => { if (messageInput.trim()) run(() => (window.sai as any).gitStash(projectPath, messageInput.trim())); }}
                   disabled={!messageInput.trim()}
-                  style={{ background: messageInput.trim() ? 'var(--accent)' : 'var(--bg-hover)', color: messageInput.trim() ? '#000' : 'var(--text-muted)', border: 'none', borderRadius: 3, padding: '3px 8px', fontSize: 10, cursor: messageInput.trim() ? 'pointer' : 'not-allowed' }}
+                  style={{ background: messageInput.trim() ? 'var(--accent)' : 'var(--surface-3)', color: messageInput.trim() ? '#000' : 'var(--text-muted)', border: 'none', borderRadius: 3, padding: '3px 8px', fontSize: 10, cursor: messageInput.trim() ? 'pointer' : 'not-allowed' }}
                 >
                   Save
                 </button>

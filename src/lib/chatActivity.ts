@@ -49,8 +49,12 @@ export interface WorkspaceUnreadShape {
 /**
  * Compute the union of (already-known completed workspaces) with workspaces
  * that contain at least one session needing attention (unread or errored).
- * The currently focused session is exempt — looking at it counts as viewing
- * it, even if its updatedAt hasn't caught up to lastViewedAt yet.
+ *
+ * The currently focused workspace is exempt entirely — the titlebar must never
+ * badge its own status. You're already looking at that workspace, so any of its
+ * sessions completing is visible in the chat list, not the workspace switcher.
+ * This also means visiting a workspace clears its green notice: switching makes
+ * it the focused workspace, which drops it from the result.
  *
  * Used to drive the green '!' indicator in the TitleBar workspace switcher
  * so it reflects per-session state, not just whole-workspace busy/idle.
@@ -59,14 +63,14 @@ export function computeCompletedWorkspaces(opts: {
   completedWorkspaces: ReadonlySet<string>;
   workspaces: ReadonlyArray<WorkspaceUnreadShape>;
   focusedProjectPath?: string;
-  focusedSessionId?: string;
 }): Set<string> {
-  const { completedWorkspaces, workspaces, focusedProjectPath, focusedSessionId } = opts;
+  const { completedWorkspaces, workspaces, focusedProjectPath } = opts;
   const next = new Set(completedWorkspaces);
+  // Visiting a workspace clears its notice: never badge the one you're on.
+  if (focusedProjectPath) next.delete(focusedProjectPath);
   for (const ws of workspaces) {
-    const exemptId = ws.projectPath === focusedProjectPath ? focusedSessionId : undefined;
+    if (ws.projectPath === focusedProjectPath) continue;
     for (const s of ws.sessions) {
-      if (s.id === exemptId) continue;
       if (s.lastTurnErrored) { next.add(ws.projectPath); break; }
       if (s.updatedAt > (s.lastViewedAt ?? s.updatedAt)) { next.add(ws.projectPath); break; }
     }

@@ -11,17 +11,47 @@ export interface SwarmHost {
 }
 
 export async function dispatchSwarmTool(name: string, input: any, host: SwarmHost) {
+  const inp = input ?? {};
+  const reqString = (field: string): string | null =>
+    typeof inp[field] === 'string' && inp[field].length > 0 ? inp[field] : null;
   switch (name) {
-    case 'spawn_task': return { ok: true, task: await host.spawnTask(input) };
-    case 'spawn_tasks': return { ok: true, tasks: await host.spawnTasks(input.prompts, input.projects) };
-    case 'query_status': return { ok: true, snapshot: await host.snapshot(input.filter) };
-    case 'pause_task': await host.pause(input.taskRef); return { ok: true };
-    case 'resume_task': await host.resume(input.taskRef); return { ok: true };
-    case 'approve_tool_call': await host.approve(input.approvalId); return { ok: true };
-    case 'deny_tool_call': await host.deny(input.approvalId); return { ok: true };
-    case 'land': return await host.land(input.taskRef);
-    case 'discard': await host.discard(input.taskRef); return { ok: true };
-    default: return { ok: false, error: `unknown tool: ${name}` };
+    case 'spawn_task': {
+      if (typeof inp.prompt !== 'string' || !inp.prompt) return { ok: false, error: 'spawn_task requires a non-empty "prompt" string' };
+      return { ok: true, task: await host.spawnTask(inp) };
+    }
+    case 'spawn_tasks': {
+      if (!Array.isArray(inp.prompts) || inp.prompts.length === 0) return { ok: false, error: 'spawn_tasks requires a non-empty "prompts" array' };
+      const projects = inp.projects === undefined || Array.isArray(inp.projects) ? inp.projects : undefined;
+      return { ok: true, tasks: await host.spawnTasks(inp.prompts, projects) };
+    }
+    case 'query_status':
+      return { ok: true, snapshot: await host.snapshot(typeof inp.filter === 'string' ? inp.filter : undefined) };
+    case 'pause_task': {
+      const ref = reqString('taskRef'); if (!ref) return { ok: false, error: 'pause_task requires a "taskRef" string' };
+      await host.pause(ref); return { ok: true };
+    }
+    case 'resume_task': {
+      const ref = reqString('taskRef'); if (!ref) return { ok: false, error: 'resume_task requires a "taskRef" string' };
+      await host.resume(ref); return { ok: true };
+    }
+    case 'approve_tool_call': {
+      const id = reqString('approvalId'); if (!id) return { ok: false, error: 'approve_tool_call requires an "approvalId" string' };
+      await host.approve(id); return { ok: true };
+    }
+    case 'deny_tool_call': {
+      const id = reqString('approvalId'); if (!id) return { ok: false, error: 'deny_tool_call requires an "approvalId" string' };
+      await host.deny(id); return { ok: true };
+    }
+    case 'land': {
+      const ref = reqString('taskRef'); if (!ref) return { ok: false, error: 'land requires a "taskRef" string' };
+      return await host.land(ref);
+    }
+    case 'discard': {
+      const ref = reqString('taskRef'); if (!ref) return { ok: false, error: 'discard requires a "taskRef" string' };
+      await host.discard(ref); return { ok: true };
+    }
+    default:
+      return { ok: false, error: `unknown tool: ${name}` };
   }
 }
 
@@ -35,80 +65,6 @@ export interface SwarmToolRequest {
 export interface SwarmToolResponder {
   respond: (id: string, result: unknown) => void;
   respondError: (id: string, error: string) => void;
-}
-
-/**
- * Build a synthetic assistant ChatMessage that carries a single tool_use card
- * for an MCP swarm tool. Used as a fallback render path when the Claude CLI
- * does not surface MCP tool_use blocks in its stream-json output (so the
- * orchestrator chat would otherwise show no card for spawn_task et al.).
- *
- * The id format `mcp-tooluse-${requestId}` lets a follow-up call to
- * {@link applySyntheticToolResult} attach the tool's output to the same card.
- */
-export function buildSyntheticToolUseMessage(req: SwarmToolRequest, now: number = Date.now()): {
-  id: string;
-  role: 'assistant';
-  content: string;
-  timestamp: number;
-  startedAt: number;
-  toolCalls: Array<{
-    id: string;
-    type: 'other';
-    name: string;
-    input: string;
-    startedAt: number;
-  }>;
-} {
-  const fullName = req.tool.startsWith('mcp__swarm__') ? req.tool : `mcp__swarm__${req.tool}`;
-  return {
-    id: `mcp-msg-${req.id}`,
-    role: 'assistant',
-    content: '',
-    timestamp: now,
-    startedAt: now,
-    toolCalls: [
-      {
-        id: `mcp-tooluse-${req.id}`,
-        type: 'other',
-        name: fullName,
-        input: typeof req.input === 'string' ? req.input : JSON.stringify(req.input ?? {}, null, 2),
-        startedAt: now,
-      },
-    ],
-  };
-}
-
-/**
- * Returns a new message list with the tool-call output attached to the
- * synthetic card created by {@link buildSyntheticToolUseMessage}. If no card
- * matching `requestId` is found, returns the input unchanged (best-effort).
- */
-export function applySyntheticToolResult<M extends { id: string; toolCalls?: Array<{ id?: string; output?: string; durationMs?: number; startedAt?: number }> }>(
-  messages: M[],
-  requestId: string,
-  result: unknown,
-  now: number = Date.now(),
-): M[] {
-  const targetId = `mcp-tooluse-${requestId}`;
-  let touched = false;
-  const next = messages.map(m => {
-    if (!m.toolCalls || !m.toolCalls.length) return m;
-    let updated = false;
-    const newCalls = m.toolCalls.map(tc => {
-      if (tc.id !== targetId) return tc;
-      updated = true;
-      const output = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
-      const durationMs = typeof tc.startedAt === 'number' ? now - tc.startedAt : undefined;
-      return { ...tc, output, ...(durationMs != null ? { durationMs } : {}) };
-    });
-    if (updated) {
-      touched = true;
-      return { ...m, toolCalls: newCalls };
-    }
-    return m;
-  });
-  return touched ? next : messages;
 }
 
 /**

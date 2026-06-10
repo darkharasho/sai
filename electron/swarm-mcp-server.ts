@@ -15,6 +15,10 @@ import { createInterface } from 'node:readline';
 import * as net from 'node:net';
 import * as crypto from 'node:crypto';
 import { SWARM_TOOL_SCHEMA } from '../src/lib/swarmOrchestratorTools';
+import { toolsForToolset, SAI_TOOL_NAMES, type SaiToolset } from '../src/lib/saiTools';
+
+let toolset: SaiToolset = (process.env.SAI_MCP_TOOLSET as SaiToolset) || 'orchestrator';
+export function setToolset(t: SaiToolset): void { toolset = t; }
 
 export interface JsonRpcRequest {
   jsonrpc: '2.0';
@@ -61,13 +65,16 @@ const PROTOCOL_VERSION = '2024-11-05';
 const SWARM_TOOL_NAMES = new Set(SWARM_TOOL_SCHEMA.map((t) => t.name));
 
 function listTools() {
-  return {
-    tools: SWARM_TOOL_SCHEMA.map((tool) => ({
-      name: `swarm_${tool.name}`,
-      description: tool.description,
-      inputSchema: tool.input_schema,
-    })),
-  };
+  const tools: Array<{ name: string; description: string; inputSchema: unknown }> = [];
+  if (toolset === 'orchestrator') {
+    for (const tool of SWARM_TOOL_SCHEMA) {
+      tools.push({ name: `swarm_${tool.name}`, description: tool.description, inputSchema: tool.input_schema });
+    }
+  }
+  for (const tool of toolsForToolset(toolset)) {
+    tools.push({ name: `sai_${tool.name}`, description: tool.description, inputSchema: tool.input_schema });
+  }
+  return { tools };
 }
 
 /**
@@ -114,31 +121,30 @@ export async function handleRequest(
       const fullName = typeof params.name === 'string' ? params.name : '';
       const input = (params.arguments ?? {}) as unknown;
 
-      if (!fullName.startsWith('swarm_')) {
-        return {
-          jsonrpc: '2.0',
-          id,
-          error: { code: -32602, message: `unknown tool: ${fullName}` },
-        };
+      // Only dispatch tools the current toolset actually advertises in
+      // tools/list — a buggy or hostile client must not be able to invoke an
+      // unlisted tool (e.g. swarm_spawn_task from a chat session).
+      let toolName: string | null = null;
+      if (toolset === 'orchestrator' && fullName.startsWith('swarm_') && SWARM_TOOL_NAMES.has(fullName.slice(6))) {
+        toolName = fullName.slice(6);
+      } else if (fullName.startsWith('sai_') && SAI_TOOL_NAMES.has(fullName.slice(4))
+                 && toolsForToolset(toolset).some((t) => t.name === fullName.slice(4))) {
+        toolName = fullName.slice(4);
       }
-      const toolName = fullName.slice('swarm_'.length);
-      if (!SWARM_TOOL_NAMES.has(toolName)) {
-        return {
-          jsonrpc: '2.0',
-          id,
-          error: { code: -32602, message: `unknown tool: ${fullName}` },
-        };
+      if (!toolName) {
+        return { jsonrpc: '2.0', id, error: { code: -32602, message: `unknown tool: ${fullName}` } };
       }
 
       try {
-        const result = await transport.call(toolName, input);
-        return {
-          jsonrpc: '2.0',
-          id,
-          result: {
-            content: [{ type: 'text', text: JSON.stringify(result) }],
-          },
-        };
+        const result = (await transport.call(toolName, input)) as any;
+        const content: Array<Record<string, unknown>> = [];
+        const image = result && typeof result === 'object' ? result.__mcpImage : undefined;
+        const textPayload = image ? { ...result, __mcpImage: undefined } : result;
+        content.push({ type: 'text', text: JSON.stringify(textPayload) });
+        if (image && typeof image.base64 === 'string') {
+          content.push({ type: 'image', data: image.base64, mimeType: image.mimeType ?? 'image/png' });
+        }
+        return { jsonrpc: '2.0', id, result: { content } };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return {
@@ -221,6 +227,7 @@ export function makeSocketTransport(opts: SocketTransportOptions = {}): SocketTr
   let buffer = '';
   let closed = false;
   const pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  const CALL_TIMEOUT_MS = 120_000; // a call with no result/error frame this long is presumed wedged
 
   let readyResolve!: () => void;
   let readyReject!: (e: Error) => void;
@@ -313,12 +320,20 @@ export function makeSocketTransport(opts: SocketTransportOptions = {}): SocketTr
       if (closed) return Promise.reject(new Error('socket closed'));
       const id = crypto.randomBytes(8).toString('hex');
       return new Promise<unknown>((resolve, reject) => {
-        pending.set(id, { resolve, reject });
+        const timer = setTimeout(() => {
+          if (pending.delete(id)) reject(new Error(`tool call ${tool} timed out after ${CALL_TIMEOUT_MS}ms`));
+        }, CALL_TIMEOUT_MS);
+        // handleFrame / rejectAllPending call these, so the timer is always cleared on settle.
+        pending.set(id, {
+          resolve: (v: unknown) => { clearTimeout(timer); resolve(v); },
+          reject: (e: Error) => { clearTimeout(timer); reject(e); },
+        });
         try {
           socket?.write(
             JSON.stringify({ type: 'call', id, tool, input }) + '\n',
           );
         } catch (err) {
+          clearTimeout(timer);
           pending.delete(id);
           reject(err instanceof Error ? err : new Error(String(err)));
         }
@@ -373,6 +388,7 @@ export function startStdioLoop(
 export async function main(): Promise<void> {
   const env = readEnvOrExit();
   setEnv(env);
+  setToolset((process.env.SAI_MCP_TOOLSET as SaiToolset) || 'orchestrator');
 
   const transport = makeSocketTransport();
   try {

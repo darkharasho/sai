@@ -1,0 +1,120 @@
+import { describe, it, expect } from 'vitest';
+import { SAI_TOOL_SCHEMA, toolsForToolset, SAI_TOOL_NAMES } from '../../../src/lib/saiTools';
+
+describe('saiTools registry', () => {
+  it('includes render_html and render_component in the chat toolset', () => {
+    const names = toolsForToolset('chat').map((t) => t.name);
+    expect(names).toContain('render_html');
+    expect(names).toContain('render_component');
+  });
+
+  it('excludes chat-only tools from the orchestrator toolset', () => {
+    const names = toolsForToolset('orchestrator').map((t) => t.name);
+    expect(names).not.toContain('render_html');
+  });
+
+  it('every tool declares an object input_schema and a toolset', () => {
+    for (const t of SAI_TOOL_SCHEMA) {
+      expect(t.input_schema.type).toBe('object');
+      expect(['chat', 'orchestrator', 'both']).toContain(t.toolset);
+    }
+  });
+
+  it('render tool descriptions steer the model on when to use them', () => {
+    const byName = Object.fromEntries(SAI_TOOL_SCHEMA.map((t) => [t.name, t.description]));
+    // Should tell the model to render in-app for UI requests rather than writing files.
+    expect(byName['render_html']).toMatch(/design|mock|preview|show/i);
+    expect(byName['render_html']).toMatch(/in-app|inside the SAI app|live/i);
+  });
+
+  it('render_html exposes file-access fields', () => {
+    const t = SAI_TOOL_SCHEMA.find((x) => x.name === 'render_html')!;
+    const props = t.input_schema.properties as Record<string, unknown>;
+    expect(props.path).toBeDefined();
+    expect(props.baseDir).toBeDefined();
+    expect(props.height).toBeDefined();
+    // html is no longer required (path-only renders are valid).
+    expect(t.input_schema.required ?? []).not.toContain('html');
+  });
+
+  it('SAI_TOOL_NAMES is the set of all tool names', () => {
+    expect(SAI_TOOL_NAMES.size).toBe(SAI_TOOL_SCHEMA.length);
+    expect(SAI_TOOL_NAMES.has('render_html')).toBe(true);
+    expect(SAI_TOOL_NAMES.has('render_component')).toBe(true);
+  });
+});
+
+describe('Tier 1 chart/diff tools', () => {
+  it('registers render_chart and render_diff as chat tools', () => {
+    expect(SAI_TOOL_NAMES.has('render_chart')).toBe(true);
+    expect(SAI_TOOL_NAMES.has('render_diff')).toBe(true);
+    const chart = SAI_TOOL_SCHEMA.find((t) => t.name === 'render_chart')!;
+    expect(chart.toolset).toBe('chat');
+    expect(chart.input_schema.required).toContain('chart');
+    expect(chart.input_schema.required).toContain('values');
+    const diff = SAI_TOOL_SCHEMA.find((t) => t.name === 'render_diff')!;
+    expect(diff.input_schema.required).toEqual(expect.arrayContaining(['before', 'after']));
+  });
+});
+
+describe('render_mermaid tool', () => {
+  it('registers render_mermaid as a chat tool requiring diagram', () => {
+    expect(SAI_TOOL_NAMES.has('render_mermaid')).toBe(true);
+    const m = SAI_TOOL_SCHEMA.find((t) => t.name === 'render_mermaid')!;
+    expect(m.toolset).toBe('chat');
+    expect(m.input_schema.required).toContain('diagram');
+  });
+});
+
+describe('Tier 2 inspect/capture tools', () => {
+  it('registers inspect_element and capture_app as chat tools', () => {
+    expect(SAI_TOOL_NAMES.has('inspect_element')).toBe(true);
+    expect(SAI_TOOL_NAMES.has('capture_app')).toBe(true);
+    const inspect = SAI_TOOL_SCHEMA.find((t) => t.name === 'inspect_element')!;
+    expect(inspect.toolset).toBe('chat');
+    expect(inspect.input_schema.required).toContain('selector');
+    const cap = SAI_TOOL_SCHEMA.find((t) => t.name === 'capture_app')!;
+    expect(cap.toolset).toBe('chat');
+    expect(cap.input_schema.required ?? []).toEqual([]);
+  });
+});
+
+describe('render_theme tool', () => {
+  it('registers render_theme as a chat tool requiring vars', () => {
+    expect(SAI_TOOL_NAMES.has('render_theme')).toBe(true);
+    const t = SAI_TOOL_SCHEMA.find((x) => x.name === 'render_theme')!;
+    expect(t.toolset).toBe('chat');
+    expect(t.input_schema.required).toContain('vars');
+  });
+});
+
+describe('render_form tool', () => {
+  it('registers render_form as a chat tool requiring html', () => {
+    expect(SAI_TOOL_NAMES.has('render_form')).toBe(true);
+    const f = SAI_TOOL_SCHEMA.find((x) => x.name === 'render_form')!;
+    expect(f.toolset).toBe('chat');
+    expect(f.input_schema.required).toContain('html');
+  });
+});
+
+describe('native tools', () => {
+  it('registers pick_file, notify, clipboard as chat tools', () => {
+    for (const n of ['pick_file', 'notify', 'clipboard']) {
+      expect(SAI_TOOL_NAMES.has(n)).toBe(true);
+      expect(SAI_TOOL_SCHEMA.find((t) => t.name === n)!.toolset).toBe('chat');
+    }
+    expect(SAI_TOOL_SCHEMA.find((t) => t.name === 'notify')!.input_schema.required).toContain('title');
+    expect(SAI_TOOL_SCHEMA.find((t) => t.name === 'clipboard')!.input_schema.required).toContain('text');
+  });
+});
+
+describe('confirm/choose tools', () => {
+  it('registers confirm and choose as chat tools', () => {
+    expect(SAI_TOOL_NAMES.has('confirm')).toBe(true);
+    expect(SAI_TOOL_NAMES.has('choose')).toBe(true);
+    expect(SAI_TOOL_SCHEMA.find((t) => t.name === 'confirm')!.input_schema.required).toContain('message');
+    const choose = SAI_TOOL_SCHEMA.find((t) => t.name === 'choose')!;
+    expect(choose.input_schema.required).toEqual(expect.arrayContaining(['message', 'options']));
+    expect(choose.toolset).toBe('chat');
+  });
+});

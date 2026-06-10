@@ -4,6 +4,7 @@ import {
   gitWorktreeAdd, gitWorktreeRemove, gitDeleteBranch,
   gitCanFastForward, gitFastForwardMerge, gitDiffShortstat, gitBranchDiff,
 } from './git';
+import { removeWorktreeAndBranch, defaultWorktreeExists } from './swarmWorktreeCleanup';
 
 const SWARM_ROOT = '.sai-swarm'; // sibling-of-project dir
 
@@ -20,8 +21,11 @@ export function registerSwarmHandlers() {
     return wt;
   });
   ipcMain.handle('swarm:worktree-remove', async (_e, projectPath: string, worktreePath: string, branch: string) => {
-    await gitWorktreeRemove(projectPath, worktreePath).catch(() => {});
-    await gitDeleteBranch(projectPath, branch);
+    await removeWorktreeAndBranch(projectPath, worktreePath, branch, {
+      worktreeRemove: gitWorktreeRemove,
+      deleteBranch: gitDeleteBranch,
+      worktreeExists: defaultWorktreeExists,
+    });
   });
   ipcMain.handle('swarm:can-ff', (_e, projectPath: string, source: string, target: string) =>
     gitCanFastForward(projectPath, source, target));

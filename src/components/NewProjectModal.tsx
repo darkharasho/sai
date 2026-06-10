@@ -48,11 +48,11 @@ function TabButton({ active, onClick, label, icon }: { active: boolean; onClick:
 }
 
 const replaceBtnStyle: React.CSSProperties = {
-  background: 'var(--bg-secondary)',
-  border: '1px solid var(--border)',
+  background: 'var(--surface-2)',
+  border: '1px solid var(--border-subtle)',
   color: 'var(--text)',
   fontSize: 11, padding: '4px 10px', borderRadius: 4, cursor: 'pointer',
-  fontFamily: 'system-ui, sans-serif',
+  fontFamily: 'inherit',
   transition: 'border-color 120ms ease, color 120ms ease',
 };
 
@@ -222,7 +222,7 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
       <div
         className="sai-modal-in"
         onClick={e => e.stopPropagation()}
-        style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10, padding: '24px 28px', width: 520, boxShadow: '0 8px 32px rgba(0,0,0,0.6)', display: 'flex', flexDirection: 'column', gap: 16 }}
+        style={{ background: 'var(--surface-3)', border: '1px solid var(--border-subtle)', borderRadius: 10, padding: '24px 28px', width: 520, boxShadow: '0 8px 32px rgba(0,0,0,0.6)', display: 'flex', flexDirection: 'column', gap: 16 }}
       >
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -231,7 +231,7 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
         </div>
 
         {/* Tab bar */}
-        <div style={{ display: 'flex', gap: 2, borderBottom: '1px solid var(--border)', margin: '0 -4px' }}>
+        <div style={{ display: 'flex', gap: 2, borderBottom: '1px solid var(--border-hairline)', margin: '0 -4px' }}>
           <TabButton active={tab === 'setup'} onClick={() => setTab('setup')} icon={<Settings2 size={12} />} label="Setup" />
           <TabButton active={tab === 'brainstorm'} onClick={() => setTab('brainstorm')} icon={<Sparkles size={12} />} label="Brainstorm" />
         </div>
@@ -309,7 +309,7 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
                 title={pushedBack ? 'Skip the clarifying question and create the project with what we have' : undefined}
                 style={{
                   background: 'none',
-                  border: `1px solid ${useThisEnabled ? 'var(--accent)' : 'var(--border)'}`,
+                  border: `1px solid ${useThisEnabled ? 'var(--accent)' : 'var(--border-subtle)'}`,
                   color: useThisEnabled ? 'var(--accent)' : 'var(--text-muted)',
                   borderRadius: 5, padding: '7px 16px', fontSize: 13,
                   cursor: useThisEnabled ? 'pointer' : 'not-allowed',
@@ -340,7 +340,7 @@ export default function NewProjectModal({ onClose, onCreated }: NewProjectModalP
                 onClick={handleCreate}
                 disabled={!parentDir || !projectName.trim() || creating}
                 style={{
-                  background: 'none', border: `1px solid ${parentDir && projectName.trim() && !creating ? 'var(--accent)' : 'var(--border)'}`,
+                  background: 'none', border: `1px solid ${parentDir && projectName.trim() && !creating ? 'var(--accent)' : 'var(--border-subtle)'}`,
                   color: parentDir && projectName.trim() && !creating ? 'var(--accent)' : 'var(--text-muted)',
                   borderRadius: 5, padding: '7px 16px', fontSize: 13, cursor: parentDir && projectName.trim() && !creating ? 'pointer' : 'not-allowed',
                   display: 'flex', alignItems: 'center', gap: 6,

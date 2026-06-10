@@ -1,7 +1,9 @@
 import { FolderClosed, GitBranch, MessagesSquare, Puzzle, Server, Search, Zap } from 'lucide-react';
+import { WorkspaceSquircle } from './shared/WorkspaceSquircle';
+import type { IndicatorState } from '../lib/workspaceStatus';
 import { DOT_MASK_URL } from '../lib/assets';
 
-type OverallStatus = 'approval' | 'completed' | 'busy' | null;
+type OverallStatus = 'approval' | 'done' | 'busy' | 'busy-done' | null;
 
 interface NavBarProps {
   activeSidebar: string | null;
@@ -13,9 +15,12 @@ interface NavBarProps {
    *  sidebar is collapsed (mirrors the workspace dropdown badge pattern). */
   chatNotificationCount?: number;
   overallStatus?: OverallStatus;
+  hasOrchestrator?: boolean;
+  hasMcp?: boolean;
+  hasPlugins?: boolean;
 }
 
-export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, swarmApprovalCount = 0, chatNotificationCount = 0, overallStatus = null }: NavBarProps) {
+export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, swarmApprovalCount = 0, chatNotificationCount = 0, overallStatus = null, hasOrchestrator = true, hasMcp = true, hasPlugins = true }: NavBarProps) {
   const badgeLabel = gitChangeCount > 100 ? '99+' : `${gitChangeCount}`;
   const swarmBadgeLabel = swarmApprovalCount > 100 ? '99+' : `${swarmApprovalCount}`;
   const chatBadgeLabel = chatNotificationCount > 100 ? '99+' : `${chatNotificationCount}`;
@@ -56,48 +61,54 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, sw
         <span className="nav-label">Chats</span>
         {chatNotificationCount > 0 && <span className="nav-badge">{chatBadgeLabel}</span>}
       </button>
-      <button
-        className={`nav-btn ${activeSidebar === 'swarm' ? 'active' : ''}`}
-        onClick={() => onToggle('swarm')}
-        title="Swarm"
-        aria-label="Swarm"
-      >
-        <Zap size={18} />
-        <span className="nav-label">Swarm</span>
-        {swarmApprovalCount > 0 && <span className="nav-badge">{swarmBadgeLabel}</span>}
-      </button>
-      <div className="nav-divider" />
-      <button
-        className={`nav-btn ${activeSidebar === 'plugins' ? 'active' : ''}`}
-        onClick={() => onToggle('plugins')}
-        title="Plugins"
-      >
-        <Puzzle size={18} />
-        <span className="nav-label">Plugins</span>
-      </button>
-      <button
-        className={`nav-btn ${activeSidebar === 'mcp' ? 'active' : ''}`}
-        onClick={() => onToggle('mcp')}
-        title="MCP Servers"
-      >
-        <Server size={18} />
-        <span className="nav-label">MCP</span>
-      </button>
+      {hasOrchestrator && (
+        <button
+          className={`nav-btn ${activeSidebar === 'swarm' ? 'active' : ''}`}
+          onClick={() => onToggle('swarm')}
+          title="Swarm"
+          aria-label="Swarm"
+        >
+          <Zap size={18} />
+          <span className="nav-label">Swarm</span>
+          {swarmApprovalCount > 0 && <span className="nav-badge">{swarmBadgeLabel}</span>}
+        </button>
+      )}
+      {(hasPlugins || hasMcp) && <div className="nav-divider" />}
+      {hasPlugins && (
+        <button
+          className={`nav-btn ${activeSidebar === 'plugins' ? 'active' : ''}`}
+          onClick={() => onToggle('plugins')}
+          title="Plugins"
+        >
+          <Puzzle size={18} />
+          <span className="nav-label">Plugins</span>
+        </button>
+      )}
+      {hasMcp && (
+        <button
+          className={`nav-btn ${activeSidebar === 'mcp' ? 'active' : ''}`}
+          onClick={() => onToggle('mcp')}
+          title="MCP Servers"
+        >
+          <Server size={18} />
+          <span className="nav-label">MCP</span>
+        </button>
+      )}
       {overallStatus && (
         <div className="nav-status-indicator">
-          <span className={`nav-status-dot nav-status-${overallStatus}`} />
+          <WorkspaceSquircle state={overallStatus as IndicatorState} />
         </div>
       )}
       <style>{`
         .navbar {
           width: var(--nav-width);
-          background: var(--bg-secondary);
+          background: var(--surface-0);
           display: flex;
           flex-direction: column;
           align-items: center;
           padding-top: 8px;
           gap: 2px;
-          border-right: 1px solid var(--border);
+          border-right: 1px solid var(--border-hairline);
           flex-shrink: 0;
         }
         .nav-btn {
@@ -140,7 +151,7 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, sw
         .nav-label {
           font-size: 8px;
           font-weight: 500;
-          font-family: 'Geist', sans-serif;
+          font-family: inherit;
           letter-spacing: 0.3px;
           line-height: 1;
         }
@@ -194,16 +205,16 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, sw
         }
         .nav-btn:hover {
           color: var(--text);
-          background: var(--bg-hover);
+          background: var(--surface-4);
         }
         .nav-btn.active {
           color: var(--accent);
-          background: rgba(199, 145, 12, 0.08);
+          background: var(--accent-dim);
         }
         .nav-divider {
           width: 24px;
           height: 1px;
-          background: var(--border);
+          background: var(--border-hairline);
           margin: 4px 0;
         }
         .nav-status-indicator {
@@ -212,37 +223,6 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, sw
           display: flex;
           align-items: center;
           justify-content: center;
-        }
-        .nav-status-dot {
-          display: block;
-          width: 10px;
-          height: 10px;
-          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-        }
-        .nav-status-approval {
-          background: #f59e0b;
-          animation: nav-status-blink 1s ease-in-out infinite;
-        }
-        .nav-status-completed {
-          background: var(--green);
-          animation: nav-status-pulse 2s ease-in-out infinite;
-        }
-        .nav-status-busy {
-          background: var(--accent);
-          animation: nav-status-spin 2.2s ease-in-out infinite;
-        }
-        @keyframes nav-status-blink {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.2; }
-        }
-        @keyframes nav-status-pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.4; }
-        }
-        @keyframes nav-status-spin {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.35; transform: scale(0.75); }
         }
       `}</style>
     </div>

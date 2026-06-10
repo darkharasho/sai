@@ -61,8 +61,8 @@ export default function ApprovalPanel({ approval, onApprove, onDeny, onAlwaysAll
       animate={{ opacity: 1, y: 0, transition: entryTransition }}
       exit={{ opacity: 0, y: -DISTANCE.nudge, transition: exitTransition }}
       style={{
-        background: 'var(--bg-elevated)',
-        border: '1px solid var(--border)',
+        background: 'var(--surface-3)',
+        border: '1px solid var(--border-subtle)',
         borderRadius: 10,
         marginBottom: 8,
         overflow: 'hidden',
@@ -90,8 +90,8 @@ export default function ApprovalPanel({ approval, onApprove, onDeny, onAlwaysAll
           rows={Math.min(command.split('\n').length, 6)}
           style={{
             margin: '8px 14px',
-            background: 'var(--bg-secondary)',
-            border: '1px solid var(--border)',
+            background: 'var(--surface-2)',
+            border: '1px solid var(--border-hairline)',
             borderRadius: 6,
             padding: '8px 12px',
             fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
@@ -107,8 +107,8 @@ export default function ApprovalPanel({ approval, onApprove, onDeny, onAlwaysAll
       ) : hasStructuredInput ? (
         <div style={{
           margin: '8px 14px',
-          background: 'var(--bg-secondary)',
-          border: '1px solid var(--border)',
+          background: 'var(--surface-2)',
+          border: '1px solid var(--border-hairline)',
           borderRadius: 6,
           padding: '8px 12px',
           fontSize: 12,
@@ -156,8 +156,8 @@ export default function ApprovalPanel({ approval, onApprove, onDeny, onAlwaysAll
       ) : (
         <div style={{
           margin: '8px 14px',
-          background: 'var(--bg-secondary)',
-          border: '1px solid var(--border)',
+          background: 'var(--surface-2)',
+          border: '1px solid var(--border-hairline)',
           borderRadius: 6,
           padding: '8px 12px',
           fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
@@ -195,7 +195,7 @@ export default function ApprovalPanel({ approval, onApprove, onDeny, onAlwaysAll
           onClick={onDeny}
           style={{
             background: 'none', color: 'var(--text-secondary)',
-            border: '1px solid var(--border)', borderRadius: 6,
+            border: '1px solid var(--border-subtle)', borderRadius: 6,
             padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
             display: 'flex', alignItems: 'center', gap: 5,
           }}
@@ -206,7 +206,7 @@ export default function ApprovalPanel({ approval, onApprove, onDeny, onAlwaysAll
           onClick={onAlwaysAllow}
           style={{
             background: 'none', color: 'var(--text-secondary)',
-            border: '1px solid var(--border)', borderRadius: 6,
+            border: '1px solid var(--border-subtle)', borderRadius: 6,
             padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
             display: 'flex', alignItems: 'center', gap: 5,
           }}
@@ -218,13 +218,13 @@ export default function ApprovalPanel({ approval, onApprove, onDeny, onAlwaysAll
           display: 'flex', alignItems: 'center', gap: 6,
         }}>
           <kbd style={{
-            background: 'var(--bg-hover)', border: '1px solid var(--border)', borderRadius: 3,
+            background: 'var(--surface-4)', border: '1px solid var(--border-hairline)', borderRadius: 3,
             padding: '1px 5px', fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
             color: 'var(--text-secondary)',
           }}>Enter</kbd> approve
           <span>·</span>
           <kbd style={{
-            background: 'var(--bg-hover)', border: '1px solid var(--border)', borderRadius: 3,
+            background: 'var(--surface-4)', border: '1px solid var(--border-hairline)', borderRadius: 3,
             padding: '1px 5px', fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
             color: 'var(--text-secondary)',
           }}>Esc</kbd> deny

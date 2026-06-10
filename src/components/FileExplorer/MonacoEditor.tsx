@@ -31,25 +31,25 @@ self.MonacoEnvironment = {
   },
 };
 
-// Register SAI dark theme
+// Register SAI dark theme — colors kept in sync with --surface-* CSS vars
 monaco.editor.defineTheme('sai-dark', {
   base: 'vs-dark',
   inherit: true,
   rules: [],
   colors: {
-    'editor.background': '#111418',
+    'editor.background': '#0f1318',
     'editor.foreground': '#bec6d0',
-    'editorLineNumber.foreground': '#475262',
+    'editorLineNumber.foreground': '#5a6a7a',
     'editorLineNumber.activeForeground': '#a0acbb',
-    'editor.selectionBackground': '#21292f',
-    'editor.lineHighlightBackground': '#161a1f',
-    'editorWidget.background': '#0c0f11',
-    'editorWidget.border': '#2a2e35',
-    'input.background': '#161a1f',
-    'input.border': '#2a2e35',
-    'dropdown.background': '#1c2128',
-    'list.hoverBackground': '#21292f',
-    'minimap.background': '#0c0f11',
+    'editor.selectionBackground': '#252d3a',
+    'editor.lineHighlightBackground': '#161b22',
+    'editorWidget.background': '#090c0e',
+    'editorWidget.border': '#1e2228',
+    'input.background': '#161b22',
+    'input.border': '#1e2228',
+    'dropdown.background': '#1d2430',
+    'list.hoverBackground': '#252d3a',
+    'minimap.background': '#090c0e',
     'scrollbar.shadow': '#00000000',
     'editorOverviewRuler.border': '#00000000',
   },
@@ -154,6 +154,9 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
   const decorationsRef = useRef<string[]>([]);
   const headContentRef = useRef<string[] | null>(null);
   const decorationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // True while we programmatically replace the model from an external `content` change,
+  // so the change-listener doesn't mistake the reload for a user edit and mark it dirty.
+  const applyingExternalRef = useRef(false);
   onContentChangeRef.current = onContentChange;
   const [dirty, setDirty] = useState(false);
   const [saveError, setSaveError] = useState(false);
@@ -356,21 +359,19 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
     editorRef.current = editor;
     registerMonacoEditor(filePath, editor);
 
-    // Apply saved highlight theme
-    const hlTheme = getActiveHighlightTheme();
-    if (hlTheme !== 'monokai') {
-      buildMonacoThemeData(hlTheme).then(data => {
-        monaco.editor.defineTheme('sai-dark', {
-          base: data.base,
-          inherit: true,
-          rules: data.rules,
-          colors: data.colors,
-        });
-        monaco.editor.setTheme('sai-dark');
+    // Apply saved highlight theme — always call so CSS vars drive chrome colors
+    buildMonacoThemeData(getActiveHighlightTheme()).then(data => {
+      monaco.editor.defineTheme('sai-dark', {
+        base: data.base,
+        inherit: true,
+        rules: data.rules,
+        colors: data.colors,
       });
-    }
+      monaco.editor.setTheme('sai-dark');
+    });
 
     editor.onDidChangeModelContent(() => {
+      if (applyingExternalRef.current) return;
       setDirty(true);
       onDirtyChange?.(true);
       scheduleDecorationUpdate();
@@ -401,6 +402,32 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
       editor.dispose();
     };
   }, []);
+
+  // Reflect EXTERNAL `content` prop changes (e.g. a hot-reload from disk) into the live
+  // model. The editor is created once with the initial content; without this, a reloaded
+  // `content` prop would never reach the mounted editor and the view would stay stale.
+  // Guard: skip when the model already matches (our own edits echoed back, or the initial
+  // mount value); suppress the dirty flag since reloaded content equals what's on disk.
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    if (editor.getValue() === content) return;
+    const model = editor.getModel();
+    if (!model) return;
+    applyingExternalRef.current = true;
+    const view = editor.saveViewState();
+    model.pushEditOperations(
+      [],
+      [{ range: model.getFullModelRange(), text: content }],
+      () => null,
+    );
+    if (view) editor.restoreViewState(view);
+    applyingExternalRef.current = false;
+    setDirty(false);
+    onDirtyChange?.(false);
+    scheduleDecorationUpdate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [content]);
 
   // Jump to line when initialLine changes (e.g. clicking a second file reference)
   useEffect(() => {
@@ -466,12 +493,12 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
           align-items: center;
           justify-content: space-between;
           padding: 4px 16px;
-          border-top: 1px solid var(--border);
+          border-top: 1px solid var(--border-hairline);
           font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-size: 11px;
           color: var(--text-muted);
           flex-shrink: 0;
-          background: var(--bg-secondary);
+          background: var(--surface-2);
         }
         .monaco-dirty-dot {
           width: 8px;
@@ -482,16 +509,16 @@ export default function MonacoEditor({ filePath, content, fontSize = 13, minimap
         }
         .md-editor-preview-btn {
           background: none;
-          border: 1px solid var(--border);
-          border-radius: 3px;
+          border: 1px solid var(--border-subtle);
+          border-radius: var(--radius-sm);
           color: var(--text-muted);
-          font-size: 11px;
+          font-size: var(--text-sm);
           padding: 1px 8px;
           cursor: pointer;
           font-family: 'Geist Mono', 'JetBrains Mono', monospace;
         }
         .md-editor-preview-btn:hover {
-          background: var(--bg-hover);
+          background: var(--surface-4);
           color: var(--text);
         }
         .git-gutter-added {

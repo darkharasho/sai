@@ -49,11 +49,11 @@ export default function LandCard({ toolCall, onRebaseRetry }: Props) {
     <div data-testid="swarm-land-card" style={{ ...cardBase, borderColor: SWARM_GREEN }}>
       <div style={{ color: SWARM_GREEN, fontWeight: 600 }}>
         → Landed{' '}
-        <code style={{ fontFamily: "'Geist Mono', monospace", background: 'var(--bg-secondary)', padding: '1px 4px', borderRadius: 3 }}>
+        <code style={{ fontFamily: "'Geist Mono', monospace", background: 'var(--surface-2)', padding: '1px 4px', borderRadius: 3 }}>
           {branch}
         </code>{' '}
         into{' '}
-        <code style={{ fontFamily: "'Geist Mono', monospace", background: 'var(--bg-secondary)', padding: '1px 4px', borderRadius: 3 }}>
+        <code style={{ fontFamily: "'Geist Mono', monospace", background: 'var(--surface-2)', padding: '1px 4px', borderRadius: 3 }}>
           {baseBranch}
         </code>
       </div>

@@ -53,8 +53,8 @@ export default function BrainstormTab({
         style={{
           flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14,
           padding: '14px 12px',
-          background: 'var(--bg-secondary)',
-          border: '1px solid var(--border)',
+          background: 'var(--surface-2)',
+          border: '1px solid var(--border-subtle)',
           borderRadius: 6,
         }}
       >
@@ -86,8 +86,8 @@ export default function BrainstormTab({
         className="brainstorm-input"
         style={{
           display: 'flex', gap: 6, alignItems: 'stretch',
-          background: 'var(--bg-secondary)',
-          border: `1px solid ${inputFocused ? 'var(--accent)' : 'var(--border)'}`,
+          background: 'var(--surface-2)',
+          border: `1px solid ${inputFocused ? 'var(--accent)' : 'var(--border-subtle)'}`,
           borderRadius: 6,
           padding: 4,
           transition: 'border-color 120ms ease',
@@ -110,7 +110,7 @@ export default function BrainstormTab({
             flex: 1,
             background: 'transparent', border: 'none', outline: 'none',
             padding: '6px 8px', fontSize: 13, color: 'var(--text)',
-            fontFamily: 'system-ui, sans-serif', resize: 'none', lineHeight: 1.45,
+            fontFamily: 'inherit', resize: 'none', lineHeight: 1.45,
           }}
         />
         <button
@@ -142,7 +142,7 @@ function Message({ role, text, streaming, showDivider }: { role: 'user' | 'assis
     <div style={{
       display: 'flex', alignItems: 'flex-start', gap: 10,
       paddingTop: showDivider ? 12 : 0,
-      borderTop: showDivider ? '1px dashed var(--border)' : 'none',
+      borderTop: showDivider ? '1px dashed var(--border-hairline)' : 'none',
       opacity: showDivider ? 1 : 1,
     }}>
       <div style={{ flexShrink: 0, width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 1 }}>
@@ -174,14 +174,14 @@ function Message({ role, text, streaming, showDivider }: { role: 'user' | 'assis
         .brainstorm-msg code {
           font-family: 'JetBrains Mono', monospace;
           font-size: 11.5px;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
+          background: var(--surface-3);
+          border: 1px solid var(--border-subtle);
           border-radius: 3px;
           padding: 0 4px;
         }
         .brainstorm-msg pre {
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
+          background: var(--surface-3);
+          border: 1px solid var(--border-subtle);
           border-radius: 5px;
           padding: 8px 10px;
           overflow-x: auto;
@@ -203,7 +203,7 @@ function Message({ role, text, streaming, showDivider }: { role: 'user' | 'assis
         .brainstorm-msg blockquote {
           margin: 6px 0;
           padding: 2px 0 2px 10px;
-          border-left: 2px solid var(--border);
+          border-left: 2px solid var(--border-hairline);
           color: var(--text-muted);
         }
         /* Always-visible scrollbar — the default chrome blends into the
@@ -223,7 +223,7 @@ function Message({ role, text, streaming, showDivider }: { role: 'user' | 'assis
         .brainstorm-transcript::-webkit-scrollbar-thumb {
           background: var(--text-muted);
           border-radius: 5px;
-          border: 2px solid var(--bg-secondary);
+          border: 2px solid var(--surface-2);
         }
         .brainstorm-transcript::-webkit-scrollbar-thumb:hover {
           background: var(--accent);

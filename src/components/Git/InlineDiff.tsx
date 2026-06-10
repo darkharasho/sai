@@ -64,8 +64,8 @@ export default function InlineDiff({ projectPath, filepath, staged, onOpen }: In
   return (
     <div
       style={{
-        background: 'var(--bg-elevated, #0d1117)',
-        borderTop: '1px solid var(--border)',
+        background: 'var(--surface-2)',
+        borderTop: '1px solid var(--border-hairline)',
         fontFamily: "'JetBrains Mono', monospace",
         fontSize: 11,
         lineHeight: 1.6,
@@ -101,7 +101,7 @@ export default function InlineDiff({ projectPath, filepath, staged, onOpen }: In
       </div>
       <div
         style={{
-          borderTop: '1px solid var(--border)',
+          borderTop: '1px solid var(--border-hairline)',
           padding: '4px 12px',
           textAlign: 'right',
         }}

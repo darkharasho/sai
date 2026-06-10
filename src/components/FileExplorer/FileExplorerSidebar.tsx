@@ -434,8 +434,8 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen, metaRunti
       style={{
         width: 'var(--sidebar-width)',
         minWidth: 'var(--sidebar-width)',
-        background: 'var(--bg-secondary)',
-        borderRight: '1px solid var(--border)',
+        background: 'var(--surface-1)',
+        borderRight: '1px solid var(--border-subtle)',
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
@@ -445,21 +445,7 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen, metaRunti
         handleContextMenu(e, null, projectPath);
       }}
     >
-      <div
-        style={{
-          height: 36,
-          display: 'flex',
-          alignItems: 'center',
-          padding: '0 12px',
-          fontSize: 11,
-          fontWeight: 600,
-          textTransform: 'uppercase',
-          letterSpacing: '0.5px',
-          color: 'var(--text-muted)',
-          borderBottom: '1px solid var(--border)',
-          flexShrink: 0,
-        }}
-      >
+      <div className="sidebar-section-header">
         Explorer
       </div>
 
@@ -475,7 +461,7 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen, metaRunti
       >
         <div
           className={`tree-row project-root-row ${dragOverPath === projectPath ? 'drag-over' : ''}`}
-          style={{ paddingLeft: 8, fontWeight: 700, fontSize: 11, color: 'var(--text-secondary)' }}
+          style={{ color: 'var(--text-secondary)' }}
           onContextMenu={e => handleContextMenu(e, null, projectPath)}
           onDragOver={e => handleDragOver(e, projectPath)}
           onDragLeave={handleDragLeave}
@@ -536,12 +522,11 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen, metaRunti
           display: flex;
           align-items: center;
           gap: 6px;
-          height: 28px;
-          padding-right: 8px;
+          padding: 3px var(--sp-3);
           cursor: pointer;
           color: var(--text-secondary);
           font-family: 'Geist Mono', 'JetBrains Mono', 'Fira Code', monospace;
-          font-size: 13px;
+          font-size: var(--text-sm);
           white-space: nowrap;
           overflow: hidden;
         }
@@ -550,8 +535,12 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen, metaRunti
                       color var(--dur-fast) var(--ease-out-soft);
         }
         .tree-row:hover {
-          background: var(--bg-hover);
+          background: var(--surface-4);
           color: var(--text);
+        }
+        .tree-row.active, .tree-row[aria-selected="true"] {
+          background: var(--accent-dim);
+          color: var(--accent);
         }
         .tree-chevron {
           color: var(--text-muted);
@@ -595,6 +584,25 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen, metaRunti
         }
         .project-root-row {
           position: relative;
+          font-size: var(--text-xs);
+          font-weight: 600;
+          color: var(--text-secondary);
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+          padding: var(--sp-2) var(--sp-3);
+          border-bottom: 1px solid var(--border-hairline);
+        }
+        .sidebar-section-header {
+          font-size: var(--text-xs);
+          font-weight: 600;
+          color: var(--text-secondary);
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+          padding: var(--sp-2) var(--sp-3);
+          border-bottom: 1px solid var(--border-hairline);
+          display: flex;
+          align-items: center;
+          flex-shrink: 0;
         }
         .project-actions {
           display: flex;
@@ -614,7 +622,7 @@ export default function FileExplorerSidebar({ projectPath, onFileOpen, metaRunti
         }
         .project-action-btn:hover {
           color: var(--accent);
-          background: var(--bg-hover);
+          background: var(--surface-4);
         }
       `}</style>
     </div>
@@ -642,7 +650,7 @@ function InlineNameInput({ initialValue, onSubmit, onCancel }: { initialValue: s
       onBlur={() => onCancel()}
       style={{
         flex: 1,
-        background: 'var(--bg-input)',
+        background: 'var(--surface-2)',
         border: '1px solid var(--accent)',
         borderRadius: 3,
         color: 'var(--text)',

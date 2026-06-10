@@ -19,7 +19,7 @@ export default function GitActivity({ commits }: GitActivityProps) {
   return (
     <div
       style={{
-        borderTop: '1px solid var(--border)',
+        borderTop: '1px solid var(--border-hairline)',
         paddingTop: 8,
         marginTop: 4,
       }}
@@ -27,12 +27,13 @@ export default function GitActivity({ commits }: GitActivityProps) {
       <div
         style={{
           padding: '4px 12px',
-          fontSize: 10,
-          fontWeight: 700,
+          fontSize: 'var(--text-xs)',
+          fontWeight: 600,
           textTransform: 'uppercase' as const,
-          letterSpacing: '0.6px',
-          color: 'var(--text-muted)',
+          letterSpacing: '0.06em',
+          color: 'var(--text-secondary)',
           userSelect: 'none' as const,
+          borderBottom: '1px solid var(--border-hairline)',
         }}
       >
         AI Activity
@@ -87,7 +88,7 @@ export default function GitActivity({ commits }: GitActivityProps) {
                   style={{
                     padding: '1px 6px',
                     borderRadius: 999,
-                    background: 'var(--bg-tertiary)',
+                    background: 'var(--surface-3)',
                     color: 'var(--text-secondary)',
                   }}
                 >

@@ -1,7 +1,7 @@
 import { spawn, ChildProcess, execFile } from 'node:child_process';
 import { BrowserWindow, ipcMain, app } from 'electron';
 import { getOrCreate, get, getClaude, touchActivity, listAllWorkspaces } from './workspace';
-import type { PendingToolUse } from './workspace';
+import type { PendingToolUse, WorkspaceClaude } from './workspace';
 import { sweepIdleScopes, IDLE_SCOPE_MS, SWEEP_INTERVAL_MS } from './idleScopeSweep';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
@@ -19,6 +19,8 @@ import {
 } from '../../src/lib/orchestratorSystemPrompt';
 import type { SessionBus } from './remote/session-bus';
 import { clamp, type PermMode } from './remote/clamp';
+import { exitTerminalEvents } from './claudeExit';
+import { imageReadResult } from './imageFiles';
 
 const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
 
@@ -122,6 +124,24 @@ function defaultMcpServerScriptPath(): string {
 }
 
 /**
+ * Appended to chat sessions' system prompt so the agent reaches for the in-app
+ * renderer on visual/UI requests instead of silently writing files. Names the
+ * tools directly so it is robust to MCP namespacing.
+ */
+export const CHAT_RENDER_NUDGE =
+  'This app (SAI) can render UI live inside its own window. When the user asks you to ' +
+  'design, mock up, build, show, preview, or iterate on a UI element, component, page, ' +
+  'or visual style, FIRST render it in-app with the render_html tool (write a ' +
+  'self-contained HTML/CSS/JS snippet) — or render_component to mount a registered ' +
+  'project component — so the user can see it and give feedback. This also applies when ' +
+  'asked to screenshot, capture, verify, or otherwise show a working or finished UI ' +
+  'result: prefer the in-app renderer, which returns the screenshot to you directly, over ' +
+  'spinning up an external browser (Playwright/Chrome) or a separate server. Prefer ' +
+  'rendering over writing files for these requests; only write or scaffold files when the ' +
+  'user explicitly asks to save, add, or wire the component into the codebase. You can ' +
+  're-render to iterate on feedback.';
+
+/**
  * Build CLI args for the persistent process based on current config.
  * Exported for unit tests and to support orchestrator-kind sessions which
  * need extra `--mcp-config` / `--strict-mcp-config` / `--tools` flags.
@@ -198,6 +218,29 @@ export function buildArgs(options: BuildArgsOptions = {}): string[] {
     });
     args.push('--system-prompt', buildOrchestratorSystemPrompt(ctx));
   } else {
+    // Chat sessions get SAI-native tools (render_html / render_component) via an
+    // MCP config, but keep all built-in tools (no --strict-mcp-config).
+    // getMcpHandle() (= swarmMcpHost.start()) is safe to call here regardless of
+    // session ordering: main.ts starts the host and registers its onToolCall
+    // handler unconditionally at app init, and start() is idempotent — this just
+    // returns the already-listening handle.
+    if (kind === 'chat' && workspace) {
+      const handle = getMcpHandle();
+      const cfgPath = writeMcpConfig({
+        socketPath: handle.socketPath,
+        secret: handle.secret,
+        workspace,
+        mcpServerScriptPath: resolveMcpServerScriptPath(),
+        electronExecPath: resolveElectronExecPath(),
+        toolset: 'chat',
+      });
+      args.push('--mcp-config', cfgPath);
+      // Steer the chat agent to actually use the in-app renderer: without this
+      // the model treats "make me a button" as a write-a-file task (and the
+      // frontend-design skill reinforces that), never reaching for the tool.
+      args.push('--append-system-prompt', CHAT_RENDER_NUDGE);
+    }
+
     // Chat/task: pass through user MCP config path(s) from SAI settings.
     const mcpConfig = readSetting('mcpConfigPath');
     if (mcpConfig) {
@@ -329,6 +372,16 @@ function ensureProcess(
         // forward the assistant message that contains the tool_use itself (so
         // the card shows), then start buffering from the very next message. ---
         if (claude.awaitingQuestionAnswer) {
+          if (msg.type === 'result') {
+            // The CLI's auto-dismissed turn for this question just ended. If the user has
+            // already answered, inject now; otherwise note it drained so a later answer
+            // injects immediately.
+            claude.questionTurnDrained = true;
+            if (claude.pendingQuestionAnswer) flushPendingQuestionAnswer(claude);
+          } else if (claude.pendingQuestionAnswer) {
+            // Answer is held but the dismissed turn is still streaming — keep deferring.
+            armQuestionAnswerFallback(claude);
+          }
           continue;
         }
 
@@ -431,6 +484,12 @@ function ensureProcess(
         if (askUserQuestionId) {
           claude.awaitingQuestionAnswer = true;
           claude.pendingQuestionId = askUserQuestionId;
+          claude.questionTurnDrained = false;
+          claude.pendingQuestionAnswer = null;
+          if (claude.questionAnswerFallbackTimer) {
+            clearTimeout(claude.questionAnswerFallbackTimer);
+            claude.questionAnswerFallbackTimer = null;
+          }
           const wsName = ws.projectPath.split('/').pop() || ws.projectPath;
           const questions = claude.pendingToolUse?.input?.questions;
           const firstQuestion = Array.isArray(questions) && questions[0]?.question
@@ -504,11 +563,17 @@ function ensureProcess(
     claude.awaitingApproval = false;
     claude.awaitingQuestionAnswer = false;
     claude.pendingQuestionId = null;
+    claude.pendingQuestionAnswer = null;
+    claude.questionTurnDrained = false;
+    if (claude.questionAnswerFallbackTimer) {
+      clearTimeout(claude.questionAnswerFallbackTimer);
+      claude.questionAnswerFallbackTimer = null;
+    }
     claude.awaitingPlanReview = false;
     claude.pendingPlanReviewId = null;
     claude.streaming = false;
-    if (wasBusy) {
-      emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope, turnSeq: claude.turnSeq });
+    for (const ev of exitTerminalEvents(code, signal, wasBusy)) {
+      emitChatMessage({ ...ev, projectPath: ws.projectPath, scope, turnSeq: claude.turnSeq });
     }
   });
 
@@ -523,11 +588,17 @@ function ensureProcess(
     claude.awaitingApproval = false;
     claude.awaitingQuestionAnswer = false;
     claude.pendingQuestionId = null;
+    claude.pendingQuestionAnswer = null;
+    claude.questionTurnDrained = false;
+    if (claude.questionAnswerFallbackTimer) {
+      clearTimeout(claude.questionAnswerFallbackTimer);
+      claude.questionAnswerFallbackTimer = null;
+    }
     claude.awaitingPlanReview = false;
     claude.pendingPlanReviewId = null;
     claude.streaming = false;
     emitChatMessage({
-      type: 'error', text: `Claude process error: ${err.message}`, projectPath: ws.projectPath, scope
+      type: 'error', fatal: true, text: `Claude process error: ${err.message}`, projectPath: ws.projectPath, scope
     });
     emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope, turnSeq: claude.turnSeq });
   });
@@ -648,6 +719,44 @@ export function interruptImpl(projectPath: string, scope?: string): void {
   }
 }
 
+/** Inject the held AskUserQuestion answer into the CLI as a corrective user message and
+ *  re-open the output gate. Called once the CLI's auto-dismissed turn has fully drained
+ *  (its `result` was seen) or, as a fallback, after a grace period if the CLI blocked. */
+function flushPendingQuestionAnswer(claude: WorkspaceClaude): void {
+  const pending = claude.pendingQuestionAnswer;
+  if (!pending) return;
+  if (claude.questionAnswerFallbackTimer) {
+    clearTimeout(claude.questionAnswerFallbackTimer);
+    claude.questionAnswerFallbackTimer = null;
+  }
+  claude.awaitingQuestionAnswer = false;
+  claude.pendingQuestionId = null;
+  claude.questionTurnDrained = false;
+  claude.pendingQuestionAnswer = null;
+  const proc = claude.process;
+  if (proc?.stdin && !proc.stdin.destroyed) {
+    const followUp = JSON.stringify({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: `[AskUserQuestion answers for tool call ${pending.toolUseId}]\nThe user picked the following answers (the earlier placeholder tool_result for this tool call should be disregarded):\n${JSON.stringify(pending.answers, null, 2)}`,
+      },
+    });
+    proc.stdin.write(followUp + '\n');
+  }
+}
+
+/** (Re)arm the grace timer that flushes a held answer if the CLI never emits a turn-end
+ *  `result` (i.e. it blocked rather than auto-dismissing). Reset on each gated message so
+ *  a still-streaming auto-dismissed turn keeps deferring until its `result` arrives. */
+function armQuestionAnswerFallback(claude: WorkspaceClaude): void {
+  if (claude.questionAnswerFallbackTimer) clearTimeout(claude.questionAnswerFallbackTimer);
+  claude.questionAnswerFallbackTimer = setTimeout(() => {
+    claude.questionAnswerFallbackTimer = null;
+    flushPendingQuestionAnswer(claude);
+  }, 1500);
+}
+
 export async function answerQuestionImpl(
   projectPath: string,
   toolUseId: string,
@@ -659,14 +768,7 @@ export async function answerQuestionImpl(
   const effectiveScope = scope || 'chat';
   const claude = getClaude(ws, effectiveScope);
 
-  // Stop buffering CLI output now that the user has answered. The buffered
-  // messages (placeholder tool_result + cancellation acknowledgment) are
-  // dropped — the corrective user message below replaces them.
-  if (claude.awaitingQuestionAnswer && claude.pendingQuestionId === toolUseId) {
-    claude.awaitingQuestionAnswer = false;
-    claude.pendingQuestionId = null;
-  }
-
+  // Mark the card answered in the UI immediately.
   emitChatMessage({
     type: 'question_answered',
     projectPath: ws.projectPath,
@@ -675,6 +777,22 @@ export async function answerQuestionImpl(
     answers,
   });
 
+  // Deferred injection: the CLI auto-answers AskUserQuestion itself with a placeholder
+  // "dismissed" tool_result and keeps streaming that turn. We keep dropping that turn's
+  // output until it fully drains, THEN inject the real answer — otherwise releasing the
+  // gate the instant the user answers leaks the half-streamed "dismissed" reply. If the
+  // turn already drained, inject now; otherwise wait for its `result` (or the grace timer).
+  if (claude.awaitingQuestionAnswer && claude.pendingQuestionId === toolUseId) {
+    claude.pendingQuestionAnswer = { toolUseId, answers };
+    if (claude.questionTurnDrained) {
+      flushPendingQuestionAnswer(claude);
+    } else {
+      armQuestionAnswerFallback(claude);
+    }
+    return true;
+  }
+
+  // Gate already released (e.g. answered after the flow reset): inject directly.
   const proc = claude.process;
   if (proc?.stdin && !proc.stdin.destroyed) {
     const followUp = JSON.stringify({
@@ -866,6 +984,7 @@ export async function approveImpl(
   // --- Local tool execution (Bash, Write, Edit, Read) ---
   let result = '';
   let isError = false;
+  let resultImages: Array<{ path: string; media_type: string }> | null = null;
 
   try {
     if (pending.toolName === 'Bash' || pending.toolName === 'bash') {
@@ -923,13 +1042,26 @@ export async function approveImpl(
         result = `File not found: ${filePath}`;
         isError = true;
       } else {
-        result = fs.readFileSync(filePath, 'utf-8');
+        const img = imageReadResult(filePath);
+        if (img) {
+          result = img.text;
+          resultImages = [img.image];
+        } else {
+          result = fs.readFileSync(filePath, 'utf-8');
+        }
       }
     }
   } catch (err: any) {
     result = err.message || 'Command execution failed';
     isError = true;
   }
+
+  const toolResultContent = resultImages
+    ? [
+        { type: 'text', text: result },
+        ...resultImages.map(im => ({ type: 'image', source: { type: 'sai-file', path: im.path, media_type: im.media_type } })),
+      ]
+    : result;
 
   // Send the real tool result to the renderer as if the CLI produced it
   emitChatMessage({
@@ -941,7 +1073,7 @@ export async function approveImpl(
       content: [{
         type: 'tool_result',
         tool_use_id: pending.toolUseId,
-        content: result,
+        content: toolResultContent,
         is_error: isError,
       }],
     },
@@ -1085,6 +1217,12 @@ export function registerClaudeHandlers(win: BrowserWindow) {
     if (!ws) return;
     const claude = getClaude(ws, scope || 'chat');
     if (claude.process) {
+      // If this scope is actively streaming, leave the process running so the
+      // user can switch to it and see real streaming output (with a working Stop
+      // button). Killing it here without emitting done would leave the UI stuck;
+      // killing it WITH a done strips the Stop button before the user can act.
+      // The process will emit done naturally when the turn finishes.
+      if (claude.streaming || claude.busy) return;
       claude.process.kill();
       claude.process = null;
       claude.processConfig = null;

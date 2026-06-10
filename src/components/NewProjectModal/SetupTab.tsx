@@ -53,8 +53,8 @@ export default function SetupTab({
   onClearNameBadge, onClearContextBadge,
 }: SetupTabProps) {
   const inputStyle: React.CSSProperties = {
-    background: 'var(--bg-secondary)',
-    border: '1px solid var(--border)',
+    background: 'var(--surface-2)',
+    border: '1px solid var(--border-subtle)',
     borderRadius: 5,
     padding: '7px 10px',
     fontSize: 13,
@@ -71,7 +71,7 @@ export default function SetupTab({
     extra?: React.ReactNode,
   ) => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--bg-elevated)' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--border-hairline)' }}>
         <div
           onClick={() => {
             if (key === 'githubRepo' && !githubUser) return;
@@ -79,8 +79,8 @@ export default function SetupTab({
           }}
           style={{
             width: 15, height: 15, borderRadius: 3, flexShrink: 0, marginTop: 1,
-            border: `1.5px solid ${helpers[key] ? 'var(--accent)' : 'var(--border)'}`,
-            background: helpers[key] ? 'var(--accent)' : 'var(--bg-secondary)',
+            border: `1.5px solid ${helpers[key] ? 'var(--accent)' : 'var(--border-subtle)'}`,
+            background: helpers[key] ? 'var(--accent)' : 'var(--surface-2)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             cursor: key === 'githubRepo' && !githubUser ? 'not-allowed' : 'pointer',
             opacity: key === 'githubRepo' && !githubUser ? 0.4 : 1,
@@ -118,7 +118,7 @@ export default function SetupTab({
   );
 
   const githubSubPanel = helpers.githubRepo && githubUser ? (
-    <div style={{ marginLeft: 25, marginBottom: 4, padding: 10, background: 'var(--bg-secondary)', borderRadius: 5, border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div style={{ marginLeft: 25, marginBottom: 4, padding: 10, background: 'var(--surface-2)', borderRadius: 5, border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ fontSize: 11, color: 'var(--text-muted)', width: 60, flexShrink: 0 }}>Name</span>
         <input
@@ -136,7 +136,7 @@ export default function SetupTab({
               onClick={() => setVisibility(v)}
               style={{
                 fontSize: 12, padding: '3px 10px', borderRadius: 3, cursor: 'pointer',
-                border: `1px solid ${visibility === v ? 'var(--accent)' : 'var(--border)'}`,
+                border: `1px solid ${visibility === v ? 'var(--accent)' : 'var(--border-subtle)'}`,
                 color: visibility === v ? 'var(--accent)' : 'var(--text-muted)',
                 background: visibility === v ? 'rgba(199,145,12,0.1)' : 'transparent',
               }}
@@ -163,7 +163,7 @@ export default function SetupTab({
           />
           <button
             onClick={handleBrowseParent}
-            style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 5, padding: '7px 12px', fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+            style={{ background: 'var(--surface-2)', border: '1px solid var(--border-subtle)', borderRadius: 5, padding: '7px 12px', fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
           >
             Browse
           </button>
@@ -205,12 +205,12 @@ export default function SetupTab({
           onChange={e => { setContext(e.target.value); onClearContextBadge(); }}
           placeholder="What is this project for? e.g. 'A CLI tool for processing CSV files.'"
           rows={3}
-          style={{ ...inputStyle, fontFamily: 'system-ui, sans-serif', resize: 'vertical', lineHeight: 1.5 }}
+          style={{ ...inputStyle, fontFamily: 'inherit', resize: 'vertical', lineHeight: 1.5 }}
         />
       </div>
 
       {/* Divider */}
-      <div style={{ height: 1, background: 'var(--border)' }} />
+      <div style={{ height: 1, background: 'var(--border-hairline)' }} />
 
       {/* Helpers */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>

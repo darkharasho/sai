@@ -64,8 +64,8 @@ export function RebaseButton({ projectPath, currentBranch, onRefresh, onListBran
       {open && (
         <div style={{
           position: 'absolute', bottom: '100%', left: 0, marginBottom: 4,
-          minWidth: 200, background: 'var(--bg-elevated, #1c2128)',
-          border: '1px solid var(--border)', borderRadius: 6,
+          minWidth: 200, background: 'var(--surface-3)',
+          border: '1px solid var(--border-subtle)', borderRadius: 6,
           boxShadow: '0 -4px 16px rgba(0,0,0,0.3)', zIndex: 100, padding: 8,
         }}>
           <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>
@@ -77,7 +77,7 @@ export function RebaseButton({ projectPath, currentBranch, onRefresh, onListBran
             onChange={e => setFilter(e.target.value)}
             placeholder="Filter branches…"
             aria-label="Filter branches"
-            style={{ width: '100%', background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 3, color: 'var(--text)', fontSize: 11, padding: '3px 6px', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box', marginBottom: 4 }}
+            style={{ width: '100%', background: 'var(--surface-2)', border: '1px solid var(--border-subtle)', borderRadius: 3, color: 'var(--text)', fontSize: 11, padding: '3px 6px', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box', marginBottom: 4 }}
             onKeyDown={e => { if (e.key === 'Escape') { setOpen(false); setFilter(''); setSelected(''); } }}
           />
           <div style={{ maxHeight: 120, overflowY: 'auto', marginBottom: 6 }}>
@@ -106,7 +106,7 @@ export function RebaseButton({ projectPath, currentBranch, onRefresh, onListBran
               disabled={!selected || busy}
               aria-label="Rebase"
               style={{
-                flex: 1, background: selected ? 'var(--yellow, #f9e2af)' : 'var(--bg-hover)',
+                flex: 1, background: selected ? 'var(--yellow, #f9e2af)' : 'var(--surface-4)',
                 color: selected ? '#000' : 'var(--text-muted)',
                 border: 'none', borderRadius: 3, padding: '4px 0',
                 fontSize: 11, fontWeight: 600, cursor: selected ? 'pointer' : 'not-allowed',
@@ -116,7 +116,7 @@ export function RebaseButton({ projectPath, currentBranch, onRefresh, onListBran
             </button>
             <button
               onClick={() => { setOpen(false); setFilter(''); setSelected(''); }}
-              style={{ flex: 1, background: 'none', border: '1px solid var(--border)', borderRadius: 3, padding: '4px 0', fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}
+              style={{ flex: 1, background: 'none', border: '1px solid var(--border-subtle)', borderRadius: 3, padding: '4px 0', fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}
             >
               Cancel
             </button>
@@ -148,7 +148,7 @@ export function RebaseInProgressBanner({ projectPath, onto, onRefresh }: RebaseI
     <div style={{
       margin: '8px 12px 0',
       padding: '8px 10px',
-      background: 'var(--bg-input)',
+      background: 'var(--surface-2)',
       borderLeft: '3px solid var(--yellow, #f9e2af)',
       borderRadius: '0 4px 4px 0',
     }}>
@@ -169,7 +169,7 @@ export function RebaseInProgressBanner({ projectPath, onto, onRefresh }: RebaseI
         <button
           onClick={() => run(() => (window.sai as any).gitRebaseSkip(projectPath))}
           disabled={busy}
-          style={{ flex: 1, background: 'var(--bg-hover)', color: 'var(--text-muted)', border: 'none', borderRadius: 3, padding: '3px 0', fontSize: 10, cursor: 'pointer' }}
+          style={{ flex: 1, background: 'var(--surface-4)', color: 'var(--text-muted)', border: 'none', borderRadius: 3, padding: '3px 0', fontSize: 10, cursor: 'pointer' }}
         >
           Skip
         </button>

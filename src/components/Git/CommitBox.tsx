@@ -128,7 +128,7 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
   return (
     <div
       style={{
-        borderTop: '1px solid var(--border)',
+        borderTop: '1px solid var(--border-hairline)',
         padding: '10px 12px',
         display: 'flex',
         flexDirection: 'column',
@@ -163,7 +163,7 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
               fontSize: 11,
               textAlign: 'left',
             }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-hover)'; }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-4)'; }}
             onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
             title="Switch branch"
           >
@@ -227,7 +227,7 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
 
         {branchMenuOpen && (
           <div className="branch-dropup">
-            <div style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>
+            <div style={{ padding: '6px 8px', borderBottom: '1px solid var(--border-hairline)' }}>
               <input
                 ref={filterRef}
                 type="text"
@@ -236,8 +236,8 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
                 onChange={e => { setBranchFilter(e.target.value); setFocusedBranchIndex(0); }}
                 style={{
                   width: '100%',
-                  background: 'var(--bg-input)',
-                  border: '1px solid var(--border)',
+                  background: 'var(--surface-2)',
+                  border: '1px solid var(--border-subtle)',
                   borderRadius: 3,
                   color: 'var(--text)',
                   fontSize: 11,
@@ -279,7 +279,7 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
                       onMouseEnter={() => setFocusedBranchIndex(i)}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 6,
-                        width: '100%', background: focusedBranchIndex === i ? 'var(--bg-hover)' : 'none',
+                        width: '100%', background: focusedBranchIndex === i ? 'var(--surface-4)' : 'none',
                         border: 'none', color: 'var(--text)', cursor: 'pointer',
                         padding: '5px 10px', fontSize: 11, textAlign: 'left', fontFamily: 'inherit',
                       }}
@@ -293,7 +293,7 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
               )}
               {filteredRemote.length > 0 && (
                 <>
-                  <div style={{ padding: '4px 10px 2px', fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.5px', textTransform: 'uppercase', borderTop: filteredLocal.length > 0 ? '1px solid var(--border)' : 'none', marginTop: filteredLocal.length > 0 ? 4 : 0 }}>
+                  <div style={{ padding: '4px 10px 2px', fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.5px', textTransform: 'uppercase', borderTop: filteredLocal.length > 0 ? '1px solid var(--border-hairline)' : 'none', marginTop: filteredLocal.length > 0 ? 4 : 0 }}>
                     Remote
                   </div>
                   {filteredRemote.map((b, i) => (
@@ -303,7 +303,7 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
                       onMouseEnter={() => setFocusedBranchIndex(filteredLocal.length + i)}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 6,
-                        width: '100%', background: focusedBranchIndex === filteredLocal.length + i ? 'var(--bg-hover)' : 'none',
+                        width: '100%', background: focusedBranchIndex === filteredLocal.length + i ? 'var(--surface-4)' : 'none',
                         border: 'none', color: 'var(--text-muted)', cursor: 'pointer',
                         padding: '5px 10px', fontSize: 11, textAlign: 'left', fontFamily: 'inherit',
                       }}
@@ -320,7 +320,7 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
                 </div>
               )}
             </div>
-            <div style={{ borderTop: '1px solid var(--border)' }}>
+            <div style={{ borderTop: '1px solid var(--border-hairline)' }}>
               {creatingBranch ? (
                 <div style={{ display: 'flex', gap: 4, padding: '6px 8px' }}>
                   <input
@@ -331,8 +331,8 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
                     autoFocus
                     style={{
                       flex: 1,
-                      background: 'var(--bg-input)',
-                      border: '1px solid var(--border)',
+                      background: 'var(--surface-2)',
+                      border: '1px solid var(--border-subtle)',
                       borderRadius: 3,
                       color: 'var(--text)',
                       fontSize: 11,
@@ -349,7 +349,7 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
                     onClick={handleCreate}
                     disabled={!newBranchName.trim()}
                     style={{
-                      background: newBranchName.trim() ? 'var(--accent)' : 'var(--bg-hover)',
+                      background: newBranchName.trim() ? 'var(--accent)' : 'var(--surface-4)',
                       color: newBranchName.trim() ? '#000' : 'var(--text-muted)',
                       border: 'none',
                       borderRadius: 3,
@@ -385,7 +385,7 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
             alignItems: 'flex-start',
             gap: 6,
             padding: '6px 8px',
-            background: 'var(--bg-input)',
+            background: 'var(--surface-2)',
             borderLeft: '2px solid var(--red)',
             borderRadius: 3,
             fontSize: 11,
@@ -423,8 +423,8 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
         style={{
           width: '100%',
           resize: 'vertical' as const,
-          background: 'var(--bg-input)',
-          border: '1px solid var(--border)',
+          background: 'var(--surface-2)',
+          border: '1px solid var(--border-subtle)',
           borderRadius: 4,
           color: 'var(--text)',
           fontSize: 12,
@@ -446,12 +446,12 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
         disabled={!message.trim() || busy || rebaseInProgress}
         style={{
           width: '100%',
-          padding: '6px 0',
+          padding: `5px var(--sp-2)`,
           border: 'none',
-          borderRadius: 4,
-          background: message.trim() && !busy && !rebaseInProgress ? 'var(--accent)' : 'var(--bg-hover)',
+          borderRadius: 'var(--radius-sm)',
+          background: message.trim() && !busy && !rebaseInProgress ? 'var(--accent)' : 'var(--surface-3)',
           color: message.trim() && !busy && !rebaseInProgress ? '#000' : 'var(--text-muted)',
-          fontSize: 12,
+          fontSize: 'var(--text-sm)',
           fontWeight: 600,
           cursor: message.trim() && !busy ? 'pointer' : 'not-allowed',
           transition: 'background 0.15s',
@@ -480,22 +480,22 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
           title="Push"
           style={{
             flex: 1,
-            padding: '5px 0',
-            border: '1px solid var(--border)',
-            borderRadius: 4,
-            background: 'var(--bg-input)',
+            padding: `5px var(--sp-2)`,
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-sm)',
+            background: 'var(--surface-3)',
             color: busy || rebaseInProgress ? 'var(--text-muted)' : 'var(--text-secondary)',
-            fontSize: 12,
+            fontSize: 'var(--text-sm)',
             cursor: busy || rebaseInProgress ? 'not-allowed' : 'pointer',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
           }}
           onMouseEnter={(e) => {
-            if (!busy && !rebaseInProgress) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-hover)';
+            if (!busy && !rebaseInProgress) (e.currentTarget as HTMLButtonElement).style.background = 'var(--surface-4)';
           }}
           onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-input)';
+            (e.currentTarget as HTMLButtonElement).style.background = 'var(--surface-3)';
           }}
         >
           <ArrowUp size={13} style={{ marginRight: 3 }} />
@@ -508,22 +508,22 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
           title="Pull"
           style={{
             flex: 1,
-            padding: '5px 0',
-            border: '1px solid var(--border)',
-            borderRadius: 4,
-            background: 'var(--bg-input)',
+            padding: `5px var(--sp-2)`,
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-sm)',
+            background: 'var(--surface-3)',
             color: busy || rebaseInProgress ? 'var(--text-muted)' : 'var(--text-secondary)',
-            fontSize: 12,
+            fontSize: 'var(--text-sm)',
             cursor: busy || rebaseInProgress ? 'not-allowed' : 'pointer',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
           }}
           onMouseEnter={(e) => {
-            if (!busy && !rebaseInProgress) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-hover)';
+            if (!busy && !rebaseInProgress) (e.currentTarget as HTMLButtonElement).style.background = 'var(--surface-4)';
           }}
           onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-input)';
+            (e.currentTarget as HTMLButtonElement).style.background = 'var(--surface-3)';
           }}
         >
           <ArrowDown size={13} style={{ marginRight: 3 }} />
@@ -561,8 +561,8 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
           left: 0;
           right: 0;
           margin-bottom: 4px;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
+          background: var(--surface-3);
+          border: 1px solid var(--border-subtle);
           border-radius: 6px;
           box-shadow: 0 -4px 16px rgba(0,0,0,0.3);
           z-index: 50;
@@ -583,7 +583,7 @@ export default function CommitBox({ branch, ahead, behind, onCommit, onPush, onP
           font-family: 'Geist Mono', 'JetBrains Mono', monospace;
         }
         .branch-item:hover {
-          background: var(--bg-hover);
+          background: var(--surface-4);
         }
         .branch-item.active {
           color: var(--accent);

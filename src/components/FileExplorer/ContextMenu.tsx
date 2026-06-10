@@ -85,8 +85,8 @@ export default function ContextMenu({ x, y, entry, onAction, onClose, allowCreat
         position: 'fixed',
         left: x,
         top: y,
-        background: '#1c2128',
-        border: '1px solid var(--border)',
+        background: 'var(--surface-3)',
+        border: '1px solid var(--border-subtle)',
         borderRadius: 6,
         padding: '4px 0',
         minWidth: 180,
@@ -98,7 +98,7 @@ export default function ContextMenu({ x, y, entry, onAction, onClose, allowCreat
     >
       {cleaned.map((item, i) => {
         if (item === 'separator') {
-          return <div key={`sep-${i}`} style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />;
+          return <div key={`sep-${i}`} style={{ height: 1, background: 'var(--border-hairline)', margin: '4px 0' }} />;
         }
         return (
           <div
@@ -109,7 +109,7 @@ export default function ContextMenu({ x, y, entry, onAction, onClose, allowCreat
               color: item.danger ? 'var(--red)' : 'var(--text)',
               cursor: 'pointer',
             }}
-            onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
+            onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-4)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
           >
             {item.label}

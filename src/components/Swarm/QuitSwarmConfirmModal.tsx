@@ -40,8 +40,8 @@ export default function QuitSwarmConfirmModal({ tasks, onCancel, onConfirm }: Qu
         className="sai-modal-in"
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: 'var(--bg-elevated)',
-          border: '1px solid var(--border)',
+          background: 'var(--surface-3)',
+          border: '1px solid var(--border-subtle)',
           borderRadius: 8,
           padding: '24px 28px',
           width: 420,
@@ -72,8 +72,8 @@ export default function QuitSwarmConfirmModal({ tasks, onCancel, onConfirm }: Qu
             gap: 4,
             maxHeight: 220,
             overflowY: 'auto',
-            borderTop: '1px solid var(--border)',
-            borderBottom: '1px solid var(--border)',
+            borderTop: '1px solid var(--border-hairline)',
+            borderBottom: '1px solid var(--border-hairline)',
             paddingTop: 8,
             paddingBottom: 8,
           }}
@@ -105,7 +105,7 @@ export default function QuitSwarmConfirmModal({ tasks, onCancel, onConfirm }: Qu
             onClick={onCancel}
             style={{
               background: 'none',
-              border: '1px solid var(--border)',
+              border: '1px solid var(--border-subtle)',
               color: 'var(--text-muted)',
               borderRadius: 5,
               padding: '6px 14px',
@@ -118,7 +118,7 @@ export default function QuitSwarmConfirmModal({ tasks, onCancel, onConfirm }: Qu
             }}
             onMouseLeave={(e) => {
               (e.currentTarget as HTMLElement).style.color = 'var(--text-muted)';
-              (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)';
+              (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-subtle)';
             }}
           >
             Cancel

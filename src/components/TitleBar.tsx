@@ -11,6 +11,7 @@ import { LogOut, Settings, ChevronDown, FolderOpen, FolderPlus, Layers, Pencil, 
 import { basename } from '../utils/pathUtils';
 import SaiLogo from './SaiLogo';
 import { DOT_MASK_URL } from '../lib/assets';
+import { WorkspaceSquircle, StatusSlot } from './shared/WorkspaceSquircle';
 
 interface GitHubUser {
   login: string;
@@ -104,15 +105,24 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
   // Reset the recent filter when switching tabs so it doesn't carry over.
   useEffect(() => { setRecentQuery(''); }, [pickerTab]);
 
-  // Close dropdown on outside click
+  // Close dropdown on outside click or Escape
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setOpen(false);
       }
     };
-    if (open) document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    if (open) {
+      document.addEventListener('mousedown', handleClick);
+      document.addEventListener('keydown', handleKey);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKey);
+    };
   }, [open]);
 
   const handleSuspend = async (path: string) => {
@@ -245,14 +255,14 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
             const metaBusy = scope(busyWorkspaces, 'meta').filter(p => p !== projectPath).length;
 
             const projectIndicator = projApproval > 0
-              ? <span className="titlebar-approval-dot" />
-              : projCompleted > 0
-                ? <span className="workspace-done-dot" />
-                : projBusy > 0
-                  ? <span className="titlebar-busy-indicator">
-                      <span className="titlebar-busy-spinner" />
-                      {projBusy > 1 && <span className="titlebar-busy-count">{projBusy}</span>}
-                    </span>
+              ? <WorkspaceSquircle state="approval" title="Approval needed" />
+              : projBusy > 0
+                ? <span className="titlebar-busy-indicator">
+                    <WorkspaceSquircle state="busy" />
+                    {projBusy > 1 && <span className="titlebar-busy-count">{projBusy}</span>}
+                  </span>
+                : projCompleted > 0
+                  ? <WorkspaceSquircle state="done" title="Response complete" />
                   : null;
 
             const metaCls = metaApproval > 0 ? 'approval'
@@ -324,15 +334,24 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                             className={`dropdown-item workspace-item ${w.projectPath === projectPath ? 'active' : ''}`}
                             onClick={() => { onProjectChange(w.projectPath); setOpen(false); }}
                           >
-                            {approvalWorkspaces?.has(w.projectPath)
-                              ? <span className="workspace-approval-icon" title="Approval needed">!</span>
-                              : busyWorkspaces?.has(w.projectPath)
-                                ? <span className="workspace-spinner" title="Working..." />
-                                : <span className="workspace-status-dot workspace-dot-active" />}
+                            <StatusSlot>
+                              <WorkspaceSquircle
+                                state={
+                                  approvalWorkspaces?.has(w.projectPath) ? 'approval'
+                                  : busyWorkspaces?.has(w.projectPath) ? 'busy'
+                                  : completedWorkspaces?.has(w.projectPath) ? 'done'
+                                  : 'alive'
+                                }
+                                title={
+                                  approvalWorkspaces?.has(w.projectPath) ? 'Approval needed'
+                                  : busyWorkspaces?.has(w.projectPath) ? 'Working...'
+                                  : completedWorkspaces?.has(w.projectPath) ? 'Response complete'
+                                  : undefined
+                                }
+                              />
+                            </StatusSlot>
                             <span className="dropdown-item-name">{basename(w.projectPath)}</span>
-                            {approvalWorkspaces?.has(w.projectPath)
-                              ? <span className="workspace-approval-label">Approval needed</span>
-                              : !busyWorkspaces?.has(w.projectPath) && completedWorkspaces?.has(w.projectPath) && <span className="workspace-completed-icon" title="Response complete">!</span>}
+                            {approvalWorkspaces?.has(w.projectPath) && <span className="workspace-approval-label">Approval needed</span>}
                             <span className="dropdown-item-path">{w.projectPath}</span>
                           </button>
                           {w.projectPath !== projectPath && (<>
@@ -374,7 +393,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                                 className={`dropdown-item workspace-item ${w.projectPath === projectPath ? 'active' : ''}`}
                                 onClick={() => { onProjectChange(w.projectPath); setOpen(false); }}
                               >
-                                <span className="workspace-status-dot workspace-dot-suspended" />
+                                <StatusSlot><WorkspaceSquircle state="inactive" /></StatusSlot>
                                 <span className="dropdown-item-name">{basename(w.projectPath)}</span>
                                 <span className="dropdown-item-path">{w.projectPath}</span>
                               </button>
@@ -420,13 +439,13 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                         flex: 1, display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
                         gap: 5, color: 'var(--accent)', fontSize: 13, borderRadius: '4px 0 0 4px',
                       }}
-                      onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent-hover)'; e.currentTarget.style.background = 'var(--bg-elevated)'; }}
+                      onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent-hover)'; e.currentTarget.style.background = 'var(--surface-3)'; }}
                       onMouseLeave={e => { e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.background = 'transparent'; }}
                     >
                       <FolderOpen size={13} />
                       Open Project
                     </button>
-                    <div style={{ width: 1, height: 16, background: 'var(--border)', flexShrink: 0 }} />
+                    <div style={{ width: 1, height: 16, background: 'var(--border-hairline)', flexShrink: 0 }} />
                     <button
                       className="dropdown-item"
                       onClick={() => { setOpen(false); onNewProject?.(); }}
@@ -434,7 +453,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                         flex: 1, display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
                         gap: 5, color: 'var(--accent)', fontSize: 13, borderRadius: '0 4px 4px 0',
                       }}
-                      onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent-hover)'; e.currentTarget.style.background = 'var(--bg-elevated)'; }}
+                      onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent-hover)'; e.currentTarget.style.background = 'var(--surface-3)'; }}
                       onMouseLeave={e => { e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.background = 'transparent'; }}
                     >
                       <FolderPlus size={13} />
@@ -482,9 +501,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                               <span className="dropdown-item-name">{meta.name}</span>
                               <span className="dropdown-item-path">{meta.projects.length} project{meta.projects.length === 1 ? '' : 's'}</span>
                             </div>
-                            {approvalWorkspaces?.has(meta.syntheticRoot)
-                              ? <span className="workspace-approval-label">Approval needed</span>
-                              : !busyWorkspaces?.has(meta.syntheticRoot) && completedWorkspaces?.has(meta.syntheticRoot) && <span className="workspace-completed-icon" title="Response complete">!</span>}
+                            {approvalWorkspaces?.has(meta.syntheticRoot) && <span className="workspace-approval-label">Approval needed</span>}
                           </button>
                           <button
                             className="meta-workspace-manage-btn"
@@ -534,9 +551,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                                 <span className="dropdown-item-name">{meta.name}</span>
                                 <span className="dropdown-item-path">{meta.projects.length} project{meta.projects.length === 1 ? '' : 's'}</span>
                               </div>
-                              {approvalWorkspaces?.has(meta.syntheticRoot)
-                                ? <span className="workspace-approval-label">Approval needed</span>
-                                : !busyWorkspaces?.has(meta.syntheticRoot) && completedWorkspaces?.has(meta.syntheticRoot) && <span className="workspace-completed-icon" title="Response complete">!</span>}
+                              {approvalWorkspaces?.has(meta.syntheticRoot) && <span className="workspace-approval-label">Approval needed</span>}
                             </button>
                             <button
                               className="meta-workspace-manage-btn"
@@ -563,7 +578,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                       display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
                       gap: 5, color: 'var(--accent)', fontSize: 13,
                     }}
-                    onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent-hover)'; e.currentTarget.style.background = 'var(--bg-elevated)'; }}
+                    onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent-hover)'; e.currentTarget.style.background = 'var(--surface-3)'; }}
                     onMouseLeave={e => { e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.background = 'transparent'; }}
                   >
                     <Layers size={13} />
@@ -696,7 +711,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
       <style>{`
         .titlebar {
           height: var(--titlebar-height);
-          background: var(--bg-secondary);
+          background: var(--surface-0);
           border-bottom: none;
           display: flex;
           align-items: center;
@@ -762,7 +777,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           transition: background-color 120ms ease, color 120ms ease;
         }
         .window-ctrl:hover {
-          background: var(--bg-hover);
+          background: var(--surface-4);
           color: var(--text);
         }
         .window-ctrl-close:hover {
@@ -803,8 +818,8 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           display: flex;
           align-items: center;
           gap: 5px;
-          background: var(--bg-secondary);
-          border: 1px solid var(--border);
+          background: var(--surface-2);
+          border: 1px solid var(--border-subtle);
           border-radius: 5px;
           color: var(--text-secondary);
           font-size: 11px;
@@ -825,8 +840,9 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           cursor: pointer;
           padding: 2px 6px;
           color: var(--text-secondary);
+          font-family: 'Onest', sans-serif;
         }
-        .gh-user-btn:hover { background: var(--bg-hover); border-color: var(--border); color: var(--text); }
+        .gh-user-btn:hover { background: var(--surface-4); border-color: var(--border-subtle); color: var(--text); }
         .gh-avatar-wrap { position: relative; flex-shrink: 0; }
         .gh-avatar {
           width: 18px;
@@ -842,7 +858,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           width: 6px;
           height: 6px;
           border-radius: 50%;
-          border: 1px solid var(--bg-secondary);
+          border: 1px solid var(--surface-0);
         }
         .gh-sync-dot.syncing { background: var(--accent); animation: sync-pulse 1s ease-in-out infinite; }
         .gh-sync-dot.error { background: #f87171; }
@@ -862,8 +878,8 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           position: absolute;
           top: calc(100% + 6px);
           right: 0;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
+          background: var(--surface-3);
+          border: 1px solid var(--border-subtle);
           border-radius: 8px;
           min-width: 200px;
           box-shadow: 0 8px 24px rgba(0,0,0,0.4);
@@ -894,7 +910,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         }
         .gh-dropdown-divider {
           height: 1px;
-          background: var(--border);
+          background: var(--border-hairline);
         }
         .gh-dropdown-item {
           display: flex;
@@ -909,7 +925,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           cursor: pointer;
           text-align: left;
         }
-        .gh-dropdown-item:hover { background: var(--bg-hover); }
+        .gh-dropdown-item:hover { background: var(--surface-4); }
         .gh-dropdown-item.danger { color: #f87171; }
         .gh-dropdown-item.danger:hover { background: rgba(248,113,113,0.08); }
         .project-dropdown-wrapper {
@@ -922,6 +938,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           background: transparent;
           border: 1px solid transparent;
           color: var(--text);
+          font-family: 'Onest', sans-serif;
           font-size: 12px;
           cursor: pointer;
           padding: 4px 12px;
@@ -932,32 +949,12 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           gap: 5px;
           line-height: 1;
         }
-        .workspace-done-dot {
-          display: inline-block;
-          width: 9px;
-          height: 9px;
-          background: var(--green);
-          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-          margin-left: 6px;
-          vertical-align: middle;
-          animation: done-pulse 2s ease-in-out infinite;
-        }
         .titlebar-busy-indicator {
           display: inline-flex;
           align-items: center;
           gap: 4px;
           margin-left: 6px;
           vertical-align: middle;
-        }
-        .titlebar-busy-spinner {
-          display: inline-block;
-          width: 9px;
-          height: 9px;
-          background: var(--accent);
-          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-          animation: dot-spinner-pulse 2.2s ease-in-out infinite;
         }
         @keyframes dot-spinner-pulse {
           0%, 100% { opacity: 1; transform: scale(1); }
@@ -970,20 +967,6 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           opacity: 0.6;
           font-weight: 500;
         }
-        .workspace-completed-icon {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          width: 14px;
-          height: 14px;
-          border-radius: 50%;
-          background: var(--accent);
-          color: #000;
-          font-size: 10px;
-          font-weight: 800;
-          flex-shrink: 0;
-          animation: done-pulse 2s ease-in-out infinite;
-        }
         @keyframes done-pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.4; }
@@ -991,35 +974,6 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         @keyframes approval-blink {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.2; }
-        }
-        .titlebar-approval-dot {
-          display: inline-block;
-          width: 9px;
-          height: 9px;
-          background: #f59e0b;
-          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-          margin-left: 6px;
-          vertical-align: middle;
-          animation: approval-blink 1s ease-in-out infinite;
-        }
-        .workspace-approval-icon {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          width: 14px;
-          height: 14px;
-          border-radius: 50%;
-          background: #f59e0b;
-          color: #000;
-          font-size: 10px;
-          font-weight: 800;
-          flex-shrink: 0;
-          animation: approval-blink 1s ease-in-out infinite;
-        }
-        .dropdown-item.active .workspace-approval-icon {
-          background: #000;
-          color: #f59e0b;
         }
         .workspace-approval-label {
           font-size: 11px;
@@ -1031,8 +985,8 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           opacity: 0.8;
         }
         .project-selector:hover {
-          background: var(--bg-hover);
-          border-color: var(--border);
+          background: var(--surface-4);
+          border-color: var(--border-subtle);
         }
         .project-dropdown {
           position: absolute;
@@ -1040,8 +994,8 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           left: 50%;
           transform: translateX(-50%);
           margin-top: 4px;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
+          background: var(--surface-3);
+          border: 1px solid var(--border-subtle);
           border-radius: 8px;
           width: 420px;
           box-shadow: 0 8px 24px rgba(0,0,0,0.4);
@@ -1071,7 +1025,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           font-size: 13px;
         }
         .dropdown-item:hover {
-          background: var(--bg-hover);
+          background: var(--surface-4);
         }
         .dropdown-item.active {
           background: var(--accent);
@@ -1093,7 +1047,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         }
         .dropdown-divider {
           height: 1px;
-          background: var(--border);
+          background: var(--border-hairline);
           margin: 4px 0;
         }
         .dropdown-inactive-scroll {
@@ -1105,7 +1059,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           width: 8px;
         }
         .dropdown-inactive-scroll::-webkit-scrollbar-thumb {
-          background: var(--border);
+          background: var(--border-hairline);
           border-radius: 4px;
         }
         .dropdown-inactive-scroll::-webkit-scrollbar-thumb:hover {
@@ -1122,32 +1076,6 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         .workspace-item .dropdown-item-path {
           margin-left: auto;
           flex-shrink: 1;
-        }
-        .workspace-status-dot {
-          display: inline-block;
-          width: 9px;
-          height: 9px;
-          flex-shrink: 0;
-          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-        }
-        .workspace-dot-active {
-          background: #4ade80;
-        }
-        .workspace-spinner {
-          width: 10px;
-          height: 10px;
-          background: var(--accent);
-          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-          flex-shrink: 0;
-          animation: dot-spinner-pulse 2.2s ease-in-out infinite;
-        }
-        .dropdown-item.active .workspace-spinner {
-          background: #000;
-        }
-        .workspace-dot-suspended {
-          background: #d4a72c;
         }
         .workspace-row-wrapper {
           position: relative;
@@ -1176,7 +1104,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           opacity: 1;
         }
         .workspace-overflow-btn:hover {
-          background: var(--bg-secondary);
+          background: var(--surface-4);
           color: var(--text);
         }
         .workspace-submenu {
@@ -1184,8 +1112,8 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           right: 8px;
           top: calc(100% - 4px);
           z-index: 200;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
+          background: var(--surface-3);
+          border: 1px solid var(--border-subtle);
           border-radius: 6px;
           padding: 4px 0;
           min-width: 120px;
@@ -1206,7 +1134,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           -webkit-app-region: no-drag;
         }
         .workspace-submenu-item:hover {
-          background: var(--bg-hover);
+          background: var(--surface-4);
         }
         .workspace-submenu-item.danger {
           color: #f87171;
@@ -1216,7 +1144,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         }
         .picker-tabs {
           display: flex;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--border-hairline);
           padding: 4px 8px 0;
           gap: 2px;
         }
@@ -1235,7 +1163,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         }
         .picker-tabs button:hover {
           color: var(--text);
-          background: var(--bg-hover);
+          background: var(--surface-4);
         }
         .picker-tabs button.active {
           color: var(--accent);
@@ -1299,7 +1227,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         }
         .meta-workspace-manage-btn:hover {
           color: var(--text);
-          background: var(--bg-hover);
+          background: var(--surface-4);
         }
         .meta-workspace-item {
           flex-direction: row !important;

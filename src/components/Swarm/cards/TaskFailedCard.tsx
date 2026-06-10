@@ -57,7 +57,7 @@ export default function TaskFailedCard({ toolCall, onRetry, onDiscard }: Props) 
         </div>
       </div>
       {input.reason && (
-        <div style={{ ...monoBox, marginTop: 6, padding: '6px 8px', background: 'var(--bg-secondary)', borderRadius: 4 }}>
+        <div style={{ ...monoBox, marginTop: 6, padding: '6px 8px', background: 'var(--surface-2)', borderRadius: 4 }}>
           {input.reason}
         </div>
       )}

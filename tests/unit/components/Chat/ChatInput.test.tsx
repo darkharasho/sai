@@ -281,6 +281,50 @@ describe('ChatInput', () => {
     });
   });
 
+  describe('capability-gated toolbar controls', () => {
+    it('renders effort mode button for claude', () => {
+      const { container } = render(
+        <ChatInput {...defaultProps} aiProvider="claude" />
+      );
+      expect(container.querySelector('.effort-btn')).toBeTruthy();
+    });
+
+    it('hides effort mode button for gemini', () => {
+      const { container } = render(
+        <ChatInput {...defaultProps} aiProvider="gemini" />
+      );
+      expect(container.querySelector('.effort-btn')).toBeNull();
+    });
+
+    it('hides effort mode button for codex', () => {
+      const { container } = render(
+        <ChatInput {...defaultProps} aiProvider="codex" />
+      );
+      expect(container.querySelector('.effort-btn')).toBeNull();
+    });
+
+    it('renders conversation mode toggle for gemini', () => {
+      render(
+        <ChatInput {...defaultProps} aiProvider="gemini" geminiConversationMode="planning" />
+      );
+      expect(screen.getByTitle('Conversation mode: planning')).toBeTruthy();
+    });
+
+    it('hides conversation mode toggle for claude', () => {
+      render(
+        <ChatInput {...defaultProps} aiProvider="claude" />
+      );
+      expect(screen.queryByTitle(/Conversation mode/)).toBeNull();
+    });
+
+    it('hides conversation mode toggle for codex', () => {
+      render(
+        <ChatInput {...defaultProps} aiProvider="codex" />
+      );
+      expect(screen.queryByTitle(/Conversation mode/)).toBeNull();
+    });
+  });
+
   it('calls onBeforeSend with a DOMRect immediately before onSend on Enter', () => {
     const order: string[] = [];
     const onSend = vi.fn(() => { order.push('send'); });

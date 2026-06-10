@@ -175,8 +175,8 @@ export default function MessageQueue({ queue, onRemove, onPromote }: MessageQueu
             bottom: calc(100% + 8px);
             left: 0;
             width: 360px;
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
+            background: var(--surface-3);
+            border: 1px solid var(--border-subtle);
             border-radius: 8px;
             padding: 0;
             box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
@@ -189,7 +189,7 @@ export default function MessageQueue({ queue, onRemove, onPromote }: MessageQueu
             align-items: center;
             gap: 8px;
             padding: 6px 12px;
-            border-bottom: 1px solid var(--border);
+            border-bottom: 1px solid var(--border-hairline);
             font-size: 11px;
           }
           .queue-popover-title { font-weight: 600; color: var(--text); }

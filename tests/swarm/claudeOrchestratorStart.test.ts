@@ -159,6 +159,7 @@ describe('swarmMcpConfig', () => {
             SAI_SWARM_SOCKET_PATH: '/tmp/s.sock',
             SAI_SWARM_SECRET: 'sek',
             SAI_SWARM_WORKSPACE: '/ws',
+            SAI_MCP_TOOLSET: 'orchestrator',
           },
         },
       },

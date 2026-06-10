@@ -14,6 +14,7 @@
 
 import { test as base, expect, Page } from '@playwright/test';
 import path from 'path';
+import { version as APP_VERSION } from '../../package.json';
 
 const FIXTURE_PROJECT = path.resolve(__dirname, 'fixtures/test-project');
 
@@ -32,9 +33,10 @@ export function buildDefaultSaiMock(fixturePath: string): Record<string, any> {
     openRecentProject: () => {},
     settingsGet: (key: string, defaultVal?: any) => {
       // Suppress the What's New modal in tests by pretending the user has already
-      // seen the current version. Tests that need to assert What's New behavior
-      // can override settingsGet via the saiMock fixture.
-      if (key === 'lastSeenVersion') return Promise.resolve('0.8.36');
+      // seen the current version. useWhatsNew compares lastSeenVersion against
+      // package.json's version with strict !==, so this MUST track the real
+      // version or the modal renders a full-screen overlay that blocks clicks.
+      if (key === 'lastSeenVersion') return Promise.resolve(APP_VERSION);
       return Promise.resolve(defaultVal ?? null);
     },
     settingsSet: () => Promise.resolve(),
@@ -62,6 +64,12 @@ export function buildDefaultSaiMock(fixturePath: string): Record<string, any> {
     terminalWrite: () => {},
     terminalResize: () => {},
     terminalOnData: (_cb: any) => noop(),
+    terminalOnCtrlC: (_cb: any) => noop(),
+    terminalSignal: () => {},
+    terminalKill: () => Promise.resolve(),
+    terminalGetProcess: () => Promise.resolve(null),
+    terminalIsAwaitingInput: () => Promise.resolve(false),
+    openExternal: () => {},
     gitStatus: () => Promise.resolve({ branch: 'main', staged: [], modified: [], created: [], deleted: [], not_added: [], ahead: 0, behind: 0 }),
     gitStage: () => Promise.resolve(),
     gitUnstage: () => Promise.resolve(),
@@ -75,12 +83,15 @@ export function buildDefaultSaiMock(fixturePath: string): Record<string, any> {
     gitCreateBranch: () => Promise.resolve(),
     gitDiff: () => Promise.resolve(''),
     gitDiscard: () => Promise.resolve(),
+    gitShow: () => Promise.resolve(''),
     fsReadDir: () => Promise.resolve([
       { name: 'src', path: fixturePath + '/src', type: 'directory' },
       { name: 'package.json', path: fixturePath + '/package.json', type: 'file' },
       { name: 'README.md', path: fixturePath + '/README.md', type: 'file' },
     ]),
     fsReadFile: () => Promise.resolve('// test content'),
+    fsReadFileBase64: () => Promise.resolve("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Crect width='80' height='80' fill='%2300a000'/%3E%3C/svg%3E"),
+    fsReadFileBase: () => Promise.resolve(''),
     fsMtime: () => Promise.resolve({ mtime: Date.now() }),
     fsWriteFile: () => Promise.resolve(),
     fsRename: () => Promise.resolve(),
@@ -118,6 +129,25 @@ export function buildDefaultSaiMock(fixturePath: string): Record<string, any> {
     githubOnSyncStatus: (_cb: any) => noop(),
     githubOnSettingsApplied: (_cb: any) => noop(),
     saveImage: () => Promise.resolve('/tmp/test.png'),
+    brainstormConsumeSeed: () => Promise.resolve({ ok: false }),
+    claudeGenerateTitle: () => Promise.resolve(''),
+    claudeAnswerQuestion: () => Promise.resolve(),
+    claudeAnswerPlanReview: () => Promise.resolve(),
+    claudeCompact: () => Promise.resolve(),
+    metaWorkspaceList: () => Promise.resolve([]),
+    metaWorkspaceActivate: () => Promise.resolve(),
+    metaWorkspaceCreate: () => Promise.resolve(),
+    metaWorkspaceDelete: () => Promise.resolve(),
+    metaWorkspaceUpdate: () => Promise.resolve(),
+    windowMinimize: () => {},
+    windowMaximizeToggle: () => {},
+    windowClose: () => {},
+    windowIsMaximized: () => Promise.resolve(false),
+    windowOnMaximizedChange: (_cb: any) => noop(),
+    windowIsFramelessRounded: () => Promise.resolve(false),
+    scaffoldProject: () => Promise.resolve({ ok: false }),
+    selectFile: () => Promise.resolve(null),
+    remote: () => Promise.resolve(null),
   };
 }
 
@@ -131,7 +161,7 @@ export const test = base.extend<{ window: Page; saiMock: SaiMockOverrides }>({
   saiMock: [{}, { option: true }],
   window: async ({ page, saiMock }, use) => {
     await page.addInitScript(
-      ({ fixturePath, overrides }: { fixturePath: string; overrides: Record<string, string> }) => {
+      ({ fixturePath, appVersion, overrides }: { fixturePath: string; appVersion: string; overrides: Record<string, string> }) => {
         const noop = () => () => {};
         // NOTE: This object is a deliberate duplicate of buildDefaultSaiMock() above.
         // The structured-clone boundary prevents passing live functions across addInitScript,
@@ -146,9 +176,10 @@ export const test = base.extend<{ window: Page; saiMock: SaiMockOverrides }>({
           openRecentProject: () => {},
           settingsGet: (key: string, defaultVal?: any) => {
             // Suppress the What's New modal in tests by pretending the user has already
-            // seen the current version. Tests that need to assert What's New behavior
-            // can override settingsGet via the saiMock fixture.
-            if (key === 'lastSeenVersion') return Promise.resolve('0.8.36');
+            // seen the current version. useWhatsNew compares lastSeenVersion against
+            // package.json's version with strict !==, so this MUST track the real
+            // version or the modal renders a full-screen overlay that blocks clicks.
+            if (key === 'lastSeenVersion') return Promise.resolve(appVersion);
             return Promise.resolve(defaultVal ?? null);
           },
           settingsSet: () => Promise.resolve(),
@@ -176,6 +207,12 @@ export const test = base.extend<{ window: Page; saiMock: SaiMockOverrides }>({
           terminalWrite: () => {},
           terminalResize: () => {},
           terminalOnData: (_cb: any) => noop(),
+          terminalOnCtrlC: (_cb: any) => noop(),
+          terminalSignal: () => {},
+          terminalKill: () => Promise.resolve(),
+          terminalGetProcess: () => Promise.resolve(null),
+          terminalIsAwaitingInput: () => Promise.resolve(false),
+          openExternal: () => {},
           gitStatus: () => Promise.resolve({ branch: 'main', staged: [], modified: [], created: [], deleted: [], not_added: [], ahead: 0, behind: 0 }),
           gitStage: () => Promise.resolve(),
           gitUnstage: () => Promise.resolve(),
@@ -189,12 +226,15 @@ export const test = base.extend<{ window: Page; saiMock: SaiMockOverrides }>({
           gitCreateBranch: () => Promise.resolve(),
           gitDiff: () => Promise.resolve(''),
           gitDiscard: () => Promise.resolve(),
+          gitShow: () => Promise.resolve(''),
           fsReadDir: () => Promise.resolve([
             { name: 'src', path: fixturePath + '/src', type: 'directory' },
             { name: 'package.json', path: fixturePath + '/package.json', type: 'file' },
             { name: 'README.md', path: fixturePath + '/README.md', type: 'file' },
           ]),
           fsReadFile: () => Promise.resolve('// test content'),
+          fsReadFileBase64: () => Promise.resolve("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Crect width='80' height='80' fill='%2300a000'/%3E%3C/svg%3E"),
+          fsReadFileBase: () => Promise.resolve(''),
           fsMtime: () => Promise.resolve({ mtime: Date.now() }),
           fsWriteFile: () => Promise.resolve(),
           fsRename: () => Promise.resolve(),
@@ -232,6 +272,24 @@ export const test = base.extend<{ window: Page; saiMock: SaiMockOverrides }>({
           githubOnSyncStatus: (_cb: any) => noop(),
           githubOnSettingsApplied: (_cb: any) => noop(),
           saveImage: () => Promise.resolve('/tmp/test.png'),
+          brainstormConsumeSeed: () => Promise.resolve({ ok: false }),
+          claudeGenerateTitle: () => Promise.resolve(''),
+          claudeAnswerQuestion: () => Promise.resolve(),
+          claudeAnswerPlanReview: () => Promise.resolve(),
+          claudeCompact: () => Promise.resolve(),
+          metaWorkspaceList: () => Promise.resolve([]),
+          metaWorkspaceActivate: () => Promise.resolve(),
+          metaWorkspaceCreate: () => Promise.resolve(),
+          metaWorkspaceDelete: () => Promise.resolve(),
+          metaWorkspaceUpdate: () => Promise.resolve(),
+          windowMinimize: () => {},
+          windowMaximizeToggle: () => {},
+          windowClose: () => {},
+          windowIsMaximized: () => Promise.resolve(false),
+          windowOnMaximizedChange: (_cb: any) => noop(),
+          windowIsFramelessRounded: () => Promise.resolve(false),
+          scaffoldProject: () => Promise.resolve({ ok: false }),
+          remote: () => Promise.resolve(null),
         };
         // Apply overrides — each value is a function source string we eval back into a function.
         for (const [key, fnSource] of Object.entries(overrides)) {
@@ -239,11 +297,16 @@ export const test = base.extend<{ window: Page; saiMock: SaiMockOverrides }>({
           base[key] = new Function('return (' + fnSource + ')')();
         }
         (window as any).sai = base;
+        // Expose the real app version so per-test settingsGet overrides can
+        // suppress the What's New modal without hardcoding a version that goes
+        // stale on the next release bump.
+        (window as any).__APP_VERSION = appVersion;
         // Expose helper to fire saved event-listener callbacks from tests.
         (window as any).__saiTriggers = (window as any).__saiTriggers || {};
       },
       {
         fixturePath: FIXTURE_PROJECT,
+        appVersion: APP_VERSION,
         // Serialize each override function to source so it survives the structured-clone boundary.
         overrides: Object.fromEntries(
           Object.entries(saiMock).map(([k, v]) => [k, typeof v === 'function' ? v.toString() : `() => (${JSON.stringify(v)})`])

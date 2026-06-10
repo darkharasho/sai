@@ -6,6 +6,8 @@ import ThinkingAnimation from '../ThinkingAnimation';
 import SaiLogo from '../SaiLogo';
 import MotionPresence from './MotionPresence';
 import { SPRING, DISTANCE, EASING, useReducedMotionTransition } from './motion';
+import { useSaiAnimationPref } from './useSaiAnimationPref';
+import { parseToolResultBlocks } from '../../lib/toolResultContent';
 
 // Projects whose brainstorm seed has already been consumed (or attempted) in
 // this renderer process. The seed is one-shot, but the chat start-effect can
@@ -49,7 +51,7 @@ function ContextMeter({ used, total }: { used: number; total: number }) {
   return (
     <div className="context-meter" title={`Context: ${Math.round(pct)}% (${(used / 1000).toFixed(0)}K / ${(total / 1000).toFixed(0)}K tokens)`}>
       <svg width="22" height="22" viewBox="0 0 22 22">
-        <circle cx="11" cy="11" r={radius} fill="none" stroke="var(--border)" strokeWidth="2.5" />
+        <circle cx="11" cy="11" r={radius} fill="none" stroke="var(--border-hairline)" strokeWidth="2.5" />
         <circle
           cx="11" cy="11" r={radius} fill="none"
           stroke={color} strokeWidth="2.5"
@@ -65,218 +67,6 @@ function ContextMeter({ used, total }: { used: number; total: number }) {
   );
 }
 
-function CodexThinkingAnimation() {
-  return (
-    <div className="codex-thinking">
-      <span className="codex-thinking-dot">•</span>
-      <span className="codex-working codex-working-wave">
-        {'Working'.split('').map((c, i) => (
-          <span key={i} style={{ animationDelay: `${i * 50}ms` }}>{c}</span>
-        ))}
-      </span>
-    </div>
-  );
-}
-
-const GEMINI_COLORS = ['#D7AFFF', '#87AFFF', '#87D7D7', '#D7FFD7', '#FFFFAF', '#FF87AF'];
-const COLOR_CYCLE_MS = 4000;
-const BRAILLE_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-
-function lerpColor(a: string, b: string, t: number): string {
-  const parse = (hex: string) => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
-  const [r1, g1, b1] = parse(a);
-  const [r2, g2, b2] = parse(b);
-  const r = Math.round(r1 + (r2 - r1) * t);
-  const g = Math.round(g1 + (g2 - g1) * t);
-  const bl = Math.round(b1 + (b2 - b1) * t);
-  return `rgb(${r},${g},${bl})`;
-}
-
-// Witty loading phrases (from Gemini CLI, Apache 2.0)
-const GEMINI_WITTY = [
-  "I'm Feeling Lucky", "Shipping awesomeness", "Painting the serifs back on",
-  "Navigating the slime mold", "Consulting the digital spirits", "Reticulating splines",
-  "Warming up the AI hamsters", "Asking the magic conch shell", "Generating witty retort",
-  "Polishing the algorithms", "Don't rush perfection (or my code)", "Brewing fresh bytes",
-  "Counting electrons", "Engaging cognitive processors",
-  "Checking for syntax errors in the universe", "One moment, optimizing humor",
-  "Shuffling punchlines", "Untangling neural nets", "Compiling brilliance",
-  "Loading wit.exe", "Summoning the cloud of wisdom", "Preparing a witty response",
-  "Just a sec, I'm debugging reality", "Confuzzling the options",
-  "Tuning the cosmic frequencies", "Crafting a response worthy of your patience",
-  "Compiling the 1s and 0s", "Resolving dependencies... and existential crises",
-  "Defragmenting memories... both RAM and personal", "Rebooting the humor module",
-  "Caching the essentials (mostly cat memes)", "Optimizing for ludicrous speed",
-  "Swapping bits... don't tell the bytes", "Garbage collecting... be right back",
-  "Assembling the interwebs", "Converting coffee into code",
-  "Updating the syntax for reality", "Rewiring the synapses",
-  "Looking for a misplaced semicolon", "Greasin' the cogs of the machine",
-  "Pre-heating the servers", "Calibrating the flux capacitor",
-  "Engaging the improbability drive", "Channeling the Force",
-  "Aligning the stars for optimal response", "So say we all",
-  "Loading the next great idea", "Just a moment, I'm in the zone",
-  "Preparing to dazzle you with brilliance", "Just a tick, I'm polishing my wit",
-  "Hold tight, I'm crafting a masterpiece", "Just a jiffy, I'm debugging the universe",
-  "Just a moment, I'm aligning the pixels", "Warp speed engaged",
-  "Mining for more Dilithium crystals", "Don't panic",
-  "Following the white rabbit", "The truth is in here... somewhere",
-  "Blowing on the cartridge", "Loading... Do a barrel roll!",
-  "Waiting for the respawn", "Finishing the Kessel Run in less than 12 parsecs",
-  "The cake is not a lie, it's just still loading",
-  "Fiddling with the character creation screen",
-  "Just a moment, I'm finding the right meme", "Pressing 'A' to continue",
-  "Herding digital cats", "Polishing the pixels",
-  "Finding a suitable loading screen pun", "Distracting you with this witty phrase",
-  "Almost there... probably", "Our hamsters are working as fast as they can",
-  "Giving Cloudy a pat on the head", "Petting the cat", "Slapping the bass",
-  "I'm going the distance, I'm going for speed",
-  "Is this the real life? Is this just fantasy?",
-  "I've got a good feeling about this", "Doing research on the latest memes",
-  "Hmmm... let me think",
-  "Why don't programmers like nature? It has too many bugs",
-  "Why do programmers prefer dark mode? Because light attracts bugs",
-  "Why did the developer go broke? Because they used up all their cache",
-  "Applying percussive maintenance", "Searching for the correct USB orientation",
-  "Ensuring the magic smoke stays inside the wires",
-  "Rewriting in Rust for no particular reason", "Trying to exit Vim",
-  "Spinning up the hamster wheel",
-  "That's not a bug, it's an undocumented feature",
-  "Engage.", "I'll be back... with an answer.", "My other process is a TARDIS",
-  "Communing with the machine spirit", "Letting the thoughts marinate",
-  "Just remembered where I put my keys", "Pondering the orb",
-  "I've seen things you people wouldn't believe... like a user who reads loading messages.",
-  "Initiating thoughtful gaze", "What's a computer's favorite snack? Microchips.",
-  "Why do Java developers wear glasses? Because they don't C#.",
-  "Charging the laser... pew pew!", "Dividing by zero... just kidding!",
-  "Making it go beep boop.", "Buffering... because even AIs need a moment.",
-  "Entangling quantum particles for a faster response",
-  "Are you not entertained? (Working on it!)",
-  "Just waiting for the dial-up tone to finish",
-  "Pretty sure there's a cat walking on the keyboard somewhere",
-  "Enhancing... Enhancing... Still loading.",
-  "It's not a bug, it's a feature... of this loading screen.",
-  "Have you tried turning it off and on again? (The loading screen, not me.)",
-  "Constructing additional pylons", "Releasing the HypnoDrones",
-];
-
-// Informative tips about Gemini CLI features (from Gemini CLI, Apache 2.0)
-const GEMINI_TIPS = [
-  "Restore project files to a previous state with /restore…",
-  "Clear the screen and history with /clear…",
-  "Save tokens by summarizing the context with /compress…",
-  "Copy the last response to your clipboard with /copy…",
-  "Open the full documentation in your browser with /docs…",
-  "Add directories to your workspace with /directory add <path>…",
-  "Get help on commands with /help…",
-  "Create a project-specific GEMINI.md file with /init…",
-  "List configured MCP servers and tools with /mcp list…",
-  "See the current instructional context with /memory show…",
-  "Choose your Gemini model with /model…",
-  "Check model-specific usage stats with /stats model…",
-  "Check tool-specific usage stats with /stats tools…",
-  "Change the CLI's color theme with /theme…",
-  "List all available tools with /tools…",
-  "View and edit settings with /settings…",
-  "Toggle Vim keybindings on and off with /vim…",
-  "Execute any shell command with !<command>…",
-  "Share your conversation to a file with /resume share <file>…",
-  "Save your current conversation with /resume save <tag>…",
-  "Resume a saved conversation with /resume resume <tag>…",
-  "Close dialogs and suggestions with Esc…",
-  "Cancel a request with Ctrl+C, or press twice to exit…",
-  "Clear your screen at any time with Ctrl+L…",
-  "Toggle auto-approval (YOLO mode) for all tools with Ctrl+Y…",
-  "Cycle through approval modes with Shift+Tab…",
-  "Toggle Markdown rendering with Alt+M…",
-  "Toggle shell mode by typing ! in an empty prompt…",
-  "Insert a newline with a backslash (\\) followed by Enter…",
-  "Navigate your prompt history with the Up and Down arrows…",
-  "Search through command history with Ctrl+R…",
-  "Accept an autocomplete suggestion with Tab or Enter…",
-  "Personalize your CLI with a new color theme (/settings)…",
-  "Don't like these tips? You can hide them (/settings)…",
-  "Customize loading phrases: tips, witty, all, or off (/settings)…",
-  "Show citations to see where the model gets information (/settings)…",
-  "Enable AI-powered prompt completion while typing (/settings)…",
-  "Automatically accept safe read-only tool calls (/settings)…",
-  "Enable checkpointing to recover your session after a crash (settings.json)…",
-  "Run tools in a secure sandbox environment (settings.json)…",
-  "Define and manage connections to MCP servers (settings.json)…",
-  "Set your preferred editor for opening files (/settings)…",
-  "File a bug report directly with /bug…",
-];
-
-function getGeminiHints(mode: 'witty' | 'tips' | 'all' | 'off'): string[] {
-  if (mode === 'witty') return GEMINI_WITTY;
-  if (mode === 'tips') return GEMINI_TIPS;
-  if (mode === 'all') return [...GEMINI_WITTY, ...GEMINI_TIPS];
-  return [];
-}
-
-
-function GeminiThinkingAnimation({ loadingPhrases = 'all' }: { loadingPhrases?: 'witty' | 'tips' | 'all' | 'off' }) {
-  const hints = useMemo(() => getGeminiHints(loadingPhrases), [loadingPhrases]);
-  const [frame, setFrame] = useState(0);
-  const [color, setColor] = useState(GEMINI_COLORS[0]);
-  const [hintIndex, setHintIndex] = useState(() => hints.length > 0 ? Math.floor(Math.random() * hints.length) : 0);
-  const hintTransition = useReducedMotionTransition({ duration: 0.18, ease: EASING.out });
-
-  // Braille spinner at 80ms
-  useEffect(() => {
-    const interval = setInterval(() => setFrame(f => (f + 1) % BRAILLE_FRAMES.length), 80);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Smooth rainbow color cycle over 4s
-  useEffect(() => {
-    let raf: number;
-    const start = Date.now();
-    const tick = () => {
-      const elapsed = (Date.now() - start) % COLOR_CYCLE_MS;
-      const progress = elapsed / COLOR_CYCLE_MS;
-      const pos = progress * GEMINI_COLORS.length;
-      const idx = Math.floor(pos);
-      const t = pos - idx;
-      const c1 = GEMINI_COLORS[idx % GEMINI_COLORS.length];
-      const c2 = GEMINI_COLORS[(idx + 1) % GEMINI_COLORS.length];
-      setColor(lerpColor(c1, c2, t));
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, []);
-
-  // Cycle hints every 5 seconds
-  useEffect(() => {
-    if (hints.length === 0) return;
-    const hintInterval = setInterval(() => {
-      setHintIndex(prev => {
-        let next;
-        do { next = Math.floor(Math.random() * hints.length); } while (next === prev && hints.length > 1);
-        return next;
-      });
-    }, 5000);
-    return () => clearInterval(hintInterval);
-  }, [hints]);
-
-  return (
-    <div className="gemini-thinking">
-      <span className="gemini-spinner" style={{ color }}>{BRAILLE_FRAMES[frame]}</span>
-      <AnimatePresence mode="popLayout" initial={false}>
-        <motion.span
-          key={hintIndex}
-          className="gemini-hint gemini-hint-slide"
-          initial={{ opacity: 0, y: 4 }}
-          animate={{ opacity: 0.85, y: 0 }}
-          exit={{ opacity: 0, y: -4 }}
-          transition={hintTransition}
-        >
-          {hints.length > 0 ? hints[hintIndex] : 'Thinking...'}
-        </motion.span>
-      </AnimatePresence>
-    </div>
-  );
-}
 
 import ChatMessage from './ChatMessage';
 import { detectWatchTargets } from './githubWatcher';
@@ -286,6 +76,7 @@ import ChatInput, { type ContextItem } from './ChatInput';
 import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, QueuedMessage, TerminalTab } from '../../types';
 import type { MetaWorkspaceRuntime } from '../../types';
 import { buildHelpMessage } from './helpText';
+import { buildTaskRegistry, TaskRegistryContext } from './taskRegistry';
 import { parseAiError, looksLikeApiError } from './parseAiError';
 import { buildMetaPreamble } from '../../lib/metaSystemPrompt';
 
@@ -313,7 +104,6 @@ interface ChatPanelProps {
   onGeminiApprovalModeChange: (mode: 'default' | 'auto_edit' | 'yolo' | 'plan') => void;
   geminiConversationMode: 'planning' | 'fast';
   onGeminiConversationModeChange: (mode: 'planning' | 'fast') => void;
-  geminiLoadingPhrases?: 'witty' | 'tips' | 'all' | 'off';
   initialMessages?: ChatMessageType[];
   onMessagesChange?: (messages: ChatMessageType[]) => void;
   onTurnComplete?: () => void;
@@ -596,8 +386,9 @@ const FAKE_ERROR_VARIANTS = {
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, geminiLoadingPhrases, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(initialMessages || []);
+  const taskRegistry = useMemo(() => buildTaskRegistry(messages), [messages]);
   const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);
   const setMessages = useCallback((updater: ChatMessageType[] | ((prev: ChatMessageType[]) => ChatMessageType[])) => {
     setMessagesRaw(prev => {
@@ -620,6 +411,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   // instead of waiting for end-of-turn.
   const STREAM_IDLE_MS = 250;
   const [streamSettled, setStreamSettled] = useState(true);
+  const saiAnimationEnabled = useSaiAnimationPref();
   const streamIdleTimerRef = useRef<number | null>(null);
   const flushStreamingText = useCallback(() => {
     if (streamRafRef.current != null) {
@@ -775,9 +567,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     });
 
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
-      // Only process messages for this workspace and chat scope
+      // Only process messages for this workspace and chat scope.
+      // Claude uses session UUIDs as scopes for multi-scope isolation.
+      // Gemini and Codex use 'chat' as a fixed scope — match on projectPath only.
       if (msg.projectPath && msg.projectPath !== projectPath) return;
-      if (msg.scope && msg.scope !== claudeScope) return;
+      const expectedScope = aiProvider === 'claude' ? claudeScope : 'chat';
+      if (msg.scope && msg.scope !== expectedScope) return;
 
       // Flush any buffered streaming text before processing a non-delta event,
       // so the pending content is committed to state in the correct order.
@@ -987,13 +782,11 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
       // Tool results come back as user messages with tool_result content blocks
       if (msg.type === 'user' && msg.message?.content) {
-        const results: Array<{ tool_use_id: string; output: string }> = [];
+        const results: Array<{ tool_use_id: string; output: string; images?: import('../../types').ToolResultImage[] }> = [];
         for (const block of msg.message.content) {
           if (block.type === 'tool_result' && block.tool_use_id) {
-            const text = Array.isArray(block.content)
-              ? block.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('')
-              : typeof block.content === 'string' ? block.content : '';
-            results.push({ tool_use_id: block.tool_use_id, output: text });
+            const { text, images } = parseToolResultBlocks(block.content);
+            results.push({ tool_use_id: block.tool_use_id, output: text, images });
           }
         }
         if (results.length > 0) {
@@ -1010,7 +803,12 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
                   if (result) {
                     updated = true;
                     const durationMs = typeof tc.startedAt === 'number' ? now - tc.startedAt : undefined;
-                    return { ...tc, output: result.output, ...(durationMs != null ? { durationMs } : {}) };
+                    return {
+                      ...tc,
+                      output: result.output,
+                      ...(result.images ? { resultImages: result.images } : {}),
+                      ...(durationMs != null ? { durationMs } : {}),
+                    };
                   }
                   return tc;
                 });
@@ -1088,6 +886,19 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           // skip the setMessages entirely. Only applies when the last message is
           // already a pure-text assistant bubble we can append to.
           const lastNow = messagesRef.current[messagesRef.current.length - 1];
+          // Mark the assistant bubble as actively streaming and (re)arm the idle timer
+          // so markdown renders mid-turn on a pause and the thinking head stays in its
+          // thinking phase. Used by both the fast path and the slow path's text branch.
+          const markStreamingActive = () => {
+            setStreamSettled(s => s ? false : s);
+            if (streamIdleTimerRef.current != null) {
+              clearTimeout(streamIdleTimerRef.current);
+            }
+            streamIdleTimerRef.current = window.setTimeout(() => {
+              streamIdleTimerRef.current = null;
+              setStreamSettled(true);
+            }, STREAM_IDLE_MS);
+          };
           if (
             isPureTextDelta
             && tools.length === 0
@@ -1101,16 +912,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
                 flushStreamingText();
               });
             }
-            // Mark the bubble as in-flight and (re)arm the idle timer so
-            // markdown renders mid-turn when streaming pauses.
-            setStreamSettled(s => s ? false : s);
-            if (streamIdleTimerRef.current != null) {
-              clearTimeout(streamIdleTimerRef.current);
-            }
-            streamIdleTimerRef.current = window.setTimeout(() => {
-              streamIdleTimerRef.current = null;
-              setStreamSettled(true);
-            }, STREAM_IDLE_MS);
+            markStreamingActive();
             return;
           }
           setMessages(prev => {
@@ -1148,7 +950,13 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
               toolCalls: tools.length > 0 ? tools : undefined,
             }];
           });
-
+          // A text segment created/updated via the slow path (e.g. the first delta of a
+          // turn, or follow-up text after a tool) must also flip streamSettled=false so
+          // its head stays in the thinking phase — otherwise the head reveals the first
+          // chunk prematurely and the pending row briefly double-shows. Tool-only events
+          // (no text) intentionally leave streamSettled alone so the pending row keeps a
+          // thinking indicator alive while the tool runs.
+          if (text && tools.length === 0) markStreamingActive();
         }
       }
 
@@ -1462,6 +1270,20 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
     return owner;
   }, [messages]);
   const showThinking = isStreaming && !awaitingQuestion;
+  const isSaiProvider = true; // All providers use the SAI animation system
+  const saiMorphActive = isSaiProvider && saiAnimationEnabled;
+  const lastMsg = messages[messages.length - 1];
+  // A segment head shows the thinking row only while it is ACTIVELY streaming text
+  // (`!streamSettled`). Once it settles — text revealed, or a tool is running, or it's
+  // between segments — the head goes quiet, so the trailing pending row must take over
+  // to keep a thinking indicator alive while the turn continues (e.g. during a tool
+  // call after a typed response). The first-text-delta no longer leaves a stale window
+  // here because the slow path now clears streamSettled when it creates a text segment.
+  const hasStreamingAssistantSegment = !streamSettled && lastMsg?.role === 'assistant';
+  // SAI morph path: only a pending tail row when no segment head is actively thinking.
+  const showPendingSaiThinking = showThinking && saiMorphActive && !hasStreamingAssistantSegment;
+  // Detached banner: non-SAI providers, OR SAI with the animation pref off (today's fallback).
+  const showDetachedBanner = showThinking && !saiMorphActive;
   const hasHiddenMessages = renderStart > 0;
 
   useEffect(() => {
@@ -1502,21 +1324,34 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
   const handleApprove = (modifiedCommand?: string) => {
     if (!pendingApproval) return;
-    window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, true, modifiedCommand, claudeScope);
+    if (aiProvider === 'gemini') {
+      (window.sai as any).geminiApprove?.(projectPath, pendingApproval.toolUseId, true, modifiedCommand, 'chat');
+    } else {
+      window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, true, modifiedCommand, claudeScope);
+    }
     setPendingApproval(null);
   };
 
   const handleDeny = () => {
     if (!pendingApproval) return;
-    window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, false, undefined, claudeScope);
+    if (aiProvider === 'gemini') {
+      (window.sai as any).geminiApprove?.(projectPath, pendingApproval.toolUseId, false, undefined, 'chat');
+    } else {
+      window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, false, undefined, claudeScope);
+    }
     setPendingApproval(null);
   };
 
   const handleAlwaysAllow = async () => {
     if (!pendingApproval) return;
-    const pattern = `${pendingApproval.toolName}(*)`;
-    await window.sai.claudeAlwaysAllow(projectPath, pattern);
-    window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, true, undefined, claudeScope);
+    if (aiProvider === 'gemini') {
+      // Gemini doesn't support always-allow patterns — just approve this instance
+      (window.sai as any).geminiApprove?.(projectPath, pendingApproval.toolUseId, true, undefined, 'chat');
+    } else {
+      const pattern = `${pendingApproval.toolName}(*)`;
+      await window.sai.claudeAlwaysAllow(projectPath, pattern);
+      window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, true, undefined, claudeScope);
+    }
     setPendingApproval(null);
   };
 
@@ -1807,6 +1642,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
                 <span className="chat-load-sentinel-text">Loading earlier messages...</span>
               </div>
             )}
+            <TaskRegistryContext.Provider value={taskRegistry}>
             {visibleMessages.map(msg => msg.role === 'user'
                 ? (
                   <div
@@ -1832,10 +1668,11 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
                 )
                 : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} renderToolCall={renderToolCall} renderMessage={renderMessage} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} watcherUrlAllowlist={watcherUrlsByMessageId.get(msg.id) ?? EMPTY_URL_SET} />
               )}
+            </TaskRegistryContext.Provider>
           </>
         )}
         <MotionPresence>
-          {showThinking && (
+          {showDetachedBanner && (
             <motion.div
               key="thinking"
               initial={{ opacity: 0, y: DISTANCE.lift }}
@@ -1843,9 +1680,18 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
               exit={{ opacity: 0 }}
               transition={thinkingTransition}
             >
-              {aiProvider === 'gemini' ? <GeminiThinkingAnimation loadingPhrases={geminiLoadingPhrases} />
-                : aiProvider === 'codex' ? <CodexThinkingAnimation />
-                : <ThinkingAnimation />}
+              <ThinkingAnimation />
+            </motion.div>
+          )}
+          {showPendingSaiThinking && (
+            <motion.div
+              key="thinking-pending"
+              initial={{ opacity: 0, y: DISTANCE.lift }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={thinkingTransition}
+            >
+              <ThinkingAnimation />
             </motion.div>
           )}
         </MotionPresence>
@@ -1959,16 +1805,16 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           height: 32px;
           padding: 0;
           border-radius: 50%;
-          border: 1px solid var(--border);
-          background: var(--bg-secondary);
+          border: 1px solid var(--border-subtle);
+          background: var(--surface-2);
           color: var(--accent);
           cursor: pointer;
           box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
           transition: background 0.15s, border-color 0.15s;
         }
         .follow-btn:hover {
-          background: color-mix(in srgb, var(--bg-secondary) 70%, var(--accent) 10%);
-          border-color: color-mix(in srgb, var(--border) 60%, var(--accent) 40%);
+          background: color-mix(in srgb, var(--surface-2) 70%, var(--accent) 10%);
+          border-color: color-mix(in srgb, var(--border-subtle) 60%, var(--accent) 40%);
         }
         .follow-btn-unread {
           position: absolute;
@@ -1978,7 +1824,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           height: 6px;
           border-radius: 50%;
           background: var(--accent);
-          box-shadow: 0 0 0 2px var(--bg-secondary);
+          box-shadow: 0 0 0 2px var(--surface-2);
         }
         @media (prefers-reduced-motion: no-preference) {
           @keyframes follow-btn-unread-pulse {
@@ -1993,8 +1839,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         .pinned-prompt-bar {
           flex-shrink: 0;
           padding: 0 16px 0 0;
-          border-bottom: 1px solid var(--border);
-          background: color-mix(in srgb, var(--bg-secondary) 80%, transparent);
+          border-bottom: 1px solid var(--border-hairline);
+          background: color-mix(in srgb, var(--surface-2) 80%, transparent);
           backdrop-filter: blur(12px);
           -webkit-backdrop-filter: blur(12px);
           display: flex;
@@ -2138,8 +1984,8 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
           font-size: 12px;
         }
         .chat-empty-hint kbd {
-          background: var(--bg-input);
-          border: 1px solid var(--border);
+          background: var(--surface-2);
+          border: 1px solid var(--border-hairline);
           border-radius: 4px;
           padding: 2px 7px;
           font-family: 'Geist Mono', 'JetBrains Mono', monospace;
@@ -2209,66 +2055,6 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
         }
         @media (prefers-reduced-motion: reduce) {
           .thinking-cursor-block { animation: none; opacity: 1; }
-        }
-        .codex-thinking {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 12px 14px;
-        }
-        .codex-thinking-dot {
-          color: var(--text-muted);
-          font-size: 16px;
-          line-height: 1;
-        }
-        .codex-working {
-          font-size: 14px;
-          font-weight: 700;
-          background-image: linear-gradient(
-            90deg,
-            rgba(220,220,220,0.95) 0%,
-            rgba(220,220,220,0.95) 42%,
-            rgba(100,100,100,0.7) 50%,
-            rgba(220,220,220,0.95) 58%,
-            rgba(220,220,220,0.95) 100%
-          );
-          background-size: 400% 100%;
-          background-position: 200% 0;
-          -webkit-background-clip: text;
-          background-clip: text;
-          color: transparent;
-          animation: codex-working-shimmer 8s linear infinite;
-        }
-        @keyframes codex-working-shimmer {
-          from { background-position: 200% 0; }
-          to { background-position: -200% 0; }
-        }
-        @media (prefers-reduced-motion: no-preference) {
-          @keyframes codex-working-wave {
-            0%, 100% { transform: translateY(0); }
-            50%      { transform: translateY(-0.5px); }
-          }
-          .codex-working-wave > span {
-            display: inline-block;
-            animation: codex-working-wave 1.4s ease-in-out infinite;
-          }
-        }
-        .gemini-thinking {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 8px 14px;
-          margin-bottom: 12px;
-        }
-        .gemini-spinner {
-          font-size: 18px;
-          line-height: 1;
-          flex-shrink: 0;
-        }
-        .gemini-hint {
-          font-size: 13px;
-          font-style: italic;
-          color: var(--text);
         }
       `}</style>
     </div>

@@ -3,7 +3,7 @@ import { Search, File, ChevronRight, FileCode2, MessageSquare } from 'lucide-rea
 import { fuzzyMatch } from '../utils/fuzzyMatch';
 import { basename } from '../utils/pathUtils';
 import SaiLogo from './SaiLogo';
-import { DOT_MASK_URL } from '../lib/assets';
+import { WorkspaceSquircle, StatusSlot } from './shared/WorkspaceSquircle';
 
 type PaletteMode = 'files' | 'commands' | 'grep' | 'sessions';
 
@@ -378,7 +378,9 @@ export default function CommandPalette({
                 onClick={() => { onWorkspaceSwitch(w.projectPath); onClose(); }}
                 onMouseEnter={() => setSelectedIndex(i)}
               >
-                <div className="cp-status-dot" style={{ background: isActive ? 'var(--green)' : 'var(--text-muted)' }} />
+                <StatusSlot>
+                  <WorkspaceSquircle state={isActive ? 'alive' : 'inactive'} />
+                </StatusSlot>
                 <div className="cp-result-info">
                   <div className="cp-result-name">{name}</div>
                   <div className="cp-result-path">{w.projectPath}</div>
@@ -418,8 +420,8 @@ export default function CommandPalette({
           left: 50%;
           transform: translateX(-50%);
           width: 520px;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
+          background: var(--surface-3);
+          border: 1px solid var(--border-subtle);
           border-radius: 10px;
           box-shadow: 0 16px 48px rgba(0,0,0,0.5);
           z-index: 9999;
@@ -429,7 +431,7 @@ export default function CommandPalette({
         }
         .cp-input-row {
           padding: 12px 16px;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--border-hairline);
           display: flex;
           align-items: center;
           gap: 10px;
@@ -441,7 +443,7 @@ export default function CommandPalette({
           outline: none;
           color: var(--text);
           font-size: 14px;
-          font-family: 'Geist', sans-serif;
+          font-family: inherit;
           caret-color: var(--accent);
         }
         .cp-input::placeholder {
@@ -449,7 +451,7 @@ export default function CommandPalette({
         }
         .cp-modes {
           padding: 6px 16px;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--border-hairline);
           display: flex;
           gap: 4px;
         }
@@ -500,14 +502,6 @@ export default function CommandPalette({
           font-weight: 600;
           font-family: 'Geist Mono', monospace;
         }
-        .cp-status-dot {
-          display: inline-block;
-          width: 9px;
-          height: 9px;
-          flex-shrink: 0;
-          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-        }
         .cp-result-info {
           flex: 1;
           min-width: 0;
@@ -515,7 +509,7 @@ export default function CommandPalette({
         .cp-result-name {
           font-size: 13px;
           color: var(--text);
-          font-family: 'Geist', sans-serif;
+          font-family: inherit;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
@@ -558,7 +552,7 @@ export default function CommandPalette({
         }
         .cp-footer {
           padding: 8px 16px;
-          border-top: 1px solid var(--border);
+          border-top: 1px solid var(--border-hairline);
           display: flex;
           gap: 16px;
           font-size: 11px;
@@ -566,10 +560,10 @@ export default function CommandPalette({
           font-family: 'Geist Mono', monospace;
         }
         .cp-footer kbd {
-          background: var(--bg-input);
+          background: var(--surface-2);
           padding: 1px 5px;
           border-radius: 3px;
-          border: 1px solid var(--border);
+          border: 1px solid var(--border-hairline);
           color: var(--text-secondary);
           font-size: 10px;
         }

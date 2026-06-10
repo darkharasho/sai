@@ -38,8 +38,8 @@ export default function SwarmDiffModal({ title, branch, baseBranch, diff, loadin
         className="sai-modal-in"
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: 'var(--bg-elevated)',
-          border: '1px solid var(--border)',
+          background: 'var(--surface-3)',
+          border: '1px solid var(--border-subtle)',
           borderRadius: 8,
           width: 'min(900px, 92vw)',
           height: 'min(720px, 86vh)',
@@ -49,7 +49,7 @@ export default function SwarmDiffModal({ title, branch, baseBranch, diff, loadin
           overflow: 'hidden',
         }}
       >
-        <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-hairline)', display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {title}
@@ -62,7 +62,7 @@ export default function SwarmDiffModal({ title, branch, baseBranch, diff, loadin
             onClick={onClose}
             style={{
               background: 'none',
-              border: '1px solid var(--border)',
+              border: '1px solid var(--border-subtle)',
               color: 'var(--text-muted)',
               borderRadius: 5,
               padding: '4px 10px',
@@ -73,7 +73,7 @@ export default function SwarmDiffModal({ title, branch, baseBranch, diff, loadin
             Close
           </button>
         </div>
-        <div style={{ flex: 1, overflow: 'auto', padding: 0, background: 'var(--bg-secondary)' }}>
+        <div style={{ flex: 1, overflow: 'auto', padding: 0, background: 'var(--surface-1)' }}>
           {loading && (
             <div style={{ padding: 24, color: 'var(--text-muted)', fontSize: 12 }}>Loading diff…</div>
           )}

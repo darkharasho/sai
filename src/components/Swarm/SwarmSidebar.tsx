@@ -54,9 +54,9 @@ export default function SwarmSidebar({ tasks, selectedId, onSelect, onNewTask, o
         .swarm-sidebar {
           width: 260px;
           flex-shrink: 0;
-          background: var(--bg-secondary);
+          background: var(--surface-1);
           color: var(--text);
-          border-right: 1px solid var(--border);
+          border-right: 1px solid var(--border-subtle);
           display: flex;
           flex-direction: column;
           overflow-y: auto;
@@ -67,14 +67,13 @@ export default function SwarmSidebar({ tasks, selectedId, onSelect, onNewTask, o
           align-items: center;
           justify-content: space-between;
           padding: 12px 14px;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--border-hairline);
         }
         .swarm-sidebar header .label {
-          font-size: 11px;
+          font-size: var(--text-xs);
           font-weight: 600;
-          letter-spacing: 0.1em;
-          color: var(--text);
-          opacity: 0.7;
+          letter-spacing: 0.06em;
+          color: var(--text-secondary);
         }
         .swarm-sidebar .new-task {
           display: inline-flex;
@@ -82,7 +81,7 @@ export default function SwarmSidebar({ tasks, selectedId, onSelect, onNewTask, o
           gap: 4px;
           background: transparent;
           color: var(--accent);
-          border: 1px solid var(--border);
+          border: 1px solid var(--border-hairline);
           border-radius: 4px;
           padding: 3px 8px;
           font-size: 10px;
@@ -90,7 +89,7 @@ export default function SwarmSidebar({ tasks, selectedId, onSelect, onNewTask, o
           cursor: pointer;
         }
         .swarm-sidebar .new-task:hover {
-          background: var(--bg-hover);
+          background: var(--surface-4);
         }
         .swarm-overview-row {
           display: flex;
@@ -98,13 +97,13 @@ export default function SwarmSidebar({ tasks, selectedId, onSelect, onNewTask, o
           gap: 10px;
           padding: 10px 14px;
           cursor: pointer;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--border-hairline);
         }
         .swarm-overview-row:hover {
-          background: var(--bg-hover);
+          background: var(--surface-4);
         }
         .swarm-overview-row.selected {
-          background: var(--bg-hover);
+          background: var(--accent-dim);
           border-left: 3px solid var(--accent);
           padding-left: 11px;
         }
@@ -119,10 +118,11 @@ export default function SwarmSidebar({ tasks, selectedId, onSelect, onNewTask, o
         }
         .section-label {
           padding: 10px 14px 6px;
-          font-size: 10px;
+          font-size: var(--text-xs);
           font-weight: 600;
-          letter-spacing: 0.12em;
-          opacity: 0.55;
+          letter-spacing: 0.06em;
+          color: var(--text-secondary);
+          text-transform: uppercase;
         }
         .task-list {
           display: flex;
@@ -135,13 +135,13 @@ export default function SwarmSidebar({ tasks, selectedId, onSelect, onNewTask, o
           gap: 8px;
           padding: 8px 14px 8px 11px;
           cursor: pointer;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--border-hairline);
         }
         .swarm-row:hover {
-          background: var(--bg-hover);
+          background: var(--surface-4);
         }
         .swarm-row.selected {
-          background: var(--bg-hover);
+          background: var(--accent-dim);
         }
         .swarm-row .row-title {
           font-size: 13px;
@@ -183,7 +183,7 @@ export default function SwarmSidebar({ tasks, selectedId, onSelect, onNewTask, o
         .swarm-row .row-discard:hover {
           opacity: 1;
           color: var(--red, #b44);
-          background: var(--bg-hover);
+          background: var(--surface-4);
         }
         .swarm-row .row-discard:focus-visible {
           opacity: 1;

@@ -8,6 +8,7 @@ import FileExplorerSidebar from './components/FileExplorer/FileExplorerSidebar';
 import SearchPanel from './components/SearchPanel/SearchPanel';
 import TitleBar from './components/TitleBar';
 import CodePanel from './components/CodePanel/CodePanel';
+import { extractEditToolUses, successfulToolResultIds } from './components/CodePanel/detectFileEdits';
 import UnsavedChangesModal from './components/UnsavedChangesModal';
 import WorkspaceToast, { type ToastTone } from './components/WorkspaceToast';
 import { computeChatToasts } from './lib/chatToasts';
@@ -41,12 +42,24 @@ import SwarmToolCardSelector from './components/Swarm/cards/SwarmToolCardSelecto
 import { bucketToolCalls, trimEvents, pushRing, type TimedEvent } from './lib/swarmActivityHistory';
 import InlineApprovalCard from './components/Swarm/cards/InlineApprovalCard';
 import QuitSwarmConfirmModal from './components/Swarm/QuitSwarmConfirmModal';
-import { swarmInit, swarmGetApprovals, swarmResolveApproval, swarmCreateApproval } from './swarmDb';
-import { SwarmScheduler, isLikelyReadOnlyPrompt } from './lib/swarmScheduler';
+import { swarmInit, swarmGetApprovals, swarmResolveApproval, swarmCreateApproval, swarmCreateTask, swarmDeleteTask, swarmGetApproval, swarmDeleteApprovalsByTask } from './swarmDb';
+import { approvalRoutingTarget } from './lib/swarmApprovalRouting';
+import { diffSwarmTasks } from './lib/swarmPersistenceDiff';
+import { hydrateWorkspaceSwarm } from './lib/swarmHydrate';
+import { SwarmScheduler, isLikelyReadOnlyPrompt, findStaleTasks } from './lib/swarmScheduler';
 import { runSwarmTask } from './lib/swarmTaskRunner';
-import { landTask, discardTask } from './lib/swarmLanding';
+import { landTask, discardTask, rebaseRetry } from './lib/swarmLanding';
 import { ensureOrchestratorSession } from './lib/swarmOrchestratorSession';
 import { handleSwarmToolRequest, type SwarmHost } from './lib/swarmOrchestratorDispatcher';
+import { handleRenderToolRequest } from './render/handleRenderToolRequest';
+import { registeredComponentKeys } from './render/componentRegistry';
+import { renderMermaidToSvg } from './render/renderMermaid';
+import { handleSaiQueryToolRequest } from './render/saiQueryTools';
+import { handleSaiNativeToolRequest, type PickFileOpts } from './render/saiNativeTools';
+import { buildChartHtml, buildDiffHtml, type ChartInput, type DiffInput } from './render/builtinRenderers';
+import { registerPendingForm } from './render/formBridge';
+import { formTimeoutMs } from './render/formTimeout';
+import { RenderToolCallCard } from './components/Chat/RenderToolCallCard';
 import { executeSlashCommand } from './lib/orchestratorSlashCommands';
 import { isOrchestratorToolDrift, describeToolDrift } from './lib/orchestratorToolDrift';
 import { resolveTaskRef } from './lib/swarmRef';
@@ -54,6 +67,8 @@ import { installRemoteProxyHandler } from './lib/remoteProxyClient';
 import { applyQuestionEvent } from './lib/awaitingQuestionTracker';
 
 const SWARM_DEFAULT_CAP = 5;
+const SWARM_STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 min of no activity → presumed dead. Heartbeats (deriveSwarmMirror) refresh activity on any stream traffic; this headroom covers a single silent long-running tool/sub-agent.
+const SWARM_WATCHDOG_INTERVAL_MS = 60 * 1000;    // sweep cadence
 import { swarmBranchName } from './lib/swarmSlug';
 import { shouldRequireApproval } from './lib/swarmApprovalPolicy';
 import { deriveSwarmMirror, applySwarmPatch } from './lib/swarmStatusMirror';
@@ -62,6 +77,20 @@ import { isImageFile } from './utils/imageFiles';
 import { getMonacoEditorFor } from './utils/monacoEditorRegistry';
 import * as monaco from 'monaco-editor';
 import { motion, AnimatePresence } from 'motion/react';
+import { getCapabilities } from './providers/capabilities';
+
+declare global {
+  interface Window {
+    __saiTest?: {
+      setWorkspaceBusy(id: string): void;
+      setWorkspaceDone(id: string): void;
+      setWorkspaceIdle(id: string): void;
+      clearWorkspaces(): void;
+      getOverallStatus(): 'done' | 'busy' | 'busy-done' | null;
+      getState(): { busyWorkspaces: string[]; completedWorkspaces: string[] };
+    };
+  }
+}
 
 function applyEditsClientSide(content: string, edits: { line: number; column: number; length: number; replacement: string }[]): string {
   const sorted = [...edits].sort((a, b) => b.line - a.line || b.column - a.column);
@@ -174,7 +203,6 @@ export default function App() {
   const [geminiModels, setGeminiModels] = useState<{ id: string; name: string }[]>([]);
   const [geminiApprovalMode, setGeminiApprovalMode] = useState<GeminiApprovalMode>('default');
   const [geminiConversationMode, setGeminiConversationMode] = useState<GeminiConversationMode>('planning');
-  const [geminiLoadingPhrases, setGeminiLoadingPhrases] = useState<'witty' | 'tips' | 'all' | 'off'>('all');
   const [workspaces, setWorkspaces] = useState<Map<string, WorkspaceContext>>(new Map());
   const [swarmTasksByWs, setSwarmTasksByWs] = useState<Map<string, SwarmTask[]>>(new Map());
   const [swarmApprovalsByWs, setSwarmApprovalsByWs] = useState<Map<string, SwarmApproval[]>>(new Map());
@@ -221,6 +249,8 @@ export default function App() {
   // orchestrator's own session id) can drive the ChatPanel thinking animation.
   // Keys are `${projectPath}:${scope}` — scope defaults to 'chat'.
   const [streamingScopes, setStreamingScopes] = useState<Set<string>>(new Set());
+  const streamingScopesRef = useRef<Set<string>>(new Set());
+  streamingScopesRef.current = streamingScopes;
   // Unsent draft text and attached context per workspace, persisted across
   // workspace switches and session-key remounts so partial messages survive
   // navigation.
@@ -278,6 +308,9 @@ export default function App() {
   // the ref re-syncs, so without this guard the same task fires task_completed
   // twice (visible as duplicate inline cards).
   const emittedLifecycleRef = useRef<Set<string>>(new Set());
+  // tool_use_ids of in-flight AI file edits, awaiting their tool_result so we can
+  // hot-reload open files the instant an edit completes.
+  const pendingEditsRef = useRef<Set<string>>(new Set());
   // Per-workspace activity ring buffers powering the orchestrator sparklines.
   // - tools: timed tool_use events (filtered per task for SpawnTaskCard)
   // - activeBuckets: 12-element ring of `streaming+queued+awaiting_approval`
@@ -314,6 +347,19 @@ export default function App() {
   // swarm (sidebar change or back to overview) so the chat panel doesn't
   // keep showing the task's chat outside the swarm view.
   const preSwarmSessionByWsRef = useRef<Map<string, string>>(new Map());
+  // Workspaces whose persisted swarm tasks have already been hydrated this
+  // session (so we don't re-load and clobber live in-memory state).
+  const hydratedWorkspacesRef = useRef<Set<string>>(new Set());
+  // Workspaces whose hydrate is currently running, to guard against the effect
+  // re-entering before the first load completes.
+  const hydrationInFlightRef = useRef<Set<string>>(new Set());
+  // Approval ids currently being resolved, to make approve/deny idempotent
+  // against double-clicks / approve-then-deny.
+  const resolvingApprovalsRef = useRef<Set<string>>(new Set());
+  // Last task list persisted per workspace, for diffing on change.
+  const persistedTasksRef = useRef<Map<string, SwarmTask[]>>(new Map());
+  // FIFO so overlapping persistence flushes don't interleave IndexedDB txns.
+  const persistQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const lastEmittedWorkspaceStatusRef = useRef<Map<string, {
     busy: boolean;
     streaming: boolean;
@@ -529,9 +575,7 @@ export default function App() {
     return cleanup;
   }, []);
 
-  // Initialize the swarm IndexedDB once. Tasks are now ephemeral session state
-  // (in `swarmTasksByWs`) and never persisted; the DB is still used for
-  // approvals records.
+  // Initialize the swarm IndexedDB once.
   useEffect(() => {
     (async () => {
       try {
@@ -542,8 +586,65 @@ export default function App() {
     })();
   }, []);
 
+  // Hydrate persisted swarm tasks for a workspace the first time it becomes
+  // active: load tasks, reconcile zombie (streaming/awaiting_approval) tasks to
+  // paused, prune approvals whose task is gone, then seed in-memory state.
+  // The workspace is marked hydrated only AFTER its persistence baseline is set
+  // (and an in-flight guard prevents re-entry), so the persistence effect —
+  // which skips non-hydrated workspaces — never runs against an empty baseline
+  // mid-load.
+  useEffect(() => {
+    const ws = activeProjectPath;
+    if (!ws || hydratedWorkspacesRef.current.has(ws) || hydrationInFlightRef.current.has(ws)) return;
+    hydrationInFlightRef.current.add(ws);
+    let cancelled = false;
+    (async () => {
+      try {
+        const { tasks, liveApprovals } = await hydrateWorkspaceSwarm(ws);
+        if (cancelled) return;
+        // Establish the persistence baseline and mark hydrated together, before
+        // seeding state, so the persistence effect only ever sees a correct
+        // baseline for this workspace.
+        persistedTasksRef.current.set(ws, tasks);
+        hydratedWorkspacesRef.current.add(ws);
+        setSwarmTasksByWs(prev => {
+          const m = new Map(prev);
+          // Don't clobber any tasks spawned before hydrate resolved.
+          const existing = m.get(ws) ?? [];
+          const existingIds = new Set(existing.map(t => t.id));
+          const merged = [...existing, ...tasks.filter(t => !existingIds.has(t.id))];
+          m.set(ws, merged);
+          return m;
+        });
+        setSwarmApprovalsByWs(prev => {
+          const m = new Map(prev);
+          m.set(ws, liveApprovals);
+          return m;
+        });
+      } catch (err) {
+        // best-effort: a hydrate failure shouldn't crash the workspace. Leaving
+        // the ws un-hydrated lets a later activation retry.
+        console.error('swarm: hydrate failed', err);
+      } finally {
+        hydrationInFlightRef.current.delete(ws);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeProjectPath]);
+
   // Keep sidebarOpenRef in sync so workspace-switch can read the current value.
   useEffect(() => { sidebarOpenRef.current = sidebarOpen; }, [sidebarOpen]);
+
+  // Close provider-specific sidebars when switching to a provider that doesn't support them.
+  useEffect(() => {
+    const caps = getCapabilities(aiProvider);
+    setSidebarOpen(prev => {
+      if (prev === 'mcp' && !caps.hasMcp) return null;
+      if (prev === 'plugins' && !caps.hasPlugins) return null;
+      if (prev === 'swarm' && !caps.hasOrchestrator) return null;
+      return prev;
+    });
+  }, [aiProvider]);
   const swarmSelectedRef = useRef<string>('overview');
   useEffect(() => { swarmSelectedRef.current = swarmSelected; }, [swarmSelected]);
 
@@ -588,6 +689,31 @@ export default function App() {
     }).catch(() => { /* ignore */ });
     return () => { cancelled = true; };
   }, [activeProjectPath, swarmTasksByWs]);
+
+  // Persist swarm task changes. All ~dozen setSwarmTasksByWs sites funnel here:
+  // we diff the new map against the last-persisted snapshot per workspace and
+  // upsert changed tasks / delete removed ones. Writes are serialized via a
+  // FIFO. The full task object is persisted (put), so there is no partial-patch
+  // read-modify-write race.
+  useEffect(() => {
+    const snapshot = swarmTasksByWs;
+    persistQueueRef.current = persistQueueRef.current.then(async () => {
+      for (const [ws, nextTasks] of snapshot.entries()) {
+        // Only persist workspaces that have been hydrated, so the diff baseline
+        // is correct (avoids deleting persisted tasks before they're loaded).
+        if (!hydratedWorkspacesRef.current.has(ws)) continue;
+        const prevTasks = persistedTasksRef.current.get(ws) ?? [];
+        const { upserts, deletes } = diffSwarmTasks(prevTasks, nextTasks);
+        for (const task of upserts) {
+          try { await swarmCreateTask(task); } catch (err) { console.error('swarm: persist upsert failed', task.id, err); }
+        }
+        for (const id of deletes) {
+          try { await swarmDeleteTask(id); } catch (err) { console.error('swarm: persist delete failed', id, err); }
+        }
+        persistedTasksRef.current.set(ws, nextTasks);
+      }
+    }).catch(() => { /* keep the queue alive on error */ });
+  }, [swarmTasksByWs]);
 
   // Poll active task counts every 5s into a 12-element ring buffer per
   // workspace so the StatStrip ACTIVE card can render a 60s background
@@ -800,83 +926,120 @@ export default function App() {
     }).catch(() => { /* ignore */ });
   }, []);
 
-  useEffect(() => {
-    if (!activeProjectPath) return;
-    let s = swarmSchedulers.current.get(activeProjectPath);
+  // The scheduler's start callback. Stable so every per-workspace scheduler
+  // shares one implementation. On any failure it throws/rejects *after* cleanup
+  // so the scheduler releases the reserved cap slot (see SwarmScheduler.launch).
+  const makeSwarmOnStart = useCallback(() => async (task: SwarmTask) => {
+    const now = Date.now();
+    setSwarmTasksByWs(prev => {
+      const m = new Map(prev);
+      const list = (m.get(task.workspaceId) ?? []).map(t =>
+        t.id === task.id ? { ...t, status: 'streaming' as const, lastActivityAt: now } : t
+      );
+      m.set(task.workspaceId, list);
+      return m;
+    });
+    const removeFromList = () => {
+      setSwarmTasksByWs(prev => {
+        const m = new Map(prev);
+        m.set(task.workspaceId, (m.get(task.workspaceId) ?? []).filter(t => t.id !== task.id));
+        return m;
+      });
+    };
+    // Eager worktree materialization for likely-write tasks.
+    let effectiveWorktreePath: string | null = task.worktreePath;
+    if (!isLikelyReadOnlyPrompt(task.prompt) && !task.worktreePath) {
+      try {
+        const wt = await (window.sai as any).swarm.worktreeAdd(task.projectPath ?? task.workspaceId, task.id, task.branch, task.baseBranch);
+        effectiveWorktreePath = wt;
+        setSwarmTasksByWs(prev => {
+          const m = new Map(prev);
+          const list = (m.get(task.workspaceId) ?? []).map(t =>
+            t.id === task.id ? { ...t, worktreePath: wt } : t
+          );
+          m.set(task.workspaceId, list);
+          return m;
+        });
+      } catch (err) {
+        console.error('swarm: worktree materialization failed', err);
+        removeFromList();
+        throw err; // free the scheduler slot
+      }
+    }
+    // Kick off the provider runner for the task's session.
+    // Today only Claude is supported (codex/gemini IPC don't yet thread scope/kind through start).
+    try {
+      const sai = window.sai as any;
+      const dispatched = await runSwarmTask(
+        { ...task, worktreePath: effectiveWorktreePath },
+        {
+          claudeStart: sai.claudeStart,
+          claudeSend: sai.claudeSend,
+        },
+      );
+      if (!dispatched) {
+        console.warn(`swarm: provider '${task.provider}' is not yet supported for task runner; marking failed`);
+        try {
+          void (window.sai as any).swarmEmitCard?.(task.workspaceId, 'task_failed', {
+            taskId: task.id,
+            title: task.title,
+            branch: task.branch,
+            prompt: task.prompt,
+            reason: 'Task runner currently supports Claude only. Codex / Gemini support is a planned follow-up.',
+          });
+        } catch { /* best-effort */ }
+        removeFromList();
+        throw new Error(`unsupported provider: ${task.provider}`); // free the slot
+      }
+    } catch (err) {
+      console.error('swarm: provider runner failed to start', err);
+      removeFromList();
+      throw err; // free the scheduler slot
+    }
+  }, []);
+
+  const ensureSwarmScheduler = useCallback((ws: string): SwarmScheduler => {
+    let s = swarmSchedulers.current.get(ws);
     if (!s) {
       s = new SwarmScheduler({
         cap: swarmSettingsRef.current.concurrencyCap,
-        onStart: async (task) => {
-          const now = Date.now();
-          setSwarmTasksByWs(prev => {
-            const m = new Map(prev);
-            const list = (m.get(task.workspaceId) ?? []).map(t =>
-              t.id === task.id ? { ...t, status: 'streaming' as const, lastActivityAt: now } : t
-            );
-            m.set(task.workspaceId, list);
-            return m;
-          });
-          const removeFromList = () => {
-            setSwarmTasksByWs(prev => {
-              const m = new Map(prev);
-              m.set(task.workspaceId, (m.get(task.workspaceId) ?? []).filter(t => t.id !== task.id));
-              return m;
-            });
-          };
-          // Eager worktree materialization for likely-write tasks.
-          let effectiveWorktreePath: string | null = task.worktreePath;
-          if (!isLikelyReadOnlyPrompt(task.prompt) && !task.worktreePath) {
-            try {
-              const wt = await (window.sai as any).swarm.worktreeAdd(task.projectPath ?? task.workspaceId, task.id, task.branch, task.baseBranch);
-              effectiveWorktreePath = wt;
-              setSwarmTasksByWs(prev => {
-                const m = new Map(prev);
-                const list = (m.get(task.workspaceId) ?? []).map(t =>
-                  t.id === task.id ? { ...t, worktreePath: wt } : t
-                );
-                m.set(task.workspaceId, list);
-                return m;
-              });
-            } catch (err) {
-              console.error('swarm: worktree materialization failed', err);
-              removeFromList();
-              return;
-            }
-          }
-          // Kick off the provider runner for the task's session.
-          // Today only Claude is supported (codex/gemini IPC don't yet thread scope/kind through start).
-          try {
-            const sai = window.sai as any;
-            const dispatched = await runSwarmTask(
-              { ...task, worktreePath: effectiveWorktreePath },
-              {
-                claudeStart: sai.claudeStart,
-                claudeSend: sai.claudeSend,
-              },
-            );
-            if (!dispatched) {
-              console.warn(`swarm: provider '${task.provider}' is not yet supported for task runner; marking failed`);
-              try {
-                void (window.sai as any).swarmEmitCard?.(task.workspaceId, 'task_failed', {
-                  taskId: task.id,
-                  title: task.title,
-                  branch: task.branch,
-                  prompt: task.prompt,
-                  reason: 'Task runner currently supports Claude only. Codex / Gemini support is a planned follow-up.',
-                });
-              } catch { /* best-effort */ }
-              removeFromList();
-            }
-          } catch (err) {
-            console.error('swarm: provider runner failed to start', err);
-            removeFromList();
-          }
-        },
+        onStart: makeSwarmOnStart(),
       });
-      swarmSchedulers.current.set(activeProjectPath, s);
+      swarmSchedulers.current.set(ws, s);
     }
-    s.setTasks(swarmTasksByWs.get(activeProjectPath) ?? []);
-  }, [activeProjectPath, swarmTasksByWs]);
+    return s;
+  }, [makeSwarmOnStart]);
+
+  useEffect(() => {
+    // Ensure every workspace that has tasks has a scheduler, and feed each its
+    // current task list. Ticking all workspaces (not just the active one) lets
+    // queued tasks in background workspaces start under the cap.
+    for (const [ws, tasks] of swarmTasksByWs.entries()) {
+      ensureSwarmScheduler(ws).setTasks(tasks);
+    }
+  }, [swarmTasksByWs, ensureSwarmScheduler]);
+
+  // Watchdog: periodically fail streaming tasks that have gone silent (provider
+  // died without emitting a terminal event), reclaiming their cap slots. Reads
+  // tasks via a ref to avoid resetting the interval on every state change.
+  useEffect(() => {
+    const id = setInterval(() => {
+      const now = Date.now();
+      let changed = false;
+      const next = new Map(swarmTasksByWsRef.current);
+      for (const [ws, tasks] of next.entries()) {
+        const stale = findStaleTasks(tasks, now, SWARM_STALE_THRESHOLD_MS);
+        if (stale.length === 0) continue;
+        const staleIds = new Set(stale.map(t => t.id));
+        next.set(ws, tasks.map(t =>
+          staleIds.has(t.id) ? { ...t, status: 'failed' as const, lastActivityAt: now } : t
+        ));
+        changed = true;
+      }
+      if (changed) setSwarmTasksByWs(next);
+    }, SWARM_WATCHDOG_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, []);
 
   // Fetch diff stats for ready (done) tasks in the active workspace
   useEffect(() => {
@@ -974,10 +1137,11 @@ export default function App() {
 
     const wsTasks = () => swarmTasksByWs.get(ws) ?? [];
 
-    // Tasks are ephemeral in-memory state; the helpers' updateTask dep
-    // (which used to persist to swarmDb) is now a no-op. Local list mutations
-    // happen in the call sites below so terminal tasks are removed from view.
-    const noopUpdateTask = async () => { /* tasks are ephemeral */ };
+    // updateTask is a no-op here: task persistence is handled centrally by the
+    // diff effect, which deletes a task's row when it's filtered out of the
+    // in-memory list (e.g. on land/discard). Local list mutations in the call
+    // sites below drive both the UI and that persistence.
+    const noopUpdateTask = async () => { /* persistence handled by the diff effect */ };
     const landDeps = {
       canFastForward: (cwd: string, src: string, tgt: string) =>
         (window.sai as any).swarm.canFastForward(cwd, src, tgt),
@@ -996,6 +1160,8 @@ export default function App() {
       updateTask: noopUpdateTask,
       rebase: (worktreePath: string, baseBranch: string) =>
         (window.sai as any).gitRebase(worktreePath, baseBranch),
+      rebaseAbort: (worktreePath: string) =>
+        (window.sai as any).gitRebaseAbort(worktreePath),
     };
     const discardDeps = {
       worktreeRemove: (cwd: string, wt: string, br: string) =>
@@ -1014,15 +1180,6 @@ export default function App() {
       if (p === 'codex') return (window.sai as any).codexStop?.(ws);
       if (p === 'gemini') return (window.sai as any).geminiStop?.(ws);
       return (window.sai as any).claudeStop?.(ws);
-    }
-
-    function resolveProviderApproval(task: SwarmTask, toolUseId: string, approved: boolean) {
-      const p = task.provider;
-      const scope = task.sessionId;
-      // codexApprove/geminiApprove don't exist in the current preload; degrade gracefully.
-      if (p === 'codex') return (window.sai as any).codexApprove?.(ws, toolUseId, approved, undefined, scope);
-      if (p === 'gemini') return (window.sai as any).geminiApprove?.(ws, toolUseId, approved, undefined, scope);
-      return (window.sai as any).claudeApprove?.(ws, toolUseId, approved, undefined, scope);
     }
 
     const spawnTask = async (i: { prompt: string; title?: string; provider?: string; model?: string; approvalPolicy?: string; project?: string }) => {
@@ -1054,6 +1211,45 @@ export default function App() {
       return { id: created.id, title: created.title };
     };
 
+    // Resolve an approval by id, routed to the approval's OWN workspace (not
+    // the active one), idempotent against double-resolution.
+    const resolveApproval = async (approvalId: string, approved: boolean) => {
+      if (resolvingApprovalsRef.current.has(approvalId)) return;
+      resolvingApprovalsRef.current.add(approvalId);
+      try {
+        const a = await swarmGetApproval(approvalId);
+        if (!a) return;
+        const { workspaceId, task, toolUseId } = approvalRoutingTarget(a, swarmTasksByWsRef.current);
+        if (task) {
+          const scope = task.sessionId;
+          const p = task.provider;
+          if (p === 'codex') (window.sai as any).codexApprove?.(workspaceId, toolUseId, approved, undefined, scope);
+          else if (p === 'gemini') (window.sai as any).geminiApprove?.(workspaceId, toolUseId, approved, undefined, scope);
+          else (window.sai as any).claudeApprove?.(workspaceId, toolUseId, approved, undefined, scope);
+        }
+        await swarmResolveApproval(a.id);
+        setSwarmApprovalsByWs(prev => {
+          const m = new Map(prev);
+          m.set(workspaceId, (m.get(workspaceId) ?? []).filter(x => x.id !== approvalId));
+          return m;
+        });
+        if (task) {
+          setApprovalSessions(prev => {
+            const inner = prev.get(workspaceId);
+            if (!inner || !inner.has(task.sessionId)) return prev;
+            const next = new Map(prev);
+            const innerNext = new Map(inner);
+            innerNext.delete(task.sessionId);
+            if (innerNext.size === 0) next.delete(workspaceId);
+            else next.set(workspaceId, innerNext);
+            return next;
+          });
+        }
+      } finally {
+        resolvingApprovalsRef.current.delete(approvalId);
+      }
+    };
+
     const host: SwarmHost = {
       spawnTask,
       spawnTasks: async (prompts, projects) => Promise.all(prompts.map((p, idx) => spawnTask({ prompt: p, project: projects?.[idx] }))),
@@ -1083,58 +1279,8 @@ export default function App() {
           return m;
         });
       },
-      approve: async (approvalId) => {
-        const all = await swarmGetApprovals(ws);
-        const a = all.find(x => x.id === approvalId);
-        if (!a) return;
-        const task = wsTasks().find(t => t.id === a.taskId);
-        if (task) await resolveProviderApproval(task, a.toolUseId, true);
-        await swarmResolveApproval(a.id);
-        setSwarmApprovalsByWs(prev => {
-          const m = new Map(prev);
-          m.set(ws, (m.get(ws) ?? []).filter(x => x.id !== approvalId));
-          return m;
-        });
-        // Also clear the banner entry eagerly in case approval_resolved is delayed
-        if (task) {
-          setApprovalSessions(prev => {
-            const inner = prev.get(ws);
-            if (!inner || !inner.has(task.sessionId)) return prev;
-            const next = new Map(prev);
-            const innerNext = new Map(inner);
-            innerNext.delete(task.sessionId);
-            if (innerNext.size === 0) next.delete(ws);
-            else next.set(ws, innerNext);
-            return next;
-          });
-        }
-      },
-      deny: async (approvalId) => {
-        const all = await swarmGetApprovals(ws);
-        const a = all.find(x => x.id === approvalId);
-        if (!a) return;
-        const task = wsTasks().find(t => t.id === a.taskId);
-        if (task) await resolveProviderApproval(task, a.toolUseId, false);
-        await swarmResolveApproval(a.id);
-        setSwarmApprovalsByWs(prev => {
-          const m = new Map(prev);
-          m.set(ws, (m.get(ws) ?? []).filter(x => x.id !== approvalId));
-          return m;
-        });
-        // Also clear the banner entry eagerly in case approval_resolved is delayed
-        if (task) {
-          setApprovalSessions(prev => {
-            const inner = prev.get(ws);
-            if (!inner || !inner.has(task.sessionId)) return prev;
-            const next = new Map(prev);
-            const innerNext = new Map(inner);
-            innerNext.delete(task.sessionId);
-            if (innerNext.size === 0) next.delete(ws);
-            else next.set(ws, innerNext);
-            return next;
-          });
-        }
-      },
+      approve: async (approvalId) => { await resolveApproval(approvalId, true); },
+      deny: async (approvalId) => { await resolveApproval(approvalId, false); },
       land: async (ref) => {
         const t = byRef(ref);
         const r = await landTask(t, landDeps);
@@ -1144,6 +1290,12 @@ export default function App() {
           setSwarmTasksByWs(prev => {
             const m = new Map(prev);
             m.set(ws, (m.get(ws) ?? []).filter(x => x.id !== t.id));
+            return m;
+          });
+          void swarmDeleteApprovalsByTask(t.id).catch(() => { /* best-effort prune */ });
+          setSwarmApprovalsByWs(prev => {
+            const m = new Map(prev);
+            m.set(ws, (m.get(ws) ?? []).filter(x => x.taskId !== t.id));
             return m;
           });
         }
@@ -1156,6 +1308,12 @@ export default function App() {
         setSwarmTasksByWs(prev => {
           const m = new Map(prev);
           m.set(ws, (m.get(ws) ?? []).filter(x => x.id !== t.id));
+          return m;
+        });
+        void swarmDeleteApprovalsByTask(t.id).catch(() => { /* best-effort prune */ });
+        setSwarmApprovalsByWs(prev => {
+          const m = new Map(prev);
+          m.set(ws, (m.get(ws) ?? []).filter(x => x.taskId !== t.id));
           return m;
         });
       },
@@ -1261,6 +1419,174 @@ export default function App() {
     if (typeof sai?.onSwarmToolRequest !== 'function') return; // mocks / tests
 
     const unsub = sai.onSwarmToolRequest((req: { id: string; tool: string; input: any; workspace: string }) => {
+      if (req.tool === 'inspect_element' || req.tool === 'capture_app') {
+        const saiAny = sai as { captureRegion?: (r: { x: number; y: number; width: number; height: number }) => Promise<string | null> };
+        void handleSaiQueryToolRequest(
+          { tool: req.tool, input: req.input },
+          { captureRegion: saiAny.captureRegion },
+        ).then(
+          (result) =>
+            result === null
+              ? sai.respondSwarmToolError(req.id, `unhandled query tool: ${req.tool}`)
+              : sai.respondSwarmTool(req.id, result),
+          (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
+        );
+        return;
+      }
+
+      if (req.tool === 'render_mermaid') {
+        const saiAny = sai as { renderCaptureHtml?: (a: { html: string; width?: number }) => Promise<string | null> };
+        const diagram = typeof req.input?.diagram === 'string' ? req.input.diagram : '';
+        const deps = diagram && typeof saiAny.renderCaptureHtml === 'function'
+          ? {
+              captureRenderRegion: async () => {
+                const svg = await renderMermaidToSvg(diagram);
+                const b64 = await saiAny.renderCaptureHtml!({
+                  html: svg,
+                  width: typeof req.input?.width === 'number' ? req.input.width : undefined,
+                });
+                if (!b64) throw new Error('capture returned no image');
+                return { base64: b64, mimeType: 'image/png' as const };
+              },
+            }
+          : {};
+        void handleRenderToolRequest(
+          { tool: req.tool, input: req.input, renderId: req.id },
+          deps,
+        ).then(
+          (result) => sai.respondSwarmTool(req.id, result),
+          (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
+        );
+        return;
+      }
+
+      if (req.tool === 'render_component' || req.tool === 'render_theme') {
+        const saiAny = sai as { renderCaptureComponent?: (a: { component?: string; components?: string[]; props?: Record<string, unknown>; vars?: Record<string, string>; width?: number }) => Promise<string | null> };
+        const deps = typeof saiAny.renderCaptureComponent === 'function'
+          ? {
+              captureRenderRegion: async () => {
+                const b64 = await saiAny.renderCaptureComponent!({
+                  component: typeof req.input?.component === 'string' ? req.input.component : undefined,
+                  components: Array.isArray(req.input?.components) && req.input.components.length > 0
+                    ? req.input.components
+                    : (req.tool === 'render_theme' ? registeredComponentKeys() : undefined),
+                  props: req.input?.props && typeof req.input.props === 'object' ? req.input.props : undefined,
+                  vars: req.input?.vars && typeof req.input.vars === 'object' ? req.input.vars : undefined,
+                  width: typeof req.input?.width === 'number' ? req.input.width : undefined,
+                });
+                if (!b64) throw new Error('capture returned no image');
+                return { base64: b64, mimeType: 'image/png' as const };
+              },
+            }
+          : {};
+        void handleRenderToolRequest(
+          { tool: req.tool, input: req.input, renderId: req.id },
+          deps,
+        ).then(
+          (result) => sai.respondSwarmTool(req.id, result),
+          (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
+        );
+        return;
+      }
+
+      if (req.tool === 'pick_file' || req.tool === 'notify' || req.tool === 'clipboard') {
+        const saiAny = sai as {
+          pickFile?: (o: PickFileOpts) => Promise<string[] | null>;
+          notify?: (a: { title: string; body?: string }) => Promise<boolean>;
+          clipboardWrite?: (t: string) => Promise<boolean>;
+        };
+        void handleSaiNativeToolRequest(
+          { tool: req.tool, input: req.input },
+          { pickFile: saiAny.pickFile, notify: saiAny.notify, clipboardWrite: saiAny.clipboardWrite },
+        ).then(
+          (result) =>
+            result === null
+              ? sai.respondSwarmToolError(req.id, `unhandled native tool: ${req.tool}`)
+              : sai.respondSwarmTool(req.id, result),
+          (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
+        );
+        return;
+      }
+
+      if (req.tool === 'render_form' || req.tool === 'confirm' || req.tool === 'choose') {
+        const { promise } = registerPendingForm(formTimeoutMs(req.input));
+        void promise.then(
+          (result) => sai.respondSwarmTool(req.id, result),
+          (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
+        );
+        return;
+      }
+
+      // SAI render tools (render_html / render_chart / render_diff) are handled in the
+      // renderer: dispatch into the render store, then (for html) screenshot the
+      // mock headlessly so the agent can SEE its render without opening a browser
+      // tab. renderId = req.id; response goes over the swarm tool channel.
+      if (typeof req.tool === 'string' && req.tool.startsWith('render_')) {
+        const saiAny = sai as {
+          renderCaptureHtml?: (a: { html: string; width?: number }) => Promise<string | null>;
+          renderCaptureFile?: (a: { cwd: string; path?: string; html?: string; baseDir?: string; width?: number; height?: number }) => Promise<string | null>;
+        };
+        let htmlInput: string | null = null;
+        if (req.tool === 'render_html' && req.input && typeof req.input.html === 'string') {
+          htmlInput = req.input.html as string;
+        } else if (req.tool === 'render_chart') {
+          try {
+            htmlInput = buildChartHtml(req.input as ChartInput);
+          } catch {
+            htmlInput = null;
+          }
+        } else if (
+          req.tool === 'render_diff' &&
+          typeof req.input?.before === 'string' && req.input.before.length > 0 &&
+          typeof req.input?.after === 'string' && req.input.after.length > 0
+        ) {
+          htmlInput = buildDiffHtml(req.input as DiffInput);
+        }
+        const isFileMode =
+          req.tool === 'render_html' &&
+          (typeof req.input?.path === 'string' || typeof req.input?.baseDir === 'string');
+        let deps: Parameters<typeof handleRenderToolRequest>[1];
+        if (isFileMode && typeof saiAny.renderCaptureFile === 'function') {
+          deps = {
+            captureRenderRegion: async () => {
+              const b64 = await saiAny.renderCaptureFile!({
+                cwd: activeProjectPathRef.current ?? '',
+                path: typeof req.input?.path === 'string' ? req.input.path : undefined,
+                html: typeof req.input?.html === 'string' ? req.input.html : undefined,
+                baseDir: typeof req.input?.baseDir === 'string' ? req.input.baseDir : undefined,
+                width: typeof req.input?.width === 'number' ? req.input.width : undefined,
+                height: typeof req.input?.height === 'number' ? req.input.height : undefined,
+              });
+              if (!b64) throw new Error('capture returned no image');
+              return { base64: b64, mimeType: 'image/png' as const };
+            },
+          };
+        } else if (htmlInput && typeof saiAny.renderCaptureHtml === 'function') {
+          deps = {
+            captureRenderRegion: async () => {
+              const b64 = await saiAny.renderCaptureHtml!({
+                html: htmlInput,
+                width: typeof req.input?.width === 'number' ? req.input.width : undefined,
+              });
+              if (!b64) throw new Error('capture returned no image');
+              return { base64: b64, mimeType: 'image/png' as const };
+            },
+          };
+        } else {
+          deps = {};
+        }
+        const dispatchInput = isFileMode
+          ? { ...req.input, cwd: activeProjectPathRef.current ?? '' }
+          : req.input;
+        void handleRenderToolRequest(
+          { tool: req.tool, input: dispatchInput, renderId: req.id },
+          deps,
+        ).then(
+          (result) => sai.respondSwarmTool(req.id, result),
+          (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
+        );
+        return;
+      }
       void handleSwarmToolRequest(req, {
         activeWorkspace: activeProjectPathRef.current,
         host: swarmHostRef.current,
@@ -1610,7 +1936,6 @@ export default function App() {
       if (g.model) setGeminiModel(g.model);
       if (g.approvalMode === 'default' || g.approvalMode === 'auto_edit' || g.approvalMode === 'yolo' || g.approvalMode === 'plan') setGeminiApprovalMode(g.approvalMode);
       if (g.conversationMode === 'planning' || g.conversationMode === 'fast') setGeminiConversationMode(g.conversationMode);
-      if (g.loadingPhrases === 'witty' || g.loadingPhrases === 'tips' || g.loadingPhrases === 'all' || g.loadingPhrases === 'off') setGeminiLoadingPhrases(g.loadingPhrases);
     });
     // Migrate flat keys to nested (one-time)
     Promise.all([
@@ -1815,7 +2140,13 @@ export default function App() {
         // so the yellow indicator survives an app restart. (The backend
         // doesn't restore live processes; sessions stay "suspended" until
         // the user sends a message that respawns them.)
-        const reseed = sessions.filter(s => s.scopeSuspended).map(s => `${activeProjectPath}:${s.id}`);
+        const reseed = sessions
+          .filter(s => s.scopeSuspended)
+          .map(s => `${activeProjectPath}:${s.id}`)
+          // Don't re-add a scope that streaming_start already cleared in-flight.
+          // Without this guard a stale DB read races the async scopeSuspended:false
+          // patch and re-marks actively-streaming sessions as suspended.
+          .filter(k => !streamingScopesRef.current.has(k));
         if (reseed.length > 0) {
           setSuspendedScopes(prev => {
             const next = new Set(prev);
@@ -1930,41 +2261,67 @@ export default function App() {
     return () => clearInterval(id);
   }, [projectPath]);
 
+  // Reload-or-banner decision for a single open file whose on-disk content changed.
+  // Clean file → swap in the new content (hot reload); dirty file → flag the conflict
+  // banner so the user chooses. Shared by the 5s poll and the instant AI-edit trigger.
+  const applyExternalChange = useCallback(async (projectPath: string, filePath: string) => {
+    const ws = workspacesRef.current.get(projectPath);
+    const file = ws?.openFiles.find(f => f.path === filePath);
+    if (!file) return;
+    if (file.isDirty) {
+      setExternallyModified(prev => (prev.has(filePath) ? prev : new Set([...prev, filePath])));
+      return;
+    }
+    try {
+      const [content, { mtime }] = await Promise.all([
+        window.sai.fsReadFile(filePath) as Promise<string>,
+        window.sai.fsMtime(filePath) as Promise<{ mtime: number }>,
+      ]);
+      updateWorkspace(projectPath, w => ({
+        ...w,
+        openFiles: w.openFiles.map(f =>
+          f.path === filePath
+            ? { ...f, content, savedContent: content, isDirty: false, diskMtime: mtime }
+            : f
+        ),
+      }));
+    } catch {
+      // File may have been deleted/moved between the signal and the read; ignore.
+    }
+  }, [updateWorkspace]);
+
+  // Re-check each open editor file's mtime and hot-reload (or flag a conflict) any that
+  // changed on disk. Reads each file by ITS OWN path, so it's robust to path-normalization
+  // differences (e.g. a `/home` → `/var/home` home symlink) between the editor's open path
+  // and whatever absolute form an external writer — including the AI — reports. Shared by
+  // the 5s poll and the instant AI-edit trigger.
+  const resyncOpenFiles = useCallback(async (projectPath: string) => {
+    const ws = workspacesRef.current.get(projectPath);
+    if (!ws) return;
+    const editorFiles = ws.openFiles.filter(
+      f => f.viewMode === 'editor' && f.diskMtime !== undefined
+    );
+    for (const file of editorFiles) {
+      try {
+        const { mtime } = await (window.sai.fsMtime(file.path) as Promise<{ mtime: number }>);
+        if (mtime <= file.diskMtime!) continue;
+        await applyExternalChange(projectPath, file.path);
+      } catch {
+        // File may have been deleted or moved; ignore
+      }
+    }
+  }, [applyExternalChange]);
+
+  // The claude:message effect subscribes once (empty deps) and reads live values via refs,
+  // so expose the latest resync through a ref to avoid a stale closure.
+  const resyncOpenFilesRef = useRef(resyncOpenFiles);
+  resyncOpenFilesRef.current = resyncOpenFiles;
+
   useEffect(() => {
     if (!projectPath) return;
-    const id = setInterval(async () => {
-      const ws = workspacesRef.current.get(projectPath);
-      if (!ws) return;
-      const editorFiles = ws.openFiles.filter(
-        f => f.viewMode === 'editor' && f.diskMtime !== undefined
-      );
-      for (const file of editorFiles) {
-        try {
-          const { mtime } = await (window.sai.fsMtime(file.path) as Promise<{ mtime: number }>);
-          if (mtime <= file.diskMtime!) continue;
-          if (!file.isDirty) {
-            const content = await (window.sai.fsReadFile(file.path) as Promise<string>);
-            updateWorkspace(projectPath, w => ({
-              ...w,
-              openFiles: w.openFiles.map(f =>
-                f.path === file.path
-                  ? { ...f, content, savedContent: content, isDirty: false, diskMtime: mtime }
-                  : f
-              ),
-            }));
-          } else {
-            setExternallyModified(prev => {
-              if (prev.has(file.path)) return prev;
-              return new Set([...prev, file.path]);
-            });
-          }
-        } catch {
-          // File may have been deleted or moved; ignore
-        }
-      }
-    }, 5000);
+    const id = setInterval(() => { void resyncOpenFiles(projectPath); }, 5000);
     return () => clearInterval(id);
-  }, [projectPath, updateWorkspace]);
+  }, [projectPath, resyncOpenFiles]);
 
   // Global Ctrl+H handler for chat history sidebar
   useKeybinding('chatHistory.toggle', useCallback((e) => {
@@ -2020,6 +2377,28 @@ export default function App() {
   useEffect(() => {
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
       if (!msg.projectPath) return;
+      // Hot-reload open files the AI edits: note each edit tool_use, then when its
+      // tool_result reports success, re-sync open files by mtime. We don't match the AI's
+      // reported path against open files — they can differ (symlinked home, normalization);
+      // the mtime resync reads each open file by its own path, which always resolves.
+      // Codex sends session_id after streaming_start (it comes from the first
+      // Codex output line). Update chatStreamingSessionRef so isStreaming stays
+      // true — without this, isStreaming flips false the moment session_id
+      // arrives because chatStreamingSessionRef still has null from streaming_start.
+      if (msg.type === 'session_id' && (msg.scope || 'chat') === 'chat' && msg.sessionId) {
+        chatStreamingSessionRef.current.set(msg.projectPath, msg.sessionId);
+      }
+      if (msg.type === 'assistant') {
+        for (const { id } of extractEditToolUses(msg.message?.content, msg.projectPath)) {
+          pendingEditsRef.current.add(id);
+        }
+      } else if (msg.type === 'user') {
+        let editCompleted = false;
+        for (const id of successfulToolResultIds(msg.message?.content)) {
+          if (pendingEditsRef.current.delete(id)) editCompleted = true;
+        }
+        if (editCompleted) void resyncOpenFilesRef.current(msg.projectPath);
+      }
       // Use composite key (projectPath:scope) for turnSeq tracking
       const scopeKey = `${msg.projectPath}:${msg.scope || 'chat'}`;
       // Swarm status mirror — runs for every workspace+scope so background
@@ -2054,6 +2433,16 @@ export default function App() {
           // Emit a completion / failure card into the orchestrator chat so
           // background task lifecycle events appear inline as a live feed.
           if (mirror.patch.kind === 'status' && patchedTask) {
+            // A task that reached a terminal status can have no actionable
+            // pending approval; prune any stale rows for it.
+            void swarmDeleteApprovalsByTask(patchedTask.id).catch(() => { /* best-effort prune */ });
+            setSwarmApprovalsByWs(prev => {
+              const list = prev.get(msg.projectPath) ?? [];
+              if (!list.some(x => x.taskId === patchedTask.id)) return prev;
+              const m = new Map(prev);
+              m.set(msg.projectPath, list.filter(x => x.taskId !== patchedTask.id));
+              return m;
+            });
             const statusPatch = mirror.patch;
             const dedupeKey = `${patchedTask.id}:${statusPatch.status}`;
             // claude.ts emits both 'result' and 'done' at end of turn; both pass
@@ -2192,6 +2581,12 @@ export default function App() {
         const count = busyScopeCountRef.current.get(msg.projectPath) || 0;
         busyScopeCountRef.current.set(msg.projectPath, count + 1);
         setBusyWorkspaces(prev => new Set(prev).add(msg.projectPath));
+        setCompletedWorkspaces(prev => {
+          if (!prev.has(msg.projectPath)) return prev;
+          const next = new Set(prev);
+          next.delete(msg.projectPath);
+          return next;
+        });
         if ((msg.scope || 'chat') === 'chat') {
           chatStreamingSessionRef.current.set(msg.projectPath, (msg.sessionId ?? null) as string | null);
           setChatStreamingWorkspaces(prev => prev.has(msg.projectPath) ? prev : new Set(prev).add(msg.projectPath));
@@ -2430,10 +2825,27 @@ export default function App() {
       // so the titlebar spinner doesn't stay stuck if the 'done' message is lost.
       if (msg.type === 'result' || msg.type === 'done') {
         setAwaitingQuestionWorkspaces(prev => applyQuestionEvent(prev, msg));
-        // For 'done', ignore stale messages from a previous turn (per scope)
+        // For 'done', ignore stale messages from a previous turn (per scope).
+        // BUT still decrement busyScopeCountRef — the stale done represents a
+        // cancelled turn that did end. Without the decrement, the interrupt
+        // scenario (stop + immediate new send) leaves the count at 2→1 instead
+        // of 2→1→0, keeping busyWorkspaces permanently set.
         if (msg.type === 'done' && msg.turnSeq != null) {
           const expected = wsTurnSeqRef.current.get(scopeKey);
-          if (expected != null && msg.turnSeq !== expected) return;
+          if (expected != null && msg.turnSeq !== expected) {
+            const staleCount = busyScopeCountRef.current.get(msg.projectPath) || 0;
+            const staleNext = Math.max(0, staleCount - 1);
+            busyScopeCountRef.current.set(msg.projectPath, staleNext);
+            if (staleNext === 0) {
+              setBusyWorkspaces(prev => {
+                if (!prev.has(msg.projectPath)) return prev;
+                const next = new Set(prev);
+                next.delete(msg.projectPath);
+                return next;
+              });
+            }
+            return;
+          }
         }
         wsTurnSeqRef.current.set(scopeKey, -1);
         // Swarm-aware completion notification (gated by swarm.notifyOnComplete).
@@ -2506,12 +2918,6 @@ export default function App() {
         }
         if ((msg.scope || 'chat') === 'chat') {
           chatStreamingSessionRef.current.delete(msg.projectPath);
-          setChatStreamingWorkspaces(prev => {
-            if (!prev.has(msg.projectPath)) return prev;
-            const next = new Set(prev);
-            next.delete(msg.projectPath);
-            return next;
-          });
         }
         setStreamingScopes(prev => {
           if (!prev.has(scopeKey)) return prev;
@@ -2541,6 +2947,17 @@ export default function App() {
                 setToast({ message: `${wsName} has finished`, key: Date.now() });
               }, 300);
             }
+            return next;
+          });
+        }
+        // Clear chatStreamingWorkspaces whenever the chat scope ends.
+        // Placed after setBusyWorkspaces; React 18 auto-batches all setState
+        // calls in the same synchronous handler so no extra render is produced.
+        if ((msg.scope || 'chat') === 'chat') {
+          setChatStreamingWorkspaces(prev => {
+            if (!prev.has(msg.projectPath)) return prev;
+            const next = new Set(prev);
+            next.delete(msg.projectPath);
             return next;
           });
         }
@@ -2779,6 +3196,24 @@ export default function App() {
     }
   }, [activeProjectPath, workspaces, handleToggleMdPreview]));
 
+  // Mark a workspace's active session as viewed — bump lastViewedAt (persisted +
+  // in-memory), the same signal that clears a session's unread "!". Without this,
+  // visiting a workspace clears the raw completed flag but computeCompletedWorkspaces
+  // re-flags it as unread (updatedAt > lastViewedAt) the moment focus moves away, so
+  // the green "completed" squircle never durably clears on visit.
+  const markActiveSessionViewed = useCallback((projectPath: string) => {
+    const ws = workspacesRef.current.get(projectPath);
+    const sid = ws?.activeSession?.id;
+    if (!ws || !sid) return;
+    const viewedAt = Date.now();
+    void dbPatchSessionMeta(projectPath, sid, { lastViewedAt: viewedAt }).catch(() => {});
+    updateWorkspace(projectPath, w => ({
+      ...w,
+      activeSession: { ...w.activeSession, lastViewedAt: viewedAt },
+      sessions: w.sessions.map(s => s.id === sid ? { ...s, lastViewedAt: viewedAt } : s),
+    }));
+  }, [updateWorkspace]);
+
   const handleProjectSwitch = useCallback((newPath: string) => {
     setActiveMetaRuntime(null);
     if (newPath === activeProjectPath) return;
@@ -2816,7 +3251,10 @@ export default function App() {
       next.delete(newPath);
       return next;
     });
-  }, [activeProjectPath, workspaces]);
+    // Tie the green-squircle clear to the unread "!" mechanism: visiting marks the
+    // workspace's active session viewed so it isn't re-flagged after you switch away.
+    markActiveSessionViewed(newPath);
+  }, [activeProjectPath, workspaces, markActiveSessionViewed]);
 
   const handleMetaWorkspaceActivate = useCallback(async (id: string) => {
     const runtime = await window.sai.metaWorkspaceActivate?.(id);
@@ -2859,7 +3297,8 @@ export default function App() {
       next.delete(runtime.syntheticRoot);
       return next;
     });
-  }, [activeProjectPath]);
+    markActiveSessionViewed(runtime.syntheticRoot);
+  }, [activeProjectPath, markActiveSessionViewed]);
 
   const handleMetaWorkspaceCreated = useCallback((runtime: MetaWorkspaceRuntime) => {
     setMetaWorkspaces(prev => {
@@ -3265,10 +3704,6 @@ export default function App() {
     saveGeminiSetting('conversationMode', mode);
   };
 
-  const handleGeminiLoadingPhrasesChange = (mode: 'witty' | 'tips' | 'all' | 'off') => {
-    setGeminiLoadingPhrases(mode);
-    saveGeminiSetting('loadingPhrases', mode);
-  };
 
   const chatOpen = expanded.includes('chat');
   const editorOpen = expanded.includes('editor');
@@ -3291,7 +3726,7 @@ export default function App() {
 
   const renderPanel = (panel: PanelId) => {
     const isOpen = expanded.includes(panel);
-    const providerSvg = aiProvider === 'codex' ? 'svg/openai.svg' : aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : 'svg/claude.svg';
+    const providerSvg = aiProvider === 'codex' ? 'svg/codex.svg' : aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : 'svg/claude.svg';
     const providerColor = aiProvider === 'codex' ? 'var(--text)' : aiProvider === 'gemini' ? '#4285f4' : '#e27b4a';
     const icon = panel === 'chat'
       ? <span className="accordion-provider-icon" style={{
@@ -3460,10 +3895,10 @@ export default function App() {
                       if (!focusedSwarmTask) return;
                       const task = focusedSwarmTask;
                       // Note: Claude CLI spawns a fresh process per turn, so a
-                      // true "resume" of the prior process isn't possible —
-                      // "resume" here re-dispatches the original prompt as a
-                      // new turn. If this feels misleading, consider renaming
-                      // the button to "Re-run" in SwarmTaskHeader.
+                      // true "resume" isn't possible — this re-dispatches the
+                      // original prompt as a new turn. Enqueue and let the
+                      // scheduler promote it under the concurrency cap rather
+                      // than starting it directly (which would bypass the cap).
                       setSwarmTasksByWs(prev => {
                         const m = new Map(prev);
                         const list = (m.get(activeProjectPath) ?? []).map(t =>
@@ -3472,25 +3907,6 @@ export default function App() {
                         m.set(activeProjectPath, list);
                         return m;
                       });
-                      try {
-                        const sai = window.sai as any;
-                        const dispatched = await runSwarmTask(
-                          { ...task, worktreePath: task.worktreePath },
-                          { claudeStart: sai.claudeStart, claudeSend: sai.claudeSend },
-                        );
-                        if (dispatched) {
-                          setSwarmTasksByWs(prev => {
-                            const m = new Map(prev);
-                            const list = (m.get(activeProjectPath) ?? []).map(t =>
-                              t.id === task.id ? { ...t, status: 'streaming' as const } : t
-                            );
-                            m.set(activeProjectPath, list);
-                            return m;
-                          });
-                        }
-                      } catch (err) {
-                        console.error('swarm: resume failed', err);
-                      }
                     }}
                   />
                 )}
@@ -3532,8 +3948,7 @@ export default function App() {
                       onGeminiApprovalModeChange={handleGeminiApprovalModeChange}
                       geminiConversationMode={geminiConversationMode}
                       onGeminiConversationModeChange={handleGeminiConversationModeChange}
-                      geminiLoadingPhrases={geminiLoadingPhrases}
-                      initialMessages={orchMessages}
+                                            initialMessages={orchMessages}
                       activeFilePath={ws.activeFilePath}
                       onFileOpen={handleFileOpen}
                       isActive={wsPath === activeProjectPath}
@@ -3676,15 +4091,27 @@ export default function App() {
                               console.warn('swarm: rebase-retry skipped, task or worktree missing', taskRef);
                               return;
                             }
-                            try {
-                              await (window.sai as any).gitRebase?.(t.worktreePath, t.baseBranch);
-                            } catch (err) {
-                              console.error('swarm: rebase failed', err);
-                              window.alert(`Rebase failed: ${err instanceof Error ? err.message : String(err)}`);
-                              return;
-                            }
-                            try { await landWithCard(taskRef); }
-                            catch (err) { console.error('swarm: post-rebase land failed', err); }
+                            const wt = t.worktreePath;
+                            // Serialize behind the land queue so a retry never
+                            // races a concurrent land. Clear any in-progress
+                            // rebase first, then rebase, then land.
+                            const next = landQueueRef.current.then(async () => {
+                              const sai = window.sai as any;
+                              const r = await rebaseRetry(wt, t.baseBranch, {
+                                rebaseStatus: (p: string) => sai.gitRebaseStatus(p),
+                                rebaseAbort: (p: string) => sai.gitRebaseAbort(p),
+                                rebase: (p: string, base: string) => sai.gitRebase(p, base),
+                              });
+                              if (!r.ok) {
+                                console.error('swarm: rebase failed', r.detail);
+                                window.alert(`Rebase failed: ${r.detail}`);
+                                return;
+                              }
+                              try { await landWithCard(taskRef); }
+                              catch (err) { console.error('swarm: post-rebase land failed', err); }
+                            });
+                            landQueueRef.current = next.catch(() => {});
+                            await next;
                           }}
                           onLand={(id) => { void landWithCard(id); }}
                           onDiscard={(id) => { void discardWithCard(id); }}
@@ -3827,6 +4254,23 @@ export default function App() {
                   modelChoice={modelChoice}
                   onModelChange={handleModelChange}
                   availableModels={claudeModels}
+                  renderToolCall={(tc) => {
+                    const n = tc.name || '';
+                    if (
+                      n.endsWith('sai_render_html') ||
+                      n.endsWith('sai_render_component') ||
+                      n.endsWith('sai_render_chart') ||
+                      n.endsWith('sai_render_diff') ||
+                      n.endsWith('sai_render_mermaid') ||
+                      n.endsWith('sai_render_theme') ||
+                      n.endsWith('sai_render_form') ||
+                      n.endsWith('sai_confirm') ||
+                      n.endsWith('sai_choose')
+                    ) {
+                      return <RenderToolCallCard tc={tc} cwd={projectPath} />;
+                    }
+                    return null;
+                  }}
                   aiProvider={aiProvider}
                   codexModel={codexModel}
                   onCodexModelChange={handleCodexModelChange}
@@ -3840,13 +4284,26 @@ export default function App() {
                   onGeminiApprovalModeChange={handleGeminiApprovalModeChange}
                   geminiConversationMode={geminiConversationMode}
                   onGeminiConversationModeChange={handleGeminiConversationModeChange}
-                  geminiLoadingPhrases={geminiLoadingPhrases}
-                  initialMessages={ws.activeSession.messages}
+                                    initialMessages={ws.activeSession.messages}
                   initialPendingApproval={approvalSessions.get(wsPath)?.get(ws.activeSession.id) ?? null}
                   activeFilePath={ws.activeFilePath}
                   onFileOpen={handleFileOpen}
                   isActive={wsPath === activeProjectPath}
-                  isStreaming={streamingScopes.has(`${wsPath}:${ws.activeSession.id}`)}
+                  isStreaming={
+                    aiProvider === 'claude'
+                      ? streamingScopes.has(`${wsPath}:${ws.activeSession.id}`)
+                      // Gemini uses a long-lived ACP — multiple sessions can stream
+                      // concurrently (New Chat keeps the background turn running).
+                      // Only show the animation when the streaming ACP session matches
+                      // this session's own geminiSessionId.
+                      : aiProvider === 'gemini'
+                        ? streamingScopes.has(`${wsPath}:chat`) &&
+                          chatStreamingSessionRef.current.get(wsPath) === (ws.activeSession.geminiSessionId ?? null)
+                        // Codex spawns a new process per turn and kills the previous one
+                        // on each new send — only one stream is ever active per workspace.
+                        // No session-ID matching needed.
+                        : streamingScopes.has(`${wsPath}:chat`)
+                  }
                   awaitingQuestion={awaitingQuestionWorkspaces.has(wsPath)}
                   initialDraft={chatDraftsRef.current.get(wsPath) || ''}
                   onDraftChange={(draft: string) => handleDraftChange(wsPath, draft)}
@@ -4119,6 +4576,40 @@ export default function App() {
     prevAwaitingRef.current = awaitingSessionIds;
   }, [streamingSessionIds, awaitingSessionIds, sessions, activeSession?.id]);
 
+  // Dev-only test bridge — lets Playwright drive workspace state directly.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    window.__saiTest = {
+      setWorkspaceBusy: (id: string) => {
+        setBusyWorkspaces(prev => new Set([...prev, id]));
+        setCompletedWorkspaces(prev => { const n = new Set(prev); n.delete(id); return n; });
+      },
+      setWorkspaceDone: (id: string) => {
+        setCompletedWorkspaces(prev => new Set([...prev, id]));
+        setBusyWorkspaces(prev => { const n = new Set(prev); n.delete(id); return n; });
+      },
+      setWorkspaceIdle: (id: string) => {
+        setBusyWorkspaces(prev => { const n = new Set(prev); n.delete(id); return n; });
+        setCompletedWorkspaces(prev => { const n = new Set(prev); n.delete(id); return n; });
+      },
+      clearWorkspaces: () => {
+        setBusyWorkspaces(new Set());
+        setCompletedWorkspaces(new Set());
+      },
+      getOverallStatus: () => {
+        if (busyWorkspaces.size > 0 && completedWorkspaces.size > 0) return 'busy-done';
+        if (completedWorkspaces.size > 0) return 'done';
+        if (busyWorkspaces.size > 0) return 'busy';
+        return null;
+      },
+      getState: () => ({
+        busyWorkspaces: [...busyWorkspaces],
+        completedWorkspaces: [...completedWorkspaces],
+      }),
+    };
+    return () => { delete window.__saiTest; };
+  }, [busyWorkspaces, completedWorkspaces, setBusyWorkspaces, setCompletedWorkspaces]);
+
   // Surface session-level unread/error state up to the workspace level so the
   // TitleBar workspace switcher shows the green '!' even when the workspace
   // isn't actively busy. Mirrors how approvalSessions.keys() rolls per-session
@@ -4128,9 +4619,8 @@ export default function App() {
       completedWorkspaces,
       workspaces: Array.from(workspaces.values()),
       focusedProjectPath: activeProjectPath,
-      focusedSessionId: activeSession?.id,
     }),
-    [completedWorkspaces, workspaces, activeProjectPath, activeSession?.id],
+    [completedWorkspaces, workspaces, activeProjectPath],
   );
 
   return (
@@ -4153,7 +4643,11 @@ export default function App() {
           if (key === 'aiProvider') { setAiProvider(value); handleNewChat(); }
           if (key === 'commitMessageProvider') setCommitMessageProvider(value);
           if (key === 'aiTitleGeneration') setAiTitleGeneration(value);
-          if (key === 'geminiLoadingPhrases') handleGeminiLoadingPhrasesChange(value);
+          if (key === 'geminiModel') handleGeminiModelChange(value);
+          if (key === 'geminiApprovalMode') handleGeminiApprovalModeChange(value);
+          if (key === 'geminiConversationMode') handleGeminiConversationModeChange(value);
+          if (key === 'codexModel') handleCodexModelChange(value);
+          if (key === 'codexPermission') handleCodexPermissionChange(value);
           if (key === 'focusedChat') { setFocusedChat(value); if (value) { setExpanded(['chat', 'terminal']); setSplitRatio(0.66); } }
           if (key === 'defaultView') { /* persisted only, applies on next launch */ }
           if (key === 'sidebarWidth') document.documentElement.style.setProperty('--sidebar-width', `${value}px`);
@@ -4238,15 +4732,21 @@ export default function App() {
           gitChangeCount={gitChangeCount}
           swarmApprovalCount={swarmApprovalCount}
           chatNotificationCount={chatNotificationCount}
-          overallStatus={approvalSessions.size > 0 ? 'approval' : completedWorkspaces.size > 0 ? 'completed' : busyWorkspaces.size > 0 ? 'busy' : null}
+          overallStatus={approvalSessions.size > 0 ? 'approval' : busyWorkspaces.size > 0 && completedWorkspaces.size > 0 ? 'busy-done' : completedWorkspaces.size > 0 ? 'done' : busyWorkspaces.size > 0 ? 'busy' : null}
+          hasOrchestrator={getCapabilities(aiProvider).hasOrchestrator}
+          hasMcp={getCapabilities(aiProvider).hasMcp}
+          hasPlugins={getCapabilities(aiProvider).hasPlugins}
         />
-        <AnimatePresence initial={false}>
+        <AnimatePresence initial={false} mode="popLayout">
           {sidebarOpen === 'files' && (
             <motion.div
               key="sidebar-files"
               className="sidebar-slot"
-              exit={{ opacity: 0, x: -12 }}
-              transition={{ duration: 0.16, ease: 'easeIn' }}
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15, ease: [0.2, 0.8, 0.2, 1] }}
+              style={{ overflow: 'hidden' }}
             >
               <FileExplorerSidebar
                 projectPath={projectPath}
@@ -4259,8 +4759,11 @@ export default function App() {
             <motion.div
               key="sidebar-git"
               className="sidebar-slot"
-              exit={{ opacity: 0, x: -12 }}
-              transition={{ duration: 0.16, ease: 'easeIn' }}
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15, ease: [0.2, 0.8, 0.2, 1] }}
+              style={{ overflow: 'hidden' }}
             >
               {activeMetaRuntime && activeMetaRuntime.syntheticRoot === projectPath
                 ? <MetaGitSidebar runtime={activeMetaRuntime} onFileClick={handleFileClick} commitMessageProvider={commitMessageProvider} />
@@ -4271,8 +4774,11 @@ export default function App() {
             <motion.div
               key="sidebar-search"
               className="sidebar-slot"
-              exit={{ opacity: 0, x: -12 }}
-              transition={{ duration: 0.16, ease: 'easeIn' }}
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15, ease: [0.2, 0.8, 0.2, 1] }}
+              style={{ overflow: 'hidden' }}
             >
               <SearchPanel
                 projectPath={projectPath}
@@ -4289,8 +4795,11 @@ export default function App() {
             <motion.div
               key="sidebar-chats"
               className="sidebar-slot"
-              exit={{ opacity: 0, x: -12 }}
-              transition={{ duration: 0.16, ease: 'easeIn' }}
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15, ease: [0.2, 0.8, 0.2, 1] }}
+              style={{ overflow: 'hidden' }}
             >
               <ChatHistorySidebar
                 sessions={sessions}
@@ -4312,8 +4821,11 @@ export default function App() {
             <motion.div
               key="sidebar-plugins"
               className="sidebar-slot"
-              exit={{ opacity: 0, x: -12 }}
-              transition={{ duration: 0.16, ease: 'easeIn' }}
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15, ease: [0.2, 0.8, 0.2, 1] }}
+              style={{ overflow: 'hidden' }}
             >
               <PluginsSidebar />
             </motion.div>
@@ -4322,8 +4834,11 @@ export default function App() {
             <motion.div
               key="sidebar-mcp"
               className="sidebar-slot"
-              exit={{ opacity: 0, x: -12 }}
-              transition={{ duration: 0.16, ease: 'easeIn' }}
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15, ease: [0.2, 0.8, 0.2, 1] }}
+              style={{ overflow: 'hidden' }}
             >
               <McpSidebar />
             </motion.div>
@@ -4332,8 +4847,11 @@ export default function App() {
             <motion.div
               key="sidebar-swarm"
               className="sidebar-slot"
-              exit={{ opacity: 0, x: -12 }}
-              transition={{ duration: 0.16, ease: 'easeIn' }}
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15, ease: [0.2, 0.8, 0.2, 1] }}
+              style={{ overflow: 'hidden' }}
             >
               <SwarmSidebar
                 tasks={swarmTasksByWs.get(activeProjectPath) ?? []}

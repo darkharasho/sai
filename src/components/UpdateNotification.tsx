@@ -133,8 +133,8 @@ export default function UpdateNotification() {
         }
         .update-checking {
           color: var(--text-muted);
-          border-color: var(--border);
-          background: var(--bg-hover);
+          border-color: var(--border-subtle);
+          background: var(--surface-4);
         }
         .update-downloading {
           color: var(--accent);

@@ -73,7 +73,7 @@ function formatRelative(ts: number): string {
 
 const PROVIDER_OPTIONS: { id: 'claude' | 'codex' | 'gemini'; label: string; svg: string; color: string }[] = [
   { id: 'claude', label: 'Claude', svg: 'svg/claude.svg', color: '#e27b4a' },
-  { id: 'codex', label: 'Codex CLI', svg: 'svg/openai.svg', color: '#fff' },
+  { id: 'codex', label: 'Codex', svg: 'svg/codex.svg', color: '#fff' },
   { id: 'gemini', label: 'Gemini CLI', svg: 'svg/Google-gemini-icon.svg', color: '#4285f4' },
 ];
 
@@ -88,10 +88,15 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [lockCommitProvider, setLockCommitProvider] = useState(false);
   const [commitProviderOpen, setCommitProviderOpen] = useState(false);
   const commitProviderRef = useRef<HTMLDivElement>(null);
-  const [geminiLoadingPhrases, setGeminiLoadingPhrases] = useState<'witty' | 'tips' | 'all' | 'off'>('all');
+  const [geminiDefaultModel, setGeminiDefaultModel] = useState('auto-gemini-3');
+  const [geminiDefaultApprovalMode, setGeminiDefaultApprovalMode] = useState<'default' | 'auto_edit' | 'yolo' | 'plan'>('default');
+  const [geminiDefaultConversationMode, setGeminiDefaultConversationMode] = useState<'planning' | 'fast'>('planning');
+  const [codexDefaultModel, setCodexDefaultModel] = useState('');
+  const [codexDefaultPermission, setCodexDefaultPermission] = useState<'auto' | 'read-only' | 'full-access'>('auto');
+  const [codexAvailableModels, setCodexAvailableModels] = useState<{ id: string; name: string }[]>([]);
+  const [geminiAvailableModels, setGeminiAvailableModels] = useState<{ id: string; name: string }[]>([]);
   const [systemNotifications, setSystemNotifications] = useState(false);
   const [toolCallsExpanded, setToolCallsExpanded] = useState(true);
-  const [typewriterEnabled, setTypewriterEnabled] = useState(true);
   const [saiAnimationEnabled, setSaiAnimationEnabled] = useState(true);
   const [focusedChat, setFocusedChat] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(300);
@@ -116,11 +121,28 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.settingsGet('editorFontSize', 13).then((v: number) => setEditorFontSize(v));
     window.sai.settingsGet('editorMinimap', true).then((v: boolean) => setEditorMinimap(v));
     window.sai.settingsGet('gemini', {}).then((g: any) => {
-      if (g.loadingPhrases === 'witty' || g.loadingPhrases === 'tips' || g.loadingPhrases === 'all' || g.loadingPhrases === 'off') setGeminiLoadingPhrases(g.loadingPhrases);
+      if (g.model) setGeminiDefaultModel(g.model);
+      if (g.approvalMode === 'default' || g.approvalMode === 'auto_edit' || g.approvalMode === 'yolo' || g.approvalMode === 'plan') setGeminiDefaultApprovalMode(g.approvalMode);
+      if (g.conversationMode === 'planning' || g.conversationMode === 'fast') setGeminiDefaultConversationMode(g.conversationMode);
     });
+    window.sai.settingsGet('codex', {}).then((c: any) => {
+      if (c.model) setCodexDefaultModel(c.model);
+      if (c.permission === 'auto' || c.permission === 'read-only' || c.permission === 'full-access') setCodexDefaultPermission(c.permission);
+    });
+    (window.sai as any).codexModels?.().then((result: { models: { id: string; name: string }[]; defaultModel: string } | undefined) => {
+      if (result?.models?.length) {
+        setCodexAvailableModels(result.models);
+        setCodexDefaultModel(prev => prev || result.defaultModel || '');
+      }
+    }).catch(() => {});
+    (window.sai as any).geminiModels?.().then((result: { models: { id: string; name: string }[]; defaultModel: string } | undefined) => {
+      if (result?.models?.length) {
+        setGeminiAvailableModels(result.models);
+        setGeminiDefaultModel(prev => prev || result.defaultModel || '');
+      }
+    }).catch(() => {});
     window.sai.settingsGet('systemNotifications', false).then((v: boolean) => setSystemNotifications(v));
     window.sai.settingsGet('toolCallsExpanded', true).then((v: boolean) => setToolCallsExpanded(v));
-    window.sai.settingsGet('typewriterEnabled', true).then((v: boolean) => setTypewriterEnabled(v));
     window.sai.settingsGet('saiAnimationEnabled', true).then((v: boolean) => setSaiAnimationEnabled(v !== false));
     window.sai.settingsGet('focusedChat', false).then((v: boolean) => setFocusedChat(v));
     window.sai.settingsGet('sidebarWidth', 300).then((v: number) => setSidebarWidth(v));
@@ -162,7 +184,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if ('lockCommitProvider' in remote) setLockCommitProvider(remote.lockCommitProvider);
       if ('systemNotifications' in remote) setSystemNotifications(remote.systemNotifications);
       if ('toolCallsExpanded' in remote) setToolCallsExpanded(remote.toolCallsExpanded);
-      if ('typewriterEnabled' in remote) setTypewriterEnabled(remote.typewriterEnabled);
       if ('saiAnimationEnabled' in remote) setSaiAnimationEnabled(remote.saiAnimationEnabled !== false);
       if ('focusedChat' in remote) setFocusedChat(remote.focusedChat);
       if ('sidebarWidth' in remote) setSidebarWidth(remote.sidebarWidth);
@@ -285,12 +306,45 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     }
   };
 
-  const handleGeminiLoadingPhrasesChange = (value: 'witty' | 'tips' | 'all' | 'off') => {
-    setGeminiLoadingPhrases(value);
+
+  const handleGeminiDefaultModelChange = (model: string) => {
+    setGeminiDefaultModel(model);
     window.sai.settingsGet('gemini', {}).then((existing: any) => {
-      window.sai.settingsSet('gemini', { ...existing, loadingPhrases: value });
+      window.sai.settingsSet('gemini', { ...existing, model });
     });
-    onSettingChange?.('geminiLoadingPhrases', value);
+    onSettingChange?.('geminiModel', model);
+  };
+
+  const handleGeminiDefaultApprovalModeChange = (mode: 'default' | 'auto_edit' | 'yolo' | 'plan') => {
+    setGeminiDefaultApprovalMode(mode);
+    window.sai.settingsGet('gemini', {}).then((existing: any) => {
+      window.sai.settingsSet('gemini', { ...existing, approvalMode: mode });
+    });
+    onSettingChange?.('geminiApprovalMode', mode);
+  };
+
+  const handleGeminiDefaultConversationModeChange = (mode: 'planning' | 'fast') => {
+    setGeminiDefaultConversationMode(mode);
+    window.sai.settingsGet('gemini', {}).then((existing: any) => {
+      window.sai.settingsSet('gemini', { ...existing, conversationMode: mode });
+    });
+    onSettingChange?.('geminiConversationMode', mode);
+  };
+
+  const handleCodexDefaultModelChange = (model: string) => {
+    setCodexDefaultModel(model);
+    window.sai.settingsGet('codex', {}).then((existing: any) => {
+      window.sai.settingsSet('codex', { ...existing, model });
+    });
+    onSettingChange?.('codexModel', model);
+  };
+
+  const handleCodexDefaultPermissionChange = (permission: 'auto' | 'read-only' | 'full-access') => {
+    setCodexDefaultPermission(permission);
+    window.sai.settingsGet('codex', {}).then((existing: any) => {
+      window.sai.settingsSet('codex', { ...existing, permission });
+    });
+    onSettingChange?.('codexPermission', permission);
   };
 
   const handleFocusedChatChange = (value: boolean) => {
@@ -332,13 +386,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     setToolCallsExpanded(value);
     window.sai.settingsSet('toolCallsExpanded', value);
     onSettingChange?.('toolCallsExpanded', value);
-  };
-
-  const handleTypewriterEnabledChange = (value: boolean) => {
-    setTypewriterEnabled(value);
-    window.sai.settingsSet('typewriterEnabled', value);
-    window.dispatchEvent(new CustomEvent('sai-pref-typewriter', { detail: value }));
-    onSettingChange?.('typewriterEnabled', value);
   };
 
   const handleSaiAnimationEnabledChange = (value: boolean) => {
@@ -564,21 +611,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
 
         <div className="settings-row">
           <div className="settings-row-info">
-            <div className="settings-row-name">Typewriter streaming</div>
-            <div className="settings-row-desc">Reveal assistant replies word-by-word as they stream. Off renders each chunk instantly.</div>
-          </div>
-          <button
-            className={`settings-toggle${typewriterEnabled ? ' on' : ''}`}
-            onClick={() => handleTypewriterEnabledChange(!typewriterEnabled)}
-            role="switch"
-            aria-checked={typewriterEnabled}
-          >
-            <span className="settings-toggle-thumb" />
-          </button>
-        </div>
-
-        <div className="settings-row">
-          <div className="settings-row-info">
             <div className="settings-row-name">SAI streaming animation</div>
             <div className="settings-row-desc">Replace the streaming-message indicator with the SAI mark animation.</div>
           </div>
@@ -775,14 +807,14 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             placeholder="~/projects"
             value={defaultProjectDir}
             onChange={e => handleDefaultProjectDirChange(e.target.value)}
-            style={{ width: 180, fontSize: 12, padding: '4px 8px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)' }}
+            style={{ width: 180, fontSize: 12, padding: '4px 8px', background: 'var(--surface-1)', border: '1px solid var(--border-hairline)', borderRadius: 6, color: 'var(--text)' }}
           />
           <button
             onClick={async () => {
               const folder = await window.sai.selectFolder(defaultProjectDir || undefined);
               if (folder) handleDefaultProjectDirChange(folder);
             }}
-            style={{ fontSize: 11, padding: '4px 8px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 5, color: 'var(--text-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+            style={{ fontSize: 11, padding: '4px 8px', background: 'var(--surface-1)', border: '1px solid var(--border-hairline)', borderRadius: 5, color: 'var(--text-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
           >
             Browse
           </button>
@@ -799,7 +831,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
           placeholder="~/.claude/mcp.json"
           value={mcpConfigPath}
           onChange={e => handleMcpConfigChange(e.target.value)}
-          style={{ width: 220, fontSize: 12, padding: '4px 8px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)' }}
+          style={{ width: 220, fontSize: 12, padding: '4px 8px', background: 'var(--surface-1)', border: '1px solid var(--border-hairline)', borderRadius: 6, color: 'var(--text)' }}
         />
       </div>
 
@@ -842,17 +874,37 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const renderCodexPage = () => (
     <section className="settings-section">
       <div className="settings-section-label">Codex</div>
+      {codexAvailableModels.length > 0 && (
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <div className="settings-row-name">Default model</div>
+            <div className="settings-row-desc">Pre-selected model when starting a new Codex session</div>
+          </div>
+          <select
+            className="settings-select"
+            value={codexDefaultModel}
+            onChange={e => handleCodexDefaultModelChange(e.target.value)}
+          >
+            {codexAvailableModels.map(m => (
+              <option key={m.id} value={m.id}>{m.name || m.id}</option>
+            ))}
+          </select>
+        </div>
+      )}
       <div className="settings-row">
         <div className="settings-row-info">
-          <div className="settings-row-name">Chat toolbar controls</div>
-          <div className="settings-row-desc">Model and permission mode for Codex live in the chat toolbar so you can change them per conversation.</div>
+          <div className="settings-row-name">Default permission mode</div>
+          <div className="settings-row-desc">How Codex handles file system and shell access</div>
         </div>
-      </div>
-      <div className="settings-row">
-        <div className="settings-row-info">
-          <div className="settings-row-name">What to configure here</div>
-          <div className="settings-row-desc">Use the Provider page to choose Codex as your chat or commit-message provider. Use the chat toolbar when you need to change runtime behavior.</div>
-        </div>
+        <select
+          className="settings-select"
+          value={codexDefaultPermission}
+          onChange={e => handleCodexDefaultPermissionChange(e.target.value as any)}
+        >
+          <option value="auto">Auto (sandboxed)</option>
+          <option value="read-only">Read-only</option>
+          <option value="full-access">Full access</option>
+        </select>
       </div>
     </section>
   );
@@ -860,20 +912,51 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const renderGeminiPage = () => (
     <section className="settings-section">
       <div className="settings-section-label">Gemini</div>
+      {geminiAvailableModels.length > 0 && (
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <div className="settings-row-name">Default model</div>
+            <div className="settings-row-desc">Pre-selected model when starting a new Gemini session</div>
+          </div>
+          <select
+            className="settings-select"
+            value={geminiDefaultModel}
+            onChange={e => handleGeminiDefaultModelChange(e.target.value)}
+          >
+            {geminiAvailableModels.map(m => (
+              <option key={m.id} value={m.id}>{m.name || m.id}</option>
+            ))}
+          </select>
+        </div>
+      )}
       <div className="settings-row">
         <div className="settings-row-info">
-          <div className="settings-row-name">Loading phrases</div>
-          <div className="settings-row-desc">What to show while Gemini is thinking</div>
+          <div className="settings-row-name">Default approval mode</div>
+          <div className="settings-row-desc">How Gemini handles file edits and tool calls</div>
         </div>
         <select
           className="settings-select"
-          value={geminiLoadingPhrases}
-          onChange={e => handleGeminiLoadingPhrasesChange(e.target.value as any)}
+          value={geminiDefaultApprovalMode}
+          onChange={e => handleGeminiDefaultApprovalModeChange(e.target.value as any)}
         >
-          <option value="all">All (witty + tips)</option>
-          <option value="witty">Witty phrases</option>
-          <option value="tips">Informative tips</option>
-          <option value="off">Off</option>
+          <option value="default">Default</option>
+          <option value="auto_edit">Auto Edit</option>
+          <option value="yolo">Yolo</option>
+          <option value="plan">Plan</option>
+        </select>
+      </div>
+      <div className="settings-row">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Default conversation mode</div>
+          <div className="settings-row-desc">Planning uses extended thinking; Fast is quicker</div>
+        </div>
+        <select
+          className="settings-select"
+          value={geminiDefaultConversationMode}
+          onChange={e => handleGeminiDefaultConversationModeChange(e.target.value as any)}
+        >
+          <option value="planning">Planning</option>
+          <option value="fast">Fast</option>
         </select>
       </div>
     </section>
@@ -1054,8 +1137,8 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             backdrop-filter: blur(4px);
           }
           .settings-modal {
-            background: var(--bg-elevated);
-            border: 1px solid var(--border);
+            background: var(--surface-3);
+            border: 1px solid var(--border-subtle);
             border-radius: 10px;
             width: 720px;
             box-shadow: 0 24px 64px rgba(0,0,0,0.5);
@@ -1066,7 +1149,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             align-items: center;
             justify-content: space-between;
             padding: 16px 20px;
-            border-bottom: 1px solid var(--border);
+            border-bottom: 1px solid var(--border-hairline);
           }
           .settings-header-right {
             display: flex;
@@ -1083,7 +1166,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             border-radius: 4px;
             display: flex;
           }
-          .settings-close:hover { color: var(--text); background: var(--bg-hover); }
+          .settings-close:hover { color: var(--text); background: var(--surface-4); }
           .sync-dot {
             width: 7px;
             height: 7px;
@@ -1128,8 +1211,8 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
           .settings-sidebar {
             width: 185px;
             min-width: 185px;
-            background: var(--bg-primary);
-            border-right: 1px solid var(--border);
+            background: var(--surface-1);
+            border-right: 1px solid var(--border-subtle);
             padding: 12px 0;
             display: flex;
             flex-direction: column;
@@ -1148,10 +1231,10 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             text-align: left;
             width: 100%;
           }
-          .settings-nav-item:hover { color: var(--text); background: var(--bg-hover); }
+          .settings-nav-item:hover { color: var(--text); background: var(--surface-4); }
           .settings-nav-item.active {
-            color: var(--text);
-            background: rgba(255,255,255,0.05);
+            color: var(--accent);
+            background: var(--accent-dim);
             border-left-color: var(--accent);
           }
           .settings-nav-sub {
@@ -1168,10 +1251,10 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             text-align: left;
             width: 100%;
           }
-          .settings-nav-sub:hover { color: var(--text); background: var(--bg-hover); }
+          .settings-nav-sub:hover { color: var(--text); background: var(--surface-4); }
           .settings-nav-sub.active {
-            color: var(--text);
-            background: rgba(255,255,255,0.05);
+            color: var(--accent);
+            background: var(--accent-dim);
           }
           .settings-content {
             flex: 1;
@@ -1195,13 +1278,13 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
           .settings-row-spaced { margin-top: 12px; }
           .settings-row-name { font-size: 13px; font-weight: 500; color: var(--text); }
           .settings-row-desc { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
-          .settings-divider { height: 1px; background: var(--border); margin: 16px 0; }
+          .settings-divider { height: 1px; background: var(--border-hairline); margin: 16px 0; }
           .settings-toggle {
             width: 36px;
             height: 20px;
             border-radius: 10px;
-            border: 1px solid var(--border);
-            background: var(--bg-secondary);
+            border: 1px solid var(--border-hairline);
+            background: var(--surface-1);
             cursor: pointer;
             position: relative;
             flex-shrink: 0;
@@ -1220,8 +1303,8 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
           }
           .settings-toggle.on .settings-toggle-thumb { transform: translateX(16px); background: #000; }
           .settings-select {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
+            background: var(--surface-1);
+            border: 1px solid var(--border-hairline);
             border-radius: 5px;
             color: var(--text);
             font-size: 12px;
@@ -1238,8 +1321,8 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             display: flex;
             align-items: center;
             gap: 8px;
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
+            background: var(--surface-1);
+            border: 1px solid var(--border-hairline);
             border-radius: 5px;
             color: var(--text);
             font-size: 12px;
@@ -1264,8 +1347,8 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             position: absolute;
             top: calc(100% + 4px);
             right: 0;
-            background: var(--bg-elevated);
-            border: 1px solid var(--border);
+            background: var(--surface-3);
+            border: 1px solid var(--border-subtle);
             border-radius: 6px;
             box-shadow: 0 8px 24px rgba(0,0,0,0.4);
             overflow: hidden;
@@ -1285,8 +1368,8 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             cursor: pointer;
             text-align: left;
           }
-          .provider-dropdown-item:hover { background: var(--bg-hover); }
-          .provider-dropdown-item.active { background: var(--bg-secondary); }
+          .provider-dropdown-item:hover { background: var(--surface-4); }
+          .provider-dropdown-item.active { background: var(--accent-dim); }
           .settings-sync-note {
             font-size: 11px;
             color: var(--text-muted);
@@ -1294,7 +1377,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
           }
           .settings-sync-note code {
             font-family: 'Geist Mono', 'JetBrains Mono', monospace;
-            background: var(--bg-secondary);
+            background: var(--surface-1);
             padding: 1px 4px;
             border-radius: 3px;
             color: var(--accent);

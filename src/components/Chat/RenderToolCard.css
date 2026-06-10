@@ -1,0 +1,181 @@
+/* ── RenderToolCard (Task 9) — full-width panel card ─────────────────────── */
+.sai-render-card {
+  width: 100%;
+  background: var(--surface-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+}
+.sai-render-card__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  background: var(--surface-3);
+  border-bottom: 1px solid var(--border-hairline);
+}
+.sai-render-card__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+  color: var(--text);
+}
+.sai-render-card__glyph { color: var(--accent); }
+.sai-render-card__sub {
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 11px;
+  font-family: 'Geist Mono', 'JetBrains Mono', 'Fira Code', monospace;
+}
+/* Right-aligned golden toggle button */
+.sai-render-card__codebtn {
+  margin-left: auto;
+  background: var(--accent);
+  color: #1a1110;
+  border: 1px solid var(--accent);
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+}
+.sai-render-card__codebtn:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+/* Beefy render area */
+.sai-render-card__render {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+  padding: 18px;
+  background: var(--surface-2);
+}
+.sai-render-card__err { padding: 12px 14px; color: var(--red); }
+.sai-render-card__code {
+  margin: 0;
+  padding: 12px 14px;
+  max-height: 280px;
+  overflow: auto;
+  background: var(--surface-0);
+  border-top: 1px solid var(--border-hairline);
+  font: 12px/1.55 'Geist Mono', 'JetBrains Mono', 'Fira Code', monospace;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* RenderRegion wrapper: round the live render's corners */
+[data-render-region] { border-radius: var(--radius-md); overflow: hidden; }
+
+/* ── RenderToolCallCard — tight right-aligned card with animated code pane ─ */
+.sai-rc-wrap { display: flex; justify-content: flex-start; width: 100%; }
+
+.sai-rc {
+  display: inline-flex;
+  flex-direction: column;
+  max-width: 100%;
+  background: var(--surface-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+}
+
+/* Header — compact */
+.sai-rc__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 4px 10px;
+  border-bottom: 1px solid var(--border-hairline);
+}
+.sai-rc__title {
+  flex: 1 1 0; min-width: 0;
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--text); overflow: hidden;
+}
+.sai-rc__icon { flex: 0 0 auto; color: var(--accent); }
+.sai-rc__brand { font-weight: 600; flex: 0 0 auto; }
+.sai-rc__sep { color: var(--text-muted); flex: 0 0 auto; }
+/* basis 0 → the (possibly long) mock name never forces the card wider than
+   the render; it just fills leftover header space and truncates. */
+.sai-rc__name { flex: 1 1 0; min-width: 0; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Header buttons — code toggle (gold outline) + open-in-browser (ghost) */
+.sai-rc__codebtn,
+.sai-rc__openbtn {
+  flex: 0 0 auto;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px; border-radius: var(--radius-sm);
+  font: 600 11px 'Geist Mono','JetBrains Mono','Fira Code',monospace;
+  line-height: 1.55;
+  cursor: pointer;
+  transition: background .12s ease, border-color .12s ease, color .12s ease;
+}
+.sai-rc__codebtn {
+  background: var(--surface-2);
+  color: var(--accent);
+  border: 1px solid rgba(212, 160, 23, 0.45);
+}
+.sai-rc__codebtn:hover { background: var(--surface-3); border-color: var(--accent); }
+.sai-rc[data-expanded="true"] .sai-rc__codebtn { background: var(--surface-4); border-color: var(--accent); }
+.sai-rc__openbtn {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+}
+.sai-rc__openbtn:hover { color: var(--text); border-color: var(--border-strong); background: var(--surface-2); }
+
+/* Render pane — hugs the mock's natural width; razor-thin frame on all sides.
+   The mock's own width drives the card width (capped to the message list), so
+   normal mocks stay their actual size and only genuinely wide mocks fill out. */
+.sai-rc__render {
+  flex: 0 0 auto;
+  align-self: stretch;
+  padding: 3px;
+  background: var(--surface-2);
+  display: flex; align-items: stretch;
+}
+.sai-rc__render [data-render-region] {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+/* Layout: narrow mock → code opens to the RIGHT; wide mock → code drops BELOW */
+.sai-rc__panes { display: flex; }
+.sai-rc[data-layout="side"] .sai-rc__panes { flex-direction: row; align-items: stretch; }
+.sai-rc[data-layout="stack"] .sai-rc__panes { flex-direction: column; }
+
+.sai-rc__code { overflow: hidden; background: var(--surface-0); }
+.sai-rc[data-layout="side"] .sai-rc__code {
+  width: 0;
+  transition: width .22s cubic-bezier(.2, .8, .2, 1);
+}
+.sai-rc[data-layout="side"][data-expanded="true"] .sai-rc__code {
+  width: 360px;
+  border-left: 1px solid var(--border-hairline);
+}
+.sai-rc[data-layout="stack"] .sai-rc__code {
+  max-height: 0;
+  transition: max-height .24s cubic-bezier(.2, .8, .2, 1);
+}
+.sai-rc[data-layout="stack"][data-expanded="true"] .sai-rc__code {
+  max-height: 460px;
+  border-top: 1px solid var(--border-hairline);
+}
+
+.sai-rc__codeplain,
+.sai-rc__codehl {
+  margin: 0; padding: 12px 14px; box-sizing: border-box;
+  overflow: auto; max-height: 460px;
+  font: 12px/1.6 'Geist Mono','JetBrains Mono','Fira Code',monospace;
+  white-space: pre; color: var(--text);
+}
+/* Let our panel bg show through shiki's own <pre> bg */
+.sai-rc__codehl .shiki { margin: 0 !important; padding: 0 !important; background: transparent !important; }
+.sai-rc__codehl pre, .sai-rc__codehl code { background: transparent !important; }
+.sai-rc__err { padding: 12px 14px; color: var(--red, #d45c3c); }

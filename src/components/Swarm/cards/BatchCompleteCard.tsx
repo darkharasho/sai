@@ -50,8 +50,8 @@ function Stat({ label, value, color, emphasized }: StatProps) {
         alignItems: 'flex-start',
         gap: 4,
         padding: '10px 12px',
-        background: 'var(--bg-secondary)',
-        border: '1px solid var(--border)',
+        background: 'var(--surface-2)',
+        border: '1px solid var(--border-subtle)',
         borderRadius: 6,
         minWidth: 0,
       }}
@@ -157,8 +157,8 @@ export default function BatchCompleteCard({ toolCall, onLandAll, hasLandable }: 
             style={{
               marginBottom: 14,
               padding: '10px 12px',
-              background: 'var(--bg-secondary)',
-              border: '1px solid var(--border)',
+              background: 'var(--surface-2)',
+              border: '1px solid var(--border-subtle)',
               borderRadius: 6,
             }}
           >

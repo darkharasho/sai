@@ -94,9 +94,9 @@ export default function NewTaskPopover({ open, onClose, onSubmit, defaultProvide
             z-index: 1000;
           }
           .ntp-card {
-            background: var(--bg-secondary);
+            background: var(--surface-3);
             color: var(--text);
-            border: 1px solid var(--border);
+            border: 1px solid var(--border-subtle);
             border-radius: 8px;
             padding: 16px;
             width: min(520px, 92vw);
@@ -113,9 +113,9 @@ export default function NewTaskPopover({ open, onClose, onSubmit, defaultProvide
             opacity: 0.85;
           }
           .ntp-textarea {
-            background: var(--bg-primary, var(--bg-secondary));
+            background: var(--surface-2);
             color: var(--text);
-            border: 1px solid var(--border);
+            border: 1px solid var(--border-subtle);
             border-radius: 4px;
             padding: 8px 10px;
             font-size: 13px;
@@ -138,9 +138,9 @@ export default function NewTaskPopover({ open, onClose, onSubmit, defaultProvide
           }
           .ntp-row select,
           .ntp-row input {
-            background: var(--bg-primary, var(--bg-secondary));
+            background: var(--surface-2);
             color: var(--text);
-            border: 1px solid var(--border);
+            border: 1px solid var(--border-subtle);
             border-radius: 4px;
             padding: 5px 8px;
             font-size: 12px;
@@ -152,21 +152,22 @@ export default function NewTaskPopover({ open, onClose, onSubmit, defaultProvide
           }
           .ntp-btn-secondary,
           .ntp-btn-primary {
-            border: 1px solid var(--border);
-            border-radius: 4px;
-            padding: 6px 14px;
-            font-size: 12px;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            padding: 5px var(--sp-2);
+            font-size: var(--text-sm);
             cursor: pointer;
             background: transparent;
-            color: var(--text);
+            color: var(--text-secondary);
           }
           .ntp-btn-secondary:hover {
-            background: var(--bg-hover);
+            background: var(--surface-4);
           }
           .ntp-btn-primary {
             background: var(--accent);
-            color: var(--bg-secondary);
+            color: #000;
             border-color: var(--accent);
+            font-weight: 600;
           }
           .ntp-btn-primary:hover {
             opacity: 0.9;

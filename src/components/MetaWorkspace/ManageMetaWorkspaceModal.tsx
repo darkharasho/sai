@@ -92,8 +92,8 @@ export function ManageMetaWorkspaceModal({ meta, onClose, onUpdated, onDeleted }
   }, [meta.id, onDeleted]);
 
   const inputStyle: React.CSSProperties = {
-    background: 'var(--bg-secondary)',
-    border: '1px solid var(--border)',
+    background: 'var(--surface-2)',
+    border: '1px solid var(--border-subtle)',
     borderRadius: 5,
     padding: '7px 10px',
     fontSize: 13,
@@ -133,7 +133,7 @@ export function ManageMetaWorkspaceModal({ meta, onClose, onUpdated, onDeleted }
               onClick={handlePickAndAdd}
               style={{
                 display: 'flex', alignItems: 'center', gap: 4,
-                background: 'none', border: '1px solid var(--border)', borderRadius: 4,
+                background: 'none', border: '1px solid var(--border-subtle)', borderRadius: 4,
                 color: 'var(--accent)', fontSize: 11, padding: '3px 8px', cursor: 'pointer',
               }}
             >
@@ -153,7 +153,7 @@ export function ManageMetaWorkspaceModal({ meta, onClose, onUpdated, onDeleted }
               key={project.path}
               style={{
                 display: 'flex', flexDirection: 'column', gap: 6,
-                background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+                background: 'var(--surface-2)', border: '1px solid var(--border-subtle)',
                 borderRadius: 6, padding: '8px 10px',
               }}
             >
@@ -196,7 +196,7 @@ export function ManageMetaWorkspaceModal({ meta, onClose, onUpdated, onDeleted }
         </div>
 
         {/* Divider */}
-        <div style={{ height: 1, background: 'var(--border)', marginBottom: 16 }} />
+        <div style={{ height: 1, background: 'var(--border-hairline)', marginBottom: 16 }} />
 
         {/* Error */}
         {error && (
@@ -261,7 +261,7 @@ export function ManageMetaWorkspaceModal({ meta, onClose, onUpdated, onDeleted }
             disabled={!canSave}
             style={{
               background: 'none',
-              border: `1px solid ${canSave ? 'var(--accent)' : 'var(--border)'}`,
+              border: `1px solid ${canSave ? 'var(--accent)' : 'var(--border-subtle)'}`,
               color: canSave ? 'var(--accent)' : 'var(--text-muted)',
               borderRadius: 5, padding: '7px 16px', fontSize: 13,
               cursor: canSave ? 'pointer' : 'not-allowed',
@@ -286,8 +286,8 @@ export function ManageMetaWorkspaceModal({ meta, onClose, onUpdated, onDeleted }
           backdrop-filter: blur(2px);
         }
         .mmwm-modal {
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
+          background: var(--surface-3);
+          border: 1px solid var(--border-subtle);
           border-radius: 10px;
           padding: 24px 28px;
           width: 520px;
@@ -299,7 +299,7 @@ export function ManageMetaWorkspaceModal({ meta, onClose, onUpdated, onDeleted }
           flex-direction: column;
         }
         .mmwm-modal::-webkit-scrollbar { width: 6px; }
-        .mmwm-modal::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        .mmwm-modal::-webkit-scrollbar-thumb { background: var(--border-hairline); border-radius: 3px; }
         .mmwm-modal::-webkit-scrollbar-track { background: transparent; }
       `}</style>
     </div>

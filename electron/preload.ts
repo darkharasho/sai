@@ -65,8 +65,58 @@ contextBridge.exposeInMainWorld('sai', {
   geminiSend: (projectPath: string, message: string, imagePaths?: string[], approvalMode?: string, conversationMode?: string, model?: string, scope?: string) =>
     ipcRenderer.send('gemini:send', projectPath, message, imagePaths, approvalMode, conversationMode, model, scope),
   geminiStop: (projectPath: string, scope?: string) => ipcRenderer.send('gemini:stop', projectPath, scope),
+  geminiApprove: (projectPath: string, toolUseId: string, approved: boolean, modifiedCommand?: string, scope?: string) =>
+    ipcRenderer.send('gemini:approve', projectPath, toolUseId, approved, modifiedCommand, scope),
   geminiSetSessionId: (projectPath: string, sessionId: string | undefined, scope?: string) =>
     ipcRenderer.send('gemini:setSessionId', projectPath, sessionId, scope),
+  // Unified provider routing — dispatches to the correct per-provider channel.
+  // Existing window.sai.claudeSend / geminiSend / codexSend remain for backward compat.
+  provider: {
+    start(provider: string, cwd: string, opts: {
+      scope?: string; kind?: string; orchestratorContext?: unknown;
+      scopeCwd?: string; metaPreamble?: string;
+    } = {}) {
+      if (provider === 'claude') {
+        return ipcRenderer.invoke('claude:start', cwd, opts.scope, opts.kind, opts.orchestratorContext, opts.scopeCwd, opts.metaPreamble);
+      } else if (provider === 'gemini') {
+        return ipcRenderer.invoke('gemini:start', cwd, opts.metaPreamble);
+      } else {
+        return ipcRenderer.invoke('codex:start', cwd, opts.metaPreamble);
+      }
+    },
+    send(provider: string, projectPath: string, message: string, opts: {
+      imagePaths?: string[]; model?: string; scope?: string;
+      effortLevel?: string; permMode?: string;
+      approvalMode?: string; conversationMode?: string;
+    } = {}) {
+      const images = opts.imagePaths ?? [];
+      if (provider === 'claude') {
+        ipcRenderer.send('claude:send', projectPath, message, images, opts.permMode, opts.effortLevel, opts.model, opts.scope);
+      } else if (provider === 'gemini') {
+        ipcRenderer.send('gemini:send', projectPath, message, images, opts.approvalMode, opts.conversationMode, opts.model, opts.scope);
+      } else {
+        ipcRenderer.send('codex:send', projectPath, message, images, opts.permMode, opts.model);
+      }
+    },
+    stop(provider: string, projectPath: string, scope?: string) {
+      if (provider === 'claude') {
+        ipcRenderer.send('claude:stop', projectPath, scope);
+      } else if (provider === 'gemini') {
+        ipcRenderer.send('gemini:stop', projectPath, scope);
+      } else {
+        ipcRenderer.send('codex:stop', projectPath);
+      }
+    },
+    setSessionId(provider: string, projectPath: string, sessionId: string | undefined, scope?: string) {
+      if (provider === 'claude') {
+        ipcRenderer.send('claude:setSessionId', projectPath, sessionId, scope);
+      } else if (provider === 'gemini') {
+        ipcRenderer.send('gemini:setSessionId', projectPath, sessionId, scope);
+      } else {
+        ipcRenderer.send('codex:setSessionId', projectPath, sessionId);
+      }
+    },
+  },
   claudeOnMessage: (callback: (msg: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, msg: unknown) => callback(msg);
     ipcRenderer.on('claude:message', listener);
@@ -110,6 +160,14 @@ contextBridge.exposeInMainWorld('sai', {
   fsReadDir: (dirPath: string) => ipcRenderer.invoke('fs:readDir', dirPath),
   fsReadFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath),
   fsReadFileBase64: (filePath: string) => ipcRenderer.invoke('fs:readFileBase64', filePath),
+  captureRegion: (rect: { x: number; y: number; width: number; height: number }): Promise<string | null> =>
+    ipcRenderer.invoke('sai:capture-region', rect),
+  pickFile: (opts: { mode?: 'open' | 'save' | 'directory'; filters?: { name: string; extensions: string[] }[]; multi?: boolean }): Promise<string[] | null> =>
+    ipcRenderer.invoke('sai:pick-file', opts),
+  notify: (args: { title: string; body?: string }): Promise<boolean> =>
+    ipcRenderer.invoke('sai:notify', args),
+  clipboardWrite: (text: string): Promise<boolean> =>
+    ipcRenderer.invoke('sai:clipboard-write', text),
   fsMtime: (filePath: string) => ipcRenderer.invoke('fs:mtime', filePath),
   fsWriteFile: (filePath: string, content: string) => ipcRenderer.invoke('fs:writeFile', filePath, content),
   fsRename: (oldPath: string, newPath: string) => ipcRenderer.invoke('fs:rename', oldPath, newPath),
@@ -202,6 +260,19 @@ contextBridge.exposeInMainWorld('sai', {
   getRecentProjects: () => ipcRenderer.invoke('project:getRecent'),
   openRecentProject: (path: string) => ipcRenderer.invoke('project:openRecent', path),
   openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
+  renderOpenInBrowser: (arg: string | { cwd: string; path: string }) =>
+    ipcRenderer.invoke('render:openInBrowser', arg),
+  renderMintFileUrl: (args: { cwd: string; path?: string; html?: string; baseDir?: string }):
+    Promise<{ ok: true; url: string; token: string } | { ok: false; error: string }> =>
+    ipcRenderer.invoke('render:mintFileUrl', args),
+  renderReleaseFileUrl: (token: string): Promise<boolean> =>
+    ipcRenderer.invoke('render:releaseFileUrl', token),
+  renderCaptureHtml: (args: { html: string; width?: number }): Promise<string | null> =>
+    ipcRenderer.invoke('render:captureHtml', args),
+  renderCaptureFile: (args: { cwd: string; path?: string; html?: string; baseDir?: string; width?: number; height?: number }): Promise<string | null> =>
+    ipcRenderer.invoke('render:captureFile', args),
+  renderCaptureComponent: (a: { component?: string; components?: string[]; props?: Record<string, unknown>; vars?: Record<string, string>; width?: number }): Promise<string | null> =>
+    ipcRenderer.invoke('render:captureComponent', a),
   setBadgeCount: (count: number) => ipcRenderer.send('app:setBadgeCount', count),
   scaffoldProject: (options: any) => ipcRenderer.invoke('project:scaffold', options),
   brainstormStart: () => ipcRenderer.invoke('brainstorm:start'),

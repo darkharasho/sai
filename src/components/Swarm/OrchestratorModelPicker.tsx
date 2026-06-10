@@ -110,7 +110,7 @@ export default function OrchestratorModelPicker({ provider, model, onChange, dis
           alignItems: 'center',
           gap: 4,
           background: 'none',
-          border: '1px solid var(--border)',
+          border: '1px solid var(--border-subtle)',
           color: 'var(--text-muted)',
           padding: '2px 6px',
           borderRadius: 4,
@@ -135,8 +135,8 @@ export default function OrchestratorModelPicker({ provider, model, onChange, dis
             top: coords.top,
             right: coords.right,
             minWidth: 260,
-            background: 'var(--bg-elevated, var(--bg, #1c1c1c))',
-            border: '1px solid var(--border)',
+            background: 'var(--surface-3)',
+            border: '1px solid var(--border-subtle)',
             borderRadius: 6,
             padding: 6,
             zIndex: 9999,
@@ -169,7 +169,7 @@ export default function OrchestratorModelPicker({ provider, model, onChange, dis
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   width: '100%',
-                  background: isSelected ? 'var(--bg-hover, rgba(255,255,255,0.06))' : 'transparent',
+                  background: isSelected ? 'var(--surface-4)' : 'transparent',
                   color: isDisabled ? 'var(--text-muted)' : 'var(--text)',
                   border: 'none',
                   padding: '6px 8px',
@@ -186,7 +186,7 @@ export default function OrchestratorModelPicker({ provider, model, onChange, dis
             );
           })}
 
-          <div style={{ height: 1, background: 'var(--border)', margin: '6px 0', opacity: 0.5 }} />
+          <div style={{ height: 1, background: 'var(--border-hairline)', margin: '6px 0' }} />
 
           <div style={{ fontSize: 10, opacity: 0.55, padding: '4px 8px', textTransform: 'uppercase', letterSpacing: 1 }}>
             Model
@@ -211,7 +211,7 @@ export default function OrchestratorModelPicker({ provider, model, onChange, dis
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     width: '100%',
-                    background: isSelected ? 'var(--bg-hover, rgba(255,255,255,0.06))' : 'transparent',
+                    background: isSelected ? 'var(--surface-4)' : 'transparent',
                     color: 'var(--text)',
                     border: 'none',
                     padding: '6px 8px',

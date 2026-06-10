@@ -228,8 +228,8 @@ export default function PluginsSidebar() {
       <style>{`
         .plugins-sidebar {
           width: var(--sidebar-width);
-          background: var(--bg-secondary);
-          border-right: 1px solid var(--border);
+          background: var(--surface-1);
+          border-right: 1px solid var(--border-subtle);
           display: flex;
           flex-direction: column;
           overflow: hidden;
@@ -237,7 +237,7 @@ export default function PluginsSidebar() {
         }
         .sidebar-tabs {
           display: flex;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--border-hairline);
         }
         .sidebar-tab {
           flex: 1;
@@ -283,8 +283,8 @@ export default function PluginsSidebar() {
         .sidebar-search {
           width: 100%;
           padding: 6px 10px 6px 28px;
-          background: var(--bg-input);
-          border: 1px solid var(--border);
+          background: var(--surface-2);
+          border: 1px solid var(--border-hairline);
           border-radius: 6px;
           color: var(--text);
           font-size: 11px;
@@ -302,17 +302,17 @@ export default function PluginsSidebar() {
           align-items: center;
           gap: 8px;
           padding: 10px;
-          background: var(--bg-input);
+          background: var(--surface-2);
           border-radius: 6px;
           margin-bottom: 4px;
           cursor: pointer;
           transition: background 0.15s;
         }
-        .sidebar-card:hover { background: var(--bg-hover); }
+        .sidebar-card:hover { background: var(--surface-4); }
         .card-icon {
           width: 28px;
           height: 28px;
-          background: var(--bg-hover);
+          background: var(--surface-4);
           border-radius: 6px;
           display: flex;
           align-items: center;
@@ -354,14 +354,14 @@ export default function PluginsSidebar() {
         .card-chevron { color: var(--text-muted); font-size: 10px; }
         .card-install-btn {
           padding: 2px 8px;
-          background: var(--bg-hover);
+          background: var(--surface-4);
           border: none;
           border-radius: 4px;
           font-size: 10px;
           color: var(--accent);
           cursor: pointer;
         }
-        .card-install-btn:hover { background: var(--border); }
+        .card-install-btn:hover { background: var(--border-subtle); }
         .card-installed { font-size: 10px; color: var(--text-muted); }
         .sidebar-empty {
           text-align: center;
@@ -385,7 +385,7 @@ export default function PluginsSidebar() {
         .retry-btn {
           margin-top: 8px;
           padding: 4px 12px;
-          background: var(--bg-hover);
+          background: var(--surface-4);
           border: none;
           border-radius: 4px;
           color: var(--accent);

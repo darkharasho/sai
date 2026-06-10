@@ -1,9 +1,25 @@
 // Vite resolves .woff2 imports as asset URLs by default
+import onestUrl from '../assets/fonts/Onest-Variable.woff2?url';
 const geistSansUrl = new URL('../../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2', import.meta.url).href;
 const geistMonoUrl = new URL('../../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2', import.meta.url).href;
 const departureMonoUrl = new URL('../../public/fonts/DepartureMono-Regular.woff2', import.meta.url).href;
 
 const css = `
+@font-face {
+  font-family: 'Onest';
+  src: url('${onestUrl}') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Onest';
+  src: url('${geistSansUrl}') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0060;
+}
 @font-face {
   font-family: 'Geist';
   src: url('${geistSansUrl}') format('woff2');

@@ -53,7 +53,7 @@ export default function InlineApprovalCard({ meta, onApprove, onDeny, onView }: 
       style={{
         ...cardBase,
         borderColor: SWARM_RED,
-        background: 'color-mix(in srgb, #b44 8%, var(--bg-elevated))',
+        background: 'color-mix(in srgb, #b44 8%, var(--surface-3))',
       }}
     >
       <div style={{ color: '#e88', fontWeight: 600, marginBottom: 6, fontSize: 11, letterSpacing: 0.4, textTransform: 'uppercase' }}>

@@ -112,7 +112,7 @@ export default function GitHistory({ projectPath }: GitHistoryProps) {
         return (
           <div
             key={commit.hash}
-            style={{ borderBottom: '1px solid var(--border)' }}
+            style={{ borderBottom: '1px solid var(--border-hairline)' }}
           >
             <div
               onClick={() => toggle(commit.hash)}
@@ -171,7 +171,7 @@ export default function GitHistory({ projectPath }: GitHistoryProps) {
                       style={{
                         padding: '1px 6px',
                         borderRadius: 999,
-                        background: 'var(--bg-tertiary)',
+                        background: 'var(--surface-3)',
                         color: 'var(--text-secondary)',
                       }}
                     >
@@ -186,7 +186,7 @@ export default function GitHistory({ projectPath }: GitHistoryProps) {
               <div
                 style={{
                   padding: '4px 12px 10px 32px',
-                  background: 'var(--bg-primary)',
+                  background: 'var(--surface-1)',
                   fontSize: 11,
                   color: 'var(--text-secondary)',
                 }}
@@ -201,8 +201,8 @@ export default function GitHistory({ projectPath }: GitHistoryProps) {
                         style={{
                           margin: '4px 0 8px',
                           padding: '6px 8px',
-                          background: 'var(--bg-secondary)',
-                          border: '1px solid var(--border)',
+                          background: 'var(--surface-2)',
+                          border: '1px solid var(--border-hairline)',
                           borderRadius: 3,
                           fontSize: 11,
                           color: 'var(--text-secondary)',
@@ -263,8 +263,8 @@ export default function GitHistory({ projectPath }: GitHistoryProps) {
             disabled={loading}
             onClick={() => setCount((c) => c + PAGE_SIZE)}
             style={{
-              background: 'var(--bg-hover)',
-              border: '1px solid var(--border)',
+              background: 'var(--surface-4)',
+              border: '1px solid var(--border-subtle)',
               borderRadius: 3,
               padding: '4px 12px',
               fontSize: 11,

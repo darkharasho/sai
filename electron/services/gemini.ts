@@ -218,6 +218,89 @@ function renderToolContent(content: any[] | undefined): string {
   }).filter(Boolean).join('\n');
 }
 
+/**
+ * Convert an ACP tool-call content array into a tool_result `content` value.
+ * Returns a plain string when there are no images (unchanged behavior); returns
+ * an array of text + Anthropic-style image blocks when image content is present.
+ * Best-effort: only the known image shape is recognized.
+ */
+export function acpContentToToolResult(content: any[] | undefined): string | any[] {
+  if (!Array.isArray(content) || content.length === 0) return '';
+  const images: Array<{ media_type: string; data: string }> = [];
+  for (const item of content) {
+    const inner = item?.content;
+    if (item?.type === 'content' && inner?.type === 'image' && inner.data) {
+      images.push({ media_type: inner.mimeType || 'application/octet-stream', data: inner.data });
+    }
+  }
+  if (images.length === 0) return renderToolContent(content);
+  const textOnly = content.filter(item => !(item?.type === 'content' && item?.content?.type === 'image'));
+  return [
+    { type: 'text', text: renderToolContent(textOnly) },
+    ...images.map(im => ({ type: 'image', source: { type: 'base64', media_type: im.media_type, data: im.data } })),
+  ];
+}
+
+// Map Gemini ACP tool_call `kind` values to Claude-equivalent tool names so that
+// ChatPanel's icon/type inference (which checks block.name) works for Gemini.
+function geminiKindToName(kind: string | undefined, title: string | undefined): string {
+  switch (kind) {
+    case 'read_file': return 'Read';
+    case 'write_file': case 'create_file': return 'Write';
+    case 'replace_in_file': case 'edit_file': case 'patch_file': return 'Edit';
+    case 'run_shell_command': case 'shell_command': case 'shell': return 'Bash';
+    case 'search_file_content': case 'search_files': return 'Grep';
+    case 'glob': case 'list_directory': case 'list_files': return 'Glob';
+    case 'web_search': return 'WebSearch';
+    case 'web_fetch': return 'WebFetch';
+    default: return title || kind || 'tool';
+  }
+}
+
+// Extract a plain string from a location value — the Gemini ACP may send
+// locations as plain strings or as objects with a path/file/name field.
+function asPathString(loc: unknown): string {
+  if (typeof loc === 'string') return loc;
+  if (loc && typeof loc === 'object') {
+    const o = loc as Record<string, unknown>;
+    return String(o.path || o.file || o.name || JSON.stringify(loc));
+  }
+  return String(loc ?? '');
+}
+
+// Format the input object so the tool card shows useful information
+// (file paths, commands) rather than the raw {kind, locations} envelope.
+// All values placed in file_path/pattern/command must be strings so that
+// ToolCallCard.formatInput never receives a non-string label.
+function geminiKindToInput(kind: string | undefined, locations: unknown[] | undefined, title: string | undefined): Record<string, unknown> {
+  const primaryPath = locations?.length ? asPathString(locations[0]) : undefined;
+  const allPaths = locations?.map(asPathString);
+  switch (kind) {
+    case 'read_file':
+    case 'write_file':
+    case 'create_file':
+    case 'replace_in_file':
+    case 'edit_file':
+    case 'patch_file':
+      return primaryPath
+        ? (allPaths!.length > 1 ? { file_path: primaryPath, paths: allPaths } : { file_path: primaryPath })
+        : { kind };
+    case 'run_shell_command':
+    case 'shell_command':
+    case 'shell':
+      return title ? { command: String(title) } : { kind };
+    case 'list_directory':
+    case 'glob':
+    case 'list_files':
+      return primaryPath ? { pattern: primaryPath } : { kind };
+    case 'search_file_content':
+    case 'search_files':
+      return primaryPath ? { pattern: primaryPath, ...(allPaths!.length > 1 ? { paths: allPaths!.slice(1) } : {}) } : { kind };
+    default:
+      return { kind, ...(primaryPath ? { file_path: primaryPath } : {}) };
+  }
+}
+
 function translateAcpEvent(msg: any, projectPath: string, scope: string): any | null {
   if (msg?.method === 'session/update') {
     const update = msg.params?.update;
@@ -245,11 +328,8 @@ function translateAcpEvent(msg: any, projectPath: string, scope: string): any | 
           content: [{
             id: update.toolCallId,
             type: 'tool_use',
-            name: update.title || 'tool',
-            input: {
-              kind: update.kind,
-              locations: update.locations,
-            },
+            name: geminiKindToName(update.kind, update.title),
+            input: geminiKindToInput(update.kind, update.locations, update.title),
           }],
         },
       };
@@ -264,7 +344,7 @@ function translateAcpEvent(msg: any, projectPath: string, scope: string): any | 
           content: [{
             type: 'tool_result',
             tool_use_id: update.toolCallId,
-            content: renderToolContent(update.content),
+            content: acpContentToToolResult(update.content),
             is_error: update.status === 'failed',
           }],
         },
@@ -545,6 +625,10 @@ export function registerGeminiHandlers(win: BrowserWindow) {
     const ws = get(projectPath);
     if (!ws) return;
     const sessionId = getScopeSessionId(ws, scope);
+    // Capture turnSeq before any async work. If gemini:send arrives and increments
+    // turnSeq while session/cancel is awaited, this done should still carry the
+    // original turn number so App.tsx's stale-done guard can reject it.
+    const stoppedTurnSeq = ws.gemini.turnSeq;
 
     if (ws.gemini.transport && sessionId && ws.gemini.busy) {
       try {
@@ -564,8 +648,30 @@ export function registerGeminiHandlers(win: BrowserWindow) {
       type: 'done',
       projectPath: ws.projectPath,
       scope,
-      turnSeq: ws.gemini.turnSeq,
+      turnSeq: stoppedTurnSeq,
     });
+  });
+
+  ipcMain.on('gemini:approve', async (_event, projectPath: string, toolUseId: string, approved: boolean, modifiedCommand?: string, scope: string = 'chat') => {
+    const ws = get(projectPath);
+    if (!ws) return;
+    const pending = ws.gemini.pendingApproval;
+    if (!pending || pending.toolUseId !== toolUseId) return;
+    const sessionId = scope === 'chat' ? ws.gemini.chatSessionId : ws.gemini.terminalSessions.get(scope);
+    try {
+      await ws.gemini.transport?.request('tool/approve', {
+        sessionId,
+        scope,
+        toolUseId,
+        approved,
+        modifiedCommand,
+      });
+      ws.gemini.pendingApproval = null;
+      safeSend(win, 'claude:message', { type: 'approval_resolved', projectPath: ws.projectPath, scope });
+    } catch (error: any) {
+      ws.gemini.pendingApproval = null;
+      safeSend(win, 'claude:message', { type: 'error', projectPath: ws.projectPath, scope, text: `Gemini approval failed: ${error?.message || 'Unknown error'}` });
+    }
   });
 
   ipcMain.on(
@@ -605,16 +711,50 @@ export function registerGeminiHandlers(win: BrowserWindow) {
           projectPath: ws.projectPath,
           scope,
           turnSeq: ws.gemini.turnSeq,
+          // Include the ACP session ID so isStreaming can be scoped to the
+          // active SAI session — prevents a background streaming turn from
+          // showing the thinking animation in a newly opened empty session.
+          sessionId,
         });
 
-        const result = await client.request<any>('session/prompt', {
-          sessionId,
-          scope,
-          prompt: buildPromptItems(message, imagePaths, bootstrapText),
-          approvalMode: approvalMode || 'auto_edit',
-          conversationMode,
-          model: conversationMode === 'fast' ? 'gemini-2.5-flash' : (model || GEMINI_DEFAULT_MODEL),
+        // Idle timeout: fire if no ACP event arrives for 2 minutes. Resets on
+        // every onEvent so active streaming turns never hit it, but a truly
+        // silent/stuck ACP is caught. A fixed total timeout fires even when
+        // content has already streamed — this idle approach avoids that.
+        const IDLE_TIMEOUT_MS = 2 * 60 * 1000;
+        let idleHandle: ReturnType<typeof setTimeout> | null = null;
+        let timeoutReject: ((e: Error) => void) | null = null;
+        const resetIdle = () => {
+          if (idleHandle) clearTimeout(idleHandle);
+          if (timeoutReject) {
+            idleHandle = setTimeout(
+              () => timeoutReject!(new Error('Gemini request timed out: no response for 2 minutes')),
+              IDLE_TIMEOUT_MS,
+            );
+          }
+        };
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutReject = reject;
+          resetIdle();
         });
+        const unsubIdle = client.onEvent(() => resetIdle());
+
+        let result: any;
+        try {
+          result = await Promise.race([timeoutPromise, client.request<any>('session/prompt', {
+            sessionId,
+            scope,
+            prompt: buildPromptItems(message, imagePaths, bootstrapText),
+            approvalMode: approvalMode || 'auto_edit',
+            conversationMode,
+            model: conversationMode === 'fast' ? 'gemini-2.5-flash' : (model || GEMINI_DEFAULT_MODEL),
+          })]);
+        } finally {
+          // Always cancel the idle timer and unsubscribe once session/prompt settles.
+          if (idleHandle) clearTimeout(idleHandle);
+          timeoutReject = null;
+          unsubIdle();
+        }
 
         if (bootstrapText) {
           ws.gemini.bootstrappedSessionIds.add(sessionId);

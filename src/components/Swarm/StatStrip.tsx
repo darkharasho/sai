@@ -31,8 +31,8 @@ const labelStyle: React.CSSProperties = {
 const cardBase: React.CSSProperties = {
   borderRadius: 6,
   padding: 10,
-  background: 'var(--bg-elevated)',
-  border: '1px solid var(--border)',
+  background: 'var(--surface-3)',
+  border: '1px solid var(--border-subtle)',
   minWidth: 0,
 };
 
@@ -48,7 +48,7 @@ export default function StatStrip({ active, approvals, ready, queued, cap, cost,
         gridTemplateColumns: 'repeat(5, 1fr)',
         gap: 10,
         padding: '12px 18px',
-        borderBottom: '1px solid var(--border)',
+        borderBottom: '1px solid var(--border-hairline)',
         flexShrink: 0,
       }}
     >
@@ -57,7 +57,7 @@ export default function StatStrip({ active, approvals, ready, queued, cap, cost,
         style={{
           ...cardBase,
           borderColor: 'var(--accent)',
-          background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-elevated))',
+          background: 'color-mix(in srgb, var(--accent) 8%, var(--surface-3))',
           position: 'relative',
           overflow: 'hidden',
         }}
@@ -90,9 +90,9 @@ export default function StatStrip({ active, approvals, ready, queued, cap, cost,
         data-testid="stat-approvals"
         style={{
           ...cardBase,
-          borderColor: approvalsMuted ? 'var(--border)' : '#b44',
+          borderColor: approvalsMuted ? 'var(--border-subtle)' : '#b44',
           background: approvalsMuted
-            ? 'var(--bg-elevated)'
+            ? 'var(--surface-3)'
             : 'rgba(180,68,68,0.08)',
           opacity: approvalsMuted ? 0.7 : 1,
         }}

@@ -3,6 +3,7 @@ import type { ChatMessage } from '../../types';
 import { Check, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SPRING, useReducedMotionTransition } from './motion';
+import { buildTaskRegistry } from './taskRegistry';
 
 interface Todo {
   id: string;
@@ -15,18 +16,6 @@ interface Todo {
 interface TodoProgressProps {
   messages: ChatMessage[];
   isStreaming: boolean;
-}
-
-function extractTaskCreateId(output: string | undefined, fallback: string): string {
-  if (!output) return fallback;
-  // Output format from TaskCreate: "Task #1 created successfully: ..."
-  const m = /Task\s*#?\s*([0-9a-zA-Z_-]+)\b/i.exec(output);
-  if (m) return m[1];
-  try {
-    const parsed = JSON.parse(output);
-    if (parsed && (parsed.id || parsed.taskId)) return String(parsed.id || parsed.taskId);
-  } catch { /* ignore */ }
-  return fallback;
 }
 
 function findLatestTodos(messages: ChatMessage[]): Todo[] | null {
@@ -61,54 +50,16 @@ function findLatestTodos(messages: ChatMessage[]): Todo[] | null {
     if (best) return best;
   }
 
-  // New: TaskCreate / TaskUpdate are atomic per-task calls. Replay them in
-  // order across the whole conversation so updates in a later turn can still
-  // find tasks created earlier.
-  const tasks = new Map<string, Todo>();
-  const order: string[] = [];
-  let createSeq = 0;
-  for (let i = 0; i < messages.length; i++) {
-    const m = messages[i];
-    if (m.role !== 'assistant' || !m.toolCalls?.length) continue;
-    for (const tc of m.toolCalls) {
-      if (tc.name === 'TaskCreate') {
-        try {
-          const input = JSON.parse(tc.input || '{}');
-          createSeq += 1;
-          const id = extractTaskCreateId(tc.output, String(createSeq));
-          if (tasks.has(id)) continue;
-          tasks.set(id, {
-            id,
-            content: input.subject || input.description || 'Task',
-            activeForm: input.activeForm,
-            status: 'pending',
-          });
-          order.push(id);
-        } catch { /* ignore malformed input */ }
-      } else if (tc.name === 'TaskUpdate') {
-        try {
-          const input = JSON.parse(tc.input || '{}');
-          const id = input.taskId != null ? String(input.taskId) : '';
-          if (!id) continue;
-          if (input.status === 'deleted') {
-            tasks.delete(id);
-            const ix = order.indexOf(id);
-            if (ix >= 0) order.splice(ix, 1);
-            continue;
-          }
-          const existing = tasks.get(id);
-          if (!existing) continue;
-          if (input.status === 'pending' || input.status === 'in_progress' || input.status === 'completed') {
-            existing.status = input.status;
-          }
-          if (typeof input.subject === 'string') existing.content = input.subject;
-          if (typeof input.activeForm === 'string') existing.activeForm = input.activeForm;
-        } catch { /* ignore malformed input */ }
-      }
-    }
-  }
-  if (order.length > 0) {
-    return order.map((id) => tasks.get(id)!).filter(Boolean);
+  // New: TaskCreate / TaskUpdate are atomic per-task calls. Replay them via the
+  // shared registry so updates in a later turn still find tasks created earlier.
+  const registry = buildTaskRegistry(messages);
+  if (registry.size > 0) {
+    return Array.from(registry.values()).map((t) => ({
+      id: t.id,
+      content: t.subject,
+      activeForm: t.activeForm,
+      status: t.status,
+    }));
   }
   return null;
 }
@@ -168,7 +119,7 @@ export default function TodoProgress({ messages, isStreaming }: TodoProgressProp
       title={open ? undefined : `${completed}/${total} · ${activeLabel}`}
     >
       <svg className="todo-ring-svg" width="22" height="22" viewBox="0 0 22 22">
-        <circle cx="11" cy="11" r={RADIUS} fill="none" stroke="var(--border)" strokeWidth="2.5" />
+        <circle cx="11" cy="11" r={RADIUS} fill="none" stroke="var(--border-hairline)" strokeWidth="2.5" />
         <motion.circle
           cx="11" cy="11" r={RADIUS}
           fill="none"
@@ -218,9 +169,13 @@ export default function TodoProgress({ messages, isStreaming }: TodoProgressProp
                     <span className={`todo-ring-status todo-ring-status--${status}`}>
                       {status === 'done' && <Check size={9} strokeWidth={3} />}
                     </span>
-                    <span className="todo-ring-text">
-                      {status === 'active' ? (t.activeForm || t.content) : t.content}
+                    <span className="todo-ring-textwrap">
+                      <span className="todo-ring-text">{t.content}</span>
+                      {status === 'active' && t.activeForm && t.activeForm !== t.content && (
+                        <span className="todo-ring-subtext">{t.activeForm}</span>
+                      )}
                     </span>
+                    {t.priority && <span className="todo-ring-priority">{t.priority}</span>}
                   </li>
                 );
               })}
@@ -255,8 +210,8 @@ export default function TodoProgress({ messages, isStreaming }: TodoProgressProp
           bottom: calc(100% + 8px);
           left: 0;
           width: 320px;
-          background: var(--bg-secondary);
-          border: 1px solid var(--border);
+          background: var(--surface-3);
+          border: 1px solid var(--border-subtle);
           border-radius: 8px;
           padding: 0;
           box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
@@ -269,7 +224,7 @@ export default function TodoProgress({ messages, isStreaming }: TodoProgressProp
           align-items: center;
           gap: 8px;
           padding: 6px 10px 6px 12px;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--border-hairline);
           font-size: 11px;
         }
         .todo-ring-popover-title { font-weight: 600; color: var(--text); }
@@ -346,6 +301,17 @@ export default function TodoProgress({ messages, isStreaming }: TodoProgressProp
           }
         }
         .todo-ring-text { color: var(--text); word-break: break-word; }
+        .todo-ring-textwrap { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+        .todo-ring-subtext {
+          font-size: 10.5px; color: var(--text-muted); font-style: italic; word-break: break-word;
+        }
+        .todo-ring-priority {
+          flex-shrink: 0; align-self: flex-start; margin-top: 2px;
+          font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600;
+          padding: 1px 6px; border-radius: 3px;
+          background: color-mix(in srgb, var(--orange, #e6b84f) 18%, transparent);
+          color: var(--orange, #e6b84f);
+        }
         .todo-ring-item--done .todo-ring-text {
           color: var(--text-muted);
           text-decoration: line-through;

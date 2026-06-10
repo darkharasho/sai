@@ -262,8 +262,8 @@ const STYLES = `
     border-radius: 4px;
     font-size: 12px;
     font-family: 'Geist Mono', 'JetBrains Mono', ui-monospace, monospace;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
+    background: var(--surface-2);
+    border: 1px solid var(--border-subtle);
     color: var(--text);
     cursor: pointer;
     transition: background 0.15s ease, border-color 0.15s ease;
@@ -312,7 +312,7 @@ const STYLES = `
   .link-preview-spinner {
     width: 10px;
     height: 10px;
-    border: 1.5px solid var(--border);
+    border: 1.5px solid var(--border-hairline);
     border-top-color: var(--text-muted);
     border-radius: 50%;
     animation: link-preview-spin 0.6s linear infinite;
@@ -329,8 +329,8 @@ const STYLES = `
     z-index: 100;
     min-width: 280px;
     max-width: 400px;
-    background: var(--bg-primary);
-    border: 1px solid var(--border);
+    background: var(--surface-3);
+    border: 1px solid var(--border-subtle);
     border-radius: 8px;
     padding: 12px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
@@ -352,7 +352,7 @@ const STYLES = `
     font-size: 10px;
     padding: 1px 6px;
     border-radius: 3px;
-    background: var(--bg-secondary);
+    background: var(--surface-2);
     color: var(--text-muted);
     margin-left: auto;
   }
@@ -391,8 +391,8 @@ const STYLES = `
     font-size: 11px;
     font-weight: 500;
     cursor: pointer;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
+    background: var(--surface-2);
+    border: 1px solid var(--border-subtle);
     color: var(--text-muted);
     font-family: inherit;
     transition: background 0.12s ease;

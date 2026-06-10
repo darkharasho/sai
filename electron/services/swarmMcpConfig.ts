@@ -10,6 +10,8 @@ export interface SwarmMcpConfigInput {
   mcpServerScriptPath: string;
   /** process.execPath at call time (Electron itself, run via ELECTRON_RUN_AS_NODE) */
   electronExecPath: string;
+  /** Which toolset the MCP server should expose. Defaults to 'orchestrator'. */
+  toolset?: 'chat' | 'orchestrator' | 'both';
 }
 
 /**
@@ -28,6 +30,7 @@ export function buildSwarmMcpConfig(input: SwarmMcpConfigInput) {
           SAI_SWARM_SOCKET_PATH: input.socketPath,
           SAI_SWARM_SECRET: input.secret,
           SAI_SWARM_WORKSPACE: input.workspace,
+          SAI_MCP_TOOLSET: input.toolset ?? 'orchestrator',
         },
       },
     },

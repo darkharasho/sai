@@ -16,9 +16,9 @@ function relative(ts: number | null): string {
 const buttonStyle: React.CSSProperties = {
   padding: '6px 12px',
   fontSize: 12,
-  background: 'var(--bg-secondary)',
+  background: 'var(--surface-2)',
   color: 'var(--text)',
-  border: '1px solid var(--border)',
+  border: '1px solid var(--border-subtle)',
   borderRadius: 6,
   cursor: 'pointer',
 };
@@ -33,8 +33,8 @@ const primaryButtonStyle: React.CSSProperties = {
 
 const codeStyle: React.CSSProperties = {
   fontSize: 11,
-  background: 'var(--bg-secondary)',
-  border: '1px solid var(--border)',
+  background: 'var(--surface-2)',
+  border: '1px solid var(--border-hairline)',
   padding: '2px 6px',
   borderRadius: 4,
   color: 'var(--text)',
@@ -133,8 +133,8 @@ export default function RemoteSettings() {
           onChange={(e) => void handleCeiling((e.target.value || null) as any)}
           style={{
             fontSize: 12, padding: '4px 8px',
-            background: 'var(--bg-secondary)', color: 'var(--text)',
-            border: '1px solid var(--border)', borderRadius: 6,
+            background: 'var(--surface-2)', color: 'var(--text)',
+            border: '1px solid var(--border-subtle)', borderRadius: 6,
           }}
         >
           <option value="">No clamp (use desktop)</option>
@@ -146,7 +146,7 @@ export default function RemoteSettings() {
 
       <div className="settings-divider" />
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', background: 'var(--surface-2)', border: '1px solid var(--border-subtle)', borderRadius: 6 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
           <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: dotColor }} />
           <span style={{ color: 'var(--text)' }}>{status?.running ? 'Running' : 'Not running'}</span>
@@ -181,7 +181,7 @@ export default function RemoteSettings() {
       </div>
 
       {pairQr && !pairExpired && (
-        <div style={{ marginTop: 14, padding: 14, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+        <div style={{ marginTop: 14, padding: 14, background: 'var(--surface-2)', border: '1px solid var(--border-subtle)', borderRadius: 6, display: 'flex', gap: 16, alignItems: 'flex-start' }}>
           <img src={pairQr} alt="Pairing QR" style={{ width: 180, height: 180, background: '#fff', padding: 6, borderRadius: 6 }} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 13, color: 'var(--text)' }}>Scan with your phone's camera</div>
@@ -209,7 +209,7 @@ export default function RemoteSettings() {
       )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {devices.filter((d) => !d.revokedAt).map((d) => (
-          <div key={d.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6 }}>
+          <div key={d.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--surface-2)', border: '1px solid var(--border-subtle)', borderRadius: 6 }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
               <div style={{ fontSize: 13, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.label}</div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>last seen {relative(d.lastSeenAt)}</div>

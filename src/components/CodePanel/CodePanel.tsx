@@ -69,14 +69,14 @@ export default function CodePanel({
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
-      background: 'var(--bg-primary)',
+      background: 'var(--surface-1)',
     }}>
       {/* Tab bar */}
       <div style={{
         display: 'flex',
         alignItems: 'stretch',
-        background: 'var(--bg-secondary)',
-        borderBottom: '1px solid var(--border)',
+        background: 'var(--surface-2)',
+        borderBottom: '1px solid var(--border-hairline)',
         flexShrink: 0,
         overflow: 'hidden',
       }}>
@@ -109,9 +109,9 @@ export default function CodePanel({
                   fontSize: 12,
                   cursor: 'pointer',
                   color: isActive ? 'var(--text)' : 'var(--text-muted)',
-                  background: isActive ? 'var(--bg-primary)' : 'transparent',
+                  background: isActive ? 'var(--surface-1)' : 'transparent',
                   borderBottom: isActive ? '2px solid var(--accent)' : '2px solid transparent',
-                  borderRight: '1px solid var(--border)',
+                  borderRight: '1px solid var(--border-hairline)',
                   userSelect: 'none' as const,
                   flexShrink: 0,
                 }}
@@ -164,7 +164,7 @@ export default function CodePanel({
                       const btn = e.currentTarget;
                       btn.style.opacity = '1';
                       btn.style.color = 'var(--text)';
-                      btn.style.background = 'var(--bg-hover)';
+                      btn.style.background = 'var(--surface-4)';
                       const dot = btn.parentElement?.querySelector('.tab-dirty-dot') as HTMLElement | null;
                       if (dot) dot.style.opacity = '0';
                     }}
@@ -193,7 +193,7 @@ export default function CodePanel({
             style={{
               background: 'none',
               border: 'none',
-              borderLeft: '1px solid var(--border)',
+              borderLeft: '1px solid var(--border-hairline)',
               color: 'var(--text-muted)',
               cursor: 'pointer',
               padding: '0 10px',
@@ -212,8 +212,8 @@ export default function CodePanel({
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: '4px 12px',
-        background: 'var(--bg-secondary)',
-        borderBottom: '1px solid var(--border)',
+        background: 'var(--surface-2)',
+        borderBottom: '1px solid var(--border-hairline)',
         flexShrink: 0,
       }}>
         <span style={{
@@ -229,14 +229,14 @@ export default function CodePanel({
             display: 'flex',
             borderRadius: 4,
             overflow: 'hidden',
-            border: '1px solid var(--border)',
+            border: '1px solid var(--border-hairline)',
           }}>
             {(['unified', 'split'] as const).map((m) => (
               <button
                 key={m}
                 onClick={() => onDiffModeChange(activeFilePath, m)}
                 style={{
-                  background: activeFile.diffMode === m ? 'var(--bg-hover)' : 'transparent',
+                  background: activeFile.diffMode === m ? 'var(--surface-4)' : 'transparent',
                   color: activeFile.diffMode === m ? 'var(--text)' : 'var(--text-muted)',
                   border: 'none',
                   padding: '3px 10px',
@@ -256,7 +256,7 @@ export default function CodePanel({
             color: 'var(--text-muted)',
             fontSize: 11,
             padding: '3px 8px',
-            border: '1px solid var(--border)',
+            border: '1px solid var(--border-hairline)',
             borderRadius: 4,
           }}>
             Ctrl+S to save
@@ -271,8 +271,8 @@ export default function CodePanel({
           alignItems: 'center',
           gap: 8,
           padding: '6px 12px',
-          background: 'var(--bg-secondary)',
-          borderBottom: '1px solid var(--border)',
+          background: 'var(--surface-2)',
+          borderBottom: '1px solid var(--border-hairline)',
           flexShrink: 0,
           fontSize: 12,
           color: 'var(--text-muted)',
@@ -298,7 +298,7 @@ export default function CodePanel({
               onClick={() => onKeepMyEdits(activeFilePath)}
               style={{
                 background: 'none',
-                border: '1px solid var(--border)',
+                border: '1px solid var(--border-subtle)',
                 borderRadius: 4,
                 color: 'var(--text-muted)',
                 cursor: 'pointer',

@@ -1,4 +1,4 @@
-- [x] User input should be a chevron not a dot
+v- [x] User input should be a chevron not a dot
 - [x] shrink the main input field for user inputs
 - [x] add version number to the app
 - [x] show a badge on the git page when there is changes
@@ -45,3 +45,16 @@
 - [x] show a spinner in the titlebar if theres a background workspace currently with an active conversation. have a faint number for how many workspaces are actively mid conversation
 - [x] spellchecker needs to be faster, auto complete even if the user has moved on from the word
 - [x] whats new shows every launch
+
+
+
+- [x] render md in tool cards
+- [x] syntax highlighting better in tool cards like grep and glob
+- [x] task updates more info
+- [x] hot reloading files when in the editor 
+- [x] answering askuserquestions makes it think its dismissed "The question was dismissed — I'll go with the clean default that matches how you've been working: two separate PRs, and I'll leave PR #43 as-is (the stray release.json ignore line is harmless and avoids a needless force-push; the release PR just won't re-touch .gitignore). Easy to redirect if you'd rather combine."
+- [x] custom svg like otto for emoji
+- [x] green squircle still not clearing on visiting a workspace, tie it to the !
+- [x] Gemini workspaces dont notify properly, turn is done but if im in a different workspace it says its always working even when its done
+- [ ] Long running sessions tend to get stuck, i think maybe by the auto suspend?
+- [ ] for output like npx playwright test it would be nice to see the output live instead of just the call

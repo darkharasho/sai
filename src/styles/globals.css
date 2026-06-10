@@ -1,38 +1,97 @@
 :root {
-  --bg-primary: #111418;
-  --bg-secondary: #0c0f11;
-  --bg-mid: #0e1114;
-  --bg-input: #161a1f;
-  --bg-hover: #21292f;
-  --bg-elevated: #1c2027;
-  --border: #1e2228;
-  --accent: #c7910c;
-  --accent-hover: #f5b832;
-  --text: #bec6d0;
-  --text-secondary: #a0acbb;
-  --text-muted: #5a6a7a;
-  --blue: #11B7D4;
-  --green: #00a884;
-  --orange: #d4770c;
-  --pink: #d46ec0;
-  --purple: #a85ff1;
-  --red: #E35535;
-  --yellow: #c7910c;
+  /* ── Surface elevation (5-step ladder) ── */
+  --surface-0: #090c0e;   /* window bg, nav bar */
+  --surface-1: #0f1318;   /* sidebars, panels, main area */
+  --surface-2: #161b22;   /* cards, inputs, code blocks */
+  --surface-3: #1d2430;   /* modals, dropdowns, tool card headers */
+  --surface-4: #252d3a;   /* hover, selected */
+
+  /* Semantic aliases — keep old names working during component migration */
+  --bg-primary:   var(--surface-1);
+  --bg-secondary: var(--surface-0);
+  --bg-mid:       var(--surface-0);
+  --bg-input:     var(--surface-2);
+  --bg-hover:     var(--surface-4);
+  --bg-elevated:  var(--surface-3);
+
+  /* ── Borders (tiered) ── */
+  --border-hairline: #161f28;              /* internal structure, separators */
+  --border-subtle:   #1e2a38;             /* panel/card edges (default) */
+  --border-strong:   #2e3d4e;             /* focus rings, active states */
+  --border-accent:   rgba(212,160,23,0.35); /* selected/highlighted */
+
+  /* Alias — old --border maps to subtle tier */
+  --border: var(--border-subtle);
+
+  /* ── Accent (refined gold) ── */
+  --accent:       #d4a017;
+  --accent-hover: #f0b820;
+  --accent-dim:   rgba(212,160,23,0.12);  /* icon bg, selection tints */
+  --accent-rgb:   212, 160, 23;           /* for rgba() usage */
+
+  /* ── Text ── */
+  --text:           #bec6d0;
+  --text-secondary: #8a97a8;
+  --text-muted:     #4d5d6d;
+
+  /* ── Status colors ── */
+  --blue:      #4a9fd4;
+  --green:     #2ea87e;
+  --orange:    #d4770c;
+  --pink:      #d46ec0;
+  --purple:    #9c6ef0;
+  --red:       #d45c3c;
+  --yellow:    #d4a017;
   --turquoise: #38c7bd;
 
-  --nav-width: 48px;
-  --sidebar-width: 300px;
-  --titlebar-height: 38px;
+  /* ── Type scale ── */
+  --text-xs:   11px;   /* timestamps, labels, metadata */
+  --text-sm:   12px;   /* secondary UI, sidebar items */
+  --text-base: 13px;   /* body (default) */
+  --text-md:   14px;   /* chat message body */
+  --text-lg:   15px;   /* section headings, panel titles */
+  --text-xl:   17px;   /* page-level headings */
+
+  /* ── Spacing scale (4px base) ── */
+  --sp-1:  4px;
+  --sp-2:  8px;
+  --sp-3:  12px;
+  --sp-4:  16px;
+  --sp-5:  20px;
+  --sp-6:  24px;
+  --sp-8:  32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+
+  /* ── Radius scale ── */
+  --radius-xs: 2px;    /* tags, badges */
+  --radius-sm: 4px;    /* buttons, small elements */
+  --radius-md: 6px;    /* cards, inputs */
+  --radius-lg: 10px;   /* panels */
+  --radius-xl: 14px;   /* modals */
+
+  /* ── Papery dash divider ── */
+  --divider-dash: repeating-linear-gradient(
+    90deg,
+    var(--border-hairline) 0 7px,
+    transparent 7px 13px
+  );
+
+  /* ── Layout ── */
+  --nav-width:          48px;
+  --sidebar-width:      300px;
+  --titlebar-height:    38px;
   --terminal-min-height: 150px;
 
+  /* ── Motion ── */
   --ease-out-soft: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --dur-fast: 120ms;
-  --dur-base: 180ms;
+  --dur-fast:  120ms;
+  --dur-base:  180ms;
 
-  font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  font-size: 13px;
+  font-family: 'Onest', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: var(--text-base);
   color: var(--text);
-  background: var(--bg-primary);
+  background: var(--surface-1);
 }
 
 @keyframes sidebar-in {
@@ -41,7 +100,6 @@
 }
 
 .sidebar-mount {
-  animation: sidebar-in var(--dur-base) var(--ease-out-soft);
   will-change: transform, opacity;
 }
 
@@ -101,10 +159,13 @@
 
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
+button, input, select, textarea { font-family: inherit; }
+
 
 html, body, #root {
   height: 100%;
   overflow: hidden;
+  font-family: 'Onest', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
 html.rounded-corners,
@@ -114,7 +175,7 @@ html.rounded-corners body {
 
 html.rounded-corners #root {
   border-radius: 10px;
-  background: var(--bg-primary);
+  background: var(--surface-1);
 }
 
 html.rounded-corners.window-maximized #root {
@@ -174,15 +235,15 @@ html.rounded-corners.window-maximized .drag-overlay {
 }
 
 
-::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; transition: background 0.2s; }
+::-webkit-scrollbar-thumb { background: var(--border-subtle); border-radius: 3px; transition: background 0.2s; }
 ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 
 code { font-family: 'Geist Mono', 'JetBrains Mono', 'Fira Code', monospace; }
 
 pre {
-  background: var(--bg-secondary);
+  background: var(--surface-2);
   border-radius: 6px;
   padding: 12px;
   overflow-x: auto;
@@ -203,4 +264,60 @@ pre {
 @keyframes overlay-in {
   from { opacity: 0; backdrop-filter: blur(0px); }
   to   { opacity: 1; backdrop-filter: blur(4px); }
+}
+
+/* Papery dash — reusable dividers (see specs/2026-06-05-ui-papery-dash-refresh-design.md) */
+.dashed-rule {
+  height: 1px;
+  min-height: 1px;
+  flex-shrink: 0; /* never collapse to 0 when used as a flex child */
+  border: 0;
+  background: var(--divider-dash);
+}
+
+.dashed-divider-top {
+  background-image: var(--divider-dash);
+  background-repeat: no-repeat;
+  background-position: top left;
+  background-size: 100% 1px;
+}
+
+/* Assistant message word-reveal (see specs/2026-06-05-assistant-message-reveal-design.md) */
+.rv-word { will-change: opacity; }
+.rv-caret {
+  color: var(--accent);
+  margin-left: 1px;
+  animation: rv-caret-blink 1s steps(2) infinite;
+}
+@keyframes rv-caret-blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .rv-caret { animation: none; }
+}
+.sai-emoji-icon {
+  display: inline-block;
+  width: 1.3em;
+  height: 1.3em;
+  vertical-align: -0.2em;
+  margin: 0 0.1em;
+  color: var(--accent);
+}
+.sai-emoji-mask {
+  display: inline-block;
+  width: 1.3em;
+  height: 1.3em;
+  vertical-align: -0.2em;
+  margin: 0 0.1em;
+  background-color: var(--accent);
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+}
+.sai-emoji-jumbo .sai-emoji-icon,
+.sai-emoji-jumbo .sai-emoji-mask {
+  width: 2.2em;
+  height: 2.2em;
+  vertical-align: -0.35em;
 }
