@@ -21,6 +21,9 @@ import {
   resolveRenderAsset,
   RENDER_CSP,
   contentTypeFor,
+  prepareRenderTarget,
+  mintRenderToken,
+  evictRenderToken,
 } from './services/renderProtocol';
 import { execFile as _execFile } from 'node:child_process';
 import { promisify as _promisify } from 'node:util';
@@ -969,10 +972,40 @@ function createWindow() {
     }
   });
 
-  // Write a render's HTML to a temp file and open it in the default browser.
-  ipcMain.handle('render:openInBrowser', async (_event, html: string) => {
-    if (typeof html !== 'string' || !html) return false;
+  ipcMain.handle(
+    'render:mintFileUrl',
+    async (_e, args: { cwd: string; path?: string; html?: string; baseDir?: string }) => {
+      if (!args || typeof args.cwd !== 'string' || !args.cwd) {
+        return { ok: false, error: 'missing cwd' };
+      }
+      const target = prepareRenderTarget(args);
+      if (!target.ok) return { ok: false, error: target.error };
+      const token = mintRenderToken(renderProtocolStore, {
+        root: target.root,
+        inlineHtml: target.inlineHtml,
+      });
+      return { ok: true, url: `sai-render://${token}/${target.entry}`, token };
+    },
+  );
+
+  ipcMain.handle('render:releaseFileUrl', async (_e, token: string) => {
+    if (typeof token === 'string') evictRenderToken(renderProtocolStore, token);
+    return true;
+  });
+
+  // Open a render in the default browser. Accepts EITHER inline HTML (written to a
+  // temp file) OR { cwd, path } to open the real on-disk file.
+  ipcMain.handle('render:openInBrowser', async (_event, arg: string | { cwd: string; path: string }) => {
     try {
+      if (arg && typeof arg === 'object' && typeof arg.path === 'string') {
+        const target = prepareRenderTarget({ cwd: arg.cwd, path: arg.path });
+        if (!target.ok) return false;
+        const file = path.join(target.root, target.entry);
+        await shell.openExternal(pathToFileURL(file).toString());
+        return true;
+      }
+      const html = arg as string;
+      if (typeof html !== 'string' || !html) return false;
       const dir = path.join(app.getPath('temp'), 'sai-renders');
       fs.mkdirSync(dir, { recursive: true });
       const file = path.join(dir, `render-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.html`);
