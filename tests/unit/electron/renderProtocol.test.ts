@@ -104,6 +104,20 @@ describe('prepareRenderTarget', () => {
     expect(prepareRenderTarget({ cwd: root, path: '../escape' }).ok).toBe(false);
   });
 
+  it('rejects an in-workspace symlink that points outside cwd', () => {
+    const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sai-out2-')));
+    fs.mkdirSync(path.join(outside, 'secret'));
+    fs.writeFileSync(path.join(outside, 'secret', 'index.html'), '<p>leak</p>');
+    fs.symlinkSync(path.join(outside, 'secret'), path.join(root, 'evil'));
+    // path into the symlinked dir must be rejected (escapes the workspace)
+    const t = prepareRenderTarget({ cwd: root, path: 'evil/index.html' });
+    expect(t.ok).toBe(false);
+    // baseDir pointing at the symlinked dir must also be rejected
+    const t2 = prepareRenderTarget({ cwd: root, html: '<p>x</p>', baseDir: 'evil' });
+    expect(t2.ok).toBe(false);
+    fs.rmSync(outside, { recursive: true, force: true });
+  });
+
   it('injects a <base> into inline html so relative assets resolve', () => {
     const t = prepareRenderTarget({ cwd: root, html: '<link href="app.css">', baseDir: 'assets' });
     expect(t.ok && t.inlineHtml).toContain('<base href="sai-render-base/">');

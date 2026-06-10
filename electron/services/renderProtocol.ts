@@ -96,20 +96,9 @@ export function resolveRenderAsset(
     : rel;
   if (path.isAbsolute(stripped)) return { ok: false, status: 403 };
 
-  const candidate = path.resolve(entry.root, stripped || 'index.html');
-  let realCandidate: string;
-  try {
-    realCandidate = fs.realpathSync(candidate);
-  } catch {
-    return { ok: false, status: 404 };
-  }
-  if (
-    realCandidate !== entry.root &&
-    !realCandidate.startsWith(entry.root + path.sep)
-  ) {
-    return { ok: false, status: 403 };
-  }
-  return { ok: true, filePath: realCandidate };
+  const real = containedRealPath(entry.root, stripped || 'index.html');
+  if (!real) return { ok: false, status: 404 };
+  return { ok: true, filePath: real };
 }
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -144,12 +133,29 @@ export type PrepareResult =
 // pointing back through the protocol (resolved against the token root).
 const INLINE_BASE = '<base href="sai-render-base/">';
 
-function within(cwd: string, rel: string): string | null {
+// Resolve `rel` against `root` and return the realpath IFF it stays inside the
+// realpath'd root. Realpathing both ends means an in-tree symlink that points
+// outside cannot escape (its real target fails the prefix check). null = blocked
+// or missing.
+function containedRealPath(root: string, rel: string): string | null {
   if (path.isAbsolute(rel)) return null;
-  const realCwd = fs.realpathSync(cwd);
-  const resolved = path.resolve(realCwd, rel);
-  if (resolved !== realCwd && !resolved.startsWith(realCwd + path.sep)) return null;
-  return resolved;
+  let realRoot: string;
+  try {
+    realRoot = fs.realpathSync(root);
+  } catch {
+    return null;
+  }
+  const resolved = path.resolve(realRoot, rel);
+  let realResolved: string;
+  try {
+    realResolved = fs.realpathSync(resolved);
+  } catch {
+    return null;
+  }
+  if (realResolved !== realRoot && !realResolved.startsWith(realRoot + path.sep)) {
+    return null;
+  }
+  return realResolved;
 }
 
 export function prepareRenderTarget(opts: {
@@ -160,7 +166,7 @@ export function prepareRenderTarget(opts: {
 }): PrepareResult {
   // path wins over html.
   if (opts.path) {
-    const abs = within(opts.cwd, opts.path);
+    const abs = containedRealPath(opts.cwd, opts.path);
     if (!abs) return { ok: false, error: `path escapes workspace: ${opts.path}` };
     let stat: fs.Stats;
     try {
@@ -176,7 +182,7 @@ export function prepareRenderTarget(opts: {
 
   if (typeof opts.html === 'string') {
     const baseRel = opts.baseDir ?? '.';
-    const abs = within(opts.cwd, baseRel);
+    const abs = containedRealPath(opts.cwd, baseRel);
     if (!abs) return { ok: false, error: `baseDir escapes workspace: ${opts.baseDir}` };
     const withBase = injectBase(opts.html);
     return { ok: true, root: abs, entry: INLINE_ENTRY, inlineHtml: withBase };
