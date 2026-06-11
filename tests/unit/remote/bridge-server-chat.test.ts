@@ -92,6 +92,14 @@ describe('BridgeServer chat routing', () => {
     ws.close();
   });
 
+  it('prompt forwards sessionId to sendPrompt', async () => {
+    const ws = await pairedSocket(server, port);
+    ws.send(JSON.stringify({ type: 'prompt', text: 'continue', projectPath: '/p', scope: 'chat', sessionId: 'sess-42' }));
+    await vi.waitFor(() => expect(sendPrompt).toHaveBeenCalled());
+    expect(sendPrompt.mock.calls[0][0]).toMatchObject({ text: 'continue', projectPath: '/p', sessionId: 'sess-42' });
+    ws.close();
+  });
+
   it('approval calls resolveApproval', async () => {
     const ws = await pairedSocket(server, port);
     ws.send(JSON.stringify({ type: 'approval', toolUseId: 'tu1', decision: 'approve', projectPath: '/p', scope: 'chat' }));
