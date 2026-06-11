@@ -55,6 +55,7 @@ import { landTask, discardTask, rebaseRetry } from './lib/swarmLanding';
 import { ensureOrchestratorSession } from './lib/swarmOrchestratorSession';
 import { handleSwarmToolRequest, type SwarmHost } from './lib/swarmOrchestratorDispatcher';
 import { handleRenderToolRequest } from './render/handleRenderToolRequest';
+import { resolveThemedSurface } from './render/renderSizing';
 import { resolveWatchRun } from './components/Chat/githubRunResolver';
 import { registeredComponentKeys } from './render/componentRegistry';
 import { renderMermaidToSvg } from './render/renderMermaid';
@@ -1458,7 +1459,7 @@ export default function App() {
       }
 
       if (req.tool === 'render_mermaid') {
-        const saiAny = sai as { renderCaptureHtml?: (a: { html: string; width?: number }) => Promise<string | null> };
+        const saiAny = sai as { renderCaptureHtml?: (a: { html: string; width?: number; background?: string }) => Promise<string | null> };
         const diagram = typeof req.input?.diagram === 'string' ? req.input.diagram : '';
         const deps = diagram && typeof saiAny.renderCaptureHtml === 'function'
           ? {
@@ -1467,6 +1468,7 @@ export default function App() {
                 const b64 = await saiAny.renderCaptureHtml!({
                   html: svg,
                   width: typeof req.input?.width === 'number' ? req.input.width : undefined,
+                  background: typeof req.input?.background === 'string' ? req.input.background : resolveThemedSurface(),
                 });
                 if (!b64) throw new Error('capture returned no image');
                 return { base64: b64, mimeType: 'image/png' as const };
@@ -1546,7 +1548,7 @@ export default function App() {
       // tab. renderId = req.id; response goes over the swarm tool channel.
       if (typeof req.tool === 'string' && req.tool.startsWith('render_')) {
         const saiAny = sai as {
-          renderCaptureHtml?: (a: { html: string; width?: number }) => Promise<string | null>;
+          renderCaptureHtml?: (a: { html: string; width?: number; background?: string }) => Promise<string | null>;
           renderCaptureFile?: (a: { cwd: string; path?: string; html?: string; baseDir?: string; width?: number; height?: number }) => Promise<string | null>;
         };
         let htmlInput: string | null = null;
@@ -1590,6 +1592,7 @@ export default function App() {
               const b64 = await saiAny.renderCaptureHtml!({
                 html: htmlInput,
                 width: typeof req.input?.width === 'number' ? req.input.width : undefined,
+                background: typeof req.input?.background === 'string' ? req.input.background : resolveThemedSurface(),
               });
               if (!b64) throw new Error('capture returned no image');
               return { base64: b64, mimeType: 'image/png' as const };
