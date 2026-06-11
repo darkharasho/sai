@@ -981,7 +981,7 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
             <SquareSlash size={18} />
           </button>
           {overlayControl && (() => {
-            const next: OverlayMode = overlayControl.mode === 'on' ? 'off' : overlayControl.mode === 'off' ? 'persist' : 'on';
+            const next: OverlayMode = overlayControl.mode === 'on' ? 'persist' : overlayControl.mode === 'persist' ? 'off' : 'on';
             return (
               <button
                 className={`toolbar-btn overlay-mode-btn overlay-mode-${overlayControl.mode}`}
