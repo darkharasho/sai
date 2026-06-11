@@ -5,11 +5,14 @@ export interface OverlayRow {
   name: string;
   kind: 'project' | 'meta';
   state: IndicatorState;
-  /** Last assistant text, pre-truncated by the caller. */
-  snippet?: string;
-  /** Recent tool calls (latest last); running ones have done=false. */
-  tools?: Array<{ name: string; done: boolean }>;
+  /** Chronological tail of the conversation: text segments interleaved with
+   *  tool calls exactly as they happened (latest last). */
+  tail?: OverlayTailItem[];
 }
+
+export type OverlayTailItem =
+  | { kind: 'text'; text: string }
+  | { kind: 'tool'; name: string; done: boolean };
 
 export interface OverlayPayload {
   hasReportable: boolean;

@@ -253,6 +253,17 @@ describe('OverlayManager', () => {
     expect(windows[0].visible).toBe(true);
   });
 
+  it('does not reposition a visible window when payloads arrive (drag must stick)', () => {
+    const { mgr } = makeManager();
+    mgr.setEnabled(true);
+    mgr.update({ hasReportable: true });
+    mgr.setMainFocused(false);
+    mgr.dragBy(120, 80);
+    const [x, y] = windows[0].getPosition();
+    mgr.update({ hasReportable: true, rows: [], focusPath: null });
+    expect(windows[0].getPosition()).toEqual([x, y]);
+  });
+
   it('destroy tears the window down', () => {
     const { mgr } = makeManager();
     mgr.setEnabled(true);

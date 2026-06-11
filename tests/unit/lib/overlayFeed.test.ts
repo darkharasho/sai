@@ -17,12 +17,12 @@ describe('buildOverlayPayload', () => {
     const p = buildOverlayPayload([
       row({ path: '/busy', name: 'busy', state: 'busy' }),
       row({ path: '/done', name: 'done', state: 'done' }),
-      row({ path: '/ask', name: 'ask', state: 'question', snippet: 'which one?' }),
+      row({ path: '/ask', name: 'ask', state: 'question', tail: [{ kind: 'text', text: 'which one?' }] }),
     ]);
     expect(p.hasReportable).toBe(true);
     expect(p.rows.map(s => s.name)).toEqual(['busy', 'done', 'ask']);
     expect(p.focusPath).toBe('/ask');
-    expect(p.rows.find(r => r.path === '/ask')?.snippet).toBe('which one?');
+    expect(p.rows.find(r => r.path === '/ask')?.tail).toEqual([{ kind: 'text', text: 'which one?' }]);
   });
 
   it('approval beats busy; busy beats done', () => {

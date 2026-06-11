@@ -66,7 +66,15 @@
 .overlay-meta { font-style: italic; }
 .overlay-thinking { flex-shrink: 0; }
 
-.overlay-focus-head { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
+.overlay-status-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding-top: 7px;
+  margin-top: 6px;
+  border-top: 1px solid var(--border-subtle, #21262d);
+  flex-shrink: 0;
+}
 .overlay-focus-name { font-weight: 600; }
 .overlay-focus-state {
   color: var(--accent, #c7913b);
@@ -79,11 +87,11 @@
   color: var(--text-secondary, #c9d1d9);
   line-height: 1.5;
   white-space: pre-wrap;
+  margin: 3px 0;
 }
 
-.overlay-tools { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
-
 .overlay-tool-card {
+  margin: 3px 0;
   display: flex;
   gap: 6px;
   align-items: center;
@@ -109,5 +117,3 @@
 .overlay-tool-done { opacity: 0.7; }
 
 @keyframes overlay-tool-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
-
-.overlay-thinking-row { display: flex; padding: 6px 2px 2px; }

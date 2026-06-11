@@ -31,9 +31,17 @@ beforeEach(() => {
 const payload: OverlayPayload = {
   hasReportable: true,
   rows: [
-    { path: '/a', name: 'sai', kind: 'project', state: 'busy', snippet: 'refactoring the spawn path', tools: [{ name: 'Read', done: true }, { name: 'Bash', done: false }] },
-    { path: '/b', name: 'BotCord', kind: 'project', state: 'question', snippet: 'Which auth method should the bot use?', tools: [{ name: 'AskUserQuestion', done: false }] },
-    { path: '/m', name: 'infra', kind: 'meta', state: 'done', snippet: 'migration complete' },
+    { path: '/a', name: 'sai', kind: 'project', state: 'busy', tail: [
+      { kind: 'text', text: 'refactoring the spawn path' },
+      { kind: 'tool', name: 'Read', done: true },
+      { kind: 'text', text: 'now running the suite' },
+      { kind: 'tool', name: 'Bash', done: false },
+    ] },
+    { path: '/b', name: 'BotCord', kind: 'project', state: 'question', tail: [
+      { kind: 'text', text: 'Which auth method should the bot use?' },
+      { kind: 'tool', name: 'AskUserQuestion', done: false },
+    ] },
+    { path: '/m', name: 'infra', kind: 'meta', state: 'done', tail: [{ kind: 'text', text: 'migration complete' }] },
   ],
   focusPath: '/b',
 };
@@ -78,16 +86,28 @@ describe('OverlayView', () => {
     expect(getByText('Which auth method should the bot use?')).toBeTruthy();
   });
 
-  it('renders multiple tool cards with running/done status', () => {
+  it('renders text and tool cards interleaved in chronological order', () => {
     const { container, getByText } = render(<OverlayView />);
     act(() => { stateCb!(payload); });
     fireEvent.click(getByText('sai', { selector: '.overlay-strip-name' }));
+    const items = Array.from(container.querySelectorAll('.overlay-scroll > *'));
+    expect(items.map(el => el.className.includes('overlay-tool-card') ? 'tool' : 'text'))
+      .toEqual(['text', 'tool', 'text', 'tool']);
     const cards = container.querySelectorAll('.overlay-tool-card');
-    expect(cards).toHaveLength(2);
-    expect(cards[0].textContent).toContain('Read');
     expect(cards[0].className).toContain('overlay-tool-done');
-    expect(cards[1].textContent).toContain('Bash');
     expect(cards[1].className).not.toContain('overlay-tool-done');
+  });
+
+  it('shows the identity status row at the bottom, not a header', () => {
+    const { container } = render(<OverlayView />);
+    act(() => { stateCb!(payload); });
+    expect(container.querySelector('.overlay-focus-head')).toBeNull();
+    const row = container.querySelector('.overlay-status-row')!;
+    expect(row.textContent).toContain('BotCord');
+    expect(row.textContent).toContain('waiting for your answer');
+    // The status row is the card's last section (after the scroll area).
+    const card = container.querySelector('.overlay-focus')!;
+    expect(card.lastElementChild).toBe(row);
   });
 
   it('shows the thinking animation for a busy focused row', () => {

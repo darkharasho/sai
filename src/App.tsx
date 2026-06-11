@@ -22,7 +22,7 @@ import { setActiveWorkspace, updateTerminalName } from './terminalBuffer';
 import { basename } from './utils/pathUtils';
 import { createSession, generateSmartTitle } from './sessions';
 import { computeUnmountFlushes, computeQuitFlushes } from './workspaceFlush';
-import { buildOverlayPayload, type OverlayRow } from './lib/overlayFeed';
+import { buildOverlayPayload, type OverlayRow, type OverlayTailItem } from './lib/overlayFeed';
 import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbPatchSessionMeta, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
 import { queueSaveSession } from './lib/sessionSaveQueue';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval } from './types';
@@ -4669,25 +4669,24 @@ export default function App() {
       : busyWorkspaces.has(path) ? 'busy' as const
       : completedWorkspacesWithUnread.has(path) ? 'done' as const
       : 'alive' as const;
-    const tailFor = (path: string): { snippet?: string; tools?: Array<{ name: string; done: boolean }> } => {
+    const tailFor = (path: string): { tail?: OverlayTailItem[] } => {
       const messages = wsMessagesRef.current.get(path) ?? workspaces.get(path)?.activeSession.messages ?? [];
-      let snippet: string | undefined;
-      const tools: Array<{ name: string; done: boolean }> = [];
-      // Snippet: latest assistant text. Tools: the most recent calls across
-      // trailing assistant messages — text and tools often live on different
-      // messages mid-turn.
-      for (let i = messages.length - 1; i >= 0 && (!snippet || tools.length < 3); i--) {
-        const m = messages[i];
-        if (m.role !== 'assistant') continue;
-        if (!snippet && typeof m.content === 'string' && m.content) snippet = m.content.slice(0, 600);
-        if (tools.length < 3 && m.toolCalls) {
-          for (let j = m.toolCalls.length - 1; j >= 0 && tools.length < 3; j--) {
-            const tc = m.toolCalls[j];
-            tools.unshift({ name: tc.name, done: tc.output != null });
-          }
+      // Chronological tail over the last few assistant messages: text segments
+      // and tool calls interleaved exactly as they happened, capped to the
+      // most recent items.
+      const MAX_ITEMS = 10;
+      const tail: OverlayTailItem[] = [];
+      const recentAssistant: typeof messages = [];
+      for (let i = messages.length - 1; i >= 0 && recentAssistant.length < 4; i--) {
+        if (messages[i].role === 'assistant') recentAssistant.unshift(messages[i]);
+      }
+      for (const m of recentAssistant) {
+        if (typeof m.content === 'string' && m.content) tail.push({ kind: 'text', text: m.content.slice(0, 600) });
+        for (const tc of m.toolCalls ?? []) {
+          tail.push({ kind: 'tool', name: tc.name, done: tc.output != null });
         }
       }
-      return { snippet, tools: tools.length > 0 ? tools : undefined };
+      return { tail: tail.length > 0 ? tail.slice(-MAX_ITEMS) : undefined };
     };
     const metaRoots = new Set((metaWorkspaces || []).map(m => m.syntheticRoot));
     const rows: OverlayRow[] = [];

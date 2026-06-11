@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import SaiLogo from '../SaiLogo';
 import { useThinkingDriver } from '../Chat/useThinkingDriver';
 import { WorkspaceSquircle } from '../shared/WorkspaceSquircle';
-import type { OverlayPayload, OverlayRow } from '../../lib/overlayFeed';
+import type { OverlayPayload, OverlayRow, OverlayTailItem } from '../../lib/overlayFeed';
 import type { IndicatorState } from '../../lib/workspaceStatus';
 import './OverlayView.css';
 
@@ -110,11 +110,6 @@ export function OverlayView() {
           ))}
         </div>
         <div className="overlay-focus">
-          <div className="overlay-focus-head">
-            <WorkspaceSquircle state={focusRow.state} />
-            <span className="overlay-focus-name">{focusRow.name}</span>
-            <span className="overlay-focus-state">· {STATE_LABEL[focusRow.state] ?? focusRow.state}</span>
-          </div>
           <div
             className="overlay-scroll"
             ref={scrollRef}
@@ -123,23 +118,24 @@ export function OverlayView() {
               pinnedRef.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 24;
             }}
           >
-            {focusRow.snippet && <div className="overlay-snippet">{focusRow.snippet}</div>}
-            {focusRow.tools && focusRow.tools.length > 0 && (
-              <div className="overlay-tools">
-                {focusRow.tools.map((t, i) => (
-                  <div key={`${t.name}-${i}`} className={`overlay-tool-card${t.done ? ' overlay-tool-done' : ''}`}>
-                    <span className="overlay-tool-dot" />
-                    <span className="overlay-tool-name">{t.name}</span>
-                    <span className="overlay-tool-status">{t.done ? 'done' : 'running'}</span>
-                  </div>
-                ))}
-              </div>
+            {(focusRow.tail ?? []).map((item: OverlayTailItem, i: number) =>
+              item.kind === 'text' ? (
+                <div key={`t-${i}`} className="overlay-snippet">{item.text}</div>
+              ) : (
+                <div key={`c-${i}`} className={`overlay-tool-card${item.done ? ' overlay-tool-done' : ''}`}>
+                  <span className="overlay-tool-dot" />
+                  <span className="overlay-tool-name">{item.name}</span>
+                  <span className="overlay-tool-status">{item.done ? 'done' : 'running'}</span>
+                </div>
+              )
             )}
-            {isWorking(focusRow.state) && (
-              <div className="overlay-thinking-row">
-                <SaiLogo mode={driver.chainMode} size={16} color="#c7913b" className="overlay-thinking" />
-              </div>
-            )}
+          </div>
+          <div className="overlay-status-row">
+            {isWorking(focusRow.state)
+              ? <SaiLogo mode={driver.chainMode} size={16} color="#c7913b" className="overlay-thinking" />
+              : <WorkspaceSquircle state={focusRow.state} />}
+            <span className="overlay-focus-name">{focusRow.name}</span>
+            <span className="overlay-focus-state">· {STATE_LABEL[focusRow.state] ?? focusRow.state}</span>
           </div>
         </div>
       </div>

@@ -150,7 +150,11 @@ export class OverlayManager {
     if (show) {
       this.clearLinger();
       if (!this.win || this.win.isDestroyed()) this.create();
-      this.win!.setBounds({ ...this.position(), width: WIDTH, height: HEIGHT });
+      if (!this.win!.isVisible()) {
+        // Position only on the hidden→visible transition — repositioning on
+        // every payload would snap the window back mid-drag.
+        this.win!.setBounds({ ...this.position(), width: WIDTH, height: HEIGHT });
+      }
       if (this.lastPayload) this.win!.webContents.send('overlay:state', this.lastPayload);
       if (!this.win!.isVisible()) this.win!.showInactive();
       this.grabShortcut();
