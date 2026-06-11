@@ -161,6 +161,7 @@ export function OverlayView() {
               )
             )}
           </div>
+          {!idle && (
           <div className="overlay-status-row">
             {isWorking(focusRow.state)
               ? <SaiLogo mode={driver.chainMode} size={16} color="#c7913b" className="overlay-thinking" />
@@ -194,6 +195,7 @@ export function OverlayView() {
               );
             })()}
           </div>
+          )}
         </div>
       </div>
     </div>

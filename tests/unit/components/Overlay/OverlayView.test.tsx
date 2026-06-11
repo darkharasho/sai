@@ -53,12 +53,9 @@ describe('OverlayView', () => {
     act(() => { stateCb!({ hasReportable: false, rows: [], focusPath: null }); });
     // Content stays — it IS the last conversation…
     expect(getByText('Which auth method should the bot use?')).toBeTruthy();
-    // …but every status indicator flips to the green read/alive state: no
-    // stale white/gold marks, no 'working' label, no question triangle.
-    const row = container.querySelector('.overlay-status-row')!;
-    expect(row.querySelector('.ws-sq-alive')).toBeTruthy();
-    expect(row.textContent).not.toContain('working');
-    expect(row.textContent).not.toContain('waiting');
+    // …but with no activity there is no footer at all, and strip squircles
+    // flip to the green read/alive state (no stale white/gold/question marks).
+    expect(container.querySelector('.overlay-status-row')).toBeNull();
     expect(container.querySelector('.overlay-strip .ws-sq-question')).toBeNull();
     expect(container.querySelectorAll('.overlay-strip .ws-sq-alive').length).toBeGreaterThan(0);
   });
