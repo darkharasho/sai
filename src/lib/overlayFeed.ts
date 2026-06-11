@@ -59,11 +59,20 @@ export function updateRecentDone(
   recentDone: Set<string>,
   prevBusy: ReadonlySet<string>,
   currentBusy: ReadonlySet<string>,
+  inAppCompleted: ReadonlySet<string> = new Set(),
 ): Set<string> {
   for (const path of prevBusy) {
     if (!currentBusy.has(path)) recentDone.add(path);
   }
   for (const path of currentBusy) {
+    recentDone.delete(path);
+  }
+  // Hand off to in-app unread tracking: once completedWorkspaces has a path
+  // (background workspaces, ~300ms after the turn ends), the in-app clear —
+  // the user reading it on desktop — must clear the overlay too. recentDone
+  // only needs to cover what in-app tracking never will: the focused
+  // workspace (cleared by the caller on window focus).
+  for (const path of inAppCompleted) {
     recentDone.delete(path);
   }
   return recentDone;

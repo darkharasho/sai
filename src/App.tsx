@@ -4684,7 +4684,7 @@ export default function App() {
   }, []);
   useEffect(() => {
     if (!overlayEnabled || overlayMode === 'off') return;
-    updateRecentDone(overlayRecentDoneRef.current, overlayPrevBusyRef.current, busyWorkspaces);
+    updateRecentDone(overlayRecentDoneRef.current, overlayPrevBusyRef.current, busyWorkspaces, completedWorkspaces);
     overlayPrevBusyRef.current = new Set(busyWorkspaces);
     const stateFor = (path: string) =>
       approvalSessions.has(path) ? 'approval' as const

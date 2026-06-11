@@ -55,4 +55,15 @@ describe('updateRecentDone', () => {
     updateRecentDone(done, new Set(['/x']), new Set(['/x']));
     expect(done.has('/old')).toBe(true);
   });
+
+  it('hands off to in-app tracking: paths in completedWorkspaces leave recentDone', () => {
+    const done = new Set<string>();
+    // Background ws finishes: recentDone covers the 300ms before App marks it
+    updateRecentDone(done, new Set(['/bg']), new Set(), new Set());
+    expect(done.has('/bg')).toBe(true);
+    // App's completedWorkspaces picks it up → in-app unread tracking owns it,
+    // so reading it on desktop (which clears completed) also clears the overlay
+    updateRecentDone(done, new Set(), new Set(), new Set(['/bg']));
+    expect(done.has('/bg')).toBe(false);
+  });
 });
