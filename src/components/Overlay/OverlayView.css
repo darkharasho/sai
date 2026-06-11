@@ -32,7 +32,33 @@
 .overlay-focus { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
 /* Content scrolls (auto-pinned to the newest activity); strip + head stay fixed. */
-.overlay-scroll { flex: 1; overflow-y: auto; min-height: 0; scrollbar-width: thin; }
+.overlay-scroll { flex: 1; overflow-y: auto; min-height: 0; scrollbar-width: thin; scrollbar-color: var(--border, #30363d) transparent; }
+.overlay-scroll::-webkit-scrollbar { width: 5px; }
+.overlay-scroll::-webkit-scrollbar-track { background: transparent; }
+.overlay-scroll::-webkit-scrollbar-thumb { background: var(--border, #30363d); border-radius: 3px; }
+.overlay-scroll::-webkit-scrollbar-thumb:hover { background: var(--border-strong, #3f4651); }
+
+/* Compact markdown inside snippets */
+.overlay-snippet p { margin: 0 0 4px; }
+.overlay-snippet p:last-child { margin-bottom: 0; }
+.overlay-snippet ul, .overlay-snippet ol { margin: 2px 0; padding-left: 18px; }
+.overlay-snippet h1, .overlay-snippet h2, .overlay-snippet h3, .overlay-snippet h4 { font-size: 12px; margin: 4px 0 2px; }
+.overlay-snippet code {
+  background: var(--bg-secondary, #161b22);
+  border-radius: 4px;
+  padding: 0 4px;
+  font-family: var(--font-mono, ui-monospace), ui-monospace, monospace;
+  font-size: 11px;
+}
+.overlay-snippet pre {
+  background: var(--bg-secondary, #161b22);
+  border: 1px solid var(--border-subtle, #21262d);
+  border-radius: 6px;
+  padding: 6px 8px;
+  overflow-x: auto;
+  margin: 4px 0;
+}
+.overlay-snippet pre code { background: none; padding: 0; }
 
 /* Interactive mode (Ctrl+Shift+F9): accent edge; dragging is manual (IPC). */
 .overlay-interactive .overlay-card { border-color: var(--accent, #58a6ff); cursor: grab; }
@@ -86,8 +112,8 @@
 .overlay-snippet {
   color: var(--text-secondary, #c9d1d9);
   line-height: 1.5;
-  white-space: pre-wrap;
   margin: 3px 0;
+  overflow-wrap: anywhere;
 }
 
 .overlay-tool-card {

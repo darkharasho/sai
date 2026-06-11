@@ -132,3 +132,34 @@ describe('OverlayView', () => {
     expect(setInteractive).not.toHaveBeenCalled();
   });
 });
+
+describe('done state and markdown (2026-06-11 round 4)', () => {
+  it('renders text segments as markdown', () => {
+    const { container } = render(<OverlayView />);
+    act(() => {
+      stateCb!({
+        hasReportable: true,
+        rows: [{ path: '/a', name: 'sai', kind: 'project', state: 'busy', tail: [{ kind: 'text', text: 'fixed **all** the `bugs`' }] }],
+        focusPath: '/a',
+      });
+    });
+    expect(container.querySelector('.overlay-snippet strong')?.textContent).toBe('all');
+    expect(container.querySelector('.overlay-snippet code')?.textContent).toBe('bugs');
+  });
+
+  it('done shows the static SAI mark and name without a working label', () => {
+    const { container } = render(<OverlayView />);
+    act(() => {
+      stateCb!({
+        hasReportable: true,
+        rows: [{ path: '/a', name: 'sai', kind: 'project', state: 'done', tail: [{ kind: 'text', text: 'all set' }] }],
+        focusPath: '/a',
+      });
+    });
+    const row = container.querySelector('.overlay-status-row')!;
+    expect(row.querySelector('[data-testid="sai-logo"]')?.getAttribute('data-mode')).toBe('static');
+    expect(row.textContent).toContain('sai');
+    expect(row.textContent).not.toContain('working');
+    expect(row.textContent).not.toContain('done');
+  });
+});

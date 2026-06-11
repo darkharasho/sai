@@ -4667,7 +4667,10 @@ export default function App() {
       approvalSessions.has(path) ? 'approval' as const
       : awaitingQuestionWorkspaces.has(path) ? 'question' as const
       : busyWorkspaces.has(path) ? 'busy' as const
-      : completedWorkspacesWithUnread.has(path) ? 'done' as const
+      // Raw completed set, NOT the unread-filtered one: that filter exempts
+      // the focused workspace (you're looking at it), but the overlay exists
+      // precisely when you are NOT looking — done must show as done.
+      : completedWorkspaces.has(path) ? 'done' as const
       : 'alive' as const;
     const tailFor = (path: string): { tail?: OverlayTailItem[] } => {
       const messages = wsMessagesRef.current.get(path) ?? workspaces.get(path)?.activeSession.messages ?? [];
@@ -4719,7 +4722,7 @@ export default function App() {
       if (overlayThrottleRef.current) { clearTimeout(overlayThrottleRef.current); overlayThrottleRef.current = null; }
       if (tick) clearInterval(tick);
     };
-  }, [overlayEnabled, overlayMode, busyWorkspaces, completedWorkspacesWithUnread, approvalSessions, awaitingQuestionWorkspaces, workspaces, metaWorkspaces]);
+  }, [overlayEnabled, overlayMode, busyWorkspaces, completedWorkspaces, approvalSessions, awaitingQuestionWorkspaces, workspaces, metaWorkspaces]);
 
   return (
     <div className="app">

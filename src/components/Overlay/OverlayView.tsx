@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import SaiLogo from '../SaiLogo';
 import { useThinkingDriver } from '../Chat/useThinkingDriver';
 import { WorkspaceSquircle } from '../shared/WorkspaceSquircle';
@@ -120,7 +122,9 @@ export function OverlayView() {
           >
             {(focusRow.tail ?? []).map((item: OverlayTailItem, i: number) =>
               item.kind === 'text' ? (
-                <div key={`t-${i}`} className="overlay-snippet">{item.text}</div>
+                <div key={`t-${i}`} className="overlay-snippet">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.text}</ReactMarkdown>
+                </div>
               ) : (
                 <div key={`c-${i}`} className={`overlay-tool-card${item.done ? ' overlay-tool-done' : ''}`}>
                   <span className="overlay-tool-dot" />
@@ -133,9 +137,13 @@ export function OverlayView() {
           <div className="overlay-status-row">
             {isWorking(focusRow.state)
               ? <SaiLogo mode={driver.chainMode} size={16} color="#c7913b" className="overlay-thinking" />
-              : <WorkspaceSquircle state={focusRow.state} />}
+              : focusRow.state === 'done'
+                ? <SaiLogo mode="static" size={16} color="#c7913b" className="overlay-thinking" />
+                : <WorkspaceSquircle state={focusRow.state} />}
             <span className="overlay-focus-name">{focusRow.name}</span>
-            <span className="overlay-focus-state">· {STATE_LABEL[focusRow.state] ?? focusRow.state}</span>
+            {focusRow.state !== 'done' && (
+              <span className="overlay-focus-state">· {STATE_LABEL[focusRow.state] ?? focusRow.state}</span>
+            )}
           </div>
         </div>
       </div>
