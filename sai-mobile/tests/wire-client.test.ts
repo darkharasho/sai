@@ -49,3 +49,18 @@ describe('connect (wire client)', () => {
     c.close();
   });
 });
+
+describe('sendPrompt sessionId threading', () => {
+  beforeEach(() => { MockWS.instances = []; (global as any).WebSocket = MockWS; });
+
+  it('includes the sessionId in the prompt frame', () => {
+    const c = connect({ baseUrl: 'http://h', token: 't' });
+    MockWS.instances[0].emitOpen();
+    MockWS.instances[0].emitMessage({ type: 'auth_ok' });
+    c.sendPrompt({ text: 'hi', projectPath: '/p', sessionId: 's1' });
+    const frames = MockWS.instances[0].sent.map((s: string) => JSON.parse(s));
+    const prompt = frames.find((f: any) => f.type === 'prompt');
+    expect(prompt).toMatchObject({ text: 'hi', projectPath: '/p', sessionId: 's1' });
+    c.close();
+  });
+});

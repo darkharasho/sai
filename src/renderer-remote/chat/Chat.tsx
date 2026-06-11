@@ -320,6 +320,7 @@ export default function Chat({ client, statusStore, watcherStore, active, onActi
       model: overrides.model,
       effort: overrides.effort,
       permMode: overrides.permMode,
+      sessionId: active.sessionId,
       images,
     });
   };

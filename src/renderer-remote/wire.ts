@@ -33,6 +33,9 @@ export interface ChatPromptArgs {
   model?: string;
   effort?: string;
   permMode?: string;
+  /** Claude CLI session to resume; threads through to --resume on the desktop
+   * so prompts continue the conversation instead of forking a fresh context. */
+  sessionId?: string;
   /** Base64 data URLs for inline image attachments (e.g. `data:image/png;base64,…`). */
   images?: string[];
 }
@@ -381,6 +384,7 @@ export function connect(token: string): WireClient {
       model: a.model,
       effort: a.effort,
       permMode: a.permMode,
+      sessionId: a.sessionId,
       images: a.images && a.images.length > 0 ? a.images : undefined,
     }),
     approve: (a) => sendFrame({ type: 'approval', toolUseId: a.toolUseId, decision: a.decision, modifiedCommand: a.modifiedCommand, projectPath: a.projectPath, scope: a.scope ?? 'chat' }),

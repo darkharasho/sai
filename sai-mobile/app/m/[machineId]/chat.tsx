@@ -339,6 +339,7 @@ export default function Chat() {
             model: overrides.model,
             effort: overrides.effort,
             permMode: overrides.permMode,
+            sessionId: sessionId || undefined,
             images,
           });
           setStreaming(true);

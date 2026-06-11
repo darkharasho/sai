@@ -366,3 +366,12 @@ describe('wire.close — listener teardown', () => {
     expect(ws.readyState).toBe(3);
   });
 });
+
+describe('sendPrompt sessionId threading', () => {
+  it('includes the sessionId in the prompt frame', () => {
+    const { client, ws } = freshConnect();
+    client.sendPrompt({ text: 'hi', projectPath: '/p', sessionId: 's1' });
+    const frame = JSON.parse(ws.sent.at(-1)!);
+    expect(frame).toMatchObject({ type: 'prompt', text: 'hi', projectPath: '/p', sessionId: 's1' });
+  });
+});
