@@ -53,6 +53,8 @@ export type EffortLevel = 'low' | 'medium' | 'high' | 'max';
 // surfaced via claude:models — the CLI accepts arbitrary model strings.
 export type ModelChoice = 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan' | (string & {});
 
+export type ClaudeModelOption = { id: string; label: string; description: string; recommended?: boolean; oneM?: boolean; extra?: boolean };
+
 export interface ChatSession {
   id: string;
   title: string;

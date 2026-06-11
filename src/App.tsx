@@ -27,7 +27,7 @@ import { toolCallDetail } from './lib/toolCallDetail';
 import { findLatestTodos } from './components/Chat/TodoProgress';
 import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbPatchSessionMeta, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
 import { queueSaveSession } from './lib/sessionSaveQueue';
-import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval, EffortLevel, ModelChoice } from './types';
+import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval, EffortLevel, ModelChoice, ClaudeModelOption } from './types';
 import type { MetaWorkspaceListItem, MetaWorkspaceRuntime } from './types';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, setActiveHighlightTheme, type HighlightThemeId } from './themes';
 import ApprovalBanner from './components/ApprovalBanner';
@@ -112,8 +112,7 @@ function applyEditsClientSide(content: string, edits: { line: number; column: nu
 }
 
 type PermissionMode = 'default' | 'bypass';
-// EffortLevel and ModelChoice are imported from ./types
-type ClaudeModelOption = { id: string; label: string; description: string; recommended?: boolean; oneM?: boolean; extra?: boolean };
+// EffortLevel, ModelChoice, and ClaudeModelOption are imported from ./types
 // Persisted model can be a known alias or an account-specific id (e.g. Fable);
 // the CLI validates it, so accept any non-empty string here.
 const isModelChoice = (v: unknown): v is ModelChoice => typeof v === 'string' && v.length > 0;

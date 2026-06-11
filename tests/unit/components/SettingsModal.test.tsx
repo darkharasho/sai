@@ -323,6 +323,70 @@ describe('SettingsModal', () => {
     expect(commitProviderBtn.closest('.provider-select')?.classList.contains('disabled')).toBe(true);
   });
 
+  it('renders Claude model and Claude effort rows on Provider page when props provided', async () => {
+    const onClaudeModelChange = vi.fn();
+    const onClaudeEffortChange = vi.fn();
+    render(
+      <SettingsModal
+        {...defaultProps}
+        claudeModel="sonnet"
+        claudeEffort="high"
+        claudeModels={[{ id: 'sonnet', label: 'Sonnet', description: 'x' }]}
+        onClaudeModelChange={onClaudeModelChange}
+        onClaudeEffortChange={onClaudeEffortChange}
+      />
+    );
+    fireEvent.click(screen.getByText('Provider'));
+    await waitFor(() => {
+      expect(screen.getByText('Claude model')).toBeTruthy();
+      expect(screen.getByText('Claude effort')).toBeTruthy();
+    });
+  });
+
+  it('does NOT render Claude model and Claude effort rows when props are absent', async () => {
+    render(<SettingsModal {...defaultProps} />);
+    fireEvent.click(screen.getByText('Provider'));
+    await waitFor(() => {
+      expect(screen.queryByText('Claude model')).toBeNull();
+      expect(screen.queryByText('Claude effort')).toBeNull();
+    });
+  });
+
+  it('calls onClaudeEffortChange when an effort option is clicked', async () => {
+    const onClaudeModelChange = vi.fn();
+    const onClaudeEffortChange = vi.fn();
+    render(
+      <SettingsModal
+        {...defaultProps}
+        claudeModel="sonnet"
+        claudeEffort="high"
+        claudeModels={[{ id: 'sonnet', label: 'Sonnet', description: 'x' }]}
+        onClaudeModelChange={onClaudeModelChange}
+        onClaudeEffortChange={onClaudeEffortChange}
+      />
+    );
+    fireEvent.click(screen.getByText('Provider'));
+    await waitFor(() => expect(screen.getByText('Claude effort')).toBeTruthy());
+
+    // Open the effort dropdown
+    const effortRow = screen.getByText('Claude effort').closest('.settings-row')!;
+    const effortBtn = effortRow.querySelector('.provider-select-btn') as HTMLElement;
+    fireEvent.click(effortBtn);
+
+    await waitFor(() => {
+      const dropdown = effortRow.querySelector('.provider-dropdown');
+      expect(dropdown).toBeTruthy();
+    });
+
+    // Click a different effort option (Low)
+    const lowBtn = Array.from(effortRow.querySelectorAll('.provider-dropdown-item')).find(
+      btn => btn.textContent?.includes('Low')
+    );
+    expect(lowBtn).toBeTruthy();
+    fireEvent.click(lowBtn!);
+    expect(onClaudeEffortChange).toHaveBeenCalledWith('low');
+  });
+
   it('syncs commit provider when chat provider changes and lock is ON', async () => {
     const mock = createMockSai();
     // Start with lock ON

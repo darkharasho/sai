@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import type { MetaWorkspaceListItem, MetaWorkspaceRuntime, ModelChoice, EffortLevel } from '../types';
+import type { MetaWorkspaceListItem, MetaWorkspaceRuntime, ModelChoice, EffortLevel, ClaudeModelOption } from '../types';
 import UpdateNotification from './UpdateNotification';
 import CloseWorkspaceModal from './CloseWorkspaceModal';
 import GitHubAuthModal from './GitHubAuthModal';
@@ -24,8 +24,6 @@ interface WorkspaceInfo {
   status: string;
   lastActivity: number;
 }
-
-type ClaudeModelOption = { id: string; label: string; description: string; recommended?: boolean; oneM?: boolean; extra?: boolean };
 
 interface TitleBarProps {
   projectPath: string;

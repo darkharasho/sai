@@ -1,13 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import type { ModelChoice, EffortLevel } from '../types';
+import type { ModelChoice, EffortLevel, ClaudeModelOption } from '../types';
 import { X, Check, ChevronDown, Settings as SettingsIcon, Monitor, Type, PanelLeft, Palette, HardDrive, Keyboard, Zap, Smartphone, Link } from 'lucide-react';
 import KeybindingsPage from './Settings/KeybindingsPage';
 import SwarmSettings from './Settings/SwarmSettings';
 import RemoteSettings from './Settings/RemoteSettings';
 import IntegrationsPage from './Settings/IntegrationsPage';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, getActiveHighlightTheme, setActiveHighlightTheme, getShikiHighlighter, type HighlightThemeId } from '../themes';
-
-type ClaudeModelOption = { id: string; label: string; description: string; recommended?: boolean; oneM?: boolean; extra?: boolean };
 
 const EFFORT_OPTIONS: { id: EffortLevel; label: string }[] = [
   { id: 'low',    label: 'Low'    },
