@@ -4723,6 +4723,7 @@ export default function App() {
           if (key === 'codexModel') handleCodexModelChange(value);
           if (key === 'codexPermission') handleCodexPermissionChange(value);
           if (key === 'focusedChat') { setFocusedChat(value); if (value) { setExpanded(['chat', 'terminal']); setSplitRatio(0.66); } }
+          if (key === 'overlayEnabled') setOverlayEnabled(!!value);
           if (key === 'defaultView') { /* persisted only, applies on next launch */ }
           if (key === 'sidebarWidth') document.documentElement.style.setProperty('--sidebar-width', `${value}px`);
           if (typeof key === 'string' && key.startsWith('swarm.')) {
