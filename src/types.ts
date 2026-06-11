@@ -48,6 +48,10 @@ export interface ApprovalChatMeta {
 
 export type AIProvider = 'claude' | 'codex' | 'gemini';
 
+export type EffortLevel = 'low' | 'medium' | 'high' | 'max';
+
+export type ModelChoice = 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan' | (string & {});
+
 export interface ChatSession {
   id: string;
   title: string;
