@@ -47,11 +47,16 @@ const payload: OverlayPayload = {
 };
 
 describe('OverlayView', () => {
-  it('keeps the last reportable content when an empty payload arrives (hide-linger)', () => {
-    const { getByText } = render(<OverlayView />);
+  it('shows the caught-up idle state when an empty payload arrives (never stale status)', () => {
+    const { container, queryByText } = render(<OverlayView />);
     act(() => { stateCb!(payload); });
     act(() => { stateCb!({ hasReportable: false, rows: [], focusPath: null }); });
-    expect(getByText('Which auth method should the bot use?')).toBeTruthy();
+    // Stale content must not survive — reading a pending result on desktop
+    // empties the payload, and the overlay has to reflect that.
+    expect(queryByText('Which auth method should the bot use?')).toBeNull();
+    const idle = container.querySelector('.overlay-idle');
+    expect(idle).toBeTruthy();
+    expect(idle!.textContent).toContain('caught up');
   });
 
   it('mirrors interactive mode driven by the main process shortcut', () => {

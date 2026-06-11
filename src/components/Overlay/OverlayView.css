@@ -18,6 +18,13 @@
 
 .overlay-empty { pointer-events: none; }
 
+.overlay-idle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.overlay-idle .overlay-focus-name { color: var(--text-muted, #8b949e); font-weight: 500; }
+
 .overlay-card {
   flex: 1;
   display: flex;

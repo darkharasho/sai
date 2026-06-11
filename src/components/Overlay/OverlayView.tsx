@@ -34,9 +34,7 @@ export function OverlayView() {
     // Keep the last reportable payload: when everything goes idle the manager
     // lingers before hiding, and blanking the card during that grace reads as
     // a glitch. The window hides; content never visibly empties.
-    const offState = (window as any).sai?.overlayOnState?.((p: OverlayPayload) => {
-      setPayload(prev => (p?.hasReportable ? p : prev));
-    });
+    const offState = (window as any).sai?.overlayOnState?.((p: OverlayPayload) => setPayload(p));
     // Interactive mode is toggled in the main process (Ctrl+Shift+F9 — Linux
     // never delivers mouse events to a click-through window); mirror it here.
     const offInteractive = (window as any).sai?.overlayOnInteractive?.((v: boolean) => setInteractive(v));
@@ -88,7 +86,26 @@ export function OverlayView() {
     if (el && pinnedRef.current) el.scrollTop = el.scrollHeight;
   }, [payload, focusRow?.path]);
 
-  if (!payload?.hasReportable || !focusRow) return <div className="overlay-root overlay-empty" />;
+  if (!payload) return <div className="overlay-root overlay-empty" />;
+
+  // Everything read / nothing running: show an explicit caught-up state.
+  // Freezing the last reportable frame here left stale status (white done
+  // marks) on screen in persist mode after the user read the result in-app.
+  if (!payload.hasReportable || !focusRow) {
+    return (
+      <div
+        className={`overlay-root${interactive ? ' overlay-interactive' : ''}`}
+        onPointerDown={onPointerDown}
+      >
+        <div className="overlay-card overlay-idle">
+          <div className="overlay-status-row" style={{ border: 'none', margin: 0, padding: 0 }}>
+            <SaiLogo mode="static" size={16} color="#c7913b" className="overlay-thinking" />
+            <span className="overlay-focus-name">all caught up</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
