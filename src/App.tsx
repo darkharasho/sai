@@ -22,7 +22,7 @@ import { setActiveWorkspace, updateTerminalName } from './terminalBuffer';
 import { basename } from './utils/pathUtils';
 import { createSession, generateSmartTitle } from './sessions';
 import { computeUnmountFlushes, computeQuitFlushes } from './workspaceFlush';
-import { buildOverlayPayload, type OverlayRow, type OverlayTailItem } from './lib/overlayFeed';
+import { buildOverlayPayload, updateRecentDone, type OverlayRow, type OverlayTailItem } from './lib/overlayFeed';
 import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbPatchSessionMeta, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
 import { queueSaveSession } from './lib/sessionSaveQueue';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval } from './types';
@@ -4665,16 +4665,26 @@ export default function App() {
   // the background — spec 2026-06-11-focus-overlay-design.md). Throttled and
   // gated on the setting so the IPC stays silent when disabled.
   const overlayThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Overlay-local done tracking (see updateRecentDone) — cleared when the
+  // window regains focus: the user has seen the result.
+  const overlayRecentDoneRef = useRef<Set<string>>(new Set());
+  const overlayPrevBusyRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const onFocus = () => { overlayRecentDoneRef.current.clear(); };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
   useEffect(() => {
     if (!overlayEnabled || overlayMode === 'off') return;
+    updateRecentDone(overlayRecentDoneRef.current, overlayPrevBusyRef.current, busyWorkspaces);
+    overlayPrevBusyRef.current = new Set(busyWorkspaces);
     const stateFor = (path: string) =>
       approvalSessions.has(path) ? 'approval' as const
       : awaitingQuestionWorkspaces.has(path) ? 'question' as const
       : busyWorkspaces.has(path) ? 'busy' as const
-      // Raw completed set, NOT the unread-filtered one: that filter exempts
-      // the focused workspace (you're looking at it), but the overlay exists
-      // precisely when you are NOT looking — done must show as done.
-      : completedWorkspaces.has(path) ? 'done' as const
+      // completedWorkspaces never includes the focused workspace (in-app
+      // semantics) — the overlay's own recent-done tracking covers it.
+      : completedWorkspaces.has(path) || overlayRecentDoneRef.current.has(path) ? 'done' as const
       : 'alive' as const;
     const tailFor = (path: string): { tail?: OverlayTailItem[] } => {
       const messages = wsMessagesRef.current.get(path) ?? workspaces.get(path)?.activeSession.messages ?? [];

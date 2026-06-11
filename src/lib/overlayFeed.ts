@@ -44,3 +44,24 @@ export function buildOverlayPayload(rows: OverlayRow[]): OverlayPayload {
     focusPath: focus?.path ?? null,
   };
 }
+
+/** Overlay-local done tracking. In-app, `completedWorkspaces` deliberately
+ *  excludes the focused workspace (you're looking at it) — but the overlay
+ *  exists precisely while you are NOT looking, so it derives done itself: a
+ *  workspace that was busy and stopped is done until it starts again (the
+ *  caller clears the set when the main window regains focus). Mutates and
+ *  returns `recentDone`. busyWorkspaces is turn-scoped (not the streamSettled
+ *  debounce), so stop transitions here are real turn ends. */
+export function updateRecentDone(
+  recentDone: Set<string>,
+  prevBusy: ReadonlySet<string>,
+  currentBusy: ReadonlySet<string>,
+): Set<string> {
+  for (const path of prevBusy) {
+    if (!currentBusy.has(path)) recentDone.add(path);
+  }
+  for (const path of currentBusy) {
+    recentDone.delete(path);
+  }
+  return recentDone;
+}

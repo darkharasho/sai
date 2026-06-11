@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildOverlayPayload, type OverlayRow } from '@/lib/overlayFeed';
+import { buildOverlayPayload, updateRecentDone, type OverlayRow } from '@/lib/overlayFeed';
 
 const row = (over: Partial<OverlayRow>): OverlayRow => ({
   path: '/p', name: 'p', kind: 'project', state: 'inactive', ...over,
@@ -37,5 +37,22 @@ describe('buildOverlayPayload', () => {
   it('busy-done counts as busy for focus priority', () => {
     const p = buildOverlayPayload([row({ path: '/bd', state: 'busy-done' }), row({ path: '/d', state: 'done' })]);
     expect(p.focusPath).toBe('/bd');
+  });
+});
+
+describe('updateRecentDone', () => {
+  it('marks workspaces that stopped being busy and unmarks ones that restart', () => {
+    const done = new Set<string>();
+    updateRecentDone(done, new Set(['/a', '/b']), new Set(['/b']));
+    expect([...done]).toEqual(['/a']);
+    // /a starts a new turn → no longer done
+    updateRecentDone(done, new Set(['/b']), new Set(['/a', '/b']));
+    expect(done.size).toBe(0);
+  });
+
+  it('keeps prior done marks across unrelated updates', () => {
+    const done = new Set<string>(['/old']);
+    updateRecentDone(done, new Set(['/x']), new Set(['/x']));
+    expect(done.has('/old')).toBe(true);
   });
 });
