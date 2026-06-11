@@ -2,6 +2,7 @@
 // src/renderer-remote/chat/Transcript.tsx's user/assistant/system row
 // layouts (icon-gutter + body), keeps the existing minimal ToolCard
 // (rich port is M12), and the existing ApprovalCard.
+import { useRef } from 'react';
 import { Terminal } from 'lucide-react-native';
 import { FlatList, Text, View } from 'react-native';
 import Markdown from 'react-native-markdown-display';
@@ -259,8 +260,21 @@ export function Transcript({ events, streaming = false, onApprove, onAnswerQuest
     return true;
   });
   void usedResultIds;
+  // Keep the list pinned to the bottom as messages stream in, but only when
+  // the user is already at (or near) the bottom — never fight an upward scroll.
+  const listRef = useRef<FlatList<TranscriptEvent>>(null);
+  const atBottomRef = useRef(true);
   return (
     <FlatList
+      ref={listRef}
+      onScroll={(e) => {
+        const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+        atBottomRef.current = contentOffset.y + layoutMeasurement.height >= contentSize.height - 48;
+      }}
+      scrollEventThrottle={100}
+      onContentSizeChange={() => {
+        if (atBottomRef.current) listRef.current?.scrollToEnd({ animated: false });
+      }}
       style={{ flex: 1, backgroundColor: C.bgPrimary }}
       data={visible}
       keyExtractor={(e) => e.id}
