@@ -1,9 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown } from 'lucide-react';
-import type { AIProvider } from '../../types';
-
-type ModelChoice = 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan';
+import type { AIProvider, ModelChoice } from '../../types';
 
 type ModelOption = { id: string; label: string; description: string; color: string; recommended?: boolean };
 

@@ -1,5 +1,5 @@
 import { useState, useRef, KeyboardEvent, useEffect, useMemo } from 'react';
-import type { PendingApproval, TerminalTab, ChatMessage as ChatMessageType, QueuedMessage, MetaWorkspaceRuntime } from '../../types';
+import type { PendingApproval, TerminalTab, ChatMessage as ChatMessageType, QueuedMessage, MetaWorkspaceRuntime, EffortLevel, ModelChoice } from '../../types';
 import TodoProgress from './TodoProgress';
 import MessageQueue from './MessageQueue';
 import { basename } from '../../utils/pathUtils';
@@ -8,7 +8,7 @@ import {
   SquarePlus, Slash, SquareSlash, AtSign, FileText, GitBranch, Terminal as TerminalIcon, Settings,
   MessageSquare, Zap, Send, Square, ShieldCheck, ShieldOff,
   Paperclip, Image, ChevronDown, Minus, ChevronUp, ChevronsUp, Clock, Check, EyeOff,
-  PictureInPicture2,
+  PictureInPicture2, Settings2,
 } from 'lucide-react';
 import {
   getTerminalContent, getTerminalLastCommand, getLastCommandName,
@@ -17,10 +17,6 @@ import {
 } from '../../terminalBuffer';
 import { getCapabilities } from '../../providers/capabilities';
 
-type EffortLevel = 'low' | 'medium' | 'high' | 'max';
-// Known CLI aliases plus any account-specific model id (e.g. 'claude-fable-5[1m]')
-// surfaced via claude:models — the CLI accepts arbitrary model strings.
-type ModelChoice = 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan' | (string & {});
 type ModelOption = { id: string; label: string; description: string; recommended?: boolean; oneM?: boolean; extra?: boolean };
 
 export type OverlayMode = 'on' | 'off' | 'persist';
@@ -1170,17 +1166,24 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
 
           {/* Effort level — Claude only */}
           {getCapabilities(aiProvider).hasEffortMode && (() => {
+            const ov = claudeOverrideState;
+            const onDefault = ov ? !ov.effortOverridden : false;
             const cfg = EFFORT_CONFIG[effortLevel];
-            const Icon = cfg.icon;
+            const Icon = onDefault ? Settings2 : cfg.icon;
+            // Cycle: low → medium → high → max → Default(clear) → low …
+            const next: EffortLevel | null = onDefault ? 'low' : cfg.next === 'low' ? (ov ? null : 'low') : cfg.next;
             return (
               <button
                 className="toolbar-btn effort-btn"
-                onClick={() => onEffortChange(cfg.next)}
-                title={`Effort: ${effortLevel} — Click to cycle`}
-                style={{ color: cfg.color }}
+                onClick={() => onEffortChange(next)}
+                title={onDefault
+                  ? `Effort: follows Settings (${ov!.globalEffort}) — Click to override`
+                  : `Effort: ${effortLevel} (workspace override) — Click to cycle`}
+                style={{ color: onDefault ? 'var(--text-muted)' : cfg.color }}
               >
                 <Icon size={15} />
-                <span className="effort-label">{cfg.label}</span>
+                <span className="effort-label">{onDefault ? `Def·${EFFORT_CONFIG[ov!.globalEffort].label}` : cfg.label}</span>
+                {!onDefault && ov && <span className="override-dot" aria-hidden />}
               </button>
             );
           })()}
@@ -1193,26 +1196,43 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
               onClick={() => setModelMenuOpen(!modelMenuOpen)}
               style={{ color: modelOptions.find(m => m.id === modelChoice)?.color }}
             >
-              <span className="model-label">{modelOptions.find(m => m.id === modelChoice)?.label ?? modelChoice}</span>
+              <span className="model-label">{modelOptions.find(m => m.id === modelChoice)?.label ?? modelChoice}{claudeOverrideState?.modelOverridden ? ' •' : ''}</span>
               <ChevronDown size={11} style={{ opacity: 0.5 }} />
             </button>
             {modelMenuOpen && (
               <div className="model-dropdown">
                 <div className="model-dropdown-header">Select a model</div>
+                {claudeOverrideState && (
+                  <button
+                    className={`model-dropdown-item ${!claudeOverrideState.modelOverridden ? 'active' : ''}`}
+                    onClick={() => { onModelChange(null); setModelMenuOpen(false); }}
+                  >
+                    <div className="model-dropdown-item-info">
+                      <span className="model-dropdown-item-name">
+                        Follow Settings
+                        <span className="model-recommended">
+                          ({modelOptions.find(m => m.id === claudeOverrideState.globalModel)?.label ?? claudeOverrideState.globalModel})
+                        </span>
+                      </span>
+                      <span className="model-dropdown-item-desc">Use the app-wide default for this workspace</span>
+                    </div>
+                    {!claudeOverrideState.modelOverridden && <Check size={14} style={{ flexShrink: 0 }} />}
+                  </button>
+                )}
                 {modelOptions.map(opt => (
                   <button
                     key={opt.id}
-                    className={`model-dropdown-item ${opt.id === modelChoice ? 'active' : ''}`}
+                    className={`model-dropdown-item ${opt.id === modelChoice && (claudeOverrideState?.modelOverridden ?? true) ? 'active' : ''}`}
                     onClick={() => { onModelChange(opt.id); setModelMenuOpen(false); }}
                   >
                     <div className="model-dropdown-item-info">
-                      <span className="model-dropdown-item-name" style={{ color: opt.id === modelChoice ? opt.color : undefined }}>
+                      <span className="model-dropdown-item-name" style={{ color: opt.id === modelChoice && (claudeOverrideState?.modelOverridden ?? true) ? opt.color : undefined }}>
                         {opt.label}
                         {opt.recommended && <span className="model-recommended">(recommended)</span>}
                       </span>
                       <span className="model-dropdown-item-desc">{opt.description}</span>
                     </div>
-                    {opt.id === modelChoice && <Check size={14} style={{ color: opt.color, flexShrink: 0 }} />}
+                    {opt.id === modelChoice && (claudeOverrideState?.modelOverridden ?? true) && <Check size={14} style={{ color: opt.color, flexShrink: 0 }} />}
                   </button>
                 ))}
               </div>
@@ -1928,6 +1948,7 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
           font-size: 11px;
           font-family: 'Geist Mono', 'JetBrains Mono', monospace;
         }
+        .override-dot { width: 4px; height: 4px; border-radius: 50%; background: currentColor; display: inline-block; margin-left: 2px; }
         .model-selector {
           position: relative;
         }
