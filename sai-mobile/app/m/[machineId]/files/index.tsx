@@ -172,11 +172,13 @@ export default function Browse() {
 
   useEffect(() => {
     if (!cwd || !client) return;
+    let cancelled = false;
     setEntries(null);
     setErr(null);
     client.listFiles(cwd, '')
-      .then((e) => setEntries(e as Entry[]))
-      .catch((e: Error) => setErr(e.message));
+      .then((e) => { if (!cancelled) setEntries(e as Entry[]); })
+      .catch((e: Error) => { if (!cancelled) setErr(e.message); });
+    return () => { cancelled = true; };
   }, [client, cwd]);
 
   // Pills: when the active workspace is meta, expose its member repos.

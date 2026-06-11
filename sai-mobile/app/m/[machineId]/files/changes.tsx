@@ -177,12 +177,14 @@ export default function Changes() {
 
   useEffect(() => {
     if (!effectiveCwd || !client) return;
+    let cancelled = false;
     setEntries(null);
     setErr(null);
     client.statusFiles(effectiveCwd)
-      .then((e) => setEntries(e as StatusEntry[]))
-      .catch((e: Error) => setErr(e.message));
+      .then((e) => { if (!cancelled) setEntries(e as StatusEntry[]); })
+      .catch((e: Error) => { if (!cancelled) setErr(e.message); });
     void refreshHeader();
+    return () => { cancelled = true; };
   }, [client, effectiveCwd, refreshKey, refreshHeader]);
 
   useEffect(() => {

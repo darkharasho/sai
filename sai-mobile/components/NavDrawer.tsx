@@ -117,6 +117,10 @@ export function NavDrawer({
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [, setStatusTick] = useState(0);
   const refreshRef = useRef<() => void>(() => {});
+  // Unmount guard for refresh()'s async chain — the drawer can close while a
+  // sessions list is still in flight.
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   // Animation: drawer slides from -WIDTH → 0. Backdrop opacity tracks it.
   const { width: screenW } = useWindowDimensions();
@@ -189,9 +193,9 @@ export function NavDrawer({
     setErr(null);
     client
       .listSessions(workspacePath)
-      .then((s) => setSessions((s as SessionMeta[]) ?? []))
-      .catch((e: Error) => setErr(e.message))
-      .finally(() => setLoading(false));
+      .then((s) => { if (mountedRef.current) setSessions((s as SessionMeta[]) ?? []); })
+      .catch((e: Error) => { if (mountedRef.current) setErr(e.message); })
+      .finally(() => { if (mountedRef.current) setLoading(false); });
   };
   refreshRef.current = refresh;
 

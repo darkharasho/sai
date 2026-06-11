@@ -90,19 +90,23 @@ export default function FileView() {
 
   useEffect(() => {
     if (!cwd || !path || !client) return;
+    let cancelled = false;
     (async () => {
       try {
         const r = await client.readFile(cwd, path);
+        if (cancelled) return;
         if (r.encoding !== 'text' || !r.content) {
           setErr('Binary file (preview unavailable).');
           return;
         }
         setData({ content: r.content, lang: r.lang });
       } catch (e: unknown) {
+        if (cancelled) return;
         const msg = e instanceof Error ? e.message : String(e);
         setErr(msg);
       }
     })();
+    return () => { cancelled = true; };
   }, [client, cwd, path]);
 
   const html = useMemo(
@@ -110,10 +114,13 @@ export default function FileView() {
     [data, path],
   );
 
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (copyTimerRef.current) clearTimeout(copyTimerRef.current); }, []);
   const onCopy = () => {
     wvRef.current?.postMessage(JSON.stringify({ type: 'copy' }));
     setCopyState('copied');
-    setTimeout(() => setCopyState('idle'), 1500);
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = setTimeout(() => setCopyState('idle'), 1500);
   };
 
   return (

@@ -97,12 +97,18 @@ export default function FileEdit() {
   // even if React state hasn't flushed (same trick as TerminalInput).
   const contentRef = useRef('');
 
+  // Unmount guard: load() awaits the wire and is also called from retry
+  // paths, so a late resolve must not setState on an unmounted screen.
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+
   const load = async () => {
     if (!cwd || !path || !client) return;
     setLoading(true);
     setErr(null);
     try {
       const r = await client.readFile(cwd, path);
+      if (!mountedRef.current) return;
       if (r.encoding !== 'text' || typeof r.content !== 'string') {
         setErr('This file is not editable as text.');
         setLoading(false);
@@ -115,9 +121,10 @@ export default function FileEdit() {
       setInitialSha(typeof r.sha === 'string' ? r.sha : null);
       setLang(r.lang);
     } catch (e: unknown) {
+      if (!mountedRef.current) return;
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   };
 

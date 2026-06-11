@@ -35,6 +35,7 @@ export default function FileDiff() {
 
   useEffect(() => {
     if (!cwd || !path || !client) return;
+    let cancelled = false;
     (async () => {
       setLoading(true);
       try {
@@ -45,17 +46,19 @@ export default function FileDiff() {
           client.diffFile(cwd, path, staged),
           client.statusFiles(cwd).catch(() => [] as unknown[]),
         ]);
+        if (cancelled) return;
         setDiff(d.diff ?? '');
         const entries = s as Array<{ path: string; status: string; staged: boolean }>;
         const match = entries.find((e) => e.path === path && e.staged === staged)
           ?? entries.find((e) => e.path === path);
         if (match) setStatus(match.status);
       } catch (e: unknown) {
-        setErr(e instanceof Error ? e.message : String(e));
+        if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
+    return () => { cancelled = true; };
   }, [client, cwd, path, staged]);
 
   return (
