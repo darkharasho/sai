@@ -19,6 +19,7 @@ import SaiLogo from '../SaiLogo';
 import { matchLinkPreview } from './linkPreview';
 import LinkPreviewChip from './LinkPreviewChip';
 import StreamingAssistantHead from './StreamingAssistantHead';
+import { hasRevealed, markRevealed } from './revealRegistry';
 import { useSaiAnimationPref } from './useSaiAnimationPref';
 import { rehypeEmojiIcons } from './rehypeEmojiIcons';
 import { renderEmojiSpan } from './emojiIcons';
@@ -27,10 +28,9 @@ import { renderEmojiSpan } from './emojiIcons';
 // animation from replaying if a message remounts (e.g. workspace swap, list
 // re-keying), so existing history doesn't shimmer in on every render.
 const SEEN_MESSAGES = new Set<string>();
-// Word-reveal animation runs once per message ID for the lifetime of the
-// renderer process. Using a module-level set (not a per-instance ref) so
-// workspace/session switches that remount ChatMessage don't replay it.
-const REVEALED_MESSAGES = new Set<string>();
+// Word-reveal once-per-id dedup lives in revealRegistry (shared with
+// StreamingAssistantHead so BOTH reveal paths consult the same set —
+// workspace/session switches that remount ChatMessage must not replay it).
 // Records ids that streamed token-by-token this session, so their post-stream
 // re-render is NOT word-revealed (the live append already showed them).
 const STREAMED_MESSAGES = new Set<string>();
@@ -737,7 +737,7 @@ function ChatMessage({
     if (isAssistantStreaming) { STREAMED_MESSAGES.add(message.id); }
     if (useMorphHead) return;            // StreamingAssistantHead owns the reveal
     if (isAssistantStreaming) return;
-    if (REVEALED_MESSAGES.has(message.id)) return;
+    if (hasRevealed(message.id)) return;
     if (!message.content) return;
     // Reveal a reply generated this session (streamed → completed, any duration) or a
     // fresh complete arrival; never history (not streamed this session + old timestamp).
@@ -748,7 +748,7 @@ function ChatMessage({
     if (prefersReducedMotion()) return;
     const el = mdRef.current;
     if (!el) return;
-    REVEALED_MESSAGES.add(message.id);
+    markRevealed(message.id);
     revealWords(el);
   }, [isAssistantStreaming, message.id, message.role, message.content, message.timestamp, useMorphHead]);
   // When the parent passes an allowlist (main chat), only render watchers it explicitly
@@ -810,6 +810,7 @@ function ChatMessage({
           streaming={!!isAssistantStreaming}
           content={typeof message.content === 'string' ? message.content : String(message.content ?? '')}
           durationMs={message.durationMs}
+          messageId={message.id}
         >
           <ReactMarkdown {...ASSISTANT_MD_PLUGINS} components={markdownComponents}>
             {typeof message.content === 'string' ? message.content : String(message.content ?? '')}

@@ -28,6 +28,7 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); });
 
 import StreamingAssistantHead from '../../../../src/components/Chat/StreamingAssistantHead';
+import { _resetRevealRegistry } from '../../../../src/components/Chat/revealRegistry';
 
 describe('StreamingAssistantHead', () => {
   it('while streaming: shows live clock + status, animated logo, no reveal', () => {
@@ -166,5 +167,48 @@ describe('StreamingAssistantHead', () => {
       </StrictMode>
     );
     expect(revealSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('reveal replay on remount (workspace/chat swap)', () => {
+  it('plays the reveal the first time a message id mounts already-complete', async () => {
+    _resetRevealRegistry();
+    const { container } = render(
+      <StreamingAssistantHead streaming={false} content="fresh arrival" messageId="m-first">
+        <p>fresh arrival</p>
+      </StreamingAssistantHead>
+    );
+    expect(revealSpy).toHaveBeenCalledTimes(1);
+    // Content container must be visible (reveal owns word-level visibility)
+    expect((container.querySelector('.sah-md') as HTMLElement).style.display).not.toBe('none');
+  });
+
+  it('does NOT replay the reveal when the same message id remounts', async () => {
+    _resetRevealRegistry();
+    // First mount: completes a live stream, reveal plays once.
+    const first = render(
+      <StreamingAssistantHead streaming content="" messageId="m-replay">
+        <p>the reply</p>
+      </StreamingAssistantHead>
+    );
+    first.rerender(
+      <StreamingAssistantHead streaming={false} content="the reply" durationMs={1000} messageId="m-replay">
+        <p>the reply</p>
+      </StreamingAssistantHead>
+    );
+    await act(async () => { await new Promise(r => setTimeout(r, 300)); });
+    expect(revealSpy).toHaveBeenCalledTimes(1);
+    first.unmount();
+
+    // Remount (workspace swap): same id, already revealed → no animation,
+    // content visible immediately.
+    const second = render(
+      <StreamingAssistantHead streaming={false} content="the reply" durationMs={1000} messageId="m-replay">
+        <p>the reply</p>
+      </StreamingAssistantHead>
+    );
+    expect(revealSpy).toHaveBeenCalledTimes(1);
+    expect((second.container.querySelector('.sah-md') as HTMLElement).style.display).not.toBe('none');
+    expect(second.container.textContent).toContain('the reply');
   });
 });

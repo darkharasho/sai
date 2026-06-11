@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import SaiLogo from '../SaiLogo';
 import { useThinkingDriver } from './useThinkingDriver';
 import { revealWords } from './wordReveal';
+import { hasRevealed, markRevealed } from './revealRegistry';
 import { prefersReducedMotion } from './motion';
 
 function formatMs(ms: number): string {
@@ -20,10 +21,14 @@ interface Props {
   streaming: boolean;
   content: string;
   durationMs?: number;
+  /** Message id for the once-per-session reveal registry. When set and the id
+   *  has already revealed in a previous mount, remounts (workspace/chat swaps)
+   *  render the content statically instead of replaying the animation. */
+  messageId?: string;
   children: React.ReactNode;
 }
 
-export default function StreamingAssistantHead({ streaming, content, durationMs, children }: Props) {
+export default function StreamingAssistantHead({ streaming, content, durationMs, messageId, children }: Props) {
   const [phase, setPhase] = useState<Phase>(streaming ? 'thinking' : 'revealed');
   const driver = useThinkingDriver(phase === 'thinking');
   const mdRef = useRef<HTMLDivElement | null>(null);
@@ -65,11 +70,16 @@ export default function StreamingAssistantHead({ streaming, content, durationMs,
     if (phase !== 'revealed') return;
     if (revealStartedRef.current) return;
     if (prefersReducedMotion()) return;
+    // Once-per-session guard: a remount of an already-revealed message
+    // (workspace/chat swap) must show the content statically, not replay the
+    // animation. revealStartedRef only survives within one mount.
+    if (messageId && hasRevealed(messageId)) return;
     const el = mdRef.current;
     if (!el) return;
     revealStartedRef.current = true;
+    if (messageId) markRevealed(messageId);
     revealWords(el);
-  }, [phase]);
+  }, [phase, messageId]);
 
   const isStatic = phase !== 'thinking';
   const clock = isStatic ? formatMs(durationMs ?? frozenMsRef.current) : driver.clockText;
