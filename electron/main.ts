@@ -54,7 +54,7 @@ async function _resolveTailnetEndpointWithEnv() {
   });
 }
 import { registerTerminalHandlers, destroyAllTerminals } from './services/pty';
-import { registerClaudeHandlers, setRemoteCeiling, setRemoteBus, sendImpl, approveImpl, interruptImpl, answerQuestionImpl, setSubprocessMemoryCapMB } from './services/claude';
+import { registerClaudeHandlers, destroyClaude, setRemoteCeiling, setRemoteBus, sendImpl, approveImpl, interruptImpl, answerQuestionImpl, setSubprocessMemoryCapMB } from './services/claude';
 import { RendererProxy } from './services/remote/renderer-proxy';
 import { registerGitHandlers } from './services/git';
 import { registerFsHandlers } from './services/fs';
@@ -420,6 +420,7 @@ function createWindow() {
     }
     if (mainWindow) writeSetting('windowBounds', mainWindow.getBounds());
     stopSuspendTimer();
+    destroyClaude();
     destroyAllTerminals();
     terminalStore.destroyAll();
     destroyAll(mainWindow!);
@@ -520,6 +521,14 @@ function createWindow() {
           }
         }, timeoutMs);
       });
+    });
+
+    // Don't leave MCP tool calls hanging if the window goes away mid-call.
+    mainWindow.on('closed', () => {
+      for (const pending of pendingMcpCalls.values()) {
+        pending.reject(new Error('main window closed'));
+      }
+      pendingMcpCalls.clear();
     });
 
     const emitSyntheticToolResult = (
@@ -992,6 +1001,7 @@ function createWindow() {
       const deadline = Date.now() + 3000;
       // eslint-disable-next-line no-constant-condition
       while (true) {
+        if (win.isDestroyed()) throw new Error('capture window destroyed during poll');
         const ready = (await win.webContents.executeJavaScript('window.__renderReady === true').catch(() => false)) as boolean;
         if (ready) break;
         if (Date.now() >= deadline) {
@@ -1002,7 +1012,7 @@ function createWindow() {
       }
       const h = (await win.webContents.executeJavaScript(
         "(function(){var el=document.getElementById('render-host-root');return el?Math.ceil(el.getBoundingClientRect().height):0;})() || 200",
-      )) as number;
+      ).catch(() => 200)) as number;
       const height = Math.min(Math.max(Math.round(h), 40), 4000);
       win.setContentSize(width, height);
       await new Promise((r) => setTimeout(r, 60));

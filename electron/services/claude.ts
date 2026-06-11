@@ -58,6 +58,10 @@ function writeCachedSlashCommands(commands: string[]) {
 
 let mainWin: BrowserWindow | null = null;
 
+// Single instance across registerClaudeHandlers calls (dev hot reload
+// re-registers); cleared by destroyClaude on window close.
+let idleSweepTimer: ReturnType<typeof setInterval> | null = null;
+
 let remoteBus: SessionBus | null = null;
 export function setRemoteBus(bus: SessionBus | null): void {
   remoteBus = bus;
@@ -1419,7 +1423,8 @@ export function registerClaudeHandlers(win: BrowserWindow) {
   });
 
   // Idle-scope sweep: stop Claude scopes that have been inactive for >30 min
-  const idleSweepTimer = setInterval(() => {
+  if (idleSweepTimer) clearInterval(idleSweepTimer);
+  idleSweepTimer = setInterval(() => {
     const records: { workspaceId: string; scope: string; lastActivityAt: number; streaming: boolean; awaitingInput: boolean }[] = [];
     for (const ws of listAllWorkspaces()) {
       for (const [scope, claude] of ws.claudeScopes.entries()) {
@@ -1456,5 +1461,10 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 }
 
 export function destroyClaude() {
-  // Handled by workspace.destroyAll
+  // Subprocess teardown is handled by workspace.destroyAll; this clears the
+  // module-level sweep timer so it can't fire against a destroyed window.
+  if (idleSweepTimer) {
+    clearInterval(idleSweepTimer);
+    idleSweepTimer = null;
+  }
 }
