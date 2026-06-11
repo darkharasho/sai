@@ -1,4 +1,4 @@
-import { useSyncExternalStore, useEffect, useRef, useState, useCallback } from 'react';
+import { useSyncExternalStore, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import type { CSSProperties } from 'react';
 import './RenderToolCard.css';
 import { renderStore, type RenderEntry } from '../../render/renderStore';
@@ -63,7 +63,9 @@ export function RenderRegion({ entry }: { entry: RenderEntry }) {
   const style: CSSProperties = {
     width: displayWidth,
     maxWidth: '100%',
-    background: entry.background ?? 'var(--sai-surface, #1a1a1a)',
+    // Sanitized: the wrapper styles the MAIN document — a raw model-supplied
+    // value like url(https://…) would fetch from the privileged renderer.
+    background: (entry.background && sanitizeCssColor(entry.background)) || 'var(--sai-surface, #1a1a1a)',
     display: 'inline-block',
   };
   return (
@@ -125,7 +127,13 @@ function RenderedHtml({ entry, enableSubmit, onNaturalWidth }: {
   const submittedRef = useRef(false);
   const [height, setHeight] = useState(300);
   const bridge = enableSubmit ? SUBMIT_BRIDGE : '';
-  const bodyBg = (entry.background && sanitizeCssColor(entry.background)) || resolveThemedSurface();
+  // Memoized per background value: recomputing on theme change would alter the
+  // srcDoc and reload the iframe, wiping in-progress form input (spec: theme
+  // changes don't repaint mounted mocks).
+  const bodyBg = useMemo(
+    () => (entry.background && sanitizeCssColor(entry.background)) || resolveThemedSurface(),
+    [entry.background],
+  );
   const doc =
     `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${SANDBOX_CSP}"></head>` +
     `<body style="margin:0;background:${bodyBg}">${userHtml}${bridge}${SIZE_REPORTER}</body></html>`;

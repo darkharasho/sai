@@ -76,3 +76,19 @@ describe('RenderRegion sizing + background', () => {
     expect(region.style.width).toBe('360px');
   });
 });
+
+describe('RenderRegion wrapper background sanitization', () => {
+  it('does not apply an unsanitized background to the wrapper div', () => {
+    const { container } = render(
+      <RenderRegion entry={htmlEntry({ background: 'url(https://evil.example/px.png)' })} />,
+    );
+    const region = container.querySelector('[data-render-region]') as HTMLElement;
+    expect(region.style.background).not.toContain('url(');
+  });
+
+  it('applies a valid explicit background to the wrapper div', () => {
+    const { container } = render(<RenderRegion entry={htmlEntry({ background: '#0a0c0e' })} />);
+    const region = container.querySelector('[data-render-region]') as HTMLElement;
+    expect(region.style.background).toContain('rgb(10, 12, 14)');
+  });
+});

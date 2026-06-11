@@ -55,7 +55,7 @@ import { landTask, discardTask, rebaseRetry } from './lib/swarmLanding';
 import { ensureOrchestratorSession } from './lib/swarmOrchestratorSession';
 import { handleSwarmToolRequest, type SwarmHost } from './lib/swarmOrchestratorDispatcher';
 import { handleRenderToolRequest } from './render/handleRenderToolRequest';
-import { resolveThemedSurface } from './render/renderSizing';
+import { resolveThemedSurface, sanitizeCssColor } from './render/renderSizing';
 import { resolveWatchRun } from './components/Chat/githubRunResolver';
 import { registeredComponentKeys } from './render/componentRegistry';
 import { renderMermaidToSvg } from './render/renderMermaid';
@@ -1468,7 +1468,7 @@ export default function App() {
                 const b64 = await saiAny.renderCaptureHtml!({
                   html: svg,
                   width: typeof req.input?.width === 'number' ? req.input.width : undefined,
-                  background: typeof req.input?.background === 'string' ? req.input.background : resolveThemedSurface(),
+                  background: (typeof req.input?.background === 'string' && sanitizeCssColor(req.input.background)) || resolveThemedSurface(),
                 });
                 if (!b64) throw new Error('capture returned no image');
                 return { base64: b64, mimeType: 'image/png' as const };
@@ -1592,7 +1592,7 @@ export default function App() {
               const b64 = await saiAny.renderCaptureHtml!({
                 html: htmlInput,
                 width: typeof req.input?.width === 'number' ? req.input.width : undefined,
-                background: typeof req.input?.background === 'string' ? req.input.background : resolveThemedSurface(),
+                background: (typeof req.input?.background === 'string' && sanitizeCssColor(req.input.background)) || resolveThemedSurface(),
               });
               if (!b64) throw new Error('capture returned no image');
               return { base64: b64, mimeType: 'image/png' as const };
