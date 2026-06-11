@@ -85,6 +85,7 @@ import {
 } from './services/metaSyntheticRoot';
 import { renderHostSearch, type RenderHostParams } from './renderHostUrl';
 import { formTimeoutMs } from '../src/render/formTimeout';
+import { sanitizeCssColor } from '../src/render/renderSizing';
 
 // Allow E2E tests to isolate userData
 if (process.env.SAI_USER_DATA_DIR) {
@@ -936,14 +937,15 @@ function createWindow() {
   // Render a mock's HTML in a hidden off-screen window and screenshot it, so the
   // agent can SEE its render without opening a visible browser tab. Returns a
   // bare base64 PNG (or null on failure).
-  ipcMain.handle('render:captureHtml', async (_event, args: { html?: string; width?: number }) => {
+  ipcMain.handle('render:captureHtml', async (_event, args: { html?: string; width?: number; background?: string }) => {
     const html = typeof args?.html === 'string' ? args.html : '';
     if (!html) return null;
-    const width = Math.min(Math.max(Math.round(args?.width || 480), 80), 2000);
+    const minWidth = Math.min(Math.max(Math.round(args?.width || 480), 80), 2000);
+    const background = (typeof args?.background === 'string' && sanitizeCssColor(args.background)) || '#1a1a1a';
     let win: BrowserWindow | null = null;
     try {
       win = new BrowserWindow({
-        width,
+        width: minWidth,
         height: 1200,
         show: false,
         // Park it far off any display so it never flashes on screen.
@@ -956,10 +958,20 @@ function createWindow() {
       const doc =
         `<!doctype html><html><head><meta charset="utf-8">` +
         `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:;">` +
-        `</head><body style="margin:0">${html}</body></html>`;
+        `</head><body style="margin:0;background:${background}">${html}</body></html>`;
       await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(doc));
       // Let layout, fonts and any inline scripts settle before measuring.
       await new Promise((r) => setTimeout(r, 320));
+      // Grow-only width: widen to the content's natural width (capped) so the
+      // screenshot matches the in-chat region instead of clipping/scrolling.
+      const naturalW = (await win.webContents.executeJavaScript(
+        'Math.ceil(Math.max(document.documentElement.scrollWidth, document.body ? document.body.scrollWidth : 0)) || 0',
+      )) as number;
+      const width = Math.min(Math.max(minWidth, Math.round(naturalW) || 0), 2000);
+      if (width > minWidth) {
+        win.setContentSize(width, 1200);
+        await new Promise((r) => setTimeout(r, 60));
+      }
       const h = (await win.webContents.executeJavaScript(
         'Math.ceil(Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)) || 200',
       )) as number;
