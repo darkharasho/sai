@@ -3728,19 +3728,17 @@ export default function App() {
     saveClaudeSetting('model', model);
   };
 
+  // Side effects stay OUTSIDE the setState updater — StrictMode double-invokes
+  // updaters in dev, which would fire duplicate settings writes.
   const handleWorkspaceModelChange = (wsPath: string, model: ModelChoice | null) => {
-    setClaudeWsOverrides(prev => {
-      const next = setWorkspaceOverride(prev, wsPath, { model });
-      saveClaudeSetting('workspaceOverrides', next);
-      return next;
-    });
+    const next = setWorkspaceOverride(claudeWsOverrides, wsPath, { model });
+    setClaudeWsOverrides(next);
+    saveClaudeSetting('workspaceOverrides', next);
   };
   const handleWorkspaceEffortChange = (wsPath: string, effort: EffortLevel | null) => {
-    setClaudeWsOverrides(prev => {
-      const next = setWorkspaceOverride(prev, wsPath, { effort });
-      saveClaudeSetting('workspaceOverrides', next);
-      return next;
-    });
+    const next = setWorkspaceOverride(claudeWsOverrides, wsPath, { effort });
+    setClaudeWsOverrides(next);
+    saveClaudeSetting('workspaceOverrides', next);
   };
 
   const handleCodexModelChange = (model: string) => {
@@ -3994,23 +3992,19 @@ export default function App() {
                     ?? orchMessagesByWs.get(orchSessionId)
                     ?? orchSession?.messages
                     ?? [];
-                  const wsClaudeCfgOrch = resolveClaudeConfig(claudeWsOverrides, wsPath, { model: modelChoice, effort: effortLevel });
+                  // The orchestrator's model is deliberately swarm-controlled
+                  // (swarm.orchestratorModel) — it does NOT participate in
+                  // per-workspace overrides, so no claudeOverrideState here.
                   const orchChatSlot = (
                     <ChatPanel
                       key={orchSessionId}
                       projectPath={wsPath}
                       permissionMode={permissionMode}
                       onPermissionChange={handlePermissionChange}
-                      effortLevel={wsClaudeCfgOrch.effort}
-                      onEffortChange={(level) => handleWorkspaceEffortChange(wsPath, level)}
+                      effortLevel={effortLevel}
+                      onEffortChange={(level) => { if (level) handleEffortChange(level); }}
                       modelChoice={orchModel}
-                      onModelChange={(model) => handleWorkspaceModelChange(wsPath, model)}
-                      claudeOverrideState={{
-                        modelOverridden: wsClaudeCfgOrch.modelOverridden,
-                        effortOverridden: wsClaudeCfgOrch.effortOverridden,
-                        globalModel: modelChoice,
-                        globalEffort: effortLevel,
-                      }}
+                      onModelChange={(model) => { if (model) handleModelChange(model); }}
                       availableModels={claudeModels}
                       aiProvider={orchProvider}
                       codexModel={codexModel}

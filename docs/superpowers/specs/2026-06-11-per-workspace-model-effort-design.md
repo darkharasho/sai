@@ -39,6 +39,12 @@ can be applied later).
 - The per-message send path (`claudeSend(..., effort, model, scope)`) is untouched — it
   already carries values per call, so different workspaces sending different values
   needs no backend changes.
+- **Orchestrator panels opt out** (revised during implementation): the orchestrator
+  chat's model is already deliberately controlled by Swarm settings
+  (`swarm.orchestratorModel`) — a second override layer would compete with it. The
+  orchestrator ChatPanel keeps its swarm-controlled model and the global effort, and
+  receives no `claudeOverrideState` (so its pickers behave as before). Per-workspace
+  overrides apply to regular workspace chats only.
 - Existing behavior, documented not changed: when a workspace's effective model/effort
   changes, that workspace's CLI process respawns on the next send and its session
   context restarts.
