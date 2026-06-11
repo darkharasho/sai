@@ -15,7 +15,7 @@ export interface OverlayRow {
 export type OverlayTailItem =
   | { kind: 'text'; text: string }
   | { kind: 'user'; text: string }
-  | { kind: 'tool'; name: string; done: boolean }
+  | { kind: 'tool'; name: string; done: boolean; detail?: string }
   | { kind: 'elided'; count: number };
 
 export interface OverlayPayload {

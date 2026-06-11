@@ -23,6 +23,7 @@ import { basename } from './utils/pathUtils';
 import { createSession, generateSmartTitle } from './sessions';
 import { computeUnmountFlushes, computeQuitFlushes } from './workspaceFlush';
 import { buildOverlayPayload, truncateSnippet, updateRecentDone, type OverlayRow, type OverlayTailItem } from './lib/overlayFeed';
+import { toolCallDetail } from './lib/toolCallDetail';
 import { findLatestTodos } from './components/Chat/TodoProgress';
 import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbPatchSessionMeta, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
 import { queueSaveSession } from './lib/sessionSaveQueue';
@@ -4725,7 +4726,7 @@ export default function App() {
         const calls = m.toolCalls ?? [];
         if (calls.length > TOOLS_PER_MESSAGE) tail.push({ kind: 'elided', count: calls.length - TOOLS_PER_MESSAGE });
         for (const tc of calls.slice(-TOOLS_PER_MESSAGE)) {
-          tail.push({ kind: 'tool', name: tc.name, done: tc.output != null });
+          tail.push({ kind: 'tool', name: tc.name, done: tc.output != null, detail: toolCallDetail(tc) ?? undefined });
         }
       }
       const todoList = findLatestTodos(messages);

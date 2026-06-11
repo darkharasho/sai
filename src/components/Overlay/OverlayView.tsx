@@ -156,7 +156,7 @@ export function OverlayView() {
                 <div key={`c-${i}`} className={`overlay-tool-card${item.done ? ' overlay-tool-done' : ''}`}>
                   <span className="overlay-tool-dot" />
                   <span className="overlay-tool-name">{item.name}</span>
-                  <span className="overlay-tool-status">{item.done ? 'done' : 'running'}</span>
+                  {item.detail && <span className="overlay-tool-detail">{item.detail}</span>}
                 </div>
               )
             )}
