@@ -85,6 +85,6 @@ rendering, snapshot machinery, `github-auth.ts`.
 
 - Unit tests for the resolver: URL parsing, branch resolution with mocked
   `githubApiGet`, retry-until-created behavior, fake-URL passthrough.
-- Unit test for the `entryFromToolCall` mapping.
+- Unit tests for the `watchTargetFromToolCall` / `watchTargetsFromMessage` mapping.
 - Manual verification via the `sai://fake-run` flow.
 - Note: new SAI tools are not live in a running session — restart SAI to dogfood.
