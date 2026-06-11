@@ -501,8 +501,10 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
 
   // Load auto-compact threshold setting
   useEffect(() => {
-    window.sai.settingsGet('autoCompactThreshold', 0).then((v: number) => setAutoCompactThreshold(v));
-    window.sai.settingsGet('toolCallsExpanded', true).then((v: boolean) => setToolCallsExpanded(v));
+    let cancelled = false;
+    window.sai.settingsGet('autoCompactThreshold', 0).then((v: number) => { if (!cancelled) setAutoCompactThreshold(v); });
+    window.sai.settingsGet('toolCallsExpanded', true).then((v: boolean) => { if (!cancelled) setToolCallsExpanded(v); });
+    return () => { cancelled = true; };
   }, []);
 
   // Auto-compact when context exceeds threshold
@@ -1525,6 +1527,7 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
   const suppressNextDrainRef = useRef(false);
   const turnStartedAtRef = useRef<number | null>(null);
   const nextSegmentStartRef = useRef<number | null>(null);
+  const autoSendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (prevStreamingRef.current && !isStreaming) {
       // Stamp durationMs on every unstamped assistant text bubble in the current
@@ -1557,11 +1560,18 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
       } else if (messageQueue.length > 0 && onQueueShift && sessionId) {
         const next = messageQueue[0];
         onQueueShift(sessionId);
-        setTimeout(() => handleSend(next.fullText, next.images), 300);
+        autoSendTimerRef.current = setTimeout(() => handleSend(next.fullText, next.images), 300);
       }
     }
     prevStreamingRef.current = isStreaming;
   }, [isStreaming]);
+
+  // Unmount-only: a pending queue-drain send must not fire into an unmounted
+  // panel. Not cleared on isStreaming changes — that would drop a message the
+  // queue has already shifted.
+  useEffect(() => () => {
+    if (autoSendTimerRef.current) clearTimeout(autoSendTimerRef.current);
+  }, []);
 
   return (
     <div className="chat-panel">

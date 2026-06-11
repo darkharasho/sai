@@ -1665,14 +1665,20 @@ export default function App() {
   const [paletteWorkspaces, setPaletteWorkspaces] = useState<{ projectPath: string; status?: string; lastActivity?: number }[]>([]);
 
   useEffect(() => {
-    window.sai.metaWorkspaceList?.().then(list => setMetaWorkspaces(list ?? [])).catch(() => setMetaWorkspaces([]));
+    let cancelled = false;
+    window.sai.metaWorkspaceList?.().then(list => {
+      if (!cancelled) setMetaWorkspaces(list ?? []);
+    }).catch(() => { if (!cancelled) setMetaWorkspaces([]); });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
     if (!commandPaletteOpen) return;
+    let cancelled = false;
     (window as any).sai.workspaceGetAll().then((ws: any[]) => {
-      setPaletteWorkspaces(ws);
-    }).catch(() => setPaletteWorkspaces([]));
+      if (!cancelled) setPaletteWorkspaces(ws);
+    }).catch(() => { if (!cancelled) setPaletteWorkspaces([]); });
+    return () => { cancelled = true; };
   }, [commandPaletteOpen]);
 
   const getWorkspace = useCallback((path: string): WorkspaceContext => {
@@ -1901,45 +1907,49 @@ export default function App() {
 
   // Load persisted settings from main process (file-based, works in dev+prod)
   useEffect(() => {
-    window.sai.settingsGet('focusedChat', false).then((v: boolean) => setFocusedChat(v));
+    // StrictMode/unmount guard: drop late IPC responses instead of setting
+    // state on an unmounted (or remounted) component.
+    let cancelled = false;
+    const guard = <T,>(fn: (v: T) => void) => (v: T) => { if (!cancelled) fn(v); };
+    window.sai.settingsGet('focusedChat', false).then(guard((v: boolean) => setFocusedChat(v)));
     window.sai.settingsGet('sidebarWidth', 300).then((v: number) => {
       document.documentElement.style.setProperty('--sidebar-width', `${v}px`);
     });
-    window.sai.settingsGet('editorFontSize', 13).then((v: number) => setEditorFontSize(v));
-    window.sai.settingsGet('editorMinimap', true).then((v: boolean) => setEditorMinimap(v));
+    window.sai.settingsGet('editorFontSize', 13).then(guard((v: number) => setEditorFontSize(v)));
+    window.sai.settingsGet('editorMinimap', true).then(guard((v: boolean) => setEditorMinimap(v)));
     window.sai.settingsGet('theme', 'default').then((v: string) => {
       if (v !== 'default' && THEMES.some(t => t.id === v)) applyTheme(v as ThemeId);
     });
     window.sai.settingsGet('roundedCorners', false).then((v: boolean) => {
       document.documentElement.classList.toggle('rounded-corners', !!v);
     });
-    window.sai.settingsGet('highlightTheme', 'monokai').then((v: string) => {
+    window.sai.settingsGet('highlightTheme', 'monokai').then(guard((v: string) => {
       if (v !== 'monokai' && HIGHLIGHT_THEMES.some(t => t.id === v)) setActiveHighlightTheme(v as HighlightThemeId);
-    });
-    window.sai.settingsGet('aiProvider', 'claude').then((v: string) => {
+    }));
+    window.sai.settingsGet('aiProvider', 'claude').then(guard((v: string) => {
       if (v === 'claude' || v === 'codex' || v === 'gemini') setAiProvider(v as AIProvider);
-    });
-    window.sai.settingsGet('commitMessageProvider', 'claude').then((v: string) => {
+    }));
+    window.sai.settingsGet('commitMessageProvider', 'claude').then(guard((v: string) => {
       if (v === 'claude' || v === 'codex' || v === 'gemini') setCommitMessageProvider(v as AIProvider);
-    });
-    window.sai.settingsGet('aiTitleGeneration', false).then((v: boolean) => {
+    }));
+    window.sai.settingsGet('aiTitleGeneration', false).then(guard((v: boolean) => {
       setAiTitleGeneration(!!v);
-    });
+    }));
     // Load nested provider settings
-    window.sai.settingsGet('claude', {}).then((c: any) => {
+    window.sai.settingsGet('claude', {}).then(guard((c: any) => {
       if (isModelChoice(c.model)) setModelChoice(c.model);
       if (c.effort === 'low' || c.effort === 'medium' || c.effort === 'high' || c.effort === 'max') setEffortLevel(c.effort);
       if (c.permission === 'default' || c.permission === 'bypass') setPermissionMode(c.permission);
-    });
-    window.sai.settingsGet('codex', {}).then((c: any) => {
+    }));
+    window.sai.settingsGet('codex', {}).then(guard((c: any) => {
       if (c.model) setCodexModel(c.model);
       if (c.permission === 'auto' || c.permission === 'read-only' || c.permission === 'full-access') setCodexPermission(c.permission);
-    });
-    window.sai.settingsGet('gemini', {}).then((g: any) => {
+    }));
+    window.sai.settingsGet('gemini', {}).then(guard((g: any) => {
       if (g.model) setGeminiModel(g.model);
       if (g.approvalMode === 'default' || g.approvalMode === 'auto_edit' || g.approvalMode === 'yolo' || g.approvalMode === 'plan') setGeminiApprovalMode(g.approvalMode);
       if (g.conversationMode === 'planning' || g.conversationMode === 'fast') setGeminiConversationMode(g.conversationMode);
-    });
+    }));
     // Migrate flat keys to nested (one-time)
     Promise.all([
       window.sai.settingsGet('modelChoice', null),
@@ -1996,7 +2006,7 @@ export default function App() {
         if (g.conversationMode === 'planning' || g.conversationMode === 'fast') setGeminiConversationMode(g.conversationMode);
       }
     });
-    return unsubApplied;
+    return () => { cancelled = true; unsubApplied(); };
   }, []);
 
   // Prefetch Codex models once at startup so they're ready when user switches

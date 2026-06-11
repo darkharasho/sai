@@ -101,7 +101,14 @@ function TerminalInstance({ tabUid, projectPath, visible, onTerminalReady }: Ter
 
     // Create terminal in main process — pass current xterm dimensions so the
     // PTY starts at the correct size and readline doesn't miscalculate positions.
+    let disposed = false;
     window.sai.terminalCreate(cwd, xterm.cols, xterm.rows).then((id: number) => {
+      if (disposed) {
+        // Effect cleaned up before the PTY IPC resolved — kill the orphan
+        // immediately or it would outlive the panel with no owner.
+        window.sai.terminalKill(id);
+        return;
+      }
       termIdRef.current = id;
       registerTerminal(id, xterm, projectPath);
       onTerminalReady?.(tabUid, id);
@@ -144,6 +151,7 @@ function TerminalInstance({ tabUid, projectPath, visible, onTerminalReady }: Ter
     intersectionObserver.observe(container);
 
     return () => {
+      disposed = true;
       if (termIdRef.current !== null) {
         unregisterTerminal(termIdRef.current);
         window.sai.terminalKill(termIdRef.current);
