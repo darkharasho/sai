@@ -1178,7 +1178,7 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
                 onClick={() => onEffortChange(next)}
                 title={onDefault
                   ? `Effort: follows Settings (${ov!.globalEffort}) — Click to override`
-                  : `Effort: ${effortLevel} (workspace override) — Click to cycle`}
+                  : `Effort: ${effortLevel}${ov ? ' (workspace override)' : ''} — Click to cycle`}
                 style={{ color: onDefault ? 'var(--text-muted)' : cfg.color }}
               >
                 <Icon size={15} />
