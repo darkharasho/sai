@@ -47,16 +47,20 @@ const payload: OverlayPayload = {
 };
 
 describe('OverlayView', () => {
-  it('shows the caught-up idle state when an empty payload arrives (never stale status)', () => {
-    const { container, queryByText } = render(<OverlayView />);
+  it('keeps the last convo on an empty payload but turns the status green (read)', () => {
+    const { container, getByText } = render(<OverlayView />);
     act(() => { stateCb!(payload); });
     act(() => { stateCb!({ hasReportable: false, rows: [], focusPath: null }); });
-    // Stale content must not survive — reading a pending result on desktop
-    // empties the payload, and the overlay has to reflect that.
-    expect(queryByText('Which auth method should the bot use?')).toBeNull();
-    const idle = container.querySelector('.overlay-idle');
-    expect(idle).toBeTruthy();
-    expect(idle!.textContent).toContain('caught up');
+    // Content stays — it IS the last conversation…
+    expect(getByText('Which auth method should the bot use?')).toBeTruthy();
+    // …but every status indicator flips to the green read/alive state: no
+    // stale white/gold marks, no 'working' label, no question triangle.
+    const row = container.querySelector('.overlay-status-row')!;
+    expect(row.querySelector('.ws-sq-alive')).toBeTruthy();
+    expect(row.textContent).not.toContain('working');
+    expect(row.textContent).not.toContain('waiting');
+    expect(container.querySelector('.overlay-strip .ws-sq-question')).toBeNull();
+    expect(container.querySelectorAll('.overlay-strip .ws-sq-alive').length).toBeGreaterThan(0);
   });
 
   it('mirrors interactive mode driven by the main process shortcut', () => {

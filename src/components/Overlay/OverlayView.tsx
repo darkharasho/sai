@@ -30,27 +30,35 @@ export function OverlayView() {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const pinnedRef = useRef(true);
 
+  // Last payload that actually carried a conversation. When the current
+  // payload is empty (everything read/idle) we keep showing this content but
+  // override every status indicator to the green read state — content is
+  // history (fine to keep), status is live (must never be stale).
+  const [lastContent, setLastContent] = useState<OverlayPayload | null>(null);
+
   useEffect(() => {
-    // Keep the last reportable payload: when everything goes idle the manager
-    // lingers before hiding, and blanking the card during that grace reads as
-    // a glitch. The window hides; content never visibly empties.
-    const offState = (window as any).sai?.overlayOnState?.((p: OverlayPayload) => setPayload(p));
+    const offState = (window as any).sai?.overlayOnState?.((p: OverlayPayload) => {
+      setPayload(p);
+      if (p?.hasReportable && p.rows.length > 0) setLastContent(p);
+    });
     // Interactive mode is toggled in the main process (Ctrl+Shift+F9 — Linux
     // never delivers mouse events to a click-through window); mirror it here.
     const offInteractive = (window as any).sai?.overlayOnInteractive?.((v: boolean) => setInteractive(v));
     return () => { offState?.(); offInteractive?.(); };
   }, []);
 
-  const rows: OverlayRow[] = payload?.rows ?? [];
+  const idle = !!payload && (!payload.hasReportable || payload.rows.length === 0);
+  const source = idle ? lastContent : payload;
+  const rows: OverlayRow[] = (source?.rows ?? []).map(r => (idle ? { ...r, state: 'alive' as const } : r));
   const focusRow =
     rows.find(r => r.path === selected)
-    ?? rows.find(r => r.path === payload?.focusPath)
+    ?? rows.find(r => r.path === source?.focusPath)
     ?? rows[0]
     ?? null;
 
   // The thinking driver runs whenever the focused conversation is working, so
   // the logo cycles through the same animation chain as the in-app indicator.
-  const driver = useThinkingDriver(!!focusRow && isWorking(focusRow.state));
+  const driver = useThinkingDriver(!idle && !!focusRow && isWorking(focusRow.state));
 
   // Manual drag: -webkit-app-region is unreliable on Linux (and the window is
   // non-focusable), so interactive-mode dragging moves the window through IPC
@@ -88,10 +96,8 @@ export function OverlayView() {
 
   if (!payload) return <div className="overlay-root overlay-empty" />;
 
-  // Everything read / nothing running: show an explicit caught-up state.
-  // Freezing the last reportable frame here left stale status (white done
-  // marks) on screen in persist mode after the user read the result in-app.
-  if (!payload.hasReportable || !focusRow) {
+  // Nothing has ever run this session: a minimal caught-up card.
+  if (!focusRow) {
     return (
       <div
         className={`overlay-root${interactive ? ' overlay-interactive' : ''}`}
@@ -162,7 +168,7 @@ export function OverlayView() {
                 ? <SaiLogo mode="static" size={16} color="#c7913b" className="overlay-thinking" />
                 : <WorkspaceSquircle state={focusRow.state} />}
             <span className="overlay-focus-name">{focusRow.name}</span>
-            {focusRow.state !== 'done' && (
+            {focusRow.state !== 'done' && focusRow.state !== 'alive' && (
               <span className="overlay-focus-state">· {STATE_LABEL[focusRow.state] ?? focusRow.state}</span>
             )}
             {focusRow.todos && focusRow.todos.total > 0 && (() => {
