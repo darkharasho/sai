@@ -307,7 +307,12 @@ export function registerTerminalHandlers(win: BrowserWindow) {
       // from grouping GUI apps launched from the terminal under SAI's taskbar icon.
       // Disable ECHOCTL before starting the interactive shell so escape sequences
       // (arrow keys etc.) aren't echoed as ^[[A notation on the prompt line.
-      const shellInit = `stty -echoctl 2>/dev/null; exec "${shell}" --login`;
+      // Shell args come from buildShellLaunchArgs so desktop terminals get the
+      // shared-history scaffolding (history -a at every prompt) — shells are
+      // SIGKILLed on close, so history persisted only on clean exit is lost.
+      const shellArgs = buildShellLaunchArgs(shell, env);
+      const quotedArgs = shellArgs.map(a => `"${a.replace(/"/g, '\\"')}"`).join(' ');
+      const shellInit = `stty -echoctl 2>/dev/null; exec "${shell}" ${quotedArgs}`;
       const useScope = canUseSystemdScope();
       spawnCmd = useScope ? 'systemd-run' : shell;
       spawnArgs = useScope

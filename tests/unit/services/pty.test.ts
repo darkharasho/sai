@@ -733,3 +733,50 @@ describe.skipIf(process.platform !== 'win32')('Windows shell resolution: never s
     expect(lastCall[1]).toEqual(['-NoLogo']);
   });
 });
+
+// ===========================================================================
+// REGRESSION: 1497a16 — desktop terminal:create lost the shared-history
+// scaffolding. The refactor extracted createTerminalImpl (which execs bash
+// with SAI's --rcfile so `history -a` runs at every prompt) but left the
+// desktop IPC handler on a hardcoded `--login`, so desktop terminals never
+// persist history (shells are SIGKILLed and bash only flushes on clean exit).
+// ===========================================================================
+
+describe.skipIf(process.platform === 'win32')('desktop terminal:create uses history scaffolding', () => {
+  async function spawnArgsWithShell(shellPath: string): Promise<{ cmd: string; args: string[]; env: Record<string, string> }> {
+    const savedShell = process.env.SHELL;
+    process.env.SHELL = shellPath;
+    try {
+      const win = createMockBrowserWindow();
+      const { registerTerminalHandlers } = await loadService();
+      registerTerminalHandlers(win as never);
+      await mockIpcMain._invoke('terminal:create', '/tmp');
+      const ptyModule = await import('node-pty');
+      const call = vi.mocked(ptyModule.spawn).mock.calls.at(-1)!;
+      return { cmd: call[0] as string, args: call[1] as string[], env: (call[2] as any).env };
+    } finally {
+      if (savedShell !== undefined) process.env.SHELL = savedShell; else delete process.env.SHELL;
+    }
+  }
+
+  it('bash: execs with --rcfile pointing at the sai shell-init bashrc, not --login', async () => {
+    const { args } = await spawnArgsWithShell('/bin/bash');
+    const shellInit = args[args.indexOf('-c') + 1];
+    expect(shellInit).toContain('--rcfile');
+    expect(shellInit).toContain('bashrc');
+    expect(shellInit).not.toContain('--login');
+  });
+
+  it('zsh: execs interactive with ZDOTDIR pointing at the sai shell-init dir', async () => {
+    const { args, env } = await spawnArgsWithShell('/usr/bin/zsh');
+    const shellInit = args[args.indexOf('-c') + 1];
+    expect(shellInit).not.toContain('--login');
+    expect(env.ZDOTDIR).toContain('sai-shell-init');
+  });
+
+  it('unsupported shells still fall back to --login', async () => {
+    const { args } = await spawnArgsWithShell('/usr/bin/fish');
+    const shellInit = args[args.indexOf('-c') + 1];
+    expect(shellInit).toContain('--login');
+  });
+});
