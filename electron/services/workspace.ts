@@ -319,6 +319,25 @@ export function destroyAll(win: BrowserWindow): void {
 const SUSPEND_CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutes
 export const DEFAULT_SUSPEND_TIMEOUT = 60 * 60 * 1000; // 1 hour
 
+/**
+ * True when no agent in the workspace is doing or waiting on anything:
+ * no Claude scope busy/streaming or blocked on user input (question,
+ * approval, plan review), and Codex/Gemini idle. lastActivity only tracks
+ * *user* actions, so the auto-suspend timer must check this too — a long
+ * agentic run (or a pending question while the user is away) looks "inactive"
+ * by timestamp while a process is very much alive. Mirrors the guards in
+ * sweepIdleScopes.
+ */
+export function isWorkspaceQuiescent(ws: Workspace): boolean {
+  for (const claude of ws.claudeScopes.values()) {
+    if (claude.busy || claude.streaming) return false;
+    if (claude.awaitingQuestionAnswer || claude.awaitingApproval || claude.awaitingPlanReview) return false;
+  }
+  if (ws.codex.busy) return false;
+  if (ws.gemini.busy) return false;
+  return true;
+}
+
 let suspendTimer: ReturnType<typeof setInterval> | null = null;
 
 export function startSuspendTimer(win: BrowserWindow, getTimeout: () => number = () => DEFAULT_SUSPEND_TIMEOUT): void {
@@ -328,7 +347,7 @@ export function startSuspendTimer(win: BrowserWindow, getTimeout: () => number =
     if (timeout === 0) return; // "Never"
     const now = Date.now();
     for (const [projectPath, ws] of workspaces) {
-      if (ws.status === 'active' && now - ws.lastActivity > timeout) {
+      if (ws.status === 'active' && now - ws.lastActivity > timeout && isWorkspaceQuiescent(ws)) {
         suspend(projectPath, win);
       }
     }

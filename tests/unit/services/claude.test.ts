@@ -1204,3 +1204,24 @@ describe('claude:alwaysAllow handler', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Workspace activity tracking — stdout must reset the auto-suspend clock
+// ---------------------------------------------------------------------------
+
+describe('workspace lastActivity on stdout', () => {
+  const PROJECT = '/test/activity';
+
+  it('bumps ws.lastActivity when the CLI emits output', async () => {
+    const ws = workspaceState.getOrCreate(PROJECT);
+    ws.claudeScopes.get('chat')!.cwd = PROJECT;
+    mockIpcMain._emit('claude:send', PROJECT, 'hello', []);
+    await flushAsync();
+
+    (ws as any).lastActivity = 0; // simulate the user having been idle a long time
+    pushLines(getLatestProcess(), { type: 'assistant', message: { content: [] } });
+    await flushAsync();
+
+    expect((ws as any).lastActivity).toBeGreaterThan(0);
+  });
+});

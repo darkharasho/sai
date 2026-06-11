@@ -335,6 +335,10 @@ function ensureProcess(
     for (const line of lines) {
       if (!line.trim()) continue;
       claude.lastActivityAt = Date.now();
+      // Also reset the workspace-level auto-suspend clock: lastActivity
+      // otherwise only tracks user sends, so a long agentic run would look
+      // "inactive" to startSuspendTimer the moment it ends.
+      ws.lastActivity = Date.now();
       try {
         const msg = JSON.parse(line);
         // Capture session ID and forward to renderer

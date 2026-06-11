@@ -438,3 +438,98 @@ describe('startSuspendTimer / stopSuspendTimer', () => {
     stopSuspendTimer();
   });
 });
+
+// ===========================================================================
+// isWorkspaceQuiescent + suspend-timer guard (long-running chats must not die)
+// ===========================================================================
+
+describe('isWorkspaceQuiescent', () => {
+  it('is true for a freshly created workspace', async () => {
+    const { getOrCreate, isWorkspaceQuiescent } = await loadService();
+    const ws = getOrCreate('/q/idle');
+    expect(isWorkspaceQuiescent(ws)).toBe(true);
+  });
+
+  it('is false while a claude scope is streaming', async () => {
+    const { getOrCreate, getClaude, isWorkspaceQuiescent } = await loadService();
+    const ws = getOrCreate('/q/streaming');
+    getClaude(ws, 'chat').streaming = true;
+    expect(isWorkspaceQuiescent(ws)).toBe(false);
+  });
+
+  it('is false while a claude scope is busy', async () => {
+    const { getOrCreate, getClaude, isWorkspaceQuiescent } = await loadService();
+    const ws = getOrCreate('/q/busy');
+    getClaude(ws, 'task-1').busy = true;
+    expect(isWorkspaceQuiescent(ws)).toBe(false);
+  });
+
+  it('is false while a claude scope awaits user input', async () => {
+    const { getOrCreate, getClaude, isWorkspaceQuiescent } = await loadService();
+    for (const flag of ['awaitingQuestionAnswer', 'awaitingApproval', 'awaitingPlanReview'] as const) {
+      const ws = getOrCreate(`/q/${flag}`);
+      (getClaude(ws, 'chat') as any)[flag] = true;
+      expect(isWorkspaceQuiescent(ws), flag).toBe(false);
+    }
+  });
+
+  it('is false while codex or gemini is busy', async () => {
+    const { getOrCreate, isWorkspaceQuiescent } = await loadService();
+    const wsCodex = getOrCreate('/q/codex');
+    wsCodex.codex.busy = true;
+    expect(isWorkspaceQuiescent(wsCodex)).toBe(false);
+    const wsGemini = getOrCreate('/q/gemini');
+    wsGemini.gemini.busy = true;
+    expect(isWorkspaceQuiescent(wsGemini)).toBe(false);
+  });
+});
+
+describe('suspend timer quiescence guard', () => {
+  it('does not suspend an aged workspace whose claude scope is streaming', async () => {
+    const { getOrCreate, getClaude, startSuspendTimer, stopSuspendTimer } = await loadService();
+    const win = createWin();
+    const ws = getOrCreate('/timer/streaming');
+    const timeout = 60 * 60 * 1000;
+    ws.lastActivity = Date.now() - timeout - 1000;
+    const claude = getClaude(ws, 'chat');
+    claude.streaming = true;
+    claude.busy = true;
+    claude.process = createMockProcess() as never;
+
+    startSuspendTimer(win as never, () => timeout);
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 1000);
+
+    expect(ws.status).toBe('active');
+    expect((claude.process as any).kill).not.toHaveBeenCalled();
+    stopSuspendTimer();
+  });
+
+  it('does not suspend an aged workspace awaiting a question answer', async () => {
+    const { getOrCreate, getClaude, startSuspendTimer, stopSuspendTimer } = await loadService();
+    const win = createWin();
+    const ws = getOrCreate('/timer/awaiting');
+    const timeout = 60 * 60 * 1000;
+    ws.lastActivity = Date.now() - timeout - 1000;
+    getClaude(ws, 'chat').awaitingQuestionAnswer = true;
+
+    startSuspendTimer(win as never, () => timeout);
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 1000);
+
+    expect(ws.status).toBe('active');
+    stopSuspendTimer();
+  });
+
+  it('still suspends an aged, fully idle workspace', async () => {
+    const { getOrCreate, startSuspendTimer, stopSuspendTimer } = await loadService();
+    const win = createWin();
+    const ws = getOrCreate('/timer/quiet');
+    const timeout = 60 * 60 * 1000;
+    ws.lastActivity = Date.now() - timeout - 1000;
+
+    startSuspendTimer(win as never, () => timeout);
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 1000);
+
+    expect(ws.status).toBe('suspended');
+    stopSuspendTimer();
+  });
+});
