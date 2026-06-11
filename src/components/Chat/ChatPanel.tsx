@@ -69,7 +69,7 @@ function ContextMeter({ used, total }: { used: number; total: number }) {
 
 
 import ChatMessage from './ChatMessage';
-import { detectWatchTargets } from './githubWatcher';
+import { watchTargetsFromMessage } from './githubRunResolver';
 
 const EMPTY_URL_SET: Set<string> = new Set();
 import ChatInput, { type ContextItem } from './ChatInput';
@@ -1264,7 +1264,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     const owner = new Map<string, Set<string>>();
     const seen = new Set<string>();
     for (const m of messages) {
-      const targets = detectWatchTargets(m);
+      const targets = watchTargetsFromMessage(m);
       if (targets.length === 0) continue;
       const owned = new Set<string>();
       for (const t of targets) {
@@ -1388,10 +1388,23 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       return;
     }
     // Dev-only: messages containing sai://fake-* render the watcher card without
-    // round-tripping to the LLM. Lets us preview live behavior with no real API calls.
+    // round-tripping to the LLM. Synthesizes a watch_github_run tool call (the
+    // card now mounts from tool calls, not text detection).
     if (import.meta.env.DEV && /sai:\/\/fake-run\//.test(text)) {
-      const userId = `fake-watcher-${Date.now()}`;
-      setMessages(prev => [...prev, { id: userId, role: 'user', content: text, timestamp: Date.now(), images }]);
+      const url = text.match(/sai:\/\/fake-run\/[^\s)"'<]*/)![0];
+      const runId = url.replace(/^sai:\/\/fake-run\//, '').split('?')[0];
+      const ts = Date.now();
+      setMessages(prev => [...prev,
+        { id: `fake-watcher-user-${ts}`, role: 'user', content: text, timestamp: ts, images },
+        {
+          id: `fake-watcher-${ts}`, role: 'assistant', content: '', timestamp: ts + 1,
+          toolCalls: [{
+            id: `fake-watch-${ts}`, type: 'mcp', name: 'mcp__swarm__sai_watch_github_run',
+            input: JSON.stringify({ url }),
+            output: JSON.stringify({ owner: 'fake', repo: 'fake', runId, url, status: 'in_progress' }),
+          }],
+        },
+      ]);
       flushMessagesToParent();
       return;
     }

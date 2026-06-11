@@ -8,7 +8,7 @@ import { Check, ChevronRight, Circle, Copy, Eraser, RotateCw, Terminal, Terminal
 import { motion, AnimatePresence } from 'motion/react';
 import ToolCallCard from './ToolCallCard';
 import GitHubWatcherCard from './GitHubWatcherCard';
-import { detectWatchTargets } from './githubWatcher';
+import { watchTargetsFromMessage } from './githubRunResolver';
 import Stagger from './Stagger';
 import { readFlipRect, hasFlipRect } from './flipRegistry';
 import { SPRING, DISTANCE, FADE_IN, useReducedMotionTransition, prefersReducedMotion } from './motion';
@@ -755,8 +755,8 @@ function ChatMessage({
   // owns — prevents duplicates when the same run URL shows up in multiple messages. Other
   // callers (orchestrator, tests) don't pass an allowlist and get the full set.
   const watcherTargets = watcherUrlAllowlist
-    ? detectWatchTargets(message).filter(t => watcherUrlAllowlist.has(t.url))
-    : detectWatchTargets(message);
+    ? watchTargetsFromMessage(message).filter(t => watcherUrlAllowlist.has(t.url))
+    : watchTargetsFromMessage(message);
 
   const markdownComponents = useMemo(() => ({
     pre: ({ children, ...props }: any) => (

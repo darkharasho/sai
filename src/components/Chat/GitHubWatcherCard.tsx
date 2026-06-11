@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GitBranch, ExternalLink, AlertCircle, CheckCircle2, XCircle, CircleDot, Clock, MinusCircle, Circle } from 'lucide-react';
 import { SPRING, useReducedMotionTransition } from './motion';
-import type { GitHubWatchTarget } from './githubWatcher';
+import type { GitHubWatchTarget } from './githubRunResolver';
 import type { GitHubWatcherSnapshot } from '../../types';
 
 // Cards re-poll a non-terminal snapshot only if it's fresher than this; older
