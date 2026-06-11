@@ -1196,7 +1196,8 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
               onClick={() => setModelMenuOpen(!modelMenuOpen)}
               style={{ color: modelOptions.find(m => m.id === modelChoice)?.color }}
             >
-              <span className="model-label">{modelOptions.find(m => m.id === modelChoice)?.label ?? modelChoice}{claudeOverrideState?.modelOverridden ? ' •' : ''}</span>
+              <span className="model-label">{modelOptions.find(m => m.id === modelChoice)?.label ?? modelChoice}</span>
+              {claudeOverrideState?.modelOverridden && <span className="override-dot" aria-hidden />}
               <ChevronDown size={11} style={{ opacity: 0.5 }} />
             </button>
             {modelMenuOpen && (

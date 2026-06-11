@@ -22,8 +22,9 @@ can be applied later).
   path-string matching a known trap).
 - Writes are read-modify-write like the existing `saveClaudeSetting` pattern
   (App.tsx ~3700). Clearing an override deletes that field; an entry with no fields left
-  is removed. Paths for workspaces that no longer exist are ignored on load and pruned
-  on the next write.
+  is removed. Entries for workspaces that aren't currently open are kept (revised during
+  final review): they're inert, tiny, and preserving them means a workspace closed and
+  later reopened regains its override.
 - The existing global keys `claude.model` / `claude.effort` keep their current meaning
   (the defaults). No migration needed.
 
@@ -70,8 +71,8 @@ in-picker "make default" affordances don't fit. Instead:
 
 ## 4. Error handling
 
-- Unknown/stale paths in `claude.workspaceOverrides` are ignored at load, pruned on
-  write.
+- Invalid entries in `claude.workspaceOverrides` are dropped at load; entries for
+  not-currently-open workspaces are kept (see §1).
 - Invalid persisted values (not a known ModelChoice/EffortLevel) are dropped at load
   using the same validation guards the global load path uses (App.tsx ~1966).
 
