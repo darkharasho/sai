@@ -22,7 +22,8 @@ import { setActiveWorkspace, updateTerminalName } from './terminalBuffer';
 import { basename } from './utils/pathUtils';
 import { createSession, generateSmartTitle } from './sessions';
 import { computeUnmountFlushes } from './workspaceFlush';
-import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbSaveSession, dbPatchSessionMeta, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
+import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbPatchSessionMeta, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
+import { queueSaveSession } from './lib/sessionSaveQueue';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval } from './types';
 import type { MetaWorkspaceListItem, MetaWorkspaceRuntime } from './types';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, setActiveHighlightTheme, type HighlightThemeId } from './themes';
@@ -1090,7 +1091,7 @@ export default function App() {
       content: input.prompt,
       timestamp: now,
     };
-    await dbSaveSession(activeProjectPath, {
+    await queueSaveSession(activeProjectPath, {
       id: sessionId,
       title,
       messages: [userMsg],
@@ -1626,7 +1627,7 @@ export default function App() {
         updated.set(wsPath, { ...cur, activeSession: session });
         return updated;
       });
-      dbSaveSession(wsPath, session, fromIdx).catch(() => {});
+      queueSaveSession(wsPath, session, fromIdx).catch(() => {});
     }
     for (const wsPath of mountedChatRef.current) {
       if (!next.has(wsPath)) {
@@ -2175,7 +2176,7 @@ export default function App() {
         const latestMessages = wsMessagesRef.current.get(wsPath);
         if (!latestMessages || latestMessages.length === 0) {
           if (ws.activeSession.messages.length > 0) {
-            dbSaveSession(wsPath, ws.activeSession, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).catch(() => {});
+            queueSaveSession(wsPath, ws.activeSession, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).catch(() => {});
           }
           return;
         }
@@ -2194,11 +2195,27 @@ export default function App() {
           ...(wsPath === focusedPath ? { lastViewedAt: now } : {}),
           messageCount: latestMessages.length,
         };
-        dbSaveSession(wsPath, sessionToSave, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).catch(() => {});
+        queueSaveSession(wsPath, sessionToSave, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).catch(() => {});
       });
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
+
+  // Surface persistence failures (previously swallowed silently)
+  useEffect(() => {
+    const onPersistError = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { quota?: boolean; message?: string };
+      setToast({
+        message: detail?.quota
+          ? 'Chat history could not be saved: storage is full. Delete old sessions in Settings.'
+          : `Chat history could not be saved: ${detail?.message ?? 'unknown error'}`,
+        key: Date.now(),
+        tone: 'error',
+      });
+    };
+    window.addEventListener('sai-persist-error', onPersistError);
+    return () => window.removeEventListener('sai-persist-error', onPersistError);
   }, []);
 
   // Periodically persist active sessions as a safety net (every 30s)
@@ -2225,7 +2242,7 @@ export default function App() {
           const firstUserMsg = latestMessages.find(m => m.role === 'user');
           if (firstUserMsg) sessionToSave.title = generateSmartTitle(firstUserMsg.content);
         }
-        dbSaveSession(wsPath, sessionToSave, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).then(() => {
+        queueSaveSession(wsPath, sessionToSave, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).then(() => {
           dbGetSessions(wsPath).then(sessions => {
             updateWorkspace(wsPath, ws2 => ({ ...ws2, sessions }));
           });
@@ -2880,7 +2897,7 @@ export default function App() {
                   const sessions = await dbGetSessions(wsPath);
                   const targetSession = sessions.find(s => s.id === scope);
                   if (!targetSession) return;
-                  await dbSaveSession(wsPath, {
+                  await queueSaveSession(wsPath, {
                     ...targetSession,
                     messages: merged,
                     messageCount: merged.length,
@@ -2904,7 +2921,7 @@ export default function App() {
                   const sessions = await dbGetSessions(wsPath);
                   const targetSession = sessions.find(s => s.id === scope);
                   if (!targetSession) return;
-                  await dbSaveSession(wsPath, {
+                  await queueSaveSession(wsPath, {
                     ...targetSession,
                     updatedAt: Date.now(),
                     lastTurnErrored: true,
@@ -3475,7 +3492,7 @@ export default function App() {
     }
     if (sessionToSave.messages.length > 0) {
       updateWorkspace(wsPath, ws2 => ({ ...ws2, activeSession: sessionToSave }));
-      dbSaveSession(wsPath, sessionToSave, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).then(() => {
+      queueSaveSession(wsPath, sessionToSave, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).then(() => {
         dbGetSessions(wsPath).then(sessions => {
           updateWorkspace(wsPath, ws2 => ({ ...ws2, sessions }));
         });
@@ -3986,7 +4003,7 @@ export default function App() {
                             aiProvider: orchProvider,
                             messageCount: latest.length,
                           };
-                          dbSaveSession(wsPath, updated, 0).then(() => {
+                          queueSaveSession(wsPath, updated, 0).then(() => {
                             // Mirror into orchMessagesByWs so a remount reads
                             // fresh data without an extra DB round-trip.
                             setOrchMessagesByWs(prev => {
@@ -4180,7 +4197,7 @@ export default function App() {
                           clearTimeout(pending);
                           orchSaveTimerRef.current.delete(orchSessionId);
                         }
-                        dbSaveSession(wsPath, updated, 0).then(() => {
+                        queueSaveSession(wsPath, updated, 0).then(() => {
                           setOrchMessagesByWs(prev => {
                             const m = new Map(prev);
                             m.set(orchSessionId, latestMessages);
@@ -4330,7 +4347,7 @@ export default function App() {
                         const firstUserMsg = messages.find(m => m.role === 'user');
                         if (firstUserMsg) session.title = generateSmartTitle(firstUserMsg.content);
                       }
-                      dbSaveSession(wsPath, session, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).then(() => {
+                      queueSaveSession(wsPath, session, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).then(() => {
                         dbGetSessions(wsPath).then(refreshed => {
                           updateWorkspace(wsPath, w2 => ({ ...w2, sessions: refreshed }));
                         });
@@ -4373,7 +4390,7 @@ export default function App() {
                         if (firstUserMsg) updated.title = generateSmartTitle(firstUserMsg.content);
                       }
 
-                      dbSaveSession(wsPath, updated, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).then(() => {
+                      queueSaveSession(wsPath, updated, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).then(() => {
                         dbGetSessions(wsPath).then(sessions => {
                           updateWorkspace(wsPath, ws2 => ({ ...ws2, sessions }));
                         });
@@ -4391,7 +4408,7 @@ export default function App() {
                               updateWorkspace(wsPath, w2 => {
                                 if (w2.activeSession.titleEdited) return w2;
                                 const newSession = { ...w2.activeSession, title };
-                                dbSaveSession(wsPath, newSession, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).then(() => {
+                                queueSaveSession(wsPath, newSession, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).then(() => {
                                   dbGetSessions(wsPath).then(sessions => {
                                     updateWorkspace(wsPath, ws3 => ({ ...ws3, sessions }));
                                   });
