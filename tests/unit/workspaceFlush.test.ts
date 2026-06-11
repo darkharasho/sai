@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeUnmountFlushes, type WorkspaceLike } from '@/workspaceFlush';
+import { computeUnmountFlushes, computeQuitFlushes, type WorkspaceLike } from '@/workspaceFlush';
 import type { ChatMessage, ChatSession } from '@/types';
 
 const FIXED_NOW = 1_700_000_000_000;
@@ -216,5 +216,61 @@ describe('computeUnmountFlushes', () => {
       now: FIXED_NOW,
     });
     expect(flushes).toEqual([]);
+  });
+});
+
+describe('computeQuitFlushes', () => {
+  it('flushes a workspace whose live messages are ahead of the persisted count', () => {
+    const msgs = [msg(), msg()];
+    const plans = computeQuitFlushes({
+      workspaces: new Map([['/ws', ws({ messageCount: 1 })]]),
+      wsMessages: new Map([['/ws', msgs]]),
+      wsFirstLoadedIdx: new Map([['/ws', 3]]),
+      focusedPath: '/ws',
+      now: FIXED_NOW,
+    });
+    expect(plans).toHaveLength(1);
+    expect(plans[0].wsPath).toBe('/ws');
+    expect(plans[0].fromIdx).toBe(3);
+    expect(plans[0].session.messages).toBe(msgs);
+    expect(plans[0].session.messageCount).toBe(2);
+    expect(plans[0].session.updatedAt).toBe(FIXED_NOW);
+    expect(plans[0].session.lastViewedAt).toBe(FIXED_NOW); // focused
+  });
+
+  it('does not bump lastViewedAt for unfocused workspaces', () => {
+    const plans = computeQuitFlushes({
+      workspaces: new Map([['/bg', ws({ messageCount: 0, lastViewedAt: 5 })]]),
+      wsMessages: new Map([['/bg', [msg()]]]),
+      wsFirstLoadedIdx: new Map(),
+      focusedPath: '/other',
+      now: FIXED_NOW,
+    });
+    expect(plans[0].session.lastViewedAt).toBe(5);
+    expect(plans[0].fromIdx).toBe(0);
+  });
+
+  it('skips workspaces with no new messages', () => {
+    const plans = computeQuitFlushes({
+      workspaces: new Map([['/ws', ws({ messageCount: 1 })]]),
+      wsMessages: new Map([['/ws', [msg()]]]),
+      wsFirstLoadedIdx: new Map(),
+      focusedPath: '/ws',
+      now: FIXED_NOW,
+    });
+    expect(plans).toHaveLength(0);
+  });
+
+  it('falls back to activeSession when there is no live message buffer', () => {
+    const w = ws({ messageCount: 2, messages: [msg(), msg()] });
+    const plans = computeQuitFlushes({
+      workspaces: new Map([['/ws', w]]),
+      wsMessages: new Map(),
+      wsFirstLoadedIdx: new Map(),
+      focusedPath: '/ws',
+      now: FIXED_NOW,
+    });
+    expect(plans).toHaveLength(1);
+    expect(plans[0].session).toBe(w.activeSession);
   });
 });

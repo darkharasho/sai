@@ -62,3 +62,41 @@ export function computeUnmountFlushes<W extends WorkspaceLike>(args: {
   }
   return out;
 }
+
+// Compute the saves needed to persist every workspace's live chat state at
+// shutdown. Mirrors the (previously inline) beforeunload logic: skip
+// workspaces with nothing new, only bump lastViewedAt on the focused one,
+// and fall back to the activeSession snapshot when no live buffer exists.
+export function computeQuitFlushes<W extends WorkspaceLike>(args: {
+  workspaces: Map<string, W>;
+  wsMessages: Map<string, ChatMessage[]>;
+  wsFirstLoadedIdx: Map<string, number>;
+  focusedPath?: string | null;
+  now?: number;
+}): FlushPlan[] {
+  const now = args.now ?? Date.now();
+  const out: FlushPlan[] = [];
+  for (const [wsPath, ws] of args.workspaces) {
+    const fromIdx = args.wsFirstLoadedIdx.get(wsPath) ?? 0;
+    const latest = args.wsMessages.get(wsPath);
+    if (!latest || latest.length === 0) {
+      if (ws.activeSession.messages.length > 0) {
+        out.push({ wsPath, session: ws.activeSession, fromIdx });
+      }
+      continue;
+    }
+    if (latest.length === ws.activeSession.messageCount) continue;
+    out.push({
+      wsPath,
+      fromIdx,
+      session: {
+        ...ws.activeSession,
+        messages: latest,
+        updatedAt: now,
+        ...(wsPath === args.focusedPath ? { lastViewedAt: now } : {}),
+        messageCount: latest.length,
+      },
+    });
+  }
+  return out;
+}

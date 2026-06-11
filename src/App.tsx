@@ -21,7 +21,7 @@ import NewProjectModal from './components/NewProjectModal';
 import { setActiveWorkspace, updateTerminalName } from './terminalBuffer';
 import { basename } from './utils/pathUtils';
 import { createSession, generateSmartTitle } from './sessions';
-import { computeUnmountFlushes } from './workspaceFlush';
+import { computeUnmountFlushes, computeQuitFlushes } from './workspaceFlush';
 import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbPatchSessionMeta, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
 import { queueSaveSession } from './lib/sessionSaveQueue';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval } from './types';
@@ -568,7 +568,9 @@ export default function App() {
         }
       }
       if (streaming.length === 0) {
-        sai.confirmQuit?.();
+        // Persist chat state before letting the window close — beforeunload
+        // alone can't guarantee the IndexedDB writes flush in time.
+        void flushAllSessionsRef.current().finally(() => sai.confirmQuit?.());
         return;
       }
       setQuitConfirmTasks(streaming);
@@ -2168,35 +2170,30 @@ export default function App() {
     return () => { cancelled = true; };
   }, [activeProjectPath]);
 
-  // Persist active sessions to IndexedDB before the window closes
+  // Flush all live sessions to IndexedDB; capped at 2s so quit can never hang
+  // on a stuck transaction. Kept in a ref so the quit handlers (registered
+  // once with [] deps) always see the live workspace state.
+  const flushAllSessionsRef = useRef(async () => {});
+  flushAllSessionsRef.current = async () => {
+    const flushes = computeQuitFlushes({
+      workspaces: workspacesRef.current,
+      wsMessages: wsMessagesRef.current,
+      wsFirstLoadedIdx: wsFirstLoadedIdxRef.current,
+      focusedPath: activeProjectPathRef.current,
+    });
+    if (flushes.length === 0) return;
+    await Promise.race([
+      Promise.allSettled(flushes.map(f => queueSaveSession(f.wsPath, f.session, f.fromIdx))),
+      new Promise(r => setTimeout(r, 2000)),
+    ]);
+  };
+
+  // Persist active sessions to IndexedDB before the window closes. This is a
+  // best-effort backstop — the awaited flush happens in the quit handshake
+  // (onRequestQuit → flush → confirmQuit) before the window is allowed to close.
   useEffect(() => {
     const handleBeforeUnload = () => {
-      const focusedPath = activeProjectPathRef.current;
-      workspacesRef.current.forEach((ws, wsPath) => {
-        const latestMessages = wsMessagesRef.current.get(wsPath);
-        if (!latestMessages || latestMessages.length === 0) {
-          if (ws.activeSession.messages.length > 0) {
-            queueSaveSession(wsPath, ws.activeSession, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).catch(() => {});
-          }
-          return;
-        }
-        // Skip if no new messages since the last persist — bumping updatedAt
-        // without real activity would make this session look "unread" on next
-        // launch even though nothing happened.
-        if (latestMessages.length === ws.activeSession.messageCount) return;
-        const now = Date.now();
-        const sessionToSave = {
-          ...ws.activeSession,
-          messages: latestMessages,
-          updatedAt: now,
-          // Only bump lastViewedAt for the workspace the user is actually
-          // looking at; background workspaces should retain their unread
-          // state so the user sees the indicator when they switch over.
-          ...(wsPath === focusedPath ? { lastViewedAt: now } : {}),
-          messageCount: latestMessages.length,
-        };
-        queueSaveSession(wsPath, sessionToSave, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).catch(() => {});
-      });
+      void flushAllSessionsRef.current();
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
@@ -4964,7 +4961,7 @@ export default function App() {
               }
               return m;
             });
-            (window.sai as any).confirmQuit?.();
+            void flushAllSessionsRef.current().finally(() => (window.sai as any).confirmQuit?.());
           }}
         />
       )}
