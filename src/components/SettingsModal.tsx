@@ -111,6 +111,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [theme, setTheme] = useState<ThemeId>('default');
   const [highlightTheme, setHighlightTheme] = useState<HighlightThemeId>('monokai');
   const [roundedCorners, setRoundedCorners] = useState(false);
+  const [overlayEnabled, setOverlayEnabled] = useState(false);
   const [historyRetention, setHistoryRetention] = useState<number | null>(14);
   const [previewHtml, setPreviewHtml] = useState('');
 
@@ -159,6 +160,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if (HIGHLIGHT_THEMES.some(t => t.id === v)) setHighlightTheme(v as HighlightThemeId);
     });
     window.sai.settingsGet('roundedCorners', false).then((v: boolean) => setRoundedCorners(!!v));
+    window.sai.settingsGet('overlayEnabled', false).then((v: boolean) => setOverlayEnabled(!!v));
     window.sai.settingsGet('aiProvider', 'claude').then((v: string) => {
       if (v === 'claude' || v === 'codex' || v === 'gemini') setAiProvider(v as 'claude' | 'codex' | 'gemini');
     });
@@ -248,6 +250,12 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     document.documentElement.classList.toggle('rounded-corners', value);
     window.sai.settingsSet('roundedCorners', value);
     onSettingChange?.('roundedCorners', value);
+  };
+
+  const handleOverlayEnabledChange = (value: boolean) => {
+    setOverlayEnabled(value);
+    window.sai.settingsSet('overlayEnabled', value);
+    onSettingChange?.('overlayEnabled', value);
   };
 
   const handleHighlightThemeChange = (id: HighlightThemeId) => {
@@ -520,6 +528,20 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             onClick={() => handleRoundedCornersChange(!roundedCorners)}
             role="switch"
             aria-checked={roundedCorners}
+          >
+            <span className="settings-toggle-thumb" />
+          </button>
+        </div>
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <div className="settings-row-name">Focus overlay</div>
+            <div className="settings-row-desc">When SAI is in the background and something is running, show a small click-through status window. Hold Ctrl+Shift over it to interact or drag it.</div>
+          </div>
+          <button
+            className={`settings-toggle${overlayEnabled ? ' on' : ''}`}
+            onClick={() => handleOverlayEnabledChange(!overlayEnabled)}
+            role="switch"
+            aria-checked={overlayEnabled}
           >
             <span className="settings-toggle-thumb" />
           </button>

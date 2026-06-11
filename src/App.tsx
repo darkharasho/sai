@@ -22,6 +22,7 @@ import { setActiveWorkspace, updateTerminalName } from './terminalBuffer';
 import { basename } from './utils/pathUtils';
 import { createSession, generateSmartTitle } from './sessions';
 import { computeUnmountFlushes, computeQuitFlushes } from './workspaceFlush';
+import { buildOverlayPayload, type OverlayRow } from './lib/overlayFeed';
 import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbPatchSessionMeta, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
 import { queueSaveSession } from './lib/sessionSaveQueue';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval } from './types';
@@ -273,6 +274,7 @@ export default function App() {
   const [notificationCounts, setNotificationCounts] = useState<Map<string, number>>(new Map());
   const wsTurnSeqRef = useRef<Map<string, number>>(new Map());
   const [focusedChat, setFocusedChat] = useState(false);
+  const [overlayEnabled, setOverlayEnabled] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [fileIndex, setFileIndex] = useState<string[]>([]);
   const [toast, setToast] = useState<{ message: string; key: number; tone?: 'success' | 'error' } | null>(null);
@@ -1912,6 +1914,7 @@ export default function App() {
     let cancelled = false;
     const guard = <T,>(fn: (v: T) => void) => (v: T) => { if (!cancelled) fn(v); };
     window.sai.settingsGet('focusedChat', false).then(guard((v: boolean) => setFocusedChat(v)));
+    window.sai.settingsGet('overlayEnabled', false).then(guard((v: boolean) => setOverlayEnabled(!!v)));
     window.sai.settingsGet('sidebarWidth', 300).then((v: number) => {
       document.documentElement.style.setProperty('--sidebar-width', `${v}px`);
     });
@@ -4646,6 +4649,52 @@ export default function App() {
     }),
     [completedWorkspaces, workspaces, activeProjectPath],
   );
+
+  // Feed the focus overlay (display-only mini window shown while SAI is in
+  // the background — spec 2026-06-11-focus-overlay-design.md). Throttled and
+  // gated on the setting so the IPC stays silent when disabled.
+  const overlayThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!overlayEnabled) return;
+    const stateFor = (path: string) =>
+      approvalSessions.has(path) ? 'approval' as const
+      : awaitingQuestionWorkspaces.has(path) ? 'question' as const
+      : busyWorkspaces.has(path) ? 'busy' as const
+      : completedWorkspacesWithUnread.has(path) ? 'done' as const
+      : 'alive' as const;
+    const tailFor = (path: string): { snippet?: string; toolLine?: string } => {
+      const messages = wsMessagesRef.current.get(path) ?? workspaces.get(path)?.activeSession.messages ?? [];
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i];
+        if (m.role !== 'assistant') continue;
+        const snippet = typeof m.content === 'string' && m.content ? m.content.slice(0, 220) : undefined;
+        const running = m.toolCalls?.findLast?.(tc => tc.output == null) ?? m.toolCalls?.slice(-1)[0];
+        const toolLine = busyWorkspaces.has(path) && running ? `\u25b8 ${running.name}` : undefined;
+        if (snippet || toolLine) return { snippet, toolLine };
+      }
+      return {};
+    };
+    const metaRoots = new Set((metaWorkspaces || []).map(m => m.syntheticRoot));
+    const rows: OverlayRow[] = [];
+    for (const path of workspaces.keys()) {
+      if (metaRoots.has(path)) continue;
+      const state = stateFor(path);
+      rows.push({ path, name: basename(path), kind: 'project', state, ...(state === 'alive' ? {} : tailFor(path)) });
+    }
+    for (const m of metaWorkspaces || []) {
+      const state = stateFor(m.syntheticRoot);
+      if (state === 'alive' && !workspaces.has(m.syntheticRoot)) continue;
+      rows.push({ path: m.syntheticRoot, name: m.name, kind: 'meta', state, ...(state === 'alive' ? {} : tailFor(m.syntheticRoot)) });
+    }
+    if (overlayThrottleRef.current) clearTimeout(overlayThrottleRef.current);
+    overlayThrottleRef.current = setTimeout(() => {
+      overlayThrottleRef.current = null;
+      (window.sai as any).overlayUpdate?.(buildOverlayPayload(rows));
+    }, 250);
+    return () => {
+      if (overlayThrottleRef.current) { clearTimeout(overlayThrottleRef.current); overlayThrottleRef.current = null; }
+    };
+  }, [overlayEnabled, busyWorkspaces, completedWorkspacesWithUnread, approvalSessions, awaitingQuestionWorkspaces, workspaces, metaWorkspaces]);
 
   return (
     <div className="app">
