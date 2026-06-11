@@ -79,11 +79,15 @@ export default function NavDrawer({
   useEffect(() => {
     if (!open || !gitCwd) return;
     let cancelled = false;
+    // Track in-flight response listeners so closing the drawer detaches them
+    // immediately instead of waiting out the 5s response timeout.
+    const inflight = new Set<() => void>();
     const poll = () => {
       const reqId = `gb${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const off = client.on((m: any) => {
         if (m && m.reqId === reqId) {
           off();
+          inflight.delete(off);
           if (cancelled) return;
           if (m.type === 'files.status.result') {
             const entries = (m.entries ?? []) as { path: string }[];
@@ -93,12 +97,18 @@ export default function NavDrawer({
           }
         }
       });
+      inflight.add(off);
       client.send({ type: 'files.status', cwd: gitCwd, reqId });
-      setTimeout(() => off(), 5000);
+      setTimeout(() => { off(); inflight.delete(off); }, 5000);
     };
     poll();
     const id = setInterval(poll, 5000);
-    return () => { cancelled = true; clearInterval(id); };
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      for (const off of inflight) off();
+      inflight.clear();
+    };
   }, [client, gitCwd, open]);
 
   if (!open) return null;
