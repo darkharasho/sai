@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import SaiLogo from '../SaiLogo';
+import { useThinkingDriver } from '../Chat/useThinkingDriver';
 import { WorkspaceSquircle } from '../shared/WorkspaceSquircle';
-import type { OverlayPayload } from '../../lib/overlayFeed';
+import type { OverlayPayload, OverlayRow } from '../../lib/overlayFeed';
 import type { IndicatorState } from '../../lib/workspaceStatus';
 import './OverlayView.css';
 
@@ -12,18 +14,33 @@ const STATE_LABEL: Partial<Record<IndicatorState, string>> = {
   question: 'waiting for your answer',
 };
 
-/** Renderer for the focus-overlay window (#overlay hash). Display-only: a
- *  status strip of every reportable workspace plus the most interesting
- *  conversation's tail. Ctrl+Shift+hover asks main to make the window
- *  interactive (drag/click); anything else keeps it click-through. */
+const isWorking = (s: IndicatorState) => s === 'busy' || s === 'busy-done';
+
+/** Renderer for the focus-overlay window (#overlay hash). A status strip of
+ *  every reportable workspace plus one conversation's tail; clicking a strip
+ *  item (in Ctrl+Shift interactive mode) focuses that workspace's convo.
+ *  Ghosting is CSS — the window itself is opaque because transparent windows
+ *  render as a black box with GPU acceleration disabled on Linux. */
 export function OverlayView() {
   const [payload, setPayload] = useState<OverlayPayload | null>(null);
   const [interactive, setInteractive] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
 
   useEffect(() => {
     const off = (window as any).sai?.overlayOnState?.((p: OverlayPayload) => setPayload(p));
     return () => { off?.(); };
   }, []);
+
+  const rows: OverlayRow[] = payload?.rows ?? [];
+  const focusRow =
+    rows.find(r => r.path === selected)
+    ?? rows.find(r => r.path === payload?.focusPath)
+    ?? rows[0]
+    ?? null;
+
+  // The thinking driver runs whenever the focused conversation is working, so
+  // the logo cycles through the same animation chain as the in-app indicator.
+  const driver = useThinkingDriver(!!focusRow && isWorking(focusRow.state));
 
   const requestInteractive = (v: boolean) => {
     setInteractive(v);
@@ -35,7 +52,7 @@ export function OverlayView() {
     if (want !== interactive) requestInteractive(want);
   };
 
-  if (!payload?.hasReportable) return <div className="overlay-root overlay-empty" />;
+  if (!payload?.hasReportable || !focusRow) return <div className="overlay-root overlay-empty" />;
 
   return (
     <div
@@ -45,26 +62,31 @@ export function OverlayView() {
     >
       <div className="overlay-card">
         <div className="overlay-strip">
-          {payload.strip.map((r) => (
-            <span key={r.path} className="overlay-strip-item">
+          {rows.map((r) => (
+            <button
+              key={r.path}
+              className={`overlay-strip-item${r.path === focusRow.path ? ' overlay-strip-active' : ''}`}
+              onClick={() => setSelected(r.path)}
+              title={r.path}
+            >
               <WorkspaceSquircle state={r.state} />
               <span className={`overlay-strip-name${r.kind === 'meta' ? ' overlay-meta' : ''}`}>
                 {r.kind === 'meta' ? `meta:${r.name}` : r.name}
               </span>
-            </span>
+            </button>
           ))}
         </div>
-        {payload.focus && (
-          <div className="overlay-focus">
-            <div className="overlay-focus-head">
-              <WorkspaceSquircle state={payload.focus.state} />
-              <span className="overlay-focus-name">{payload.focus.name}</span>
-              <span className="overlay-focus-state">· {STATE_LABEL[payload.focus.state] ?? payload.focus.state}</span>
-            </div>
-            {payload.focus.snippet && <div className="overlay-snippet">{payload.focus.snippet}</div>}
-            {payload.focus.toolLine && <div className="overlay-tool">{payload.focus.toolLine}</div>}
+        <div className="overlay-focus">
+          <div className="overlay-focus-head">
+            {isWorking(focusRow.state)
+              ? <SaiLogo mode={driver.chainMode} size={16} color="#c7913b" className="overlay-thinking" />
+              : <WorkspaceSquircle state={focusRow.state} />}
+            <span className="overlay-focus-name">{focusRow.name}</span>
+            <span className="overlay-focus-state">· {STATE_LABEL[focusRow.state] ?? focusRow.state}</span>
           </div>
-        )}
+          {focusRow.snippet && <div className="overlay-snippet">{focusRow.snippet}</div>}
+          {focusRow.toolLine && <div className="overlay-tool">{focusRow.toolLine}</div>}
+        </div>
       </div>
     </div>
   );

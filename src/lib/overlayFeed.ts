@@ -13,8 +13,11 @@ export interface OverlayRow {
 
 export interface OverlayPayload {
   hasReportable: boolean;
-  strip: Array<Pick<OverlayRow, 'path' | 'name' | 'kind' | 'state'>>;
-  focus: OverlayRow | null;
+  /** Every reportable workspace, tails included — the overlay lets the user
+   *  pick any of them as the focused conversation. */
+  rows: OverlayRow[];
+  /** Default focus: the most interesting row. */
+  focusPath: string | null;
 }
 
 const REPORTABLE: ReadonlySet<IndicatorState> = new Set(['busy', 'busy-done', 'done', 'approval', 'question']);
@@ -33,7 +36,7 @@ export function buildOverlayPayload(rows: OverlayRow[]): OverlayPayload {
   }
   return {
     hasReportable: reportable.length > 0,
-    strip: reportable.map(({ path, name, kind, state }) => ({ path, name, kind, state })),
-    focus,
+    rows: reportable,
+    focusPath: focus?.path ?? null,
   };
 }

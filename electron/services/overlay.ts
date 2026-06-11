@@ -9,7 +9,9 @@ import path from 'node:path';
 const WIDTH = 380;
 const HEIGHT = 230;
 const MARGIN = 16;
-const GHOST_OPACITY = 0.65;
+// Brief grace before hiding on a reportable→idle transition: busy flags are
+// fed by the renderer's streamSettled debounce and flicker mid-reply.
+const LINGER_MS = 2500;
 
 export interface OverlayVisibilityInputs {
   enabled: boolean;
@@ -32,6 +34,7 @@ export class OverlayManager {
   private mainFocused = true;
   private lastPayload: unknown = null;
   private hasReportable = false;
+  private lingerTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly opts: OverlayManagerOpts) {}
 
@@ -56,12 +59,12 @@ export class OverlayManager {
 
   setInteractive(v: boolean): void {
     if (!this.win || this.win.isDestroyed()) return;
+    // Ghost vs solid is handled by the overlay renderer's CSS — setOpacity is
+    // a no-op on Linux, so only the mouse-event passthrough lives here.
     if (v) {
       this.win.setIgnoreMouseEvents(false);
-      this.win.setOpacity(1);
     } else {
       this.win.setIgnoreMouseEvents(true, { forward: true });
-      this.win.setOpacity(GHOST_OPACITY);
     }
   }
 
@@ -72,8 +75,16 @@ export class OverlayManager {
   }
 
   destroy(): void {
+    this.clearLinger();
     if (this.win && !this.win.isDestroyed()) this.win.destroy();
     this.win = null;
+  }
+
+  private clearLinger(): void {
+    if (this.lingerTimer) {
+      clearTimeout(this.lingerTimer);
+      this.lingerTimer = null;
+    }
   }
 
   private apply(): void {
@@ -83,12 +94,36 @@ export class OverlayManager {
       hasReportable: this.hasReportable,
     });
     if (show) {
+      this.clearLinger();
       if (!this.win || this.win.isDestroyed()) this.create();
       this.win!.setBounds({ ...this.position(), width: WIDTH, height: HEIGHT });
       if (this.lastPayload) this.win!.webContents.send('overlay:state', this.lastPayload);
       if (!this.win!.isVisible()) this.win!.showInactive();
-    } else if (this.win && !this.win.isDestroyed() && this.win.isVisible()) {
+      return;
+    }
+    if (!this.win || this.win.isDestroyed() || !this.win.isVisible()) {
+      this.clearLinger();
+      return;
+    }
+    if (!this.enabled || this.mainFocused) {
+      // User is back (or turned it off) — no reason to linger.
+      this.clearLinger();
       this.win.hide();
+      return;
+    }
+    // Reportable dropped — likely a stream-debounce flicker; hide after a grace.
+    if (!this.lingerTimer) {
+      this.lingerTimer = setTimeout(() => {
+        this.lingerTimer = null;
+        const stillHidden = !shouldShowOverlay({
+          enabled: this.enabled,
+          mainFocused: this.mainFocused,
+          hasReportable: this.hasReportable,
+        });
+        if (stillHidden && this.win && !this.win.isDestroyed() && this.win.isVisible()) {
+          this.win.hide();
+        }
+      }, LINGER_MS);
     }
   }
 
@@ -110,12 +145,14 @@ export class OverlayManager {
   }
 
   private create(): void {
+    // Not `transparent`: SAI disables GPU acceleration on Linux, where
+    // transparent frameless windows render as a black box. The window IS the
+    // card — its background matches the card surface and CSS draws the border.
     const win = new BrowserWindow({
       width: WIDTH,
       height: HEIGHT,
       ...this.position(),
       frame: false,
-      transparent: true,
       alwaysOnTop: true,
       resizable: false,
       movable: true,
@@ -125,13 +162,12 @@ export class OverlayManager {
       focusable: false,
       show: false,
       hasShadow: false,
-      backgroundColor: '#00000000',
+      backgroundColor: '#0d1117',
       webPreferences: { preload: path.join(__dirname, 'preload.js'), sandbox: false },
     });
     win.setAlwaysOnTop(true, 'screen-saver');
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     win.setIgnoreMouseEvents(true, { forward: true });
-    win.setOpacity(GHOST_OPACITY);
     win.removeMenu();
     win.on('moved', () => this.noteMoved());
     if (process.env.VITE_DEV_SERVER_URL) {

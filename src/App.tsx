@@ -4664,15 +4664,20 @@ export default function App() {
       : 'alive' as const;
     const tailFor = (path: string): { snippet?: string; toolLine?: string } => {
       const messages = wsMessagesRef.current.get(path) ?? workspaces.get(path)?.activeSession.messages ?? [];
-      for (let i = messages.length - 1; i >= 0; i--) {
+      let snippet: string | undefined;
+      let toolLine: string | undefined;
+      // Snippet: latest assistant text. Tool line: latest unfinished tool call
+      // while working — they often live on different messages mid-turn.
+      for (let i = messages.length - 1; i >= 0 && (!snippet || !toolLine); i--) {
         const m = messages[i];
         if (m.role !== 'assistant') continue;
-        const snippet = typeof m.content === 'string' && m.content ? m.content.slice(0, 220) : undefined;
-        const running = m.toolCalls?.findLast?.(tc => tc.output == null) ?? m.toolCalls?.slice(-1)[0];
-        const toolLine = busyWorkspaces.has(path) && running ? `\u25b8 ${running.name}` : undefined;
-        if (snippet || toolLine) return { snippet, toolLine };
+        if (!snippet && typeof m.content === 'string' && m.content) snippet = m.content.slice(0, 220);
+        if (!toolLine && busyWorkspaces.has(path) && m.toolCalls && m.toolCalls.length > 0) {
+          const running = [...m.toolCalls].reverse().find(tc => tc.output == null) ?? m.toolCalls[m.toolCalls.length - 1];
+          toolLine = `\u25b8 ${running.name}`;
+        }
       }
-      return {};
+      return { snippet, toolLine };
     };
     const metaRoots = new Set((metaWorkspaces || []).map(m => m.syntheticRoot));
     const rows: OverlayRow[] = [];

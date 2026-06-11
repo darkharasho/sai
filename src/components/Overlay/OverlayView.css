@@ -5,7 +5,7 @@
 .overlay-root {
   width: 100vw;
   height: 100vh;
-  background: transparent;
+  background: #0d1117;
   display: flex;
   align-items: stretch;
   font: 12px ui-sans-serif, system-ui, sans-serif;
@@ -18,17 +18,19 @@
 
 .overlay-card {
   flex: 1;
-  margin: 4px;
-  background: rgba(13, 17, 23, 0.92);
+  background: #0d1117;
   border: 1px solid #30363d;
-  border-radius: 12px;
-  padding: 10px 12px;
+  padding: 9px 11px;
   overflow: hidden;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  /* Ghost mode: the window can't be translucent on Linux (no GPU compositing),
+     so dim the content instead. Interactive mode restores full strength. */
+  opacity: 0.65;
+  transition: opacity 0.15s ease;
 }
 
-/* In interactive mode the whole card becomes the drag handle. */
-.overlay-interactive .overlay-card { -webkit-app-region: drag; border-color: #58a6ff; }
+/* In interactive mode the whole card becomes the drag handle (buttons opt out). */
+.overlay-interactive .overlay-card { -webkit-app-region: drag; border-color: #58a6ff; opacity: 1; }
+.overlay-interactive .overlay-strip-item { -webkit-app-region: no-drag; }
 
 .overlay-strip {
   display: flex;
@@ -40,8 +42,22 @@
   margin-bottom: 8px;
 }
 
-.overlay-strip-item { display: inline-flex; gap: 5px; align-items: center; }
+.overlay-strip-item {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+}
+.overlay-strip-item:hover { background: #21262d; }
+.overlay-strip-active { background: #1c2129; }
 .overlay-strip-name { color: #8b949e; }
+.overlay-strip-active .overlay-strip-name { color: #e0e0e0; }
+.overlay-thinking { flex-shrink: 0; }
 .overlay-meta { font-style: italic; }
 
 .overlay-focus-head { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }

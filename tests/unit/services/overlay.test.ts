@@ -70,7 +70,7 @@ describe('OverlayManager', () => {
     expect(windows[0].showInactive).toHaveBeenCalled();
   });
 
-  it('hides on focus and re-shows on blur without recreating', () => {
+  it('hides on focus (immediately) and re-shows on blur without recreating', () => {
     const { mgr } = makeManager();
     mgr.setEnabled(true);
     mgr.update({ hasReportable: true });
@@ -83,13 +83,19 @@ describe('OverlayManager', () => {
     expect(windows[0].visible).toBe(true);
   });
 
-  it('hides when everything goes idle', () => {
-    const { mgr } = makeManager();
-    mgr.setEnabled(true);
-    mgr.update({ hasReportable: true });
-    mgr.setMainFocused(false);
-    mgr.update({ hasReportable: false });
-    expect(windows[0].visible).toBe(false);
+  it('hides when everything goes idle (after the linger)', () => {
+    vi.useFakeTimers();
+    try {
+      const { mgr } = makeManager();
+      mgr.setEnabled(true);
+      mgr.update({ hasReportable: true });
+      mgr.setMainFocused(false);
+      mgr.update({ hasReportable: false });
+      vi.advanceTimersByTime(2600);
+      expect(windows[0].visible).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('forwards payloads to the window', () => {
@@ -102,17 +108,55 @@ describe('OverlayManager', () => {
     expect(windows[0].webContents.send).toHaveBeenCalledWith('overlay:state', payload);
   });
 
-  it('interactive mode flips opacity and mouse events', () => {
+  it('interactive mode flips mouse events (ghosting is CSS-side: Linux ignores setOpacity)', () => {
     const { mgr } = makeManager();
     mgr.setEnabled(true);
     mgr.update({ hasReportable: true });
     mgr.setMainFocused(false);
     mgr.setInteractive(true);
     expect(windows[0].setIgnoreMouseEvents).toHaveBeenLastCalledWith(false);
-    expect(windows[0].setOpacity).toHaveBeenLastCalledWith(1);
     mgr.setInteractive(false);
     expect(windows[0].setIgnoreMouseEvents).toHaveBeenLastCalledWith(true, { forward: true });
-    expect(windows[0].setOpacity).toHaveBeenLastCalledWith(0.65);
+  });
+
+  it('lingers before hiding when the show condition drops, and cancels on re-show', () => {
+    vi.useFakeTimers();
+    try {
+      const { mgr } = makeManager();
+      mgr.setEnabled(true);
+      mgr.update({ hasReportable: true });
+      mgr.setMainFocused(false);
+      expect(windows[0].visible).toBe(true);
+      // Condition drops (e.g. busy flicker from the streamSettled debounce)
+      mgr.update({ hasReportable: false });
+      expect(windows[0].visible).toBe(true); // still visible during linger
+      // Condition returns before the linger expires → no hide
+      mgr.update({ hasReportable: true });
+      vi.advanceTimersByTime(5000);
+      expect(windows[0].visible).toBe(true);
+      // Condition drops for good → hides after the linger
+      mgr.update({ hasReportable: false });
+      vi.advanceTimersByTime(2400);
+      expect(windows[0].visible).toBe(true);
+      vi.advanceTimersByTime(200);
+      expect(windows[0].visible).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('hides immediately when disabled (no linger)', () => {
+    vi.useFakeTimers();
+    try {
+      const { mgr } = makeManager();
+      mgr.setEnabled(true);
+      mgr.update({ hasReportable: true });
+      mgr.setMainFocused(false);
+      mgr.setEnabled(false);
+      expect(windows[0].visible).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('clamps persisted bounds to the work area', () => {

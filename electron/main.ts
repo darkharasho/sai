@@ -377,7 +377,10 @@ function createWindow() {
     getSavedBounds: () => readSettings().overlayBounds,
     saveBounds: (b) => writeSetting('overlayBounds', b),
   });
-  overlayManager.setEnabled(readSettings().overlayEnabled === true);
+  // setEnabled happens after the settings helpers are initialized below —
+  // settingsFile is a const declared mid-function, so calling readSettings()
+  // here would hit its TDZ and silently report {} (the catch eats the
+  // ReferenceError). Burned us once: the overlay stayed disabled at startup.
   mainWindow.on('blur', () => overlayManager?.setMainFocused(false));
   mainWindow.on('focus', () => {
     overlayManager?.setMainFocused(true);
@@ -755,6 +758,7 @@ function createWindow() {
 
   ipcMain.on('overlay:update', (_event, payload) => overlayManager?.update(payload));
   ipcMain.on('overlay:setInteractive', (_event, v: boolean) => overlayManager?.setInteractive(!!v));
+  overlayManager?.setEnabled(readSettings().overlayEnabled === true);
 
   // Initialize subprocess memory cap from settings (default 4096MB).
   setSubprocessMemoryCapMB(

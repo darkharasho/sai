@@ -9,33 +9,33 @@ describe('buildOverlayPayload', () => {
   it('is not reportable when everything is idle/alive', () => {
     const p = buildOverlayPayload([row({ state: 'alive' }), row({ path: '/q', state: 'inactive' })]);
     expect(p.hasReportable).toBe(false);
-    expect(p.strip).toHaveLength(0);
-    expect(p.focus).toBeNull();
+    expect(p.rows).toHaveLength(0);
+    expect(p.focusPath).toBeNull();
   });
 
-  it('strip includes every non-idle row; focus picks question > approval > busy > done', () => {
+  it('rows include every non-idle row with tails; focus picks question > approval > busy > done', () => {
     const p = buildOverlayPayload([
       row({ path: '/busy', name: 'busy', state: 'busy' }),
       row({ path: '/done', name: 'done', state: 'done' }),
       row({ path: '/ask', name: 'ask', state: 'question', snippet: 'which one?' }),
     ]);
     expect(p.hasReportable).toBe(true);
-    expect(p.strip.map(s => s.name)).toEqual(['busy', 'done', 'ask']);
-    expect(p.focus?.path).toBe('/ask');
-    expect(p.focus?.snippet).toBe('which one?');
+    expect(p.rows.map(s => s.name)).toEqual(['busy', 'done', 'ask']);
+    expect(p.focusPath).toBe('/ask');
+    expect(p.rows.find(r => r.path === '/ask')?.snippet).toBe('which one?');
   });
 
   it('approval beats busy; busy beats done', () => {
     expect(buildOverlayPayload([
       row({ path: '/busy', state: 'busy' }), row({ path: '/appr', state: 'approval' }),
-    ]).focus?.path).toBe('/appr');
+    ]).focusPath).toBe('/appr');
     expect(buildOverlayPayload([
       row({ path: '/busy', state: 'busy' }), row({ path: '/done', state: 'done' }),
-    ]).focus?.path).toBe('/busy');
+    ]).focusPath).toBe('/busy');
   });
 
   it('busy-done counts as busy for focus priority', () => {
     const p = buildOverlayPayload([row({ path: '/bd', state: 'busy-done' }), row({ path: '/d', state: 'done' })]);
-    expect(p.focus?.path).toBe('/bd');
+    expect(p.focusPath).toBe('/bd');
   });
 });
