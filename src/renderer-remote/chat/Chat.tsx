@@ -78,6 +78,10 @@ export default function Chat({ client, statusStore, watcherStore, active, onActi
 
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
+  // Live view of the attached session for wire handlers — the listener effect
+  // doesn't re-register on `active` changes, so closures would go stale.
+  const activeRef = useRef(active);
+  activeRef.current = active;
 
   useEffect(() => {
     if (!active) return;
@@ -117,6 +121,10 @@ export default function Chat({ client, statusStore, watcherStore, active, onActi
         return;
       }
       if (t === 'session.history') {
+        // A history dump for a session we've already navigated away from must
+        // not clobber the current transcript (rapid session switching).
+        const sid = (msg as any).sessionId;
+        if (sid && activeRef.current?.sessionId && sid !== activeRef.current.sessionId) return;
         const raw = (msg as any).messages ?? [];
         // ChatMessage in chatDb stores text in `content` and tool calls in
         // `toolCalls` (each with stringified input + output). Expand each
