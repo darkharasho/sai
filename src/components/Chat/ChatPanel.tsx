@@ -92,10 +92,16 @@ interface ChatPanelProps {
   permissionMode: 'default' | 'bypass';
   onPermissionChange: (mode: 'default' | 'bypass') => void;
   effortLevel: 'low' | 'medium' | 'high' | 'max';
-  onEffortChange: (level: 'low' | 'medium' | 'high' | 'max') => void;
+  onEffortChange: (level: 'low' | 'medium' | 'high' | 'max' | null) => void;
   modelChoice: 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan' | (string & {});
-  onModelChange: (model: 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan' | (string & {})) => void;
+  onModelChange: (model: 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan' | (string & {}) | null) => void;
   availableModels?: { id: string; label: string; description: string; recommended?: boolean; oneM?: boolean; extra?: boolean }[];
+  claudeOverrideState?: {
+    modelOverridden: boolean;
+    effortOverridden: boolean;
+    globalModel: 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan' | (string & {});
+    globalEffort: 'low' | 'medium' | 'high' | 'max';
+  };
   aiProvider: 'claude' | 'codex' | 'gemini';
   codexModel: string;
   onCodexModelChange: (model: string) => void;
@@ -391,7 +397,7 @@ const FAKE_ERROR_VARIANTS = {
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(initialMessages || []);
   const taskRegistry = useMemo(() => buildTaskRegistry(messages), [messages]);
   const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);
@@ -1770,6 +1776,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             modelChoice={modelChoice}
             onModelChange={onModelChange}
             availableModels={availableModels}
+            claudeOverrideState={claudeOverrideState}
             contextUsage={contextUsage}
             sessionUsage={sessionUsage}
             sessionCost={sessionCost}

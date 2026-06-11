@@ -49,7 +49,8 @@ export interface ApprovalChatMeta {
 export type AIProvider = 'claude' | 'codex' | 'gemini';
 
 export type EffortLevel = 'low' | 'medium' | 'high' | 'max';
-
+// Known CLI aliases plus any account-specific model id (e.g. 'claude-fable-5[1m]')
+// surfaced via claude:models — the CLI accepts arbitrary model strings.
 export type ModelChoice = 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan' | (string & {});
 
 export interface ChatSession {

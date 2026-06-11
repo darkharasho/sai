@@ -27,7 +27,7 @@ import { toolCallDetail } from './lib/toolCallDetail';
 import { findLatestTodos } from './components/Chat/TodoProgress';
 import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbPatchSessionMeta, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
 import { queueSaveSession } from './lib/sessionSaveQueue';
-import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval } from './types';
+import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval, EffortLevel, ModelChoice } from './types';
 import type { MetaWorkspaceListItem, MetaWorkspaceRuntime } from './types';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, setActiveHighlightTheme, type HighlightThemeId } from './themes';
 import ApprovalBanner from './components/ApprovalBanner';
@@ -71,6 +71,7 @@ import { isOrchestratorToolDrift, describeToolDrift } from './lib/orchestratorTo
 import { resolveTaskRef } from './lib/swarmRef';
 import { installRemoteProxyHandler } from './lib/remoteProxyClient';
 import { applyQuestionEvent } from './lib/awaitingQuestionTracker';
+import { resolveClaudeConfig, setWorkspaceOverride, sanitizeOverrideMap, type ClaudeOverrideMap } from './lib/claudeWorkspaceConfig';
 
 const SWARM_DEFAULT_CAP = 5;
 const SWARM_STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 min of no activity → presumed dead. Heartbeats (deriveSwarmMirror) refresh activity on any stream traffic; this headroom covers a single silent long-running tool/sub-agent.
@@ -111,12 +112,12 @@ function applyEditsClientSide(content: string, edits: { line: number; column: nu
 }
 
 type PermissionMode = 'default' | 'bypass';
-type EffortLevel = 'low' | 'medium' | 'high' | 'max';
-type ModelChoice = 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan' | (string & {});
+// EffortLevel and ModelChoice are imported from ./types
 type ClaudeModelOption = { id: string; label: string; description: string; recommended?: boolean; oneM?: boolean; extra?: boolean };
 // Persisted model can be a known alias or an account-specific id (e.g. Fable);
 // the CLI validates it, so accept any non-empty string here.
 const isModelChoice = (v: unknown): v is ModelChoice => typeof v === 'string' && v.length > 0;
+const isEffortLevel = (v: unknown): v is EffortLevel => v === 'low' || v === 'medium' || v === 'high' || v === 'max';
 
 // Cap the in-memory active-session message window. Older messages stay in
 // IndexedDB and are paginated in via ChatPanel's startReached callback.
@@ -195,6 +196,7 @@ export default function App() {
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
   const [effortLevel, setEffortLevel] = useState<EffortLevel>('high');
   const [modelChoice, setModelChoice] = useState<ModelChoice>('sonnet');
+  const [claudeWsOverrides, setClaudeWsOverrides] = useState<ClaudeOverrideMap>({});
   const [editorFontSize, setEditorFontSize] = useState(13);
   const [editorMinimap, setEditorMinimap] = useState(true);
   const [aiProvider, setAiProvider] = useState<AIProvider>('claude');
@@ -1966,8 +1968,9 @@ export default function App() {
     // Load nested provider settings
     window.sai.settingsGet('claude', {}).then(guard((c: any) => {
       if (isModelChoice(c.model)) setModelChoice(c.model);
-      if (c.effort === 'low' || c.effort === 'medium' || c.effort === 'high' || c.effort === 'max') setEffortLevel(c.effort);
+      if (isEffortLevel(c.effort)) setEffortLevel(c.effort);
       if (c.permission === 'default' || c.permission === 'bypass') setPermissionMode(c.permission);
+      setClaudeWsOverrides(sanitizeOverrideMap(c.workspaceOverrides, isModelChoice, isEffortLevel));
     }));
     window.sai.settingsGet('codex', {}).then(guard((c: any) => {
       if (c.model) setCodexModel(c.model);
@@ -3725,6 +3728,21 @@ export default function App() {
     saveClaudeSetting('model', model);
   };
 
+  const handleWorkspaceModelChange = (wsPath: string, model: ModelChoice | null) => {
+    setClaudeWsOverrides(prev => {
+      const next = setWorkspaceOverride(prev, wsPath, { model });
+      saveClaudeSetting('workspaceOverrides', next);
+      return next;
+    });
+  };
+  const handleWorkspaceEffortChange = (wsPath: string, effort: EffortLevel | null) => {
+    setClaudeWsOverrides(prev => {
+      const next = setWorkspaceOverride(prev, wsPath, { effort });
+      saveClaudeSetting('workspaceOverrides', next);
+      return next;
+    });
+  };
+
   const handleCodexModelChange = (model: string) => {
     setCodexModel(model);
     saveCodexSetting('model', model);
@@ -3976,16 +3994,23 @@ export default function App() {
                     ?? orchMessagesByWs.get(orchSessionId)
                     ?? orchSession?.messages
                     ?? [];
+                  const wsClaudeCfgOrch = resolveClaudeConfig(claudeWsOverrides, wsPath, { model: modelChoice, effort: effortLevel });
                   const orchChatSlot = (
                     <ChatPanel
                       key={orchSessionId}
                       projectPath={wsPath}
                       permissionMode={permissionMode}
                       onPermissionChange={handlePermissionChange}
-                      effortLevel={effortLevel}
-                      onEffortChange={handleEffortChange}
+                      effortLevel={wsClaudeCfgOrch.effort}
+                      onEffortChange={(level) => handleWorkspaceEffortChange(wsPath, level)}
                       modelChoice={orchModel}
-                      onModelChange={handleModelChange}
+                      onModelChange={(model) => handleWorkspaceModelChange(wsPath, model)}
+                      claudeOverrideState={{
+                        modelOverridden: wsClaudeCfgOrch.modelOverridden,
+                        effortOverridden: wsClaudeCfgOrch.effortOverridden,
+                        globalModel: modelChoice,
+                        globalEffort: effortLevel,
+                      }}
                       availableModels={claudeModels}
                       aiProvider={orchProvider}
                       codexModel={codexModel}
@@ -4293,7 +4318,9 @@ export default function App() {
                     }}
                   />
                   );
-                })() : (
+                })() : (() => {
+                  const wsClaudeCfg = resolveClaudeConfig(claudeWsOverrides, wsPath, { model: modelChoice, effort: effortLevel });
+                  return (
                 <ChatPanel
                   key={ws.activeSession.id}
                   projectPath={wsPath}
@@ -4301,10 +4328,16 @@ export default function App() {
                   claudeKind={ws.activeSession.kind === 'task' ? 'task' : 'chat'}
                   permissionMode={permissionMode}
                   onPermissionChange={handlePermissionChange}
-                  effortLevel={effortLevel}
-                  onEffortChange={handleEffortChange}
-                  modelChoice={modelChoice}
-                  onModelChange={handleModelChange}
+                  effortLevel={wsClaudeCfg.effort}
+                  onEffortChange={(level) => handleWorkspaceEffortChange(wsPath, level)}
+                  modelChoice={wsClaudeCfg.model}
+                  onModelChange={(model) => handleWorkspaceModelChange(wsPath, model)}
+                  claudeOverrideState={{
+                    modelOverridden: wsClaudeCfg.modelOverridden,
+                    effortOverridden: wsClaudeCfg.effortOverridden,
+                    globalModel: modelChoice,
+                    globalEffort: effortLevel,
+                  }}
                   availableModels={claudeModels}
                   renderToolCall={(tc) => {
                     const n = tc.name || '';
@@ -4476,7 +4509,8 @@ export default function App() {
                   }
                   mentionInsertRef={wsPath === activeProjectPath ? mentionInsertRef : undefined}
                 />
-                )}
+                  );
+                })()}
               </div>
             ))}
             {panel === 'editor' && activeFilePath && (
