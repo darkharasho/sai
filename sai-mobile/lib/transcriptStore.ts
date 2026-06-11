@@ -19,6 +19,10 @@ interface State {
   byKey: Record<string, TranscriptEvent[]>;
   append(key: string, ev: TranscriptEvent): void;
   appendBatch(key: string, evs: TranscriptEvent[]): void;
+  /** Swap the full event list for a key — used when a `session.history` dump
+   *  arrives (initial attach AND reconnect resync), where the server's view
+   *  supersedes whatever was accumulated locally. */
+  replace(key: string, evs: TranscriptEvent[]): void;
   clear(key: string): void;
 }
 
@@ -34,6 +38,9 @@ export const useTranscript = create<State>((set, get) => ({
   },
   appendBatch(key, evs) {
     for (const ev of evs) get().append(key, ev);
+  },
+  replace(key, evs) {
+    set({ byKey: { ...get().byKey, [key]: [...evs] } });
   },
   clear(key) {
     const { [key]: _, ...rest } = get().byKey;

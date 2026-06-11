@@ -41,6 +41,7 @@ export default function Chat() {
   );
   const events = useTranscript((s) => s.byKey[tkey] ?? EMPTY_EVENTS);
   const append = useTranscript((s) => s.append);
+  const replaceTranscript = useTranscript((s) => s.replace);
 
   // Load workspaces once connected (over the WS, not REST).
   useEffect(() => {
@@ -112,6 +113,48 @@ export default function Chat() {
         const url = (m as any).url as string | undefined;
         const snapshot = (m as any).snapshot;
         if (messageId && url && snapshot) githubWatcherStore.set(messageId, url, snapshot);
+        return;
+      }
+      if (t === 'session.history') {
+        // History dump from the bridge — sent on every session.attach, which
+        // the wire replays after reconnect, so this doubles as resync for
+        // anything missed while the app was backgrounded/offline.
+        const sid = (m as any).sessionId as string | undefined;
+        if (sid && sessionId && sid !== sessionId) return; // stale dump
+        const raw = ((m as any).messages ?? []) as any[];
+        const out: TranscriptEvent[] = [];
+        raw.forEach((hm, i) => {
+          const text = typeof hm.content === 'string' ? hm.content : (typeof hm.text === 'string' ? hm.text : '');
+          if (text) {
+            out.push({ id: `h-${i}-t`, type: hm.role === 'user' ? 'user' : 'assistant', text });
+          }
+          if (Array.isArray(hm.toolCalls)) {
+            hm.toolCalls.forEach((tc: any, j: number) => {
+              let parsedInput: unknown;
+              if (typeof tc.input === 'string' && tc.input.trim()) {
+                try { parsedInput = JSON.parse(tc.input); } catch { parsedInput = { command: tc.input }; }
+              } else if (tc.input && typeof tc.input === 'object') {
+                parsedInput = tc.input;
+              }
+              out.push({
+                id: `h-${i}-tc-${j}-${tc.id ?? j}`,
+                type: 'tool_use',
+                toolName: tc.name ?? tc.type ?? 'tool',
+                toolUseId: typeof tc.id === 'string' ? tc.id : undefined,
+                toolInput: parsedInput,
+              });
+              if (tc.output != null) {
+                out.push({
+                  id: `h-${i}-tr-${j}-${tc.id ?? j}`,
+                  type: 'tool_result',
+                  toolUseId: typeof tc.id === 'string' ? tc.id : undefined,
+                  toolResult: typeof tc.output === 'string' ? tc.output : JSON.stringify(tc.output, null, 2),
+                });
+              }
+            });
+          }
+        });
+        if (out.length > 0) replaceTranscript(tkey, out);
         return;
       }
       if (t === 'streaming_start') { setStreaming(true); return; }
@@ -214,7 +257,7 @@ export default function Chat() {
       }
     });
     return () => { off(); };
-  }, [client, tkey, append, follow, sessionId, machine.machineId, active?.projectPath, setActiveWs]);
+  }, [client, tkey, append, replaceTranscript, follow, sessionId, machine.machineId, active?.projectPath, setActiveWs]);
 
   const onPickWorkspace = (w: Workspace) => {
     if (!client) return;

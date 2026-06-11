@@ -24,3 +24,18 @@ describe('transcript store', () => {
     expect(useTranscript.getState().byKey['k']).toBeUndefined();
   });
 });
+
+describe('transcript store replace', () => {
+  beforeEach(() => useTranscript.setState({ byKey: {} }));
+
+  it('swaps the full event list for a key, leaving other keys untouched', () => {
+    useTranscript.getState().append('k1', { id: 'old', type: 'user', text: 'old' });
+    useTranscript.getState().append('k2', { id: 'other', type: 'user', text: 'other' });
+    useTranscript.getState().replace('k1', [
+      { id: 'h1', type: 'user', text: 'from history' },
+      { id: 'h2', type: 'assistant', text: 'reply' },
+    ]);
+    expect(useTranscript.getState().byKey['k1']!.map((e) => e.id)).toEqual(['h1', 'h2']);
+    expect(useTranscript.getState().byKey['k2']!).toHaveLength(1);
+  });
+});
