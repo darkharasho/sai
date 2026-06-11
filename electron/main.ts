@@ -62,6 +62,7 @@ import { registerUpdater } from './services/updater';
 import { registerUsageHandlers, destroyUsagePolling } from './services/usage';
 import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove, suspend, getOrCreate as getOrCreateWorkspace, DEFAULT_SUSPEND_TIMEOUT } from './services/workspace';
 import { initFocusTracking, setActiveWorkspace } from './services/notify';
+import { OverlayManager } from './services/overlay';
 import { registerGithubAuthHandlers } from './services/github-auth';
 import { initialSync, schedulePush } from './services/github-sync';
 import { registerCodexHandlers } from './services/codex';
@@ -103,6 +104,7 @@ if (process.platform === 'linux') {
 
 let mainWindow: BrowserWindow | null = null;
 let quitConfirmed = false;
+let overlayManager: OverlayManager | null = null;
 
 const THEME_TITLEBAR: Record<string, { color: string; symbolColor: string; bg: string }> = {
   default:  { color: '#0c0f11', symbolColor: '#bec6d0', bg: '#111418' },
@@ -368,7 +370,17 @@ function createWindow() {
   mainWindow.on('unmaximize', () => mainWindow?.webContents.send('window:maximizedChange', false));
 
   initFocusTracking(mainWindow);
+  // Focus overlay (off by default; spec 2026-06-11-focus-overlay-design.md).
+  // Single instance across re-registration, destroyed in the close handler.
+  overlayManager?.destroy();
+  overlayManager = new OverlayManager({
+    getSavedBounds: () => readSettings().overlayBounds,
+    saveBounds: (b) => writeSetting('overlayBounds', b),
+  });
+  overlayManager.setEnabled(readSettings().overlayEnabled === true);
+  mainWindow.on('blur', () => overlayManager?.setMainFocused(false));
   mainWindow.on('focus', () => {
+    overlayManager?.setMainFocused(true);
     mainWindow?.flashFrame(false);
   });
 
@@ -428,6 +440,8 @@ function createWindow() {
     if (mainWindow) writeSetting('windowBounds', mainWindow.getBounds());
     stopSuspendTimer();
     destroyClaude();
+    overlayManager?.destroy();
+    overlayManager = null;
     destroyAllTerminals();
     terminalStore.destroyAll();
     destroyAll(mainWindow!);
@@ -734,7 +748,13 @@ function createWindow() {
     if (key === 'subprocessMemoryCapMB') {
       setSubprocessMemoryCapMB(typeof value === 'number' ? value : 0);
     }
+    if (key === 'overlayEnabled') {
+      overlayManager?.setEnabled(value === true);
+    }
   });
+
+  ipcMain.on('overlay:update', (_event, payload) => overlayManager?.update(payload));
+  ipcMain.on('overlay:setInteractive', (_event, v: boolean) => overlayManager?.setInteractive(!!v));
 
   // Initialize subprocess memory cap from settings (default 4096MB).
   setSubprocessMemoryCapMB(

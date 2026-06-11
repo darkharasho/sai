@@ -38,6 +38,13 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.invoke('claude:answer-plan-review', projectPath, toolUseId, approved, scope),
   remoteEmitGithubWatcher: (payload: { messageId: string; url: string; snapshot: unknown }) =>
     ipcRenderer.invoke('remote:emit-github-watcher', payload),
+  overlayUpdate: (payload: unknown) => ipcRenderer.send('overlay:update', payload),
+  overlaySetInteractive: (v: boolean) => ipcRenderer.send('overlay:setInteractive', v),
+  overlayOnState: (cb: (payload: unknown) => void) => {
+    const listener = (_e: unknown, payload: unknown) => cb(payload);
+    ipcRenderer.on('overlay:state', listener);
+    return () => ipcRenderer.removeListener('overlay:state', listener);
+  },
   remoteEmitWorkspaceStatus: (projectPath: string, status: {
     busy: boolean;
     streaming: boolean;
