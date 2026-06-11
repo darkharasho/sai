@@ -18,7 +18,7 @@ interface TodoProgressProps {
   isStreaming: boolean;
 }
 
-function findLatestTodos(messages: ChatMessage[]): Todo[] | null {
+export function findLatestTodos(messages: ChatMessage[]): Todo[] | null {
   // Legacy: a single TodoWrite call emits the whole plan as `{ todos: [...] }`.
   // Find the most recent assistant message anywhere in the conversation that
   // has any TodoWrite calls. Within that message, return the last write with

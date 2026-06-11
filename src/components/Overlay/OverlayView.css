@@ -145,6 +145,27 @@
 
 @keyframes overlay-tool-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 
+.overlay-user-msg {
+  color: var(--text-muted, #8b949e);
+  border-left: 2px solid var(--border, #30363d);
+  padding-left: 7px;
+  margin: 5px 0;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.overlay-task-ring {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.overlay-task-count {
+  color: var(--text-muted, #8b949e);
+  font-family: 'Geist Mono', 'JetBrains Mono', monospace;
+  font-size: 10px;
+}
+
 .overlay-elided {
   color: var(--text-muted, #8b949e);
   font-family: 'Geist Mono', 'JetBrains Mono', monospace;

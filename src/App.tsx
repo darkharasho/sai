@@ -23,6 +23,7 @@ import { basename } from './utils/pathUtils';
 import { createSession, generateSmartTitle } from './sessions';
 import { computeUnmountFlushes, computeQuitFlushes } from './workspaceFlush';
 import { buildOverlayPayload, updateRecentDone, type OverlayRow, type OverlayTailItem } from './lib/overlayFeed';
+import { findLatestTodos } from './components/Chat/TodoProgress';
 import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbPatchSessionMeta, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
 import { queueSaveSession } from './lib/sessionSaveQueue';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval } from './types';
@@ -4669,8 +4670,15 @@ export default function App() {
   // window regains focus: the user has seen the result.
   const overlayRecentDoneRef = useRef<Set<string>>(new Set());
   const overlayPrevBusyRef = useRef<Set<string>>(new Set());
+  // Bumped on focus: clearing recent-done must also resend the payload —
+  // the manager replays its LAST payload on re-show, so without a fresh send
+  // a cleared unread would resurface as a stale white squircle.
+  const [overlayFocusTick, setOverlayFocusTick] = useState(0);
   useEffect(() => {
-    const onFocus = () => { overlayRecentDoneRef.current.clear(); };
+    const onFocus = () => {
+      overlayRecentDoneRef.current.clear();
+      setOverlayFocusTick(t => t + 1);
+    };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, []);
@@ -4686,21 +4694,20 @@ export default function App() {
       // semantics) — the overlay's own recent-done tracking covers it.
       : completedWorkspaces.has(path) || overlayRecentDoneRef.current.has(path) ? 'done' as const
       : 'alive' as const;
-    const tailFor = (path: string): { tail?: OverlayTailItem[] } => {
+    const tailFor = (path: string): { tail?: OverlayTailItem[]; todos?: { done: number; total: number } } => {
       const messages = wsMessagesRef.current.get(path) ?? workspaces.get(path)?.activeSession.messages ?? [];
-      // Chronological tail over the last few assistant messages: text segments
-      // and tool calls interleaved exactly as they happened, capped to the
-      // most recent items.
-      // Per-message tool cap (latest few + an elided marker) rather than a
-      // flat global slice: a long tool run must never trim away the text
+      // Recent history (user + assistant) with tools capped per message plus
+      // an elided marker — a long tool run must never trim away the text
       // segment that precedes it.
       const TOOLS_PER_MESSAGE = 4;
+      const MAX_MESSAGES = 12;
       const tail: OverlayTailItem[] = [];
-      const recentAssistant: typeof messages = [];
-      for (let i = messages.length - 1; i >= 0 && recentAssistant.length < 3; i--) {
-        if (messages[i].role === 'assistant') recentAssistant.unshift(messages[i]);
-      }
-      for (const m of recentAssistant) {
+      for (const m of messages.slice(-MAX_MESSAGES)) {
+        if (m.role === 'user') {
+          if (typeof m.content === 'string' && m.content) tail.push({ kind: 'user', text: m.content.slice(0, 300) });
+          continue;
+        }
+        if (m.role !== 'assistant') continue;
         if (typeof m.content === 'string' && m.content) tail.push({ kind: 'text', text: m.content.slice(0, 600) });
         const calls = m.toolCalls ?? [];
         if (calls.length > TOOLS_PER_MESSAGE) tail.push({ kind: 'elided', count: calls.length - TOOLS_PER_MESSAGE });
@@ -4708,7 +4715,11 @@ export default function App() {
           tail.push({ kind: 'tool', name: tc.name, done: tc.output != null });
         }
       }
-      return { tail: tail.length > 0 ? tail : undefined };
+      const todoList = findLatestTodos(messages);
+      const todos = todoList && todoList.length > 0
+        ? { done: todoList.filter(t => t.status === 'completed').length, total: todoList.length }
+        : undefined;
+      return { tail: tail.length > 0 ? tail : undefined, todos };
     };
     const metaRoots = new Set((metaWorkspaces || []).map(m => m.syntheticRoot));
     const rows: OverlayRow[] = [];
@@ -4741,7 +4752,7 @@ export default function App() {
       if (overlayThrottleRef.current) { clearTimeout(overlayThrottleRef.current); overlayThrottleRef.current = null; }
       if (tick) clearInterval(tick);
     };
-  }, [overlayEnabled, overlayMode, busyWorkspaces, completedWorkspaces, approvalSessions, awaitingQuestionWorkspaces, workspaces, metaWorkspaces]);
+  }, [overlayEnabled, overlayMode, overlayFocusTick, busyWorkspaces, completedWorkspaces, approvalSessions, awaitingQuestionWorkspaces, workspaces, metaWorkspaces]);
 
   return (
     <div className="app">

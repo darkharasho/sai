@@ -8,10 +8,13 @@ export interface OverlayRow {
   /** Chronological tail of the conversation: text segments interleaved with
    *  tool calls exactly as they happened (latest last). */
   tail?: OverlayTailItem[];
+  /** Task-list progress when the conversation has an active plan. */
+  todos?: { done: number; total: number };
 }
 
 export type OverlayTailItem =
   | { kind: 'text'; text: string }
+  | { kind: 'user'; text: string }
   | { kind: 'tool'; name: string; done: boolean }
   | { kind: 'elided'; count: number };
 

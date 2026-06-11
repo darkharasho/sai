@@ -163,3 +163,46 @@ describe('done state and markdown (2026-06-11 round 4)', () => {
     expect(row.textContent).not.toContain('done');
   });
 });
+
+describe('history depth + task ring (2026-06-11 round 6)', () => {
+  it('renders user messages distinctly within the timeline', () => {
+    const { container } = render(<OverlayView />);
+    act(() => {
+      stateCb!({
+        hasReportable: true,
+        rows: [{ path: '/a', name: 'sai', kind: 'project', state: 'busy', tail: [
+          { kind: 'user', text: 'fix the spawn path' },
+          { kind: 'text', text: 'on it' },
+        ] }],
+        focusPath: '/a',
+      });
+    });
+    expect(container.querySelector('.overlay-user-msg')?.textContent).toBe('fix the spawn path');
+  });
+
+  it('shows the task ring in the footer when todos exist', () => {
+    const { container } = render(<OverlayView />);
+    act(() => {
+      stateCb!({
+        hasReportable: true,
+        rows: [{ path: '/a', name: 'sai', kind: 'project', state: 'busy', tail: [{ kind: 'text', text: 'working' }], todos: { done: 3, total: 7 } }],
+        focusPath: '/a',
+      });
+    });
+    const ring = container.querySelector('.overlay-status-row .overlay-task-ring');
+    expect(ring).toBeTruthy();
+    expect(ring!.textContent).toContain('3/7');
+  });
+
+  it('omits the task ring when no todos exist', () => {
+    const { container } = render(<OverlayView />);
+    act(() => {
+      stateCb!({
+        hasReportable: true,
+        rows: [{ path: '/a', name: 'sai', kind: 'project', state: 'busy', tail: [{ kind: 'text', text: 'working' }] }],
+        focusPath: '/a',
+      });
+    });
+    expect(container.querySelector('.overlay-task-ring')).toBeNull();
+  });
+});

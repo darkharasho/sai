@@ -125,6 +125,8 @@ export function OverlayView() {
                 <div key={`t-${i}`} className="overlay-snippet">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.text}</ReactMarkdown>
                 </div>
+              ) : item.kind === 'user' ? (
+                <div key={`u-${i}`} className="overlay-user-msg">{item.text}</div>
               ) : item.kind === 'elided' ? (
                 <div key={`e-${i}`} className="overlay-elided">⋯ {item.count} earlier tool call{item.count === 1 ? '' : 's'}</div>
               ) : (
@@ -146,6 +148,28 @@ export function OverlayView() {
             {focusRow.state !== 'done' && (
               <span className="overlay-focus-state">· {STATE_LABEL[focusRow.state] ?? focusRow.state}</span>
             )}
+            {focusRow.todos && focusRow.todos.total > 0 && (() => {
+              const { done, total } = focusRow.todos;
+              const r = 6;
+              const c = 2 * Math.PI * r;
+              return (
+                <span className="overlay-task-ring" title={`Tasks: ${done}/${total}`}>
+                  <svg width="16" height="16" viewBox="0 0 16 16">
+                    <circle cx="8" cy="8" r={r} fill="none" stroke="var(--bg-hover, #21262d)" strokeWidth="2" />
+                    <circle
+                      cx="8" cy="8" r={r} fill="none"
+                      stroke={done === total ? 'var(--green, #22c55e)' : 'var(--accent, #d4a72c)'}
+                      strokeWidth="2"
+                      strokeDasharray={c}
+                      strokeDashoffset={c - (total ? done / total : 0) * c}
+                      strokeLinecap="round"
+                      transform="rotate(-90 8 8)"
+                    />
+                  </svg>
+                  <span className="overlay-task-count">{done}/{total}</span>
+                </span>
+              );
+            })()}
           </div>
         </div>
       </div>
