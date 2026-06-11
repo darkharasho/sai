@@ -754,6 +754,9 @@ function createWindow() {
     if (key === 'overlayEnabled') {
       overlayManager?.setEnabled(value === true);
     }
+    if (key === 'overlayMode' && (value === 'on' || value === 'off' || value === 'persist')) {
+      overlayManager?.setMode(value);
+    }
   });
 
   ipcMain.on('overlay:update', (_event, payload) => overlayManager?.update(payload));
@@ -764,6 +767,10 @@ function createWindow() {
     if (m === 'on' || m === 'off' || m === 'persist') overlayManager?.setMode(m);
   });
   overlayManager?.setEnabled(readSettings().overlayEnabled === true);
+  {
+    const m = readSettings().overlayMode;
+    if (m === 'on' || m === 'off' || m === 'persist') overlayManager?.setMode(m);
+  }
 
   // Initialize subprocess memory cap from settings (default 4096MB).
   setSubprocessMemoryCapMB(

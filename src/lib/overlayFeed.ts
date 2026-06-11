@@ -12,7 +12,8 @@ export interface OverlayRow {
 
 export type OverlayTailItem =
   | { kind: 'text'; text: string }
-  | { kind: 'tool'; name: string; done: boolean };
+  | { kind: 'tool'; name: string; done: boolean }
+  | { kind: 'elided'; count: number };
 
 export interface OverlayPayload {
   hasReportable: boolean;

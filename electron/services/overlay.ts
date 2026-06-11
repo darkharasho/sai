@@ -44,6 +44,9 @@ export class OverlayManager {
   private lingerTimer: ReturnType<typeof setTimeout> | null = null;
   private mode: OverlayMode = 'on';
   private interactive = false;
+  // Persist mode only keeps the overlay up once something has actually run
+  // this session — a fresh launch with zero activity shows nothing.
+  private hadActivitySinceLaunch = false;
   private shortcutRegistered = false;
 
   constructor(private readonly opts: OverlayManagerOpts) {}
@@ -72,6 +75,7 @@ export class OverlayManager {
   update(payload: { hasReportable?: boolean } | null): void {
     this.lastPayload = payload;
     this.hasReportable = !!payload?.hasReportable;
+    if (this.hasReportable) this.hadActivitySinceLaunch = true;
     if (this.win && !this.win.isDestroyed()) {
       this.win.webContents.send('overlay:state', payload);
     }
@@ -145,7 +149,7 @@ export class OverlayManager {
     const show = shouldShowOverlay({
       enabled: this.enabled && this.mode !== 'off',
       mainFocused: this.mainFocused,
-      hasReportable: this.mode === 'persist' ? true : this.hasReportable,
+      hasReportable: this.mode === 'persist' ? this.hadActivitySinceLaunch : this.hasReportable,
     });
     if (show) {
       this.clearLinger();
@@ -178,7 +182,7 @@ export class OverlayManager {
         const stillHidden = !shouldShowOverlay({
           enabled: this.enabled && this.mode !== 'off',
           mainFocused: this.mainFocused,
-          hasReportable: this.mode === 'persist' ? true : this.hasReportable,
+          hasReportable: this.mode === 'persist' ? this.hadActivitySinceLaunch : this.hasReportable,
         });
         if (stillHidden && this.win && !this.win.isDestroyed() && this.win.isVisible()) {
           this.hideAndReset();

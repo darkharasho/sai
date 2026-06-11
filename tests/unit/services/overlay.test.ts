@@ -264,6 +264,21 @@ describe('OverlayManager', () => {
     expect(windows[0].getPosition()).toEqual([x, y]);
   });
 
+  it("persist does not show before the first activity since launch", () => {
+    const { mgr } = makeManager();
+    mgr.setEnabled(true);
+    mgr.setMode('persist');
+    mgr.setMainFocused(false);
+    // Fresh launch, nothing has ever run — the pre-warmed window stays hidden.
+    expect(windows[0].visible).toBe(false);
+    expect(windows[0].showInactive).not.toHaveBeenCalled();
+    // First reportable activity arms persist for the rest of the session.
+    mgr.update({ hasReportable: true });
+    expect(windows[0].visible).toBe(true);
+    mgr.update({ hasReportable: false });
+    expect(windows[0].visible).toBe(true);
+  });
+
   it('destroy tears the window down', () => {
     const { mgr } = makeManager();
     mgr.setEnabled(true);

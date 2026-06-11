@@ -279,7 +279,8 @@ export default function App() {
   const [overlayMode, setOverlayMode] = useState<'on' | 'off' | 'persist'>('on');
   const handleOverlayModeChange = useCallback((m: 'on' | 'off' | 'persist') => {
     setOverlayMode(m);
-    (window.sai as any).overlaySetMode?.(m);
+    // settings:set persists AND drives overlayManager.setMode in main.
+    void window.sai.settingsSet('overlayMode', m);
   }, []);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [fileIndex, setFileIndex] = useState<string[]>([]);
@@ -1921,6 +1922,9 @@ export default function App() {
     const guard = <T,>(fn: (v: T) => void) => (v: T) => { if (!cancelled) fn(v); };
     window.sai.settingsGet('focusedChat', false).then(guard((v: boolean) => setFocusedChat(v)));
     window.sai.settingsGet('overlayEnabled', false).then(guard((v: boolean) => setOverlayEnabled(!!v)));
+    window.sai.settingsGet('overlayMode', 'on').then(guard((v: string) => {
+      if (v === 'on' || v === 'off' || v === 'persist') setOverlayMode(v);
+    }));
     window.sai.settingsGet('sidebarWidth', 300).then((v: number) => {
       document.documentElement.style.setProperty('--sidebar-width', `${v}px`);
     });
@@ -4677,19 +4681,24 @@ export default function App() {
       // Chronological tail over the last few assistant messages: text segments
       // and tool calls interleaved exactly as they happened, capped to the
       // most recent items.
-      const MAX_ITEMS = 10;
+      // Per-message tool cap (latest few + an elided marker) rather than a
+      // flat global slice: a long tool run must never trim away the text
+      // segment that precedes it.
+      const TOOLS_PER_MESSAGE = 4;
       const tail: OverlayTailItem[] = [];
       const recentAssistant: typeof messages = [];
-      for (let i = messages.length - 1; i >= 0 && recentAssistant.length < 4; i--) {
+      for (let i = messages.length - 1; i >= 0 && recentAssistant.length < 3; i--) {
         if (messages[i].role === 'assistant') recentAssistant.unshift(messages[i]);
       }
       for (const m of recentAssistant) {
         if (typeof m.content === 'string' && m.content) tail.push({ kind: 'text', text: m.content.slice(0, 600) });
-        for (const tc of m.toolCalls ?? []) {
+        const calls = m.toolCalls ?? [];
+        if (calls.length > TOOLS_PER_MESSAGE) tail.push({ kind: 'elided', count: calls.length - TOOLS_PER_MESSAGE });
+        for (const tc of calls.slice(-TOOLS_PER_MESSAGE)) {
           tail.push({ kind: 'tool', name: tc.name, done: tc.output != null });
         }
       }
-      return { tail: tail.length > 0 ? tail.slice(-MAX_ITEMS) : undefined };
+      return { tail: tail.length > 0 ? tail : undefined };
     };
     const metaRoots = new Set((metaWorkspaces || []).map(m => m.syntheticRoot));
     const rows: OverlayRow[] = [];

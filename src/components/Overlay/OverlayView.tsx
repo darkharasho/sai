@@ -125,6 +125,8 @@ export function OverlayView() {
                 <div key={`t-${i}`} className="overlay-snippet">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.text}</ReactMarkdown>
                 </div>
+              ) : item.kind === 'elided' ? (
+                <div key={`e-${i}`} className="overlay-elided">⋯ {item.count} earlier tool call{item.count === 1 ? '' : 's'}</div>
               ) : (
                 <div key={`c-${i}`} className={`overlay-tool-card${item.done ? ' overlay-tool-done' : ''}`}>
                   <span className="overlay-tool-dot" />
