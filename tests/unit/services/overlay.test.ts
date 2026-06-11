@@ -27,7 +27,7 @@ class MockWin {
   destroy = vi.fn(() => { this.destroyed = true; });
   setBounds = vi.fn((b: any) => { this.bounds = { ...this.bounds, ...b }; });
   getPosition = () => [this.bounds.x, this.bounds.y];
-  webContents = { send: vi.fn() };
+  webContents = { send: vi.fn(), on: vi.fn() };
   constructor(opts: any) { this.bounds = { x: opts.x, y: opts.y, width: opts.width, height: opts.height }; windows.push(this); }
 }
 
@@ -59,15 +59,32 @@ describe('shouldShowOverlay', () => {
 });
 
 describe('OverlayManager', () => {
-  it('creates the window lazily: nothing until all show conditions hold', () => {
+  it('pre-warms a hidden window at enable time; shows only when conditions hold', () => {
     const { mgr } = makeManager();
+    expect(windows).toHaveLength(0);
     mgr.setEnabled(true);
+    // Window exists immediately (renderer loads in the background) but stays
+    // hidden until blur + reportable.
+    expect(windows).toHaveLength(1);
+    expect(windows[0].visible).toBe(false);
     mgr.setMainFocused(true);
     mgr.update({ hasReportable: true });
-    expect(windows).toHaveLength(0);
+    expect(windows[0].visible).toBe(false);
     mgr.setMainFocused(false);
     expect(windows).toHaveLength(1);
     expect(windows[0].showInactive).toHaveBeenCalled();
+  });
+
+  it('replays the last payload when the renderer finishes loading', () => {
+    const { mgr } = makeManager();
+    mgr.setEnabled(true);
+    const payload = { hasReportable: true, rows: [], focusPath: null };
+    mgr.update(payload);
+    const onLoad = windows[0].webContents.on.mock.calls.find((c: any[]) => c[0] === 'did-finish-load')?.[1];
+    expect(onLoad).toBeTypeOf('function');
+    windows[0].webContents.send.mockClear();
+    onLoad();
+    expect(windows[0].webContents.send).toHaveBeenCalledWith('overlay:state', payload);
   });
 
   it('hides on focus (immediately) and re-shows on blur without recreating', () => {

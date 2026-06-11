@@ -40,6 +40,10 @@ export class OverlayManager {
 
   setEnabled(v: boolean): void {
     this.enabled = v;
+    // Pre-warm: create the (hidden) window now so the renderer bundle is
+    // loaded and painted long before the first blur — creating it lazily at
+    // show time meant seconds of blank window while modules streamed in.
+    if (v && (!this.win || this.win.isDestroyed())) this.create();
     this.apply();
   }
 
@@ -170,6 +174,11 @@ export class OverlayManager {
     win.setIgnoreMouseEvents(true, { forward: true });
     win.removeMenu();
     win.on('moved', () => this.noteMoved());
+    // The first update() usually lands before the renderer is ready and its
+    // webContents.send is lost — replay the latest payload once loaded.
+    win.webContents.on('did-finish-load', () => {
+      if (this.lastPayload) win.webContents.send('overlay:state', this.lastPayload);
+    });
     if (process.env.VITE_DEV_SERVER_URL) {
       void win.loadURL(`${process.env.VITE_DEV_SERVER_URL.replace(/\/$/, '')}/#overlay`);
     } else {

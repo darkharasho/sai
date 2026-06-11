@@ -1,6 +1,5 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import App from './App';
 import './styles/fonts';
 import './styles/globals.css';
 
@@ -25,9 +24,14 @@ if (window.location.pathname.startsWith('/render-host') || params.has('render-ho
     ReactDOM.createRoot(root).render(<TestHarness />);
   });
 } else {
-  ReactDOM.createRoot(root).render(
-    <React.StrictMode>
-      <App />
-    </React.StrictMode>
-  );
+  // App is imported dynamically so the lightweight windows above (overlay,
+  // render host) never pull its dependency graph — in dev that graph is
+  // hundreds of module requests and seconds of load time.
+  import('./App').then(({ default: App }) => {
+    ReactDOM.createRoot(root).render(
+      <React.StrictMode>
+        <App />
+      </React.StrictMode>
+    );
+  });
 }
