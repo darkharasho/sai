@@ -54,13 +54,13 @@ async function _resolveTailnetEndpointWithEnv() {
   });
 }
 import { registerTerminalHandlers, destroyAllTerminals } from './services/pty';
-import { registerClaudeHandlers, destroyClaude, setRemoteCeiling, setRemoteBus, sendImpl, approveImpl, interruptImpl, answerQuestionImpl, setSubprocessMemoryCapMB } from './services/claude';
+import { registerClaudeHandlers, destroyClaude, setRemoteCeiling, setRemoteBus, sendImpl, setSessionIdImpl, approveImpl, interruptImpl, answerQuestionImpl, setSubprocessMemoryCapMB } from './services/claude';
 import { RendererProxy } from './services/remote/renderer-proxy';
 import { registerGitHandlers } from './services/git';
 import { registerFsHandlers } from './services/fs';
 import { registerUpdater } from './services/updater';
 import { registerUsageHandlers, destroyUsagePolling } from './services/usage';
-import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove, suspend, DEFAULT_SUSPEND_TIMEOUT } from './services/workspace';
+import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove, suspend, getOrCreate as getOrCreateWorkspace, DEFAULT_SUSPEND_TIMEOUT } from './services/workspace';
 import { initFocusTracking, setActiveWorkspace } from './services/notify';
 import { registerGithubAuthHandlers } from './services/github-auth';
 import { initialSync, schedulePush } from './services/github-sync';
@@ -216,6 +216,13 @@ async function getOrInitRemote(): Promise<RemoteModule> {
             return out;
           };
           const imagePaths = writeImages(args.images);
+          // Adopt the session the device is attached to so ensureProcess
+          // spawns with --resume instead of forking a fresh context. The
+          // workspace may not exist yet (first remote message after launch).
+          if (args.sessionId) {
+            getOrCreateWorkspace(args.projectPath);
+            setSessionIdImpl(args.projectPath, args.sessionId, args.scope);
+          }
           sendImpl(
             args.projectPath, args.text,
             imagePaths.length > 0 ? imagePaths : undefined,
