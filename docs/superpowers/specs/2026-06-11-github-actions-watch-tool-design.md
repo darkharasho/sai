@@ -47,11 +47,15 @@ result immediately. The card renders through the normal tool-call card flow (bel
 the dispatcher does not mount anything itself. Resolution failure → the tool result is
 the error string, so SAI can react.
 
-## Chat card path (`entryFromToolCall` / `ChatMessage`)
+## Chat card path (`ChatMessage` watcher row)
 
-- `entryFromToolCall` maps `watch_github_run` to a new entry kind that renders the
-  existing `GitHubWatcherCard` with the resolved target — taken from the tool result,
-  falling back to re-resolving from the tool input on history rehydrate.
+- `ChatMessage` keeps its existing watcher row, but derives targets from
+  `watch_github_run` tool calls on the message (`watchTargetsFromMessage`) instead of
+  scanning text — the target comes from the tool result JSON, falling back to parsing
+  a `url` from the tool input when no result exists yet. `ChatPanel`'s
+  first-mention dedupe allowlist uses the same function. (This replaces the earlier
+  idea of routing through `entryFromToolCall`, which serves the RenderRegion system,
+  not bespoke cards.)
 - Snapshot persistence is unchanged: the card still dispatches
   `GITHUB_WATCHER_SNAPSHOT_EVENT`, `ChatPanel` still persists it onto the message, and
   `seedSnapshot` rehydrates on reload, so completed runs render their final state from
