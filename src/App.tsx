@@ -4691,13 +4691,24 @@ export default function App() {
       if (state === 'alive' && !workspaces.has(m.syntheticRoot)) continue;
       rows.push({ path: m.syntheticRoot, name: m.name, kind: 'meta', state, ...(state === 'alive' ? {} : tailFor(m.syntheticRoot)) });
     }
+    const send = () => {
+      // Rows are rebuilt on every send: tails live in wsMessagesRef, which
+      // mutates without changing any effect dependency.
+      const freshRows: OverlayRow[] = rows.map(r =>
+        r.state === 'alive' ? r : { ...r, ...tailFor(r.path) });
+      (window.sai as any).overlayUpdate?.(buildOverlayPayload(freshRows));
+    };
     if (overlayThrottleRef.current) clearTimeout(overlayThrottleRef.current);
     overlayThrottleRef.current = setTimeout(() => {
       overlayThrottleRef.current = null;
-      (window.sai as any).overlayUpdate?.(buildOverlayPayload(rows));
+      send();
     }, 250);
+    // While anything is busy, keep the tails live (tool lines + streaming
+    // text churn without status transitions to retrigger this effect).
+    const tick = busyWorkspaces.size > 0 ? setInterval(send, 1000) : null;
     return () => {
       if (overlayThrottleRef.current) { clearTimeout(overlayThrottleRef.current); overlayThrottleRef.current = null; }
+      if (tick) clearInterval(tick);
     };
   }, [overlayEnabled, busyWorkspaces, completedWorkspacesWithUnread, approvalSessions, awaitingQuestionWorkspaces, workspaces, metaWorkspaces]);
 
