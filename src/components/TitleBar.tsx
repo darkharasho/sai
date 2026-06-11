@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import type { MetaWorkspaceListItem, MetaWorkspaceRuntime } from '../types';
+import type { MetaWorkspaceListItem, MetaWorkspaceRuntime, ModelChoice, EffortLevel } from '../types';
 import UpdateNotification from './UpdateNotification';
 import CloseWorkspaceModal from './CloseWorkspaceModal';
 import GitHubAuthModal from './GitHubAuthModal';
@@ -25,6 +25,8 @@ interface WorkspaceInfo {
   lastActivity: number;
 }
 
+type ClaudeModelOption = { id: string; label: string; description: string; recommended?: boolean; oneM?: boolean; extra?: boolean };
+
 interface TitleBarProps {
   projectPath: string;
   onProjectChange: (path: string) => void;
@@ -42,9 +44,14 @@ interface TitleBarProps {
   onMetaCreated?: (runtime: MetaWorkspaceRuntime) => void;
   onMetaUpdated?: (runtime: MetaWorkspaceRuntime) => void;
   onMetaDeleted?: (id: string) => void;
+  claudeModel?: ModelChoice;
+  onClaudeModelChange?: (m: ModelChoice) => void;
+  claudeEffort?: EffortLevel;
+  onClaudeEffortChange?: (e: EffortLevel) => void;
+  claudeModels?: ClaudeModelOption[];
 }
 
-export default function TitleBar({ projectPath, onProjectChange, completedWorkspaces, busyWorkspaces, approvalWorkspaces, awaitingQuestionWorkspaces, onSettingChange, onOpenWhatsNew, onHistoryRetentionChange, onNewProject, metaWorkspaces, activeMetaRuntime, onActivateMeta, onMetaCreated, onMetaUpdated, onMetaDeleted }: TitleBarProps) {
+export default function TitleBar({ projectPath, onProjectChange, completedWorkspaces, busyWorkspaces, approvalWorkspaces, awaitingQuestionWorkspaces, onSettingChange, onOpenWhatsNew, onHistoryRetentionChange, onNewProject, metaWorkspaces, activeMetaRuntime, onActivateMeta, onMetaCreated, onMetaUpdated, onMetaDeleted, claudeModel, onClaudeModelChange, claudeEffort, onClaudeEffortChange, claudeModels }: TitleBarProps) {
   const [open, setOpen] = useState(false);
   const [pickerTab, setPickerTab] = useState<'projects' | 'meta'>('projects');
   const [workspaceList, setWorkspaceList] = useState<WorkspaceInfo[]>([]);
@@ -697,7 +704,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
       </div>
       {showAuthModal && <GitHubAuthModal onSuccess={handleAuthSuccess} onClose={() => setShowAuthModal(false)} />}
       {showClone && <GitHubCloneModal onCloned={(p) => { onProjectChange(p); }} onClose={() => setShowClone(false)} />}
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} onSettingChange={onSettingChange} onOpenWhatsNew={onOpenWhatsNew} onHistoryRetentionChange={onHistoryRetentionChange} />}
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} onSettingChange={onSettingChange} onOpenWhatsNew={onOpenWhatsNew} onHistoryRetentionChange={onHistoryRetentionChange} claudeModel={claudeModel} onClaudeModelChange={onClaudeModelChange} claudeEffort={claudeEffort} onClaudeEffortChange={onClaudeEffortChange} claudeModels={claudeModels} />}
       {showCreateMeta && (
         <CreateMetaWorkspaceModal
           recentProjects={recentProjects}

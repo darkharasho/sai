@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import type { ModelChoice, EffortLevel } from '../types';
 import { X, Check, ChevronDown, Settings as SettingsIcon, Monitor, Type, PanelLeft, Palette, HardDrive, Keyboard, Zap, Smartphone, Link } from 'lucide-react';
 import KeybindingsPage from './Settings/KeybindingsPage';
 import SwarmSettings from './Settings/SwarmSettings';
@@ -6,11 +7,25 @@ import RemoteSettings from './Settings/RemoteSettings';
 import IntegrationsPage from './Settings/IntegrationsPage';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, getActiveHighlightTheme, setActiveHighlightTheme, getShikiHighlighter, type HighlightThemeId } from '../themes';
 
+type ClaudeModelOption = { id: string; label: string; description: string; recommended?: boolean; oneM?: boolean; extra?: boolean };
+
+const EFFORT_OPTIONS: { id: EffortLevel; label: string }[] = [
+  { id: 'low',    label: 'Low'    },
+  { id: 'medium', label: 'Medium' },
+  { id: 'high',   label: 'High'   },
+  { id: 'max',    label: 'Max'    },
+];
+
 interface Props {
   onClose: () => void;
   onSettingChange?: (key: string, value: any) => void;
   onOpenWhatsNew?: () => void;
   onHistoryRetentionChange?: (days: number | null) => void;
+  claudeModel?: ModelChoice;
+  onClaudeModelChange?: (m: ModelChoice) => void;
+  claudeEffort?: EffortLevel;
+  onClaudeEffortChange?: (e: EffortLevel) => void;
+  claudeModels?: ClaudeModelOption[];
 }
 
 const TIMEOUT_OPTIONS = [
@@ -77,7 +92,7 @@ const PROVIDER_OPTIONS: { id: 'claude' | 'codex' | 'gemini'; label: string; svg:
   { id: 'gemini', label: 'Gemini CLI', svg: 'svg/Google-gemini-icon.svg', color: '#4285f4' },
 ];
 
-export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew, onHistoryRetentionChange }: Props) {
+export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew, onHistoryRetentionChange, claudeModel, onClaudeModelChange, claudeEffort, onClaudeEffortChange, claudeModels = [] }: Props) {
   const [suspendTimeout, setSuspendTimeout] = useState<number>(DEFAULT_TIMEOUT);
   const [editorFontSize, setEditorFontSize] = useState(13);
   const [editorMinimap, setEditorMinimap] = useState(true);
@@ -88,6 +103,10 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [lockCommitProvider, setLockCommitProvider] = useState(false);
   const [commitProviderOpen, setCommitProviderOpen] = useState(false);
   const commitProviderRef = useRef<HTMLDivElement>(null);
+  const [claudeModelOpen, setClaudeModelOpen] = useState(false);
+  const claudeModelRef = useRef<HTMLDivElement>(null);
+  const [claudeEffortOpen, setClaudeEffortOpen] = useState(false);
+  const claudeEffortRef = useRef<HTMLDivElement>(null);
   const [geminiDefaultModel, setGeminiDefaultModel] = useState('auto-gemini-3');
   const [geminiDefaultApprovalMode, setGeminiDefaultApprovalMode] = useState<'default' | 'auto_edit' | 'yolo' | 'plan'>('default');
   const [geminiDefaultConversationMode, setGeminiDefaultConversationMode] = useState<'planning' | 'fast'>('planning');
@@ -237,6 +256,24 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [commitProviderOpen]);
+
+  useEffect(() => {
+    if (!claudeModelOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (claudeModelRef.current && !claudeModelRef.current.contains(e.target as Node)) setClaudeModelOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [claudeModelOpen]);
+
+  useEffect(() => {
+    if (!claudeEffortOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (claudeEffortRef.current && !claudeEffortRef.current.contains(e.target as Node)) setClaudeEffortOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [claudeEffortOpen]);
 
   const handleThemeChange = (id: ThemeId) => {
     setTheme(id);
@@ -725,6 +762,64 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             )}
           </div>
         </div>
+
+        {claudeModel !== undefined && onClaudeModelChange && (
+          <div className="settings-row">
+            <div className="settings-row-info">
+              <div className="settings-row-name">Claude model</div>
+              <div className="settings-row-desc">Default for all workspaces; chats can override per workspace</div>
+            </div>
+            <div className="provider-select" ref={claudeModelRef}>
+              <button className="provider-select-btn" onClick={() => setClaudeModelOpen(!claudeModelOpen)}>
+                <span>{claudeModels.find(m => m.id === claudeModel)?.label ?? claudeModel}</span>
+                <ChevronDown size={11} style={{ opacity: 0.5 }} />
+              </button>
+              {claudeModelOpen && (
+                <div className="provider-dropdown">
+                  {(claudeModels.length > 0 ? claudeModels : [{ id: claudeModel, label: claudeModel, description: '' }]).map(opt => (
+                    <button
+                      key={opt.id}
+                      className={`provider-dropdown-item ${opt.id === claudeModel ? 'active' : ''}`}
+                      onClick={() => { onClaudeModelChange(opt.id as ModelChoice); setClaudeModelOpen(false); }}
+                    >
+                      <span>{opt.label}</span>
+                      {opt.id === claudeModel && <Check size={13} style={{ marginLeft: 'auto', color: 'var(--accent)' }} />}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {claudeEffort !== undefined && onClaudeEffortChange && (
+          <div className="settings-row">
+            <div className="settings-row-info">
+              <div className="settings-row-name">Claude effort</div>
+              <div className="settings-row-desc">Default thinking effort; chats can override per workspace</div>
+            </div>
+            <div className="provider-select" ref={claudeEffortRef}>
+              <button className="provider-select-btn" onClick={() => setClaudeEffortOpen(!claudeEffortOpen)}>
+                <span>{EFFORT_OPTIONS.find(e => e.id === claudeEffort)?.label ?? claudeEffort}</span>
+                <ChevronDown size={11} style={{ opacity: 0.5 }} />
+              </button>
+              {claudeEffortOpen && (
+                <div className="provider-dropdown">
+                  {EFFORT_OPTIONS.map(opt => (
+                    <button
+                      key={opt.id}
+                      className={`provider-dropdown-item ${opt.id === claudeEffort ? 'active' : ''}`}
+                      onClick={() => { onClaudeEffortChange(opt.id); setClaudeEffortOpen(false); }}
+                    >
+                      <span>{opt.label}</span>
+                      {opt.id === claudeEffort && <Check size={13} style={{ marginLeft: 'auto', color: 'var(--accent)' }} />}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="settings-row">
           <div className="settings-row-info">

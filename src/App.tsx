@@ -4870,6 +4870,11 @@ export default function App() {
             }
           });
         }}
+        claudeModel={modelChoice}
+        onClaudeModelChange={handleModelChange}
+        claudeEffort={effortLevel}
+        onClaudeEffortChange={handleEffortChange}
+        claudeModels={claudeModels}
       />
       <ApprovalBanner
         approvals={Array.from(approvalSessions.entries()).flatMap(([projectPath, inner]) =>
