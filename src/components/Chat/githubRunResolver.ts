@@ -135,7 +135,8 @@ export async function resolveWatchRun(
   apiGet: GitHubApiGet | undefined,
   opts: { retryMs?: number; timeoutMs?: number; sleep?: (ms: number) => Promise<void> } = {},
 ): Promise<ResolvedRun> {
-  const retryMs = opts.retryMs ?? BRANCH_RETRY_MS;
+  // Clamp to ≥1ms so the attempts division below can't go NaN/Infinity.
+  const retryMs = Math.max(1, opts.retryMs ?? BRANCH_RETRY_MS);
   const timeoutMs = opts.timeoutMs ?? BRANCH_TIMEOUT_MS;
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
 
@@ -143,7 +144,7 @@ export async function resolveWatchRun(
     const t = parseRunUrl(input.url);
     if (!t) throw new Error(`not a GitHub Actions run URL: ${input.url}`);
     if (t.owner === 'fake') {
-      return { owner: t.owner, repo: t.repo, runId: t.runId, url: t.url, status: 'in_progress' };
+      return { owner: t.owner, repo: t.repo, runId: t.runId, url: t.url, status: 'in_progress', conclusion: null };
     }
     return describeRun(t.owner, t.repo, t.runId, apiGet);
   }
