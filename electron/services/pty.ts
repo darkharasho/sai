@@ -249,120 +249,46 @@ export function killTerminalImpl(termId: number): void {
 
 export function registerTerminalHandlers(win: BrowserWindow) {
   ipcMain.handle('terminal:create', (_event, cwd: string, cols?: number, rows?: number) => {
-    const id = nextId++;
-    const env = { ...process.env } as Record<string, string>;
-
-    let spawnCmd: string;
-    let spawnArgs: string[];
-    let ptyName: string;
-    let fallbackCwd: string;
-
-    if (process.platform === 'win32') {
-      // Windows: prefer PowerShell 7 (pwsh.exe) when present, fall back to
-      // Windows PowerShell 5.1 which ships with every supported Windows
-      // build, then cmd.exe as a last resort. node-pty under ConPTY doesn't
-      // resolve bare executable names via PATH, so every candidate must be
-      // an absolute path we've confirmed exists.
-      const pwsh7Candidates = [
-        process.env.PWSH_PATH,
-        'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
-        'C:\\Program Files (x86)\\PowerShell\\7\\pwsh.exe',
-      ].filter((p): p is string => typeof p === 'string' && p.length > 0);
-      const winPwsh = process.env.SystemRoot
-        ? `${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
-        : '';
-      let resolved: string | null = null;
-      for (const candidate of pwsh7Candidates) {
-        try {
-          if (fs.existsSync(candidate)) { resolved = candidate; break; }
-        } catch { /* ignore */ }
-      }
-      if (!resolved && winPwsh) {
-        try { if (fs.existsSync(winPwsh)) resolved = winPwsh; } catch { /* ignore */ }
-      }
-      spawnCmd = resolved || process.env.ComSpec || 'cmd.exe';
-      const isCmd = spawnCmd.toLowerCase().endsWith('cmd.exe');
-      spawnArgs = isCmd ? [] : ['-NoLogo'];
-      ptyName = 'xterm-256color';
-      fallbackCwd = process.env.USERPROFILE || process.env.HOMEDRIVE || 'C:\\';
-    } else {
-      const shell = process.env.SHELL || '/bin/bash';
-      // Prevent child processes from grouping under SAI in the taskbar
-      delete env.GIO_LAUNCHED_DESKTOP_FILE;
-      delete env.GIO_LAUNCHED_DESKTOP_FILE_PID;
-      delete env.BAMF_DESKTOP_FILE_HINT;
-      // KDE Plasma / Wayland: clear startup notification tokens so spawned
-      // GUI apps (e.g. electron dev servers, browsers) get their own taskbar entry
-      delete env.XDG_ACTIVATION_TOKEN;
-      delete env.DESKTOP_STARTUP_ID;
-      // Chromium/Electron sets CHROME_DESKTOP to the .desktop filename (e.g.
-      // "sai.desktop").  Child Electron apps inherit this and use it for their
-      // WM_CLASS / app_id, causing the DE to group them under SAI's taskbar icon.
-      delete env.CHROME_DESKTOP;
-      // INVOCATION_ID ties the process to SAI's systemd service unit; clear it so
-      // child processes aren't associated with this unit's lifecycle.
-      delete env.INVOCATION_ID;
-      // On Linux with systemd, spawn via systemd-run --user --scope so the shell
-      // lives in its own cgroup. This prevents desktop environments (GNOME, KDE)
-      // from grouping GUI apps launched from the terminal under SAI's taskbar icon.
-      // Disable ECHOCTL before starting the interactive shell so escape sequences
-      // (arrow keys etc.) aren't echoed as ^[[A notation on the prompt line.
-      // Shell args come from buildShellLaunchArgs so desktop terminals get the
-      // shared-history scaffolding (history -a at every prompt) — shells are
-      // SIGKILLed on close, so history persisted only on clean exit is lost.
-      const shellArgs = buildShellLaunchArgs(shell, env);
-      const quotedArgs = shellArgs.map(a => `"${a.replace(/"/g, '\\"')}"`).join(' ');
-      const shellInit = `stty -echoctl 2>/dev/null; exec "${shell}" ${quotedArgs}`;
-      const useScope = canUseSystemdScope();
-      spawnCmd = useScope ? 'systemd-run' : shell;
-      spawnArgs = useScope
-        ? ['--user', '--scope', '--quiet', '--', shell, '-c', shellInit]
-        : ['-c', shellInit];
-      ptyName = 'xterm-256color';
-      fallbackCwd = process.env.HOME || '/';
-    }
-
-    const term = pty.spawn(spawnCmd, spawnArgs, {
-      name: ptyName,
-      cwd: cwd || fallbackCwd,
+    // Spawn through the shared impl so desktop terminals and the phone-remote
+    // store get identical shell launch behavior (rcfile history scaffolding,
+    // systemd scope, env hygiene). Only the renderer/ring wiring differs here.
+    let id = -1;
+    const { termId, pty: term } = createTerminalImpl({
+      cwd,
       cols: (cols && cols > 0) ? cols : 80,
       rows: (rows && rows > 0) ? rows : 24,
-      env,
+      onData: (data) => {
+        // Desktop renderer (unchanged behavior)
+        safeSend(win, 'terminal:data', id, data);
+        // Phone-bridge fan-out: write to ring, broadcast to subscribers.
+        let ring = ringByTerm.get(id);
+        if (!ring) { ring = new RingBuffer(DESKTOP_RING_CAP_BYTES); ringByTerm.set(id, ring); }
+        ring.push(data);
+        const subs = subscribersByTerm.get(id);
+        if (subs && subs.size > 0) {
+          for (const cb of subs) {
+            try { cb(data); } catch { /* isolate one subscriber's failure */ }
+          }
+        }
+      },
+      onExit: () => {
+        const owner = terminalOwner.get(id);
+        if (owner) {
+          const ownerWs = get(owner);
+          ownerWs?.terminals.delete(id);
+          terminalOwner.delete(id);
+        }
+        ringByTerm.delete(id);
+        subscribersByTerm.delete(id);
+      },
     });
-
-    allTerminals.set(id, term);
+    id = termId;
 
     const ws = get(cwd);
     if (ws) {
       ws.terminals.set(id, term);
       terminalOwner.set(id, cwd);
     }
-
-    term.onData((data) => {
-      // Desktop renderer (unchanged behavior)
-      safeSend(win, 'terminal:data', id, data);
-      // Phone-bridge fan-out: write to ring, broadcast to subscribers.
-      let ring = ringByTerm.get(id);
-      if (!ring) { ring = new RingBuffer(DESKTOP_RING_CAP_BYTES); ringByTerm.set(id, ring); }
-      ring.push(data);
-      const subs = subscribersByTerm.get(id);
-      if (subs && subs.size > 0) {
-        for (const cb of subs) {
-          try { cb(data); } catch { /* isolate one subscriber's failure */ }
-        }
-      }
-    });
-    term.onExit(() => {
-      allTerminals.delete(id);
-      const owner = terminalOwner.get(id);
-      if (owner) {
-        const ownerWs = get(owner);
-        ownerWs?.terminals.delete(id);
-        terminalOwner.delete(id);
-      }
-      ringByTerm.delete(id);
-      subscribersByTerm.delete(id);
-    });
     return id;
   });
 
