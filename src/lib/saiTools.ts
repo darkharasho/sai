@@ -262,6 +262,28 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
       },
     },
   },
+  {
+    name: 'watch_github_run',
+    description:
+      'Show a live GitHub Actions watcher card for a workflow run. USE THIS right after you push, tag, or ' +
+      'trigger a workflow (git push, gh workflow run, gh pr create, npm publish) so the user can watch CI ' +
+      'progress. Returns immediately with the resolved run; the card keeps updating on its own. Identify ' +
+      'the run by `url`, by `owner`+`repo`+`run_id`, or by `owner`+`repo`+`branch` (resolves the newest ' +
+      'run, waiting briefly if it has not been created yet). Call again with the same target to get ' +
+      'current status.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'Full run URL: https://github.com/{owner}/{repo}/actions/runs/{id}.' },
+        owner: { type: 'string', description: 'Repo owner (with run_id or branch).' },
+        repo: { type: 'string', description: 'Repo name (with run_id or branch).' },
+        run_id: { type: 'string', description: 'Explicit run id (requires owner and repo).' },
+        branch: { type: 'string', description: 'Resolve the newest run on this branch (requires owner and repo).' },
+        workflow: { type: 'string', description: "Optional workflow filter for branch mode: file name ('release.yml') or workflow name." },
+      },
+    },
+  },
 ];
 
 export const SAI_TOOL_NAMES = new Set(SAI_TOOL_SCHEMA.map((t) => t.name));
