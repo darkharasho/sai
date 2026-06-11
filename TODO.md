@@ -56,5 +56,5 @@ v- [x] User input should be a chevron not a dot
 - [x] custom svg like otto for emoji
 - [x] green squircle still not clearing on visiting a workspace, tie it to the !
 - [x] Gemini workspaces dont notify properly, turn is done but if im in a different workspace it says its always working even when its done
-- [ ] Long running sessions tend to get stuck, i think maybe by the auto suspend?
+- [x] Long running sessions tend to get stuck, i think maybe by the auto suspend?
 - [ ] for output like npx playwright test it would be nice to see the output live instead of just the call
