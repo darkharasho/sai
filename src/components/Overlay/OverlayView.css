@@ -24,7 +24,7 @@
   overflow: hidden;
   /* Ghost mode: the window can't be translucent on Linux (no GPU compositing),
      so dim the content instead. Interactive mode restores full strength. */
-  opacity: 0.65;
+  opacity: 0.45;
   transition: opacity 0.15s ease;
 }
 

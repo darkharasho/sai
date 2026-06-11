@@ -14,13 +14,16 @@ import { OverlayView } from '../../../../src/components/Overlay/OverlayView';
 import type { OverlayPayload } from '../../../../src/lib/overlayFeed';
 
 let stateCb: ((p: OverlayPayload) => void) | null = null;
+let interactiveCb: ((v: boolean) => void) | null = null;
 const setInteractive = vi.fn();
 
 beforeEach(() => {
   stateCb = null;
+  interactiveCb = null;
   setInteractive.mockClear();
   const sai = createMockSai();
   (sai as any).overlayOnState = (cb: (p: OverlayPayload) => void) => { stateCb = cb; return () => { stateCb = null; }; };
+  (sai as any).overlayOnInteractive = (cb: (v: boolean) => void) => { interactiveCb = cb; return () => { interactiveCb = null; }; };
   (sai as any).overlaySetInteractive = setInteractive;
   installMockSai(sai as any);
 });
@@ -36,6 +39,22 @@ const payload: OverlayPayload = {
 };
 
 describe('OverlayView', () => {
+  it('keeps the last reportable content when an empty payload arrives (hide-linger)', () => {
+    const { getByText } = render(<OverlayView />);
+    act(() => { stateCb!(payload); });
+    act(() => { stateCb!({ hasReportable: false, rows: [], focusPath: null }); });
+    expect(getByText('Which auth method should the bot use?')).toBeTruthy();
+  });
+
+  it('mirrors interactive mode driven by the main process shortcut', () => {
+    const { container } = render(<OverlayView />);
+    act(() => { stateCb!(payload); });
+    act(() => { interactiveCb!(true); });
+    expect(container.querySelector('.overlay-root')!.className).toContain('overlay-interactive');
+    act(() => { interactiveCb!(false); });
+    expect(container.querySelector('.overlay-root')!.className).not.toContain('overlay-interactive');
+  });
+
   it('renders the strip and the default focus row', () => {
     const { getByText } = render(<OverlayView />);
     act(() => { stateCb!(payload); });

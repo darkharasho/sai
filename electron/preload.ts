@@ -45,6 +45,11 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.on('overlay:state', listener);
     return () => ipcRenderer.removeListener('overlay:state', listener);
   },
+  overlayOnInteractive: (cb: (v: boolean) => void) => {
+    const listener = (_e: unknown, v: boolean) => cb(v);
+    ipcRenderer.on('overlay:interactive', listener);
+    return () => ipcRenderer.removeListener('overlay:interactive', listener);
+  },
   remoteEmitWorkspaceStatus: (projectPath: string, status: {
     busy: boolean;
     streaming: boolean;

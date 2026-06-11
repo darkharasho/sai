@@ -1,4 +1,4 @@
-import { BrowserWindow, screen } from 'electron';
+import { BrowserWindow, globalShortcut, screen } from 'electron';
 import path from 'node:path';
 
 // Focus overlay: a small always-on-top, click-through window shown when the
@@ -12,6 +12,11 @@ const MARGIN = 16;
 // Brief grace before hiding on a reportable→idle transition: busy flags are
 // fed by the renderer's streamSettled debounce and flicker mid-reply.
 const LINGER_MS = 2500;
+// Linux can't forward mouse events through a click-through window
+// (setIgnoreMouseEvents forwarding is Windows/macOS-only), so Ctrl+Shift+hover
+// can never be detected there. A global shortcut, registered only while the
+// overlay is visible, toggles interactive mode instead.
+const INTERACTIVE_SHORTCUT = 'Control+Shift+F9';
 
 export interface OverlayVisibilityInputs {
   enabled: boolean;
@@ -35,6 +40,8 @@ export class OverlayManager {
   private lastPayload: unknown = null;
   private hasReportable = false;
   private lingerTimer: ReturnType<typeof setTimeout> | null = null;
+  private interactive = false;
+  private shortcutRegistered = false;
 
   constructor(private readonly opts: OverlayManagerOpts) {}
 
@@ -63,6 +70,7 @@ export class OverlayManager {
 
   setInteractive(v: boolean): void {
     if (!this.win || this.win.isDestroyed()) return;
+    this.interactive = v;
     // Ghost vs solid is handled by the overlay renderer's CSS — setOpacity is
     // a no-op on Linux, so only the mouse-event passthrough lives here.
     if (v) {
@@ -70,6 +78,9 @@ export class OverlayManager {
     } else {
       this.win.setIgnoreMouseEvents(true, { forward: true });
     }
+    // The renderer mirrors the state (it can't observe it on Linux, where no
+    // mouse events reach a click-through window).
+    this.win.webContents.send('overlay:interactive', v);
   }
 
   noteMoved(): void {
@@ -80,8 +91,29 @@ export class OverlayManager {
 
   destroy(): void {
     this.clearLinger();
+    this.releaseShortcut();
     if (this.win && !this.win.isDestroyed()) this.win.destroy();
     this.win = null;
+  }
+
+  private grabShortcut(): void {
+    if (this.shortcutRegistered) return;
+    try {
+      globalShortcut.register(INTERACTIVE_SHORTCUT, () => this.setInteractive(!this.interactive));
+      this.shortcutRegistered = true;
+    } catch { /* another app owns it; overlay stays display-only */ }
+  }
+
+  private releaseShortcut(): void {
+    if (!this.shortcutRegistered) return;
+    try { globalShortcut.unregister(INTERACTIVE_SHORTCUT); } catch { /* gone */ }
+    this.shortcutRegistered = false;
+  }
+
+  private hideAndReset(): void {
+    if (this.interactive) this.setInteractive(false);
+    this.releaseShortcut();
+    this.win?.hide();
   }
 
   private clearLinger(): void {
@@ -103,16 +135,18 @@ export class OverlayManager {
       this.win!.setBounds({ ...this.position(), width: WIDTH, height: HEIGHT });
       if (this.lastPayload) this.win!.webContents.send('overlay:state', this.lastPayload);
       if (!this.win!.isVisible()) this.win!.showInactive();
+      this.grabShortcut();
       return;
     }
     if (!this.win || this.win.isDestroyed() || !this.win.isVisible()) {
       this.clearLinger();
+      this.releaseShortcut();
       return;
     }
     if (!this.enabled || this.mainFocused) {
       // User is back (or turned it off) — no reason to linger.
       this.clearLinger();
-      this.win.hide();
+      this.hideAndReset();
       return;
     }
     // Reportable dropped — likely a stream-debounce flicker; hide after a grace.
@@ -125,7 +159,7 @@ export class OverlayManager {
           hasReportable: this.hasReportable,
         });
         if (stillHidden && this.win && !this.win.isDestroyed() && this.win.isVisible()) {
-          this.win.hide();
+          this.hideAndReset();
         }
       }, LINGER_MS);
     }

@@ -605,7 +605,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
         <div className="settings-row">
           <div className="settings-row-info">
             <div className="settings-row-name">Focus overlay</div>
-            <div className="settings-row-desc">When SAI is in the background and something is running, show a small click-through status window. Hold Ctrl+Shift over it to interact or drag it.</div>
+            <div className="settings-row-desc">When SAI is in the background and something is running, show a small click-through status window. Press Ctrl+Shift+F9 to make it clickable and draggable; press again to release.</div>
           </div>
           <button
             className={`settings-toggle${overlayEnabled ? ' on' : ''}`}

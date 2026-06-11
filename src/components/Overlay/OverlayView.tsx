@@ -27,8 +27,16 @@ export function OverlayView() {
   const [selected, setSelected] = useState<string | null>(null);
 
   useEffect(() => {
-    const off = (window as any).sai?.overlayOnState?.((p: OverlayPayload) => setPayload(p));
-    return () => { off?.(); };
+    // Keep the last reportable payload: when everything goes idle the manager
+    // lingers before hiding, and blanking the card during that grace reads as
+    // a glitch. The window hides; content never visibly empties.
+    const offState = (window as any).sai?.overlayOnState?.((p: OverlayPayload) => {
+      setPayload(prev => (p?.hasReportable ? p : prev));
+    });
+    // Interactive mode is toggled in the main process (Ctrl+Shift+F9 — Linux
+    // never delivers mouse events to a click-through window); mirror it here.
+    const offInteractive = (window as any).sai?.overlayOnInteractive?.((v: boolean) => setInteractive(v));
+    return () => { offState?.(); offInteractive?.(); };
   }, []);
 
   const rows: OverlayRow[] = payload?.rows ?? [];

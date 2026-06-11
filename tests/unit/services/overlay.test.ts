@@ -31,12 +31,15 @@ class MockWin {
   constructor(opts: any) { this.bounds = { x: opts.x, y: opts.y, width: opts.width, height: opts.height }; windows.push(this); }
 }
 
+const globalShortcut = vi.hoisted(() => ({ register: vi.fn(), unregister: vi.fn() }));
+
 vi.mock('electron', () => ({
   BrowserWindow: vi.fn().mockImplementation(function (this: unknown, opts: any) { return new MockWin(opts); }),
   screen: {
     getPrimaryDisplay: vi.fn(() => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } })),
     getDisplayNearestPoint: vi.fn(() => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } })),
   },
+  globalShortcut,
 }));
 
 import { OverlayManager, shouldShowOverlay } from '@electron/services/overlay';
@@ -195,6 +198,25 @@ describe('OverlayManager', () => {
     windows[0].bounds.x = 50; windows[0].bounds.y = 60;
     mgr.noteMoved();
     expect(saveBounds).toHaveBeenCalledWith({ x: 50, y: 60 });
+  });
+
+  it('registers the interactive shortcut while visible and toggles on press', () => {
+    const { mgr } = makeManager();
+    mgr.setEnabled(true);
+    mgr.update({ hasReportable: true });
+    expect(globalShortcut.register).not.toHaveBeenCalled();
+    mgr.setMainFocused(false);
+    expect(globalShortcut.register).toHaveBeenCalledWith('Control+Shift+F9', expect.any(Function));
+    const toggle = globalShortcut.register.mock.calls[0][1];
+    toggle();
+    expect(windows[0].setIgnoreMouseEvents).toHaveBeenLastCalledWith(false);
+    expect(windows[0].webContents.send).toHaveBeenCalledWith('overlay:interactive', true);
+    toggle();
+    expect(windows[0].setIgnoreMouseEvents).toHaveBeenLastCalledWith(true, { forward: true });
+    expect(windows[0].webContents.send).toHaveBeenCalledWith('overlay:interactive', false);
+    // Hiding resets interactive and releases the shortcut
+    mgr.setMainFocused(true);
+    expect(globalShortcut.unregister).toHaveBeenCalledWith('Control+Shift+F9');
   });
 
   it('destroy tears the window down', () => {
