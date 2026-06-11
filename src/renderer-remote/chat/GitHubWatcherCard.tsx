@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { GitBranch, ExternalLink, AlertCircle, CheckCircle2, XCircle, CircleDot, Clock, MinusCircle, Circle } from 'lucide-react';
-import type { GitHubWatchTarget } from './githubWatcher';
+import type { GitHubWatchTarget } from '../../components/Chat/githubRunResolver';
 import type { GithubWatcherStore, GithubWatcherSnapshotShape } from './githubWatcherStore';
 
 type Phase = GithubWatcherSnapshotShape['phase'];

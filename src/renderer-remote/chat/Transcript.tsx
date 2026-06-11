@@ -6,7 +6,7 @@ import ToolCard from './ToolCard';
 import SaiLogo from '../branding/SaiLogo';
 import ThinkingAnimation from '../branding/ThinkingAnimation';
 import GitHubWatcherCard from './GitHubWatcherCard';
-import { detectWatchTargets } from './githubWatcher';
+import { watchTargetFromToolCall } from '../../components/Chat/githubRunResolver';
 import type { GithubWatcherStore } from './githubWatcherStore';
 import { useVisualViewportHeight } from '../lib/useVisualViewport';
 import { rehypeEmojiIcons } from '../../components/Chat/rehypeEmojiIcons';
@@ -181,6 +181,11 @@ export default function Transcript({ messages, streaming = false, awaitingQuesti
     >
       {messages.map((m) => {
         if (m.role === 'tool') {
+          const watchTarget = watchTargetFromToolCall({
+            name: m.toolName ?? '',
+            input: JSON.stringify(m.toolInput ?? {}),
+            output: typeof m.toolResult === 'string' ? m.toolResult : JSON.stringify(m.toolResult ?? null),
+          });
           return (
             <div key={m.id} data-msg-id={m.id} style={{ width: '100%', minWidth: 0, flexShrink: 0 }}>
               <ToolCard
@@ -191,6 +196,9 @@ export default function Transcript({ messages, streaming = false, awaitingQuesti
                 toolUseId={m.toolUseId}
                 onAnswerQuestion={onAnswerQuestion}
               />
+              {watchTarget && (
+                <GitHubWatcherCard messageId={m.id} target={watchTarget} watcherStore={watcherStore} />
+              )}
             </div>
           );
         }
@@ -217,7 +225,6 @@ export default function Transcript({ messages, streaming = false, awaitingQuesti
 
         const isUser = m.role === 'user';
         const formatMs = (ms: number) => ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
-        const watcherTargets = !isUser && m.text ? detectWatchTargets(m.text) : [];
 
         return (
           <div
@@ -239,9 +246,6 @@ export default function Transcript({ messages, streaming = false, awaitingQuesti
                     {m.text ?? ''}
                   </ReactMarkdown>
                 )}
-                {watcherTargets.map((t) => (
-                  <GitHubWatcherCard key={t.url} messageId={m.id} target={t} watcherStore={watcherStore} />
-                ))}
               </div>
             </div>
           </div>
