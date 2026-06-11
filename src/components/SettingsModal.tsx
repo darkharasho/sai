@@ -532,20 +532,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             <span className="settings-toggle-thumb" />
           </button>
         </div>
-        <div className="settings-row">
-          <div className="settings-row-info">
-            <div className="settings-row-name">Focus overlay</div>
-            <div className="settings-row-desc">When SAI is in the background and something is running, show a small click-through status window. Hold Ctrl+Shift over it to interact or drag it.</div>
-          </div>
-          <button
-            className={`settings-toggle${overlayEnabled ? ' on' : ''}`}
-            onClick={() => handleOverlayEnabledChange(!overlayEnabled)}
-            role="switch"
-            aria-checked={overlayEnabled}
-          >
-            <span className="settings-toggle-thumb" />
-          </button>
-        </div>
       </section>
 
       <div className="settings-divider" />
@@ -611,6 +597,21 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             onClick={() => handleSystemNotificationsChange(!systemNotifications)}
             role="switch"
             aria-checked={systemNotifications}
+          >
+            <span className="settings-toggle-thumb" />
+          </button>
+        </div>
+
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <div className="settings-row-name">Focus overlay</div>
+            <div className="settings-row-desc">When SAI is in the background and something is running, show a small click-through status window. Hold Ctrl+Shift over it to interact or drag it.</div>
+          </div>
+          <button
+            className={`settings-toggle${overlayEnabled ? ' on' : ''}`}
+            onClick={() => handleOverlayEnabledChange(!overlayEnabled)}
+            role="switch"
+            aria-checked={overlayEnabled}
           >
             <span className="settings-toggle-thumb" />
           </button>
