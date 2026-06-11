@@ -1,4 +1,4 @@
-import { useSyncExternalStore, useEffect, useRef, useState } from 'react';
+import { useSyncExternalStore, useEffect, useRef, useState, useCallback } from 'react';
 import type { CSSProperties } from 'react';
 import './RenderToolCard.css';
 import { renderStore, type RenderEntry } from '../../render/renderStore';
@@ -6,6 +6,7 @@ import { getRegisteredComponent } from '../../render/componentRegistry';
 import { renderMermaidToSvg } from '../../render/renderMermaid';
 import { ThemedComponents } from '../../render/ThemedComponents';
 import { submitForm } from '../../render/formBridge';
+import { nextRenderWidth, sanitizeCssColor, resolveThemedSurface } from '../../render/renderSizing';
 
 // Policy enforced inside the html-mock iframe (via a <meta> in srcDoc).
 // `script-src 'unsafe-inline'` is intentional: mocks may include JS (a product
@@ -49,15 +50,26 @@ export function RenderToolCard({
 }
 
 export function RenderRegion({ entry }: { entry: RenderEntry }) {
+  // Grow-only natural width: starts at the requested width, widens when the
+  // sandboxed mock reports a larger scrollWidth, and is capped to the message
+  // column by maxWidth. Never shrinks (see renderSizing.nextRenderWidth).
+  const [displayWidth, setDisplayWidth] = useState(entry.width);
+  useEffect(() => {
+    setDisplayWidth((w) => Math.max(w, entry.width));
+  }, [entry.width]);
+  const onNaturalWidth = useCallback((reported: number) => {
+    setDisplayWidth((w) => nextRenderWidth(w, reported, entry.width));
+  }, [entry.width]);
   const style: CSSProperties = {
-    width: entry.width,
+    width: displayWidth,
+    maxWidth: '100%',
     background: entry.background ?? 'var(--sai-surface, #1a1a1a)',
     display: 'inline-block',
   };
   return (
     <div data-render-region={entry.renderId} data-testid="render-region" style={style}>
       {entry.kind === 'html' ? (
-        <RenderedHtml entry={entry} />
+        <RenderedHtml entry={entry} onNaturalWidth={onNaturalWidth} />
       ) : entry.kind === 'mermaid' ? (
         <MermaidRender diagram={String((entry.payload as { diagram: string }).diagram)} />
       ) : entry.kind === 'theme' ? (
@@ -67,7 +79,7 @@ export function RenderRegion({ entry }: { entry: RenderEntry }) {
           props={(entry.payload as { props?: Record<string, unknown> }).props}
         />
       ) : entry.kind === 'form' ? (
-        <RenderedHtml entry={entry} enableSubmit />
+        <RenderedHtml entry={entry} enableSubmit onNaturalWidth={onNaturalWidth} />
       ) : (
         <MountComponent
           payload={entry.payload as { component: string; props: Record<string, unknown> }}
@@ -86,19 +98,22 @@ export function RenderRegion({ entry }: { entry: RenderEntry }) {
 const SUBMIT_BRIDGE =
   '<script>window.saiSubmit=function(v){try{parent.postMessage({__saiFormSubmit:1,value:v},\'*\');}catch(e){}};<\/script>';
 
-// Injected into the sandboxed mock so it can report its content height back to
+// Injected into the sandboxed mock so it can report its content size back to
 // the parent. allow-scripts permits this; postMessage to the parent works even
 // from the opaque (no same-origin) sandbox. The parent matches on event.source.
-const HEIGHT_REPORTER =
+const SIZE_REPORTER =
   '<script>(function(){' +
   'function h(){return Math.ceil(Math.max(document.documentElement.scrollHeight,(document.body?document.body.scrollHeight:0)));}' +
-  "function post(){try{parent.postMessage({__saiRender:1,height:h()},'*');}catch(e){}}" +
+  'function w(){return Math.ceil(Math.max(document.documentElement.scrollWidth,(document.body?document.body.scrollWidth:0)));}' +
+  "function post(){try{parent.postMessage({__saiRender:1,height:h(),width:w()},'*');}catch(e){}}" +
   "window.addEventListener('load',post);window.addEventListener('resize',post);" +
   'try{if(window.ResizeObserver){new ResizeObserver(post).observe(document.documentElement);}}catch(e){}' +
   'post();setTimeout(post,50);setTimeout(post,300);' +
   '})();<\/script>';
 
-function RenderedHtml({ entry, enableSubmit }: { entry: RenderEntry; enableSubmit?: boolean }) {
+function RenderedHtml({ entry, enableSubmit, onNaturalWidth }: {
+  entry: RenderEntry; enableSubmit?: boolean; onNaturalWidth?: (w: number) => void;
+}) {
   const payload = entry.payload as {
     html?: string; mode?: string; cwd?: string; path?: string; baseDir?: string; height?: number;
   };
@@ -110,19 +125,22 @@ function RenderedHtml({ entry, enableSubmit }: { entry: RenderEntry; enableSubmi
   const submittedRef = useRef(false);
   const [height, setHeight] = useState(300);
   const bridge = enableSubmit ? SUBMIT_BRIDGE : '';
+  const bodyBg = (entry.background && sanitizeCssColor(entry.background)) || resolveThemedSurface();
   const doc =
     `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${SANDBOX_CSP}"></head>` +
-    `<body style="margin:0">${userHtml}${bridge}${HEIGHT_REPORTER}</body></html>`;
+    `<body style="margin:0;background:${bodyBg}">${userHtml}${bridge}${SIZE_REPORTER}</body></html>`;
 
   useEffect(() => {
     function onMessage(e: MessageEvent) {
       const win = iframeRef.current?.contentWindow;
       if (!win || e.source !== win) return;
-      const data = e.data as { __saiRender?: number; height?: number; __saiFormSubmit?: number; value?: unknown } | null;
+      const data = e.data as { __saiRender?: number; height?: number; width?: number; __saiFormSubmit?: number; value?: unknown } | null;
       if (!data) return;
       if (data.__saiRender) {
         const h = Number(data.height);
         if (Number.isFinite(h) && h > 0) setHeight(Math.min(2000, Math.max(40, Math.ceil(h))));
+        const wRep = Number((data as { width?: number }).width);
+        if (Number.isFinite(wRep) && wRep > 0) onNaturalWidth?.(wRep);
       } else if (enableSubmit && data.__saiFormSubmit && !submittedRef.current) {
         submittedRef.current = true;
         submitForm(data.value);
@@ -130,7 +148,7 @@ function RenderedHtml({ entry, enableSubmit }: { entry: RenderEntry; enableSubmi
     }
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [enableSubmit]);
+  }, [enableSubmit, onNaturalWidth]);
 
   return (
     <iframe
