@@ -22,7 +22,7 @@ import { setActiveWorkspace, updateTerminalName } from './terminalBuffer';
 import { basename } from './utils/pathUtils';
 import { createSession, generateSmartTitle } from './sessions';
 import { computeUnmountFlushes, computeQuitFlushes } from './workspaceFlush';
-import { buildOverlayPayload, updateRecentDone, type OverlayRow, type OverlayTailItem } from './lib/overlayFeed';
+import { buildOverlayPayload, truncateSnippet, updateRecentDone, type OverlayRow, type OverlayTailItem } from './lib/overlayFeed';
 import { findLatestTodos } from './components/Chat/TodoProgress';
 import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbPatchSessionMeta, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
 import { queueSaveSession } from './lib/sessionSaveQueue';
@@ -4714,11 +4714,11 @@ export default function App() {
       const tail: OverlayTailItem[] = [];
       for (const m of messages.slice(-MAX_MESSAGES)) {
         if (m.role === 'user') {
-          if (typeof m.content === 'string' && m.content) tail.push({ kind: 'user', text: m.content.slice(0, 300) });
+          if (typeof m.content === 'string' && m.content) tail.push({ kind: 'user', text: truncateSnippet(m.content, 300) });
           continue;
         }
         if (m.role !== 'assistant') continue;
-        if (typeof m.content === 'string' && m.content) tail.push({ kind: 'text', text: m.content.slice(0, 600) });
+        if (typeof m.content === 'string' && m.content) tail.push({ kind: 'text', text: truncateSnippet(m.content, 600) });
         const calls = m.toolCalls ?? [];
         if (calls.length > TOOLS_PER_MESSAGE) tail.push({ kind: 'elided', count: calls.length - TOOLS_PER_MESSAGE });
         for (const tc of calls.slice(-TOOLS_PER_MESSAGE)) {

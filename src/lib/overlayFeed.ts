@@ -27,6 +27,18 @@ export interface OverlayPayload {
   focusPath: string | null;
 }
 
+/** Trim a chat snippet to `max` chars for the overlay tail, cutting at the
+ *  last word/line break so markdown tokens aren't split mid-word (a raw
+ *  "**Re" tail renders as literal asterisks). Falls back to a hard cut when
+ *  the only break sits in the first half of the budget (one giant token). */
+export function truncateSnippet(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max);
+  const lastBreak = Math.max(cut.lastIndexOf(' '), cut.lastIndexOf('\n'));
+  const kept = lastBreak > max / 2 ? cut.slice(0, lastBreak) : cut;
+  return `${kept.trimEnd()}…`;
+}
+
 const REPORTABLE: ReadonlySet<IndicatorState> = new Set(['busy', 'busy-done', 'done', 'approval', 'question']);
 const FOCUS_PRIORITY: IndicatorState[] = ['question', 'approval', 'busy', 'done'];
 
