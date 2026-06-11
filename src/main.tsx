@@ -13,6 +13,13 @@ if (window.location.pathname.startsWith('/render-host') || params.has('render-ho
   import('./render/RenderHost').then(({ RenderHost }) => {
     ReactDOM.createRoot(root).render(<RenderHost />);
   });
+} else if (window.location.hash === '#overlay') {
+  // Focus-overlay window: minimal tree, no StrictMode (the view drives
+  // window-level mouse-event state through main; double-invoked effects
+  // would flap setIgnoreMouseEvents).
+  import('./components/Overlay/OverlayView').then(({ OverlayView }) => {
+    ReactDOM.createRoot(root).render(<OverlayView />);
+  });
 } else if (import.meta.env.DEV && window.location.pathname.startsWith('/test-harness')) {
   import('./test-harness').then(({ TestHarness }) => {
     ReactDOM.createRoot(root).render(<TestHarness />);

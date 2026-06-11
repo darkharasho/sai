@@ -1,0 +1,68 @@
+/* Focus-overlay window styles. The window itself is transparent; the card
+   paints the visible surface. Ghost vs interactive opacity is handled by the
+   main process via win.setOpacity — here we only handle drag affordance. */
+
+.overlay-root {
+  width: 100vw;
+  height: 100vh;
+  background: transparent;
+  display: flex;
+  align-items: stretch;
+  font: 12px ui-sans-serif, system-ui, sans-serif;
+  color: #e0e0e0;
+  user-select: none;
+  cursor: default;
+}
+
+.overlay-empty { pointer-events: none; }
+
+.overlay-card {
+  flex: 1;
+  margin: 4px;
+  background: rgba(13, 17, 23, 0.92);
+  border: 1px solid #30363d;
+  border-radius: 12px;
+  padding: 10px 12px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* In interactive mode the whole card becomes the drag handle. */
+.overlay-interactive .overlay-card { -webkit-app-region: drag; border-color: #58a6ff; }
+
+.overlay-strip {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #21262d;
+  margin-bottom: 8px;
+}
+
+.overlay-strip-item { display: inline-flex; gap: 5px; align-items: center; }
+.overlay-strip-name { color: #8b949e; }
+.overlay-meta { font-style: italic; }
+
+.overlay-focus-head { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
+.overlay-focus-name { font-weight: 600; }
+.overlay-focus-state { color: #8b949e; }
+
+.overlay-snippet {
+  color: #c9d1d9;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.overlay-tool {
+  margin-top: 4px;
+  color: #8b949e;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
