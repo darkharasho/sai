@@ -147,6 +147,8 @@
 /* Done tool calls: green squircle, matching the app's status scheme. */
 .overlay-tool-done .overlay-tool-dot { background: var(--green, #22c55e); animation: none; }
 .overlay-tool-name { flex: 0 0 auto; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* No detail span → let the name use the full row instead of clipping at 45%. */
+.overlay-tool-name:last-child { max-width: none; flex: 1; }
 .overlay-tool-detail { flex: 1; min-width: 0; color: var(--text-muted, #8b949e); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .overlay-tool-done { opacity: 0.7; }
 
