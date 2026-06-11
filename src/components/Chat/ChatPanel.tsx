@@ -82,8 +82,13 @@ import { buildMetaPreamble } from '../../lib/metaSystemPrompt';
 
 type CodexPermission = 'auto' | 'read-only' | 'full-access';
 
+export type OverlayMode = 'on' | 'off' | 'persist';
+
 interface ChatPanelProps {
   projectPath: string;
+  /** When set, renders the focus-overlay mode control under the input
+   *  (present only while the overlay setting is enabled). */
+  overlayControl?: { mode: OverlayMode; onChange: (m: OverlayMode) => void };
   permissionMode: 'default' | 'bypass';
   onPermissionChange: (mode: 'default' | 'bypass') => void;
   effortLevel: 'low' | 'medium' | 'high' | 'max';
@@ -386,7 +391,7 @@ const FAKE_ERROR_VARIANTS = {
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(initialMessages || []);
   const taskRegistry = useMemo(() => buildTaskRegistry(messages), [messages]);
   const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);
@@ -1783,9 +1788,55 @@ export default function ChatPanel({ projectPath, permissionMode, onPermissionCha
             metaRuntime={activeMetaRuntime}
             mentionInsertRef={mentionInsertRef}
           />
+          {overlayControl && (
+            <div className="overlay-mode-control" role="radiogroup" aria-label="Focus overlay mode">
+              <span className="overlay-mode-label">overlay</span>
+              {(['on', 'off', 'persist'] as const).map(m => (
+                <button
+                  key={m}
+                  className={`overlay-mode-btn${overlayControl.mode === m ? ' active' : ''}`}
+                  role="radio"
+                  aria-checked={overlayControl.mode === m}
+                  onClick={() => overlayControl.onChange(m)}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </LayoutGroup>
       <style>{`
+        .overlay-mode-control {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          padding: 3px 6px 0;
+          justify-content: flex-end;
+        }
+        .overlay-mode-label {
+          color: var(--text-muted);
+          font-family: 'Departure Mono', 'Geist Mono', ui-monospace, monospace;
+          font-size: 10px;
+          letter-spacing: 0.4px;
+          margin-right: 2px;
+        }
+        .overlay-mode-btn {
+          background: none;
+          border: 1px solid transparent;
+          border-radius: 6px;
+          color: var(--text-muted);
+          font-size: 10px;
+          font-family: inherit;
+          padding: 1px 7px;
+          cursor: pointer;
+        }
+        .overlay-mode-btn:hover { background: var(--bg-hover); }
+        .overlay-mode-btn.active {
+          color: var(--accent);
+          border-color: var(--border);
+          background: var(--bg-secondary);
+        }
         .chat-panel {
           flex: 1;
           display: flex;

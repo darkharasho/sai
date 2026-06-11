@@ -97,15 +97,18 @@ describe('OverlayView', () => {
     expect(getByTestId('sai-logo').getAttribute('data-mode')).toBe('pulse');
   });
 
-  it('is ghosted by default and solid in interactive mode', () => {
+  it('interactive mode is driven ONLY by the main-process toggle (Ctrl+Shift+F9), not hover', () => {
+    // Regression: in interactive mode mouse events reach the window, and the
+    // old hover-modifier handler instantly cleared interactive on any plain
+    // mousemove — making the F9 toggle appear to "reset on new messages".
     const { container } = render(<OverlayView />);
     act(() => { stateCb!(payload); });
     const root = container.querySelector('.overlay-root')!;
     expect(root.className).not.toContain('overlay-interactive');
-    fireEvent.mouseMove(root, { ctrlKey: true, shiftKey: true });
-    expect(setInteractive).toHaveBeenLastCalledWith(true);
-    expect(container.querySelector('.overlay-root')!.className).toContain('overlay-interactive');
+    act(() => { interactiveCb!(true); });
     fireEvent.mouseMove(root, { ctrlKey: false, shiftKey: false });
-    expect(setInteractive).toHaveBeenLastCalledWith(false);
+    fireEvent.mouseLeave(root);
+    expect(container.querySelector('.overlay-root')!.className).toContain('overlay-interactive');
+    expect(setInteractive).not.toHaveBeenCalled();
   });
 });

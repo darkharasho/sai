@@ -233,6 +233,26 @@ describe('OverlayManager', () => {
     expect(saveBounds).toHaveBeenCalledWith({ x: x0 + 15, y: y0 - 10 });
   });
 
+  it("mode 'off' hides immediately; mode 'persist' shows on blur even when idle", () => {
+    const { mgr } = makeManager();
+    mgr.setEnabled(true);
+    mgr.update({ hasReportable: true });
+    mgr.setMainFocused(false);
+    expect(windows[0].visible).toBe(true);
+    mgr.setMode('off');
+    expect(windows[0].visible).toBe(false);
+    mgr.setMode('persist');
+    expect(windows[0].visible).toBe(true);
+    // Persist ignores reportable…
+    mgr.update({ hasReportable: false });
+    expect(windows[0].visible).toBe(true);
+    // …but still hides when the main window regains focus.
+    mgr.setMainFocused(true);
+    expect(windows[0].visible).toBe(false);
+    mgr.setMainFocused(false);
+    expect(windows[0].visible).toBe(true);
+  });
+
   it('destroy tears the window down', () => {
     const { mgr } = makeManager();
     mgr.setEnabled(true);

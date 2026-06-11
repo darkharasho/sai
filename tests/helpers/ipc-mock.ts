@@ -10,6 +10,7 @@ export interface MockSai {
   // Terminal
   terminalCreate: ReturnType<typeof vi.fn>;
   terminalWrite: ReturnType<typeof vi.fn>;
+  terminalSignal: ReturnType<typeof vi.fn>;
   terminalResize: ReturnType<typeof vi.fn>;
   terminalKill: ReturnType<typeof vi.fn>;
   terminalGetProcess: ReturnType<typeof vi.fn>;
@@ -151,6 +152,7 @@ export function createMockSai(): MockSai {
     // Terminal
     terminalCreate: vi.fn().mockResolvedValue(1),
     terminalWrite: vi.fn(),
+    terminalSignal: vi.fn(),
     terminalResize: vi.fn(),
     terminalKill: vi.fn(),
     terminalGetProcess: vi.fn().mockResolvedValue('bash'),

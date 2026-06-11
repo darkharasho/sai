@@ -18,6 +18,8 @@ const LINGER_MS = 2500;
 // overlay is visible, toggles interactive mode instead.
 const INTERACTIVE_SHORTCUT = 'Control+Shift+F9';
 
+export type OverlayMode = 'on' | 'off' | 'persist';
+
 export interface OverlayVisibilityInputs {
   enabled: boolean;
   mainFocused: boolean;
@@ -40,6 +42,7 @@ export class OverlayManager {
   private lastPayload: unknown = null;
   private hasReportable = false;
   private lingerTimer: ReturnType<typeof setTimeout> | null = null;
+  private mode: OverlayMode = 'on';
   private interactive = false;
   private shortcutRegistered = false;
 
@@ -56,6 +59,13 @@ export class OverlayManager {
 
   setMainFocused(v: boolean): void {
     this.mainFocused = v;
+    this.apply();
+  }
+
+  /** Session-scoped override from the inline chat control: 'off' silences the
+   *  overlay, 'persist' keeps it up on blur even when every turn is over. */
+  setMode(m: OverlayMode): void {
+    this.mode = m;
     this.apply();
   }
 
@@ -133,9 +143,9 @@ export class OverlayManager {
 
   private apply(): void {
     const show = shouldShowOverlay({
-      enabled: this.enabled,
+      enabled: this.enabled && this.mode !== 'off',
       mainFocused: this.mainFocused,
-      hasReportable: this.hasReportable,
+      hasReportable: this.mode === 'persist' ? true : this.hasReportable,
     });
     if (show) {
       this.clearLinger();
@@ -151,7 +161,7 @@ export class OverlayManager {
       this.releaseShortcut();
       return;
     }
-    if (!this.enabled || this.mainFocused) {
+    if (!this.enabled || this.mode === 'off' || this.mainFocused) {
       // User is back (or turned it off) — no reason to linger.
       this.clearLinger();
       this.hideAndReset();
@@ -162,9 +172,9 @@ export class OverlayManager {
       this.lingerTimer = setTimeout(() => {
         this.lingerTimer = null;
         const stillHidden = !shouldShowOverlay({
-          enabled: this.enabled,
+          enabled: this.enabled && this.mode !== 'off',
           mainFocused: this.mainFocused,
-          hasReportable: this.hasReportable,
+          hasReportable: this.mode === 'persist' ? true : this.hasReportable,
         });
         if (stillHidden && this.win && !this.win.isDestroyed() && this.win.isVisible()) {
           this.hideAndReset();

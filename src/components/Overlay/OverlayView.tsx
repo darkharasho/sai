@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import SaiLogo from '../SaiLogo';
 import { useThinkingDriver } from '../Chat/useThinkingDriver';
 import { WorkspaceSquircle } from '../shared/WorkspaceSquircle';
@@ -25,6 +25,8 @@ export function OverlayView() {
   const [payload, setPayload] = useState<OverlayPayload | null>(null);
   const [interactive, setInteractive] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const pinnedRef = useRef(true);
 
   useEffect(() => {
     // Keep the last reportable payload: when everything goes idle the manager
@@ -49,16 +51,6 @@ export function OverlayView() {
   // The thinking driver runs whenever the focused conversation is working, so
   // the logo cycles through the same animation chain as the in-app indicator.
   const driver = useThinkingDriver(!!focusRow && isWorking(focusRow.state));
-
-  const requestInteractive = (v: boolean) => {
-    setInteractive(v);
-    (window as any).sai?.overlaySetInteractive?.(v);
-  };
-
-  const onMouseMove = (e: React.MouseEvent) => {
-    const want = e.ctrlKey && e.shiftKey;
-    if (want !== interactive) requestInteractive(want);
-  };
 
   // Manual drag: -webkit-app-region is unreliable on Linux (and the window is
   // non-focusable), so interactive-mode dragging moves the window through IPC
@@ -88,14 +80,18 @@ export function OverlayView() {
     window.addEventListener('pointerup', up);
   };
 
+  // Auto-pin: follow the newest activity unless the user scrolled up.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el && pinnedRef.current) el.scrollTop = el.scrollHeight;
+  }, [payload, focusRow?.path]);
+
   if (!payload?.hasReportable || !focusRow) return <div className="overlay-root overlay-empty" />;
 
   return (
     <div
       className={`overlay-root${interactive ? ' overlay-interactive' : ''}`}
-      onMouseMove={onMouseMove}
       onPointerDown={onPointerDown}
-      onMouseLeave={() => { if (interactive) requestInteractive(false); }}
     >
       <div className="overlay-card">
         <div className="overlay-strip">
@@ -115,24 +111,36 @@ export function OverlayView() {
         </div>
         <div className="overlay-focus">
           <div className="overlay-focus-head">
-            {isWorking(focusRow.state)
-              ? <SaiLogo mode={driver.chainMode} size={16} color="#c7913b" className="overlay-thinking" />
-              : <WorkspaceSquircle state={focusRow.state} />}
+            <WorkspaceSquircle state={focusRow.state} />
             <span className="overlay-focus-name">{focusRow.name}</span>
             <span className="overlay-focus-state">· {STATE_LABEL[focusRow.state] ?? focusRow.state}</span>
           </div>
-          {focusRow.snippet && <div className="overlay-snippet">{focusRow.snippet}</div>}
-          {focusRow.tools && focusRow.tools.length > 0 && (
-            <div className="overlay-tools">
-              {focusRow.tools.map((t, i) => (
-                <div key={`${t.name}-${i}`} className={`overlay-tool-card${t.done ? ' overlay-tool-done' : ''}`}>
-                  <span className="overlay-tool-dot" />
-                  <span className="overlay-tool-name">{t.name}</span>
-                  <span className="overlay-tool-status">{t.done ? 'done' : 'running'}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          <div
+            className="overlay-scroll"
+            ref={scrollRef}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              pinnedRef.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 24;
+            }}
+          >
+            {focusRow.snippet && <div className="overlay-snippet">{focusRow.snippet}</div>}
+            {focusRow.tools && focusRow.tools.length > 0 && (
+              <div className="overlay-tools">
+                {focusRow.tools.map((t, i) => (
+                  <div key={`${t.name}-${i}`} className={`overlay-tool-card${t.done ? ' overlay-tool-done' : ''}`}>
+                    <span className="overlay-tool-dot" />
+                    <span className="overlay-tool-name">{t.name}</span>
+                    <span className="overlay-tool-status">{t.done ? 'done' : 'running'}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {isWorking(focusRow.state) && (
+              <div className="overlay-thinking-row">
+                <SaiLogo mode={driver.chainMode} size={16} color="#c7913b" className="overlay-thinking" />
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

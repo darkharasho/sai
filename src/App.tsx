@@ -275,6 +275,12 @@ export default function App() {
   const wsTurnSeqRef = useRef<Map<string, number>>(new Map());
   const [focusedChat, setFocusedChat] = useState(false);
   const [overlayEnabled, setOverlayEnabled] = useState(false);
+  // Session-scoped overlay mode from the inline control under the chat input.
+  const [overlayMode, setOverlayMode] = useState<'on' | 'off' | 'persist'>('on');
+  const handleOverlayModeChange = useCallback((m: 'on' | 'off' | 'persist') => {
+    setOverlayMode(m);
+    (window.sai as any).overlaySetMode?.(m);
+  }, []);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [fileIndex, setFileIndex] = useState<string[]>([]);
   const [toast, setToast] = useState<{ message: string; key: number; tone?: 'success' | 'error' } | null>(null);
@@ -4337,6 +4343,7 @@ export default function App() {
                   initialContextItems={(chatContextItemsRef.current.get(wsPath) as any) || []}
                   onContextItemsChange={(items: any[]) => handleContextItemsChange(wsPath, items)}
                   messageQueue={messageQueues.get(ws.activeSession.id) || []}
+                  overlayControl={overlayEnabled ? { mode: overlayMode, onChange: handleOverlayModeChange } : undefined}
                   onQueueAdd={handleQueueAdd}
                   onQueueRemove={handleQueueRemove}
                   onQueueShift={handleQueueShift}
@@ -4655,7 +4662,7 @@ export default function App() {
   // gated on the setting so the IPC stays silent when disabled.
   const overlayThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (!overlayEnabled) return;
+    if (!overlayEnabled || overlayMode === 'off') return;
     const stateFor = (path: string) =>
       approvalSessions.has(path) ? 'approval' as const
       : awaitingQuestionWorkspaces.has(path) ? 'question' as const
@@ -4672,7 +4679,7 @@ export default function App() {
       for (let i = messages.length - 1; i >= 0 && (!snippet || tools.length < 3); i--) {
         const m = messages[i];
         if (m.role !== 'assistant') continue;
-        if (!snippet && typeof m.content === 'string' && m.content) snippet = m.content.slice(0, 220);
+        if (!snippet && typeof m.content === 'string' && m.content) snippet = m.content.slice(0, 600);
         if (tools.length < 3 && m.toolCalls) {
           for (let j = m.toolCalls.length - 1; j >= 0 && tools.length < 3; j--) {
             const tc = m.toolCalls[j];
@@ -4713,7 +4720,7 @@ export default function App() {
       if (overlayThrottleRef.current) { clearTimeout(overlayThrottleRef.current); overlayThrottleRef.current = null; }
       if (tick) clearInterval(tick);
     };
-  }, [overlayEnabled, busyWorkspaces, completedWorkspacesWithUnread, approvalSessions, awaitingQuestionWorkspaces, workspaces, metaWorkspaces]);
+  }, [overlayEnabled, overlayMode, busyWorkspaces, completedWorkspacesWithUnread, approvalSessions, awaitingQuestionWorkspaces, workspaces, metaWorkspaces]);
 
   return (
     <div className="app">

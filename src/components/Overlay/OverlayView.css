@@ -20,11 +20,19 @@
 
 .overlay-card {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   background: var(--bg-primary, #0d1117);
   border: 1px solid var(--border, #30363d);
   padding: 9px 11px;
   overflow: hidden;
 }
+
+.overlay-focus { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+/* Content scrolls (auto-pinned to the newest activity); strip + head stay fixed. */
+.overlay-scroll { flex: 1; overflow-y: auto; min-height: 0; scrollbar-width: thin; }
 
 /* Interactive mode (Ctrl+Shift+F9): accent edge; dragging is manual (IPC). */
 .overlay-interactive .overlay-card { border-color: var(--accent, #58a6ff); cursor: grab; }
@@ -70,10 +78,7 @@
 .overlay-snippet {
   color: var(--text-secondary, #c9d1d9);
   line-height: 1.5;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  white-space: pre-wrap;
 }
 
 .overlay-tools { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
@@ -104,3 +109,5 @@
 .overlay-tool-done { opacity: 0.7; }
 
 @keyframes overlay-tool-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+.overlay-thinking-row { display: flex; padding: 6px 2px 2px; }

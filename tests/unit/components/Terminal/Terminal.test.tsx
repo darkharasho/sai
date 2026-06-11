@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { installMockSai } from '../../../helpers/ipc-mock';
 
 // jsdom doesn't implement ResizeObserver or IntersectionObserver
@@ -243,5 +243,34 @@ describe('TerminalPanel', () => {
     // Click the second tab — onTabSwitch receives the uid
     fireEvent.click(tabItems[1]);
     expect(onTabSwitch).toHaveBeenCalledWith(2);
+  });
+});
+
+describe('Ctrl+C forwarding only when the terminal owns focus (audit 2026-06-11)', () => {
+  it('ignores window-level Ctrl+C when focus is outside the terminal (e.g. copying chat text)', async () => {
+    let ctrlCb: (() => void) | null = null;
+    const mockSai = installMockSai();
+    mockSai.terminalOnCtrlC = vi.fn((cb: () => void) => { ctrlCb = cb; return () => { ctrlCb = null; }; });
+    installMockSai(mockSai);
+    render(
+      <TerminalPanel projectPath="/tmp/test" isActive wasSuspended={false} {...defaultTabProps} />
+    );
+    await waitFor(() => expect(ctrlCb).toBeTypeOf('function'));
+    mockSai.terminalSignal.mockClear();
+    mockSai.terminalWrite.mockClear();
+
+    // Focus is on the body (user copying text elsewhere in the app)
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    ctrlCb!();
+    expect(mockSai.terminalSignal).not.toHaveBeenCalled();
+    expect(mockSai.terminalWrite).not.toHaveBeenCalled();
+
+    // Focus inside the terminal panel → SIGINT goes through
+    const termEl = document.querySelector('.terminal-content') as HTMLElement;
+    const input = document.createElement('textarea');
+    termEl.appendChild(input);
+    input.focus();
+    ctrlCb!();
+    expect(mockSai.terminalSignal).toHaveBeenCalledWith(1, 'SIGINT');
   });
 });

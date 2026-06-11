@@ -269,10 +269,15 @@ export default function TerminalPanel({
   }, [projectPath, activeTerminalId, terminalTabs]);
 
   // Listen for Ctrl+C forwarded from the main process (macOS Cocoa workaround).
-  // Send \x03 + SIGINT to the active terminal's PTY.
+  // Send \x03 + SIGINT to the active terminal's PTY — but ONLY when the
+  // terminal actually owns focus. The main process forwards every window-level
+  // Ctrl+C, so without this guard, copying text anywhere in the app (chat,
+  // editor) interrupted whatever the terminal was running.
   useEffect(() => {
     if (!isActive) return;
     const cleanup = window.sai.terminalOnCtrlC(() => {
+      const focused = document.activeElement as HTMLElement | null;
+      if (!focused?.closest?.('.terminal-content, .terminal-panel')) return;
       const activeTab = terminalTabs.find(t => t.uid === activeTerminalId);
       if (activeTab && activeTab.id > 0) {
         window.sai.terminalWrite(activeTab.id, '\x03');
