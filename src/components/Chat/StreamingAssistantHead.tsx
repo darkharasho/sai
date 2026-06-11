@@ -34,6 +34,12 @@ export default function StreamingAssistantHead({ streaming, content, durationMs,
   const mdRef = useRef<HTMLDivElement | null>(null);
   const frozenMsRef = useRef<number>(0);
   const revealedRef = useRef(false);
+  // Text that has been SHOWN live during streaming must not word-reveal again
+  // at settle (and is marked revealed so remounts render statically). Live
+  // display replaced the old hold-until-settle behavior, which swallowed
+  // long stretches of reply text during tool-heavy turns.
+  const liveShownRef = useRef(false);
+  if (streaming && content) liveShownRef.current = true;
 
   useEffect(() => {
     // `streaming` is driven by an idle debounce (streamSettled), so it can flip
@@ -74,6 +80,12 @@ export default function StreamingAssistantHead({ streaming, content, durationMs,
     // (workspace/chat swap) must show the content statically, not replay the
     // animation. revealStartedRef only survives within one mount.
     if (messageId && hasRevealed(messageId)) return;
+    // Text the user already watched stream in live must not re-animate.
+    if (liveShownRef.current) {
+      revealStartedRef.current = true;
+      if (messageId) markRevealed(messageId);
+      return;
+    }
     const el = mdRef.current;
     if (!el) return;
     revealStartedRef.current = true;
@@ -102,7 +114,7 @@ export default function StreamingAssistantHead({ streaming, content, durationMs,
             [{clock}]
           </div>
         )}
-        {phase !== 'revealed' && (
+        {phase !== 'revealed' && !(streaming && content) && (
           <span className={`sah-status${phase === 'morphing' ? ' sah-status--gone' : ''}`}>
             {driver.displayText}
             <span className="thinking-cursor thinking-cursor-block" />
@@ -111,7 +123,7 @@ export default function StreamingAssistantHead({ streaming, content, durationMs,
         <div
           ref={mdRef}
           className="chat-msg-md sah-md"
-          style={phase === 'revealed' ? undefined : { display: 'none' }}
+          style={phase === 'revealed' || (streaming && content) ? undefined : { display: 'none' }}
         >
           {children}
         </div>

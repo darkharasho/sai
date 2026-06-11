@@ -758,6 +758,8 @@ function createWindow() {
 
   ipcMain.on('overlay:update', (_event, payload) => overlayManager?.update(payload));
   ipcMain.on('overlay:setInteractive', (_event, v: boolean) => overlayManager?.setInteractive(!!v));
+  ipcMain.on('overlay:dragBy', (_event, dx: number, dy: number) => overlayManager?.dragBy(Number(dx) || 0, Number(dy) || 0));
+  ipcMain.on('overlay:dragEnd', () => overlayManager?.noteMoved());
   overlayManager?.setEnabled(readSettings().overlayEnabled === true);
 
   // Initialize subprocess memory cap from settings (default 4096MB).

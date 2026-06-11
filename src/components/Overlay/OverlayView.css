@@ -1,15 +1,17 @@
-/* Focus-overlay window styles. The window itself is transparent; the card
-   paints the visible surface. Ghost vs interactive opacity is handled by the
-   main process via win.setOpacity — here we only handle drag affordance. */
+/* Focus-overlay window styles. The window is opaque (transparent windows
+   render as a black box with GPU acceleration disabled on Linux) and IS the
+   card. Colors come from SAI's theme variables — globals.css is loaded by the
+   shared entry. */
 
 .overlay-root {
   width: 100vw;
   height: 100vh;
-  background: #0d1117;
+  background: var(--bg-primary, #0d1117);
   display: flex;
   align-items: stretch;
-  font: 12px ui-sans-serif, system-ui, sans-serif;
-  color: #e0e0e0;
+  font-family: var(--font-ui, ui-sans-serif), ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--text-primary, #e0e0e0);
   user-select: none;
   cursor: default;
 }
@@ -18,28 +20,24 @@
 
 .overlay-card {
   flex: 1;
-  background: #0d1117;
-  border: 1px solid #30363d;
+  background: var(--bg-primary, #0d1117);
+  border: 1px solid var(--border, #30363d);
   padding: 9px 11px;
   overflow: hidden;
-  /* Ghost mode: the window can't be translucent on Linux (no GPU compositing),
-     so dim the content instead. Interactive mode restores full strength. */
-  opacity: 0.45;
-  transition: opacity 0.15s ease;
 }
 
-/* In interactive mode the whole card becomes the drag handle (buttons opt out). */
-.overlay-interactive .overlay-card { -webkit-app-region: drag; border-color: #58a6ff; opacity: 1; }
-.overlay-interactive .overlay-strip-item { -webkit-app-region: no-drag; }
+/* Interactive mode (Ctrl+Shift+F9): accent edge; dragging is manual (IPC). */
+.overlay-interactive .overlay-card { border-color: var(--accent, #58a6ff); cursor: grab; }
+.overlay-interactive .overlay-card:active { cursor: grabbing; }
 
 .overlay-strip {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
   flex-wrap: wrap;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #21262d;
-  margin-bottom: 8px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--border-subtle, #21262d);
+  margin-bottom: 7px;
 }
 
 .overlay-strip-item {
@@ -48,24 +46,29 @@
   align-items: center;
   background: none;
   border: none;
-  padding: 2px 4px;
+  padding: 2px 5px;
   border-radius: 6px;
   cursor: pointer;
   font: inherit;
 }
-.overlay-strip-item:hover { background: #21262d; }
-.overlay-strip-active { background: #1c2129; }
-.overlay-strip-name { color: #8b949e; }
-.overlay-strip-active .overlay-strip-name { color: #e0e0e0; }
-.overlay-thinking { flex-shrink: 0; }
+.overlay-strip-item:hover { background: var(--bg-hover, #21262d); }
+.overlay-strip-active { background: var(--bg-elevated, #1c2129); }
+.overlay-strip-name { color: var(--text-muted, #8b949e); }
+.overlay-strip-active .overlay-strip-name { color: var(--text-primary, #e0e0e0); }
 .overlay-meta { font-style: italic; }
+.overlay-thinking { flex-shrink: 0; }
 
 .overlay-focus-head { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
 .overlay-focus-name { font-weight: 600; }
-.overlay-focus-state { color: #8b949e; }
+.overlay-focus-state {
+  color: var(--accent, #c7913b);
+  font-family: 'Departure Mono', 'Geist Mono', ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.4px;
+}
 
 .overlay-snippet {
-  color: #c9d1d9;
+  color: var(--text-secondary, #c9d1d9);
   line-height: 1.5;
   display: -webkit-box;
   -webkit-line-clamp: 3;
@@ -73,12 +76,31 @@
   overflow: hidden;
 }
 
-.overlay-tool {
-  margin-top: 4px;
-  color: #8b949e;
-  font-family: ui-monospace, monospace;
+.overlay-tools { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
+
+.overlay-tool-card {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  background: var(--bg-secondary, #161b22);
+  border: 1px solid var(--border-subtle, #21262d);
+  border-radius: 7px;
+  padding: 3px 8px;
+  font-family: var(--font-mono, ui-monospace), ui-monospace, monospace;
   font-size: 11px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
+
+.overlay-tool-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--accent, #d4a72c);
+  animation: overlay-tool-pulse 1.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+.overlay-tool-done .overlay-tool-dot { background: var(--text-muted, #555); animation: none; }
+.overlay-tool-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.overlay-tool-status { color: var(--text-muted, #8b949e); font-size: 10px; }
+.overlay-tool-done { opacity: 0.7; }
+
+@keyframes overlay-tool-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }

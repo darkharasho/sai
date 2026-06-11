@@ -83,6 +83,14 @@ export class OverlayManager {
     this.win.webContents.send('overlay:interactive', v);
   }
 
+  /** Manual drag (Linux: -webkit-app-region doesn't work on a non-focusable
+   *  frameless window). Deltas are screen-coordinate based from the renderer. */
+  dragBy(dx: number, dy: number): void {
+    if (!this.win || this.win.isDestroyed()) return;
+    const [x, y] = this.win.getPosition();
+    this.win.setPosition(x + Math.round(dx), y + Math.round(dy));
+  }
+
   noteMoved(): void {
     if (!this.win || this.win.isDestroyed()) return;
     const [x, y] = this.win.getPosition();

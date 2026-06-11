@@ -31,8 +31,8 @@ beforeEach(() => {
 const payload: OverlayPayload = {
   hasReportable: true,
   rows: [
-    { path: '/a', name: 'sai', kind: 'project', state: 'busy', snippet: 'refactoring the spawn path', toolLine: '▸ Bash' },
-    { path: '/b', name: 'BotCord', kind: 'project', state: 'question', snippet: 'Which auth method should the bot use?', toolLine: '▸ AskUserQuestion' },
+    { path: '/a', name: 'sai', kind: 'project', state: 'busy', snippet: 'refactoring the spawn path', tools: [{ name: 'Read', done: true }, { name: 'Bash', done: false }] },
+    { path: '/b', name: 'BotCord', kind: 'project', state: 'question', snippet: 'Which auth method should the bot use?', tools: [{ name: 'AskUserQuestion', done: false }] },
     { path: '/m', name: 'infra', kind: 'meta', state: 'done', snippet: 'migration complete' },
   ],
   focusPath: '/b',
@@ -76,6 +76,18 @@ describe('OverlayView', () => {
     fireEvent.click(getByText('sai', { selector: '.overlay-strip-name' }));
     act(() => { stateCb!({ ...payload, rows: payload.rows.filter(r => r.path !== '/a'), focusPath: '/b' }); });
     expect(getByText('Which auth method should the bot use?')).toBeTruthy();
+  });
+
+  it('renders multiple tool cards with running/done status', () => {
+    const { container, getByText } = render(<OverlayView />);
+    act(() => { stateCb!(payload); });
+    fireEvent.click(getByText('sai', { selector: '.overlay-strip-name' }));
+    const cards = container.querySelectorAll('.overlay-tool-card');
+    expect(cards).toHaveLength(2);
+    expect(cards[0].textContent).toContain('Read');
+    expect(cards[0].className).toContain('overlay-tool-done');
+    expect(cards[1].textContent).toContain('Bash');
+    expect(cards[1].className).not.toContain('overlay-tool-done');
   });
 
   it('shows the thinking animation for a busy focused row', () => {

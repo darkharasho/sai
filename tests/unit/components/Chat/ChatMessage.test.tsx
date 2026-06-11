@@ -70,20 +70,16 @@ describe('ChatMessage', () => {
     expect(screen.getByTestId('markdown').textContent).toBe('Hello world');
   });
 
-  it('hides assistant text content while streaming (no plain text, no visible markdown)', () => {
-    // While streaming, a SAI assistant routes through the morph head, which sits in
-    // its "thinking" phase: the markdown body is kept in the DOM but display:none so
-    // no partial text flashes. The morph head itself owns the thinking animation.
+  it('shows arrived assistant text live while streaming (spec change 2026-06-11)', () => {
+    // The morph head used to hold ALL text until the stream settled, which
+    // swallowed long stretches of reply during tool-heavy turns. Arrived text
+    // now renders live; the head keeps the animated logo + clock.
     const msg = makeMessage({ role: 'assistant', content: 'partial chunk' });
     const { container } = render(<ChatMessage message={msg} isStreaming />);
-    expect(container.querySelector('.chat-msg-stream-text')).toBeNull();
-    // Morph head is present and in the thinking phase.
     const head = container.querySelector('.sah-root');
     expect(head).toBeTruthy();
-    expect(head?.getAttribute('data-phase')).toBe('thinking');
-    // The markdown body is rendered but hidden (no visible partial text).
     const md = container.querySelector('.sah-md') as HTMLElement | null;
-    expect(md?.style.display).toBe('none');
+    expect(md?.style.display).not.toBe('none');
   });
 
   it('renders assistant content via markdown when not streaming', () => {
@@ -467,9 +463,9 @@ describe('ChatMessage', () => {
     expect(container.querySelectorAll('.rv-word').length).toBe(0);
   });
 
-  it('reveals a message after it finishes streaming', () => {
-    // The SAI morph head morphs from thinking → revealed over a short blur (250ms)
-    // before it word-reveals, so advance timers past that transition.
+  it('does not word-reveal text that streamed in live (spec change 2026-06-11)', () => {
+    // Live-shown text was already watched arriving; re-animating it at settle
+    // would replay content the user has read.
     vi.useFakeTimers();
     try {
       const msg = { id: 'rv-stream', role: 'assistant' as const, content: 'streamed then done', timestamp: Date.now() };
@@ -478,7 +474,9 @@ describe('ChatMessage', () => {
       );
       rerender(<ChatMessage message={msg} projectPath="/p" isStreaming={false} />);
       act(() => { vi.advanceTimersByTime(300); });
-      expect(container.querySelectorAll('.rv-word').length).toBeGreaterThan(0);
+      expect(container.querySelectorAll('.rv-word').length).toBe(0);
+      const md = container.querySelector('.sah-md') as HTMLElement | null;
+      expect(md?.style.display).not.toBe('none');
     } finally {
       vi.useRealTimers();
     }

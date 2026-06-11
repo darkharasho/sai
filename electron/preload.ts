@@ -40,6 +40,8 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.invoke('remote:emit-github-watcher', payload),
   overlayUpdate: (payload: unknown) => ipcRenderer.send('overlay:update', payload),
   overlaySetInteractive: (v: boolean) => ipcRenderer.send('overlay:setInteractive', v),
+  overlayDragBy: (dx: number, dy: number) => ipcRenderer.send('overlay:dragBy', dx, dy),
+  overlayDragEnd: () => ipcRenderer.send('overlay:dragEnd'),
   overlayOnState: (cb: (payload: unknown) => void) => {
     const listener = (_e: unknown, payload: unknown) => cb(payload);
     ipcRenderer.on('overlay:state', listener);

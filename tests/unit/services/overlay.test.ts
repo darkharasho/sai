@@ -26,6 +26,7 @@ class MockWin {
   isDestroyed = () => this.destroyed;
   destroy = vi.fn(() => { this.destroyed = true; });
   setBounds = vi.fn((b: any) => { this.bounds = { ...this.bounds, ...b }; });
+  setPosition = vi.fn((x: number, y: number) => { this.bounds.x = x; this.bounds.y = y; });
   getPosition = () => [this.bounds.x, this.bounds.y];
   webContents = { send: vi.fn(), on: vi.fn() };
   constructor(opts: any) { this.bounds = { x: opts.x, y: opts.y, width: opts.width, height: opts.height }; windows.push(this); }
@@ -217,6 +218,19 @@ describe('OverlayManager', () => {
     // Hiding resets interactive and releases the shortcut
     mgr.setMainFocused(true);
     expect(globalShortcut.unregister).toHaveBeenCalledWith('Control+Shift+F9');
+  });
+
+  it('dragBy moves the window and dragEnd persistence works via noteMoved', () => {
+    const { mgr, saveBounds } = makeManager();
+    mgr.setEnabled(true);
+    mgr.update({ hasReportable: true });
+    mgr.setMainFocused(false);
+    const [x0, y0] = windows[0].getPosition();
+    mgr.dragBy(15, -10);
+    expect(windows[0].bounds.x).toBe(x0 + 15);
+    expect(windows[0].bounds.y).toBe(y0 - 10);
+    mgr.noteMoved();
+    expect(saveBounds).toHaveBeenCalledWith({ x: x0 + 15, y: y0 - 10 });
   });
 
   it('destroy tears the window down', () => {

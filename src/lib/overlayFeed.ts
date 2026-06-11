@@ -7,8 +7,8 @@ export interface OverlayRow {
   state: IndicatorState;
   /** Last assistant text, pre-truncated by the caller. */
   snippet?: string;
-  /** Current tool call line while streaming. */
-  toolLine?: string;
+  /** Recent tool calls (latest last); running ones have done=false. */
+  tools?: Array<{ name: string; done: boolean }>;
 }
 
 export interface OverlayPayload {

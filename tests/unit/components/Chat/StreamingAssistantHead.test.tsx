@@ -212,3 +212,34 @@ describe('reveal replay on remount (workspace/chat swap)', () => {
     expect(second.container.textContent).toContain('the reply');
   });
 });
+
+describe('live text during streaming (no swallowed messages)', () => {
+  it('shows arrived text while still streaming instead of holding it', () => {
+    const { container } = render(
+      <StreamingAssistantHead streaming content="partial reply so far" messageId="m-live">
+        <p>partial reply so far</p>
+      </StreamingAssistantHead>
+    );
+    const md = container.querySelector('.sah-md') as HTMLElement;
+    expect(md.style.display).not.toBe('none');
+    // The textual status line yields to the real text; logo+clock remain.
+    expect(container.querySelector('.sah-status')).toBeNull();
+    expect(container.querySelector('.sah-clock')).toBeTruthy();
+  });
+
+  it('does not word-reveal text the user already watched stream in', async () => {
+    _resetRevealRegistry();
+    const r = render(
+      <StreamingAssistantHead streaming content="text already on screen" messageId="m-live2">
+        <p>text already on screen</p>
+      </StreamingAssistantHead>
+    );
+    r.rerender(
+      <StreamingAssistantHead streaming={false} content="text already on screen" durationMs={900} messageId="m-live2">
+        <p>text already on screen</p>
+      </StreamingAssistantHead>
+    );
+    await act(async () => { await new Promise(res => setTimeout(res, 300)); });
+    expect(revealSpy).not.toHaveBeenCalled();
+  });
+});

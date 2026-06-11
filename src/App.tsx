@@ -4662,22 +4662,25 @@ export default function App() {
       : busyWorkspaces.has(path) ? 'busy' as const
       : completedWorkspacesWithUnread.has(path) ? 'done' as const
       : 'alive' as const;
-    const tailFor = (path: string): { snippet?: string; toolLine?: string } => {
+    const tailFor = (path: string): { snippet?: string; tools?: Array<{ name: string; done: boolean }> } => {
       const messages = wsMessagesRef.current.get(path) ?? workspaces.get(path)?.activeSession.messages ?? [];
       let snippet: string | undefined;
-      let toolLine: string | undefined;
-      // Snippet: latest assistant text. Tool line: latest unfinished tool call
-      // while working — they often live on different messages mid-turn.
-      for (let i = messages.length - 1; i >= 0 && (!snippet || !toolLine); i--) {
+      const tools: Array<{ name: string; done: boolean }> = [];
+      // Snippet: latest assistant text. Tools: the most recent calls across
+      // trailing assistant messages — text and tools often live on different
+      // messages mid-turn.
+      for (let i = messages.length - 1; i >= 0 && (!snippet || tools.length < 3); i--) {
         const m = messages[i];
         if (m.role !== 'assistant') continue;
         if (!snippet && typeof m.content === 'string' && m.content) snippet = m.content.slice(0, 220);
-        if (!toolLine && busyWorkspaces.has(path) && m.toolCalls && m.toolCalls.length > 0) {
-          const running = [...m.toolCalls].reverse().find(tc => tc.output == null) ?? m.toolCalls[m.toolCalls.length - 1];
-          toolLine = `\u25b8 ${running.name}`;
+        if (tools.length < 3 && m.toolCalls) {
+          for (let j = m.toolCalls.length - 1; j >= 0 && tools.length < 3; j--) {
+            const tc = m.toolCalls[j];
+            tools.unshift({ name: tc.name, done: tc.output != null });
+          }
         }
       }
-      return { snippet, toolLine };
+      return { snippet, tools: tools.length > 0 ? tools : undefined };
     };
     const metaRoots = new Set((metaWorkspaces || []).map(m => m.syntheticRoot));
     const rows: OverlayRow[] = [];

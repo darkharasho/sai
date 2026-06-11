@@ -60,12 +60,41 @@ export function OverlayView() {
     if (want !== interactive) requestInteractive(want);
   };
 
+  // Manual drag: -webkit-app-region is unreliable on Linux (and the window is
+  // non-focusable), so interactive-mode dragging moves the window through IPC
+  // using screen-coordinate deltas.
+  const dragRef = { last: null as { x: number; y: number } | null };
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (!interactive) return;
+    if ((e.target as HTMLElement).closest('.overlay-strip-item')) return; // buttons stay clickable
+    dragRef.last = { x: e.screenX, y: e.screenY };
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    const move = (ev: PointerEvent) => {
+      if (!dragRef.last) return;
+      const dx = ev.screenX - dragRef.last.x;
+      const dy = ev.screenY - dragRef.last.y;
+      if (dx !== 0 || dy !== 0) {
+        dragRef.last = { x: ev.screenX, y: ev.screenY };
+        (window as any).sai?.overlayDragBy?.(dx, dy);
+      }
+    };
+    const up = () => {
+      dragRef.last = null;
+      (window as any).sai?.overlayDragEnd?.();
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
   if (!payload?.hasReportable || !focusRow) return <div className="overlay-root overlay-empty" />;
 
   return (
     <div
       className={`overlay-root${interactive ? ' overlay-interactive' : ''}`}
       onMouseMove={onMouseMove}
+      onPointerDown={onPointerDown}
       onMouseLeave={() => { if (interactive) requestInteractive(false); }}
     >
       <div className="overlay-card">
@@ -93,7 +122,17 @@ export function OverlayView() {
             <span className="overlay-focus-state">· {STATE_LABEL[focusRow.state] ?? focusRow.state}</span>
           </div>
           {focusRow.snippet && <div className="overlay-snippet">{focusRow.snippet}</div>}
-          {focusRow.toolLine && <div className="overlay-tool">{focusRow.toolLine}</div>}
+          {focusRow.tools && focusRow.tools.length > 0 && (
+            <div className="overlay-tools">
+              {focusRow.tools.map((t, i) => (
+                <div key={`${t.name}-${i}`} className={`overlay-tool-card${t.done ? ' overlay-tool-done' : ''}`}>
+                  <span className="overlay-tool-dot" />
+                  <span className="overlay-tool-name">{t.name}</span>
+                  <span className="overlay-tool-status">{t.done ? 'done' : 'running'}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
