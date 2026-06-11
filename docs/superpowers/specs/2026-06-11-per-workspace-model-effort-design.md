@@ -43,18 +43,23 @@ can be applied later).
   changes, that workspace's CLI process respawns on the next send and its session
   context restarts.
 
-## 3. Picker UI (`src/components/Chat/ChatInput.tsx`)
+## 3. UI — defaults in Settings, overrides in chat
 
-The existing model and effort menus become workspace-scoped:
+Revised during plan exploration: the effort control is a cycle button (not a menu), so
+in-picker "make default" affordances don't fit. Instead:
 
-- Top entry: **"Default — follow app setting (<current global model · effort>)"**,
-  showing the live global values. Selecting it clears that workspace's override for
-  that field.
-- The remaining entries set the workspace override (current behavior, new scope).
-- Each concrete choice row gets a secondary **"make default"** affordance that writes
-  the GLOBAL key (`claude.model` / `claude.effort`) instead, leaving the workspace's
-  override state untouched.
-- When the workspace has an override, the picker trigger shows a subtle marker
+- **Global defaults live in the Settings modal** (`src/components/SettingsModal.tsx`):
+  a Claude section with the app-wide model and effort, writing the existing
+  `claude.model` / `claude.effort` keys. This is the only place globals change.
+- **The in-chat controls become pure workspace overrides**, keeping their current
+  forms (`src/components/Chat/ChatInput.tsx`):
+  - The model dropdown gains a top entry **"Default (follow settings)"** showing the
+    live global value; selecting it clears the workspace's model override. Other
+    entries set the override.
+  - The effort cycle button gains a **Default stop** in the cycle
+    (low → medium → high → max → Default → …), labeled with the live global value
+    (e.g. "Default · high"); landing on it clears the workspace's effort override.
+- When the workspace has an override, the control shows a subtle marker
   (dot/asterisk) so a detached workspace is visible at a glance.
 
 ## 4. Error handling
