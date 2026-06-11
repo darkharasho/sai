@@ -183,3 +183,64 @@ describe('TitleBar', () => {
     expect(onProjectChange).toHaveBeenCalledWith('/home/user/other-project');
   });
 });
+
+describe('TitleBar status chip (audit 2026-06-11)', () => {
+  it('shows the two-tone busy-done squircle when one workspace works and another is done', () => {
+    const { container } = render(
+      <TitleBar
+        {...defaultProps}
+        projectPath="/home/user/current"
+        busyWorkspaces={new Set(['/ws/busy-one'])}
+        completedWorkspaces={new Set(['/ws/done-one'])}
+      />
+    );
+    expect(container.querySelector('.ws-sq-busy-done')).toBeTruthy();
+    expect(container.querySelector('.ws-sq-busy:not(.ws-sq-busy-done)')).toBeNull();
+  });
+
+  it('keeps the plain busy squircle when nothing is completed', () => {
+    const { container } = render(
+      <TitleBar
+        {...defaultProps}
+        projectPath="/home/user/current"
+        busyWorkspaces={new Set(['/ws/busy-one'])}
+      />
+    );
+    expect(container.querySelector('.ws-sq-busy')).toBeTruthy();
+    expect(container.querySelector('.ws-sq-busy-done')).toBeNull();
+  });
+
+  it('shows the question squircle for a workspace awaiting an AskUserQuestion answer', () => {
+    const { container } = render(
+      <TitleBar
+        {...defaultProps}
+        projectPath="/home/user/current"
+        busyWorkspaces={new Set(['/ws/asking'])}
+        awaitingQuestionWorkspaces={new Set(['/ws/asking'])}
+      />
+    );
+    expect(container.querySelector('.ws-sq-question')).toBeTruthy();
+  });
+
+  it('marks the awaiting workspace row with the question state in the dropdown', async () => {
+    const mockSai = createMockSai();
+    mockSai.workspaceGetAll = vi.fn().mockResolvedValue([
+      { projectPath: '/ws/asking', status: 'active' },
+      { projectPath: '/ws/other', status: 'active' },
+    ]);
+    installMockSai(mockSai);
+    const { container } = render(
+      <TitleBar
+        {...defaultProps}
+        projectPath="/ws/other"
+        busyWorkspaces={new Set(['/ws/asking'])}
+        awaitingQuestionWorkspaces={new Set(['/ws/asking'])}
+      />
+    );
+    fireEvent.click(screen.getByText(/other/, { selector: '.titlebar-project-name, button, span, div' }));
+    await waitFor(() => {
+      const row = container.querySelector('[data-path="/ws/asking"]');
+      expect(row?.querySelector('.ws-sq-question')).toBeTruthy();
+    });
+  });
+});

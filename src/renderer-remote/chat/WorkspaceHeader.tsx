@@ -69,6 +69,9 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
     if (summary.includes('approval')) {
       return <span className="ws-tab-indicator-dot ws-tab-indicator-approval" title="Approval needed" />;
     }
+    if (summary.includes('question')) {
+      return <WorkspaceSquircle state="question" title="Waiting for your answer" />;
+    }
     if (summary.includes('done')) {
       return <span className="ws-tab-indicator-dot ws-tab-indicator-completed" title="Response complete" />;
     }
@@ -140,6 +143,13 @@ export default function WorkspaceHeader({ client, currentProjectPath, onPick, st
           const priorities = others.map((w) => workspaceDisplayState(statusStore.get(w.projectPath), { isOpen: w.state === 'active' || w.state === 'open' }));
           if (priorities.includes('approval')) {
             return <span className="ws-approval-icon" title="Approval needed elsewhere">!</span>;
+          }
+          if (priorities.includes('question')) {
+            return (
+              <StatusSlot>
+                <WorkspaceSquircle state="question" title="Waiting for your answer in another workspace" />
+              </StatusSlot>
+            );
           }
           if (priorities.includes('busy')) {
             return (

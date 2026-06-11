@@ -4655,6 +4655,7 @@ export default function App() {
         completedWorkspaces={completedWorkspacesWithUnread}
         busyWorkspaces={busyWorkspaces}
         approvalWorkspaces={new Set(approvalSessions.keys())}
+        awaitingQuestionWorkspaces={awaitingQuestionWorkspaces}
         metaWorkspaces={metaWorkspaces}
         activeMetaRuntime={activeMetaRuntime}
         onActivateMeta={handleMetaWorkspaceActivate}

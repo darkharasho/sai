@@ -19,7 +19,9 @@ describe('workspaceDisplayState', () => {
   it('busy beats done and alive', () => {
     expect(workspaceDisplayState({ busy: true, completed: true }, { isOpen: true })).toBe('busy');
     expect(workspaceDisplayState({ streaming: true }, { isOpen: true })).toBe('busy');
-    expect(workspaceDisplayState({ awaitingQuestion: true }, { isOpen: true })).toBe('busy');
+    // Spec change 2026-06-11: awaitingQuestion is its own state now, no longer
+    // folded into busy (it hid which workspace was waiting for an answer).
+    expect(workspaceDisplayState({ awaitingQuestion: true }, { isOpen: true })).toBe('question');
   });
 
   it('done when completed and not busy', () => {
@@ -29,5 +31,13 @@ describe('workspaceDisplayState', () => {
 
   it('inactive when not open and no flags', () => {
     expect(workspaceDisplayState({ completed: false })).toBe('inactive');
+  });
+});
+
+describe('question indicator state (audit 2026-06-11)', () => {
+  it('awaitingQuestion maps to question, above busy and below approval', () => {
+    expect(workspaceDisplayState({ awaitingQuestion: true, busy: true })).toBe('question');
+    expect(workspaceDisplayState({ awaitingQuestion: true, approval: true })).toBe('approval');
+    expect(workspaceDisplayState({ busy: true })).toBe('busy');
   });
 });

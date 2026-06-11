@@ -18,7 +18,9 @@ const SQ_MASK = `url("${DOT_MASK_URL}") center / contain no-repeat`;
 const TRI_MASK = `url("${TRIANGLE_MASK_URL}") center / contain no-repeat`;
 
 export function WorkspaceSquircle({ state, title, className, 'data-testid': testId }: WorkspaceSquircleProps) {
-  const isApproval = state === 'approval';
+  // Triangle = "needs your input": orange for approvals, blue for an
+  // AskUserQuestion waiting on an answer.
+  const isTriangle = state === 'approval' || state === 'question';
 
   // busy-done ("something busy + something done") is a single squircle split
   // diagonally into the busy (gold) and done (grey) colors — see the CSS. It
@@ -29,8 +31,8 @@ export function WorkspaceSquircle({ state, title, className, 'data-testid': test
       title={title}
       data-testid={testId}
       style={{
-        WebkitMask: isApproval ? TRI_MASK : SQ_MASK,
-        mask: isApproval ? TRI_MASK : SQ_MASK,
+        WebkitMask: isTriangle ? TRI_MASK : SQ_MASK,
+        mask: isTriangle ? TRI_MASK : SQ_MASK,
       }}
     />
   );

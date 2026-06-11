@@ -4,6 +4,9 @@
 .ws-sq-busy     { background: #d4a72c; width: 9px; height: 9px; animation: ws-sq-shrink 1.4s ease-in-out infinite; }
 .ws-sq-done     { background: #e0e0e0; width: 9px; height: 9px; animation: ws-sq-blink 1.8s ease-in-out infinite; }
 .ws-sq-approval  { background: #f97316; width: 16px; height: 16px; animation: ws-sq-flash 1.2s ease-in-out infinite; }
+/* question: same "needs your input" triangle as approval, in blue — a scope
+   blocked on an AskUserQuestion answer must stand out from plain busy gold. */
+.ws-sq-question  { background: #60a5fa; width: 16px; height: 16px; animation: ws-sq-flash 1.2s ease-in-out infinite; }
 /* busy-done: one squircle split diagonally — gold (busy) over grey (done).
    Reads as two states at once with no nested detail, so it stays legible at
    the 9px status-dot size. Pulses on the busy rhythm. */

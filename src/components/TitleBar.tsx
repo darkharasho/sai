@@ -31,6 +31,7 @@ interface TitleBarProps {
   completedWorkspaces?: Set<string>;
   busyWorkspaces?: Set<string>;
   approvalWorkspaces?: Set<string>;
+  awaitingQuestionWorkspaces?: Set<string>;
   onSettingChange?: (key: string, value: any) => void;
   onOpenWhatsNew?: () => void;
   onHistoryRetentionChange?: (days: number | null) => void;
@@ -43,7 +44,7 @@ interface TitleBarProps {
   onMetaDeleted?: (id: string) => void;
 }
 
-export default function TitleBar({ projectPath, onProjectChange, completedWorkspaces, busyWorkspaces, approvalWorkspaces, onSettingChange, onOpenWhatsNew, onHistoryRetentionChange, onNewProject, metaWorkspaces, activeMetaRuntime, onActivateMeta, onMetaCreated, onMetaUpdated, onMetaDeleted }: TitleBarProps) {
+export default function TitleBar({ projectPath, onProjectChange, completedWorkspaces, busyWorkspaces, approvalWorkspaces, awaitingQuestionWorkspaces, onSettingChange, onOpenWhatsNew, onHistoryRetentionChange, onNewProject, metaWorkspaces, activeMetaRuntime, onActivateMeta, onMetaCreated, onMetaUpdated, onMetaDeleted }: TitleBarProps) {
   const [open, setOpen] = useState(false);
   const [pickerTab, setPickerTab] = useState<'projects' | 'meta'>('projects');
   const [workspaceList, setWorkspaceList] = useState<WorkspaceInfo[]>([]);
@@ -248,6 +249,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
             const scope = (set: Set<string> | undefined, want: 'meta' | 'project') =>
               set ? [...set].filter(p => want === 'meta' ? metaRoots.has(p) : !metaRoots.has(p)) : [];
             const projApproval = scope(approvalWorkspaces, 'project').length;
+            const projQuestion = scope(awaitingQuestionWorkspaces, 'project').filter(p => p !== projectPath).length;
             const projCompleted = scope(completedWorkspaces, 'project').filter(p => !busyWorkspaces?.has(p)).length;
             const projBusy = scope(busyWorkspaces, 'project').filter(p => p !== projectPath).length;
             const metaApproval = scope(approvalWorkspaces, 'meta').length;
@@ -256,14 +258,17 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
 
             const projectIndicator = projApproval > 0
               ? <WorkspaceSquircle state="approval" title="Approval needed" />
-              : projBusy > 0
-                ? <span className="titlebar-busy-indicator">
-                    <WorkspaceSquircle state="busy" />
-                    {projBusy > 1 && <span className="titlebar-busy-count">{projBusy}</span>}
-                  </span>
-                : projCompleted > 0
-                  ? <WorkspaceSquircle state="done" title="Response complete" />
-                  : null;
+              : projQuestion > 0
+                ? <WorkspaceSquircle state="question" title="Waiting for your answer" />
+                : projBusy > 0
+                  ? <span className="titlebar-busy-indicator">
+                      {/* busy + done at once renders the diagonal two-tone squircle */}
+                      <WorkspaceSquircle state={projCompleted > 0 ? 'busy-done' : 'busy'} title={projCompleted > 0 ? 'Working… / response complete' : 'Working…'} />
+                      {projBusy > 1 && <span className="titlebar-busy-count">{projBusy}</span>}
+                    </span>
+                  : projCompleted > 0
+                    ? <WorkspaceSquircle state="done" title="Response complete" />
+                    : null;
 
             const metaCls = metaApproval > 0 ? 'approval'
               : metaCompleted > 0 ? 'completed'
@@ -338,12 +343,14 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                               <WorkspaceSquircle
                                 state={
                                   approvalWorkspaces?.has(w.projectPath) ? 'approval'
+                                  : awaitingQuestionWorkspaces?.has(w.projectPath) ? 'question'
                                   : busyWorkspaces?.has(w.projectPath) ? 'busy'
                                   : completedWorkspaces?.has(w.projectPath) ? 'done'
                                   : 'alive'
                                 }
                                 title={
                                   approvalWorkspaces?.has(w.projectPath) ? 'Approval needed'
+                                  : awaitingQuestionWorkspaces?.has(w.projectPath) ? 'Waiting for your answer'
                                   : busyWorkspaces?.has(w.projectPath) ? 'Working...'
                                   : completedWorkspaces?.has(w.projectPath) ? 'Response complete'
                                   : undefined
@@ -397,12 +404,14 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                                   <WorkspaceSquircle
                                     state={
                                       approvalWorkspaces?.has(w.projectPath) ? 'approval'
+                                      : awaitingQuestionWorkspaces?.has(w.projectPath) ? 'question'
                                       : busyWorkspaces?.has(w.projectPath) ? 'busy'
                                       : completedWorkspaces?.has(w.projectPath) ? 'done'
                                       : 'inactive'
                                     }
                                     title={
                                       approvalWorkspaces?.has(w.projectPath) ? 'Approval needed'
+                                      : awaitingQuestionWorkspaces?.has(w.projectPath) ? 'Waiting for your answer'
                                       : busyWorkspaces?.has(w.projectPath) ? 'Working...'
                                       : completedWorkspaces?.has(w.projectPath) ? 'Response complete'
                                       : undefined
