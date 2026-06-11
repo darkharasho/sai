@@ -1737,6 +1737,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         <div data-testid="chat-bottom-strip" className="chat-bottom-strip">
           <ChatInput
             onSend={handleSend}
+            overlayControl={overlayControl}
             onBeforeSend={(rect) => { pendingComposerRectRef.current = rect; }}
             disabled={!ready}
             slashCommands={slashCommands}
@@ -1788,55 +1789,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             metaRuntime={activeMetaRuntime}
             mentionInsertRef={mentionInsertRef}
           />
-          {overlayControl && (
-            <div className="overlay-mode-control" role="radiogroup" aria-label="Focus overlay mode">
-              <span className="overlay-mode-label">overlay</span>
-              {(['on', 'off', 'persist'] as const).map(m => (
-                <button
-                  key={m}
-                  className={`overlay-mode-btn${overlayControl.mode === m ? ' active' : ''}`}
-                  role="radio"
-                  aria-checked={overlayControl.mode === m}
-                  onClick={() => overlayControl.onChange(m)}
-                >
-                  {m}
-                </button>
-              ))}
-            </div>
-          )}
         </div>
       </LayoutGroup>
       <style>{`
-        .overlay-mode-control {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          padding: 3px 6px 0;
-          justify-content: flex-end;
-        }
-        .overlay-mode-label {
-          color: var(--text-muted);
-          font-family: 'Departure Mono', 'Geist Mono', ui-monospace, monospace;
-          font-size: 10px;
-          letter-spacing: 0.4px;
-          margin-right: 2px;
-        }
-        .overlay-mode-btn {
-          background: none;
-          border: 1px solid transparent;
-          border-radius: 6px;
-          color: var(--text-muted);
-          font-size: 10px;
-          font-family: inherit;
-          padding: 1px 7px;
-          cursor: pointer;
-        }
-        .overlay-mode-btn:hover { background: var(--bg-hover); }
-        .overlay-mode-btn.active {
-          color: var(--accent);
-          border-color: var(--border);
-          background: var(--bg-secondary);
-        }
         .chat-panel {
           flex: 1;
           display: flex;

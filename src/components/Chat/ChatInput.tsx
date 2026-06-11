@@ -8,6 +8,7 @@ import {
   SquarePlus, Slash, SquareSlash, AtSign, FileText, GitBranch, Terminal as TerminalIcon, Settings,
   MessageSquare, Zap, Send, Square, ShieldCheck, ShieldOff,
   Paperclip, Image, ChevronDown, Minus, ChevronUp, ChevronsUp, Clock, Check, EyeOff,
+  PictureInPicture2,
 } from 'lucide-react';
 import {
   getTerminalContent, getTerminalLastCommand, getLastCommandName,
@@ -22,8 +23,13 @@ type EffortLevel = 'low' | 'medium' | 'high' | 'max';
 type ModelChoice = 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan' | (string & {});
 type ModelOption = { id: string; label: string; description: string; recommended?: boolean; oneM?: boolean; extra?: boolean };
 
+export type OverlayMode = 'on' | 'off' | 'persist';
+
 interface ChatInputProps {
   onSend: (message: string, images?: string[]) => void;
+  /** Focus-overlay mode cycler (icon button in the toolbar); present only
+   *  while the overlay setting is enabled. */
+  overlayControl?: { mode: OverlayMode; onChange: (m: OverlayMode) => void };
   onBeforeSend?: (composerRect: DOMRect) => void;
   disabled?: boolean;
   slashCommands?: string[];
@@ -249,7 +255,7 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommands = [], isStreaming, messages = [], onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, contextUsage, sessionUsage, sessionCost, rateLimits, billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
+export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabled, slashCommands = [], isStreaming, messages = [], onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, contextUsage, sessionUsage, sessionCost, rateLimits, billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
   // Live model list (account/org-aware) when available, else the static fallback.
   const modelOptions = useMemo<{ id: ModelChoice; label: string; description: string; color: string; recommended?: boolean }[]>(() => {
     if (availableModels && availableModels.length) {
@@ -974,6 +980,20 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
           <button className="toolbar-btn" onClick={() => { setSlashMenuOpen(prev => !prev); setShowAddMenu(false); }} title="Slash commands">
             <SquareSlash size={18} />
           </button>
+          {overlayControl && (() => {
+            const next: OverlayMode = overlayControl.mode === 'on' ? 'off' : overlayControl.mode === 'off' ? 'persist' : 'on';
+            return (
+              <button
+                className={`toolbar-btn overlay-mode-btn overlay-mode-${overlayControl.mode}`}
+                onClick={() => overlayControl.onChange(next)}
+                title={`Focus overlay: ${overlayControl.mode} — click for ${next}`}
+                aria-label={`Focus overlay mode: ${overlayControl.mode}`}
+              >
+                <PictureInPicture2 size={18} />
+                {overlayControl.mode === 'persist' && <span className="overlay-mode-pin" />}
+              </button>
+            );
+          })()}
           {aiProvider === 'claude' && contextUsage && <ContextRing used={contextUsage.used} total={contextUsage.total} onClick={() => onSend('/compact')} />}
           <TodoProgress messages={messages} isStreaming={!!isStreaming} />
           <MessageQueue
@@ -1690,6 +1710,18 @@ export default function ChatInput({ onSend, onBeforeSend, disabled, slashCommand
           color: var(--text-muted);
           font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-weight: 500;
+        }
+        .overlay-mode-btn { position: relative; }
+        .overlay-mode-off { opacity: 0.4; }
+        .overlay-mode-persist { color: var(--accent); }
+        .overlay-mode-pin {
+          position: absolute;
+          top: 3px;
+          right: 2px;
+          width: 5px;
+          height: 5px;
+          border-radius: 50%;
+          background: var(--accent);
         }
         .toolbar-btn {
           background: none;
