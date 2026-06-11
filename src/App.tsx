@@ -55,6 +55,7 @@ import { landTask, discardTask, rebaseRetry } from './lib/swarmLanding';
 import { ensureOrchestratorSession } from './lib/swarmOrchestratorSession';
 import { handleSwarmToolRequest, type SwarmHost } from './lib/swarmOrchestratorDispatcher';
 import { handleRenderToolRequest } from './render/handleRenderToolRequest';
+import { resolveWatchRun } from './components/Chat/githubRunResolver';
 import { registeredComponentKeys } from './render/componentRegistry';
 import { renderMermaidToSvg } from './render/renderMermaid';
 import { handleSaiQueryToolRequest } from './render/saiQueryTools';
@@ -1442,6 +1443,15 @@ export default function App() {
             result === null
               ? sai.respondSwarmToolError(req.id, `unhandled query tool: ${req.tool}`)
               : sai.respondSwarmTool(req.id, result),
+          (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
+        );
+        return;
+      }
+
+      if (req.tool === 'watch_github_run') {
+        const saiAny = sai as { githubApiGet?: (p: string) => Promise<{ ok: boolean; status: number; body: any }> };
+        void resolveWatchRun(req.input ?? {}, saiAny.githubApiGet).then(
+          (result) => sai.respondSwarmTool(req.id, result),
           (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
         );
         return;
