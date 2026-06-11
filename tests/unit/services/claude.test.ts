@@ -202,7 +202,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 import { spawn } from 'node:child_process';
 import { createMockBrowserWindow } from '../../helpers/electron-mock';
 import { MockChildProcess } from '../../helpers/process-mock';
-import { registerClaudeHandlers } from '@electron/services/claude';
+import { registerClaudeHandlers, setSessionIdImpl } from '@electron/services/claude';
 
 // ---------------------------------------------------------------------------
 // Per-test process registry
@@ -1223,5 +1223,41 @@ describe('workspace lastActivity on stdout', () => {
     await flushAsync();
 
     expect((ws as any).lastActivity).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// setSessionIdImpl — remote prompts adopt the attached session (audit 2026-06-10)
+// ---------------------------------------------------------------------------
+
+describe('setSessionIdImpl', () => {
+  const PROJECT = '/test/remote-session';
+
+  it('sets sessionId on an idle scope so the next spawn resumes', async () => {
+    const ws = workspaceState.getOrCreate(PROJECT);
+    setSessionIdImpl(PROJECT, 'sess-123', 'chat');
+    expect(ws.claudeScopes.get('chat')!.sessionId).toBe('sess-123');
+  });
+
+  it('does not clobber a streaming scope', async () => {
+    const ws = workspaceState.getOrCreate(PROJECT);
+    const claude = ws.claudeScopes.get('chat')!;
+    claude.process = { kill: vi.fn() } as any;
+    claude.streaming = true;
+    claude.sessionId = 'live-session';
+    setSessionIdImpl(PROJECT, 'other-session', 'chat');
+    expect(claude.sessionId).toBe('live-session');
+  });
+
+  it('kills an idle process when switching sessions', async () => {
+    const ws = workspaceState.getOrCreate(PROJECT);
+    const claude = ws.claudeScopes.get('chat')!;
+    const kill = vi.fn();
+    claude.process = { kill } as any;
+    claude.streaming = false;
+    claude.busy = false;
+    setSessionIdImpl(PROJECT, 'sess-next', 'chat');
+    expect(kill).toHaveBeenCalled();
+    expect(claude.sessionId).toBe('sess-next');
   });
 });

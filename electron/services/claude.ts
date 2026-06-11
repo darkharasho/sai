@@ -614,6 +614,26 @@ function ensureProcess(
   return proc;
 }
 
+/** Switch a scope to a different Claude session (history resumption). Shared
+ *  by the claude:setSessionId IPC and the remote-bridge prompt path. If this
+ *  scope is actively streaming, leave the process running so the user can
+ *  switch to it and see real streaming output (with a working Stop button) —
+ *  killing it here without emitting done would leave the UI stuck; killing it
+ *  WITH a done strips the Stop button before the user can act. An idle
+ *  process is killed so the next spawn picks up --resume <sessionId>. */
+export function setSessionIdImpl(projectPath: string, sessionId: string | undefined, scope?: string): void {
+  const ws = get(projectPath);
+  if (!ws) return;
+  const claude = getClaude(ws, scope || 'chat');
+  if (claude.process) {
+    if (claude.streaming || claude.busy) return;
+    claude.process.kill();
+    claude.process = null;
+    claude.processConfig = null;
+  }
+  claude.sessionId = sessionId;
+}
+
 export function sendImpl(
   projectPath: string,
   message: string,
@@ -1221,21 +1241,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 
   // claude:setSessionId — switch to a different Claude session (for history resumption)
   ipcMain.on('claude:setSessionId', (_event, projectPath: string, sessionId: string | undefined, scope?: string) => {
-    const ws = get(projectPath);
-    if (!ws) return;
-    const claude = getClaude(ws, scope || 'chat');
-    if (claude.process) {
-      // If this scope is actively streaming, leave the process running so the
-      // user can switch to it and see real streaming output (with a working Stop
-      // button). Killing it here without emitting done would leave the UI stuck;
-      // killing it WITH a done strips the Stop button before the user can act.
-      // The process will emit done naturally when the turn finishes.
-      if (claude.streaming || claude.busy) return;
-      claude.process.kill();
-      claude.process = null;
-      claude.processConfig = null;
-    }
-    claude.sessionId = sessionId;
+    setSessionIdImpl(projectPath, sessionId, scope);
   });
 
   // claude:send — write message to persistent process stdin
