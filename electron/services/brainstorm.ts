@@ -128,19 +128,26 @@ export const SYNTHESIZE_PROMPT_FORCE = [
 // versions).
 //
 // Notes on flag choices:
-// - --max-turns 4: claude needs >1 turn when a SessionStart hook (e.g.
-//   the superpowers plugin) makes its first action a tool call. We give
-//   enough headroom for a few tool calls plus the assistant reply.
-// - --disallowed-tools Skill,Task: brainstorm is a plain conversation —
-//   no skills, no subagents. This also prevents the superpowers plugin
-//   from pulling claude into a recursive Skill invocation loop.
+// - --setting-sources '': load NO user/project settings, so no plugins and
+//   no SessionStart hooks. The superpowers plugin's hook tells the model it
+//   MUST invoke the brainstorming skill before responding; for a "new
+//   project" prompt the model would burn its whole --max-turns budget on
+//   Skill/ToolSearch attempts and intermittently exit 1 with no text.
+//   (--bare is not usable here: it restricts auth to ANTHROPIC_API_KEY,
+//   breaking OAuth users.)
+// - --tools '': brainstorm is a plain conversation — with no tools available
+//   the reply is always text in a single turn. Subsumes the old
+//   --disallowed-tools Skill,Task blacklist, which didn't stop the model
+//   from *attempting* those calls and wasting turns on the denials.
+// - --max-turns 4: text-only replies take one turn; the rest is headroom.
 export function buildClaudeArgs(opts: { prompt: string }): string[] {
   return [
     '-p', opts.prompt,
     '--output-format', 'stream-json',
     '--verbose',
     '--max-turns', '4',
-    '--disallowed-tools', 'Skill,Task',
+    '--setting-sources', '',
+    '--tools', '',
     '--append-system-prompt', BRAINSTORM_SYSTEM_PROMPT,
   ];
 }

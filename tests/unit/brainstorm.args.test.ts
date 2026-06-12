@@ -12,10 +12,20 @@ describe('buildClaudeArgs', () => {
     expect(args).toContain('hello');
     expect(args[args.indexOf('--output-format') + 1]).toBe('stream-json');
     expect(args[args.indexOf('--max-turns') + 1]).toBe('4');
-    expect(args[args.indexOf('--disallowed-tools') + 1]).toBe('Skill,Task');
     expect(args).toContain('--verbose');
     expect(args[args.indexOf('--append-system-prompt') + 1]).toBe(BRAINSTORM_SYSTEM_PROMPT);
     expect(args).not.toContain('--resume');
+  });
+
+  it('isolates the run from user settings and disables all tools', () => {
+    const args = buildClaudeArgs({ prompt: 'hello' });
+    // No settings sources → no plugins or SessionStart hooks. The superpowers
+    // hook otherwise hijacks the turn budget hunting for the brainstorming
+    // skill, intermittently exhausting --max-turns with no text output.
+    expect(args[args.indexOf('--setting-sources') + 1]).toBe('');
+    // No tools at all → the reply is always plain text in a single turn.
+    expect(args[args.indexOf('--tools') + 1]).toBe('');
+    expect(args).not.toContain('--disallowed-tools');
   });
 });
 
