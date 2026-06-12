@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import type { QueuedMessage } from '../../types';
-import { ArrowUp, FileText, Image, ListOrdered, Terminal, X } from 'lucide-react';
+import { ArrowUp, ChevronsUp, FileText, Image, ListOrdered, Terminal, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SPRING, useReducedMotionTransition } from './motion';
 
@@ -8,9 +8,11 @@ interface MessageQueueProps {
   queue: QueuedMessage[];
   onRemove: (id: string) => void;
   onPromote: (id: string) => void;
+  /** Send this queued message immediately (interrupting the current turn). */
+  onSendNow?: (id: string) => void;
 }
 
-export default function MessageQueue({ queue, onRemove, onPromote }: MessageQueueProps) {
+export default function MessageQueue({ queue, onRemove, onPromote, onSendNow }: MessageQueueProps) {
   const [open, setOpen] = useState(false);
   const [pulseKey, setPulseKey] = useState(0);
   const prevLenRef = useRef(queue.length);
@@ -119,6 +121,17 @@ export default function MessageQueue({ queue, onRemove, onPromote }: MessageQueu
                             className="queue-action queue-action--promote"
                             title="Move to next"
                             onClick={() => onPromote(msg.id)}
+                          >
+                            <ChevronsUp size={11} />
+                          </button>
+                        )}
+                        {onSendNow && (
+                          <button
+                            type="button"
+                            data-testid="queue-send-now"
+                            className="queue-action queue-action--send"
+                            title="Send now"
+                            onClick={() => onSendNow(msg.id)}
                           >
                             <ArrowUp size={11} />
                           </button>
@@ -258,7 +271,8 @@ export default function MessageQueue({ queue, onRemove, onPromote }: MessageQueu
             transition: color 0.15s, background 0.15s;
           }
           .queue-action:hover { color: var(--text); background: rgba(255, 255, 255, 0.06); }
-          .queue-action--promote:hover {
+          .queue-action--promote:hover,
+          .queue-action--send:hover {
             color: var(--accent);
             background: color-mix(in srgb, var(--accent) 10%, transparent);
           }

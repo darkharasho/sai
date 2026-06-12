@@ -165,6 +165,55 @@ describe('resolveWatchRun', () => {
       { retryMs: 10, timeoutMs: 100, sleep },
     );
     expect(r).toMatchObject({ runId: '5' });
+    // Attempt 1 checks branch (empty) then any-ref fallback (empty), sleeps
+    // once; attempt 2 finds the run on the branch list.
+    expect(sleep).toHaveBeenCalledTimes(1);
+  });
+
+  it('branch mode: falls back to a fresh run on another ref (tag-triggered workflows)', async () => {
+    // Tag-triggered runs report the tag (e.g. v1.9.10) as head_branch, so the
+    // branch-filtered list comes back empty even though the run exists.
+    const NOW = 1_750_000_000_000;
+    const branchEmpty = { ok: true, status: 200, body: { workflow_runs: [] } };
+    const anyRef = { ok: true, status: 200, body: { workflow_runs: [
+      { id: 9, path: '.github/workflows/release.yml', name: 'Release', head_branch: 'v1.9.10',
+        created_at: new Date(NOW - 60_000).toISOString(), status: 'in_progress', conclusion: null,
+        display_title: 'release: v1.9.10', html_url: 'https://github.com/o/r/actions/runs/9' },
+    ] } };
+    const apiGet = vi.fn()
+      .mockResolvedValueOnce(branchEmpty)
+      .mockResolvedValueOnce(anyRef);
+    const sleep = vi.fn(noSleep);
+    const r = await resolveWatchRun(
+      { owner: 'o', repo: 'r', branch: 'main', workflow: 'release.yml' },
+      apiGet as unknown as GitHubApiGet,
+      { retryMs: 10, timeoutMs: 100, sleep, now: () => NOW },
+    );
+    expect(r).toMatchObject({ runId: '9', displayTitle: 'release: v1.9.10' });
+    expect(apiGet).toHaveBeenNthCalledWith(1, '/repos/o/r/actions/runs?branch=main&per_page=5');
+    expect(apiGet).toHaveBeenNthCalledWith(2, '/repos/o/r/actions/runs?per_page=10');
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('branch mode: ignores stale any-ref runs while polling, then takes the newest on timeout', async () => {
+    const NOW = 1_750_000_000_000;
+    const branchEmpty = { ok: true, status: 200, body: { workflow_runs: [] } };
+    const staleAnyRef = { ok: true, status: 200, body: { workflow_runs: [
+      { id: 3, path: '.github/workflows/release.yml', name: 'Release', head_branch: 'v1.0.0',
+        created_at: new Date(NOW - 48 * 3600_000).toISOString(), status: 'completed', conclusion: 'success',
+        html_url: 'https://github.com/o/r/actions/runs/3' },
+    ] } };
+    const apiGet = vi.fn((path: string) =>
+      Promise.resolve(path.includes('branch=') ? branchEmpty : staleAnyRef));
+    const sleep = vi.fn(noSleep);
+    const r = await resolveWatchRun(
+      { owner: 'o', repo: 'r', branch: 'main', workflow: 'release.yml' },
+      apiGet as unknown as GitHubApiGet,
+      { retryMs: 10, timeoutMs: 30, sleep, now: () => NOW },
+    );
+    // A stale run never wins during the poll window (a fresh one might still
+    // appear), but beats erroring out once the window is exhausted.
+    expect(r).toMatchObject({ runId: '3' });
     expect(sleep).toHaveBeenCalledTimes(2);
   });
 

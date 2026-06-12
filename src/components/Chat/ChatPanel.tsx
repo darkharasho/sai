@@ -1547,6 +1547,21 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     }
   };
 
+  const handleQueueSendNow = (id: string) => {
+    const item = messageQueue.find(m => m.id === id);
+    if (!item || !sessionId) return;
+    onQueueRemove?.(sessionId, id);
+    // Same semantics as bypass-queue-on-enter: interrupt the current turn and
+    // dispatch immediately; the rest of the queue resumes draining afterwards.
+    if (isStreaming) {
+      suppressNextDrainRef.current = true;
+      if (aiProvider === 'gemini') (window.sai as any).geminiStop?.(projectPath);
+      else if (aiProvider === 'codex') window.sai.codexStop?.(projectPath);
+      else window.sai.claudeStop?.(projectPath, claudeScope);
+    }
+    handleSend(item.fullText, item.images);
+  };
+
   const prevStreamingRef = useRef(false);
   const suppressNextDrainRef = useRef(false);
   const turnStartedAtRef = useRef<number | null>(null);
@@ -1802,6 +1817,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             messageQueue={messageQueue}
             onQueueRemove={(id) => sessionId && onQueueRemove?.(sessionId, id)}
             onQueuePromote={(id) => sessionId && onQueuePromote?.(sessionId, id)}
+            onQueueSendNow={handleQueueSendNow}
             initialDraft={initialDraft}
             onDraftChange={onDraftChange}
             initialContextItems={initialContextItems}

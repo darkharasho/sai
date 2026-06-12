@@ -87,6 +87,10 @@ export type GitHubApiGet = (path: string) => Promise<{ ok: boolean; status: numb
 
 const BRANCH_RETRY_MS = 3000;
 const BRANCH_TIMEOUT_MS = 30000;
+// Any-ref fallback: a run this young on any ref right after a push is almost
+// certainly the one we just triggered (tag pushes report the tag, not the
+// branch, as head_branch — so the branch-filtered list misses them).
+const FRESH_RUN_MS = 5 * 60_000;
 
 async function describeRun(
   owner: string, repo: string, runId: string, apiGet: GitHubApiGet | undefined,
@@ -113,14 +117,7 @@ function matchesWorkflow(run: any, workflow?: string): boolean {
   return w === path || w === base || w === name;
 }
 
-async function findBranchRun(
-  owner: string, repo: string, branch: string, workflow: string | undefined, apiGet: GitHubApiGet,
-): Promise<ResolvedRun | null> {
-  const r = await apiGet(`/repos/${owner}/${repo}/actions/runs?branch=${encodeURIComponent(branch)}&per_page=5`);
-  if (!r.ok) throw new Error(`could not list runs for ${owner}/${repo}@${branch} (HTTP ${r.status})`);
-  const runs: any[] = Array.isArray(r.body?.workflow_runs) ? r.body.workflow_runs : [];
-  const run = runs.find((x) => matchesWorkflow(x, workflow));
-  if (!run) return null;
+function resolvedFromRun(owner: string, repo: string, run: any): ResolvedRun {
   return {
     owner, repo, runId: String(run.id),
     url: typeof run.html_url === 'string' ? run.html_url : `https://github.com/${owner}/${repo}/actions/runs/${run.id}`,
@@ -130,15 +127,43 @@ async function findBranchRun(
   };
 }
 
+async function findBranchRun(
+  owner: string, repo: string, branch: string, workflow: string | undefined, apiGet: GitHubApiGet,
+): Promise<ResolvedRun | null> {
+  const r = await apiGet(`/repos/${owner}/${repo}/actions/runs?branch=${encodeURIComponent(branch)}&per_page=5`);
+  if (!r.ok) throw new Error(`could not list runs for ${owner}/${repo}@${branch} (HTTP ${r.status})`);
+  const runs: any[] = Array.isArray(r.body?.workflow_runs) ? r.body.workflow_runs : [];
+  const run = runs.find((x) => matchesWorkflow(x, workflow));
+  return run ? resolvedFromRun(owner, repo, run) : null;
+}
+
+/** Newest matching run on ANY ref; with maxAgeMs, only one created recently. */
+async function findAnyRefRun(
+  owner: string, repo: string, workflow: string | undefined, apiGet: GitHubApiGet,
+  maxAgeMs: number | undefined, now: () => number,
+): Promise<ResolvedRun | null> {
+  const r = await apiGet(`/repos/${owner}/${repo}/actions/runs?per_page=10`);
+  if (!r.ok) return null;
+  const runs: any[] = Array.isArray(r.body?.workflow_runs) ? r.body.workflow_runs : [];
+  const run = runs.find((x) => {
+    if (!matchesWorkflow(x, workflow)) return false;
+    if (maxAgeMs === undefined) return true;
+    const created = Date.parse(x?.created_at ?? '');
+    return Number.isFinite(created) && now() - created <= maxAgeMs;
+  });
+  return run ? resolvedFromRun(owner, repo, run) : null;
+}
+
 export async function resolveWatchRun(
   input: WatchRunInput,
   apiGet: GitHubApiGet | undefined,
-  opts: { retryMs?: number; timeoutMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+  opts: { retryMs?: number; timeoutMs?: number; sleep?: (ms: number) => Promise<void>; now?: () => number } = {},
 ): Promise<ResolvedRun> {
   // Clamp to ≥1ms so the attempts division below can't go NaN/Infinity.
   const retryMs = Math.max(1, opts.retryMs ?? BRANCH_RETRY_MS);
   const timeoutMs = opts.timeoutMs ?? BRANCH_TIMEOUT_MS;
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
+  const now = opts.now ?? Date.now;
 
   if (typeof input.url === 'string' && input.url.length > 0) {
     const t = parseRunUrl(input.url);
@@ -163,10 +188,17 @@ export async function resolveWatchRun(
     // Right after a push, GitHub may not have created the run yet — poll briefly.
     const attempts = Math.max(1, Math.ceil(timeoutMs / retryMs));
     for (let i = 0; i < attempts; i++) {
-      const run = await findBranchRun(owner, repo, input.branch, input.workflow, apiGet);
+      const run = await findBranchRun(owner, repo, input.branch, input.workflow, apiGet)
+        // Tag-triggered runs report the tag as head_branch, so the branch list
+        // misses them — accept a fresh run on any ref instead.
+        ?? await findAnyRefRun(owner, repo, input.workflow, apiGet, FRESH_RUN_MS, now);
       if (run) return run;
       if (i < attempts - 1) await sleep(retryMs);
     }
+    // Poll window exhausted with no fresh run: the newest matching run on any
+    // ref, however old, still beats erroring out.
+    const stale = await findAnyRefRun(owner, repo, input.workflow, apiGet, undefined, now);
+    if (stale) return stale;
     throw new Error(`no run found for ${owner}/${repo}@${input.branch}`);
   }
 

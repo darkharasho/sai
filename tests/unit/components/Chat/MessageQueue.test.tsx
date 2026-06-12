@@ -37,4 +37,22 @@ describe('MessageQueue', () => {
     fireEvent.click(removeButtons[1]);
     expect(onRemove).toHaveBeenCalledWith('2');
   });
+
+  it('shows a send-now button on every item, including the first', () => {
+    const onSendNow = vi.fn();
+    const { container } = render(
+      <MessageQueue queue={mockQueue} onRemove={vi.fn()} onPromote={vi.fn()} onSendNow={onSendNow} />,
+    );
+    fireEvent.click(container.querySelector('[data-testid="queue-badge"]') as HTMLElement);
+    const sendButtons = container.querySelectorAll('[data-testid="queue-send-now"]');
+    expect(sendButtons).toHaveLength(3);
+    fireEvent.click(sendButtons[0]);
+    expect(onSendNow).toHaveBeenCalledWith('1');
+  });
+
+  it('omits the send-now button when no handler is provided', () => {
+    const { container } = render(<MessageQueue queue={mockQueue} onRemove={vi.fn()} onPromote={vi.fn()} />);
+    fireEvent.click(container.querySelector('[data-testid="queue-badge"]') as HTMLElement);
+    expect(container.querySelectorAll('[data-testid="queue-send-now"]')).toHaveLength(0);
+  });
 });
