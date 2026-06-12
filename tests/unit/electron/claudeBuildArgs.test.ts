@@ -62,7 +62,7 @@ vi.mock('node:child_process', async (importOriginal) => {
   };
 });
 
-import { buildArgs, CHAT_RENDER_NUDGE } from '../../../electron/services/claude';
+import { buildArgs, CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE } from '../../../electron/services/claude';
 
 describe('buildArgs — chat session MCP config', () => {
   it('includes --mcp-config when kind=chat and workspace is provided', () => {
@@ -150,12 +150,55 @@ describe('buildArgs — chat session MCP config', () => {
     });
     expect(args).toContain('--append-system-prompt');
     const idx = args.indexOf('--append-system-prompt');
-    expect(args[idx + 1]).toBe(CHAT_RENDER_NUDGE);
+    expect(args[idx + 1]).toContain(CHAT_RENDER_NUDGE);
     expect(CHAT_RENDER_NUDGE).toMatch(/render_html/);
     // Covers capture/verify intents (not just design/build), so a "screenshot
     // the working feature" request steers to the in-app renderer too.
     expect(CHAT_RENDER_NUDGE).toMatch(/screenshot/);
     expect(CHAT_RENDER_NUDGE).toMatch(/Playwright/);
+  });
+
+  it('appends the GitHub watcher nudge to the system prompt for chat sessions', () => {
+    const args = buildArgs({
+      kind: 'chat',
+      workspace: '/w',
+      getMcpHandle: () => ({ socketPath: 's', secret: 'x' }),
+      writeMcpConfig: () => '/tmp/cfg.json',
+      resolveMcpServerScriptPath: () => 'srv.js',
+      resolveElectronExecPath: () => 'elec',
+      readSetting: () => undefined,
+    });
+    const idx = args.indexOf('--append-system-prompt');
+    expect(args[idx + 1]).toContain(CHAT_GITHUB_WATCH_NUDGE);
+    expect(CHAT_GITHUB_WATCH_NUDGE).toMatch(/watch_github_run/);
+    // The tool is usually deferred behind ToolSearch in Claude Code, so the
+    // nudge must tell the model how to load it — the schema description alone
+    // never reaches the model's context.
+    expect(CHAT_GITHUB_WATCH_NUDGE).toMatch(/ToolSearch/);
+    // Covers the triggering moments: pushes, tags, workflow dispatches.
+    expect(CHAT_GITHUB_WATCH_NUDGE).toMatch(/git push/);
+  });
+
+  it('emits a single --append-system-prompt combining nudges and metaPreamble', () => {
+    // The CLI keeps only the last --append-system-prompt flag, so separate
+    // flags would silently clobber earlier sections (metaPreamble used to
+    // wipe out the render nudge).
+    const args = buildArgs({
+      kind: 'chat',
+      workspace: '/w',
+      metaPreamble: 'META PREAMBLE SECTION',
+      getMcpHandle: () => ({ socketPath: 's', secret: 'x' }),
+      writeMcpConfig: () => '/tmp/cfg.json',
+      resolveMcpServerScriptPath: () => 'srv.js',
+      resolveElectronExecPath: () => 'elec',
+      readSetting: () => undefined,
+    });
+    const flags = args.filter((a) => a === '--append-system-prompt');
+    expect(flags).toHaveLength(1);
+    const combined = args[args.indexOf('--append-system-prompt') + 1];
+    expect(combined).toContain(CHAT_RENDER_NUDGE);
+    expect(combined).toContain(CHAT_GITHUB_WATCH_NUDGE);
+    expect(combined).toContain('META PREAMBLE SECTION');
   });
 
   it('does NOT append the render nudge when chat has no workspace (tool not attached)', () => {

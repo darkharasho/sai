@@ -146,6 +146,22 @@ export const CHAT_RENDER_NUDGE =
   're-render to iterate on feedback.';
 
 /**
+ * Appended to chat sessions' system prompt so the agent shows the live GitHub
+ * Actions watcher card after pushes. The sai_watch_github_run tool's own
+ * description says "USE THIS right after you push", but Claude Code defers MCP
+ * tools behind ToolSearch when many servers are connected — deferred tools
+ * surface only their name, so the description never reaches the model. The
+ * trigger has to live in the system prompt instead.
+ */
+export const CHAT_GITHUB_WATCH_NUDGE =
+  'After you run `git push` (including pushing tags) or otherwise trigger a GitHub Actions ' +
+  'workflow (gh workflow run, gh pr create, creating a release), show the user a live CI ' +
+  'watcher card with the sai_watch_github_run tool instead of pasting a gh run URL. If the ' +
+  'tool is deferred, load it via ToolSearch first. Resolve the run by owner+repo+branch ' +
+  '(optionally a workflow file) or by run URL; the card keeps updating on its own. Only fall ' +
+  'back to a plain Actions link if the tool is unavailable.';
+
+/**
  * Build CLI args for the persistent process based on current config.
  * Exported for unit tests and to support orchestrator-kind sessions which
  * need extra `--mcp-config` / `--strict-mcp-config` / `--tools` flags.
@@ -173,6 +189,11 @@ export function buildArgs(options: BuildArgsOptions = {}): string[] {
     '--verbose',
     '--include-partial-messages',
   ];
+
+  // The CLI keeps only the LAST --append-system-prompt flag (verified
+  // empirically), so all appended prompt sections are collected here and
+  // emitted as a single flag at the end.
+  const appendPrompts: string[] = [];
 
   // Orchestrator runs in bypassPermissions because its only tools are
   // mcp__swarm__* (built-ins blocked via --tools '' and --strict-mcp-config),
@@ -242,7 +263,10 @@ export function buildArgs(options: BuildArgsOptions = {}): string[] {
       // Steer the chat agent to actually use the in-app renderer: without this
       // the model treats "make me a button" as a write-a-file task (and the
       // frontend-design skill reinforces that), never reaching for the tool.
-      args.push('--append-system-prompt', CHAT_RENDER_NUDGE);
+      appendPrompts.push(CHAT_RENDER_NUDGE);
+      // Same story for the CI watcher card: the tool description carries the
+      // trigger, but deferred tools don't expose descriptions, so nudge here.
+      appendPrompts.push(CHAT_GITHUB_WATCH_NUDGE);
     }
 
     // Chat/task: pass through user MCP config path(s) from SAI settings.
@@ -259,7 +283,11 @@ export function buildArgs(options: BuildArgsOptions = {}): string[] {
 
   // Append meta-workspace preamble to the system prompt when provided.
   if (metaPreamble && metaPreamble.trim()) {
-    args.push('--append-system-prompt', metaPreamble);
+    appendPrompts.push(metaPreamble);
+  }
+
+  if (appendPrompts.length > 0) {
+    args.push('--append-system-prompt', appendPrompts.join('\n\n'));
   }
 
   return args;

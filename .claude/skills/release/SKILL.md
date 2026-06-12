@@ -159,7 +159,15 @@ Provide the release URL:
 gh release view v{NEW_VERSION} --json url --jq '.url'
 ```
 
-Provide the Actions run link:
+Show a live watcher card for the CI build with the `sai_watch_github_run` MCP tool
+(load it via ToolSearch if needed), resolving the newest release-workflow run:
+
+```
+sai_watch_github_run({ owner, repo, branch: "main", workflow: "release.yml" })
+```
+
+The card keeps updating on its own. Fall back to a plain Actions run link only
+if the MCP tool is unavailable (e.g. headless run):
 ```bash
 gh run list --workflow=release.yml --limit=1 --json url --jq '.[0].url'
 ```

@@ -75,6 +75,11 @@ function detectLang(toolCall: ToolCall): string {
  *  markdown structure. Conservative: plain prose / plain code stays as source. */
 export function isMarkdownBody(label: string, code: string): boolean {
   if (/\.(md|markdown)$/i.test(label.trim())) return true;
+  // Any other file extension means a non-markdown file: never promote, no
+  // matter what the body looks like (JSDoc " * line"s match the list-item
+  // heuristic, TS union arms look table-ish). Heuristics below are only for
+  // extension-less labels (bash output, generic content).
+  if (/\.[a-z0-9]+$/i.test(label.trim())) return false;
   const body = code || '';
   // Require non-trivial content so a single value line doesn't promote.
   if (body.split('\n').filter(l => l.trim()).length < 2) return false;
@@ -287,8 +292,12 @@ function formatInput(toolCall: ToolCall): FormatResult {
     // Bash — show command
     if (parsed.command) return { label: 'Command', code: parsed.command, labelLang: 'bash' };
 
-    // Write — show file path + content
-    if (parsed.file_path && parsed.content) return { label: parsed.file_path, code: parsed.content };
+    // Write — show file path + content, highlighted as the target file's
+    // language (detectLang only sees the tool name + raw JSON input, which
+    // misguesses for Write bodies).
+    if (parsed.file_path && parsed.content) {
+      return { label: parsed.file_path, code: parsed.content, langOverride: langFromPath(parsed.file_path) };
+    }
 
     // Edit — show diff with structured data for syntax-highlighted rendering
     if (parsed.file_path && parsed.old_string != null) {

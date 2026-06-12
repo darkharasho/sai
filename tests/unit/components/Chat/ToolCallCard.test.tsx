@@ -113,6 +113,27 @@ describe('isMarkdownBody', () => {
     expect(isMarkdownBody('', '')).toBe(false);
     expect(isMarkdownBody('app.tsx', '')).toBe(false);
   });
+
+  it('is false for a non-md file even when the body trips the heuristics', () => {
+    // JSDoc continuation lines (" * text") match the list-item pattern, and
+    // TS union arms ("| { ... }") look table-ish — a known non-markdown
+    // extension must short-circuit before any body sniffing.
+    const ts = [
+      '/**',
+      ' * Wire GitHub-Releases auto-updates.',
+      ' * Active only in the packaged app.',
+      ' */',
+      'export type UpdateStatus =',
+      "  | { state: 'checking' }",
+      "  | { state: 'ready'; version: string }",
+    ].join('\n');
+    expect(isMarkdownBody('/abs/path/updater.ts', ts)).toBe(false);
+    expect(isMarkdownBody('src/notes.py', '# heading-looking comment\n# another one\nx = 1')).toBe(false);
+  });
+
+  it('still applies heuristics when the label has no file extension', () => {
+    expect(isMarkdownBody('Command', '# Title\n\n- a\n- b')).toBe(true);
+  });
 });
 
 describe('ToolCallCard markdown body', () => {
@@ -132,6 +153,21 @@ describe('ToolCallCard markdown body', () => {
   it('shows a rendered/source toggle for markdown bodies', () => {
     const { getByTestId } = render(<ToolCallCard toolCall={mdWrite} />);
     expect(getByTestId('md-view-toggle')).toBeTruthy();
+  });
+
+  it('renders a .ts Write with JSDoc as plain source, not markdown', () => {
+    const tsWrite = {
+      id: 'w2',
+      type: 'file_edit' as const,
+      name: 'Write',
+      input: JSON.stringify({
+        file_path: '/p/updater.ts',
+        content: '/**\n * Update lifecycle.\n * Pushed to the renderer.\n */\nexport const x = 1;\n',
+      }),
+    };
+    const { container, queryByTestId } = render(<ToolCallCard toolCall={tsWrite} />);
+    expect(container.querySelector('.card-md')).toBeFalsy();
+    expect(queryByTestId('md-view-toggle')).toBeFalsy();
   });
 
   it('flips to highlighted source when toggled', () => {
