@@ -1563,12 +1563,33 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   };
 
   const prevStreamingRef = useRef(false);
+  const prevQueueLenRef = useRef(messageQueue.length);
   const suppressNextDrainRef = useRef(false);
+  const drainPendingRef = useRef(false);
   const turnStartedAtRef = useRef<number | null>(null);
   const nextSegmentStartRef = useRef<number | null>(null);
   const autoSendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Drives queue draining. Keyed on BOTH isStreaming and messageQueue because a
+  // drain can be triggered two ways:
+  //   1. A turn ends (isStreaming true->false) with items already queued.
+  //   2. An item lands in the queue when we're ALREADY idle — the hit-or-miss
+  //      race where the user queues a message in the same instant the turn is
+  //      wrapping up, so `done` flips isStreaming false a render before the
+  //      queued item arrives. An edge-only effect never woke for that item.
   useEffect(() => {
-    if (prevStreamingRef.current && !isStreaming) {
+    const wasStreaming = prevStreamingRef.current;
+    const prevQueueLen = prevQueueLenRef.current;
+    prevStreamingRef.current = isStreaming;
+    prevQueueLenRef.current = messageQueue.length;
+
+    const turnJustEnded = wasStreaming && !isStreaming;
+    // Item(s) appeared while we were already settled and idle.
+    const queueGrewWhileIdle = !isStreaming && !wasStreaming && messageQueue.length > prevQueueLen;
+
+    // A real turn started — clear the in-flight guard so the next end can drain.
+    if (isStreaming) drainPendingRef.current = false;
+
+    if (turnJustEnded) {
       // Stamp durationMs on every unstamped assistant text bubble in the current
       // turn. Each bubble gets cumulative time from turn start so the displayed
       // value monotonically grows across a multi-bubble turn.
@@ -1594,16 +1615,31 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       if (turnStartedAtRef.current !== null) {
         turnStartedAtRef.current = null;
       }
-      if (suppressNextDrainRef.current) {
+    }
+
+    if (!isStreaming && (turnJustEnded || queueGrewWhileIdle)) {
+      // suppressNextDrainRef is set right before an interrupting stop (bypass /
+      // send-now). It must only ever consume the turn-end edge it was set for —
+      // not a queue-grew-while-idle wake — otherwise it could swallow an
+      // unrelated drain.
+      if (suppressNextDrainRef.current && turnJustEnded) {
         suppressNextDrainRef.current = false;
-      } else if (messageQueue.length > 0 && onQueueShift && sessionId) {
+      } else if (
+        !suppressNextDrainRef.current &&
+        !drainPendingRef.current &&
+        !autoSendTimerRef.current &&
+        messageQueue.length > 0 && onQueueShift && sessionId
+      ) {
         const next = messageQueue[0];
+        drainPendingRef.current = true;
         onQueueShift(sessionId);
-        autoSendTimerRef.current = setTimeout(() => handleSend(next.fullText, next.images), 300);
+        autoSendTimerRef.current = setTimeout(() => {
+          autoSendTimerRef.current = null;
+          handleSend(next.fullText, next.images);
+        }, 300);
       }
     }
-    prevStreamingRef.current = isStreaming;
-  }, [isStreaming]);
+  }, [isStreaming, messageQueue]);
 
   // Unmount-only: a pending queue-drain send must not fire into an unmounted
   // panel. Not cleared on isStreaming changes — that would drop a message the

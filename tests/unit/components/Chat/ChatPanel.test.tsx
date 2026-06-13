@@ -816,6 +816,45 @@ describe('ChatPanel', () => {
       expect(mockSai.claudeSend.mock.calls[0][1]).toContain('queued one');
     });
 
+    it('drains a message that landed in the queue just AFTER the turn ended (race)', async () => {
+      // Hit-or-miss bug: the user queues a message in the tiny window as the
+      // turn is wrapping up. The `done` IPC flips isStreaming false and runs the
+      // drain effect while the queue is still empty; the queued item arrives one
+      // render later. Because the drain only keyed on the isStreaming edge, that
+      // item was never sent. It must drain on arrival while idle.
+      const onQueueShift = vi.fn();
+      const props: ChatPanelProps = { ...baseProps(), messageQueue: [], onQueueShift };
+      const { rerender } = render(<ChatPanel {...props} />);
+
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+      const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+      // Turn streams, then ends while the queue is still empty.
+      await act(async () => {
+        handler({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+      });
+      rerender(<ChatPanel {...props} isStreaming />);
+      await act(async () => {
+        handler({ type: 'done', projectPath: '/project', scope: 'chat' });
+      });
+      rerender(<ChatPanel {...props} isStreaming={false} />);
+      expect(onQueueShift).not.toHaveBeenCalled();
+
+      // The queued message lands a render AFTER the turn already ended.
+      mockSai.claudeSend.mockClear();
+      const withQueue: ChatPanelProps = {
+        ...props,
+        isStreaming: false,
+        messageQueue: [{ id: 'q-0', text: 'late one', fullText: 'late one' }],
+      };
+      await act(async () => { rerender(<ChatPanel {...withQueue} />); });
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 350)); });
+
+      expect(onQueueShift).toHaveBeenCalledTimes(1);
+      expect(mockSai.claudeSend).toHaveBeenCalledTimes(1);
+      expect(mockSai.claudeSend.mock.calls[0][1]).toContain('late one');
+    });
+
     it('plain-Enter while not streaming with non-empty queue dispatches immediately without stop', async () => {
       const onQueueShift = vi.fn();
       const props: ChatPanelProps = {
