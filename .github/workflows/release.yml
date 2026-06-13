@@ -36,7 +36,11 @@ jobs:
           - os: ubuntu-latest
             platform: linux
             args: --linux AppImage
-          - os: windows-latest
+          # Pinned to windows-2022: the windows-latest image migrated to Server
+          # 2025, where node-gyp can't locate the Visual Studio C++ toolset and
+          # the node-pty native rebuild fails ("Could not find any Visual Studio
+          # installation to use"). windows-2022 still ships a detectable VS 2022.
+          - os: windows-2022
             platform: win
             args: --win nsis
           - os: macos-latest
