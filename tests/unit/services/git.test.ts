@@ -46,6 +46,7 @@ const { mockIpcMain, mockSimpleGit, mockGitInstance, mockFsPromises } = vi.hoist
     pull: vi.fn(),
     fetch: vi.fn(),
     log: vi.fn(),
+    raw: vi.fn(),
     branch: vi.fn(),
     checkout: vi.fn(),
     checkoutLocalBranch: vi.fn(),
@@ -278,18 +279,23 @@ describe('git:fetch', () => {
 // ===========================================================================
 
 describe('git:log', () => {
+  // Build a raw `git log` record matching the --format string in git.ts:
+  // %H %P %an %aI %s %b, fields joined by US (\x1f), record ended by RS (\x1e).
+  const rec = (o: {
+    hash: string;
+    parents?: string;
+    author: string;
+    date: string;
+    subject: string;
+    body?: string;
+  }) =>
+    [o.hash, o.parents ?? '', o.author, o.date, o.subject, o.body ?? ''].join('\x1f') + '\x1e\n';
+
   it('returns correct log entry structure', async () => {
     await setup();
-    mockGitInstance.log.mockResolvedValue({
-      all: [
-        {
-          hash: 'abc123',
-          message: 'feat: add something',
-          author_name: 'Alice',
-          date: '2024-01-01',
-        },
-      ],
-    });
+    mockGitInstance.raw.mockResolvedValue(
+      rec({ hash: 'abc123', parents: 'p1 p2', author: 'Alice', date: '2024-01-01', subject: 'feat: add something' })
+    );
 
     const result = await mockIpcMain._invoke('git:log', '/repo', 10) as Array<Record<string, unknown>>;
 
@@ -299,6 +305,7 @@ describe('git:log', () => {
       message: 'feat: add something',
       author: 'Alice',
       date: '2024-01-01',
+      parents: ['p1', 'p2'],
       files: [],
       aiProvider: undefined,
     });
@@ -306,9 +313,9 @@ describe('git:log', () => {
 
   it('marks entry as Claude when author_name contains "Claude"', async () => {
     await setup();
-    mockGitInstance.log.mockResolvedValue({
-      all: [{ hash: 'x', message: 'commit', author_name: 'Claude Opus', date: '2024-01-01' }],
-    });
+    mockGitInstance.raw.mockResolvedValue(
+      rec({ hash: 'x', author: 'Claude Opus', date: '2024-01-01', subject: 'commit' })
+    );
 
     const result = await mockIpcMain._invoke('git:log', '/repo', 1) as Array<{ aiProvider?: string }>;
     expect(result[0].aiProvider).toBe('claude');
@@ -316,9 +323,9 @@ describe('git:log', () => {
 
   it('marks entry as Codex when author_name contains "Codex"', async () => {
     await setup();
-    mockGitInstance.log.mockResolvedValue({
-      all: [{ hash: 'x', message: 'commit', author_name: 'OpenAI Codex', date: '2024-01-01' }],
-    });
+    mockGitInstance.raw.mockResolvedValue(
+      rec({ hash: 'x', author: 'OpenAI Codex', date: '2024-01-01', subject: 'commit' })
+    );
 
     const result = await mockIpcMain._invoke('git:log', '/repo', 1) as Array<{ aiProvider?: string }>;
     expect(result[0].aiProvider).toBe('codex');
@@ -326,14 +333,9 @@ describe('git:log', () => {
 
   it('marks entry as Claude when message contains "Co-Authored-By: Claude"', async () => {
     await setup();
-    mockGitInstance.log.mockResolvedValue({
-      all: [{
-        hash: 'y',
-        message: 'fix: something\n\nCo-Authored-By: Claude',
-        author_name: 'Human Dev',
-        date: '2024-01-01',
-      }],
-    });
+    mockGitInstance.raw.mockResolvedValue(
+      rec({ hash: 'y', author: 'Human Dev', date: '2024-01-01', subject: 'fix: something', body: 'Co-Authored-By: Claude' })
+    );
 
     const result = await mockIpcMain._invoke('git:log', '/repo', 1) as Array<{ aiProvider?: string }>;
     expect(result[0].aiProvider).toBe('claude');
@@ -341,14 +343,9 @@ describe('git:log', () => {
 
   it('marks entry as Gemini when message contains "Co-Authored-By: Gemini"', async () => {
     await setup();
-    mockGitInstance.log.mockResolvedValue({
-      all: [{
-        hash: 'g',
-        message: 'fix: something\n\nCo-Authored-By: Gemini',
-        author_name: 'Human Dev',
-        date: '2024-01-01',
-      }],
-    });
+    mockGitInstance.raw.mockResolvedValue(
+      rec({ hash: 'g', author: 'Human Dev', date: '2024-01-01', subject: 'fix: something', body: 'Co-Authored-By: Gemini' })
+    );
 
     const result = await mockIpcMain._invoke('git:log', '/repo', 1) as Array<{ aiProvider?: string }>;
     expect(result[0].aiProvider).toBe('gemini');
@@ -356,21 +353,32 @@ describe('git:log', () => {
 
   it('does not mark regular commits as AI-authored', async () => {
     await setup();
-    mockGitInstance.log.mockResolvedValue({
-      all: [{ hash: 'z', message: 'normal commit', author_name: 'Dev', date: '2024-01-01' }],
-    });
+    mockGitInstance.raw.mockResolvedValue(
+      rec({ hash: 'z', author: 'Dev', date: '2024-01-01', subject: 'normal commit' })
+    );
 
     const result = await mockIpcMain._invoke('git:log', '/repo', 1) as Array<{ aiProvider?: string }>;
     expect(result[0].aiProvider).toBeUndefined();
   });
 
-  it('passes maxCount to git.log', async () => {
+  it('passes maxCount to git log', async () => {
     await setup();
-    mockGitInstance.log.mockResolvedValue({ all: [] });
+    mockGitInstance.raw.mockResolvedValue('');
 
     await mockIpcMain._invoke('git:log', '/repo', 25);
 
-    expect(mockGitInstance.log).toHaveBeenCalledWith({ maxCount: 25 });
+    expect(mockGitInstance.raw).toHaveBeenCalledWith(
+      expect.arrayContaining(['log', '--max-count=25'])
+    );
+  });
+
+  it('passes the branch ref when provided', async () => {
+    await setup();
+    mockGitInstance.raw.mockResolvedValue('');
+
+    await mockIpcMain._invoke('git:log', '/repo', 10, { ref: 'origin/main' });
+
+    expect(mockGitInstance.raw).toHaveBeenCalledWith(expect.arrayContaining(['origin/main']));
   });
 });
 

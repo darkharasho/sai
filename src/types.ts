@@ -154,6 +154,7 @@ export interface GitCommit {
   message: string;
   author: string;
   date: string;
+  parents?: string[];
   files: string[];
   aiProvider?: 'claude' | 'codex' | 'gemini';
 }

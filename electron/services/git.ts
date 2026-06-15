@@ -261,22 +261,34 @@ export function registerGitHandlers() {
     await git(cwd).fetch();
   });
 
-  ipcMain.handle('git:log', async (_event, cwd: string, count: number) => {
-    let log;
+  ipcMain.handle('git:log', async (_event, cwd: string, count: number, options?: { ref?: string }) => {
+    // Custom format (US-delimited fields, RS-delimited records) so we get parent
+    // hashes for graph rendering. Subject (%s) is shown; body (%b) feeds AI detection.
+    const args = ['log', `--max-count=${count}`, '--format=%H%x1f%P%x1f%an%x1f%aI%x1f%s%x1f%b%x1e'];
+    if (options?.ref) args.push(options.ref);
+    let raw: string;
     try {
-      log = await git(cwd).log({ maxCount: count });
+      raw = await git(cwd).raw(args);
     } catch (err: any) {
       if (err?.message?.includes('does not have any commits')) return [];
       throw err;
     }
-    return log.all.map(entry => ({
-      hash: entry.hash,
-      message: entry.message,
-      author: entry.author_name,
-      date: entry.date,
-      files: [],
-      aiProvider: detectAiProvider(entry.author_name, entry.message),
-    }));
+    return raw
+      .split('\x1e')
+      .map(record => record.trim())
+      .filter(Boolean)
+      .map(record => {
+        const [hash, parentStr, author, date, message, body = ''] = record.split('\x1f');
+        return {
+          hash,
+          message,
+          author,
+          date,
+          parents: parentStr ? parentStr.split(' ').filter(Boolean) : [],
+          files: [],
+          aiProvider: detectAiProvider(author, `${message}\n${body}`),
+        };
+      });
   });
 
   ipcMain.handle('git:commitDetails', async (_event, cwd: string, hash: string) => {
@@ -351,6 +363,14 @@ export function registerGitHandlers() {
   });
 
   ipcMain.handle('git:diff', (_e, cwd: string, filepath: string, staged: boolean) => gitDiffImpl(cwd, filepath, staged));
+
+  ipcMain.handle('git:commitFileDiff', async (_event, cwd: string, hash: string, filepath: string) => {
+    try {
+      return await git(cwd).raw(['show', '--format=', '--no-color', hash, '--', filepath]);
+    } catch {
+      return '';
+    }
+  });
 
   ipcMain.handle('git:show', async (_event, cwd: string, filepath: string, ref: string) => {
     try {

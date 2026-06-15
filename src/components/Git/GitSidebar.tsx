@@ -359,56 +359,65 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
         overflow: 'hidden',
       }}
     >
-      {/* Header */}
+      {/* Header — tab bar */}
       <div
         style={{
           height: 36,
           display: 'flex',
-          alignItems: 'center',
-          padding: '0 12px',
-          fontSize: 'var(--text-xs)',
-          fontWeight: 600,
-          textTransform: 'uppercase' as const,
-          letterSpacing: '0.06em',
-          color: 'var(--text-secondary)',
+          alignItems: 'stretch',
           borderBottom: '1px solid var(--border-hairline)',
           flexShrink: 0,
         }}
       >
-        {view === 'history' ? 'History' : 'Source Control'}
-        {view === 'changes' && totalChanges > 0 && (
-          <span
-            style={{
-              marginLeft: 6,
-              background: 'var(--accent)',
-              color: '#000',
-              borderRadius: 8,
-              padding: '1px 6px',
-              fontSize: 10,
-              fontWeight: 700,
-              lineHeight: '14px',
-            }}
-          >
-            {totalChanges}
-          </span>
-        )}
-        <div style={{ flex: 1 }} />
-        <button
-          onClick={() => setView(view === 'history' ? 'changes' : 'history')}
-          title={view === 'history' ? 'Show changes' : 'Show history'}
-          style={{
-            background: 'transparent',
-            border: 'none',
-            padding: 4,
-            cursor: 'pointer',
-            color: view === 'history' ? 'var(--accent)' : 'var(--text-muted)',
-            display: 'flex',
-            alignItems: 'center',
-            borderRadius: 3,
-          }}
-        >
-          {view === 'history' ? <GitBranch size={14} /> : <History size={14} />}
-        </button>
+        {([
+          { key: 'changes', label: 'Changes', Icon: GitBranch },
+          { key: 'history', label: 'History', Icon: History },
+        ] as const).map(({ key, label, Icon }) => {
+          const active = view === key;
+          return (
+            <button
+              key={key}
+              onClick={() => setView(key)}
+              title={key === 'history' ? 'Show history' : 'Show changes'}
+              style={{
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+                background: 'transparent',
+                border: 'none',
+                borderBottom: active
+                  ? '2px solid var(--accent)'
+                  : '2px solid transparent',
+                cursor: 'pointer',
+                fontSize: 'var(--text-xs)',
+                fontWeight: 600,
+                textTransform: 'uppercase' as const,
+                letterSpacing: '0.06em',
+                color: active ? 'var(--text)' : 'var(--text-muted)',
+              }}
+            >
+              <Icon size={13} />
+              {label}
+              {key === 'changes' && totalChanges > 0 && (
+                <span
+                  style={{
+                    background: 'var(--accent)',
+                    color: '#000',
+                    borderRadius: 8,
+                    padding: '1px 6px',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    lineHeight: '14px',
+                  }}
+                >
+                  {totalChanges}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {scrollableContent}
