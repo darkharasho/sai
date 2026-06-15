@@ -133,19 +133,24 @@ export type PrepareResult =
 // pointing back through the protocol (resolved against the token root).
 const INLINE_BASE = '<base href="sai-render-base/">';
 
-// Resolve `rel` against `root` and return the realpath IFF it stays inside the
-// realpath'd root. Realpathing both ends means an in-tree symlink that points
-// outside cannot escape (its real target fails the prefix check). null = blocked
-// or missing.
-function containedRealPath(root: string, rel: string): string | null {
-  if (path.isAbsolute(rel)) return null;
+// Resolve `target` against `root` and return the realpath IFF it stays inside
+// the realpath'd root. Realpathing both ends means an in-tree symlink that
+// points outside cannot escape (its real target fails the prefix check), and a
+// symlinked workspace (e.g. /home -> /var/home) is matched by real target, not
+// by the literal string the caller supplied. Absolute targets are allowed as
+// long as they resolve inside the root; only the containment check gates access,
+// not whether the caller wrote a relative or absolute path. null = blocked or
+// missing.
+function containedRealPath(root: string, target: string): string | null {
   let realRoot: string;
   try {
     realRoot = fs.realpathSync(root);
   } catch {
     return null;
   }
-  const resolved = path.resolve(realRoot, rel);
+  // path.resolve ignores realRoot when target is already absolute, so absolute
+  // targets are resolved on their own and still subjected to the prefix check.
+  const resolved = path.resolve(realRoot, target);
   let realResolved: string;
   try {
     realResolved = fs.realpathSync(resolved);

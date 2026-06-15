@@ -104,6 +104,29 @@ describe('prepareRenderTarget', () => {
     expect(prepareRenderTarget({ cwd: root, path: '../escape' }).ok).toBe(false);
   });
 
+  it('accepts an absolute path inside cwd', () => {
+    const abs = path.join(root, 'index.html');
+    const t = prepareRenderTarget({ cwd: root, path: abs });
+    expect(t.ok && t.root).toBe(root);
+    expect(t.ok && t.entry).toBe('index.html');
+  });
+
+  it('rejects an absolute path outside cwd', () => {
+    expect(prepareRenderTarget({ cwd: root, path: '/etc/passwd' }).ok).toBe(false);
+  });
+
+  it('accepts an absolute path given through a symlinked cwd', () => {
+    // Mirror /home -> /var/home: an alias dir whose realpath is `root`.
+    const aliasParent = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sai-alias-')));
+    const alias = path.join(aliasParent, 'link');
+    fs.symlinkSync(root, alias);
+    // Caller supplies the aliased absolute path + aliased cwd; both realpath to `root`.
+    const t = prepareRenderTarget({ cwd: alias, path: path.join(alias, 'index.html') });
+    expect(t.ok && t.root).toBe(root);
+    expect(t.ok && t.entry).toBe('index.html');
+    fs.rmSync(aliasParent, { recursive: true, force: true });
+  });
+
   it('rejects an in-workspace symlink that points outside cwd', () => {
     const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sai-out2-')));
     fs.mkdirSync(path.join(outside, 'secret'));
