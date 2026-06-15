@@ -10,12 +10,18 @@ import { nextRenderWidth, sanitizeCssColor, resolveThemedSurface } from '../../r
 
 // Policy enforced inside the html-mock iframe (via a <meta> in srcDoc).
 // `script-src 'unsafe-inline'` is intentional: mocks may include JS (a product
-// decision), and the iframe's `sandbox="allow-scripts"` does NOT override CSP —
-// with `default-src 'none'` and no script-src, inline scripts would be blocked.
-// `allow-scripts` (without allow-same-origin) provides the isolation; the CSP
-// additionally blocks all network/remote loads (only inline styles + data: imgs).
+// decision). Network/remote loads (https:) ARE allowed so renders can pull in
+// external images, fonts, CDN scripts, and call APIs — matching the file-mode
+// RENDER_CSP. By default the iframe runs `sandbox="allow-scripts"` (opaque
+// origin: it can't touch the app). The privileged `allow-same-origin` step is
+// only added after the user approves an explicit appAccess request (see below).
 const SANDBOX_CSP =
-  "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:;";
+  "default-src 'none'; " +
+  "style-src 'unsafe-inline' https:; " +
+  "script-src 'unsafe-inline' https:; " +
+  "img-src https: data:; " +
+  "font-src https: data:; " +
+  "connect-src https:;";
 
 function useRenderEntry(renderId: string): RenderEntry | undefined {
   return useSyncExternalStore(renderStore.subscribe, () => renderStore.get(renderId));
@@ -126,6 +132,14 @@ function RenderedHtml({ entry, enableSubmit, onNaturalWidth }: {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const submittedRef = useRef(false);
   const [height, setHeight] = useState(300);
+  // Privileged same-origin access is opt-in (entry.appAccess) AND must be
+  // approved here before we hand the render the app's origin. Until granted the
+  // iframe stays isolated (allow-scripts only); normal renders never see this.
+  const [appAccessGranted, setAppAccessGranted] = useState(false);
+  const appAccessPending = entry.appAccess === true && !appAccessGranted;
+  const sandbox = entry.appAccess === true && appAccessGranted
+    ? 'allow-scripts allow-same-origin'
+    : 'allow-scripts';
   const bridge = enableSubmit ? SUBMIT_BRIDGE : '';
   // Memoized per background value: recomputing on theme change would alter the
   // srcDoc and reload the iframe, wiping in-progress form input (spec: theme
@@ -159,13 +173,38 @@ function RenderedHtml({ entry, enableSubmit, onNaturalWidth }: {
   }, [enableSubmit, onNaturalWidth]);
 
   return (
-    <iframe
-      ref={iframeRef}
-      title={entry.title || 'render'}
-      sandbox="allow-scripts"
-      style={{ width: '100%', height, border: 0, display: 'block' }}
-      srcDoc={doc}
-    />
+    <>
+      {appAccessPending && (
+        <div className="sai-render-appaccess" role="alert">
+          <span className="sai-render-appaccess__msg">
+            This render is requesting access to the app (storage &amp; page).
+          </span>
+          <span className="sai-render-appaccess__actions">
+            <button
+              type="button"
+              className="sai-render-appaccess__allow"
+              onClick={() => setAppAccessGranted(true)}
+            >
+              Allow access
+            </button>
+            <button
+              type="button"
+              className="sai-render-appaccess__deny"
+              onClick={() => setAppAccessGranted(false)}
+            >
+              Keep isolated
+            </button>
+          </span>
+        </div>
+      )}
+      <iframe
+        ref={iframeRef}
+        title={entry.title || 'render'}
+        sandbox={sandbox}
+        style={{ width: '100%', height, border: 0, display: 'block' }}
+        srcDoc={doc}
+      />
+    </>
   );
 }
 

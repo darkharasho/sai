@@ -24,7 +24,7 @@ describe('RenderedHtml file mode', () => {
     });
   });
 
-  it('inline render still uses srcdoc without allow-same-origin', () => {
+  it('inline render uses srcdoc and stays isolated (no allow-same-origin) by default', () => {
     const entry = {
       renderId: 'r2', kind: 'html', status: 'ready', width: 360,
       payload: { html: '<b>hi</b>' },
@@ -33,6 +33,20 @@ describe('RenderedHtml file mode', () => {
     const iframe = container.querySelector('iframe')!;
     expect(iframe.hasAttribute('srcdoc')).toBe(true);
     expect(iframe.getAttribute('sandbox')).toBe('allow-scripts');
+  });
+
+  it('appAccess render stays isolated until approved, then gains allow-same-origin', async () => {
+    const { fireEvent } = await import('@testing-library/react');
+    const entry = {
+      renderId: 'r3', kind: 'html', status: 'ready', width: 360,
+      payload: { html: '<b>hi</b>' }, appAccess: true,
+    } as any;
+    const { container, getByText } = render(<RenderRegion entry={entry} />);
+    const iframe = container.querySelector('iframe')!;
+    // Privileged access requested but not yet granted → isolated.
+    expect(iframe.getAttribute('sandbox')).toBe('allow-scripts');
+    fireEvent.click(getByText('Allow access'));
+    expect(container.querySelector('iframe')!.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin');
   });
 
   it('file-mode render shows an error when mint is blocked', async () => {

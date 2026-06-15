@@ -68,6 +68,42 @@
 /* RenderRegion wrapper: round the live render's corners */
 [data-render-region] { border-radius: var(--radius-md); overflow: hidden; }
 
+/* App-access approval gate — shown above the iframe when a render explicitly
+   requests same-origin access (privileged). Until "Allow", the iframe stays
+   isolated. */
+.sai-render-appaccess {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
+  border-bottom: 1px solid rgba(212, 160, 23, 0.45);
+  font-size: 12px;
+  color: var(--text);
+}
+.sai-render-appaccess__msg { flex: 1 1 auto; min-width: 0; }
+.sai-render-appaccess__actions { display: inline-flex; gap: 6px; flex: 0 0 auto; }
+.sai-render-appaccess__allow,
+.sai-render-appaccess__deny {
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  font: 600 11px 'Geist Mono', 'JetBrains Mono', 'Fira Code', monospace;
+  cursor: pointer;
+}
+.sai-render-appaccess__allow {
+  background: var(--accent);
+  color: #1a1110;
+  border: 1px solid var(--accent);
+}
+.sai-render-appaccess__allow:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.sai-render-appaccess__deny {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+}
+.sai-render-appaccess__deny:hover { color: var(--text); border-color: var(--border-strong); }
+
 /* ── RenderToolCallCard — tight right-aligned card with animated code pane ─ */
 .sai-rc-wrap { display: flex; justify-content: flex-start; width: 100%; }
 

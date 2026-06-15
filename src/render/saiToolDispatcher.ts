@@ -37,7 +37,7 @@ export function dispatchSaiRenderTool(name: string, input: any, renderId: string
       if (html.length === 0) {
         return { ok: false, error: 'render_html requires a non-empty "html" string' };
       }
-      renderStore.upsert({ renderId, kind: 'html', payload: { html }, title, width, background, status: 'rendering' });
+      renderStore.upsert({ renderId, kind: 'html', payload: { html }, title, width, background, status: 'rendering', appAccess: inp.appAccess === true });
       return { ok: true };
     }
     case 'render_component': {

@@ -11,6 +11,12 @@ export interface RenderEntry {
   background?: string;
   status: RenderStatus;
   error?: string;
+  /**
+   * Inline html only: the render asked for same-origin access to the app
+   * (localStorage, parent DOM). Privileged — the card gates it behind explicit
+   * user approval before mounting the iframe with allow-same-origin.
+   */
+  appAccess?: boolean;
 }
 
 type Listener = () => void;

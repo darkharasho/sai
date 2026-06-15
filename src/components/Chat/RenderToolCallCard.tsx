@@ -166,6 +166,7 @@ export function entryFromToolCall(tc: ToolCall, cwd = ''): { entry: RenderEntry;
       width,
       background,
       status: 'ready',
+      appAccess: input.appAccess === true,
     },
     code: html,
   };

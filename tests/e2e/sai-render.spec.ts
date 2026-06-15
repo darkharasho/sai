@@ -7,7 +7,7 @@ test('html mock renders as a sandboxed iframe and mirrors in the panel', async (
 
   const iframe = card.locator('iframe');
   await expect(iframe).toHaveCount(1);
-  // Sandboxed (no allow-same-origin) → assert the srcDoc attribute, not frame contents.
+  // Isolated by default (no allow-same-origin) → assert the srcDoc attribute, not frame contents.
   await expect(iframe).toHaveAttribute('sandbox', 'allow-scripts');
   const srcdoc = await iframe.getAttribute('srcdoc');
   expect(srcdoc ?? '').toContain('hello mock');
