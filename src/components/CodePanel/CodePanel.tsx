@@ -206,25 +206,27 @@ export default function CodePanel({
         )}
       </div>
 
-      {/* Toolbar */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '4px 12px',
-        background: 'var(--surface-2)',
-        borderBottom: '1px solid var(--border-hairline)',
-        flexShrink: 0,
-      }}>
-        <span style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: 11,
-          color: 'var(--text-muted)',
+      {/* Toolbar — only shown for diffs, where the unified/split toggle lives.
+          For normal editing the file path is redundant with the tab, so we
+          drop the toolbar entirely to reclaim vertical space. */}
+      {isDiff && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '4px 12px',
+          background: 'var(--surface-2)',
+          borderBottom: '1px solid var(--border-hairline)',
+          flexShrink: 0,
         }}>
-          {activeFile.path}
-        </span>
+          <span style={{
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: 11,
+            color: 'var(--text-muted)',
+          }}>
+            {activeFile.path}
+          </span>
 
-        {isDiff && (
           <div style={{
             display: 'flex',
             borderRadius: 4,
@@ -249,20 +251,8 @@ export default function CodePanel({
               </button>
             ))}
           </div>
-        )}
-
-        {!isDiff && (
-          <span style={{
-            color: 'var(--text-muted)',
-            fontSize: 11,
-            padding: '3px 8px',
-            border: '1px solid var(--border-hairline)',
-            borderRadius: 4,
-          }}>
-            Ctrl+S to save
-          </span>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* External change banner */}
       {externallyModified.has(activeFilePath) && (
