@@ -42,7 +42,10 @@ function TerminalInstance({ tabUid, projectPath, visible, onTerminalReady }: Ter
 
     const fit = new FitAddon();
     xterm.loadAddon(fit);
-    xterm.loadAddon(new WebLinksAddon((_event, url) => {
+    xterm.loadAddon(new WebLinksAddon((event, url) => {
+      // Require Ctrl+Click (Cmd+Click on macOS) to follow links, so plain
+      // clicks can be used for text selection without navigating away.
+      if (!event.ctrlKey && !event.metaKey) return;
       window.sai.openExternal(url);
     }));
 
