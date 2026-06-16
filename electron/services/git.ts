@@ -3,6 +3,10 @@ import { ipcMain } from 'electron';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Build an enriched PATH so git hooks can find tools like git-lfs
@@ -35,6 +39,92 @@ function enrichedEnv(): NodeJS.ProcessEnv {
 
 function git(cwd: string) {
   return simpleGit({ baseDir: cwd, binary: 'git' }).env(enrichedEnv());
+}
+
+// --- Credential resolution for network ops -------------------------------
+//
+// A packaged Electron app launched from Finder/Dock cannot read the macOS
+// keychain non-interactively, so git's osxkeychain helper returns nothing and
+// `git pull` dies with "could not read Username ... Device not configured" —
+// even though the same pull works in a terminal. To make pull/push/fetch work
+// everywhere without per-machine setup, we resolve a GitHub token from sources
+// the app CAN read (gh CLI, env vars, ~/.git-credentials) and inject it as a
+// *fallback* credential helper. A working keychain still wins because env-based
+// config is applied after all config files; the token is only used when the
+// keychain (or any earlier helper) returns nothing.
+
+let cachedToken: string | null | undefined; // undefined = not yet resolved
+
+async function resolveGitHubToken(): Promise<string | null> {
+  // 1) GitHub CLI — the most common source on dev machines.
+  try {
+    const { stdout } = await execFileAsync('gh', ['auth', 'token'], { env: enrichedEnv(), timeout: 5000 });
+    const tok = stdout.trim();
+    if (tok) return tok;
+  } catch { /* gh not installed or not authenticated */ }
+  // 2) Conventional environment variables.
+  const envTok = (process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '').trim();
+  if (envTok) return envTok;
+  // 3) git's plaintext store file, if the user set one up.
+  try {
+    const content = fs.readFileSync(path.join(os.homedir(), '.git-credentials'), 'utf8');
+    for (const line of content.split('\n')) {
+      const m = /^https:\/\/([^:@/]+)(?::([^@]+))?@github\.com/.exec(line.trim());
+      if (m) return m[2] || m[1]; // password if present, else the userinfo field
+    }
+  } catch { /* no store file */ }
+  return null;
+}
+
+async function getGitHubToken(): Promise<string | null> {
+  if (cachedToken === undefined) cachedToken = await resolveGitHubToken();
+  return cachedToken;
+}
+
+// simple-git instance for network operations: never blocks on a TTY prompt, and
+// carries a github.com-scoped fallback credential helper when a token is found.
+async function networkGit(cwd: string) {
+  const env: NodeJS.ProcessEnv = { ...enrichedEnv(), GIT_TERMINAL_PROMPT: '0' };
+  // The inline shell helper is a no-op on Windows git's credential flow and
+  // Windows GUI apps reach the Credential Manager fine, so only inject on POSIX.
+  if (process.platform !== 'win32') {
+    const token = await getGitHubToken();
+    if (token) {
+      env.SAI_GH_TOKEN = token;
+      const base = Number(env.GIT_CONFIG_COUNT || '0') || 0;
+      // Respond only to `get`; echo a username (any non-empty value) + the token.
+      const helper = `!f() { test "$1" = get && printf 'username=x-access-token\\npassword=%s\\n' "$SAI_GH_TOKEN"; }; f`;
+      env.GIT_CONFIG_COUNT = String(base + 1);
+      env[`GIT_CONFIG_KEY_${base}`] = 'credential.https://github.com.helper';
+      env[`GIT_CONFIG_VALUE_${base}`] = helper;
+    }
+  }
+  return simpleGit({ baseDir: cwd, binary: 'git' }).env(env);
+}
+
+function isAuthError(err: unknown): boolean {
+  const m = String((err as { message?: string })?.message || '').toLowerCase();
+  return m.includes('could not read username')
+    || m.includes('could not read password')
+    || m.includes('authentication failed')
+    || m.includes('device not configured')
+    || m.includes('terminal prompts disabled')
+    || m.includes('permission denied (publickey)');
+}
+
+async function runNetworkOp<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (isAuthError(err)) {
+      cachedToken = undefined; // re-resolve next time in case credentials changed
+      throw new Error(
+        `GitHub authentication failed during ${label}. SAI couldn't access your git credentials. ` +
+        `Sign in with the GitHub CLI (run \`gh auth login\` in a terminal) or set a GITHUB_TOKEN, then try again.`,
+      );
+    }
+    throw err;
+  }
 }
 
 function detectAiProvider(author: string, message: string): 'claude' | 'codex' | 'gemini' | undefined {
@@ -216,10 +306,13 @@ export async function gitCommitImpl(cwd: string, message: string): Promise<{ has
   return { hash: r.commit ?? undefined };
 }
 export async function gitPushImpl(cwd: string): Promise<void> {
-  await git(cwd).push();
+  await runNetworkOp('push', async () => { await (await networkGit(cwd)).push(); });
 }
 export async function gitPullImpl(cwd: string): Promise<void> {
-  await git(cwd).pull();
+  await runNetworkOp('pull', async () => { await (await networkGit(cwd)).pull(); });
+}
+export async function gitFetchImpl(cwd: string): Promise<void> {
+  await runNetworkOp('fetch', async () => { await (await networkGit(cwd)).fetch(); });
 }
 
 export function registerGitHandlers() {
@@ -250,15 +343,15 @@ export function registerGitHandlers() {
   });
 
   ipcMain.handle('git:push', async (_event, cwd: string) => {
-    await git(cwd).push();
+    await gitPushImpl(cwd);
   });
 
   ipcMain.handle('git:pull', async (_event, cwd: string) => {
-    await git(cwd).pull();
+    await gitPullImpl(cwd);
   });
 
   ipcMain.handle('git:fetch', async (_event, cwd: string) => {
-    await git(cwd).fetch();
+    await gitFetchImpl(cwd);
   });
 
   ipcMain.handle('git:log', async (_event, cwd: string, count: number, options?: { ref?: string }) => {

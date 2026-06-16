@@ -18,7 +18,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // vi.hoisted — shared objects for mock factories
 // ---------------------------------------------------------------------------
 
-const { mockIpcMain, mockSimpleGit, mockGitInstance, mockFsPromises } = vi.hoisted(() => {
+const { mockIpcMain, mockSimpleGit, mockGitInstance, mockFsPromises, mockExecFile } = vi.hoisted(() => {
   type IpcHandler = (...args: unknown[]) => unknown;
   const handlers = new Map<string, IpcHandler>();
 
@@ -64,7 +64,14 @@ const { mockIpcMain, mockSimpleGit, mockGitInstance, mockFsPromises } = vi.hoist
     unlink: vi.fn().mockResolvedValue(undefined),
   };
 
-  return { mockIpcMain, mockSimpleGit, mockGitInstance, mockFsPromises };
+  // child_process.execFile mock (promisified in git.ts to query `gh auth token`).
+  // Default: behave as if `gh` is unavailable so no token is resolved.
+  const mockExecFile = vi.fn((...args: unknown[]) => {
+    const cb = args[args.length - 1] as (e: Error | null, r?: unknown) => void;
+    cb(new Error('gh not found'));
+  });
+
+  return { mockIpcMain, mockSimpleGit, mockGitInstance, mockFsPromises, mockExecFile };
 });
 
 // ---------------------------------------------------------------------------
@@ -84,6 +91,17 @@ vi.mock('fs/promises', () => ({
   unlink: mockFsPromises.unlink,
 }));
 
+vi.mock('node:child_process', () => ({
+  execFile: mockExecFile,
+}));
+
+// Keep node:fs real (enrichedEnv probes nvm dirs) but force the ~/.git-credentials
+// read to miss, so token resolution is deterministic across dev machines.
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return { ...actual, readFileSync: vi.fn(() => { throw new Error('ENOENT'); }) };
+});
+
 // ---------------------------------------------------------------------------
 // Setup/teardown
 // ---------------------------------------------------------------------------
@@ -98,6 +116,15 @@ beforeEach(() => {
   }
   mockFsPromises.unlink.mockReset().mockResolvedValue(undefined);
   mockSimpleGit.mockClear();
+  // Default: `gh` unavailable → no token resolved.
+  mockExecFile.mockReset().mockImplementation((...args: unknown[]) => {
+    const cb = args[args.length - 1] as (e: Error | null, r?: unknown) => void;
+    cb(new Error('gh not found'));
+  });
+  // Prevent ambient CI tokens (GitHub Actions sets GITHUB_TOKEN) from leaking
+  // into credential resolution and perturbing assertions.
+  delete process.env.GH_TOKEN;
+  delete process.env.GITHUB_TOKEN;
 });
 
 afterEach(() => {
@@ -271,6 +298,67 @@ describe('git:fetch', () => {
     await mockIpcMain._invoke('git:fetch', '/repo');
 
     expect(mockGitInstance.fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ===========================================================================
+// network credential handling (pull/push/fetch)
+// ===========================================================================
+
+describe('network credential handling', () => {
+  it('disables TTY prompts for network ops so the app never hangs/cryptically fails', async () => {
+    await setup();
+    mockGitInstance.pull.mockResolvedValue(undefined);
+
+    await mockIpcMain._invoke('git:pull', '/repo');
+
+    const envArg = mockGitInstance.env.mock.calls.at(-1)?.[0] as Record<string, string>;
+    expect(envArg.GIT_TERMINAL_PROMPT).toBe('0');
+  });
+
+  it('injects a github.com-scoped fallback credential helper when gh provides a token', async () => {
+    if (process.platform === 'win32') return; // helper injection is POSIX-only
+    mockExecFile.mockImplementation((...args: unknown[]) => {
+      const cb = args[args.length - 1] as (e: Error | null, r?: unknown) => void;
+      cb(null, { stdout: 'gho_testtoken\n', stderr: '' });
+    });
+    await setup();
+    mockGitInstance.push.mockResolvedValue(undefined);
+
+    await mockIpcMain._invoke('git:push', '/repo');
+
+    const envArg = mockGitInstance.env.mock.calls.at(-1)?.[0] as Record<string, string>;
+    expect(envArg.SAI_GH_TOKEN).toBe('gho_testtoken');
+    expect(envArg.GIT_CONFIG_COUNT).toBe('1');
+    expect(envArg.GIT_CONFIG_KEY_0).toBe('credential.https://github.com.helper');
+    expect(envArg.GIT_CONFIG_VALUE_0).toContain('password=%s');
+  });
+
+  it('does not inject a helper when no token can be resolved', async () => {
+    await setup(); // default mock: gh unavailable, env tokens cleared
+    mockGitInstance.pull.mockResolvedValue(undefined);
+
+    await mockIpcMain._invoke('git:pull', '/repo');
+
+    const envArg = mockGitInstance.env.mock.calls.at(-1)?.[0] as Record<string, string>;
+    expect(envArg.SAI_GH_TOKEN).toBeUndefined();
+    expect(envArg.GIT_CONFIG_COUNT).toBeUndefined();
+  });
+
+  it('translates auth failures into a clear, actionable error', async () => {
+    await setup();
+    mockGitInstance.pull.mockRejectedValue(
+      new Error("fatal: could not read Username for 'https://github.com': Device not configured"),
+    );
+
+    await expect(mockIpcMain._invoke('git:pull', '/repo')).rejects.toThrow(/GitHub authentication failed/);
+  });
+
+  it('passes non-auth errors through unchanged', async () => {
+    await setup();
+    mockGitInstance.pull.mockRejectedValue(new Error('merge conflict in foo.ts'));
+
+    await expect(mockIpcMain._invoke('git:pull', '/repo')).rejects.toThrow(/merge conflict in foo\.ts/);
   });
 });
 
