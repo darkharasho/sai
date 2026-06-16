@@ -166,8 +166,11 @@ describe('GitSidebar', () => {
 
     render(<GitSidebar {...defaultProps} />);
 
+    // The AI Activity section is collapsed by default — expand it first.
+    await waitFor(() => screen.getByText('AI Activity'));
+    fireEvent.click(screen.getByText('AI Activity'));
+
     await waitFor(() => {
-      expect(screen.getByText('AI Activity')).toBeTruthy();
       expect(screen.getByText('feat: update app shell')).toBeTruthy();
       expect(screen.getByText('Codex')).toBeTruthy();
     });

@@ -1,4 +1,5 @@
-import { GitCommit as GitCommitIcon } from 'lucide-react';
+import { useState } from 'react';
+import { GitCommit as GitCommitIcon, ChevronDown, ChevronRight } from 'lucide-react';
 import { GitCommit } from '../../types';
 
 interface GitActivityProps {
@@ -12,6 +13,7 @@ const PROVIDER_LABELS = {
 } as const;
 
 export default function GitActivity({ commits }: GitActivityProps) {
+  const [expanded, setExpanded] = useState(false);
   const aiCommits = commits.filter((commit) => commit.aiProvider);
 
   if (aiCommits.length === 0) return null;
@@ -24,8 +26,15 @@ export default function GitActivity({ commits }: GitActivityProps) {
         marginTop: 4,
       }}
     >
-      <div
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
         style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          width: '100%',
           padding: '4px 12px',
           fontSize: 'var(--text-xs)',
           fontWeight: 600,
@@ -33,13 +42,21 @@ export default function GitActivity({ commits }: GitActivityProps) {
           letterSpacing: '0.06em',
           color: 'var(--text-secondary)',
           userSelect: 'none' as const,
+          background: 'none',
+          border: 'none',
           borderBottom: '1px solid var(--border-hairline)',
+          cursor: 'pointer',
+          textAlign: 'left' as const,
         }}
       >
-        AI Activity
-      </div>
+        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        <span>AI Activity</span>
+        <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontWeight: 400 }}>
+          {aiCommits.length}
+        </span>
+      </button>
 
-      {aiCommits.map((commit) => {
+      {expanded && aiCommits.map((commit) => {
         const shortHash = commit.hash.slice(0, 7);
         const date = new Date(commit.date);
         const dateStr = isNaN(date.getTime())
