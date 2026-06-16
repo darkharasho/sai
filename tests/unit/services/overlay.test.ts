@@ -41,6 +41,7 @@ vi.mock('electron', () => ({
     getDisplayNearestPoint: vi.fn(() => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } })),
   },
   globalShortcut,
+  app: { dock: { show: vi.fn() } },
 }));
 
 import { OverlayManager, shouldShowOverlay } from '@electron/services/overlay';
