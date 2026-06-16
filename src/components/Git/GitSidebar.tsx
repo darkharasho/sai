@@ -212,7 +212,16 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
 
   // Shared scrollable content (used in both normal and embedded modes)
   const scrollableContent = (
-    <div style={{ flex: 1, overflowY: 'auto', paddingTop: view === 'history' ? 0 : 8 }}>
+    <div
+      style={{
+        flex: 1,
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        overflowY: view === 'changes' ? 'hidden' : 'auto',
+        paddingTop: view === 'history' ? 0 : 8,
+      }}
+    >
       {view === 'history' && !gitNotRepo && !error && (
         <GitHistory projectPath={projectPath} />
       )}
@@ -224,6 +233,8 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
       )}
       {view === 'changes' && (
       <>
+      {/* Local changes — most of the height, own scroll */}
+      <div style={{ flex: 1, minHeight: '65%', overflowY: 'auto' }}>
       {rebaseStatus.inProgress && (
         <RebaseInProgressBanner
           projectPath={projectPath}
@@ -300,8 +311,12 @@ export default function GitSidebar({ projectPath, onFileClick, commitMessageProv
         onDiscard={setDiscardTarget}
         projectPath={projectPath}
       />
+      </div>
 
-      <GitActivity commits={commits} />
+      {/* AI Activity — capped so local changes keep the majority of the height */}
+      <div style={{ flexShrink: 0, maxHeight: '35%', overflowY: 'auto' }}>
+        <GitActivity commits={commits} />
+      </div>
       </>
       )}
     </div>
