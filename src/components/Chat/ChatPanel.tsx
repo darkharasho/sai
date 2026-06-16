@@ -447,6 +447,11 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const followBtnTransition = useReducedMotionTransition(SPRING.flick);
   const turnSeqRef = useRef(0); // tracks the active turn's sequence number
   const [ready, setReady] = useState(false);
+  // True from the moment a queued follow-up is shifted for sending until the new
+  // turn's `streaming_start` arrives. Bridges the gap where the prior turn's
+  // `done` has flipped isStreaming false but the next turn hasn't begun, so the
+  // Stop button and thinking animation don't flicker back to "idle" mid-handoff.
+  const [drainInFlight, setDrainInFlight] = useState(false);
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(initialPendingApproval);
   const [fileContextEnabled, setFileContextEnabled] = useState(true);
@@ -1282,7 +1287,12 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     }
     return owner;
   }, [messages]);
-  const showThinking = isStreaming && !awaitingQuestion;
+  // Display-only streaming state: stays true across the queue-drain handoff so the
+  // Stop button and thinking animation don't flicker to "idle" when the user sends
+  // a follow-up right as the current turn finishes. The real `isStreaming` prop
+  // still drives the turn/drain logic — only presentation uses this.
+  const streamingForDisplay = isStreaming || drainInFlight || messageQueue.length > 0;
+  const showThinking = streamingForDisplay && !awaitingQuestion;
   const isSaiProvider = true; // All providers use the SAI animation system
   const saiMorphActive = isSaiProvider && saiAnimationEnabled;
   const lastMsg = messages[messages.length - 1];
@@ -1569,6 +1579,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const turnStartedAtRef = useRef<number | null>(null);
   const nextSegmentStartRef = useRef<number | null>(null);
   const autoSendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const drainBackstopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Drives queue draining. Keyed on BOTH isStreaming and messageQueue because a
   // drain can be triggered two ways:
   //   1. A turn ends (isStreaming true->false) with items already queued.
@@ -1587,7 +1598,11 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     const queueGrewWhileIdle = !isStreaming && !wasStreaming && messageQueue.length > prevQueueLen;
 
     // A real turn started — clear the in-flight guard so the next end can drain.
-    if (isStreaming) drainPendingRef.current = false;
+    if (isStreaming) {
+      drainPendingRef.current = false;
+      setDrainInFlight(false);
+      if (drainBackstopRef.current) { clearTimeout(drainBackstopRef.current); drainBackstopRef.current = null; }
+    }
 
     if (turnJustEnded) {
       // Stamp durationMs on every unstamped assistant text bubble in the current
@@ -1632,11 +1647,19 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       ) {
         const next = messageQueue[0];
         drainPendingRef.current = true;
+        setDrainInFlight(true);
         onQueueShift(sessionId);
         autoSendTimerRef.current = setTimeout(() => {
           autoSendTimerRef.current = null;
           handleSend(next.fullText, next.images);
         }, 300);
+        // Safety: if the follow-up never produces a streaming_start (e.g. a spawn
+        // error), don't leave the Stop button stuck — release the bridge.
+        if (drainBackstopRef.current) clearTimeout(drainBackstopRef.current);
+        drainBackstopRef.current = setTimeout(() => {
+          drainBackstopRef.current = null;
+          setDrainInFlight(false);
+        }, 8000);
       }
     }
   }, [isStreaming, messageQueue]);
@@ -1646,6 +1669,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // queue has already shifted.
   useEffect(() => () => {
     if (autoSendTimerRef.current) clearTimeout(autoSendTimerRef.current);
+    if (drainBackstopRef.current) clearTimeout(drainBackstopRef.current);
   }, []);
 
   return (
@@ -1817,7 +1841,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             onApprove={handleApprove}
             onDeny={handleDeny}
             onAlwaysAllow={handleAlwaysAllow}
-            isStreaming={isStreaming}
+            isStreaming={streamingForDisplay}
             messages={messages}
             onStop={() => aiProvider === 'gemini' ? (window.sai as any).geminiStop(projectPath) : aiProvider === 'codex' ? window.sai.codexStop(projectPath) : window.sai.claudeStop?.(projectPath, claudeScope)}
             permissionMode={permissionMode}

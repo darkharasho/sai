@@ -1161,4 +1161,30 @@ describe('ChatPanel', () => {
       expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
     });
   });
+
+  describe('queue-drain handoff', () => {
+    it('keeps Stop button + thinking animation while a follow-up sits queued (turn ended)', async () => {
+      // Reproduces: sending a message right as the turn finishes left the
+      // composer showing Send (not Stop) and dropped the thinking animation
+      // during the gap between the old turn's `done` and the follow-up's start.
+      const props = {
+        ...baseProps(),
+        isStreaming: false,
+        messageQueue: [{ id: 'q-0', text: 'follow up', fullText: 'follow up' }],
+      };
+      const { container } = render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+      // Composer must present as streaming so the Stop button stays put...
+      expect(latestChatInputProps.isStreaming).toBe(true);
+      // ...and the thinking animation must not vanish mid-handoff.
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+    });
+
+    it('shows Send (not Stop) when idle with an empty queue', async () => {
+      const props = { ...baseProps(), isStreaming: false, messageQueue: [] };
+      render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+      expect(latestChatInputProps.isStreaming).toBe(false);
+    });
+  });
 });
