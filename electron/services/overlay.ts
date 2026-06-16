@@ -1,4 +1,4 @@
-import { BrowserWindow, globalShortcut, screen } from 'electron';
+import { app, BrowserWindow, globalShortcut, screen } from 'electron';
 import path from 'node:path';
 
 // Focus overlay: a small always-on-top, click-through window shown when the
@@ -17,6 +17,8 @@ const LINGER_MS = 2500;
 // can never be detected there. A global shortcut, registered only while the
 // overlay is visible, toggles interactive mode instead.
 const INTERACTIVE_SHORTCUT = 'Control+Shift+F9';
+
+const isMac = process.platform === 'darwin';
 
 export type OverlayMode = 'on' | 'off' | 'persist';
 
@@ -231,6 +233,13 @@ export class OverlayManager {
     });
     win.setAlwaysOnTop(true, 'screen-saver');
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    // On macOS, creating a focusable:false + visibleOnAllWorkspaces window can
+    // cause the system to mark the entire app as "background only", hiding the
+    // main window and removing the dock icon. Re-showing the dock after overlay
+    // creation restores normal foreground app behavior.
+    if (isMac && app.dock) {
+      app.dock.show();
+    }
     win.setIgnoreMouseEvents(true, { forward: true });
     win.removeMenu();
     win.on('moved', () => this.noteMoved());
