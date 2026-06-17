@@ -53,6 +53,19 @@ function get(url: string, token: string): Promise<any> {
   });
 }
 
+let orgsCache: { token: string; orgs: string[] } | null = null;
+async function getOrgs(token: string): Promise<string[]> {
+  if (orgsCache && orgsCache.token === token) return orgsCache.orgs;
+  try {
+    const res = await get('https://api.github.com/user/orgs?per_page=100', token);
+    const orgs = Array.isArray(res) ? res.map((o: any) => o.login).filter(Boolean) : [];
+    orgsCache = { token, orgs };
+    return orgs;
+  } catch {
+    return [];
+  }
+}
+
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let expireTimer: ReturnType<typeof setTimeout> | null = null;
 let polling = false;
@@ -180,13 +193,29 @@ export function registerGithubAuthHandlers(
     });
 
     if (search) {
-      // Search all repos the user can access (owned, org, collaborator)
-      const q = encodeURIComponent(`${search} in:name fork:true`);
-      const result = await get(`https://api.github.com/search/repositories?q=${q}&per_page=${PER_PAGE}&page=${page}`, token);
-      return {
-        items: (result.items || []).map(mapRepo),
-        hasMore: (result.total_count || 0) > page * PER_PAGE,
-      };
+      // Global search across all of GitHub.
+      const globalQ = encodeURIComponent(`${search} in:name fork:true`);
+      const globalResult = await get(`https://api.github.com/search/repositories?q=${globalQ}&per_page=${PER_PAGE}&page=${page}`, token);
+      const globalItems = (globalResult.items || []).map(mapRepo);
+      const globalHasMore = (globalResult.total_count || 0) > page * PER_PAGE;
+
+      // On the first page, surface the user's own + org repos first so they rank
+      // above unrelated public results.
+      const login = readSettings().github_auth?.user?.login as string | undefined;
+      const owners = [login, ...(await getOrgs(token))].filter(Boolean) as string[];
+      if (page === 1 && owners.length) {
+        const ownerQ = owners.map((o) => `user:${o}`).join(' ');
+        const scopedQ = encodeURIComponent(`${search} in:name fork:true ${ownerQ}`);
+        const scopedResult = await get(`https://api.github.com/search/repositories?q=${scopedQ}&per_page=${PER_PAGE}&page=1`, token);
+        const scopedItems = (scopedResult.items || []).map(mapRepo);
+        const scopedNames = new Set(scopedItems.map((r: any) => r.full_name));
+        return {
+          items: [...scopedItems, ...globalItems.filter((r: any) => !scopedNames.has(r.full_name))],
+          hasMore: globalHasMore,
+        };
+      }
+
+      return { items: globalItems, hasMore: globalHasMore };
     }
 
     const repos = await get(`https://api.github.com/user/repos?sort=updated&per_page=${PER_PAGE}&page=${page}&affiliation=owner,collaborator,organization_member`, token);
