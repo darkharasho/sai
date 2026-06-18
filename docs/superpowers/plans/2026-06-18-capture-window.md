@@ -888,6 +888,262 @@ not SAI; SAI-only returns a no-window message; target= selects by title."
 
 ---
 
+## Task 11: Enforce no-SAI guarantee on the CLI fallback (final-review fix)
+
+**Why:** The CLI backends capture the ACTIVE window (`spectacle -a`) or whole screen (`grim`/`screencapture`), NOT the inferred window. On KDE Wayland (where `desktopCapturer` frames are usually blank) the fallback fires, and the active window at capture time is plausibly SAI itself — so the tool could screenshot SAI while labeling it the target. This task makes the CLI fallback best-effort raise the intended window and only proceed when the active window is confirmed to be the target and NOT SAI; otherwise it bails with a "focus the app" message. Also gates the unwired `display` param (M2) and adds the missing throw-advances-backend test.
+
+**Files:**
+- Create: `electron/capture/activeGuard.ts` — pure decision logic.
+- Test: `tests/unit/electron/capture/activeGuard.test.ts`
+- Create: `electron/capture/windowControl.ts` — side-effecting wmctrl/xdotool wrappers (no unit test; compile-checked).
+- Modify: `electron/capture/captureWindow.ts` — new deps + CLI guard.
+- Modify: `tests/unit/electron/capture/captureWindow.test.ts` — update baseDeps + 2 new tests.
+- Modify: `electron/main.ts` — wire the new deps + `selfTitle`.
+- Modify: `src/App.tsx` — gate `display: true`.
+
+**Interfaces:**
+- Produces: `titleMatch(a: string, b: string): boolean` — case-insensitive substring match in either direction.
+- Produces: `activeWindowIsTarget(activeTitle: string | null, pickTitle: string, selfTitle: string): boolean` — true only when `activeTitle` is known, does NOT match `selfTitle`, and DOES match `pickTitle`.
+- Produces: `activeWindowTitle(): Promise<string | null>`, `raiseWindowByTitle(title: string): Promise<boolean>`.
+- Extends `CaptureWindowDeps` with optional `raiseWindow?: (title: string) => Promise<boolean>`, `activeWindowTitle?: () => Promise<string | null>`, `selfTitle?: string`.
+
+- [ ] **Step 1: Write the failing test for the pure guard**
+
+```ts
+// tests/unit/electron/capture/activeGuard.test.ts
+import { describe, it, expect } from 'vitest';
+import { titleMatch, activeWindowIsTarget } from '../../../../electron/capture/activeGuard';
+
+describe('titleMatch', () => {
+  it('matches case-insensitively in either direction', () => {
+    expect(titleMatch('MyApp (dev)', 'myapp')).toBe(true);
+    expect(titleMatch('myapp', 'MyApp (dev)')).toBe(true);
+    expect(titleMatch('Firefox', 'MyApp')).toBe(false);
+  });
+  it('treats empty strings as no match', () => {
+    expect(titleMatch('', 'x')).toBe(false);
+    expect(titleMatch('x', '')).toBe(false);
+  });
+});
+
+describe('activeWindowIsTarget', () => {
+  it('false when the active window is unknown', () => {
+    expect(activeWindowIsTarget(null, 'MyApp', 'SAI')).toBe(false);
+  });
+  it('false when the active window is SAI (never capture SAI)', () => {
+    expect(activeWindowIsTarget('SAI', 'MyApp', 'SAI')).toBe(false);
+  });
+  it('true when the active window is the intended target and not SAI', () => {
+    expect(activeWindowIsTarget('MyApp (dev)', 'MyApp', 'SAI')).toBe(true);
+  });
+  it('false when the active window is some other app', () => {
+    expect(activeWindowIsTarget('Spotify', 'MyApp', 'SAI')).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `npx vitest run tests/unit/electron/capture/activeGuard.test.ts --maxWorkers=2`
+Expected: FAIL — cannot find module `activeGuard`.
+
+- [ ] **Step 3: Implement the pure guard**
+
+```ts
+// electron/capture/activeGuard.ts
+// Case-insensitive substring match in either direction. Titles from different
+// sources (desktopCapturer vs. xdotool) vary in decoration/suffixes, so an exact
+// equality check is too strict.
+export function titleMatch(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  const x = a.toLowerCase();
+  const y = b.toLowerCase();
+  return x.includes(y) || y.includes(x);
+}
+
+// True only when it is safe to take a CLI active-window capture: the active window
+// must be known, must NOT be SAI, and must match the intended pick.
+export function activeWindowIsTarget(
+  activeTitle: string | null,
+  pickTitle: string,
+  selfTitle: string,
+): boolean {
+  if (!activeTitle) return false;
+  if (selfTitle && titleMatch(activeTitle, selfTitle)) return false;
+  return titleMatch(activeTitle, pickTitle);
+}
+```
+
+- [ ] **Step 4: Run it to verify it passes**
+
+Run: `npx vitest run tests/unit/electron/capture/activeGuard.test.ts --maxWorkers=2`
+Expected: PASS (6 tests).
+
+- [ ] **Step 5: Implement the side-effecting window-control wrappers**
+
+```ts
+// electron/capture/windowControl.ts
+import { spawn } from 'node:child_process';
+
+function run(bin: string, args: string[]): Promise<{ code: number; stdout: string }> {
+  return new Promise((resolve) => {
+    let stdout = '';
+    let child;
+    try {
+      child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'ignore'] });
+    } catch {
+      resolve({ code: -1, stdout: '' });
+      return;
+    }
+    child.stdout?.on('data', (d) => { stdout += String(d); });
+    child.on('error', () => resolve({ code: -1, stdout: '' }));
+    child.on('close', (code) => resolve({ code: code ?? -1, stdout }));
+  });
+}
+
+// Active window title via xdotool (works for the X11/XWayland active window).
+// Returns null when it can't be determined (tool missing, or a pure-Wayland window).
+export async function activeWindowTitle(): Promise<string | null> {
+  const r = await run('xdotool', ['getactivewindow', 'getwindowname']);
+  if (r.code !== 0) return null;
+  const t = r.stdout.trim();
+  return t.length ? t : null;
+}
+
+// Best-effort: raise the first window whose title contains `title` (XWayland via wmctrl).
+// Returns true if a matching window was activated.
+export async function raiseWindowByTitle(title: string): Promise<boolean> {
+  if (!title) return false;
+  const list = await run('wmctrl', ['-l']);
+  if (list.code !== 0) return false;
+  const needle = title.toLowerCase();
+  for (const line of list.stdout.split('\n')) {
+    const m = line.match(/^(0x[0-9a-fA-F]+)\s+\S+\s+\S+\s+(.*)$/);
+    if (!m) continue;
+    if (m[2].toLowerCase().includes(needle)) {
+      const act = await run('wmctrl', ['-i', '-a', m[1]]);
+      return act.code === 0;
+    }
+  }
+  return false;
+}
+```
+
+- [ ] **Step 6: Update the orchestrator** (`electron/capture/captureWindow.ts`)
+
+Add the import:
+```ts
+import { activeWindowIsTarget } from './activeGuard';
+```
+
+Extend `CaptureWindowDeps` with three optional fields (after `selfSourceId?: string;`):
+```ts
+  raiseWindow?: (title: string) => Promise<boolean>;
+  activeWindowTitle?: () => Promise<string | null>;
+  selfTitle?: string;
+```
+
+Replace the `else` branch of the backend loop (the current CLI branch) with:
+```ts
+      } else {
+        // CLI backends capture the ACTIVE window (spectacle) or whole screen
+        // (grim/screencapture), NOT a specific window. To uphold the no-SAI
+        // guarantee, best-effort raise the intended window, then only proceed if
+        // the active window is confirmed to be the target and is not SAI.
+        if (deps.raiseWindow) await deps.raiseWindow(pick.title);
+        const activeTitle = deps.activeWindowTitle ? await deps.activeWindowTitle() : null;
+        if (!activeWindowIsTarget(activeTitle, pick.title, deps.selfTitle ?? '')) {
+          return {
+            ok: false,
+            message: `Could not bring "${pick.title}" to the foreground to capture it (your compositor may block programmatic window raising). Focus that window, then ask again.`,
+          };
+        }
+        const shot = await deps.captureCli(backend);
+        if (!isBlankFrame(shot.rgba)) {
+          return { ok: true, __mcpImage: { base64: shot.base64, mimeType: 'image/png' }, window: pick.title };
+        }
+      }
+```
+
+- [ ] **Step 7: Update the orchestrator tests** (`tests/unit/electron/capture/captureWindow.test.ts`)
+
+Add three defaults to the `baseDeps` factory object (so existing CLI-fallback tests still pass the new guard):
+```ts
+  raiseWindow: async () => true,
+  activeWindowTitle: async () => 'MyApp',
+  selfTitle: 'SAI',
+```
+
+Add two new tests:
+```ts
+  it('advances to the CLI backend when desktopCapturer throws', async () => {
+    const r = await captureWindowFlow({}, baseDeps({
+      chain: ['desktopCapturer', 'spectacle'],
+      captureSource: async () => { throw new Error('boom'); },
+    }));
+    expect(r).toEqual({ ok: true, __mcpImage: { base64: 'CLI', mimeType: 'image/png' }, window: 'MyApp' });
+  });
+
+  it('refuses the CLI fallback when the active window is SAI (never captures SAI)', async () => {
+    const r = await captureWindowFlow({}, baseDeps({
+      chain: ['desktopCapturer', 'spectacle'],
+      captureSource: async () => ({ base64: 'BLANK', rgba: BLANK, empty: false }),
+      activeWindowTitle: async () => 'SAI',
+    }));
+    expect(r).toEqual({ ok: false, message: expect.stringContaining('foreground') });
+  });
+```
+
+- [ ] **Step 8: Run the capture tests to verify all pass**
+
+Run: `npx vitest run tests/unit/electron/capture/ --maxWorkers=2`
+Expected: PASS (all capture suites green, including the 2 new orchestrator tests + 6 activeGuard tests).
+
+- [ ] **Step 9: Wire the new deps into the IPC handler** (`electron/main.ts`)
+
+Add the import beside the other `./capture/*` imports:
+```ts
+import { activeWindowTitle, raiseWindowByTitle } from './capture/windowControl';
+```
+
+In the `sai:capture-window` handler, add to the `captureWindowFlow` deps object (alongside `selfSourceId`):
+```ts
+        raiseWindow: raiseWindowByTitle,
+        activeWindowTitle,
+        selfTitle: mainWindow && !mainWindow.isDestroyed() ? mainWindow.getTitle() : undefined,
+```
+
+- [ ] **Step 10: Gate the unwired `display` param (M2)** (`src/App.tsx`)
+
+At the TOP of the `capture_window` routing branch (before reading `captureWindow`), add:
+```ts
+        if (req.input?.display === true) {
+          sai.respondSwarmTool(req.id, { ok: false, message: 'Whole-display capture is not supported yet; omit `display` to capture a window.' });
+          return;
+        }
+```
+
+- [ ] **Step 11: Full suite + type-check**
+
+Run: `npx vitest run --maxWorkers=2 && npx tsc --noEmit`
+Expected: all green; no NEW type errors (the pre-existing `tsconfig.node.json` rootDir errors are unrelated and only relevant under that config; `npx tsc --noEmit` uses the root config).
+
+- [ ] **Step 12: Commit**
+
+```bash
+git add electron/capture/activeGuard.ts tests/unit/electron/capture/activeGuard.test.ts \
+        electron/capture/windowControl.ts electron/capture/captureWindow.ts \
+        tests/unit/electron/capture/captureWindow.test.ts electron/main.ts src/App.tsx
+git commit -m "fix(capture): never let the CLI fallback capture SAI; gate display param
+
+The CLI fallback (spectacle -a / grim / screencapture) captures the active/whole
+screen, not the inferred window. Best-effort raise the target and only capture
+when the active window is confirmed to be the target and not SAI; otherwise bail
+with a focus-the-window message. Also gate the unwired display param."
+```
+
+---
+
 ## Self-Review
 
 - **Spec coverage:** schema (T9), SAI exclusion via `getMediaSourceId` (T3+T7), layered backends (T2/T5/T6), blank-frame self-heal (T1/T6), inference order incl. project match + candidates (T3), result contract identical to `capture_app` (T6), IPC + preload + routing (T7/T8/T10), two-render-paths check (T10 Step 3), testing strategy (every pure module has TDD tests; integration smoke T10 Step 4). All spec sections map to a task.
