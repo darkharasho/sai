@@ -28,7 +28,7 @@ import {
   mintRenderToken,
   evictRenderToken,
 } from './services/renderProtocol';
-import { execFile as _execFile } from 'node:child_process';
+import { execFile as _execFile, execFileSync } from 'node:child_process';
 import { promisify as _promisify } from 'node:util';
 const _execFileP = _promisify(_execFile);
 
@@ -874,7 +874,7 @@ function createWindow() {
       sessionType: process.env.XDG_SESSION_TYPE,
       desktop: process.env.XDG_CURRENT_DESKTOP,
       has: (bin) => {
-        try { require('node:child_process').execSync(`command -v ${bin}`, { stdio: 'ignore' }); return true; }
+        try { execFileSync('which', [bin], { stdio: 'ignore' }); return true; }
         catch { return false; }
       },
     });
