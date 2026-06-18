@@ -1451,6 +1451,19 @@ export default function App() {
         return;
       }
 
+      if (req.tool === 'capture_window') {
+        const saiAny = sai as { captureWindow?: (o: { target?: string; workspace?: string }) => Promise<{ ok: boolean; [k: string]: unknown }> };
+        if (typeof saiAny.captureWindow !== 'function') {
+          sai.respondSwarmToolError(req.id, 'capture_window is unavailable in this build');
+          return;
+        }
+        void saiAny.captureWindow({ target: req.input?.target, workspace: req.workspace }).then(
+          (result) => sai.respondSwarmTool(req.id, result),
+          (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
+        );
+        return;
+      }
+
       if (req.tool === 'watch_github_run') {
         const saiAny = sai as { githubApiGet?: (p: string) => Promise<{ ok: boolean; status: number; body: any }> };
         void resolveWatchRun(req.input ?? {}, saiAny.githubApiGet).then(
