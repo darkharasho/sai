@@ -264,6 +264,21 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
     },
   },
   {
+    name: 'capture_window',
+    description:
+      'Screenshot the EXTERNAL app you are developing (a window or a whole display) and return the image. ' +
+      'Never captures SAI itself. Omit args to auto-detect the project window; pass `target` to disambiguate ' +
+      'by window title/app name. Use this to SEE the app under development — not a mock. Read-only.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        target: { type: 'string', description: 'Optional window title / app-name substring to match (case-insensitive).' },
+        display: { type: 'boolean', description: 'Capture the whole monitor instead of a single window.' },
+      },
+    },
+  },
+  {
     name: 'watch_github_run',
     description:
       'Show a live GitHub Actions watcher card for a workflow run. USE THIS right after you push, tag, or ' +
