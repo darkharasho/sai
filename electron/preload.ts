@@ -177,6 +177,8 @@ contextBridge.exposeInMainWorld('sai', {
   fsReadFileBase64: (filePath: string) => ipcRenderer.invoke('fs:readFileBase64', filePath),
   captureRegion: (rect: { x: number; y: number; width: number; height: number }): Promise<string | null> =>
     ipcRenderer.invoke('sai:capture-region', rect),
+  captureWindow: (opts: { target?: string; workspace?: string }): Promise<{ ok: boolean; [k: string]: unknown }> =>
+    ipcRenderer.invoke('sai:capture-window', opts),
   pickFile: (opts: { mode?: 'open' | 'save' | 'directory'; filters?: { name: string; extensions: string[] }[]; multi?: boolean }): Promise<string[] | null> =>
     ipcRenderer.invoke('sai:pick-file', opts),
   notify: (args: { title: string; body?: string }): Promise<boolean> =>
