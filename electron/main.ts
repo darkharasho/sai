@@ -17,6 +17,7 @@ import { clampRect, type Rect } from './capturePage';
 import { selectBackendChain } from './capture/selectBackend';
 import { captureWindowFlow } from './capture/captureWindow';
 import { listDesktopWindows, captureDesktopSource, captureViaCli } from './capture/backends';
+import { activeWindowTitle, raiseWindowByTitle } from './capture/windowControl';
 import { gitStatusImpl, gitDiffImpl, gitStageImpl, gitUnstageImpl, gitCommitImpl, gitPushImpl, gitPullImpl } from './services/git';
 import { enrichedEnv } from './services/shellEnv';
 import {
@@ -887,6 +888,9 @@ function createWindow() {
         chain,
         projectNames: projectNamesFor(opts.workspace),
         selfSourceId,
+        raiseWindow: raiseWindowByTitle,
+        activeWindowTitle,
+        selfTitle: mainWindow && !mainWindow.isDestroyed() ? mainWindow.getTitle() : undefined,
       },
     );
   });

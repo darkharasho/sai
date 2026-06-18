@@ -1,6 +1,7 @@
 import type { BackendName } from './selectBackend';
 import { inferWindow } from './inferWindow';
 import { isBlankFrame } from './blankFrame';
+import { activeWindowIsTarget } from './activeGuard';
 
 export interface CaptureWindowDeps {
   listWindows: () => Promise<Array<{ id: string; title: string }>>;
@@ -9,6 +10,9 @@ export interface CaptureWindowDeps {
   chain: BackendName[];
   projectNames: string[];
   selfSourceId?: string;
+  raiseWindow?: (title: string) => Promise<boolean>;
+  activeWindowTitle?: () => Promise<string | null>;
+  selfTitle?: string;
 }
 
 export type CaptureWindowResult =
@@ -40,6 +44,18 @@ export async function captureWindowFlow(
           return { ok: true, __mcpImage: { base64: shot.base64, mimeType: 'image/png' }, window: pick.title };
         }
       } else {
+        // CLI backends capture the ACTIVE window (spectacle) or whole screen
+        // (grim/screencapture), NOT a specific window. To uphold the no-SAI
+        // guarantee, best-effort raise the intended window, then only proceed if
+        // the active window is confirmed to be the target and is not SAI.
+        if (deps.raiseWindow) await deps.raiseWindow(pick.title);
+        const activeTitle = deps.activeWindowTitle ? await deps.activeWindowTitle() : null;
+        if (!activeWindowIsTarget(activeTitle, pick.title, deps.selfTitle ?? '')) {
+          return {
+            ok: false,
+            message: `Could not bring "${pick.title}" to the foreground to capture it (your compositor may block programmatic window raising). Focus that window, then ask again.`,
+          };
+        }
         const shot = await deps.captureCli(backend);
         if (!isBlankFrame(shot.rgba)) {
           return { ok: true, __mcpImage: { base64: shot.base64, mimeType: 'image/png' }, window: pick.title };

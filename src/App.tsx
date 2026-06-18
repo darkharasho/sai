@@ -1452,6 +1452,10 @@ export default function App() {
       }
 
       if (req.tool === 'capture_window') {
+        if (req.input?.display === true) {
+          sai.respondSwarmTool(req.id, { ok: false, message: 'Whole-display capture is not supported yet; omit `display` to capture a window.' });
+          return;
+        }
         const saiAny = sai as { captureWindow?: (o: { target?: string; workspace?: string }) => Promise<{ ok: boolean; [k: string]: unknown }> };
         if (typeof saiAny.captureWindow !== 'function') {
           sai.respondSwarmToolError(req.id, 'capture_window is unavailable in this build');

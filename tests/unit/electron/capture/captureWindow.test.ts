@@ -11,6 +11,9 @@ const baseDeps = (over: Partial<CaptureWindowDeps>): CaptureWindowDeps => ({
   chain: ['desktopCapturer'],
   projectNames: ['MyApp'],
   selfSourceId: 'sai',
+  raiseWindow: async () => true,
+  activeWindowTitle: async () => 'MyApp',
+  selfTitle: 'SAI',
   ...over,
 });
 
@@ -49,5 +52,22 @@ describe('captureWindowFlow', () => {
       captureCli: async () => ({ base64: 'Y', rgba: BLANK }),
     }));
     expect(r).toEqual({ ok: false, message: expect.stringContaining('empty frame') });
+  });
+
+  it('advances to the CLI backend when desktopCapturer throws', async () => {
+    const r = await captureWindowFlow({}, baseDeps({
+      chain: ['desktopCapturer', 'spectacle'],
+      captureSource: async () => { throw new Error('boom'); },
+    }));
+    expect(r).toEqual({ ok: true, __mcpImage: { base64: 'CLI', mimeType: 'image/png' }, window: 'MyApp' });
+  });
+
+  it('refuses the CLI fallback when the active window is SAI (never captures SAI)', async () => {
+    const r = await captureWindowFlow({}, baseDeps({
+      chain: ['desktopCapturer', 'spectacle'],
+      captureSource: async () => ({ base64: 'BLANK', rgba: BLANK, empty: false }),
+      activeWindowTitle: async () => 'SAI',
+    }));
+    expect(r).toEqual({ ok: false, message: expect.stringContaining('foreground') });
   });
 });
