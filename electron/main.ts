@@ -890,7 +890,7 @@ function createWindow() {
         selfSourceId,
         raiseWindow: raiseWindowByTitle,
         activeWindowTitle,
-        selfTitle: mainWindow && !mainWindow.isDestroyed() ? mainWindow.getTitle() : undefined,
+        selfTitle: (mainWindow && !mainWindow.isDestroyed() ? mainWindow.getTitle() : undefined) ?? 'SAI',
       },
     );
   });
