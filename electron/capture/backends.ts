@@ -44,13 +44,12 @@ export async function captureViaCli(
   const argv = backend === 'spectacle' ? spectacleArgs(out)
     : backend === 'grim' ? grimArgs(out)
     : screencaptureArgs(out);
-  const bin = backend;
   try {
-    await spawnToFile(bin, argv);
+    await spawnToFile(backend, argv);
     const png = await fs.readFile(out);
     const img = nativeImage.createFromBuffer(png);
     return { base64: png.toString('base64'), rgba: img.toBitmap() };
   } finally {
-    await fs.rm(out, { force: true }).catch(() => {});
+    await fs.rm(out, { force: true }).catch((err) => { console.warn('capture: temp file cleanup failed', err); });
   }
 }
