@@ -14,6 +14,9 @@ import { safeJoin } from './services/remote/safe-join';
 import { langFromPath, isTextLike, mimeFromPath } from './services/remote/lang';
 import { readDirImpl, readFileImpl, readFileBufImpl, statFileImpl, writeFileImpl } from './services/fs';
 import { clampRect, type Rect } from './capturePage';
+import { selectBackendChain } from './capture/selectBackend';
+import { captureWindowFlow } from './capture/captureWindow';
+import { listDesktopWindows, captureDesktopSource, captureViaCli } from './capture/backends';
 import { gitStatusImpl, gitDiffImpl, gitStageImpl, gitUnstageImpl, gitCommitImpl, gitPushImpl, gitPullImpl } from './services/git';
 import { enrichedEnv } from './services/shellEnv';
 import {
@@ -312,6 +315,21 @@ async function getEnabledFlag(): Promise<boolean> {
 async function setEnabledFlag(value: boolean): Promise<void> {
   await getOrInitRemote();
   writeRemoteKv({ enabled: value });
+}
+
+function projectNamesFor(workspace?: string): string[] {
+  const names: string[] = [];
+  if (!workspace) return names;
+  try {
+    const pkgPath = path.join(workspace, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+      if (typeof pkg.productName === 'string') names.push(pkg.productName);
+      if (typeof pkg.name === 'string') names.push(pkg.name);
+    }
+  } catch { /* ignore malformed package.json */ }
+  names.push(path.basename(workspace));
+  return names.filter(Boolean);
 }
 
 function createWindow() {
@@ -847,6 +865,30 @@ function createWindow() {
     const clamped = clampRect(rect, { width: bounds.width, height: bounds.height });
     const image = await mainWindow.webContents.capturePage(clamped);
     return image.toPNG().toString('base64'); // bare base64, no data: prefix
+  });
+
+  ipcMain.handle('sai:capture-window', async (_evt, opts: { target?: string; workspace?: string } = {}) => {
+    const selfSourceId = mainWindow && !mainWindow.isDestroyed() ? mainWindow.getMediaSourceId() : undefined;
+    const chain = selectBackendChain({
+      platform: process.platform,
+      sessionType: process.env.XDG_SESSION_TYPE,
+      desktop: process.env.XDG_CURRENT_DESKTOP,
+      has: (bin) => {
+        try { require('node:child_process').execSync(`command -v ${bin}`, { stdio: 'ignore' }); return true; }
+        catch { return false; }
+      },
+    });
+    return captureWindowFlow(
+      { target: opts.target },
+      {
+        listWindows: listDesktopWindows,
+        captureSource: captureDesktopSource,
+        captureCli: captureViaCli,
+        chain,
+        projectNames: projectNamesFor(opts.workspace),
+        selfSourceId,
+      },
+    );
   });
 
   ipcMain.handle('project:saveImage', async (_event, base64Data: string) => {
