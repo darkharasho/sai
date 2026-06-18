@@ -77,6 +77,14 @@ describe('Tier 2 inspect/capture tools', () => {
     expect(cap.toolset).toBe('chat');
     expect(cap.input_schema.required ?? []).toEqual([]);
   });
+
+  it('registers capture_window as a chat tool with target/display props', () => {
+    expect(SAI_TOOL_NAMES.has('capture_window')).toBe(true);
+    const t = SAI_TOOL_SCHEMA.find((x) => x.name === 'capture_window')!;
+    expect(t.toolset).toBe('chat');
+    expect(t.input_schema.properties.target).toBeDefined();
+    expect(t.input_schema.properties.display).toBeDefined();
+  });
 });
 
 describe('render_theme tool', () => {

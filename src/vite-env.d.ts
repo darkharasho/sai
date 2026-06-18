@@ -18,6 +18,7 @@ declare global {
     sai: Window['sai'] & {
       remote: SaiRemoteApi;
       captureRegion: (rect: { x: number; y: number; width: number; height: number }) => Promise<string | null>;
+      captureWindow: (opts: { target?: string; workspace?: string }) => Promise<{ ok: boolean; [k: string]: unknown }>;
     };
   }
 }
