@@ -103,7 +103,49 @@ export default function TodoProgress({ messages, isStreaming }: TodoProgressProp
     setOpen(false);
   }, []);
 
-  if (!isStreaming || !todos || total === 0 || dismissed || completed === total) return null;
+  const hidden = !isStreaming || !todos || total === 0 || dismissed || completed === total;
+
+  // Diagnostic: when the ring is hidden during what looks like a task turn,
+  // log WHY plus the task-tool names actually present in the messages. This is
+  // the forward-detection hook for "tasks not showing below the input" — it
+  // tells us whether the tool calls never reached the messages (upstream
+  // storage/forwarding), the parser found nothing, or a gate (streaming /
+  // dismissed / all-completed) suppressed it. Deduped by signature so it logs
+  // once per distinct state, not every render.
+  const taskToolNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const m of messages) {
+      if (m.role !== 'assistant' || !m.toolCalls) continue;
+      for (const tc of m.toolCalls) {
+        if (/task|todo/i.test(tc.name)) names.add(tc.name);
+      }
+    }
+    return names;
+  }, [messages]);
+  const lastDiagRef = useRef<string>('');
+  useEffect(() => {
+    if (!hidden) { lastDiagRef.current = ''; return; }
+    // Only interesting if a task turn seems to be in play.
+    if (!isStreaming && taskToolNames.size === 0) return;
+    const reason = !isStreaming ? 'not-streaming'
+      : !todos ? 'no-todos-parsed'
+      : total === 0 ? 'empty-list'
+      : dismissed ? 'dismissed'
+      : completed === total ? 'all-completed'
+      : 'unknown';
+    const tools = Array.from(taskToolNames).sort();
+    const sig = `${reason}|stream=${isStreaming}|total=${total}|done=${completed}|tools=${tools.join(',')}`;
+    if (sig === lastDiagRef.current) return;
+    lastDiagRef.current = sig;
+    // eslint-disable-next-line no-console
+    console.debug(
+      `[sai] TodoProgress hidden — reason=${reason}; isStreaming=${isStreaming} `
+      + `todos=${todos ? total : 'null'} completed=${completed} dismissed=${dismissed}; `
+      + `task/todo tool calls in messages=[${tools.join(', ') || 'none'}]`,
+    );
+  }, [hidden, isStreaming, todos, total, completed, dismissed, taskToolNames]);
+
+  if (hidden) return null;
 
   const inProgress = todos.find((t) => t.status === 'in_progress');
   const activeLabel = inProgress ? (inProgress.activeForm || inProgress.content) : 'Planning…';
