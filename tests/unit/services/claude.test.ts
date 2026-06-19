@@ -202,7 +202,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 import { spawn } from 'node:child_process';
 import { createMockBrowserWindow } from '../../helpers/electron-mock';
 import { MockChildProcess } from '../../helpers/process-mock';
-import { registerClaudeHandlers, setSessionIdImpl } from '@electron/services/claude';
+import { registerClaudeHandlers, setSessionIdImpl, emitStreamingStart } from '@electron/services/claude';
 
 // ---------------------------------------------------------------------------
 // Per-test process registry
@@ -828,6 +828,55 @@ describe('Approval flow', () => {
     expect(ws.claudeScopes.get('chat')!.awaitingApproval).toBe(false);
   });
 
+  it('regression: MCP-tool approval keeps streaming_start/done turnSeq in sync', async () => {
+    // After approving an MCP/unknown tool, claude.ts increments turnSeq and
+    // emits a fresh streaming_start (advancing the renderer's "expected"
+    // turnSeq). The turn's terminal result→done MUST carry that same turnSeq,
+    // otherwise the renderer's stale-turn guard (App.tsx) drops the done and the
+    // thinking animation + Stop button stay stuck forever.
+    const PROJECT_MCP = '/approval/mcp-project';
+    const ws = workspaceState.getOrCreate(PROJECT_MCP);
+    const claude = ws.claudeScopes.get('chat')! as any;
+    claude.cwd = PROJECT_MCP;
+    // Real workspace state seeds these monotonic counters (workspace.ts); the
+    // test mock doesn't, so seed them or the turnSeq math yields NaN.
+    claude.turnSeq = 0;
+    claude.activeTurnSeq = 0;
+    mockIpcMain._emit('claude:send', PROJECT_MCP, 'use a tool', []);
+    await flushAsync();
+    const proc = getLatestProcess();
+
+    // CLI requests an MCP tool that requires approval.
+    claude.awaitingApproval = true;
+    claude.busy = true;
+    claude.pendingToolUse = {
+      toolName: 'mcp__swarm__sai_render_html',
+      toolUseId: 'tu-mcp',
+      input: {},
+    };
+    claude.approvalBuffered = [];
+
+    (win.webContents.send as ReturnType<typeof vi.fn>).mockClear();
+
+    // User approves → MCP retry path bumps turnSeq + emits a new streaming_start.
+    await mockIpcMain._invoke('claude:approve', PROJECT_MCP, 'tu-mcp', true);
+    await flushAsync();
+
+    // CLI finishes the retried turn.
+    pushLines(proc, { type: 'result', duration_ms: 500, result: 'done' });
+    await flushAsync();
+
+    const msgs = sentMessages(win);
+    const lastStart = [...msgs].reverse().find((m) => m.type === 'streaming_start');
+    const lastDone = [...msgs].reverse().find((m) => m.type === 'done');
+    expect(lastStart).toBeDefined();
+    expect(lastDone).toBeDefined();
+    // The renderer accepts the done only when its turnSeq matches the latest
+    // streaming_start's turnSeq.
+    expect(lastDone!.turnSeq).toBe(lastStart!.turnSeq);
+  });
+
+
   it('does nothing when approve is called with no pending tool use', async () => {
     const { ws } = await startProcess();
     ws.claudeScopes.get('chat')!.awaitingApproval = false;
@@ -837,6 +886,56 @@ describe('Approval flow', () => {
     await mockIpcMain._invoke('claude:approve', PROJECT, 'tu-none', true);
     const after = (win.webContents.send as ReturnType<typeof vi.fn>).mock.calls.length;
     expect(after).toBe(before);
+  });
+});
+
+// ===========================================================================
+// emitStreamingStart — turnSeq desync detector
+// ===========================================================================
+
+describe('emitStreamingStart (turnSeq desync detector)', () => {
+  const ws = { projectPath: '/detector/project' };
+  const baseClaude = () => ({ turnSeq: 7, activeTurnSeq: 7, sessionId: 's-1' }) as any;
+
+  it('warns when a non-interrupt start has activeTurnSeq behind turnSeq', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      emitStreamingStart(ws, { ...baseClaude(), turnSeq: 8, activeTurnSeq: 7 }, 'chat');
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toContain('turnSeq desync');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('stays silent when activeTurnSeq is in sync', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      emitStreamingStart(ws, baseClaude(), 'chat');
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('stays silent for the interrupt case where activeTurnSeq lags by design', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      emitStreamingStart(ws, { ...baseClaude(), turnSeq: 8, activeTurnSeq: 7 }, 'chat', { interrupting: true });
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('does not warn on uninitialized (non-finite) counters', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      emitStreamingStart(ws, { sessionId: null } as any, 'chat');
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

@@ -89,6 +89,44 @@ function emitChatMessage(msg: Record<string, unknown>): void {
 }
 
 /**
+ * Emit a `streaming_start` and enforce the turnSeq invariant that keeps the
+ * renderer's thinking animation + Stop button from getting stranded.
+ *
+ * The renderer tags the latest streaming_start's turnSeq as "expected" and
+ * drops any terminal `done` whose turnSeq doesn't match (the stale-turn guard).
+ * That `done` carries `activeTurnSeq`, so for any continuation the CLI responds
+ * to immediately, `activeTurnSeq` MUST already equal `turnSeq` — otherwise the
+ * authoritative done is dropped and streaming state sticks forever.
+ *
+ * The lone exception is an interrupt: `activeTurnSeq` intentionally lags until
+ * the old turn drains, so callers pass `interrupting: true` to opt out.
+ */
+export function emitStreamingStart(
+  ws: { projectPath: string },
+  claude: WorkspaceClaude,
+  scope: string,
+  opts: { interrupting?: boolean } = {},
+): void {
+  if (!opts.interrupting
+    && Number.isFinite(claude.turnSeq)
+    && claude.activeTurnSeq !== claude.turnSeq) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[sai] streaming_start turnSeq desync (scope=${scope}): turnSeq=${claude.turnSeq} `
+      + `activeTurnSeq=${claude.activeTurnSeq} — the turn's terminal done will be dropped `
+      + `by the renderer's stale-turn guard, stranding the thinking animation + Stop button`,
+    );
+  }
+  emitChatMessage({
+    type: 'streaming_start',
+    projectPath: ws.projectPath,
+    scope,
+    sessionId: claude.sessionId ?? null,
+    turnSeq: claude.turnSeq,
+  });
+}
+
+/**
  * Read a setting from SAI's settings.json.
  */
 function readSaiSetting(key: string): any {
@@ -733,7 +771,7 @@ export function sendImpl(
   // Interrupt case: activeTurnSeq stays at the old value until the CLI finishes the
   // old response and the stdout handler updates it to claude.turnSeq.
   claude.streaming = true;
-  emitChatMessage({ type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, sessionId: claude.sessionId ?? null, turnSeq: claude.turnSeq });
+  emitStreamingStart(ws, claude, effectiveScope, { interrupting: wasInterrupt });
 
   const msg = JSON.stringify({
     type: 'user',
@@ -1022,8 +1060,14 @@ export async function approveImpl(
     const proc = claude.process;
     if (proc?.stdin && !proc.stdin.destroyed) {
       claude.turnSeq++;
+      // The CLI immediately responds to this retry, so activeTurnSeq must track
+      // turnSeq (mirrors the non-interrupt branch in sendImpl). Otherwise the
+      // turn's terminal result→done carries the stale activeTurnSeq, the
+      // renderer's stale-turn guard drops it, and the thinking animation +
+      // Stop button stay stuck.
+      claude.activeTurnSeq = claude.turnSeq;
       claude.busy = true;
-      emitChatMessage({ type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, sessionId: claude.sessionId ?? null, turnSeq: claude.turnSeq });
+      emitStreamingStart(ws, claude, effectiveScope);
       const retryMsg = JSON.stringify({
         type: 'user',
         message: {
