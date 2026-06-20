@@ -647,6 +647,64 @@ describe('ChatPanel', () => {
     expect(container.querySelector('[data-testid="follow-btn-unread"]')).toBeNull();
   });
 
+  it('does not load older messages (which cancels the jump) while a pinned jump is in progress', async () => {
+    // Controllable IntersectionObserver so we can fire the pin observer and the
+    // load-more sentinel observer deterministically.
+    const ioInstances: any[] = [];
+    class FakeIO {
+      cb: any;
+      elements: Element[] = [];
+      constructor(cb: any) { this.cb = cb; ioInstances.push(this); }
+      observe(el: Element) { this.elements.push(el); }
+      unobserve() {}
+      disconnect() {}
+      trigger(entries: any[]) { this.cb(entries, this); }
+    }
+    // @ts-expect-error - test stub
+    window.IntersectionObserver = FakeIO;
+
+    // 60 messages (> RENDER_CHUNK = 50) so renderStart = 10 and the
+    // load-more sentinel is rendered. End on a user message so there is a
+    // last user message inside the window to pin.
+    const initialMessages = Array.from({ length: 60 }, (_, i) =>
+      i % 2 === 0
+        ? { id: `u${i}`, role: 'user' as const, content: `user ${i}`, timestamp: Date.now() }
+        : { id: `a${i}`, role: 'assistant' as const, content: `asst ${i}`, timestamp: Date.now() }
+    );
+    initialMessages[59] = { id: 'u59', role: 'user', content: 'last user', timestamp: Date.now() };
+
+    const props = { ...baseProps(), initialMessages };
+    const { container } = render(<ChatPanel {...props} />);
+
+    // Windowed rendering hides earlier messages → the load-more sentinel exists.
+    expect(container.querySelector('.chat-load-sentinel')).toBeTruthy();
+
+    // Pin the last user message by firing its IntersectionObserver as out-of-view.
+    const lastWrapper = container.querySelector('[data-layout-id="pinned-u59"]');
+    expect(lastWrapper).toBeTruthy();
+    const pinIO = ioInstances.find(io => io.elements.includes(lastWrapper));
+    expect(pinIO).toBeTruthy();
+    await act(async () => { pinIO.trigger([{ isIntersecting: false }]); });
+
+    const jumpBtn = container.querySelector('.pinned-prompt-jump') as HTMLButtonElement;
+    expect(jumpBtn).toBeTruthy();
+
+    const before = container.querySelectorAll('[data-testid="chat-message"]').length;
+
+    // Start the jump, then fire the load-more sentinel *during* the jump.
+    await act(async () => { jumpBtn.click(); });
+    const sentinelEl = container.querySelector('.chat-load-sentinel');
+    const sentIO = ioInstances.find(io => io.elements.includes(sentinelEl));
+    expect(sentIO).toBeTruthy();
+    await act(async () => { sentIO.trigger([{ isIntersecting: true }]); });
+
+    // Loading older messages mid-jump rewrites scrollTop and cancels the
+    // smooth scroll ("nothing moves"). While a jump is in progress the sentinel
+    // must not expand the window, so the rendered message count is unchanged.
+    const after = container.querySelectorAll('[data-testid="chat-message"]').length;
+    expect(after).toBe(before);
+  });
+
   it('/fake-error appends a default API-error system message in dev mode', async () => {
     const onMessagesChange = vi.fn();
     const props: ChatPanelProps = { ...baseProps(), onMessagesChange };

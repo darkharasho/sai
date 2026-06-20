@@ -479,6 +479,12 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     return len > RENDER_CHUNK ? len - RENDER_CHUNK : 0;
   });
   const sentinelRef = useRef<HTMLDivElement>(null);
+  // True while a user-initiated "jump to message" smooth scroll is in flight.
+  // The load-more sentinel must not rewrite scrollTop during this window or it
+  // cancels the smooth scroll (the jump appears to do nothing). pendingJumpRef
+  // holds a target id when we had to expand the window to mount it first.
+  const jumpingRef = useRef(false);
+  const pendingJumpRef = useRef<string | null>(null);
   const pendingComposerRectRef = useRef<DOMRect | null>(null);
   const localMentionInsertRef = useRef<((linkName: string) => void) | null>(null);
   const mentionInsertRef = mentionInsertRefProp ?? localMentionInsertRef;
@@ -499,6 +505,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     if (!sentinel || !container) return;
     const observer = new IntersectionObserver(
       ([entry]) => {
+        // Don't expand the window mid-jump — the scrollTop rewrite below would
+        // cancel the in-flight smooth scroll and the jump would "do nothing".
+        if (jumpingRef.current) return;
         if (entry.isIntersecting && renderStart > 0) {
           const prevScrollHeight = container.scrollHeight;
           setRenderStart(prev => Math.max(0, prev - LOAD_MORE_CHUNK));
@@ -1105,6 +1114,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       if (e.deltaY < 0) {
+        // The user took over scrolling — release any in-flight jump guard.
+        jumpingRef.current = false;
         isAtBottomRef.current = false;
         setFollowOn(false);
       }
@@ -1194,6 +1205,47 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     setUnreadCount(0);
     if (chatContainerRef.current) tweenScrollToBottom(chatContainerRef.current);
   };
+
+  // Smooth-scroll a mounted message into view, holding the jump guard until the
+  // scroll settles so the load-more sentinel can't cancel it.
+  const beginJumpScroll = (el: HTMLElement) => {
+    jumpingRef.current = true;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const container = chatContainerRef.current;
+    const done = () => {
+      jumpingRef.current = false;
+      container?.removeEventListener('scrollend', done);
+    };
+    // 'scrollend' is the precise signal; the timeout is a fallback for browsers
+    // (and jsdom) that don't fire it.
+    container?.addEventListener('scrollend', done, { once: true } as AddEventListenerOptions);
+    setTimeout(done, 1000);
+  };
+
+  // Jump to a user message. If it's outside the render window it isn't mounted
+  // (no ref), so expand the window to include it and finish the scroll once it
+  // mounts (see the pending-jump effect below).
+  const jumpToUserMessage = (id: string) => {
+    isAtBottomRef.current = false;
+    setFollowOn(false);
+    const el = userMsgRefs.current.get(id);
+    if (el) { beginJumpScroll(el); return; }
+    const idx = messages.findIndex(m => m.id === id);
+    if (idx < 0) return;
+    pendingJumpRef.current = id;
+    // Leave a small buffer above the target so the sentinel isn't adjacent.
+    setRenderStart(prev => Math.min(prev, Math.max(0, idx - 5)));
+  };
+
+  // Finish a jump that was waiting on the target message to mount.
+  useEffect(() => {
+    const id = pendingJumpRef.current;
+    if (!id) return;
+    const el = userMsgRefs.current.get(id);
+    if (!el) return;
+    pendingJumpRef.current = null;
+    beginJumpScroll(el);
+  }, [renderStart]);
 
   const userMessages = useMemo(
     () => messages.filter(m => m.role === 'user'),
@@ -1689,11 +1741,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             <span className="pinned-prompt-text">{pinnedUserMessage.content}</span>
             <button
               className="pinned-prompt-jump"
-              onClick={() => {
-                isAtBottomRef.current = false;
-                const el = userMsgRefs.current.get(pinnedUserMessage.id);
-                el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              }}
+              onClick={() => jumpToUserMessage(pinnedUserMessage.id)}
               title="Jump to message"
             >
               <CornerLeftUp size={11} strokeWidth={2.5} />
