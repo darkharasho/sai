@@ -63,6 +63,11 @@ export const CARD_MD_STYLES = `
     border-top: 1px solid var(--border);
     margin: 12px 0;
   }
+  .card-md a {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+  .card-md a:hover { color: var(--accent-hover); }
   .card-md strong { color: var(--text); }
   .card-md blockquote {
     margin: 6px 0;

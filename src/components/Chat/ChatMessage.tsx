@@ -771,6 +771,7 @@ function ChatMessage({
       return (
         <a
           href={href}
+          style={{ color: 'var(--accent)', textDecoration: 'underline' }}
           onClick={(e) => {
             e.preventDefault();
             if (href?.startsWith('sai-file://') && onFileOpen) {

@@ -66,6 +66,8 @@
   margin: 4px 0;
 }
 .overlay-snippet pre code { background: none; padding: 0; }
+.overlay-snippet a { color: var(--accent, #d4a017); text-decoration: underline; }
+.overlay-snippet a:hover { color: var(--accent-hover, #f0b820); }
 
 /* Interactive mode (Ctrl+Shift+F9): accent edge; dragging is manual (IPC). */
 .overlay-interactive .overlay-card { border-color: var(--accent, #58a6ff); cursor: grab; }

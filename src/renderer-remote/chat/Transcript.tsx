@@ -21,7 +21,7 @@ const mdComponents = {
   ul: (props: any) => <ul style={{ margin: '4px 0 8px 18px', padding: 0 }} {...props} />,
   ol: (props: any) => <ol style={{ margin: '4px 0 8px 22px', padding: 0 }} {...props} />,
   li: (props: any) => <li style={{ marginBottom: 2 }} {...props} />,
-  a: (props: any) => <a style={{ color: 'var(--blue)', textDecoration: 'underline' }} target="_blank" rel="noreferrer" {...props} />,
+  a: (props: any) => <a style={{ color: 'var(--accent)', textDecoration: 'underline' }} target="_blank" rel="noreferrer" {...props} />,
   code: ({ inline, ...props }: any) => inline
     ? <code style={{
         fontFamily: '"Geist Mono", ui-monospace, monospace',
