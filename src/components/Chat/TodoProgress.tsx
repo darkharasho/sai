@@ -31,6 +31,8 @@ export function findLatestTodos(messages: ChatMessage[]): Todo[] | null {
   // call TodoWrite at all in the follow-up turn). Scoping to the current turn
   // hid those plans entirely. Fully-completed prior plans are still hidden by
   // the `completed === total` visibility guard at render time.
+  let todoWriteIdx = -1;
+  let todoWritePlan: Todo[] | null = null;
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m.role !== 'assistant' || !m.toolCalls?.length) continue;
@@ -47,21 +49,40 @@ export function findLatestTodos(messages: ChatMessage[]): Todo[] | null {
         }
       } catch { /* ignore malformed input */ }
     }
-    if (best) return best;
+    if (best) { todoWriteIdx = i; todoWritePlan = best; break; }
   }
 
   // New: TaskCreate / TaskUpdate are atomic per-task calls. Replay them via the
   // shared registry so updates in a later turn still find tasks created earlier.
-  const registry = buildTaskRegistry(messages);
-  if (registry.size > 0) {
-    return Array.from(registry.values()).map((t) => ({
+  // Track the latest message index carrying any Task* call so we can compare
+  // recency against the legacy TodoWrite plan below.
+  let taskIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== 'assistant' || !m.toolCalls?.length) continue;
+    if (m.toolCalls.some((tc) => tc.name === 'TaskCreate' || tc.name === 'TaskUpdate')) {
+      taskIdx = i;
+      break;
+    }
+  }
+
+  const registry = taskIdx !== -1 ? buildTaskRegistry(messages) : null;
+  const registryTodos = registry && registry.size > 0
+    ? Array.from(registry.values()).map((t) => ({
       id: t.id,
       content: t.subject,
       activeForm: t.activeForm,
       status: t.status,
-    }));
-  }
-  return null;
+    }))
+    : null;
+
+  // Prefer whichever family has the MORE RECENT activity. A stale/older
+  // TodoWrite plan (from a prior turn, restored history, or a subagent) must
+  // not shadow a live Task* plan — that shadowing was why the ring vanished
+  // under the input. Ties resolve to the Task* registry (the modern path).
+  if (registryTodos && taskIdx >= todoWriteIdx) return registryTodos;
+  if (todoWritePlan) return todoWritePlan;
+  return registryTodos;
 }
 
 const RADIUS = 8;
@@ -103,49 +124,7 @@ export default function TodoProgress({ messages, isStreaming }: TodoProgressProp
     setOpen(false);
   }, []);
 
-  const hidden = !isStreaming || !todos || total === 0 || dismissed || completed === total;
-
-  // Diagnostic: when the ring is hidden during what looks like a task turn,
-  // log WHY plus the task-tool names actually present in the messages. This is
-  // the forward-detection hook for "tasks not showing below the input" — it
-  // tells us whether the tool calls never reached the messages (upstream
-  // storage/forwarding), the parser found nothing, or a gate (streaming /
-  // dismissed / all-completed) suppressed it. Deduped by signature so it logs
-  // once per distinct state, not every render.
-  const taskToolNames = useMemo(() => {
-    const names = new Set<string>();
-    for (const m of messages) {
-      if (m.role !== 'assistant' || !m.toolCalls) continue;
-      for (const tc of m.toolCalls) {
-        if (/task|todo/i.test(tc.name)) names.add(tc.name);
-      }
-    }
-    return names;
-  }, [messages]);
-  const lastDiagRef = useRef<string>('');
-  useEffect(() => {
-    if (!hidden) { lastDiagRef.current = ''; return; }
-    // Only interesting if a task turn seems to be in play.
-    if (!isStreaming && taskToolNames.size === 0) return;
-    const reason = !isStreaming ? 'not-streaming'
-      : !todos ? 'no-todos-parsed'
-      : total === 0 ? 'empty-list'
-      : dismissed ? 'dismissed'
-      : completed === total ? 'all-completed'
-      : 'unknown';
-    const tools = Array.from(taskToolNames).sort();
-    const sig = `${reason}|stream=${isStreaming}|total=${total}|done=${completed}|tools=${tools.join(',')}`;
-    if (sig === lastDiagRef.current) return;
-    lastDiagRef.current = sig;
-    // eslint-disable-next-line no-console
-    console.debug(
-      `[sai] TodoProgress hidden — reason=${reason}; isStreaming=${isStreaming} `
-      + `todos=${todos ? total : 'null'} completed=${completed} dismissed=${dismissed}; `
-      + `task/todo tool calls in messages=[${tools.join(', ') || 'none'}]`,
-    );
-  }, [hidden, isStreaming, todos, total, completed, dismissed, taskToolNames]);
-
-  if (hidden) return null;
+  if (!isStreaming || !todos || total === 0 || dismissed || completed === total) return null;
 
   const inProgress = todos.find((t) => t.status === 'in_progress');
   const activeLabel = inProgress ? (inProgress.activeForm || inProgress.content) : 'Planning…';

@@ -190,6 +190,56 @@ describe('TodoProgress (ring + popover)', () => {
     expect(getByText('1/3')).toBeTruthy();
   });
 
+  it('does not let an older completed TodoWrite shadow a live TaskCreate plan', () => {
+    // Root cause of "task list stops showing under the input": a TodoWrite
+    // call earlier in the conversation (e.g. a prior turn, a restored history,
+    // or a subagent) used to win unconditionally over the newer Task* registry.
+    // When that legacy plan was fully completed the ring hid via
+    // completed===total, even though a fresh TaskCreate plan was active.
+    const messages = [
+      { id: 'u1', role: 'user' as const, content: 'do X', timestamp: 0 },
+      { ...buildTodosMsg([
+        { content: 'a', status: 'completed' },
+        { content: 'b', status: 'completed' },
+      ]), id: 'a1', timestamp: 1 },
+      { id: 'u2', role: 'user' as const, content: 'now do Y', timestamp: 2 },
+      {
+        id: 'a2', role: 'assistant' as const, content: '', timestamp: 3,
+        toolCalls: [
+          { id: 'c1', name: 'TaskCreate', input: JSON.stringify({ subject: 'Y-1' }), output: 'Task #1 created successfully: Y-1' },
+          { id: 'c2', name: 'TaskCreate', input: JSON.stringify({ subject: 'Y-2' }), output: 'Task #2 created successfully: Y-2' },
+          { id: 'u3', name: 'TaskUpdate', input: JSON.stringify({ taskId: '1', status: 'in_progress' }), output: 'ok' },
+        ],
+      },
+    ];
+    const { container, getByText } = render(<TodoProgress messages={messages as any} isStreaming={true} />);
+    expect(container.querySelector('[data-testid="todo-ring"]')).toBeTruthy();
+    expect(getByText('0/2')).toBeTruthy();
+  });
+
+  it('still prefers a newer TodoWrite over an older TaskCreate plan', () => {
+    // Symmetric guard: recency wins both ways. An older Task* plan must not
+    // shadow a newer TodoWrite plan either.
+    const messages = [
+      { id: 'u1', role: 'user' as const, content: 'go', timestamp: 0 },
+      {
+        id: 'a1', role: 'assistant' as const, content: '', timestamp: 1,
+        toolCalls: [
+          { id: 'c1', name: 'TaskCreate', input: JSON.stringify({ subject: 'old' }), output: 'Task #1 created successfully: old' },
+          { id: 'u2', name: 'TaskUpdate', input: JSON.stringify({ taskId: '1', status: 'completed' }), output: 'ok' },
+        ],
+      },
+      { id: 'u2', role: 'user' as const, content: 'now plan via todowrite', timestamp: 2 },
+      { ...buildTodosMsg([
+        { content: 'P', status: 'in_progress' },
+        { content: 'Q', status: 'pending' },
+        { content: 'R', status: 'pending' },
+      ]), id: 'a2', timestamp: 3 },
+    ];
+    const { getByText } = render(<TodoProgress messages={messages as any} isStreaming={true} />);
+    expect(getByText('0/3')).toBeTruthy();
+  });
+
   it('shows a priority badge on a popover item with priority', () => {
     const messages = [{
       id: 'a1',
