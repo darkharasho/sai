@@ -10,6 +10,7 @@ import { getOverrides, setOverrides as persistOverrides, clearOverrides, type Se
 import type { WorkspaceStatusStore } from '../lib/workspaceStatusStore';
 import type { GithubWatcherStore } from './githubWatcherStore';
 import { loadTranscript, saveTranscript } from '../lib/transcriptCache';
+import { buildPendingQuestionAnswerFromTranscript } from '../../lib/pendingQuestionAnswer';
 
 export interface ChatActive { projectPath: string; scope: string; sessionId: string }
 
@@ -319,6 +320,15 @@ export default function Chat({ client, statusStore, watcherStore, active, onActi
 
   const onSend = (text: string, images?: string[]) => {
     if (!active) return;
+    // Type-to-answer: a message typed while an AskUserQuestion card is awaiting
+    // an answer is the user's free-text ("Other") answer, not a new turn.
+    if (awaitingQuestion) {
+      const pending = buildPendingQuestionAnswerFromTranscript(messages, text);
+      if (pending) {
+        onAnswerQuestion(pending.toolUseId, pending.answers);
+        return;
+      }
+    }
     setMessages((arr) => [...arr, { id: `u-opt-${Date.now()}`, role: 'user', text }]);
     setLocalStreaming(true);
     client.sendPrompt({
@@ -435,6 +445,7 @@ export default function Chat({ client, statusStore, watcherStore, active, onActi
       <div style={{ flexShrink: 0 }}>
         <Composer
           streaming={streaming}
+          awaitingQuestion={awaitingQuestion}
           onSend={onSend}
           onInterrupt={onInterrupt}
           overrides={overrides}

@@ -5,6 +5,9 @@ import type { SessionOverrides } from '../lib/overrides';
 
 interface Props {
   streaming: boolean;
+  /** An AskUserQuestion card is awaiting an answer; a typed message is routed
+   *  as the free-text answer rather than a new turn. */
+  awaitingQuestion?: boolean;
   onSend: (text: string, images?: string[]) => void;
   onInterrupt: () => void;
   overrides: SessionOverrides;
@@ -45,7 +48,7 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-export default function Composer({ streaming, onSend, onInterrupt, overrides, onOverridesChange }: Props) {
+export default function Composer({ streaming, awaitingQuestion, onSend, onInterrupt, overrides, onOverridesChange }: Props) {
   const [text, setText] = useState('');
   const [sheet, setSheet] = useState<Sheet>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -244,7 +247,7 @@ export default function Composer({ streaming, onSend, onInterrupt, overrides, on
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKey}
         onPaste={onPaste}
-        placeholder={streaming ? 'Responding…' : 'Message'}
+        placeholder={awaitingQuestion ? 'Type to answer, or tap an option' : streaming ? 'Responding…' : 'Message'}
         rows={1}
         style={{
           width: '100%',

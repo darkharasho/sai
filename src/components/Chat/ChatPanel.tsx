@@ -8,6 +8,7 @@ import MotionPresence from './MotionPresence';
 import { SPRING, DISTANCE, EASING, useReducedMotionTransition } from './motion';
 import { useSaiAnimationPref } from './useSaiAnimationPref';
 import { parseToolResultBlocks } from '../../lib/toolResultContent';
+import { buildPendingQuestionAnswer } from '../../lib/pendingQuestionAnswer';
 
 // Projects whose brainstorm seed has already been consumed (or attempted) in
 // this renderer process. The seed is one-shot, but the chat start-effect can
@@ -1501,6 +1502,19 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         console.error('onInterceptSend error', err);
       }
     }
+    // Type-to-answer: when a Claude AskUserQuestion card is awaiting an answer,
+    // a normal typed message is the user's free-text ("Other") answer to the
+    // pending question(s), not a new turn. Route it to the answer channel and
+    // skip provider dispatch.
+    if (aiProvider === 'claude' && awaitingQuestion) {
+      const pending = buildPendingQuestionAnswer(messagesRef.current, text);
+      if (pending) {
+        handleAnswerQuestion(pending.toolUseId, pending.answers);
+        pendingComposerRectRef.current = null;
+        return;
+      }
+    }
+
     if (text === '/clear') {
       setMessages([]);
       setRenderStart(0);
@@ -1890,6 +1904,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             onDeny={handleDeny}
             onAlwaysAllow={handleAlwaysAllow}
             isStreaming={streamingForDisplay}
+            awaitingQuestion={awaitingQuestion}
             messages={messages}
             onStop={() => aiProvider === 'gemini' ? (window.sai as any).geminiStop(projectPath) : aiProvider === 'codex' ? window.sai.codexStop(projectPath) : window.sai.claudeStop?.(projectPath, claudeScope)}
             permissionMode={permissionMode}

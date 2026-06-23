@@ -61,7 +61,15 @@ pending question(s) instead of starting a new turn.
 
 3. **Affordance:** when `awaitingQuestion` is true (Claude), the composer
    placeholder changes to hint that typing will answer the question, e.g.
-   *"Type to answer the question, or use the buttons above…"*.
+   *"Type to answer, or use the buttons above…"*.
+
+4. **Remote/mobile chat** (`src/renderer-remote`): the same behavior, against the
+   transcript message model where each tool is its own message and `toolInput`
+   is already an object. A sibling helper
+   `buildPendingQuestionAnswerFromTranscript(messages, text)` shares the
+   answer-building core; `Chat.onSend` intercepts when `awaitingQuestion`, and
+   the `Composer` placeholder gets the same hint ("Type to answer, or tap an
+   option").
 
 ## Testing
 
@@ -79,3 +87,8 @@ Unit tests for `buildPendingQuestionAnswer`:
 
 - Codex/Gemini question flows (no equivalent answer channel today).
 - Changing the card UI itself or the backend answer injection.
+
+## Implementation note
+
+Both the desktop and remote/mobile paths are implemented. Codex/Gemini remain
+out of scope (no answer channel).
