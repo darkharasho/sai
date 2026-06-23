@@ -1039,7 +1039,7 @@ function createWindow() {
   // so the agent can SEE a real multi-file render. Returns base64 PNG or null.
   ipcMain.handle('render:captureFile', async (_event, args: { cwd?: string; path?: string; html?: string; baseDir?: string; width?: number; height?: number }) => {
     if (!args || typeof args.cwd !== 'string' || !args.cwd) return null;
-    const target = prepareRenderTarget({ cwd: args.cwd, path: args.path, html: args.html, baseDir: args.baseDir });
+    const target = prepareRenderTarget({ cwd: args.cwd, path: args.path, html: args.html, baseDir: args.baseDir, allowedRoots: [app.getPath('temp')] });
     if (!target.ok) return null;
     const token = mintRenderToken(renderProtocolStore, { root: target.root, inlineHtml: target.inlineHtml });
     const url = `sai-render://${token}/${encodeURIComponent(target.entry)}`;
@@ -1133,7 +1133,7 @@ function createWindow() {
       if (!args || typeof args.cwd !== 'string' || !args.cwd) {
         return { ok: false, error: 'missing cwd' };
       }
-      const target = prepareRenderTarget(args);
+      const target = prepareRenderTarget({ ...args, allowedRoots: [app.getPath('temp')] });
       if (!target.ok) return { ok: false, error: target.error };
       const token = mintRenderToken(renderProtocolStore, {
         root: target.root,
@@ -1153,7 +1153,7 @@ function createWindow() {
   ipcMain.handle('render:openInBrowser', async (_event, arg: string | { cwd: string; path: string }) => {
     try {
       if (arg && typeof arg === 'object' && typeof arg.path === 'string') {
-        const target = prepareRenderTarget({ cwd: arg.cwd, path: arg.path });
+        const target = prepareRenderTarget({ cwd: arg.cwd, path: arg.path, allowedRoots: [app.getPath('temp')] });
         if (!target.ok) return false;
         const file = path.join(target.root, target.entry);
         await shell.openExternal(pathToFileURL(file).toString());

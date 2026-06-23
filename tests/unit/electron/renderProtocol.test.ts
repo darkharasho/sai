@@ -141,6 +141,22 @@ describe('prepareRenderTarget', () => {
     fs.rmSync(outside, { recursive: true, force: true });
   });
 
+  it('accepts an absolute path inside an extra allowedRoot', () => {
+    const extra = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sai-extra-')));
+    const abs = path.join(extra, 'axp_pick.html');
+    fs.writeFileSync(abs, '<p>pick</p>');
+    const t = prepareRenderTarget({ cwd: root, path: abs, allowedRoots: [extra] });
+    expect(t.ok && t.root).toBe(extra);
+    expect(t.ok && t.entry).toBe('axp_pick.html');
+    fs.rmSync(extra, { recursive: true, force: true });
+  });
+
+  it('still rejects a path outside both cwd and allowedRoots', () => {
+    const extra = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sai-extra2-')));
+    expect(prepareRenderTarget({ cwd: root, path: '/etc/passwd', allowedRoots: [extra] }).ok).toBe(false);
+    fs.rmSync(extra, { recursive: true, force: true });
+  });
+
   it('injects a <base> into inline html so relative assets resolve', () => {
     const t = prepareRenderTarget({ cwd: root, html: '<link href="app.css">', baseDir: 'assets' });
     expect(t.ok && t.inlineHtml).toContain('<base href="sai-render-base/">');

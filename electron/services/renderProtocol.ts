@@ -96,7 +96,7 @@ export function resolveRenderAsset(
     : rel;
   if (path.isAbsolute(stripped)) return { ok: false, status: 403 };
 
-  const real = containedRealPath(entry.root, stripped || 'index.html');
+  const real = containedRealPath([entry.root], stripped || 'index.html');
   if (!real) return { ok: false, status: 404 };
   return { ok: true, filePath: real };
 }
@@ -133,34 +133,40 @@ export type PrepareResult =
 // pointing back through the protocol (resolved against the token root).
 const INLINE_BASE = '<base href="sai-render-base/">';
 
-// Resolve `target` against `root` and return the realpath IFF it stays inside
-// the realpath'd root. Realpathing both ends means an in-tree symlink that
-// points outside cannot escape (its real target fails the prefix check), and a
-// symlinked workspace (e.g. /home -> /var/home) is matched by real target, not
-// by the literal string the caller supplied. Absolute targets are allowed as
-// long as they resolve inside the root; only the containment check gates access,
-// not whether the caller wrote a relative or absolute path. null = blocked or
-// missing.
-function containedRealPath(root: string, target: string): string | null {
-  let realRoot: string;
-  try {
-    realRoot = fs.realpathSync(root);
-  } catch {
-    return null;
+// Resolve `target` against the FIRST root and return the realpath IFF it stays
+// inside any of the realpath'd `roots`. Realpathing both ends means an in-tree
+// symlink that points outside cannot escape (its real target fails the prefix
+// check), and a symlinked workspace (e.g. /home -> /var/home) is matched by real
+// target, not by the literal string the caller supplied. Absolute targets are
+// allowed as long as they resolve inside one of the roots; only the containment
+// check gates access, not whether the caller wrote a relative or absolute path.
+// Extra roots (e.g. the OS temp dir) widen what's reachable without dropping the
+// traversal protection — a path still has to land inside an allowed root.
+// null = blocked or missing.
+function containedRealPath(roots: string[], target: string): string | null {
+  const realRoots: string[] = [];
+  for (const root of roots) {
+    try {
+      realRoots.push(fs.realpathSync(root));
+    } catch {
+      // A missing/unreadable root just can't grant access; skip it.
+    }
   }
-  // path.resolve ignores realRoot when target is already absolute, so absolute
+  if (realRoots.length === 0) return null;
+  // path.resolve ignores the base when target is already absolute, so absolute
   // targets are resolved on their own and still subjected to the prefix check.
-  const resolved = path.resolve(realRoot, target);
+  // Relative targets resolve against the first (primary) root: the workspace.
+  const resolved = path.resolve(realRoots[0], target);
   let realResolved: string;
   try {
     realResolved = fs.realpathSync(resolved);
   } catch {
     return null;
   }
-  if (realResolved !== realRoot && !realResolved.startsWith(realRoot + path.sep)) {
-    return null;
-  }
-  return realResolved;
+  const contained = realRoots.some(
+    (r) => realResolved === r || realResolved.startsWith(r + path.sep),
+  );
+  return contained ? realResolved : null;
 }
 
 export function prepareRenderTarget(opts: {
@@ -168,10 +174,15 @@ export function prepareRenderTarget(opts: {
   path?: string;
   html?: string;
   baseDir?: string;
+  // Additional roots a target may resolve into, beyond the workspace cwd.
+  // Real render calls pass the OS temp dir here so scratch files (e.g.
+  // /tmp/foo.html) render; the strict default keeps unit tests sandboxed.
+  allowedRoots?: string[];
 }): PrepareResult {
+  const roots = [opts.cwd, ...(opts.allowedRoots ?? [])];
   // path wins over html.
   if (opts.path) {
-    const abs = containedRealPath(opts.cwd, opts.path);
+    const abs = containedRealPath(roots, opts.path);
     if (!abs) return { ok: false, error: `path escapes workspace: ${opts.path}` };
     let stat: fs.Stats;
     try {
@@ -187,7 +198,7 @@ export function prepareRenderTarget(opts: {
 
   if (typeof opts.html === 'string') {
     const baseRel = opts.baseDir ?? '.';
-    const abs = containedRealPath(opts.cwd, baseRel);
+    const abs = containedRealPath(roots, baseRel);
     if (!abs) return { ok: false, error: `baseDir escapes workspace: ${opts.baseDir}` };
     const withBase = injectBase(opts.html);
     return { ok: true, root: abs, entry: INLINE_ENTRY, inlineHtml: withBase };
