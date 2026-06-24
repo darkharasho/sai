@@ -340,17 +340,41 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // Always focus textarea on mount (workspace switch remounts via key change)
+  // Type-to-focus: rather than grabbing focus automatically, only pull focus
+  // into the chat input when the user actually starts typing. A plain printable
+  // keystroke (no Ctrl/Meta/Alt — so keyboard shortcuts are excluded) made while
+  // no other editable element is focused focuses the textarea and lets the
+  // character fall through into it.
   useEffect(() => {
-    requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (!el) return;
-      el.focus();
-      // Place caret at the end of restored draft text so typing continues there.
-      const len = el.value.length;
-      try { el.setSelectionRange(len, len); } catch { /* ignore */ }
-    });
-  }, []);
+    const onKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (disabled) return;
+      // Keybindings all use a modifier, so requiring none excludes shortcuts.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      // Printable characters produce a single-character key ("a", "1", " ", …);
+      // this skips Enter/Tab/Backspace/arrows/etc.
+      if (e.key.length !== 1) return;
+      const ta = textareaRef.current;
+      if (!ta || ta === document.activeElement) return;
+      const active = document.activeElement as HTMLElement | null;
+      if (active && active !== document.body) {
+        const tag = active.tagName;
+        const editable = active.isContentEditable
+          || tag === 'INPUT'
+          || tag === 'TEXTAREA'
+          || tag === 'SELECT'
+          || !!active.closest('.monaco-editor')
+          || !!active.closest('.xterm');
+        if (editable) return;
+      }
+      // Focus and place the caret at the end so the in-flight keystroke (and any
+      // restored draft text) stay in order.
+      ta.focus();
+      const len = ta.value.length;
+      try { ta.setSelectionRange(len, len); } catch { /* ignore */ }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [disabled]);
 
   // Persist draft text and attached context to the parent so they survive
   // workspace switches and session-key remounts.
@@ -360,39 +384,6 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
   useEffect(() => {
     onContextItemsChange?.(contextItems);
   }, [contextItems, onContextItemsChange]);
-
-  // Re-focus when input becomes enabled (e.g. after streaming ends)
-  useEffect(() => {
-    if (!disabled) {
-      const id = setTimeout(() => textareaRef.current?.focus(), 50);
-      return () => clearTimeout(id);
-    }
-  }, [disabled]);
-
-  // Refocus chat input when the window regains focus (alt-tab back into SAI),
-  // unless the user is actively in another text input/editor.
-  useEffect(() => {
-    const onWindowFocus = () => {
-      const active = document.activeElement as HTMLElement | null;
-      if (active && active !== document.body && active !== textareaRef.current) {
-        // Skip if user is in another non-terminal text input/editor
-        if (active.closest('.xterm')) {
-          // fall through and steal focus from terminal
-        } else {
-          const tag = active.tagName;
-          const editable = active.isContentEditable
-            || tag === 'INPUT'
-            || tag === 'TEXTAREA'
-            || tag === 'SELECT'
-            || !!active.closest('.monaco-editor');
-          if (editable) return;
-        }
-      }
-      requestAnimationFrame(() => textareaRef.current?.focus());
-    };
-    window.addEventListener('focus', onWindowFocus);
-    return () => window.removeEventListener('focus', onWindowFocus);
-  }, []);
 
   // Autocomplete
   useEffect(() => {
