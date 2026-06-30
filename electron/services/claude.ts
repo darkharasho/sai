@@ -22,6 +22,7 @@ import { clamp, type PermMode } from './remote/clamp';
 import { exitTerminalEvents } from './claudeExit';
 import { imageReadResult } from './imageFiles';
 import type { StartArgs, CompactArgs } from './claudeBackend/types';
+import { getClaudeBackend } from './claudeBackend';
 
 const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
 
@@ -1502,37 +1503,37 @@ export function registerClaudeHandlers(win: BrowserWindow) {
   mainWin = win;
   // claude:models — which models this account/org can actually use (org allow-lists
   // and 1M gating vary), derived from the CLI cache rather than hardcoded.
-  ipcMain.handle('claude:models', () => getAvailableClaudeModels());
+  ipcMain.handle('claude:models', () => getClaudeBackend().getModels());
   // claude:start — no longer spawns a probe. Just signals ready.
   // Sends cached slash commands immediately so they're available before the process init.
   ipcMain.handle('claude:start', (_event, projectPath: string, scope?: string, kind?: 'chat' | 'task' | 'orchestrator', orchestratorContext?: Partial<OrchestratorPromptContext> | null, scopeCwd?: string, metaPreamble?: string) =>
-    startImpl({ projectPath, scope, kind, orchestratorContext: orchestratorContext as Record<string, unknown> | null, scopeCwd, metaPreamble })
+    getClaudeBackend().start({ projectPath, scope, kind, orchestratorContext: orchestratorContext as Record<string, unknown> | null, scopeCwd, metaPreamble })
   );
 
   // claude:stop — kill the persistent process for a scope
   ipcMain.on('claude:stop', (_event, projectPath: string, scope?: string) => {
-    interruptImpl(projectPath, scope);
+    getClaudeBackend().interrupt(projectPath, scope);
   });
 
   // claude:setSessionId — switch to a different Claude session (for history resumption)
   ipcMain.on('claude:setSessionId', (_event, projectPath: string, sessionId: string | undefined, scope?: string) => {
-    setSessionIdImpl(projectPath, sessionId, scope);
+    getClaudeBackend().setSessionId(projectPath, sessionId, scope);
   });
 
   // claude:send — write message to persistent process stdin
-  ipcMain.on('claude:send', (_event, projectPath: string, message: string, imagePaths?: string[], permMode?: string, effort?: string, model?: string, scope?: string) => {
-    sendImpl(projectPath, message, imagePaths, permMode, effort, model, scope);
-  });
+  ipcMain.on('claude:send', (_event, projectPath: string, message: string, imagePaths?: string[], permMode?: string, effort?: string, model?: string, scope?: string) =>
+    getClaudeBackend().send({ projectPath, message, imagePaths, permMode, effort, model, scope })
+  );
 
   // claude:compact — silently write /compact to stdin without starting a turn.
   ipcMain.on('claude:compact', (_event, projectPath: string, permMode?: string, effort?: string, model?: string, scope?: string) =>
-    compactImpl({ projectPath, permMode, effort, model, scope })
+    getClaudeBackend().compact({ projectPath, permMode, effort, model, scope })
   );
 
   // claude:approve — user approved or denied a tool that was denied by the CLI
-  ipcMain.handle('claude:approve', (_event, projectPath: string, toolUseId: string, approved: boolean, modifiedCommand?: string, scope?: string) => {
-    return approveImpl(projectPath, toolUseId, approved, modifiedCommand, scope);
-  });
+  ipcMain.handle('claude:approve', (_event, projectPath: string, toolUseId: string, approved: boolean, modifiedCommand?: string, scope?: string) =>
+    getClaudeBackend().approve({ projectPath, toolUseId, approved, modifiedCommand, scope })
+  );
 
   // claude:answer-question — user answered an AskUserQuestion tool call in the UI.
   // We send the user's answers back to the CLI as a follow-up user message so the
@@ -1541,25 +1542,31 @@ export function registerClaudeHandlers(win: BrowserWindow) {
   // We also emit `question_answered` so the renderer can paint the answered state
   // by merging answers into the tool call's input JSON.
   ipcMain.handle('claude:answer-question', (_event, projectPath: string, toolUseId: string, answers: Record<string, string | string[]>, scope?: string) =>
-    answerQuestionImpl(projectPath, toolUseId, answers, scope)
+    getClaudeBackend().answerQuestion({ projectPath, toolUseId, answers, scope })
   );
 
   // claude:answer-plan-review — user approved or rejected an ExitPlanMode tool call.
   // Same pattern as answer-question: send the decision as a follow-up user message.
   ipcMain.handle('claude:answer-plan-review', (_event, projectPath: string, toolUseId: string, approved: boolean, scope?: string) =>
-    answerPlanReviewImpl(projectPath, toolUseId, approved, scope)
+    getClaudeBackend().answerPlanReview({ projectPath, toolUseId, approved, scope })
   );
 
   // claude:alwaysAllow — add a tool pattern to the project's .claude/settings.local.json
-  ipcMain.handle('claude:alwaysAllow', (_event, projectPath: string, toolPattern: string) => alwaysAllowImpl(projectPath, toolPattern));
+  ipcMain.handle('claude:alwaysAllow', (_event, projectPath: string, toolPattern: string) =>
+    getClaudeBackend().alwaysAllow(projectPath, toolPattern)
+  );
 
   // claude:generateCommitMessage — always one-shot to avoid context token costs
   // Uses each AI provider's fast/cheap model for generation.
-  ipcMain.handle('claude:generateCommitMessage', (_event, cwd: string, aiProvider?: string) => generateCommitMessageImpl(cwd, aiProvider));
+  ipcMain.handle('claude:generateCommitMessage', (_event, cwd: string, aiProvider?: string) =>
+    getClaudeBackend().generateCommitMessage(cwd, aiProvider)
+  );
 
   // claude:generateTitle — one-shot lightweight title generation for chat sessions
   // Always uses the cheapest/fastest model per provider.
-  ipcMain.handle('claude:generateTitle', (_event, cwd: string, userMessage: string, aiProvider?: string) => generateTitleImpl(cwd, userMessage, aiProvider));
+  ipcMain.handle('claude:generateTitle', (_event, cwd: string, userMessage: string, aiProvider?: string) =>
+    getClaudeBackend().generateTitle(cwd, userMessage, aiProvider)
+  );
 
   // Idle-scope sweep: stop Claude scopes that have been inactive for >30 min
   if (idleSweepTimer) clearInterval(idleSweepTimer);
