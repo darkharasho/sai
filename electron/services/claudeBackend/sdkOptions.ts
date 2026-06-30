@@ -18,7 +18,8 @@ const VALID_EFFORT = new Set<string>(['low', 'medium', 'high', 'max']);
 /**
  * Pure function that maps SAI's per-scope config to the claude-agent-sdk
  * `Options` object. Mirrors the CHAT path of `buildArgs` in claude.ts, minus
- * MCP — no mcpServers / strictMcpConfig / tools keys are set here. `canUseTool`
+ * MCP — mcpServers is wired through when provided (for chat tools);
+ * strictMcpConfig / tools keys are not set. `canUseTool`
  * is passed through (set only for non-bypass) so SDK mode can prompt for tool
  * approvals; bypass never carries it.
  */

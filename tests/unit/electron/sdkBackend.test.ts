@@ -937,6 +937,10 @@ describe('SdkBackend', () => {
     expect(buildChatMcpServer).not.toHaveBeenCalled();
     expect(capturedOptions.mcpServers).toBeUndefined();
 
+    // Verify chat nudges are also absent for non-chat scope
+    const appended = (capturedOptions.systemPrompt && capturedOptions.systemPrompt.append) || '';
+    expect(appended).not.toContain('render_html');
+
     fakeQuery.close();
   });
 });

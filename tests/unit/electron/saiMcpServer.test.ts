@@ -15,6 +15,10 @@ describe('buildSaiChatMcpServer', () => {
   it('registers exactly the chat toolset (16 tools)', () => {
     const chatCount = toolsForToolset('chat').length;
     expect(chatCount).toBe(16);
+
+    // Verify the server actually registered 16 handlers
+    const server = buildSaiChatMcpServer({ workspace: '/ws', dispatch: async () => ({}) });
+    expect((server as any).__handlersForTest.size).toBe(16);
   });
 
   it('handler routes to dispatch with the bare tool name + workspace, wraps success', async () => {
