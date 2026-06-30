@@ -876,6 +876,50 @@ describe('Approval flow', () => {
     expect(lastDone!.turnSeq).toBe(lastStart!.turnSeq);
   });
 
+  it('regression: re-arms streaming when a turn resumes after a wait result (background task)', async () => {
+    // The CLI emits a `result` when it yields to wait on a background task/subagent,
+    // then RESTORES the same logical turn with more assistant output and no new send.
+    // claude.ts must re-emit streaming_start on the resumed output so the Stop button
+    // + thinking indicator come back, and the eventual final done must carry the
+    // re-armed turnSeq (else the renderer's stale-turn guard drops it).
+    const PROJECT_WAIT = '/wait/restore-project';
+    const ws = workspaceState.getOrCreate(PROJECT_WAIT);
+    const claude = ws.claudeScopes.get('chat')! as any;
+    claude.cwd = PROJECT_WAIT;
+    claude.turnSeq = 0;
+    claude.activeTurnSeq = 0;
+    mockIpcMain._emit('claude:send', PROJECT_WAIT, 'spawn a background agent', []);
+    await flushAsync();
+    const proc = getLatestProcess();
+
+    // First turn streams, then the CLI ends it (the WAIT result) while a bg task runs.
+    pushLines(
+      proc,
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'starting' }] } },
+      { type: 'result', duration_ms: 100, result: 'started', stop_reason: 'end_turn' },
+    );
+    await flushAsync();
+
+    const startsBefore = sentMessages(win).filter((m) => m.type === 'streaming_start').length;
+
+    // RESTORE: the background task finished and the turn resumes with more output.
+    pushLines(
+      proc,
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'resumed' }] } },
+      { type: 'result', duration_ms: 100, result: 'final', stop_reason: 'end_turn' },
+    );
+    await flushAsync();
+
+    const msgs = sentMessages(win);
+    const starts = msgs.filter((m) => m.type === 'streaming_start');
+    // A second streaming_start was emitted for the resumed turn.
+    expect(starts.length).toBe(startsBefore + 1);
+    // Final done carries the re-armed turnSeq so the renderer won't stale-drop it.
+    const lastStart = [...msgs].reverse().find((m) => m.type === 'streaming_start');
+    const lastDone = [...msgs].reverse().find((m) => m.type === 'done');
+    expect(lastDone!.turnSeq).toBe(lastStart!.turnSeq);
+  });
+
 
   it('does nothing when approve is called with no pending tool use', async () => {
     const { ws } = await startProcess();

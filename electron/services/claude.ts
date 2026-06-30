@@ -484,6 +484,22 @@ function ensureProcess(
           continue;
         }
 
+        // --- Resume-after-wait: the new CLI ends a turn (emits `result`) when it
+        // yields to wait on a background task/subagent, then RESTORES the same logical
+        // turn with more assistant output and no new user send. Without re-arming, the
+        // turn already looks ended (streaming=false), so the Stop button + thinking
+        // indicator stay gone while the response keeps going. Re-emit a turn boundary so
+        // they return; the resumed turn's own result/done closes it as usual.
+        // (suppressForward assistant frames already returned above, so this only fires
+        // on a genuine resume.) ---
+        if (msg.type === 'assistant' && !claude.streaming) {
+          claude.turnSeq++;
+          claude.busy = true;
+          claude.activeTurnSeq = claude.turnSeq;
+          claude.streaming = true;
+          emitStreamingStart(ws, claude, scope);
+        }
+
         // --- Track the latest tool_use from assistant messages ---
         let askUserQuestionId: string | null = null;
         let exitPlanModeId: string | null = null;
