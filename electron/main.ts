@@ -58,7 +58,8 @@ async function _resolveTailnetEndpointWithEnv() {
   });
 }
 import { registerTerminalHandlers, destroyAllTerminals } from './services/pty';
-import { registerClaudeHandlers, destroyClaude, setRemoteCeiling, setRemoteBus, sendImpl, setSessionIdImpl, approveImpl, interruptImpl, answerQuestionImpl, setSubprocessMemoryCapMB } from './services/claude';
+import { registerClaudeHandlers, destroyClaude, setRemoteCeiling, setRemoteBus, setSubprocessMemoryCapMB } from './services/claude';
+import { getClaudeBackend } from './services/claudeBackend';
 import { RendererProxy } from './services/remote/renderer-proxy';
 import { registerGitHandlers } from './services/git';
 import { registerFsHandlers } from './services/fs';
@@ -228,22 +229,25 @@ async function getOrInitRemote(): Promise<RemoteModule> {
           // workspace may not exist yet (first remote message after launch).
           if (args.sessionId) {
             getOrCreateWorkspace(args.projectPath);
-            setSessionIdImpl(args.projectPath, args.sessionId, args.scope);
+            getClaudeBackend().setSessionId(args.projectPath, args.sessionId, args.scope);
           }
-          sendImpl(
-            args.projectPath, args.text,
-            imagePaths.length > 0 ? imagePaths : undefined,
-            args.permMode, args.effort, args.model,
-            args.scope, 'remote',
-          );
+          getClaudeBackend().send({
+            projectPath: args.projectPath,
+            message: args.text,
+            imagePaths: imagePaths.length > 0 ? imagePaths : undefined,
+            permMode: args.permMode,
+            effort: args.effort,
+            model: args.model,
+            scope: args.scope,
+          });
         },
         resolveApproval: async (args) => {
-          await approveImpl(args.projectPath, args.toolUseId, args.decision === 'approve', args.modifiedCommand, args.scope);
+          await getClaudeBackend().approve({ projectPath: args.projectPath, toolUseId: args.toolUseId, approved: args.decision === 'approve', modifiedCommand: args.modifiedCommand, scope: args.scope });
         },
         answerQuestion: async (args) => {
-          await answerQuestionImpl(args.projectPath, args.toolUseId, args.answers, args.scope);
+          await getClaudeBackend().answerQuestion({ projectPath: args.projectPath, toolUseId: args.toolUseId, answers: args.answers, scope: args.scope });
         },
-        interruptTurn: (path, scope) => interruptImpl(path, scope),
+        interruptTurn: (path, scope) => getClaudeBackend().interrupt(path, scope),
         listSessions: async (path) => (await rendererProxy!.listSessions(path)) as any,
         loadHistory: async (sid) => (await rendererProxy!.loadHistory(sid)) as any,
         listWorkspaces: () => rendererProxy!.listWorkspaces(),
