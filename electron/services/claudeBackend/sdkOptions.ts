@@ -22,6 +22,12 @@ const VALID_EFFORT = new Set<string>(['low', 'medium', 'high', 'max']);
  * strictMcpConfig / tools keys are not set. `canUseTool`
  * is passed through (set only for non-bypass) so SDK mode can prompt for tool
  * approvals; bypass never carries it.
+ *
+ * Sets `settingSources: ['project', 'local']` to exclude the user-global
+ * `~/.claude/settings.json` layer (where a `defaultMode: bypassPermissions` or
+ * global allow-lists would otherwise auto-allow tools and disable SAI's
+ * `canUseTool` approval flow). Project/local settings and the global CLAUDE.md
+ * context still load via the system-prompt preset.
  */
 export function buildSdkOptions(input: SdkOptionInputs): Options {
   const {
@@ -52,6 +58,7 @@ export function buildSdkOptions(input: SdkOptionInputs): Options {
     cwd,
     includePartialMessages: true,
     systemPrompt,
+    settingSources: ['project', 'local'],
   };
 
   if (effort && VALID_EFFORT.has(effort)) {

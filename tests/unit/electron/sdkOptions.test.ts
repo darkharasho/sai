@@ -128,4 +128,9 @@ describe('buildSdkOptions', () => {
     const opts = buildSdkOptions({ kind: 'chat', cwd: '/ws', mcpServers: {} });
     expect(opts.mcpServers).toBeUndefined();
   });
+
+  it('sets settingSources to [project, local] (excludes user-global bypass)', () => {
+    const opts = buildSdkOptions({ kind: 'chat', cwd: '/ws' });
+    expect(opts.settingSources).toEqual(['project', 'local']);
+  });
 });
