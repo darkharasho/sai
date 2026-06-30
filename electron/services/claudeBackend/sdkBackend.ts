@@ -2,16 +2,16 @@
  * sdkBackend.ts — SdkBackend: a ClaudeBackend that drives @anthropic-ai/claude-agent-sdk
  * with one persistent `query()` per scope (projectPath + scope).
  *
- * Phase 1: core chat only. Tool-use approval, question answering, etc. are
- * still delegated to the existing claude.ts impls (same as CliBackend).
+ * Handles core chat (Phase 1), tool approvals via canUseTool, and the
+ * AskUserQuestion / ExitPlanMode flows via tool-in-stream detection + answer
+ * injection (Phase 2). Only `alwaysAllow` and the one-shot title/commit/model
+ * helpers still delegate to the existing claude.ts impls.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import type { query as QueryFn, SDKUserMessage, PermissionResult } from '@anthropic-ai/claude-agent-sdk';
 import {
-  answerQuestionImpl,
-  answerPlanReviewImpl,
   alwaysAllowImpl,
   generateCommitMessageImpl,
   generateTitleImpl,
