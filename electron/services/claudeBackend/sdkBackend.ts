@@ -17,6 +17,7 @@ import {
   generateCommitMessageImpl,
   generateTitleImpl,
   getAvailableClaudeModels,
+  emitChatMessage,
 } from '../claude';
 import { buildSdkOptions } from './sdkOptions';
 import { mapSdkMessage, type MapperState } from './sdkMessageMap';
@@ -128,31 +129,46 @@ export class SdkBackend implements ClaudeBackend {
     const { projectPath, message, scope, permMode, effort, model } = args;
     const scopeKey = toScopeKey(projectPath, scope);
 
-    // Ensure a session exists for this scope
-    let session = this.sessions.get(scopeKey);
-    if (!session) {
-      session = this._createSession(scopeKey, projectPath, scope, { permMode, effort, model });
+    try {
+      // Ensure a session exists for this scope
+      let session = this.sessions.get(scopeKey);
+      if (!session) {
+        session = this._createSession(scopeKey, projectPath, scope, { permMode, effort, model });
+      }
+
+      // Bump turn counter
+      session.turnSeq += 1;
+      session.activeTurnSeq = session.turnSeq;
+      session.mapperState = { ...session.mapperState, streaming: true };
+
+      // Emit streaming_start for this user turn
+      this._emit({
+        type: 'streaming_start',
+        projectPath,
+        scope: scope ?? 'chat',
+        turnSeq: session.turnSeq,
+      });
+
+      // Push the user message into the input channel
+      session.pushInput({
+        type: 'user',
+        message: { role: 'user', content: message },
+        parent_tool_use_id: null,
+      });
+    } catch (err) {
+      // Surface SDK/session-creation failures to the chat instead of silently
+      // producing "no thinking, no response" (e.g. the SDK runtime failing to
+      // load or spawn). Without this, a synchronous throw from queryFn() in
+      // _createSession leaves the renderer with nothing.
+      const text = err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err);
+      // eslint-disable-next-line no-console
+      console.error('[SdkBackend.send] failed:', text);
+      this.sessions.delete(scopeKey);
+      const cur = this.sessions.get(scopeKey);
+      const turnSeq = cur?.activeTurnSeq ?? 0;
+      this._emit({ type: 'error', text: `SDK backend error: ${text}`, projectPath, scope: scope ?? 'chat' });
+      this._emit({ type: 'done', projectPath, scope: scope ?? 'chat', turnSeq });
     }
-
-    // Bump turn counter
-    session.turnSeq += 1;
-    session.activeTurnSeq = session.turnSeq;
-    session.mapperState = { ...session.mapperState, streaming: true };
-
-    // Emit streaming_start for this user turn
-    this._emit({
-      type: 'streaming_start',
-      projectPath,
-      scope: scope ?? 'chat',
-      turnSeq: session.turnSeq,
-    });
-
-    // Push the user message into the input channel
-    session.pushInput({
-      type: 'user',
-      message: { role: 'user', content: message },
-      parent_tool_use_id: null,
-    });
   }
 
   // ─── interrupt ─────────────────────────────────────────────────────────────
@@ -366,20 +382,11 @@ function toScopeKey(projectPath: string, scope?: string): string {
 }
 
 /**
- * Default emit: sends to the main window via IPC (mirroring emitChatMessage in claude.ts).
- * Imported lazily to avoid circular deps and electron bootstrap in tests.
+ * Default emit: delegates to claude.ts's emitChatMessage, which targets the
+ * REGISTERED main window (mainWin) + the remote bus — the same proven path
+ * CliBackend uses. (A previous version sent to BrowserWindow.getAllWindows()[0],
+ * which is the wrong window when more than one window exists.)
  */
 function defaultEmit(payload: Record<string, unknown>): void {
-  // Lazy: resolve the main window at call time (it may not exist during module load)
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { BrowserWindow } = require('electron') as typeof import('electron');
-    const wins = BrowserWindow.getAllWindows();
-    const win = wins[0];
-    if (win && !win.isDestroyed()) {
-      win.webContents.send('claude:message', payload);
-    }
-  } catch {
-    // Not running in Electron (tests, CLI); ignore
-  }
+  emitChatMessage(payload);
 }

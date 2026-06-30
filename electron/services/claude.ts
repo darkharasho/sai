@@ -84,7 +84,7 @@ function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
   }
 }
 
-function emitChatMessage(msg: Record<string, unknown>): void {
+export function emitChatMessage(msg: Record<string, unknown>): void {
   if (mainWin) safeSend(mainWin, 'claude:message', msg);
   const topic = `chat:${msg.projectPath}:${msg.scope ?? 'chat'}`;
   remoteBus?.publish(topic, msg);
