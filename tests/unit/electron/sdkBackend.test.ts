@@ -963,4 +963,24 @@ describe('SdkBackend', () => {
     expect(userMsg?.message?.content).toBe('[Attached image: /tmp/a.png]\n[Attached image: /tmp/b.png]\n\nlook');
     fakeQuery.close();
   });
+
+  it('(20) compact emits streaming_start and pushes /compact', async () => {
+    const pushed: any[] = [];
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    const queryFn = vi.fn((args: { prompt: any; options: any }) => {
+      (async () => { for await (const m of args.prompt) pushed.push(m); })();
+      return fakeQuery;
+    });
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((r) => setTimeout(r, 10));
+    emits.length = 0; pushed.length = 0;
+    backend.compact({ projectPath: PROJECT, scope: SCOPE });
+    await new Promise<void>((r) => setTimeout(r, 10));
+
+    expect(emits.find((e) => e.type === 'streaming_start')).toBeTruthy();
+    expect(pushed.find((m) => m?.message?.content === '/compact')).toBeTruthy();
+    fakeQuery.close();
+  });
 });

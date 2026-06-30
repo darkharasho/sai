@@ -217,18 +217,29 @@ export class SdkBackend implements ClaudeBackend {
   // ─── compact ───────────────────────────────────────────────────────────────
 
   compact(args: CompactArgs): void {
-    // Phase 1 best-effort: push a /compact user message without emitting streaming_start.
     const { projectPath, scope } = args;
     const session = this.sessions.get(toScopeKey(projectPath, scope));
-    if (session) {
-      session.pushInput({
-        type: 'user',
-        message: { role: 'user', content: '/compact' },
-        parent_tool_use_id: null,
-      });
-    }
-    // DONE_WITH_CONCERNS: /compact via injected input may not trigger the SDK's
-    // built-in compact flow reliably. Phase 2 should re-evaluate.
+    if (!session) return;
+
+    // Bump turn counter
+    session.turnSeq += 1;
+    session.activeTurnSeq = session.turnSeq;
+    session.mapperState = { ...session.mapperState, streaming: true };
+
+    // Emit streaming_start for this compact turn
+    this._emit({
+      type: 'streaming_start',
+      projectPath,
+      scope: scope ?? 'chat',
+      turnSeq: session.turnSeq,
+    });
+
+    // Push the /compact user message into the input channel
+    session.pushInput({
+      type: 'user',
+      message: { role: 'user', content: '/compact' },
+      parent_tool_use_id: null,
+    });
   }
 
   // ─── destroy ───────────────────────────────────────────────────────────────
