@@ -29,6 +29,7 @@ const {
   mockGetAvailableClaudeModels,
   mockReadCachedSlashCommands,
   mockWriteCachedSlashCommands,
+  mockReadSaiSetting,
 } = vi.hoisted(() => ({
   mockApproveImpl: vi.fn().mockResolvedValue(true),
   mockAnswerQuestionImpl: vi.fn().mockResolvedValue(true),
@@ -39,6 +40,7 @@ const {
   mockGetAvailableClaudeModels: vi.fn().mockReturnValue({ models: [], detected: false }),
   mockReadCachedSlashCommands: vi.fn().mockReturnValue(['/foo', '/bar']),
   mockWriteCachedSlashCommands: vi.fn(),
+  mockReadSaiSetting: vi.fn().mockReturnValue(undefined),
 }));
 
 vi.mock('../../../electron/services/claude', () => ({
@@ -51,10 +53,20 @@ vi.mock('../../../electron/services/claude', () => ({
   getAvailableClaudeModels: mockGetAvailableClaudeModels,
   readCachedSlashCommands: mockReadCachedSlashCommands,
   writeCachedSlashCommands: mockWriteCachedSlashCommands,
+  readSaiSetting: mockReadSaiSetting,
 }));
 
 // Import after mocks are set up
 import { SdkBackend } from '../../../electron/services/claudeBackend/sdkBackend';
+
+// fs mock — mockReadFileSync is overridden per-test that needs it; others leave it as-is
+const { mockReadFileSync } = vi.hoisted(() => ({
+  mockReadFileSync: vi.fn().mockImplementation(() => { throw new Error('ENOENT'); }),
+}));
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return { ...actual, readFileSync: mockReadFileSync };
+});
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -1005,6 +1017,24 @@ describe('SdkBackend', () => {
     expect(emits.find((e) => e.type === 'scope_suspended' && e.scope === SCOPE)).toBeTruthy();
     expect(fakeQuery.interruptSpy).toHaveBeenCalled();
     fakeQuery.close();
+  });
+
+  it('(23) chat scope merges user mcpConfigPath servers alongside sai', async () => {
+    mockReadSaiSetting.mockReturnValue('/cfg/a.json');
+    mockReadFileSync.mockReturnValue(JSON.stringify({ mcpServers: { foo: { type: 'stdio', command: 'foo' } } }) as any);
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    let capturedOptions: any = null;
+    const queryFn = vi.fn((args: any) => { capturedOptions = args.options; return fakeQuery; });
+    const buildChatMcpServer = vi.fn(() => ({ type: 'sdk', name: 'sai', instance: {} } as any));
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined, buildChatMcpServer });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((r) => { const c = () => capturedOptions ? r() : setTimeout(c, 5); setTimeout(c, 5); });
+    expect(capturedOptions.mcpServers.foo).toEqual({ type: 'stdio', command: 'foo' });
+    expect(capturedOptions.mcpServers.sai).toBeTruthy();
+    fakeQuery.close();
+    mockReadSaiSetting.mockReturnValue(undefined);
+    mockReadFileSync.mockImplementation(() => { throw new Error('ENOENT'); });
   });
 
   it('(20) compact emits streaming_start and pushes /compact', async () => {

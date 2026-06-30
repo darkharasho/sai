@@ -20,7 +20,9 @@ import {
   emitChatMessage,
   readCachedSlashCommands,
   writeCachedSlashCommands,
+  readSaiSetting,
 } from '../claude';
+import { parseUserMcpConfigPaths } from './userMcpConfig';
 import { buildSdkOptions } from './sdkOptions';
 import { mapSdkMessage, type MapperState } from './sdkMessageMap';
 import { sweepIdleScopes, IDLE_SCOPE_MS, SWEEP_INTERVAL_MS } from '../idleScopeSweep';
@@ -383,6 +385,16 @@ export class SdkBackend implements ClaudeBackend {
       const nudges = [CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE];
       const existing = appendSystemPrompt && appendSystemPrompt.trim() ? [appendSystemPrompt] : [];
       chatAppendSystemPrompt = [...nudges, ...existing].join('\n\n');
+    }
+
+    if (kind === 'chat' || kind === 'task') {
+      const userServers = parseUserMcpConfigPaths(
+        readSaiSetting('mcpConfigPath'),
+        (p) => fs.readFileSync(p, 'utf-8'),
+      );
+      if (Object.keys(userServers).length > 0) {
+        mcpServers = { ...userServers, ...(mcpServers ?? {}) }; // SAI's `sai` key wins on collision
+      }
     }
 
     const options = buildSdkOptions({
