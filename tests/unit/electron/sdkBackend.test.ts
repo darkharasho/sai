@@ -1069,7 +1069,7 @@ describe('SdkBackend', () => {
     const queryFn = vi.fn((args: any) => { capturedOptions = args.options; return fakeQuery; });
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
     backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
-    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'bypass', origin: 'remote' } as any);
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'bypass', origin: 'remote' });
     await new Promise<void>((r) => { const c = () => capturedOptions ? r() : setTimeout(c, 5); setTimeout(c, 5); });
     expect(capturedOptions.permissionMode).toBe('acceptEdits'); // clamped away from bypass
     fakeQuery.close();
@@ -1082,7 +1082,7 @@ describe('SdkBackend', () => {
     const queryFn = vi.fn((args: any) => { capturedOptions = args.options; return fakeQuery; });
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
     backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
-    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'bypass', origin: 'remote' } as any);
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'bypass', origin: 'remote' });
     await new Promise<void>((r) => { const c = () => capturedOptions ? r() : setTimeout(c, 5); setTimeout(c, 5); });
     expect(capturedOptions.permissionMode).toBe('bypassPermissions'); // no ceiling → unchanged
     fakeQuery.close();

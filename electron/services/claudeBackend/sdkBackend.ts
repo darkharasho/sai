@@ -153,8 +153,7 @@ export class SdkBackend implements ClaudeBackend {
   // ─── send ──────────────────────────────────────────────────────────────────
 
   send(args: SendArgs): void {
-    const { projectPath, message, scope, permMode, effort, model, imagePaths } = args;
-    const origin = (args as any).origin as string | undefined;
+    const { projectPath, message, scope, permMode, effort, model, imagePaths, origin } = args;
     const scopeKey = toScopeKey(projectPath, scope);
 
     // Mirror CLI sendImpl:740-743: clamp permMode by the remote ceiling when origin==='remote'
