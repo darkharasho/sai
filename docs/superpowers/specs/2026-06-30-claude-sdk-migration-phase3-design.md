@@ -1,7 +1,7 @@
 # Claude CLI → Agent SDK Migration — Phase 3: SAI chat tools as an in-process SDK MCP server
 
 **Date:** 2026-06-30
-**Status:** Design (pending review), then plan + execute
+**Status:** IMPLEMENTED on branch `claude-sdk-migration-phase3` (commits a561372e..73d43acc, 7 impl commits). Plan: docs/superpowers/plans/2026-06-30-claude-sdk-migration-phase3.md. All 6 SDD tasks reviewed-clean; final opus whole-branch review = Ready to merge (Yes); tsc clean, 237 files / 2234 tests pass. Live SDK-mode dogfood still pending (flag defaults `cli`).
 **Depends on:** Phase 1 (`SdkBackend` core chat) + Phase 2 (approvals/question/plan). Wires SAI's render/UI tools into SDK mode.
 
 ## Background
