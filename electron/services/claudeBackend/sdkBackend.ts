@@ -23,6 +23,7 @@ import {
 } from '../claude';
 import { buildSdkOptions } from './sdkOptions';
 import { mapSdkMessage, type MapperState } from './sdkMessageMap';
+import { sweepIdleScopes, IDLE_SCOPE_MS, SWEEP_INTERVAL_MS } from '../idleScopeSweep';
 import type {
   ClaudeBackend,
   StartArgs,
@@ -55,6 +56,13 @@ interface ScopeSession {
   cwd: string;
   kind: 'chat' | 'task' | 'orchestrator';
   appendSystemPrompt?: string;
+  /** Epoch ms of last user/assistant activity; used by the idle sweep. */
+  lastActivityAt: number;
+  /** True when waiting for approval / AskUserQuestion / plan review. */
+  awaitingInput: boolean;
+  /** Stored for the idle sweep so we never need to parse the scope key. */
+  _projectPath: string;
+  _scopeName: string;
 }
 
 // Use the SDK's SDKUserMessage type for the input channel
@@ -111,6 +119,7 @@ export class SdkBackend implements ClaudeBackend {
   private readonly _emit: (payload: Record<string, unknown>) => void;
   private readonly _resolveClaudePath: () => string | undefined;
   private readonly _buildChatMcpServer?: (workspace: string) => McpSdkServerConfigWithInstance | undefined;
+  private idleSweepTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(deps?: SdkBackendDeps) {
     if (deps?.queryFn) {
@@ -124,6 +133,7 @@ export class SdkBackend implements ClaudeBackend {
     this._emit = deps?.emit ?? defaultEmit;
     this._resolveClaudePath = deps?.resolveClaudePath ?? resolveClaudePath;
     this._buildChatMcpServer = deps?.buildChatMcpServer;
+    this._startIdleSweep();
   }
 
   // ─── start ─────────────────────────────────────────────────────────────────
@@ -153,6 +163,8 @@ export class SdkBackend implements ClaudeBackend {
       session.turnSeq += 1;
       session.activeTurnSeq = session.turnSeq;
       session.mapperState = { ...session.mapperState, streaming: true };
+      session.lastActivityAt = Date.now();
+      session.awaitingInput = false;
 
       // Emit streaming_start for this user turn
       this._emit({
@@ -227,6 +239,7 @@ export class SdkBackend implements ClaudeBackend {
     session.turnSeq += 1;
     session.activeTurnSeq = session.turnSeq;
     session.mapperState = { ...session.mapperState, streaming: true };
+    session.lastActivityAt = Date.now();
 
     // Emit streaming_start for this compact turn
     this._emit({
@@ -247,6 +260,10 @@ export class SdkBackend implements ClaudeBackend {
   // ─── destroy ───────────────────────────────────────────────────────────────
 
   destroy(): void {
+    if (this.idleSweepTimer) {
+      clearInterval(this.idleSweepTimer);
+      this.idleSweepTimer = null;
+    }
     for (const session of this.sessions.values()) {
       session.query.close();
     }
@@ -256,10 +273,13 @@ export class SdkBackend implements ClaudeBackend {
   // ─── Delegated impls ───────────────────────────────────────────────────────
 
   approve(a: ApproveArgs): Promise<boolean> {
-    const { toolUseId, approved, modifiedCommand } = a;
+    const { projectPath, toolUseId, approved, modifiedCommand, scope } = a;
     const resolver = this.pendingApprovals.get(toolUseId);
     if (resolver) {
       this.pendingApprovals.delete(toolUseId);
+      // Clear awaitingInput — user responded to the approval
+      const session = this.sessions.get(toScopeKey(projectPath, scope));
+      if (session) session.awaitingInput = false;
       if (approved) {
         const result: PermissionResult = { behavior: 'allow' };
         if (modifiedCommand !== undefined) {
@@ -280,6 +300,8 @@ export class SdkBackend implements ClaudeBackend {
     const session = this.sessions.get(toScopeKey(projectPath, scope));
     if (!session) return Promise.resolve(false);
 
+    session.awaitingInput = false;
+
     // Mark the card answered in the UI immediately (parity with CLI)
     this._emit({ type: 'question_answered', projectPath, scope: effectiveScope, toolUseId, answers });
 
@@ -299,6 +321,8 @@ export class SdkBackend implements ClaudeBackend {
     const effectiveScope = scope ?? 'chat';
     const session = this.sessions.get(toScopeKey(projectPath, scope));
     if (!session) return Promise.resolve(false);
+
+    session.awaitingInput = false;
 
     this._emit({ type: 'plan_review_answered', projectPath, scope: effectiveScope, toolUseId, approved });
 
@@ -423,6 +447,10 @@ export class SdkBackend implements ClaudeBackend {
       cwd,
       kind,
       appendSystemPrompt,
+      lastActivityAt: Date.now(),
+      awaitingInput: false,
+      _projectPath: projectPath,
+      _scopeName: scope ?? 'chat',
     };
 
     this.sessions.set(scopeKey, session);
@@ -443,6 +471,9 @@ export class SdkBackend implements ClaudeBackend {
       }
       const toolUseId = opts.toolUseID;
       const command = toolName === 'Bash' ? (input.command as string | undefined) : undefined;
+      // Mark session as awaiting user input so the idle sweep skips it
+      const session = this.sessions.get(toScopeKey(projectPath, scope));
+      if (session) session.awaitingInput = true;
       this._emit({
         type: 'approval_needed',
         projectPath,
@@ -466,6 +497,7 @@ export class SdkBackend implements ClaudeBackend {
     const drain = async () => {
       try {
         for await (const m of session.query) {
+          session.lastActivityAt = Date.now();
           if (m?.type === 'system' && m?.subtype === 'init' && Array.isArray(m?.slash_commands)) {
             writeCachedSlashCommands(m.slash_commands as string[]);
           }
@@ -503,6 +535,9 @@ export class SdkBackend implements ClaudeBackend {
                 const input = (block.input ?? {}) as Record<string, unknown>;
                 const questions = Array.isArray(input.questions) ? input.questions as Array<Record<string, unknown>> : [];
                 const question = (questions[0]?.question as string | undefined) ?? 'The agent is waiting for your answer.';
+                // Mark session as awaiting user input so the idle sweep skips it
+                const s = this.sessions.get(scopeKey);
+                if (s) s.awaitingInput = true;
                 this._emit({
                   type: 'question_needed',
                   projectPath,
@@ -512,6 +547,9 @@ export class SdkBackend implements ClaudeBackend {
                 });
               } else if (block.name === 'ExitPlanMode') {
                 const input = (block.input ?? {}) as Record<string, unknown>;
+                // Mark session as awaiting user input so the idle sweep skips it
+                const s = this.sessions.get(scopeKey);
+                if (s) s.awaitingInput = true;
                 this._emit({
                   type: 'plan_review_needed',
                   projectPath,
@@ -538,6 +576,34 @@ export class SdkBackend implements ClaudeBackend {
     };
 
     void drain();
+  }
+
+  // ─── Idle sweep ────────────────────────────────────────────────────────────
+
+  /** Run one sweep pass. Exposed for testing with a fake clock. */
+  _sweepOnce(now: number): void {
+    const records = Array.from(this.sessions.entries()).map(([, s]) => ({
+      workspaceId: s._projectPath,
+      scope: s._scopeName,
+      lastActivityAt: s.lastActivityAt,
+      streaming: s.mapperState.streaming,
+      awaitingInput: s.awaitingInput,
+    }));
+    sweepIdleScopes({
+      now,
+      idleMs: IDLE_SCOPE_MS,
+      scopes: records,
+      stop: (workspaceId, scope) => {
+        this._emit({ type: 'scope_suspended', projectPath: workspaceId, scope });
+        this.interrupt(workspaceId, scope === 'chat' ? undefined : scope);
+      },
+    });
+  }
+
+  private _startIdleSweep(): void {
+    if (this.idleSweepTimer) return;
+    this.idleSweepTimer = setInterval(() => this._sweepOnce(Date.now()), SWEEP_INTERVAL_MS);
+    if (typeof this.idleSweepTimer.unref === 'function') this.idleSweepTimer.unref();
   }
 }
 
