@@ -10,7 +10,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { query as QueryFn, SDKUserMessage, PermissionResult } from '@anthropic-ai/claude-agent-sdk';
+import type { query as QueryFn, SDKUserMessage, PermissionResult, McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
+import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE } from '../chatNudges';
 import {
   alwaysAllowImpl,
   generateCommitMessageImpl,
@@ -84,6 +85,13 @@ export interface SdkBackendDeps {
   emit?: (payload: Record<string, unknown>) => void;
   /** How to resolve the claude executable path. Default: PATH scan. */
   resolveClaudePath?: () => string | undefined;
+  /**
+   * Build the in-process SAI chat MCP server for a given workspace.
+   * Called only for `kind === 'chat'` scopes. If omitted or returns undefined
+   * (e.g. the renderer round-trip hasn't been registered yet), no MCP server
+   * is attached for that session.
+   */
+  buildChatMcpServer?: (workspace: string) => McpSdkServerConfigWithInstance | undefined;
 }
 
 // ─── SdkBackend ───────────────────────────────────────────────────────────────
@@ -100,6 +108,7 @@ export class SdkBackend implements ClaudeBackend {
   private readonly queryFn: typeof QueryFn;
   private readonly _emit: (payload: Record<string, unknown>) => void;
   private readonly _resolveClaudePath: () => string | undefined;
+  private readonly _buildChatMcpServer?: (workspace: string) => McpSdkServerConfigWithInstance | undefined;
 
   constructor(deps?: SdkBackendDeps) {
     if (deps?.queryFn) {
@@ -112,6 +121,7 @@ export class SdkBackend implements ClaudeBackend {
 
     this._emit = deps?.emit ?? defaultEmit;
     this._resolveClaudePath = deps?.resolveClaudePath ?? resolveClaudePath;
+    this._buildChatMcpServer = deps?.buildChatMcpServer;
   }
 
   // ─── start ─────────────────────────────────────────────────────────────────
@@ -317,6 +327,20 @@ export class SdkBackend implements ClaudeBackend {
     const isBypass = kind === 'orchestrator' || queryArgs.permMode === 'bypass';
     const canUseTool = isBypass ? undefined : this._buildCanUseTool(projectPath, scope);
 
+    // Chat scopes get the in-process SAI tool MCP server + the render/github
+    // nudges (deferred since Phase 1). Other kinds (task/orchestrator) do not.
+    let mcpServers: Record<string, McpSdkServerConfigWithInstance> | undefined;
+    let chatAppendSystemPrompt = appendSystemPrompt;
+    if (kind === 'chat') {
+      const server = this._buildChatMcpServer?.(cwd);
+      if (server) {
+        mcpServers = { sai: server };
+      }
+      const nudges = [CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE];
+      const existing = appendSystemPrompt && appendSystemPrompt.trim() ? [appendSystemPrompt] : [];
+      chatAppendSystemPrompt = [...nudges, ...existing].join('\n\n');
+    }
+
     const options = buildSdkOptions({
       kind,
       permMode: queryArgs.permMode,
@@ -325,8 +349,9 @@ export class SdkBackend implements ClaudeBackend {
       cwd,
       sessionId: resumeId,
       claudeExecutablePath: this._resolveClaudePath(),
-      appendSystemPrompt,
+      appendSystemPrompt: chatAppendSystemPrompt,
       canUseTool,
+      mcpServers,
     });
 
     // Build an async-iterable input channel (push-based queue)

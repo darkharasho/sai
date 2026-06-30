@@ -1,6 +1,8 @@
 import { readSaiSetting } from '../claude';
 import { CliBackend } from './cliBackend';
 import { SdkBackend } from './sdkBackend';
+import { buildSaiChatMcpServer } from './saiMcpServer';
+import { getSaiToolDispatch } from '../saiToolBridge';
 import type { ClaudeBackend } from './types';
 export * from './types';
 
@@ -14,7 +16,13 @@ export function getClaudeBackend(): ClaudeBackend {
   if (active) return active;
   const which = getClaudeBackendSetting();
   if (which === 'sdk') {
-    active = new SdkBackend();
+    active = new SdkBackend({
+      buildChatMcpServer: (workspace: string) => {
+        const dispatch = getSaiToolDispatch();
+        if (!dispatch) return undefined; // main.ts hasn't registered the round-trip yet
+        return buildSaiChatMcpServer({ workspace, dispatch });
+      },
+    });
   } else {
     active = new CliBackend();
   }

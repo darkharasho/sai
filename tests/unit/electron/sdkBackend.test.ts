@@ -901,4 +901,42 @@ describe('SdkBackend', () => {
     });
     expect(result).toBe(false);
   });
+
+  // ── Task 6: Chat MCP server + nudges wiring ───────────────────────────────
+
+  it('(17) chat scope attaches mcpServers.sai from buildChatMcpServer + prepends nudges', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    let capturedOptions: any = null;
+    const queryFn = vi.fn((args: { prompt: any; options: any }) => { capturedOptions = args.options; return fakeQuery; });
+    const fakeServer = { type: 'sdk', name: 'sai', instance: {} } as any;
+    const buildChatMcpServer = vi.fn(() => fakeServer);
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined, buildChatMcpServer });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((resolve) => { const check = () => { if (capturedOptions) resolve(); else setTimeout(check, 5); }; setTimeout(check, 5); });
+
+    expect(buildChatMcpServer).toHaveBeenCalledWith(PROJECT);
+    expect(capturedOptions.mcpServers).toEqual({ sai: fakeServer });
+    const appended = (capturedOptions.systemPrompt && capturedOptions.systemPrompt.append) || '';
+    expect(appended).toContain('render_html');
+    expect(appended).toContain('sai_watch_github_run');
+
+    fakeQuery.close();
+  });
+
+  it('(18) non-chat scope does not attach mcpServers', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    let capturedOptions: any = null;
+    const queryFn = vi.fn((args: { prompt: any; options: any }) => { capturedOptions = args.options; return fakeQuery; });
+    const buildChatMcpServer = vi.fn(() => ({ type: 'sdk', name: 'sai', instance: {} } as any));
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined, buildChatMcpServer });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'orchestrator' });
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'bypass' });
+    await new Promise<void>((resolve) => { const check = () => { if (capturedOptions) resolve(); else setTimeout(check, 5); }; setTimeout(check, 5); });
+
+    expect(buildChatMcpServer).not.toHaveBeenCalled();
+    expect(capturedOptions.mcpServers).toBeUndefined();
+
+    fakeQuery.close();
+  });
 });
