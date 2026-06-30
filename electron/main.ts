@@ -81,6 +81,7 @@ import { registerBrainstormHandlers } from './services/brainstorm';
 import { registerSearchHandlers } from './services/search';
 import { registerSwarmHandlers } from './services/swarm';
 import * as swarmMcpHost from './services/swarmMcpHost';
+import { setSaiToolDispatch } from './services/saiToolBridge';
 import {
   listMetaWorkspaces, createMetaWorkspace, updateMetaWorkspace,
   deleteMetaWorkspace, getMetaWorkspace,
@@ -528,7 +529,11 @@ function createWindow() {
       }
     });
 
-    swarmMcpHost.onToolCall(async (req) => {
+    // Single dispatch used by BOTH MCP transports: the socket SwarmMcpHost (CLI
+    // mode) and the in-process SDK MCP server (SDK mode, via saiToolBridge). The
+    // orchestrator-card injection below is a no-op for chat scopes (no
+    // orchSessionId), so SDK chat tools reuse this unchanged.
+    const dispatchSwarmTool = async (req: { tool: string; input: unknown; workspace: string }) => {
       const id = `mcp-${crypto.randomUUID()}`;
       // Deterministic tool_use id so the later tool_result can be matched.
       const toolUseId = `mcp-tooluse-${id}`;
@@ -570,7 +575,10 @@ function createWindow() {
           }
         }, timeoutMs);
       });
-    });
+    };
+
+    swarmMcpHost.onToolCall(dispatchSwarmTool);
+    setSaiToolDispatch(dispatchSwarmTool);
 
     // Don't leave MCP tool calls hanging if the window goes away mid-call.
     mainWindow.on('closed', () => {
