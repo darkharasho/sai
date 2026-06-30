@@ -56,19 +56,25 @@ interface FakeQuery extends AsyncIterable<any> {
 /**
  * Build a fake Query object that yields the given messages in order,
  * with `interrupt` and `close` spies.
+ * When `hang` is true, after yielding messages the generator will block
+ * indefinitely until close() is called (models a live streaming session).
  */
-function makeFakeQuery(messages: any[]): FakeQuery {
+function makeFakeQuery(messages: any[], opts: { hang?: boolean } = {}): FakeQuery {
   const interruptSpy = vi.fn().mockResolvedValue(undefined);
   const closeSpy = vi.fn();
 
-  let resolve: (() => void) | null = null;
   let closed = false;
+  let hangResolve: (() => void) | null = null;
   const pending: any[] = [...messages];
 
   async function* gen() {
     for (const msg of pending) {
       if (closed) return;
       yield msg;
+    }
+    // If hang mode, block until close() is called
+    if (opts.hang) {
+      await new Promise<void>((res) => { hangResolve = res; });
     }
   }
 
@@ -78,7 +84,11 @@ function makeFakeQuery(messages: any[]): FakeQuery {
     interruptSpy,
     closeSpy,
     interrupt: interruptSpy,
-    close: closeSpy,
+    close: () => {
+      closed = true;
+      closeSpy();
+      hangResolve?.();
+    },
     [Symbol.asyncIterator]() {
       return iterator;
     },
@@ -224,8 +234,8 @@ describe('SdkBackend', () => {
   // ── Test 3: interrupt() calls query.interrupt() ──
 
   it('(3) interrupt() calls the query interrupt spy', async () => {
-    // Make a query that never yields (hangs until closed)
-    const fakeQuery = makeFakeQuery([]);
+    // Make a query that hangs indefinitely (blocks until closed/interrupted)
+    const fakeQuery = makeFakeQuery([], { hang: true });
     fakeQuery.interrupt = vi.fn().mockResolvedValue(undefined);
     (fakeQuery as any).interruptSpy = fakeQuery.interrupt;
 
@@ -302,7 +312,7 @@ describe('SdkBackend', () => {
   // ── Test 5: destroy() calls query.close() ──
 
   it('(5) destroy() calls close() on all live sessions', async () => {
-    const fakeQuery = makeFakeQuery([]);
+    const fakeQuery = makeFakeQuery([], { hang: true });
     fakeQuery.close = vi.fn();
     (fakeQuery as any).closeSpy = fakeQuery.close;
 
@@ -320,5 +330,134 @@ describe('SdkBackend', () => {
     backend.destroy();
 
     expect(fakeQuery.close).toHaveBeenCalledTimes(1);
+  });
+
+  // ── Test 6: drain-loop error → error+done emitted, dead session removed, next send rebuilds ──
+
+  it('(6) drain-loop error removes dead session; subsequent send creates a fresh query', async () => {
+    // First query: async generator that throws immediately
+    function makeThrowingQuery() {
+      const interruptSpy = vi.fn().mockResolvedValue(undefined);
+      const closeSpy = vi.fn();
+
+      async function* gen() {
+        throw new Error('sdk exploded');
+      }
+
+      const iterator = gen();
+      return {
+        interruptSpy,
+        closeSpy,
+        interrupt: interruptSpy,
+        close: closeSpy,
+        [Symbol.asyncIterator]() {
+          return iterator;
+        },
+      };
+    }
+
+    const throwingQuery = makeThrowingQuery();
+    const goodQuery = makeFakeQuery([
+      { type: 'result', stop_reason: 'end_turn', num_turns: 1 },
+    ]);
+
+    let callCount = 0;
+    const queryFn = vi.fn((args: { prompt: any; options: any }) => {
+      capturedQueryArgs.push(args);
+      callCount++;
+      return callCount === 1 ? throwingQuery : goodQuery;
+    });
+
+    const backend = new SdkBackend({
+      queryFn,
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+    });
+
+    // First send — drain loop will throw
+    backend.send({ projectPath: PROJECT, message: 'first', scope: SCOPE });
+    // Wait for error + done to be emitted
+    await new Promise<void>((resolve) => {
+      const check = () => {
+        if (emits.some(e => e.type === 'error') && emits.some(e => e.type === 'done')) resolve();
+        else setTimeout(check, 5);
+      };
+      setTimeout(check, 5);
+    });
+
+    expect(emits.some(e => e.type === 'error')).toBe(true);
+    const errorEmit = emits.find(e => e.type === 'error') as Record<string, unknown>;
+    expect(errorEmit.text).toContain('sdk exploded');
+    expect(emits.some(e => e.type === 'done')).toBe(true);
+
+    // queryFn was called once for the first (throwing) query
+    expect(queryFn).toHaveBeenCalledTimes(1);
+
+    // Second send — dead session must have been removed; queryFn should be called again
+    const priorDones = emits.filter(e => e.type === 'done').length;
+    backend.send({ projectPath: PROJECT, message: 'second', scope: SCOPE });
+    await new Promise<void>((resolve) => {
+      const check = () => {
+        if (emits.filter(e => e.type === 'done').length > priorDones) resolve();
+        else setTimeout(check, 5);
+      };
+      setTimeout(check, 5);
+    });
+
+    // queryFn must have been called a second time (fresh session, not the dead one)
+    expect(queryFn).toHaveBeenCalledTimes(2);
+    // Second send should succeed (result + done emitted)
+    const dones = emits.filter(e => e.type === 'done');
+    expect(dones.length).toBeGreaterThanOrEqual(2);
+  });
+
+  // ── Test 7: normal drain completion removes session; next send rebuilds ──
+
+  it('(7) normal drain completion removes session so next send creates a fresh query', async () => {
+    const fakeQuery1 = makeFakeQuery([
+      { type: 'result', stop_reason: 'end_turn', num_turns: 1 },
+    ]);
+    const fakeQuery2 = makeFakeQuery([
+      { type: 'result', stop_reason: 'end_turn', num_turns: 1 },
+    ]);
+
+    let callCount = 0;
+    const queryFn = vi.fn((args: { prompt: any; options: any }) => {
+      capturedQueryArgs.push(args);
+      callCount++;
+      return callCount === 1 ? fakeQuery1 : fakeQuery2;
+    });
+
+    const backend = new SdkBackend({
+      queryFn,
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+    });
+
+    // First send — drains normally
+    backend.send({ projectPath: PROJECT, message: 'first', scope: SCOPE });
+    await new Promise<void>((resolve) => {
+      const check = () => {
+        if (emits.some(e => e.type === 'done')) resolve();
+        else setTimeout(check, 5);
+      };
+      setTimeout(check, 5);
+    });
+
+    expect(queryFn).toHaveBeenCalledTimes(1);
+
+    // Second send — session should have been deleted after normal completion
+    // so queryFn is called again for a fresh session
+    const priorDones = emits.filter(e => e.type === 'done').length;
+    backend.send({ projectPath: PROJECT, message: 'second', scope: SCOPE });
+    await new Promise<void>((resolve) => {
+      const check = () => {
+        if (emits.filter(e => e.type === 'done').length > priorDones) resolve();
+        else setTimeout(check, 5);
+      };
+      setTimeout(check, 5);
+    });
+
+    expect(queryFn).toHaveBeenCalledTimes(2);
   });
 });

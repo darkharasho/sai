@@ -6,6 +6,8 @@
  * still delegated to the existing claude.ts impls (same as CliBackend).
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import type { query as QueryFn, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import {
   approveImpl,
@@ -67,10 +69,8 @@ export function resolveClaudePath(): string | undefined {
   const bin = process.platform === 'win32' ? 'claude.exe' : 'claude';
   for (const dir of pathEnv.split(sep)) {
     if (!dir) continue;
-    const { existsSync } = require('fs') as typeof import('fs');
-    const { join } = require('path') as typeof import('path');
-    const candidate = join(dir, bin);
-    if (existsSync(candidate)) return candidate;
+    const candidate = path.join(dir, bin);
+    if (fs.existsSync(candidate)) return candidate;
   }
   return undefined;
 }
@@ -317,6 +317,7 @@ export class SdkBackend implements ClaudeBackend {
 
   private _startDrain(session: ScopeSession, projectPath: string, scope: string | undefined): void {
     const effectiveScope = scope ?? 'chat';
+    const scopeKey = toScopeKey(projectPath, scope);
 
     const drain = async () => {
       try {
@@ -345,6 +346,12 @@ export class SdkBackend implements ClaudeBackend {
         const text = err instanceof Error ? err.message : String(err);
         this._emit({ type: 'error', text, projectPath, scope: effectiveScope });
         this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: session.activeTurnSeq });
+      } finally {
+        // Remove the dead session only if it hasn't been replaced by a newer one
+        // (e.g. setSessionId may have already deleted+recreated it)
+        if (this.sessions.get(scopeKey) === session) {
+          this.sessions.delete(scopeKey);
+        }
       }
     };
 
