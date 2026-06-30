@@ -95,6 +95,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [editorFontSize, setEditorFontSize] = useState(13);
   const [editorMinimap, setEditorMinimap] = useState(true);
   const [aiProvider, setAiProvider] = useState<'claude' | 'codex' | 'gemini'>('claude');
+  const [claudeBackend, setClaudeBackend] = useState<'cli' | 'sdk'>('cli');
   const [providerOpen, setProviderOpen] = useState(false);
   const providerRef = useRef<HTMLDivElement>(null);
   const [commitMessageProvider, setCommitMessageProvider] = useState<'claude' | 'codex' | 'gemini'>('claude');
@@ -180,6 +181,9 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.settingsGet('overlayEnabled', false).then((v: boolean) => setOverlayEnabled(!!v));
     window.sai.settingsGet('aiProvider', 'claude').then((v: string) => {
       if (v === 'claude' || v === 'codex' || v === 'gemini') setAiProvider(v as 'claude' | 'codex' | 'gemini');
+    });
+    window.sai.settingsGet('claudeBackend', 'cli').then((v: string) => {
+      if (v === 'cli' || v === 'sdk') setClaudeBackend(v);
     });
     window.sai.settingsGet('commitMessageProvider', 'claude').then((v: string) => {
       if (v === 'claude' || v === 'codex' || v === 'gemini') setCommitMessageProvider(v as 'claude' | 'codex' | 'gemini');
@@ -327,6 +331,12 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       window.sai.settingsSet('commitMessageProvider', value);
       onSettingChange?.('commitMessageProvider', value);
     }
+  };
+
+  const handleClaudeBackendChange = (value: 'cli' | 'sdk') => {
+    setClaudeBackend(value);
+    window.sai.settingsSet('claudeBackend', value);
+    onSettingChange?.('claudeBackend', value);
   };
 
   const handleCommitProviderChange = (value: 'claude' | 'codex' | 'gemini') => {
@@ -954,6 +964,20 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       <div className="settings-divider" />
 
       <div className="settings-section-label">Claude</div>
+      <div className="settings-row">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Backend</div>
+          <div className="settings-row-desc">How SAI talks to Claude: the <b>CLI</b> (spawns the <code>claude</code> binary) or the <b>SDK</b> (@anthropic-ai/claude-agent-sdk). SDK is experimental — core chat only; approvals/questions/render tools aren't wired yet. Requires app restart to take effect.</div>
+        </div>
+        <select
+          className="settings-select"
+          value={claudeBackend}
+          onChange={e => handleClaudeBackendChange(e.target.value as 'cli' | 'sdk')}
+        >
+          <option value="cli">CLI (default)</option>
+          <option value="sdk">SDK (experimental)</option>
+        </select>
+      </div>
       <div className="settings-row">
         <div className="settings-row-info">
           <div className="settings-row-name">Auto-compact context</div>
