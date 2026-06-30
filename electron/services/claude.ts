@@ -46,7 +46,7 @@ function spawnEnv(): NodeJS.ProcessEnv {
   return withNodeMemoryCap(enrichedEnv(), subprocessMemoryCapMB);
 }
 
-function readCachedSlashCommands(): string[] {
+export function readCachedSlashCommands(): string[] {
   try {
     return JSON.parse(fs.readFileSync(SLASH_COMMANDS_CACHE, 'utf-8'));
   } catch {
@@ -54,7 +54,7 @@ function readCachedSlashCommands(): string[] {
   }
 }
 
-function writeCachedSlashCommands(commands: string[]) {
+export function writeCachedSlashCommands(commands: string[]) {
   try {
     fs.writeFileSync(SLASH_COMMANDS_CACHE, JSON.stringify(commands));
   } catch { /* ignore write errors */ }

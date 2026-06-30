@@ -27,6 +27,8 @@ const {
   mockGenerateCommitMessageImpl,
   mockGenerateTitleImpl,
   mockGetAvailableClaudeModels,
+  mockReadCachedSlashCommands,
+  mockWriteCachedSlashCommands,
 } = vi.hoisted(() => ({
   mockApproveImpl: vi.fn().mockResolvedValue(true),
   mockAnswerQuestionImpl: vi.fn().mockResolvedValue(true),
@@ -35,6 +37,8 @@ const {
   mockGenerateCommitMessageImpl: vi.fn().mockResolvedValue('msg'),
   mockGenerateTitleImpl: vi.fn().mockResolvedValue('title'),
   mockGetAvailableClaudeModels: vi.fn().mockReturnValue({ models: [], detected: false }),
+  mockReadCachedSlashCommands: vi.fn().mockReturnValue(['/foo', '/bar']),
+  mockWriteCachedSlashCommands: vi.fn(),
 }));
 
 vi.mock('../../../electron/services/claude', () => ({
@@ -45,6 +49,8 @@ vi.mock('../../../electron/services/claude', () => ({
   generateCommitMessageImpl: mockGenerateCommitMessageImpl,
   generateTitleImpl: mockGenerateTitleImpl,
   getAvailableClaudeModels: mockGetAvailableClaudeModels,
+  readCachedSlashCommands: mockReadCachedSlashCommands,
+  writeCachedSlashCommands: mockWriteCachedSlashCommands,
 }));
 
 // Import after mocks are set up
@@ -961,6 +967,21 @@ describe('SdkBackend', () => {
 
     const userMsg = pushed.find((m) => m?.type === 'user');
     expect(userMsg?.message?.content).toBe('[Attached image: /tmp/a.png]\n[Attached image: /tmp/b.png]\n\nlook');
+    fakeQuery.close();
+  });
+
+  it('(21) start returns cached slash commands; drain caches slash_commands from system/init', async () => {
+    mockReadCachedSlashCommands.mockReturnValue(['/clear', '/compact']);
+    const initMsg = { type: 'system', subtype: 'init', slash_commands: ['/clear', '/compact', '/new'], session_id: 's1' };
+    const fakeQuery = makeFakeQuery([initMsg], { hang: true });
+    const queryFn = vi.fn(() => fakeQuery);
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    const ret = backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    expect(ret).toEqual({ slashCommands: ['/clear', '/compact'] });
+
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((r) => setTimeout(r, 20));
+    expect(mockWriteCachedSlashCommands).toHaveBeenCalledWith(['/clear', '/compact', '/new']);
     fakeQuery.close();
   });
 

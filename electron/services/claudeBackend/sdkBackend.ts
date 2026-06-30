@@ -18,6 +18,8 @@ import {
   generateTitleImpl,
   getAvailableClaudeModels,
   emitChatMessage,
+  readCachedSlashCommands,
+  writeCachedSlashCommands,
 } from '../claude';
 import { buildSdkOptions } from './sdkOptions';
 import { mapSdkMessage, type MapperState } from './sdkMessageMap';
@@ -131,7 +133,7 @@ export class SdkBackend implements ClaudeBackend {
     const scopeKey = toScopeKey(projectPath, scope);
     const cwd = scopeCwd ?? projectPath;
     this.scopeMeta.set(scopeKey, { cwd, kind, appendSystemPrompt: metaPreamble });
-    return { slashCommands: [] };
+    return { slashCommands: readCachedSlashCommands() };
   }
 
   // ─── send ──────────────────────────────────────────────────────────────────
@@ -464,6 +466,10 @@ export class SdkBackend implements ClaudeBackend {
     const drain = async () => {
       try {
         for await (const m of session.query) {
+          if (m?.type === 'system' && m?.subtype === 'init' && Array.isArray(m?.slash_commands)) {
+            writeCachedSlashCommands(m.slash_commands as string[]);
+          }
+
           const { emits, state, sessionId } = mapSdkMessage(m, session.mapperState);
           session.mapperState = state;
 
