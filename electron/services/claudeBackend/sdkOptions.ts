@@ -72,6 +72,14 @@ export function buildSdkOptions(input: SdkOptionInputs): Options {
   if (canUseTool && !isBypass) {
     opts.canUseTool = canUseTool;
   }
+  // NOTE (Phase 2 dogfood, 2026-06-30): with @anthropic-ai/claude-agent-sdk@0.3.196
+  // driving the installed claude CLI 2.1.195, the runtime never issues a
+  // `can_use_tool` control request, so the canUseTool callback above is wired but
+  // never invoked — tool approvals are DORMANT in SDK mode until the SDK/CLI
+  // support lands. Tried: both runtimes, all permission modes, settingSources:[],
+  // env-unset, headless + real app. When canUseTool starts firing, SDK mode will
+  // also need `settingSources` control so a user's global defaultMode:
+  // bypassPermissions doesn't silently disable approvals.
 
   return opts;
 }
