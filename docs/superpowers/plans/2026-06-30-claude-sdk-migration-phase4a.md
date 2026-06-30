@@ -737,7 +737,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
   2. `/compact` → conversation compacts, thinking animation shows.
   3. Attach an image → the `[Attached image: …]` ref reaches the agent.
   4. Point `mcpConfigPath` at a test MCP server → its tools load.
-  5. Leave a scope idle (or temporarily shorten `IDLE_SCOPE_MS`) → it suspends.
+  5. Leave a scope idle (or temporarily shorten `IDLE_SCOPE_MS`) → it suspends. CONFIRM: (a) NO spurious error card appears when the sweep closes the SDK query (if one does, the drain's `catch` is treating an intentional `close()` as an error — add a `closedByDesign` flag the catch checks); (b) the SDK runtime is actually freed (no lingering subprocess); (c) sending again to the suspended scope RESUMES the prior conversation (context preserved via the stashed sessionId).
   - If settingSources regresses global CLAUDE.md, fall back to `['user','project','local']` (Task 6) and re-confirm.
 - [ ] **Step 4: Update spec status + memory** — mark the Phase 4a spec implemented; note Phase 4b (orchestrator) remains.
 

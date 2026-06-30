@@ -620,6 +620,8 @@ export class SdkBackend implements ClaudeBackend {
         this._emit({ type: 'scope_suspended', projectPath: workspaceId, scope });
         // Tear down the session properly (mirrors setSessionId's close+resume-stash),
         // so the SDK runtime is freed but the conversation resumes on the next send.
+        // `scope` here is `_scopeName`, stored as `scope ?? 'chat'`, so the chat scope
+        // is the literal string 'chat'; convert it back to undefined for toScopeKey.
         const scopeKey = toScopeKey(workspaceId, scope === 'chat' ? undefined : scope);
         const session = this.sessions.get(scopeKey);
         if (session) {
