@@ -9,7 +9,7 @@ import type {
 
 export class CliBackend implements ClaudeBackend {
   start(a: StartArgs) { return startImpl(a); }
-  send(a: SendArgs) { sendImpl(a.projectPath, a.message, a.imagePaths, a.permMode, a.effort, a.model, a.scope); }
+  send(a: SendArgs) { sendImpl(a.projectPath, a.message, a.imagePaths, a.permMode, a.effort, a.model, a.scope, a.origin); }
   interrupt(projectPath: string, scope?: string) { interruptImpl(projectPath, scope); }
   setSessionId(projectPath: string, sessionId: string | undefined, scope?: string) { setSessionIdImpl(projectPath, sessionId, scope); }
   compact(a: CompactArgs) { compactImpl(a); }

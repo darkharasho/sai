@@ -14,6 +14,7 @@ export interface SendArgs {
   effort?: string;
   model?: string;
   scope?: string;
+  origin?: 'desktop' | 'remote';
 }
 export interface CompactArgs {
   projectPath: string;

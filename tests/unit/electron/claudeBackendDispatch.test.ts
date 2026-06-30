@@ -154,7 +154,19 @@ describe('CliBackend', () => {
   it('delegates send() to sendImpl with positional args', () => {
     const be = new CliBackend();
     be.send({ projectPath: '/p', message: 'hi', scope: 's' });
-    expect(mockSendImpl).toHaveBeenCalledWith('/p', 'hi', undefined, undefined, undefined, undefined, 's');
+    expect(mockSendImpl).toHaveBeenCalledWith('/p', 'hi', undefined, undefined, undefined, undefined, 's', undefined);
+  });
+
+  it('send() with origin "remote" passes "remote" as the 8th positional arg', () => {
+    const be = new CliBackend();
+    be.send({ projectPath: '/p', message: 'hi', scope: 's', origin: 'remote' });
+    expect(mockSendImpl).toHaveBeenCalledWith('/p', 'hi', undefined, undefined, undefined, undefined, 's', 'remote');
+  });
+
+  it('send() without origin passes undefined as the 8th positional arg', () => {
+    const be = new CliBackend();
+    be.send({ projectPath: '/p', message: 'hello' });
+    expect(mockSendImpl).toHaveBeenCalledWith('/p', 'hello', undefined, undefined, undefined, undefined, undefined, undefined);
   });
 });
 

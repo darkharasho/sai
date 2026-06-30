@@ -239,6 +239,7 @@ async function getOrInitRemote(): Promise<RemoteModule> {
             effort: args.effort,
             model: args.model,
             scope: args.scope,
+            origin: 'remote',
           });
         },
         resolveApproval: async (args) => {
