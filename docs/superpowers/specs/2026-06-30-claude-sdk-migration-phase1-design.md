@@ -22,6 +22,12 @@ The SDK's `query({ prompt, options })` returns a `Query` (an `AsyncGenerator<SDK
 
 The flag keeps `'cli'` the default, so this gap is invisible to normal users; `'sdk'` is for dogfooding plain chat + auto-accepted edits.
 
+**Additional deferred parity items (identified in the Phase 1 final review — documented here so the boundary is explicit, not silent bugs):**
+- **Image attachments** (`SendArgs.imagePaths`): `CliBackend`/`sendImpl` prepends `[Attached image: …]` refs to the prompt; `SdkBackend.send` does not forward images in Phase 1. → wire in a later phase (ties into MCP/render work).
+- **Remote `origin` handling** (`SendArgs.origin`): `sendImpl` applies the remote permission-ceiling clamp (`clamp(permMode, remoteCeiling)` when `origin==='remote'`) and emits the `user_message` echo. `SdkBackend` does not. Low impact — `'sdk'` is opt-in and not the remote default — but the remote clamp belongs in **Phase 2** (permissions / `canUseTool`), where it is implemented properly rather than duplicated.
+- **Chat system-prompt nudges**: `buildArgs` appends `CHAT_RENDER_NUDGE` + `CHAT_GITHUB_WATCH_NUDGE` (which steer toward the SAI MCP tools `render_html` / `sai_watch_github_run`). Those tools are deferred to **Phase 3**, so the nudges are intentionally omitted from the SDK options until then; only `metaPreamble` is forwarded as `appendSystemPrompt`.
+- **In-flight `send` semantics**: the CLI path treats a `send` during an active turn as an interrupt (`wasInterrupt`). `SdkBackend` currently bumps `turnSeq` and starts a new `streaming_start` while the prior turn still drains, which can advance `activeTurnSeq` mid-stream. The mocked unit tests serialize sends and do not cover this; it must be exercised in the manual dogfood (and a guard/interrupt-mirror added) before relying on `'sdk'` for rapid multi-send use.
+
 ## Design
 
 ### Runtime source (decided: option i)
