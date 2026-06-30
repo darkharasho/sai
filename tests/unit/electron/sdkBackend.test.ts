@@ -152,6 +152,9 @@ describe('SdkBackend', () => {
       setTimeout(check, 5);
     });
 
+    // First emit must be streaming_start (order-sensitive)
+    expect(emits[0].type).toBe('streaming_start');
+
     // First emit must be streaming_start with turnSeq 1
     const startEmit = emits.find(e => e.type === 'streaming_start');
     expect(startEmit).toBeDefined();

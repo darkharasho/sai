@@ -263,6 +263,8 @@ export class SdkBackend implements ClaudeBackend {
     let inputResolve: (() => void) | null = null;
     let inputClosed = false;
 
+    // SINGLE-CONSUMER: this iterable must be iterated exactly once (the drain loop).
+    // A second [Symbol.asyncIterator]() call would share inputResolve and strand the first iterator.
     const inputIterable: AsyncIterable<SdkUserInputMessage> = {
       [Symbol.asyncIterator]() {
         return {
