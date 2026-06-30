@@ -21,7 +21,9 @@ import {
   readCachedSlashCommands,
   writeCachedSlashCommands,
   readSaiSetting,
+  getRemoteCeiling,
 } from '../claude';
+import { clamp, type PermMode } from '../remote/clamp';
 import { parseUserMcpConfigPaths } from './userMcpConfig';
 import { buildSdkOptions } from './sdkOptions';
 import { mapSdkMessage, type MapperState } from './sdkMessageMap';
@@ -152,13 +154,20 @@ export class SdkBackend implements ClaudeBackend {
 
   send(args: SendArgs): void {
     const { projectPath, message, scope, permMode, effort, model, imagePaths } = args;
+    const origin = (args as any).origin as string | undefined;
     const scopeKey = toScopeKey(projectPath, scope);
+
+    // Mirror CLI sendImpl:740-743: clamp permMode by the remote ceiling when origin==='remote'
+    const effectivePermMode =
+      origin === 'remote'
+        ? (clamp(permMode as PermMode | undefined, getRemoteCeiling()) ?? permMode)
+        : permMode;
 
     try {
       // Ensure a session exists for this scope
       let session = this.sessions.get(scopeKey);
       if (!session) {
-        session = this._createSession(scopeKey, projectPath, scope, { permMode, effort, model });
+        session = this._createSession(scopeKey, projectPath, scope, { permMode: effectivePermMode, effort, model });
       }
 
       // Bump turn counter

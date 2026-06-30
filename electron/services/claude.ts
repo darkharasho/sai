@@ -75,6 +75,7 @@ let remoteCeiling: PermMode | null = null;
 export function setRemoteCeiling(ceiling: PermMode | null): void {
   remoteCeiling = ceiling;
 }
+export function getRemoteCeiling(): PermMode | null { return remoteCeiling; }
 
 function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
   try {

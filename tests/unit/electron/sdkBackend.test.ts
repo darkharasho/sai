@@ -30,6 +30,7 @@ const {
   mockReadCachedSlashCommands,
   mockWriteCachedSlashCommands,
   mockReadSaiSetting,
+  mockGetRemoteCeiling,
 } = vi.hoisted(() => ({
   mockApproveImpl: vi.fn().mockResolvedValue(true),
   mockAnswerQuestionImpl: vi.fn().mockResolvedValue(true),
@@ -41,6 +42,7 @@ const {
   mockReadCachedSlashCommands: vi.fn().mockReturnValue(['/foo', '/bar']),
   mockWriteCachedSlashCommands: vi.fn(),
   mockReadSaiSetting: vi.fn().mockReturnValue(undefined),
+  mockGetRemoteCeiling: vi.fn().mockReturnValue(null),
 }));
 
 vi.mock('../../../electron/services/claude', () => ({
@@ -54,6 +56,7 @@ vi.mock('../../../electron/services/claude', () => ({
   readCachedSlashCommands: mockReadCachedSlashCommands,
   writeCachedSlashCommands: mockWriteCachedSlashCommands,
   readSaiSetting: mockReadSaiSetting,
+  getRemoteCeiling: mockGetRemoteCeiling,
 }));
 
 // Import after mocks are set up
@@ -1054,6 +1057,34 @@ describe('SdkBackend', () => {
 
     expect(emits.find((e) => e.type === 'streaming_start')).toBeTruthy();
     expect(pushed.find((m) => m?.message?.content === '/compact')).toBeTruthy();
+    fakeQuery.close();
+  });
+
+  // ── Task 7: Remote origin permission clamp ────────────────────────────────
+
+  it('(24) remote origin clamps a bypass attempt down to the ceiling', async () => {
+    mockGetRemoteCeiling.mockReturnValue('always-ask');
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    let capturedOptions: any = null;
+    const queryFn = vi.fn((args: any) => { capturedOptions = args.options; return fakeQuery; });
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'bypass', origin: 'remote' } as any);
+    await new Promise<void>((r) => { const c = () => capturedOptions ? r() : setTimeout(c, 5); setTimeout(c, 5); });
+    expect(capturedOptions.permissionMode).toBe('acceptEdits'); // clamped away from bypass
+    fakeQuery.close();
+  });
+
+  it('(25) remote origin with null ceiling leaves bypass intact', async () => {
+    mockGetRemoteCeiling.mockReturnValue(null);
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    let capturedOptions: any = null;
+    const queryFn = vi.fn((args: any) => { capturedOptions = args.options; return fakeQuery; });
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'bypass', origin: 'remote' } as any);
+    await new Promise<void>((r) => { const c = () => capturedOptions ? r() : setTimeout(c, 5); setTimeout(c, 5); });
+    expect(capturedOptions.permissionMode).toBe('bypassPermissions'); // no ceiling → unchanged
     fakeQuery.close();
   });
 });
