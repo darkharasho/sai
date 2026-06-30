@@ -137,7 +137,7 @@ export class SdkBackend implements ClaudeBackend {
   // ─── send ──────────────────────────────────────────────────────────────────
 
   send(args: SendArgs): void {
-    const { projectPath, message, scope, permMode, effort, model } = args;
+    const { projectPath, message, scope, permMode, effort, model, imagePaths } = args;
     const scopeKey = toScopeKey(projectPath, scope);
 
     try {
@@ -160,10 +160,17 @@ export class SdkBackend implements ClaudeBackend {
         turnSeq: session.turnSeq,
       });
 
+      // Mirror CliBackend.sendImpl: prepend image refs the model can resolve.
+      let content = message;
+      if (imagePaths && imagePaths.length > 0) {
+        const imageRefs = imagePaths.map((p) => `[Attached image: ${p}]`).join('\n');
+        content = `${imageRefs}\n\n${message}`;
+      }
+
       // Push the user message into the input channel
       session.pushInput({
         type: 'user',
-        message: { role: 'user', content: message },
+        message: { role: 'user', content },
         parent_tool_use_id: null,
       });
     } catch (err) {

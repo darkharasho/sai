@@ -943,4 +943,24 @@ describe('SdkBackend', () => {
 
     fakeQuery.close();
   });
+
+  // ── Task 1 Phase 4a: image forwarding ────────────────────────────────────
+
+  it('(19) send forwards imagePaths as CLI-identical [Attached image: ...] refs', async () => {
+    const pushed: any[] = [];
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    const queryFn = vi.fn((args: { prompt: any; options: any }) => {
+      // Drain the async-iterable prompt to capture pushed user messages.
+      (async () => { for await (const m of args.prompt) pushed.push(m); })();
+      return fakeQuery;
+    });
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'look', scope: SCOPE, permMode: 'default', imagePaths: ['/tmp/a.png', '/tmp/b.png'] });
+    await new Promise<void>((r) => setTimeout(r, 20));
+
+    const userMsg = pushed.find((m) => m?.type === 'user');
+    expect(userMsg?.message?.content).toBe('[Attached image: /tmp/a.png]\n[Attached image: /tmp/b.png]\n\nlook');
+    fakeQuery.close();
+  });
 });
