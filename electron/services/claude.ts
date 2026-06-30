@@ -23,6 +23,8 @@ import { exitTerminalEvents } from './claudeExit';
 import { imageReadResult } from './imageFiles';
 import type { StartArgs, CompactArgs } from './claudeBackend/types';
 import { getClaudeBackend } from './claudeBackend';
+import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE } from './chatNudges';
+export { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE };
 
 const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
 
@@ -167,39 +169,6 @@ function defaultMcpServerScriptPath(): string {
   return path.join(__dirname, 'swarm-mcp-server.js');
 }
 
-/**
- * Appended to chat sessions' system prompt so the agent reaches for the in-app
- * renderer on visual/UI requests instead of silently writing files. Names the
- * tools directly so it is robust to MCP namespacing.
- */
-export const CHAT_RENDER_NUDGE =
-  'This app (SAI) can render UI live inside its own window. When the user asks you to ' +
-  'design, mock up, build, show, preview, or iterate on a UI element, component, page, ' +
-  'or visual style, FIRST render it in-app with the render_html tool (write a ' +
-  'self-contained HTML/CSS/JS snippet) — or render_component to mount a registered ' +
-  'project component — so the user can see it and give feedback. This also applies when ' +
-  'asked to screenshot, capture, verify, or otherwise show a working or finished UI ' +
-  'result: prefer the in-app renderer, which returns the screenshot to you directly, over ' +
-  'spinning up an external browser (Playwright/Chrome) or a separate server. Prefer ' +
-  'rendering over writing files for these requests; only write or scaffold files when the ' +
-  'user explicitly asks to save, add, or wire the component into the codebase. You can ' +
-  're-render to iterate on feedback.';
-
-/**
- * Appended to chat sessions' system prompt so the agent shows the live GitHub
- * Actions watcher card after pushes. The sai_watch_github_run tool's own
- * description says "USE THIS right after you push", but Claude Code defers MCP
- * tools behind ToolSearch when many servers are connected — deferred tools
- * surface only their name, so the description never reaches the model. The
- * trigger has to live in the system prompt instead.
- */
-export const CHAT_GITHUB_WATCH_NUDGE =
-  'After you run `git push` (including pushing tags) or otherwise trigger a GitHub Actions ' +
-  'workflow (gh workflow run, gh pr create, creating a release), show the user a live CI ' +
-  'watcher card with the sai_watch_github_run tool instead of pasting a gh run URL. If the ' +
-  'tool is deferred, load it via ToolSearch first. Resolve the run by owner+repo+branch ' +
-  '(optionally a workflow file) or by run URL; the card keeps updating on its own. Only fall ' +
-  'back to a plain Actions link if the tool is unavailable.';
 
 /**
  * Build CLI args for the persistent process based on current config.

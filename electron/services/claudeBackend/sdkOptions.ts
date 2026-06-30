@@ -10,6 +10,7 @@ export interface SdkOptionInputs {
   claudeExecutablePath?: string;
   appendSystemPrompt?: string; // CHAT_RENDER_NUDGE + CHAT_GITHUB_WATCH_NUDGE + metaPreamble, joined
   canUseTool?: CanUseTool;     // tool-approval callback; not set in bypass mode
+  mcpServers?: Record<string, unknown>; // in-process SDK MCP servers (chat tools); set only for chat
 }
 
 const VALID_EFFORT = new Set<string>(['low', 'medium', 'high', 'max']);
@@ -32,6 +33,7 @@ export function buildSdkOptions(input: SdkOptionInputs): Options {
     claudeExecutablePath,
     appendSystemPrompt,
     canUseTool,
+    mcpServers,
   } = input;
 
   const permissionMode: Options['permissionMode'] =
@@ -65,6 +67,10 @@ export function buildSdkOptions(input: SdkOptionInputs): Options {
 
   if (claudeExecutablePath) {
     opts.pathToClaudeCodeExecutable = claudeExecutablePath;
+  }
+
+  if (mcpServers && Object.keys(mcpServers).length > 0) {
+    opts.mcpServers = mcpServers as Options['mcpServers'];
   }
 
   // canUseTool is never set in bypass mode (bypassPermissions handles all tools automatically)

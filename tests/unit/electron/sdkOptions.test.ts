@@ -108,4 +108,24 @@ describe('buildSdkOptions', () => {
     const opts = buildSdkOptions(BASE) as Record<string, unknown>;
     expect(opts).not.toHaveProperty('canUseTool');
   });
+
+  // ── mcpServers tests ──────────────────────────────────────────────────────
+
+  it('sets mcpServers when provided', () => {
+    const fakeServer = { type: 'sdk', name: 'sai', instance: {} } as any;
+    const opts = buildSdkOptions({
+      kind: 'chat', cwd: '/ws', mcpServers: { sai: fakeServer },
+    });
+    expect(opts.mcpServers).toEqual({ sai: fakeServer });
+  });
+
+  it('omits mcpServers when not provided', () => {
+    const opts = buildSdkOptions({ kind: 'chat', cwd: '/ws' });
+    expect(opts.mcpServers).toBeUndefined();
+  });
+
+  it('omits mcpServers when given an empty object', () => {
+    const opts = buildSdkOptions({ kind: 'chat', cwd: '/ws', mcpServers: {} });
+    expect(opts.mcpServers).toBeUndefined();
+  });
 });
