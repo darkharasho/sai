@@ -1,6 +1,7 @@
 // @vitest-environment node
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { buildSdkOptions, type SdkOptionInputs } from '@electron/services/claudeBackend/sdkOptions';
+import type { CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 
 const BASE: SdkOptionInputs = {
   kind: 'chat',
@@ -75,5 +76,36 @@ describe('buildSdkOptions', () => {
   it('pathToClaudeCodeExecutable not set when claudeExecutablePath is absent', () => {
     const opts = buildSdkOptions(BASE);
     expect(opts.pathToClaudeCodeExecutable).toBeUndefined();
+  });
+
+  // ── canUseTool tests ──────────────────────────────────────────────────────
+
+  it('(h) canUseTool provided + non-bypass permMode → options.canUseTool is set', () => {
+    const canUseTool: CanUseTool = vi.fn().mockResolvedValue({ behavior: 'allow' });
+    const opts = buildSdkOptions({ ...BASE, canUseTool, permMode: 'default' });
+    expect(opts.canUseTool).toBe(canUseTool);
+  });
+
+  it('(i) canUseTool provided + no permMode (acceptEdits) → options.canUseTool is set', () => {
+    const canUseTool: CanUseTool = vi.fn().mockResolvedValue({ behavior: 'allow' });
+    const opts = buildSdkOptions({ ...BASE, canUseTool });
+    expect(opts.canUseTool).toBe(canUseTool);
+  });
+
+  it('(j) canUseTool provided + permMode bypass → options.canUseTool is NOT set', () => {
+    const canUseTool: CanUseTool = vi.fn().mockResolvedValue({ behavior: 'allow' });
+    const opts = buildSdkOptions({ ...BASE, canUseTool, permMode: 'bypass' }) as Record<string, unknown>;
+    expect(opts).not.toHaveProperty('canUseTool');
+  });
+
+  it('(k) canUseTool provided + kind orchestrator → options.canUseTool is NOT set (orchestrator = bypass)', () => {
+    const canUseTool: CanUseTool = vi.fn().mockResolvedValue({ behavior: 'allow' });
+    const opts = buildSdkOptions({ ...BASE, canUseTool, kind: 'orchestrator' }) as Record<string, unknown>;
+    expect(opts).not.toHaveProperty('canUseTool');
+  });
+
+  it('(l) canUseTool NOT provided → options.canUseTool is not set', () => {
+    const opts = buildSdkOptions(BASE) as Record<string, unknown>;
+    expect(opts).not.toHaveProperty('canUseTool');
   });
 });

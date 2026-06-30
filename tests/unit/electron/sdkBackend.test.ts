@@ -8,6 +8,13 @@
  *   3. interrupt() calls query.interrupt()
  *   4. setSessionId + send → queryFn called with options.resume === id
  *   5. destroy() calls query.close()
+ *
+ * Task 1 (Phase 2): canUseTool / approval tests:
+ *   8. canUseTool is passed to queryFn options when permMode is not bypass
+ *   9. canUseTool callback for Bash emits approval_needed (with command) + returns pending promise; approve(true) resolves allow
+ *  10. canUseTool callback for non-Bash emits approval_needed (no command) + approve(false) resolves deny
+ *  11. canUseTool is NOT passed when permMode is bypass
+ *  12. approve returns false (no-op) when toolUseId not found
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -409,6 +416,193 @@ describe('SdkBackend', () => {
     // Second send should succeed (result + done emitted)
     const dones = emits.filter(e => e.type === 'done');
     expect(dones.length).toBeGreaterThanOrEqual(2);
+  });
+
+  // ── Task 1 Phase 2: canUseTool / approval tests ───────────────────────────
+
+  it('(8) non-bypass send passes canUseTool in queryFn options', async () => {
+    const fakeQuery = makeFakeQuery([
+      { type: 'result', stop_reason: 'end_turn', num_turns: 1 },
+    ]);
+
+    let capturedOptions: any = null;
+    const queryFn = vi.fn((args: { prompt: any; options: any }) => {
+      capturedOptions = args.options;
+      return fakeQuery;
+    });
+
+    const backend = new SdkBackend({
+      queryFn,
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+    });
+
+    backend.send({ projectPath: PROJECT, message: 'hello', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((resolve) => {
+      const check = () => {
+        if (emits.some(e => e.type === 'done')) resolve();
+        else setTimeout(check, 5);
+      };
+      setTimeout(check, 5);
+    });
+
+    expect(capturedOptions).toBeDefined();
+    expect(typeof capturedOptions.canUseTool).toBe('function');
+  });
+
+  it('(9) canUseTool for Bash emits approval_needed with command; approve(true) resolves allow', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+
+    let capturedOptions: any = null;
+    const queryFn = vi.fn((args: { prompt: any; options: any }) => {
+      capturedOptions = args.options;
+      return fakeQuery;
+    });
+
+    const backend = new SdkBackend({
+      queryFn,
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+    });
+
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'run', scope: SCOPE, permMode: 'default' });
+
+    // Wait for session to be created (options captured)
+    await new Promise<void>((resolve) => {
+      const check = () => {
+        if (capturedOptions) resolve();
+        else setTimeout(check, 5);
+      };
+      setTimeout(check, 5);
+    });
+
+    const canUseTool = capturedOptions.canUseTool;
+    expect(typeof canUseTool).toBe('function');
+
+    // Invoke canUseTool as the SDK would (Bash tool)
+    const resultPromise = canUseTool(
+      'Bash',
+      { command: 'echo hi' },
+      { toolUseID: 'tu1', signal: new AbortController().signal },
+    );
+
+    // It should emit approval_needed
+    await new Promise(r => setTimeout(r, 5));
+    const approvalEmit = emits.find(e => e.type === 'approval_needed');
+    expect(approvalEmit).toBeDefined();
+    expect(approvalEmit!.toolName).toBe('Bash');
+    expect(approvalEmit!.toolUseId).toBe('tu1');
+    expect(approvalEmit!.command).toBe('echo hi');
+    expect(approvalEmit!.projectPath).toBe(PROJECT);
+    expect(approvalEmit!.scope).toBe(SCOPE);
+    expect(approvalEmit!.input).toEqual({ command: 'echo hi' });
+
+    // Promise should still be pending
+    let resolved = false;
+    resultPromise.then(() => { resolved = true; });
+    await new Promise(r => setTimeout(r, 5));
+    expect(resolved).toBe(false);
+
+    // approve(true) should resolve it
+    const approveResult = await backend.approve({ projectPath: PROJECT, toolUseId: 'tu1', approved: true, scope: SCOPE });
+    expect(approveResult).toBe(true);
+
+    const permResult = await resultPromise;
+    expect(permResult).toEqual({ behavior: 'allow' });
+
+    // Clean up
+    fakeQuery.close();
+  });
+
+  it('(10) canUseTool for non-Bash has no command; approve(false) resolves deny', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+
+    let capturedOptions: any = null;
+    const queryFn = vi.fn((args: { prompt: any; options: any }) => {
+      capturedOptions = args.options;
+      return fakeQuery;
+    });
+
+    const backend = new SdkBackend({
+      queryFn,
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+    });
+
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'run', scope: SCOPE, permMode: 'default' });
+
+    await new Promise<void>((resolve) => {
+      const check = () => {
+        if (capturedOptions) resolve();
+        else setTimeout(check, 5);
+      };
+      setTimeout(check, 5);
+    });
+
+    const canUseTool = capturedOptions.canUseTool;
+    const resultPromise = canUseTool(
+      'Edit',
+      { file_path: '/some/file.ts', old_str: 'foo', new_str: 'bar' },
+      { toolUseID: 'tu2', signal: new AbortController().signal },
+    );
+
+    await new Promise(r => setTimeout(r, 5));
+    const approvalEmit = emits.find(e => e.type === 'approval_needed');
+    expect(approvalEmit).toBeDefined();
+    expect(approvalEmit!.toolName).toBe('Edit');
+    expect(approvalEmit!.toolUseId).toBe('tu2');
+    expect(approvalEmit!.command).toBeUndefined();
+
+    const approveResult = await backend.approve({ projectPath: PROJECT, toolUseId: 'tu2', approved: false, scope: SCOPE });
+    expect(approveResult).toBe(true);
+
+    const permResult = await resultPromise;
+    expect(permResult).toEqual({ behavior: 'deny', message: 'User denied tool use' });
+
+    fakeQuery.close();
+  });
+
+  it('(11) bypass permMode does NOT pass canUseTool in queryFn options', async () => {
+    const fakeQuery = makeFakeQuery([
+      { type: 'result', stop_reason: 'end_turn', num_turns: 1 },
+    ]);
+
+    let capturedOptions: any = null;
+    const queryFn = vi.fn((args: { prompt: any; options: any }) => {
+      capturedOptions = args.options;
+      return fakeQuery;
+    });
+
+    const backend = new SdkBackend({
+      queryFn,
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+    });
+
+    backend.send({ projectPath: PROJECT, message: 'hello', scope: SCOPE, permMode: 'bypass' });
+    await new Promise<void>((resolve) => {
+      const check = () => {
+        if (emits.some(e => e.type === 'done')) resolve();
+        else setTimeout(check, 5);
+      };
+      setTimeout(check, 5);
+    });
+
+    expect(capturedOptions).toBeDefined();
+    expect(capturedOptions.canUseTool).toBeUndefined();
+  });
+
+  it('(12) approve returns false when toolUseId not found in pendingApprovals', async () => {
+    const backend = new SdkBackend({
+      queryFn: vi.fn(() => makeFakeQuery([])),
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+    });
+
+    const result = await backend.approve({ projectPath: PROJECT, toolUseId: 'nonexistent', approved: true, scope: SCOPE });
+    expect(result).toBe(false);
   });
 
   // ── Test 7: normal drain completion removes session; next send rebuilds ──

@@ -1,4 +1,4 @@
-import type { Options, EffortLevel } from '@anthropic-ai/claude-agent-sdk';
+import type { Options, EffortLevel, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 
 export interface SdkOptionInputs {
   kind: 'chat' | 'task' | 'orchestrator';
@@ -9,6 +9,7 @@ export interface SdkOptionInputs {
   sessionId?: string;          // when set → resume
   claudeExecutablePath?: string;
   appendSystemPrompt?: string; // CHAT_RENDER_NUDGE + CHAT_GITHUB_WATCH_NUDGE + metaPreamble, joined
+  canUseTool?: CanUseTool;     // tool-approval callback; not set in bypass mode
 }
 
 const VALID_EFFORT = new Set<string>(['low', 'medium', 'high', 'max']);
@@ -28,6 +29,7 @@ export function buildSdkOptions(input: SdkOptionInputs): Options {
     sessionId,
     claudeExecutablePath,
     appendSystemPrompt,
+    canUseTool,
   } = input;
 
   const permissionMode: Options['permissionMode'] =
@@ -61,6 +63,12 @@ export function buildSdkOptions(input: SdkOptionInputs): Options {
 
   if (claudeExecutablePath) {
     opts.pathToClaudeCodeExecutable = claudeExecutablePath;
+  }
+
+  // canUseTool is never set in bypass mode (bypassPermissions handles all tools automatically)
+  const isBypass = kind === 'orchestrator' || permMode === 'bypass';
+  if (canUseTool && !isBypass) {
+    opts.canUseTool = canUseTool;
   }
 
   return opts;

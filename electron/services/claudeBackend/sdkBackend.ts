@@ -8,9 +8,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { query as QueryFn, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { query as QueryFn, SDKUserMessage, PermissionResult } from '@anthropic-ai/claude-agent-sdk';
 import {
-  approveImpl,
   answerQuestionImpl,
   answerPlanReviewImpl,
   alwaysAllowImpl,
@@ -95,6 +94,8 @@ export class SdkBackend implements ClaudeBackend {
   private readonly pendingResume = new Map<string, string>();
   /** Per-scope pending cwd/kind/appendSystemPrompt set by start() */
   private readonly scopeMeta = new Map<string, { cwd: string; kind: 'chat' | 'task' | 'orchestrator'; appendSystemPrompt?: string }>();
+  /** Pending tool approval promises keyed by toolUseId */
+  private readonly pendingApprovals = new Map<string, (r: PermissionResult) => void>();
 
   private readonly queryFn: typeof QueryFn;
   private readonly _emit: (payload: Record<string, unknown>) => void;
@@ -225,7 +226,23 @@ export class SdkBackend implements ClaudeBackend {
   // ─── Delegated impls ───────────────────────────────────────────────────────
 
   approve(a: ApproveArgs): Promise<boolean> {
-    return approveImpl(a.projectPath, a.toolUseId, a.approved, a.modifiedCommand, a.scope) as Promise<boolean>;
+    const { toolUseId, approved, modifiedCommand } = a;
+    const resolver = this.pendingApprovals.get(toolUseId);
+    if (resolver) {
+      this.pendingApprovals.delete(toolUseId);
+      if (approved) {
+        const result: PermissionResult = { behavior: 'allow' };
+        if (modifiedCommand !== undefined) {
+          result.updatedInput = { command: modifiedCommand };
+        }
+        resolver(result);
+      } else {
+        resolver({ behavior: 'deny', message: 'User denied tool use' });
+      }
+      return Promise.resolve(true);
+    }
+    // Not a pending SDK approval — return false (no-op)
+    return Promise.resolve(false);
   }
   answerQuestion(a: AnswerQuestionArgs) {
     return Promise.resolve(answerQuestionImpl(a.projectPath, a.toolUseId, a.answers, a.scope));
@@ -263,6 +280,10 @@ export class SdkBackend implements ClaudeBackend {
     const resumeId = this.pendingResume.get(scopeKey);
     this.pendingResume.delete(scopeKey);
 
+    // Build canUseTool callback (only when not bypass)
+    const isBypass = kind === 'orchestrator' || queryArgs.permMode === 'bypass';
+    const canUseTool = isBypass ? undefined : this._buildCanUseTool(projectPath, scope);
+
     const options = buildSdkOptions({
       kind,
       permMode: queryArgs.permMode,
@@ -272,6 +293,7 @@ export class SdkBackend implements ClaudeBackend {
       sessionId: resumeId,
       claudeExecutablePath: this._resolveClaudePath(),
       appendSystemPrompt,
+      canUseTool,
     });
 
     // Build an async-iterable input channel (push-based queue)
@@ -329,6 +351,27 @@ export class SdkBackend implements ClaudeBackend {
     this._startDrain(session, projectPath, scope);
 
     return session;
+  }
+
+  private _buildCanUseTool(projectPath: string, scope: string | undefined) {
+    const effectiveScope = scope ?? 'chat';
+    return (toolName: string, input: Record<string, unknown>, opts: { toolUseID: string; [key: string]: unknown }) => {
+      const toolUseId = opts.toolUseID;
+      const command = toolName === 'Bash' ? (input.command as string | undefined) : undefined;
+      this._emit({
+        type: 'approval_needed',
+        projectPath,
+        scope: effectiveScope,
+        toolName,
+        toolUseId,
+        command,
+        description: undefined,
+        input,
+      });
+      return new Promise<PermissionResult>((resolve) => {
+        this.pendingApprovals.set(toolUseId, resolve);
+      });
+    };
   }
 
   private _startDrain(session: ScopeSession, projectPath: string, scope: string | undefined): void {
