@@ -25,9 +25,12 @@ export default function ApprovalBanner({ approvals, currentProjectPath, onSwitch
   const isCurrent = first.projectPath === currentProjectPath;
   const extraCount = rest.length;
 
-  const commandSnippet = first.approval.command.length > 60
-    ? first.approval.command.slice(0, 60) + '…'
-    : first.approval.command;
+  // `command` is only present for Bash-style tools; other tools (and SDK-mode
+  // approvals) legitimately have none, so guard against undefined.
+  const rawCommand = first.approval.command ?? '';
+  const commandSnippet = rawCommand.length > 60
+    ? rawCommand.slice(0, 60) + '…'
+    : rawCommand;
 
   return (
     <div className="approval-banner">

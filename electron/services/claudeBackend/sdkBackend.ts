@@ -388,7 +388,14 @@ export class SdkBackend implements ClaudeBackend {
 
   private _buildCanUseTool(projectPath: string, scope: string | undefined) {
     const effectiveScope = scope ?? 'chat';
-    return (toolName: string, input: Record<string, unknown>, opts: { toolUseID: string; [key: string]: unknown }) => {
+    return (toolName: string, input: Record<string, unknown>, opts: { toolUseID: string; [key: string]: unknown }): Promise<PermissionResult> => {
+      // AskUserQuestion / ExitPlanMode are NOT tool approvals — they have their own
+      // question/plan cards (emitted from the drain as question_needed /
+      // plan_review_needed). Auto-allow them here so they don't also pop the approval
+      // banner (which would crash on their missing `command`).
+      if (toolName === 'AskUserQuestion' || toolName === 'ExitPlanMode') {
+        return Promise.resolve({ behavior: 'allow', updatedInput: input });
+      }
       const toolUseId = opts.toolUseID;
       const command = toolName === 'Bash' ? (input.command as string | undefined) : undefined;
       this._emit({

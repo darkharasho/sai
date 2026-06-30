@@ -594,6 +594,27 @@ describe('SdkBackend', () => {
     expect(capturedOptions.canUseTool).toBeUndefined();
   });
 
+  it('(11b) canUseTool auto-allows AskUserQuestion/ExitPlanMode without emitting approval_needed', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    let capturedOptions: any = null;
+    const queryFn = vi.fn((args: { prompt: any; options: any }) => { capturedOptions = args.options; return fakeQuery; });
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'ask', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((resolve) => { const check = () => { if (capturedOptions) resolve(); else setTimeout(check, 5); }; setTimeout(check, 5); });
+
+    for (const toolName of ['AskUserQuestion', 'ExitPlanMode']) {
+      const result = await capturedOptions.canUseTool(
+        toolName,
+        { questions: [{ question: 'pick' }] },
+        { toolUseID: `tu-${toolName}`, signal: new AbortController().signal },
+      );
+      expect(result).toEqual({ behavior: 'allow', updatedInput: { questions: [{ question: 'pick' }] } });
+    }
+    // Neither should have produced an approval card (they have their own cards).
+    expect(emits.find(e => e.type === 'approval_needed')).toBeUndefined();
+  });
+
   it('(12) approve returns false when toolUseId not found in pendingApprovals', async () => {
     const backend = new SdkBackend({
       queryFn: vi.fn(() => makeFakeQuery([])),
