@@ -21,6 +21,7 @@ import type { SessionBus } from './remote/session-bus';
 import { clamp, type PermMode } from './remote/clamp';
 import { exitTerminalEvents } from './claudeExit';
 import { imageReadResult } from './imageFiles';
+import type { StartArgs, CompactArgs } from './claudeBackend/types';
 
 const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
 
@@ -1323,6 +1324,180 @@ export function getAvailableClaudeModels(): { models: ClaudeModelOption[]; detec
   return { models, detected: true };
 }
 
+export function startImpl(args: StartArgs): { slashCommands: string[] } | undefined {
+  const { projectPath, scope, kind, orchestratorContext, scopeCwd, metaPreamble } = args;
+  if (!projectPath) return;
+  const ws = getOrCreate(projectPath);
+  const claude = getClaude(ws, scope || 'chat', kind);
+  // scopeCwd lets a swarm task pin its scope to its worktree dir while keeping
+  // the workspace key (and therefore msg.projectPath in emitted events) as the
+  // original project root — so ChatPanel + listeners match on projectPath.
+  claude.cwd = scopeCwd || projectPath;
+  if (kind === 'orchestrator' && orchestratorContext) {
+    claude.orchestratorContext = orchestratorContext as Record<string, unknown>;
+  }
+  claude.metaPreamble = metaPreamble || '';
+  emitChatMessage({ type: 'ready', projectPath: ws.projectPath, scope: scope || 'chat' });
+  return { slashCommands: readCachedSlashCommands() };
+}
+
+export function compactImpl(args: CompactArgs): void {
+  const { projectPath, permMode, effort, model, scope } = args;
+  const ws = get(projectPath);
+  if (!ws) return;
+  const effectiveScope = scope || 'chat';
+  const claude = getClaude(ws, effectiveScope);
+  touchActivity(projectPath);
+  const proc = ensureProcess(mainWin!, projectPath, effectiveScope, permMode, effort, model);
+  claude.suppressForward = true;
+  const msg = JSON.stringify({ type: 'user', message: { role: 'user', content: '/compact' } });
+  if (proc.stdin && !proc.stdin.destroyed) {
+    proc.stdin.write(msg + '\n');
+  } else {
+    claude.suppressForward = false;
+  }
+}
+
+export async function alwaysAllowImpl(projectPath: string, toolPattern: string): Promise<boolean> {
+  const claudeDir = path.join(projectPath, '.claude');
+  const settingsPath = path.join(claudeDir, 'settings.local.json');
+  let settings: Record<string, any> = {};
+  try {
+    settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+  } catch { /* file doesn't exist yet */ }
+  if (!settings.permissions) settings.permissions = {};
+  if (!Array.isArray(settings.permissions.allow)) settings.permissions.allow = [];
+  if (!settings.permissions.allow.includes(toolPattern)) {
+    settings.permissions.allow.push(toolPattern);
+  }
+  try { fs.mkdirSync(claudeDir, { recursive: true }); } catch { /* exists */ }
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+  return true;
+}
+
+export async function generateCommitMessageImpl(cwd: string, aiProvider?: string): Promise<string> {
+  const ws = get(cwd);
+  const effectiveCwd = cwd || (ws && getClaude(ws).cwd) || process.env.HOME || '/';
+
+  // Get the diff
+  const getDiff = (args: string[]) => new Promise<string>((resolve) => {
+    const diffProc = spawn('git', ['diff', ...args], {
+      cwd: effectiveCwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: IS_WIN,
+    });
+    let out = '';
+    diffProc.stdout?.on('data', (d: Buffer) => { out += d.toString(); });
+    diffProc.on('exit', () => resolve(out.trim()));
+    diffProc.on('error', () => resolve(''));
+  });
+
+  let diff = await getDiff(['--staged']);
+  if (!diff) diff = await getDiff([]);
+  if (!diff) return '';
+
+  const maxLen = 8000;
+  const truncatedDiff = diff.length > maxLen
+    ? diff.slice(0, maxLen) + '\n... (diff truncated)'
+    : diff;
+
+  const commitPrompt = `Generate a concise commit message for this diff. Output ONLY the commit message text, nothing else. Use conventional commit format (e.g. feat:, fix:, refactor:). Keep it under 72 characters for the subject line.\n\n${truncatedDiff}`;
+
+  const env = spawnEnv();
+
+  if (aiProvider === 'gemini') {
+    try {
+      const geminiWs = getOrCreate(effectiveCwd);
+      geminiWs.gemini.cwd = effectiveCwd;
+      await ensureGeminiTransport(mainWin!, geminiWs);
+      const sessionId = await ensureGeminiCommitSession(mainWin!, geminiWs);
+      const result = await promptGeminiText(mainWin!, geminiWs, {
+        sessionId,
+        scope: 'commit',
+        prompt: commitPrompt,
+        approvalMode: 'plan',
+        model: 'gemini-2.5-flash',
+      });
+      return result.trim();
+    } catch {
+      return '';
+    }
+  }
+
+  // Spawn the appropriate CLI with its fast model
+  let cmd: string;
+  let args: string[];
+  if (aiProvider === 'codex') {
+    cmd = 'codex';
+    args = ['exec', '-q', '--json', '-m', 'codex-mini', commitPrompt];
+  } else {
+    cmd = 'claude';
+    args = ['-p', commitPrompt, '--output-format', 'text', '--max-turns', '1', '--model', 'haiku'];
+  }
+
+  return new Promise<string>((resolve) => {
+    const proc = spawn(cmd, args, {
+      cwd: effectiveCwd,
+      env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: IS_WIN,
+    });
+    proc.stdin?.end();
+
+    let output = '';
+    proc.stdout?.on('data', (data: Buffer) => { output += data.toString(); });
+    proc.on('exit', () => {
+      let result = output.trim();
+      if (aiProvider === 'codex') result = extractCodexCommitMessage(result);
+      resolve(result);
+    });
+    proc.on('error', () => resolve(''));
+  });
+}
+
+export async function generateTitleImpl(cwd: string, userMessage: string, aiProvider?: string): Promise<string> {
+  const ws = get(cwd);
+  const effectiveCwd = cwd || (ws && getClaude(ws).cwd) || process.env.HOME || '/';
+
+  const titlePrompt = `Summarize this conversation in 3-5 words as a title. Respond with only the title, no quotes or punctuation. User said: ${userMessage.slice(0, 500)}`;
+
+  const env = spawnEnv();
+
+  let cmd: string;
+  let args: string[];
+  if (aiProvider === 'codex') {
+    cmd = 'codex';
+    args = ['exec', '-q', '--json', '-m', 'codex-mini', titlePrompt];
+  } else if (aiProvider === 'gemini') {
+    cmd = 'gemini';
+    args = ['-p', titlePrompt, '--output-format', 'text', '-m', 'flash'];
+  } else {
+    cmd = 'claude';
+    args = ['-p', titlePrompt, '--output-format', 'text', '--max-turns', '1', '--model', 'haiku'];
+  }
+
+  return new Promise<string>((resolve) => {
+    const proc = spawn(cmd, args, {
+      cwd: effectiveCwd,
+      env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: IS_WIN,
+    });
+    proc.stdin?.end();
+
+    let output = '';
+    proc.stdout?.on('data', (data: Buffer) => { output += data.toString(); });
+    proc.on('exit', () => {
+      let result = output.trim();
+      if (aiProvider === 'codex') result = extractCodexCommitMessage(result);
+      // Clean up: remove quotes, trailing punctuation
+      result = result.replace(/^["']|["']$/g, '').trim();
+      resolve(result || '');
+    });
+    proc.on('error', () => resolve(''));
+  });
+}
+
 export function registerClaudeHandlers(win: BrowserWindow) {
   mainWin = win;
   // claude:models — which models this account/org can actually use (org allow-lists
@@ -1330,31 +1505,9 @@ export function registerClaudeHandlers(win: BrowserWindow) {
   ipcMain.handle('claude:models', () => getAvailableClaudeModels());
   // claude:start — no longer spawns a probe. Just signals ready.
   // Sends cached slash commands immediately so they're available before the process init.
-  ipcMain.handle('claude:start', (
-    _event,
-    projectPath: string,
-    scope?: string,
-    kind?: 'chat' | 'task' | 'orchestrator',
-    orchestratorContext?: Partial<OrchestratorPromptContext> | null,
-    scopeCwd?: string,
-    metaPreamble?: string,
-  ) => {
-    if (!projectPath) return;
-    const ws = getOrCreate(projectPath);
-    const claude = getClaude(ws, scope || 'chat', kind);
-    // scopeCwd lets a swarm task pin its scope to its worktree dir while keeping
-    // the workspace key (and therefore msg.projectPath in emitted events) as the
-    // original project root — so ChatPanel + listeners match on projectPath.
-    claude.cwd = scopeCwd || projectPath;
-    if (kind === 'orchestrator' && orchestratorContext) {
-      claude.orchestratorContext = orchestratorContext as Record<string, unknown>;
-    }
-    claude.metaPreamble = metaPreamble || '';
-
-    emitChatMessage({ type: 'ready', projectPath: ws.projectPath, scope: scope || 'chat' });
-
-    return { slashCommands: readCachedSlashCommands() };
-  });
+  ipcMain.handle('claude:start', (_event, projectPath: string, scope?: string, kind?: 'chat' | 'task' | 'orchestrator', orchestratorContext?: Partial<OrchestratorPromptContext> | null, scopeCwd?: string, metaPreamble?: string) =>
+    startImpl({ projectPath, scope, kind, orchestratorContext: orchestratorContext as Record<string, unknown> | null, scopeCwd, metaPreamble })
+  );
 
   // claude:stop — kill the persistent process for a scope
   ipcMain.on('claude:stop', (_event, projectPath: string, scope?: string) => {
@@ -1372,21 +1525,9 @@ export function registerClaudeHandlers(win: BrowserWindow) {
   });
 
   // claude:compact — silently write /compact to stdin without starting a turn.
-  ipcMain.on('claude:compact', (_event, projectPath: string, permMode?: string, effort?: string, model?: string, scope?: string) => {
-    const ws = get(projectPath);
-    if (!ws) return;
-    const effectiveScope = scope || 'chat';
-    const claude = getClaude(ws, effectiveScope);
-    touchActivity(projectPath);
-    const proc = ensureProcess(win, projectPath, effectiveScope, permMode, effort, model);
-    claude.suppressForward = true;
-    const msg = JSON.stringify({ type: 'user', message: { role: 'user', content: '/compact' } });
-    if (proc.stdin && !proc.stdin.destroyed) {
-      proc.stdin.write(msg + '\n');
-    } else {
-      claude.suppressForward = false;
-    }
-  });
+  ipcMain.on('claude:compact', (_event, projectPath: string, permMode?: string, effort?: string, model?: string, scope?: string) =>
+    compactImpl({ projectPath, permMode, effort, model, scope })
+  );
 
   // claude:approve — user approved or denied a tool that was denied by the CLI
   ipcMain.handle('claude:approve', (_event, projectPath: string, toolUseId: string, approved: boolean, modifiedCommand?: string, scope?: string) => {
@@ -1410,149 +1551,15 @@ export function registerClaudeHandlers(win: BrowserWindow) {
   );
 
   // claude:alwaysAllow — add a tool pattern to the project's .claude/settings.local.json
-  ipcMain.handle('claude:alwaysAllow', async (_event, projectPath: string, toolPattern: string) => {
-    const claudeDir = path.join(projectPath, '.claude');
-    const settingsPath = path.join(claudeDir, 'settings.local.json');
-    let settings: Record<string, any> = {};
-    try {
-      settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
-    } catch { /* file doesn't exist yet */ }
-    if (!settings.permissions) settings.permissions = {};
-    if (!Array.isArray(settings.permissions.allow)) settings.permissions.allow = [];
-    if (!settings.permissions.allow.includes(toolPattern)) {
-      settings.permissions.allow.push(toolPattern);
-    }
-    try { fs.mkdirSync(claudeDir, { recursive: true }); } catch { /* exists */ }
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-    return true;
-  });
+  ipcMain.handle('claude:alwaysAllow', (_event, projectPath: string, toolPattern: string) => alwaysAllowImpl(projectPath, toolPattern));
 
   // claude:generateCommitMessage — always one-shot to avoid context token costs
   // Uses each AI provider's fast/cheap model for generation.
-  ipcMain.handle('claude:generateCommitMessage', async (_event, cwd: string, aiProvider?: string) => {
-    const ws = get(cwd);
-    const effectiveCwd = cwd || (ws && getClaude(ws).cwd) || process.env.HOME || '/';
-
-    // Get the diff
-    const getDiff = (args: string[]) => new Promise<string>((resolve) => {
-      const diffProc = spawn('git', ['diff', ...args], {
-        cwd: effectiveCwd,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        shell: IS_WIN,
-      });
-      let out = '';
-      diffProc.stdout?.on('data', (d: Buffer) => { out += d.toString(); });
-      diffProc.on('exit', () => resolve(out.trim()));
-      diffProc.on('error', () => resolve(''));
-    });
-
-    let diff = await getDiff(['--staged']);
-    if (!diff) diff = await getDiff([]);
-    if (!diff) return '';
-
-    const maxLen = 8000;
-    const truncatedDiff = diff.length > maxLen
-      ? diff.slice(0, maxLen) + '\n... (diff truncated)'
-      : diff;
-
-    const commitPrompt = `Generate a concise commit message for this diff. Output ONLY the commit message text, nothing else. Use conventional commit format (e.g. feat:, fix:, refactor:). Keep it under 72 characters for the subject line.\n\n${truncatedDiff}`;
-
-    const env = spawnEnv();
-
-    if (aiProvider === 'gemini') {
-      try {
-        const geminiWs = getOrCreate(effectiveCwd);
-        geminiWs.gemini.cwd = effectiveCwd;
-        await ensureGeminiTransport(win, geminiWs);
-        const sessionId = await ensureGeminiCommitSession(win, geminiWs);
-        const result = await promptGeminiText(win, geminiWs, {
-          sessionId,
-          scope: 'commit',
-          prompt: commitPrompt,
-          approvalMode: 'plan',
-          model: 'gemini-2.5-flash',
-        });
-        return result.trim();
-      } catch {
-        return '';
-      }
-    }
-
-    // Spawn the appropriate CLI with its fast model
-    let cmd: string;
-    let args: string[];
-    if (aiProvider === 'codex') {
-      cmd = 'codex';
-      args = ['exec', '-q', '--json', '-m', 'codex-mini', commitPrompt];
-    } else {
-      cmd = 'claude';
-      args = ['-p', commitPrompt, '--output-format', 'text', '--max-turns', '1', '--model', 'haiku'];
-    }
-
-    return new Promise<string>((resolve) => {
-      const proc = spawn(cmd, args, {
-        cwd: effectiveCwd,
-        env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        shell: IS_WIN,
-      });
-      proc.stdin?.end();
-
-      let output = '';
-      proc.stdout?.on('data', (data: Buffer) => { output += data.toString(); });
-      proc.on('exit', () => {
-        let result = output.trim();
-        if (aiProvider === 'codex') result = extractCodexCommitMessage(result);
-        resolve(result);
-      });
-      proc.on('error', () => resolve(''));
-    });
-  });
+  ipcMain.handle('claude:generateCommitMessage', (_event, cwd: string, aiProvider?: string) => generateCommitMessageImpl(cwd, aiProvider));
 
   // claude:generateTitle — one-shot lightweight title generation for chat sessions
   // Always uses the cheapest/fastest model per provider.
-  ipcMain.handle('claude:generateTitle', async (_event, cwd: string, userMessage: string, aiProvider?: string) => {
-    const ws = get(cwd);
-    const effectiveCwd = cwd || (ws && getClaude(ws).cwd) || process.env.HOME || '/';
-
-    const titlePrompt = `Summarize this conversation in 3-5 words as a title. Respond with only the title, no quotes or punctuation. User said: ${userMessage.slice(0, 500)}`;
-
-    const env = spawnEnv();
-
-    let cmd: string;
-    let args: string[];
-    if (aiProvider === 'codex') {
-      cmd = 'codex';
-      args = ['exec', '-q', '--json', '-m', 'codex-mini', titlePrompt];
-    } else if (aiProvider === 'gemini') {
-      cmd = 'gemini';
-      args = ['-p', titlePrompt, '--output-format', 'text', '-m', 'flash'];
-    } else {
-      cmd = 'claude';
-      args = ['-p', titlePrompt, '--output-format', 'text', '--max-turns', '1', '--model', 'haiku'];
-    }
-
-    return new Promise<string>((resolve) => {
-      const proc = spawn(cmd, args, {
-        cwd: effectiveCwd,
-        env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        shell: IS_WIN,
-      });
-      proc.stdin?.end();
-
-      let output = '';
-      proc.stdout?.on('data', (data: Buffer) => { output += data.toString(); });
-      proc.on('exit', () => {
-        let result = output.trim();
-        if (aiProvider === 'codex') result = extractCodexCommitMessage(result);
-        // Clean up: remove quotes, trailing punctuation
-        result = result.replace(/^["']|["']$/g, '').trim();
-        resolve(result || '');
-      });
-      proc.on('error', () => resolve(''));
-    });
-  });
+  ipcMain.handle('claude:generateTitle', (_event, cwd: string, userMessage: string, aiProvider?: string) => generateTitleImpl(cwd, userMessage, aiProvider));
 
   // Idle-scope sweep: stop Claude scopes that have been inactive for >30 min
   if (idleSweepTimer) clearInterval(idleSweepTimer);
