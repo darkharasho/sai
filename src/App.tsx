@@ -71,6 +71,7 @@ import { isOrchestratorToolDrift, describeToolDrift } from './lib/orchestratorTo
 import { resolveTaskRef } from './lib/swarmRef';
 import { installRemoteProxyHandler } from './lib/remoteProxyClient';
 import { applyQuestionEvent } from './lib/awaitingQuestionTracker';
+import { turnEndIsStale } from './lib/turnSeqGuard';
 import { resolveClaudeConfig, setWorkspaceOverride, sanitizeOverrideMap, type ClaudeOverrideMap } from './lib/claudeWorkspaceConfig';
 
 const SWARM_DEFAULT_CAP = 5;
@@ -258,6 +259,10 @@ export default function App() {
   const [streamingScopes, setStreamingScopes] = useState<Set<string>>(new Set());
   const streamingScopesRef = useRef<Set<string>>(new Set());
   streamingScopesRef.current = streamingScopes;
+  // [sai-stream-debug] When isStreaming was last cleared per scope: { turnSeq, at }.
+  // Used to catch the bug — assistant output arriving AFTER a clear means the turn
+  // kept going while the Stop button / thinking indicator had already vanished.
+  const streamClearedDbgRef = useRef<Map<string, { turnSeq: unknown; at: number }>>(new Map());
   // Unsent draft text and attached context per workspace, persisted across
   // workspace switches and session-key remounts so partial messages survive
   // navigation.
@@ -2472,6 +2477,26 @@ export default function App() {
       }
       // Use composite key (projectPath:scope) for turnSeq tracking
       const scopeKey = `${msg.projectPath}:${msg.scope || 'chat'}`;
+      // [sai-stream-debug] THE BUG DETECTOR: assistant/stream output arriving for a
+      // scope whose streaming was already cleared, but BEFORE a new streaming_start —
+      // i.e. the turn kept going after Stop/thinking vanished. A `streaming_start`
+      // clears the marker (legitimate new turn). This firing is the smoking gun.
+      {
+        if (msg.type === 'streaming_start') {
+          streamClearedDbgRef.current.delete(scopeKey);
+        } else if (
+          (msg.type === 'assistant' || msg.type === 'stream_event')
+          && streamClearedDbgRef.current.has(scopeKey)
+        ) {
+          const dbg = streamClearedDbgRef.current.get(scopeKey)!;
+          // eslint-disable-next-line no-console
+          console.warn('[sai-stream-debug] ⚠️ POST-CLEAR OUTPUT — turn kept streaming after isStreaming cleared', JSON.stringify({
+            scopeKey, msgType: msg.type, sinceClearMs: Date.now() - dbg.at, clearedAtTurnSeq: dbg.turnSeq,
+          }));
+          // Only report the first frame after each clear to avoid log spam.
+          streamClearedDbgRef.current.delete(scopeKey);
+        }
+      }
       // Swarm status mirror — runs for every workspace+scope so background
       // tasks (whose ChatPanel isn't mounted) still get status/tool-count
       // updates. See src/lib/swarmStatusMirror.ts.
@@ -2896,27 +2921,28 @@ export default function App() {
       // so the titlebar spinner doesn't stay stuck if the 'done' message is lost.
       if (msg.type === 'result' || msg.type === 'done') {
         setAwaitingQuestionWorkspaces(prev => applyQuestionEvent(prev, msg));
-        // For 'done', ignore stale messages from a previous turn (per scope).
-        // BUT still decrement busyScopeCountRef — the stale done represents a
-        // cancelled turn that did end. Without the decrement, the interrupt
-        // scenario (stop + immediate new send) leaves the count at 2→1 instead
-        // of 2→1→0, keeping busyWorkspaces permanently set.
-        if (msg.type === 'done' && msg.turnSeq != null) {
-          const expected = wsTurnSeqRef.current.get(scopeKey);
-          if (expected != null && msg.turnSeq !== expected) {
-            const staleCount = busyScopeCountRef.current.get(msg.projectPath) || 0;
-            const staleNext = Math.max(0, staleCount - 1);
-            busyScopeCountRef.current.set(msg.projectPath, staleNext);
-            if (staleNext === 0) {
-              setBusyWorkspaces(prev => {
-                if (!prev.has(msg.projectPath)) return prev;
-                const next = new Set(prev);
-                next.delete(msg.projectPath);
-                return next;
-              });
-            }
-            return;
+        // Ignore a turn-end message (`result` OR `done`) from a SUPERSEDED turn.
+        // When a follow-up is sent mid-flight (interrupt / autonomous chaining), the
+        // prior turn's `result` arrives tagged with the old turnSeq while the new turn
+        // is already streaming; without this guard it would clear streamingScopes and
+        // strip the Stop button + thinking indicator mid-response. `done` was already
+        // guarded here; `result` now shares the same check via turnEndIsStale.
+        // BUT still decrement busyScopeCountRef — the stale turn did end. Without the
+        // decrement, the interrupt scenario leaves the count at 2→1 instead of 2→1→0,
+        // keeping busyWorkspaces permanently set.
+        if (turnEndIsStale(msg.turnSeq, wsTurnSeqRef.current.get(scopeKey))) {
+          const staleCount = busyScopeCountRef.current.get(msg.projectPath) || 0;
+          const staleNext = Math.max(0, staleCount - 1);
+          busyScopeCountRef.current.set(msg.projectPath, staleNext);
+          if (staleNext === 0) {
+            setBusyWorkspaces(prev => {
+              if (!prev.has(msg.projectPath)) return prev;
+              const next = new Set(prev);
+              next.delete(msg.projectPath);
+              return next;
+            });
           }
+          return;
         }
         wsTurnSeqRef.current.set(scopeKey, -1);
         // Swarm-aware completion notification (gated by swarm.notifyOnComplete).
@@ -2989,6 +3015,17 @@ export default function App() {
         }
         if ((msg.scope || 'chat') === 'chat') {
           chatStreamingSessionRef.current.delete(msg.projectPath);
+        }
+        // [sai-stream-debug] This is the exact moment isStreaming flips false
+        // (Stop button + thinking indicator vanish). Log what cleared it so we can
+        // tell an end-of-turn `done` from a stray mid-turn `result`. Logged OUTSIDE
+        // the setState updater so StrictMode's double-invoke doesn't double-log.
+        if (streamingScopesRef.current.has(scopeKey)) {
+          // eslint-disable-next-line no-console
+          console.log('[sai-stream-debug] CLEAR streamingScope', JSON.stringify({
+            scopeKey, msgType: msg.type, subtype: msg.subtype, turnSeq: msg.turnSeq,
+          }));
+          streamClearedDbgRef.current.set(scopeKey, { turnSeq: msg.turnSeq, at: Date.now() });
         }
         setStreamingScopes(prev => {
           if (!prev.has(scopeKey)) return prev;

@@ -407,6 +407,25 @@ function ensureProcess(
       ws.lastActivity = Date.now();
       try {
         const msg = JSON.parse(line);
+        // [sai-stream-debug] Trace every CLI result + turn-end-ish frame so we can
+        // see if the CLI emits more than one `result` per turn (mid-turn checkpoint
+        // / auto-compaction). Remove once the disappearing-Stop-button bug is found.
+        if (msg.type === 'result' || (msg.type === 'system' && /compact/.test(String(msg.subtype || '')))) {
+          // eslint-disable-next-line no-console
+          console.log('[sai-stream-debug] CLI frame', JSON.stringify({
+            t: new Date().toISOString(),
+            type: msg.type,
+            subtype: msg.subtype,
+            num_turns: msg.num_turns,
+            is_error: msg.is_error,
+            scope,
+            turnSeq: claude.turnSeq,
+            activeTurnSeq: claude.activeTurnSeq,
+            awaitingQuestion: claude.awaitingQuestionAnswer,
+            awaitingApproval: claude.awaitingApproval,
+            suppressForward: claude.suppressForward,
+          }));
+        }
         // Capture session ID and forward to renderer
         if (msg.session_id && !claude.sessionId) {
           claude.sessionId = msg.session_id;
