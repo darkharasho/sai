@@ -244,11 +244,44 @@ export class SdkBackend implements ClaudeBackend {
     // Not a pending SDK approval — return false (no-op)
     return Promise.resolve(false);
   }
-  answerQuestion(a: AnswerQuestionArgs) {
-    return Promise.resolve(answerQuestionImpl(a.projectPath, a.toolUseId, a.answers, a.scope));
+  answerQuestion(a: AnswerQuestionArgs): Promise<boolean> {
+    const { projectPath, toolUseId, answers, scope } = a;
+    const effectiveScope = scope ?? 'chat';
+    const session = this.sessions.get(toScopeKey(projectPath, scope));
+    if (!session) return Promise.resolve(false);
+
+    // Mark the card answered in the UI immediately (parity with CLI)
+    this._emit({ type: 'question_answered', projectPath, scope: effectiveScope, toolUseId, answers });
+
+    // Push a follow-up user message so the agent proceeds
+    const content = `[AskUserQuestion answers for tool call ${toolUseId}]\nThe user picked the following answers:\n${JSON.stringify(answers, null, 2)}`;
+    session.pushInput({
+      type: 'user',
+      message: { role: 'user', content },
+      parent_tool_use_id: null,
+    });
+
+    return Promise.resolve(true);
   }
-  answerPlanReview(a: AnswerPlanArgs) {
-    return Promise.resolve(answerPlanReviewImpl(a.projectPath, a.toolUseId, a.approved, a.scope));
+
+  answerPlanReview(a: AnswerPlanArgs): Promise<boolean> {
+    const { projectPath, toolUseId, approved, scope } = a;
+    const effectiveScope = scope ?? 'chat';
+    const session = this.sessions.get(toScopeKey(projectPath, scope));
+    if (!session) return Promise.resolve(false);
+
+    this._emit({ type: 'plan_review_answered', projectPath, scope: effectiveScope, toolUseId, approved });
+
+    const content = approved
+      ? `[ExitPlanMode result for tool call ${toolUseId}]\nPlan approved — proceed.`
+      : `[ExitPlanMode result for tool call ${toolUseId}]\nPlan rejected.`;
+    session.pushInput({
+      type: 'user',
+      message: { role: 'user', content },
+      parent_tool_use_id: null,
+    });
+
+    return Promise.resolve(true);
   }
   alwaysAllow(projectPath: string, toolPattern: string) {
     return alwaysAllowImpl(projectPath, toolPattern);
@@ -388,6 +421,9 @@ export class SdkBackend implements ClaudeBackend {
             session.sessionId = sessionId;
           }
 
+          // Capture the raw SDK message to inspect for special tool_use blocks
+          const rawMsg = m;
+
           for (const e of emits) {
             if (e.type === 'streaming_start') {
               // Re-arm: the mapper saw an assistant message while streaming=false
@@ -398,6 +434,37 @@ export class SdkBackend implements ClaudeBackend {
               this._emit({ ...e, projectPath, scope: effectiveScope, turnSeq: session.activeTurnSeq });
             } else {
               this._emit({ ...e, projectPath, scope: effectiveScope });
+            }
+          }
+
+          // After forwarding an assistant message, inspect tool_use blocks for
+          // AskUserQuestion and ExitPlanMode (emit AFTER forward so cards render)
+          if (rawMsg?.type === 'assistant' && Array.isArray(rawMsg?.message?.content)) {
+            for (const block of rawMsg.message.content as Array<Record<string, unknown>>) {
+              if (block.type !== 'tool_use') continue;
+
+              if (block.name === 'AskUserQuestion') {
+                const input = (block.input ?? {}) as Record<string, unknown>;
+                const questions = Array.isArray(input.questions) ? input.questions as Array<Record<string, unknown>> : [];
+                const question = (questions[0]?.question as string | undefined) ?? 'The agent is waiting for your answer.';
+                this._emit({
+                  type: 'question_needed',
+                  projectPath,
+                  scope: effectiveScope,
+                  toolUseId: block.id as string,
+                  question,
+                });
+              } else if (block.name === 'ExitPlanMode') {
+                const input = (block.input ?? {}) as Record<string, unknown>;
+                this._emit({
+                  type: 'plan_review_needed',
+                  projectPath,
+                  scope: effectiveScope,
+                  toolUseId: block.id as string,
+                  plan: (input.plan as string | undefined) ?? '',
+                  planFilePath: (input.planFilePath as string | undefined) ?? '',
+                });
+              }
             }
           }
         }

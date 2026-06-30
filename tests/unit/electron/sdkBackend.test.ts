@@ -654,4 +654,230 @@ describe('SdkBackend', () => {
 
     expect(queryFn).toHaveBeenCalledTimes(2);
   });
+
+  // ── Task 2 Phase 2: AskUserQuestion + ExitPlanMode flows ─────────────────
+
+  it('(13) AskUserQuestion tool_use in assistant message emits question_needed; answerQuestion emits question_answered + pushes follow-up input', async () => {
+    // Script a drain stream with an assistant message containing AskUserQuestion tool_use
+    const TOOL_USE_ID = 'tool-ask-123';
+    const QUESTION_TEXT = 'Which approach do you prefer?';
+
+    // Capture pushInput calls via a spy on the input iterable
+    let capturedPushInput: ((msg: any) => void) | null = null;
+    const pushedInputs: any[] = [];
+
+    const assistantMsg = {
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'I need to ask you something.' },
+          {
+            type: 'tool_use',
+            id: TOOL_USE_ID,
+            name: 'AskUserQuestion',
+            input: {
+              questions: [{ question: QUESTION_TEXT }],
+            },
+          },
+        ],
+      },
+    };
+
+    // Use hang:true so drain keeps the session alive after yielding the messages
+    const fakeQuery = makeFakeQuery([
+      assistantMsg,
+    ], { hang: true });
+
+    const queryFn = vi.fn((args: { prompt: any; options: any }) => {
+      capturedQueryArgs.push(args);
+      return fakeQuery;
+    });
+
+    const backend = new SdkBackend({
+      queryFn,
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+    });
+
+    // Monkey-patch _createSession to spy on pushInput before session is stored
+    const origCreateSession = (backend as any)._createSession.bind(backend);
+    (backend as any)._createSession = function (...args: any[]) {
+      const session = origCreateSession(...args);
+      const origPush = session.pushInput.bind(session);
+      session.pushInput = (msg: any) => {
+        pushedInputs.push(msg);
+        origPush(msg);
+      };
+      capturedPushInput = session.pushInput;
+      return session;
+    };
+
+    backend.send({ projectPath: PROJECT, message: 'start', scope: SCOPE });
+
+    // Wait until question_needed is emitted
+    await new Promise<void>((resolve) => {
+      const check = () => {
+        if (emits.some(e => e.type === 'question_needed')) resolve();
+        else setTimeout(check, 5);
+      };
+      setTimeout(check, 5);
+    });
+
+    // Assert question_needed payload
+    const questionNeeded = emits.find(e => e.type === 'question_needed');
+    expect(questionNeeded).toBeDefined();
+    expect(questionNeeded!.toolUseId).toBe(TOOL_USE_ID);
+    expect(questionNeeded!.question).toBe(QUESTION_TEXT);
+    expect(questionNeeded!.projectPath).toBe(PROJECT);
+    expect(questionNeeded!.scope).toBe(SCOPE);
+
+    // Count inputs pushed so far (the initial send message)
+    const inputsBeforeAnswer = pushedInputs.length;
+
+    // Call answerQuestion
+    const answers = { q0: 'Option A' };
+    const result = await backend.answerQuestion({ projectPath: PROJECT, toolUseId: TOOL_USE_ID, answers, scope: SCOPE });
+    expect(result).toBe(true);
+
+    // Assert question_answered emitted
+    const questionAnswered = emits.find(e => e.type === 'question_answered');
+    expect(questionAnswered).toBeDefined();
+    expect(questionAnswered!.toolUseId).toBe(TOOL_USE_ID);
+    expect(questionAnswered!.answers).toEqual(answers);
+    expect(questionAnswered!.projectPath).toBe(PROJECT);
+    expect(questionAnswered!.scope).toBe(SCOPE);
+
+    // Assert a follow-up message was pushed into the input channel
+    expect(pushedInputs.length).toBeGreaterThan(inputsBeforeAnswer);
+    const followUp = pushedInputs[pushedInputs.length - 1];
+    expect(followUp.type).toBe('user');
+    expect(followUp.message.role).toBe('user');
+    expect(typeof followUp.message.content).toBe('string');
+  });
+
+  it('(14) ExitPlanMode tool_use in assistant message emits plan_review_needed; answerPlanReview(approved=true) emits plan_review_answered + pushes follow-up input', async () => {
+    const TOOL_USE_ID = 'tool-plan-456';
+    const PLAN_TEXT = 'Step 1: Do A. Step 2: Do B.';
+    const PLAN_FILE = '/tmp/plan.md';
+
+    const pushedInputs: any[] = [];
+
+    const assistantMsg = {
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Here is my plan.' },
+          {
+            type: 'tool_use',
+            id: TOOL_USE_ID,
+            name: 'ExitPlanMode',
+            input: {
+              plan: PLAN_TEXT,
+              planFilePath: PLAN_FILE,
+            },
+          },
+        ],
+      },
+    };
+
+    // Use hang:true so the session stays alive after emitting plan_review_needed
+    const fakeQuery = makeFakeQuery([
+      assistantMsg,
+    ], { hang: true });
+
+    const queryFn = vi.fn(() => fakeQuery);
+
+    const backend = new SdkBackend({
+      queryFn,
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+    });
+
+    const origCreateSession = (backend as any)._createSession.bind(backend);
+    (backend as any)._createSession = function (...args: any[]) {
+      const session = origCreateSession(...args);
+      const origPush = session.pushInput.bind(session);
+      session.pushInput = (msg: any) => {
+        pushedInputs.push(msg);
+        origPush(msg);
+      };
+      return session;
+    };
+
+    backend.send({ projectPath: PROJECT, message: 'start', scope: SCOPE });
+
+    // Wait until plan_review_needed is emitted
+    await new Promise<void>((resolve) => {
+      const check = () => {
+        if (emits.some(e => e.type === 'plan_review_needed')) resolve();
+        else setTimeout(check, 5);
+      };
+      setTimeout(check, 5);
+    });
+
+    // Assert plan_review_needed payload
+    const planReviewNeeded = emits.find(e => e.type === 'plan_review_needed');
+    expect(planReviewNeeded).toBeDefined();
+    expect(planReviewNeeded!.toolUseId).toBe(TOOL_USE_ID);
+    expect(planReviewNeeded!.plan).toBe(PLAN_TEXT);
+    expect(planReviewNeeded!.planFilePath).toBe(PLAN_FILE);
+    expect(planReviewNeeded!.projectPath).toBe(PROJECT);
+    expect(planReviewNeeded!.scope).toBe(SCOPE);
+
+    const inputsBeforeAnswer = pushedInputs.length;
+
+    // Call answerPlanReview with approved=true
+    const result = await backend.answerPlanReview({ projectPath: PROJECT, toolUseId: TOOL_USE_ID, approved: true, scope: SCOPE });
+    expect(result).toBe(true);
+
+    // Assert plan_review_answered emitted
+    const planReviewAnswered = emits.find(e => e.type === 'plan_review_answered');
+    expect(planReviewAnswered).toBeDefined();
+    expect(planReviewAnswered!.toolUseId).toBe(TOOL_USE_ID);
+    expect(planReviewAnswered!.approved).toBe(true);
+    expect(planReviewAnswered!.projectPath).toBe(PROJECT);
+    expect(planReviewAnswered!.scope).toBe(SCOPE);
+
+    // Assert a follow-up message was pushed
+    expect(pushedInputs.length).toBeGreaterThan(inputsBeforeAnswer);
+    const followUp = pushedInputs[pushedInputs.length - 1];
+    expect(followUp.type).toBe('user');
+    expect(followUp.message.role).toBe('user');
+    expect(followUp.message.content).toContain('approved');
+  });
+
+  it('(15) answerQuestion returns false when no session exists for the scope', async () => {
+    const backend = new SdkBackend({
+      queryFn: vi.fn(() => makeFakeQuery([])),
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+    });
+
+    // No send() call — no session exists
+    const result = await backend.answerQuestion({
+      projectPath: PROJECT,
+      toolUseId: 'nonexistent-tu',
+      answers: { q0: 'A' },
+      scope: SCOPE,
+    });
+    expect(result).toBe(false);
+  });
+
+  it('(16) answerPlanReview returns false when no session exists for the scope', async () => {
+    const backend = new SdkBackend({
+      queryFn: vi.fn(() => makeFakeQuery([])),
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+    });
+
+    const result = await backend.answerPlanReview({
+      projectPath: PROJECT,
+      toolUseId: 'nonexistent-tu',
+      approved: true,
+      scope: SCOPE,
+    });
+    expect(result).toBe(false);
+  });
 });
