@@ -1000,7 +1000,7 @@ describe('SdkBackend', () => {
     fakeQuery.close();
   });
 
-  it('(22) _sweepOnce suspends an idle non-streaming scope and skips streaming/awaiting ones', async () => {
+  it('(22) _sweepOnce suspends an idle non-streaming scope: emits scope_suspended, closes query, stashes sessionId, removes session', async () => {
     const fakeQuery = makeFakeQuery([], { hang: true });
     const queryFn = vi.fn(() => fakeQuery);
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
@@ -1008,18 +1008,27 @@ describe('SdkBackend', () => {
     backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
     await new Promise<void>((r) => setTimeout(r, 10));
 
-    // Force the session idle and not streaming.
+    // Force the session idle and not streaming; set a known sessionId to verify stash.
     const key = `${PROJECT} ${SCOPE}`; // matches toScopeKey (space separator)
     const session: any = (backend as any).sessions.get(key);
     session.lastActivityAt = 1000;
     session.mapperState.streaming = false;
     session.awaitingInput = false;
+    session.sessionId = 'sess-1';
 
     emits.length = 0;
     (backend as any)._sweepOnce(1000 + 31 * 60 * 1000); // 31 min later
+
+    // (a) scope_suspended emitted
     expect(emits.find((e) => e.type === 'scope_suspended' && e.scope === SCOPE)).toBeTruthy();
-    expect(fakeQuery.interruptSpy).toHaveBeenCalled();
-    fakeQuery.close();
+    // (b) query.close() was called — SDK runtime freed
+    expect(fakeQuery.closeSpy).toHaveBeenCalled();
+    // (c) session removed from sessions map
+    expect((backend as any).sessions.has(key)).toBe(false);
+    // (d) sessionId stashed in pendingResume for next send
+    expect((backend as any).pendingResume.get(key)).toBe('sess-1');
+    // interrupt should NOT have been called (teardown is via close, not interrupt)
+    expect(fakeQuery.interruptSpy).not.toHaveBeenCalled();
   });
 
   it('(23) chat scope merges user mcpConfigPath servers alongside sai', async () => {

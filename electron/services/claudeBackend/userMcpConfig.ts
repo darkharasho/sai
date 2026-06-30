@@ -2,7 +2,7 @@
  * Parse the user's `mcpConfigPath` SAI setting (string | string[]) into a merged
  * map of MCP server configs, for passthrough into the SDK `mcpServers` option in
  * chat/task scopes. Mirrors the CLI, which forwards each path via --mcp-config.
- * Malformed or unreadable files are skipped (logged by the caller), never thrown.
+ * Malformed or unreadable files are skipped, never thrown.
  */
 export function parseUserMcpConfigPaths(
   setting: unknown,

@@ -219,6 +219,9 @@ export class SdkBackend implements ClaudeBackend {
     const session = this.sessions.get(toScopeKey(projectPath, scope));
     if (session) {
       void session.query.interrupt();
+      // Clear awaitingInput so a user-Stop on an awaiting scope doesn't leave it
+      // permanently un-sweepable (mirrors CLI interruptImpl clearing awaitingApproval).
+      session.awaitingInput = false;
     }
   }
 
@@ -615,7 +618,15 @@ export class SdkBackend implements ClaudeBackend {
       scopes: records,
       stop: (workspaceId, scope) => {
         this._emit({ type: 'scope_suspended', projectPath: workspaceId, scope });
-        this.interrupt(workspaceId, scope === 'chat' ? undefined : scope);
+        // Tear down the session properly (mirrors setSessionId's close+resume-stash),
+        // so the SDK runtime is freed but the conversation resumes on the next send.
+        const scopeKey = toScopeKey(workspaceId, scope === 'chat' ? undefined : scope);
+        const session = this.sessions.get(scopeKey);
+        if (session) {
+          if (session.sessionId) this.pendingResume.set(scopeKey, session.sessionId);
+          session.query.close();
+          this.sessions.delete(scopeKey);
+        }
       },
     });
   }
