@@ -129,7 +129,7 @@ export function emitStreamingStart(
 /**
  * Read a setting from SAI's settings.json.
  */
-function readSaiSetting(key: string): any {
+export function readSaiSetting(key: string): any {
   try {
     const settings = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'), 'utf-8'));
     return settings[key];
