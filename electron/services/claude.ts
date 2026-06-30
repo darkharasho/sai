@@ -1613,4 +1613,7 @@ export function destroyClaude() {
     clearInterval(idleSweepTimer);
     idleSweepTimer = null;
   }
+  // Tear down the active backend (e.g. SdkBackend closes all live queries).
+  // Call-time-only import avoids a circular-reference problem at module load.
+  getClaudeBackend().destroy?.();
 }

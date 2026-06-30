@@ -128,6 +128,7 @@ vi.mock('@electron/services/remote/clamp', () => ({
 // ---------------------------------------------------------------------------
 import { getClaudeBackendSetting, getClaudeBackend, __setClaudeBackendForTests } from '@electron/services/claudeBackend';
 import { CliBackend } from '@electron/services/claudeBackend/cliBackend';
+import { SdkBackend } from '@electron/services/claudeBackend/sdkBackend';
 import { registerClaudeHandlers } from '@electron/services/claude';
 
 afterEach(() => {
@@ -176,9 +177,12 @@ describe('getClaudeBackend', () => {
     readSaiSetting.mockReturnValue(undefined);
     expect(getClaudeBackend()).toBeInstanceOf(CliBackend);
   });
-  it('falls back to CliBackend when flag is sdk (no SDK backend yet)', () => {
+  it('returns SdkBackend when flag is sdk', () => {
     readSaiSetting.mockReturnValue('sdk');
-    expect(getClaudeBackend()).toBeInstanceOf(CliBackend);
+    const be = getClaudeBackend();
+    expect(be).toBeInstanceOf(SdkBackend);
+    // destroy is optional on the interface but present on SdkBackend
+    expect(typeof (be as any).destroy).toBe('function');
   });
 });
 

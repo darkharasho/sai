@@ -1,5 +1,6 @@
 import { readSaiSetting } from '../claude';
 import { CliBackend } from './cliBackend';
+import { SdkBackend } from './sdkBackend';
 import type { ClaudeBackend } from './types';
 export * from './types';
 
@@ -13,10 +14,10 @@ export function getClaudeBackend(): ClaudeBackend {
   if (active) return active;
   const which = getClaudeBackendSetting();
   if (which === 'sdk') {
-    // eslint-disable-next-line no-console
-    console.warn('[claude] claudeBackend=sdk requested but SDK backend not implemented; using CLI');
+    active = new SdkBackend();
+  } else {
+    active = new CliBackend();
   }
-  active = new CliBackend();
   return active;
 }
 

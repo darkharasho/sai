@@ -58,4 +58,5 @@ export interface ClaudeBackend {
   generateCommitMessage(cwd: string, provider?: string): Promise<string>;
   generateTitle(cwd: string, userMessage: string, provider?: string): Promise<string>;
   getModels(): { models: ClaudeModelOption[]; detected: boolean };
+  destroy?(): void;
 }
