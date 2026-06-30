@@ -1,3 +1,5 @@
+import type { ClaudeModelOption } from '../claude';
+
 export interface StartArgs {
   projectPath: string;
   scope?: string;
@@ -55,5 +57,5 @@ export interface ClaudeBackend {
   alwaysAllow(projectPath: string, toolPattern: string): Promise<boolean>;
   generateCommitMessage(cwd: string, provider?: string): Promise<string>;
   generateTitle(cwd: string, userMessage: string, provider?: string): Promise<string>;
-  getModels(): { models: string[]; detected: boolean };
+  getModels(): { models: ClaudeModelOption[]; detected: boolean };
 }

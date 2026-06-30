@@ -1,12 +1,11 @@
 import { readSaiSetting } from '../claude';
+import { CliBackend } from './cliBackend';
+import type { ClaudeBackend } from './types';
 export * from './types';
 
 export function getClaudeBackendSetting(): 'cli' | 'sdk' {
   return readSaiSetting('claudeBackend') === 'sdk' ? 'sdk' : 'cli';
 }
-
-import { CliBackend } from './cliBackend';
-import type { ClaudeBackend } from './types';
 
 let active: ClaudeBackend | null = null;
 
