@@ -407,23 +407,38 @@ function ensureProcess(
       ws.lastActivity = Date.now();
       try {
         const msg = JSON.parse(line);
-        // [sai-stream-debug] Trace every CLI result + turn-end-ish frame so we can
-        // see if the CLI emits more than one `result` per turn (mid-turn checkpoint
-        // / auto-compaction). Remove once the disappearing-Stop-button bug is found.
-        if (msg.type === 'result' || (msg.type === 'system' && /compact/.test(String(msg.subtype || '')))) {
+        // [sai-stream-debug] Trace every CLI result + turn-lifecycle frame to pin down
+        // the wait/restore bug: the CLI emits a real `result` when it pauses/waits on a
+        // background task/subagent, then RESUMES the same logical turn with more
+        // assistant output and NO new streaming_start — so streaming clears and the
+        // thinking/Stop indicators vanish while the turn keeps going. We need the field
+        // that distinguishes a paused result (stop_reason/terminal_reason) from a final
+        // one (stop_reason=end_turn). Remove once the fix lands.
+        if (msg.type === 'result' || (msg.type === 'system' && /compact|task/.test(String(msg.subtype || '')))) {
           // eslint-disable-next-line no-console
           console.log('[sai-stream-debug] CLI frame', JSON.stringify({
             t: new Date().toISOString(),
             type: msg.type,
             subtype: msg.subtype,
+            stop_reason: msg.stop_reason,
+            terminal_reason: msg.terminal_reason,
             num_turns: msg.num_turns,
             is_error: msg.is_error,
             scope,
             turnSeq: claude.turnSeq,
             activeTurnSeq: claude.activeTurnSeq,
-            awaitingQuestion: claude.awaitingQuestionAnswer,
-            awaitingApproval: claude.awaitingApproval,
-            suppressForward: claude.suppressForward,
+            streaming: claude.streaming,
+            busy: claude.busy,
+          }));
+        }
+        // [sai-stream-debug] THE RESTORE SIGNAL: assistant output arriving in the main
+        // process while we've already marked the turn ended (streaming=false) — i.e. the
+        // CLI resumed after a wait. This is the backend-side smoking gun for the fix.
+        if (msg.type === 'assistant' && !claude.streaming) {
+          // eslint-disable-next-line no-console
+          console.log('[sai-stream-debug] ⚠️ RESUME-AFTER-DONE assistant frame while streaming=false', JSON.stringify({
+            scope, turnSeq: claude.turnSeq, activeTurnSeq: claude.activeTurnSeq,
+            blocks: Array.isArray(msg.message?.content) ? msg.message.content.map((b: any) => b.type) : null,
           }));
         }
         // Capture session ID and forward to renderer
