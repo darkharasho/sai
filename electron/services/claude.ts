@@ -24,6 +24,7 @@ import { imageReadResult } from './imageFiles';
 import type { StartArgs, CompactArgs } from './claudeBackend/types';
 import { getClaudeBackend } from './claudeBackend';
 import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE } from './chatNudges';
+import { classifyTurnEnd, isSchedulingTool, type WaitMeta } from './waitClassifier';
 export { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE };
 
 const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
@@ -505,6 +506,13 @@ function ensureProcess(
                 toolUseId: block.id,
                 input: block.input || {},
               };
+              if (isSchedulingTool(block.name)) {
+                claude.sawSchedulingTool = true;
+                const delay = (block.input as any)?.delaySeconds;
+                if (block.name === 'ScheduleWakeup' && typeof delay === 'number') {
+                  claude.wakeupResumeInSeconds = delay;
+                }
+              }
               if (block.name === 'AskUserQuestion') {
                 askUserQuestionId = block.id;
               }
