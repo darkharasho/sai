@@ -122,6 +122,12 @@ export function emitStreamingStart(
       + `by the renderer's stale-turn guard, stranding the thinking animation + Stop button`,
     );
   }
+  // A new/resumed turn boundary clears any prior wait tracking: the resume
+  // itself proves the scope is active again, so it must not stay marked as
+  // waiting or defer the idle sweep past this point.
+  claude.sawSchedulingTool = false;
+  claude.wakeupResumeInSeconds = null;
+  claude.pendingWakeup = false;
   emitChatMessage({
     type: 'streaming_start',
     projectPath: ws.projectPath,
