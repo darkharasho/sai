@@ -261,8 +261,6 @@ export default function App() {
   const streamingScopesRef = useRef<Set<string>>(new Set());
   streamingScopesRef.current = streamingScopes;
   const [waitingScopes, setWaitingScopes] = useState<Map<string, { wait: WaitMeta; startedAtMs: number }>>(new Map());
-  const waitingScopesRef = useRef<Map<string, { wait: WaitMeta; startedAtMs: number }>>(new Map());
-  waitingScopesRef.current = waitingScopes;
   // Unsent draft text and attached context per workspace, persisted across
   // workspace switches and session-key remounts so partial messages survive
   // navigation.
@@ -4440,6 +4438,7 @@ export default function App() {
                         : streamingScopes.has(`${wsPath}:chat`)
                   }
                   waiting={
+                    // waits are claude-only: waitingScopes never holds gemini/codex entries
                     aiProvider === 'claude'
                       ? waitingScopes.get(`${wsPath}:${ws.activeSession.id}`) ?? null
                       : waitingScopes.get(`${wsPath}:chat`) ?? null

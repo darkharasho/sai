@@ -818,6 +818,9 @@ export function interruptImpl(projectPath: string, scope?: string): void {
     claude.pendingToolUse = null;
     claude.approvalBuffered = [];
     claude.awaitingApproval = false;
+    claude.pendingWakeup = false;
+    claude.sawSchedulingTool = false;
+    claude.wakeupResumeInSeconds = null;
     proc.kill();
     emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope: scope || 'chat', turnSeq: claude.turnSeq });
   }
