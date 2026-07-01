@@ -92,6 +92,12 @@ interface ScopeSession {
   pendingWakeup: boolean;
   /** Silent turn (e.g. /compact): drop all non-system forwarding until result. */
   suppressForward: boolean;
+  /** interrupt() ended the turn in the UI, but the runtime's result for that
+   *  turn is still in flight. The next send must keep activeTurnSeq LAGGING so
+   *  the late result is stamped with the dead turn's seq (stale-droppable) —
+   *  otherwise it carries the NEW turn's seq, the renderer ends the live turn,
+   *  and the queue drains into a session that is still mid-turn. */
+  awaitingInterruptResult: boolean;
   /** Epoch ms after which a pendingWakeup is considered abandoned. */
   wakeupDeadline: number | null;
   /** Stored for the idle sweep so we never need to parse the scope key. */
@@ -429,6 +435,7 @@ export class SdkBackend implements ClaudeBackend {
     // the mapper re-arms streaming_start (streaming is false), self-healing the UI.
     if (session.mapperState.streaming) {
       session.mapperState = { ...session.mapperState, streaming: false };
+      session.awaitingInterruptResult = true;
       this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: session.activeTurnSeq });
     }
   }
@@ -637,8 +644,11 @@ export class SdkBackend implements ClaudeBackend {
    * activeTurnSeq back to turnSeq when that result is processed.
    */
   private _beginTurn(session: ScopeSession, projectPath: string, effectiveScope: string): void {
-    const wasInterrupt = session.mapperState.streaming;
-    if (wasInterrupt) {
+    // A turn is superseded either while visibly streaming, or after an
+    // interrupt whose runtime result hasn't drained yet — both must leave
+    // activeTurnSeq lagging so the old turn's result is stale-droppable.
+    const wasInterrupt = session.mapperState.streaming || session.awaitingInterruptResult;
+    if (session.mapperState.streaming) {
       this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: session.turnSeq });
     }
 
@@ -834,6 +844,7 @@ export class SdkBackend implements ClaudeBackend {
       lastActivityAt: Date.now(),
       awaitingInput: false,
       suppressForward: false,
+      awaitingInterruptResult: false,
       config: normalizeConfig(queryArgs.permMode, queryArgs.effort, queryArgs.model),
       gated: !!canUseTool,
       heldToolUses: new Set(),
@@ -997,8 +1008,10 @@ export class SdkBackend implements ClaudeBackend {
 
           if (rawMsg?.type === 'result') {
             // The old turn drained: converge activeTurnSeq onto the latest send's
-            // turnSeq (it lags during an interrupt — see _beginTurn).
+            // turnSeq (it lags during an interrupt — see _beginTurn), and clear
+            // the interrupt marker — this result was the one it waited for.
             session.activeTurnSeq = session.turnSeq;
+            session.awaitingInterruptResult = false;
             // Accurate context meter: ask the runtime for its real per-category
             // context accounting (fire-and-forget; renderer falls back to the
             // usage-sum estimate when absent).

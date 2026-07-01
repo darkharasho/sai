@@ -1918,10 +1918,14 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           handleSend(next.fullText, next.images);
         }, 300);
         // Safety: if the follow-up never produces a streaming_start (e.g. a spawn
-        // error), don't leave the Stop button stuck — release the bridge.
+        // error), don't leave the Stop button stuck — release the bridge AND the
+        // drain guard. Releasing only the bridge left drainPendingRef set
+        // forever, permanently blocking every future drain (queued messages
+        // never flushed again until a manual send).
         if (drainBackstopRef.current) clearTimeout(drainBackstopRef.current);
         drainBackstopRef.current = setTimeout(() => {
           drainBackstopRef.current = null;
+          drainPendingRef.current = false;
           setDrainInFlight(false);
         }, 8000);
       }

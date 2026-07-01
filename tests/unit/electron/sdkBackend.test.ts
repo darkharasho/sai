@@ -1389,6 +1389,52 @@ describe('SdkBackend', () => {
     fakeQuery.close();
   });
 
+  it('(32b) interrupt then send: the dead turn\'s late result is stamped with the OLD seq, not the new turn\'s', async () => {
+    // Query yields nothing until we release the interrupted turn's result.
+    let releaseResult: (() => void) | null = null;
+    const resultGate = new Promise<void>((res) => { releaseResult = res; });
+    async function* gen() {
+      await resultGate;
+      yield { type: 'result', stop_reason: 'end_turn', num_turns: 1 }; // late result of the interrupted turn
+      await new Promise(() => {}); // hang
+    }
+    const iterator = gen();
+    const fakeQuery: any = {
+      interrupt: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn(),
+      [Symbol.asyncIterator]() { return iterator; },
+    };
+    const backend = new SdkBackend({ queryFn: vi.fn(() => fakeQuery), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+
+    // Turn 1 in flight → user hits Stop → immediate done(1)
+    backend.send({ projectPath: PROJECT, message: 'first', scope: SCOPE, permMode: 'default' });
+    await new Promise(r => setTimeout(r, 10));
+    backend.interrupt(PROJECT, SCOPE);
+    await new Promise(r => setTimeout(r, 10));
+    expect(emits.filter(e => e.type === 'done').map(e => e.turnSeq)).toEqual([1]);
+
+    // Follow-up send (bypass-send / queue drain) starts turn 2
+    backend.send({ projectPath: PROJECT, message: 'second', scope: SCOPE, permMode: 'default' });
+    await new Promise(r => setTimeout(r, 10));
+    const start2 = emits.filter(e => e.type === 'streaming_start').pop();
+    expect(start2!.turnSeq).toBe(2);
+
+    // The interrupted turn's result finally drains — it must carry seq 1
+    // (stale-droppable), NOT seq 2, or the renderer would end the live turn
+    // and the queue would drain into a still-running session.
+    emits.length = 0;
+    releaseResult!();
+    await new Promise<void>((resolve) => {
+      const check = () => { if (emits.some(e => e.type === 'result')) resolve(); else setTimeout(check, 5); };
+      setTimeout(check, 5);
+    });
+    expect((emits.find(e => e.type === 'result') as any).turnSeq).toBe(1);
+    expect((emits.find(e => e.type === 'done') as any).turnSeq).toBe(1);
+
+    fakeQuery.close();
+  });
+
   it('(33) session options carry the enriched spawn env and a stderr handler', async () => {
     const fakeQuery = makeFakeQuery([], { hang: true });
     let capturedOptions: any = null;
