@@ -26,6 +26,7 @@ import {
 import { clamp, type PermMode } from '../remote/clamp';
 import { parseUserMcpConfigPaths } from './userMcpConfig';
 import { buildSdkOptions } from './sdkOptions';
+import { buildOrchestratorSystemPrompt, resolveOrchestratorPromptContext, type OrchestratorPromptContext } from '../../../src/lib/orchestratorSystemPrompt';
 import { mapSdkMessage, type MapperState } from './sdkMessageMap';
 import { sweepIdleScopes, IDLE_SCOPE_MS, SWEEP_INTERVAL_MS } from '../idleScopeSweep';
 import type {
@@ -106,6 +107,12 @@ export interface SdkBackendDeps {
    * is attached for that session.
    */
   buildChatMcpServer?: (workspace: string) => McpSdkServerConfigWithInstance | undefined;
+  /**
+   * Build the in-process swarm MCP server for a given workspace.
+   * Called only for `kind === 'orchestrator'` scopes. If omitted or returns
+   * undefined (e.g. dispatch not yet registered), no swarm server is attached.
+   */
+  buildSwarmMcpServer?: (workspace: string) => McpSdkServerConfigWithInstance | undefined;
 }
 
 // ─── SdkBackend ───────────────────────────────────────────────────────────────
@@ -115,7 +122,7 @@ export class SdkBackend implements ClaudeBackend {
   /** Remembered session IDs for the next send after setSessionId */
   private readonly pendingResume = new Map<string, string>();
   /** Per-scope pending cwd/kind/appendSystemPrompt set by start() */
-  private readonly scopeMeta = new Map<string, { cwd: string; kind: 'chat' | 'task' | 'orchestrator'; appendSystemPrompt?: string }>();
+  private readonly scopeMeta = new Map<string, { cwd: string; kind: 'chat' | 'task' | 'orchestrator'; appendSystemPrompt?: string; orchestratorContext?: Record<string, unknown> | null }>();
   /** Pending tool approval promises keyed by toolUseId */
   private readonly pendingApprovals = new Map<string, (r: PermissionResult) => void>();
 
@@ -123,6 +130,7 @@ export class SdkBackend implements ClaudeBackend {
   private readonly _emit: (payload: Record<string, unknown>) => void;
   private readonly _resolveClaudePath: () => string | undefined;
   private readonly _buildChatMcpServer?: (workspace: string) => McpSdkServerConfigWithInstance | undefined;
+  private readonly _buildSwarmMcpServer?: (workspace: string) => McpSdkServerConfigWithInstance | undefined;
   private idleSweepTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(deps?: SdkBackendDeps) {
@@ -137,16 +145,17 @@ export class SdkBackend implements ClaudeBackend {
     this._emit = deps?.emit ?? defaultEmit;
     this._resolveClaudePath = deps?.resolveClaudePath ?? resolveClaudePath;
     this._buildChatMcpServer = deps?.buildChatMcpServer;
+    this._buildSwarmMcpServer = deps?.buildSwarmMcpServer;
     this._startIdleSweep();
   }
 
   // ─── start ─────────────────────────────────────────────────────────────────
 
   start(args: StartArgs): { slashCommands: string[] } {
-    const { projectPath, scope, scopeCwd, kind = 'chat', metaPreamble } = args;
+    const { projectPath, scope, scopeCwd, kind = 'chat', metaPreamble, orchestratorContext } = args;
     const scopeKey = toScopeKey(projectPath, scope);
     const cwd = scopeCwd ?? projectPath;
-    this.scopeMeta.set(scopeKey, { cwd, kind, appendSystemPrompt: metaPreamble });
+    this.scopeMeta.set(scopeKey, { cwd, kind, appendSystemPrompt: metaPreamble, orchestratorContext });
     return { slashCommands: readCachedSlashCommands() };
   }
 
@@ -388,6 +397,24 @@ export class SdkBackend implements ClaudeBackend {
     // nudges (deferred since Phase 1). Other kinds (task/orchestrator) do not.
     let mcpServers: Record<string, McpSdkServerConfigWithInstance> | undefined;
     let chatAppendSystemPrompt = appendSystemPrompt;
+    let systemPromptOverride: string | undefined;
+
+    if (kind === 'orchestrator') {
+      const server = this._buildSwarmMcpServer?.(cwd);
+      if (server) {
+        mcpServers = { swarm: server };
+      }
+      // Build the full orchestrator system prompt (full replacement, not append),
+      // mirroring claude.ts buildArgs: derive workspacePath/Name from cwd when absent.
+      const raw = (meta?.orchestratorContext ?? {}) as Partial<OrchestratorPromptContext>;
+      const ctx = resolveOrchestratorPromptContext({
+        ...raw,
+        workspacePath: raw.workspacePath || cwd,
+        workspaceName: raw.workspaceName || (cwd ? cwd.split(/[\\/]/).filter(Boolean).pop() || cwd : undefined),
+      });
+      systemPromptOverride = buildOrchestratorSystemPrompt(ctx);
+    }
+
     if (kind === 'chat') {
       const server = this._buildChatMcpServer?.(cwd);
       if (server) {
@@ -417,6 +444,7 @@ export class SdkBackend implements ClaudeBackend {
       sessionId: resumeId,
       claudeExecutablePath: this._resolveClaudePath(),
       appendSystemPrompt: chatAppendSystemPrompt,
+      systemPromptOverride,
       canUseTool,
       mcpServers,
     });

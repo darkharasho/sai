@@ -1096,4 +1096,39 @@ describe('SdkBackend', () => {
     expect(capturedOptions.permissionMode).toBe('bypassPermissions'); // no ceiling → unchanged
     fakeQuery.close();
   });
+
+  it('(26) orchestrator scope attaches mcpServers.swarm + full orchestrator systemPrompt (plain string)', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    let capturedOptions: any = null;
+    const queryFn = vi.fn((args: any) => { capturedOptions = args.options; return fakeQuery; });
+    const fakeSwarm = { type: 'sdk', name: 'swarm', instance: {} } as any;
+    const buildSwarmMcpServer = vi.fn(() => fakeSwarm);
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined, buildSwarmMcpServer });
+    backend.start({ projectPath: PROJECT, scope: 'orch', scopeCwd: PROJECT, kind: 'orchestrator', orchestratorContext: { defaultModel: 'opus', concurrencyCap: 3 } });
+    backend.send({ projectPath: PROJECT, message: 'go', scope: 'orch', permMode: 'bypass' });
+    await new Promise<void>((r) => { const c = () => capturedOptions ? r() : setTimeout(c, 5); setTimeout(c, 5); });
+
+    expect(buildSwarmMcpServer).toHaveBeenCalledWith(PROJECT);
+    expect(capturedOptions.mcpServers).toEqual({ swarm: fakeSwarm });
+    expect(typeof capturedOptions.systemPrompt).toBe('string'); // full replacement, not preset object
+    expect(capturedOptions.systemPrompt.length).toBeGreaterThan(50); // the built orchestrator prompt
+    expect(capturedOptions.tools).toEqual([]);
+    expect(capturedOptions.permissionMode).toBe('bypassPermissions');
+    fakeQuery.close();
+  });
+
+  it('(27) chat scope does not attach the swarm server', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    let capturedOptions: any = null;
+    const queryFn = vi.fn((args: any) => { capturedOptions = args.options; return fakeQuery; });
+    const buildSwarmMcpServer = vi.fn(() => ({ type: 'sdk', name: 'swarm', instance: {} } as any));
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined, buildSwarmMcpServer });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((r) => { const c = () => capturedOptions ? r() : setTimeout(c, 5); setTimeout(c, 5); });
+
+    expect(buildSwarmMcpServer).not.toHaveBeenCalled();
+    expect(capturedOptions.mcpServers?.swarm).toBeUndefined();
+    fakeQuery.close();
+  });
 });
