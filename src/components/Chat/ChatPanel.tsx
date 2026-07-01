@@ -9,6 +9,7 @@ import { SPRING, DISTANCE, EASING, useReducedMotionTransition } from './motion';
 import { useSaiAnimationPref } from './useSaiAnimationPref';
 import { parseToolResultBlocks } from '../../lib/toolResultContent';
 import { buildPendingQuestionAnswer } from '../../lib/pendingQuestionAnswer';
+import WaitingIndicator from './WaitingIndicator';
 
 // Projects whose brainstorm seed has already been consumed (or attempted) in
 // this renderer process. The seed is one-shot, but the chat start-effect can
@@ -1352,7 +1353,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // a follow-up right as the current turn finishes. The real `isStreaming` prop
   // still drives the turn/drain logic — only presentation uses this.
   const streamingForDisplay = isStreaming || drainInFlight || messageQueue.length > 0;
-  const showThinking = streamingForDisplay && !awaitingQuestion;
+  const isWaiting = !!waiting && waiting.wait.kind !== 'none';
+  // While waiting we are NOT thinking — suppress the thinking indicator.
+  const showThinking = streamingForDisplay && !awaitingQuestion && !isWaiting;
   const isSaiProvider = true; // All providers use the SAI animation system
   const saiMorphActive = isSaiProvider && saiAnimationEnabled;
   const lastMsg = messages[messages.length - 1];
@@ -1593,6 +1596,10 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     } else {
       window.sai.claudeSend(projectPath, prompt, imagePaths, permissionMode, effortLevel, modelChoice, claudeScope);
     }
+  };
+
+  const handleCancelWait = () => {
+    window.sai.claudeStop?.(projectPath, claudeScope);
   };
 
   const handleRetry = useCallback((errorMessageId: string) => {
@@ -1847,6 +1854,11 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
                 : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} renderToolCall={renderToolCall} renderMessage={renderMessage} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} watcherUrlAllowlist={watcherUrlsByMessageId.get(msg.id) ?? EMPTY_URL_SET} />
               )}
             </TaskRegistryContext.Provider>
+            {isWaiting && waiting && (
+              <div className="chat-waiting-row">
+                <WaitingIndicator wait={waiting.wait} startedAtMs={waiting.startedAtMs} onCancel={handleCancelWait} />
+              </div>
+            )}
           </>
         )}
         <MotionPresence>
@@ -1898,6 +1910,13 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       </div>
       <LayoutGroup>
         <div data-testid="chat-bottom-strip" className="chat-bottom-strip">
+          {isWaiting && (
+            <div className="chat-composer-cancel-row">
+              <button className="chat-composer-cancel" onClick={handleCancelWait} title="Cancel and stop waiting">
+                {waiting!.wait.kind === 'scheduled' ? 'Waiting to resume · Cancel' : 'Waiting · Cancel'}
+              </button>
+            </div>
+          )}
           <ChatInput
             onSend={handleSend}
             overlayControl={overlayControl}
@@ -2097,6 +2116,28 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           flex: 1 1 auto;
           min-height: 0;
         }
+        .chat-waiting-row {
+          display: flex;
+          justify-content: flex-start;
+          padding: 8px 16px 4px;
+        }
+        .chat-composer-cancel-row {
+          display: flex;
+          justify-content: center;
+          padding: 4px 16px;
+        }
+        .chat-composer-cancel {
+          background: var(--red);
+          color: #fff;
+          border: none;
+          cursor: pointer;
+          padding: 5px 12px;
+          border-radius: var(--radius-sm);
+          font-size: 12px;
+          font-weight: 600;
+          opacity: 0.85;
+        }
+        .chat-composer-cancel:hover { opacity: 1; }
         .chat-load-sentinel {
           display: flex;
           justify-content: center;
