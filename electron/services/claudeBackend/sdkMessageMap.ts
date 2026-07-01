@@ -67,6 +67,19 @@ export function mapSdkMessage(msg: any, state: MapperState): MapResult {
     return { emits, state: nextState, sessionId: capturedSessionId };
   }
 
+  // --- stream_event: re-arm on message_start so a resumed turn (wait/wakeup)
+  // shows the thinking indicator from the first partial frame, not only when
+  // the complete assistant message lands — on thinking-heavy models that can
+  // be minutes later. ---
+  if (msg.type === 'stream_event') {
+    if (!state.streaming && msg.event?.type === 'message_start') {
+      emits.push({ type: 'streaming_start' });
+      nextState = { ...nextState, streaming: true };
+    }
+    emits.push({ ...msg });
+    return { emits, state: nextState, sessionId: capturedSessionId };
+  }
+
   // --- All other types (user, system non-init, rate_limit_event, stream_event, unknown): forward as-is ---
   emits.push({ ...msg });
   return { emits, state: nextState, sessionId: capturedSessionId };

@@ -155,3 +155,24 @@ describe('buildSdkOptions', () => {
     expect(opts.systemPrompt).toEqual({ type: 'preset', preset: 'claude_code', append: 'nudge' });
   });
 });
+
+// --- env + stderr pass-through (packaged-app env enrichment, auth diagnostics) ---
+describe('env and stderr wiring', () => {
+  it('passes env through to the SDK options', () => {
+    const env = { PATH: '/enriched', NODE_OPTIONS: '--max-old-space-size=2048' };
+    const opts = buildSdkOptions({ kind: 'chat', cwd: '/ws', env });
+    expect(opts.env).toEqual(env);
+  });
+
+  it('passes the stderr callback through', () => {
+    const stderr = (_: string) => {};
+    const opts = buildSdkOptions({ kind: 'chat', cwd: '/ws', stderr });
+    expect(opts.stderr).toBe(stderr);
+  });
+
+  it('omits env/stderr when not provided', () => {
+    const opts = buildSdkOptions({ kind: 'chat', cwd: '/ws' });
+    expect(opts.env).toBeUndefined();
+    expect(opts.stderr).toBeUndefined();
+  });
+});

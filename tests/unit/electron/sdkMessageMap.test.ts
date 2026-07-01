@@ -142,3 +142,32 @@ describe('session_id capture', () => {
     expect(result.sessionId).toBeUndefined();
   });
 });
+
+// --- stream_event re-arm: resumed turns show streaming from the first partial frame ---
+describe('stream_event message_start re-arm', () => {
+  it('re-arms streaming_start when a message_start arrives while not streaming', () => {
+    const msg = { type: 'stream_event', event: { type: 'message_start' } };
+    const state: MapperState = { streaming: false, sessionIdSeen: true };
+    const result = mapSdkMessage(msg, state);
+    expect(result.emits[0].type).toBe('streaming_start');
+    expect(result.emits[1].type).toBe('stream_event');
+    expect(result.state.streaming).toBe(true);
+  });
+
+  it('does NOT re-arm on message_start while already streaming', () => {
+    const msg = { type: 'stream_event', event: { type: 'message_start' } };
+    const state: MapperState = { streaming: true, sessionIdSeen: true };
+    const result = mapSdkMessage(msg, state);
+    expect(result.emits).toHaveLength(1);
+    expect(result.emits[0].type).toBe('stream_event');
+  });
+
+  it('does NOT re-arm on non-message_start stream events while not streaming', () => {
+    const msg = { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'x' } } };
+    const state: MapperState = { streaming: false, sessionIdSeen: true };
+    const result = mapSdkMessage(msg, state);
+    expect(result.emits).toHaveLength(1);
+    expect(result.emits[0].type).toBe('stream_event');
+    expect(result.state.streaming).toBe(false);
+  });
+});

@@ -2444,6 +2444,13 @@ export default function App() {
   // Listen for background workspace completions
   // Track busy scope count per workspace so overlapping chat+terminal don't cancel each other
   const busyScopeCountRef = useRef(new Map<string, number>());
+  // Which turn each scope is currently counted for in busyScopeCountRef. A scope
+  // contributes exactly ONE busy slot: streaming_start increments only when the
+  // scope isn't already counted (re-arms after waits just update the turn), and
+  // turn-ends decrement only when they end the counted turn (a result/done pair
+  // for the same turn decrements once, not twice). Without this, workspaces
+  // running multiple scopes lost their busy indicator after the first turn ended.
+  const busyTurnByScopeRef = useRef(new Map<string, number>());
   // Per-task assistant message buffer for background swarm tasks.
   // Keyed by task sessionId (msg.scope). Flushed to chatDb on done/result so
   // background tasks (whose ChatPanel isn't mounted) still persist Claude's
@@ -2653,8 +2660,12 @@ export default function App() {
       }
       if (msg.type === 'streaming_start') {
         if (msg.turnSeq != null) wsTurnSeqRef.current.set(scopeKey, msg.turnSeq);
-        const count = busyScopeCountRef.current.get(msg.projectPath) || 0;
-        busyScopeCountRef.current.set(msg.projectPath, count + 1);
+        const countedTurn = busyTurnByScopeRef.current.get(scopeKey);
+        if (countedTurn == null) {
+          const count = busyScopeCountRef.current.get(msg.projectPath) || 0;
+          busyScopeCountRef.current.set(msg.projectPath, count + 1);
+        }
+        busyTurnByScopeRef.current.set(scopeKey, msg.turnSeq ?? countedTurn ?? 0);
         setBusyWorkspaces(prev => new Set(prev).add(msg.projectPath));
         setCompletedWorkspaces(prev => {
           if (!prev.has(msg.projectPath)) return prev;
@@ -2911,21 +2922,11 @@ export default function App() {
         // is already streaming; without this guard it would clear streamingScopes and
         // strip the Stop button + thinking indicator mid-response. `done` was already
         // guarded here; `result` now shares the same check via turnEndIsStale.
-        // BUT still decrement busyScopeCountRef — the stale turn did end. Without the
-        // decrement, the interrupt scenario leaves the count at 2→1 instead of 2→1→0,
-        // keeping busyWorkspaces permanently set.
+        // Busy counting is NOT touched here: the backend emits a pre-emptive,
+        // non-stale `done` for the superseded turn at interrupt time (CLI protocol),
+        // so its busy slot is already released — a second decrement here is what
+        // used to zero the count while sibling scopes were still streaming.
         if (turnEndIsStale(msg.turnSeq, wsTurnSeqRef.current.get(scopeKey))) {
-          const staleCount = busyScopeCountRef.current.get(msg.projectPath) || 0;
-          const staleNext = Math.max(0, staleCount - 1);
-          busyScopeCountRef.current.set(msg.projectPath, staleNext);
-          if (staleNext === 0) {
-            setBusyWorkspaces(prev => {
-              if (!prev.has(msg.projectPath)) return prev;
-              const next = new Set(prev);
-              next.delete(msg.projectPath);
-              return next;
-            });
-          }
           return;
         }
         // Branch on wait classification before entering the completion path.
@@ -3035,30 +3036,38 @@ export default function App() {
           next.delete(scopeKey);
           return next;
         });
-        // Decrement busy scope count
-        const count = busyScopeCountRef.current.get(msg.projectPath) || 0;
-        const newCount = Math.max(0, count - 1);
-        busyScopeCountRef.current.set(msg.projectPath, newCount);
-        // Only remove from busyWorkspaces when ALL scopes are done
-        if (newCount === 0) {
-          setBusyWorkspaces(prev => {
-            if (!prev.has(msg.projectPath)) return prev;
-            const next = new Set(prev);
-            next.delete(msg.projectPath);
-            if (msg.projectPath !== activeProjectPathRef.current) {
-              const wsName = basename(msg.projectPath);
-              setTimeout(() => {
-                setCompletedWorkspaces(p => new Set(p).add(msg.projectPath));
-                setNotificationCounts(p => {
-                  const next = new Map(p);
-                  next.set(msg.projectPath, (next.get(msg.projectPath) || 0) + 1);
-                  return next;
-                });
-                setToast({ message: `${wsName} has finished`, key: Date.now() });
-              }, 300);
-            }
-            return next;
-          });
+        // Release this scope's busy slot — once per turn, not once per message.
+        // `result` and `done` arrive as a pair for the same turn; only the first
+        // (which still finds the scope counted) decrements. A turn-end with a
+        // turnSeq that doesn't match the counted turn releases nothing.
+        const countedTurn = busyTurnByScopeRef.current.get(scopeKey);
+        const endsCountedTurn = countedTurn != null && (msg.turnSeq == null || countedTurn === msg.turnSeq);
+        if (endsCountedTurn) {
+          busyTurnByScopeRef.current.delete(scopeKey);
+          const count = busyScopeCountRef.current.get(msg.projectPath) || 0;
+          const newCount = Math.max(0, count - 1);
+          busyScopeCountRef.current.set(msg.projectPath, newCount);
+          // Only remove from busyWorkspaces when ALL scopes are done
+          if (newCount === 0) {
+            setBusyWorkspaces(prev => {
+              if (!prev.has(msg.projectPath)) return prev;
+              const next = new Set(prev);
+              next.delete(msg.projectPath);
+              if (msg.projectPath !== activeProjectPathRef.current) {
+                const wsName = basename(msg.projectPath);
+                setTimeout(() => {
+                  setCompletedWorkspaces(p => new Set(p).add(msg.projectPath));
+                  setNotificationCounts(p => {
+                    const next = new Map(p);
+                    next.set(msg.projectPath, (next.get(msg.projectPath) || 0) + 1);
+                    return next;
+                  });
+                  setToast({ message: `${wsName} has finished`, key: Date.now() });
+                }, 300);
+              }
+              return next;
+            });
+          }
         }
         // Clear chatStreamingWorkspaces whenever the chat scope ends.
         // Placed after setBusyWorkspaces; React 18 auto-batches all setState

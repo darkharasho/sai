@@ -12,6 +12,8 @@ export interface SdkOptionInputs {
   systemPromptOverride?: string; // full-replacement system prompt (orchestrator); overrides the preset+append form
   canUseTool?: CanUseTool;     // tool-approval callback; not set in bypass mode
   mcpServers?: Record<string, unknown>; // in-process SDK MCP servers (chat tools); set only for chat
+  env?: Record<string, string | undefined>; // subprocess env (enriched login-shell + memory cap)
+  stderr?: (data: string) => void; // subprocess stderr (auth failures, crash diagnostics)
 }
 
 const VALID_EFFORT = new Set<string>(['low', 'medium', 'high', 'max']);
@@ -43,6 +45,8 @@ export function buildSdkOptions(input: SdkOptionInputs): Options {
     systemPromptOverride,
     canUseTool,
     mcpServers,
+    env,
+    stderr,
   } = input;
 
   const permissionMode: Options['permissionMode'] =
@@ -79,6 +83,17 @@ export function buildSdkOptions(input: SdkOptionInputs): Options {
 
   if (claudeExecutablePath) {
     opts.pathToClaudeCodeExecutable = claudeExecutablePath;
+  }
+
+  // Enriched login-shell env (+ NODE_OPTIONS memory cap) — without this a
+  // Finder-launched packaged app hands the SDK subprocess the stripped GUI env,
+  // losing ANTHROPIC_* / proxy vars, and the subprocess-memory-cap setting.
+  if (env) {
+    opts.env = env;
+  }
+
+  if (stderr) {
+    opts.stderr = stderr;
   }
 
   if (mcpServers && Object.keys(mcpServers).length > 0) {

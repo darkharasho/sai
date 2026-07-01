@@ -31,8 +31,9 @@ const {
   mockWriteCachedSlashCommands,
   mockReadSaiSetting,
   mockGetRemoteCeiling,
+  mockSpawnEnv,
 } = vi.hoisted(() => ({
-  mockApproveImpl: vi.fn().mockResolvedValue(true),
+  mockApproveImpl: vi.fn().mockResolvedValue(undefined),
   mockAnswerQuestionImpl: vi.fn().mockResolvedValue(true),
   mockAnswerPlanReviewImpl: vi.fn().mockResolvedValue(true),
   mockAlwaysAllowImpl: vi.fn().mockResolvedValue(true),
@@ -43,9 +44,12 @@ const {
   mockWriteCachedSlashCommands: vi.fn(),
   mockReadSaiSetting: vi.fn().mockReturnValue(undefined),
   mockGetRemoteCeiling: vi.fn().mockReturnValue(null),
+  mockSpawnEnv: vi.fn().mockReturnValue({ PATH: '/enriched/bin', NODE_OPTIONS: '--max-old-space-size=1024' }),
 }));
 
 vi.mock('../../../electron/services/claude', () => ({
+  // Delegation target for non-SDK approvals (Gemini). Real impl returns
+  // undefined for unknown toolUseIds — mirror that as the default.
   approveImpl: mockApproveImpl,
   answerQuestionImpl: mockAnswerQuestionImpl,
   answerPlanReviewImpl: mockAnswerPlanReviewImpl,
@@ -57,6 +61,16 @@ vi.mock('../../../electron/services/claude', () => ({
   writeCachedSlashCommands: mockWriteCachedSlashCommands,
   readSaiSetting: mockReadSaiSetting,
   getRemoteCeiling: mockGetRemoteCeiling,
+  getMainWin: () => null,
+  spawnEnv: mockSpawnEnv,
+}));
+
+// notify.ts touches electron `app` at module load — must be mocked in node env.
+vi.mock('../../../electron/services/notify', () => ({
+  notifyCompletion: vi.fn(),
+  notifyApproval: vi.fn(),
+  notifyQuestion: vi.fn(),
+  notifyPlanReview: vi.fn(),
 }));
 
 // Import after mocks are set up
@@ -574,13 +588,18 @@ describe('SdkBackend', () => {
     expect(approvalEmit).toBeDefined();
     expect(approvalEmit!.toolName).toBe('Edit');
     expect(approvalEmit!.toolUseId).toBe('tu2');
-    expect(approvalEmit!.command).toBeUndefined();
+    // CLI-parity command derivation: non-Bash tools surface their target
+    // (file_path/path/pattern/url/query fallback chain) on the approval card.
+    expect(approvalEmit!.command).toBe('/some/file.ts');
 
     const approveResult = await backend.approve({ projectPath: PROJECT, toolUseId: 'tu2', approved: false, scope: SCOPE });
     expect(approveResult).toBe(true);
 
     const permResult = await resultPromise;
     expect(permResult).toEqual({ behavior: 'deny', message: 'User denied tool use' });
+
+    // Resolution clears the card everywhere (CLI parity)
+    expect(emits.find(e => e.type === 'approval_resolved')).toBeDefined();
 
     fakeQuery.close();
   });
@@ -615,7 +634,7 @@ describe('SdkBackend', () => {
     expect(capturedOptions.canUseTool).toBeUndefined();
   });
 
-  it('(11b) canUseTool auto-allows AskUserQuestion/ExitPlanMode without emitting approval_needed', async () => {
+  it('(11b) canUseTool GATES AskUserQuestion: question_needed emitted, promise held until answerQuestion resolves with the answers', async () => {
     const fakeQuery = makeFakeQuery([], { hang: true });
     let capturedOptions: any = null;
     const queryFn = vi.fn((args: { prompt: any; options: any }) => { capturedOptions = args.options; return fakeQuery; });
@@ -624,19 +643,81 @@ describe('SdkBackend', () => {
     backend.send({ projectPath: PROJECT, message: 'ask', scope: SCOPE, permMode: 'default' });
     await new Promise<void>((resolve) => { const check = () => { if (capturedOptions) resolve(); else setTimeout(check, 5); }; setTimeout(check, 5); });
 
-    for (const toolName of ['AskUserQuestion', 'ExitPlanMode']) {
-      const result = await capturedOptions.canUseTool(
-        toolName,
-        { questions: [{ question: 'pick' }] },
-        { toolUseID: `tu-${toolName}`, signal: new AbortController().signal },
-      );
-      expect(result).toEqual({ behavior: 'allow', updatedInput: { questions: [{ question: 'pick' }] } });
-    }
-    // Neither should have produced an approval card (they have their own cards).
+    const gatePromise = capturedOptions.canUseTool(
+      'AskUserQuestion',
+      { questions: [{ question: 'Which approach?' }] },
+      { toolUseID: 'tu-ask', signal: new AbortController().signal },
+    );
+
+    await new Promise(r => setTimeout(r, 5));
+    // Card emitted from the gate, no approval banner
+    const questionNeeded = emits.find(e => e.type === 'question_needed');
+    expect(questionNeeded).toBeDefined();
+    expect(questionNeeded!.toolUseId).toBe('tu-ask');
+    expect(questionNeeded!.question).toBe('Which approach?');
     expect(emits.find(e => e.type === 'approval_needed')).toBeUndefined();
+
+    // Promise held — the model cannot proceed past the unanswered question
+    let resolved = false;
+    gatePromise.then(() => { resolved = true; });
+    await new Promise(r => setTimeout(r, 5));
+    expect(resolved).toBe(false);
+
+    const ok = await backend.answerQuestion({ projectPath: PROJECT, toolUseId: 'tu-ask', answers: { q0: 'Option A' }, scope: SCOPE });
+    expect(ok).toBe(true);
+    const permResult = await gatePromise;
+    expect(permResult.behavior).toBe('deny'); // answers delivered as the tool result
+    expect(permResult.message).toContain('Option A');
+    expect(emits.find(e => e.type === 'question_answered')).toBeDefined();
+
+    fakeQuery.close();
   });
 
-  it('(12) approve returns false when toolUseId not found in pendingApprovals', async () => {
+  it('(11c) canUseTool GATES ExitPlanMode: plan_review_needed emitted; approve → allow, reject → deny', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    let capturedOptions: any = null;
+    const queryFn = vi.fn((args: { prompt: any; options: any }) => { capturedOptions = args.options; return fakeQuery; });
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'plan', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((resolve) => { const check = () => { if (capturedOptions) resolve(); else setTimeout(check, 5); }; setTimeout(check, 5); });
+
+    // Approved plan → allow with the original input
+    const planInput = { plan: 'Step 1: A. Step 2: B.', planFilePath: '/tmp/plan.md' };
+    const approvedPromise = capturedOptions.canUseTool(
+      'ExitPlanMode', planInput,
+      { toolUseID: 'tu-plan-1', signal: new AbortController().signal },
+    );
+    await new Promise(r => setTimeout(r, 5));
+    const card = emits.find(e => e.type === 'plan_review_needed');
+    expect(card).toBeDefined();
+    expect(card!.plan).toBe(planInput.plan);
+    expect(card!.planFilePath).toBe(planInput.planFilePath);
+
+    let resolved = false;
+    approvedPromise.then(() => { resolved = true; });
+    await new Promise(r => setTimeout(r, 5));
+    expect(resolved).toBe(false); // held until the user decides
+
+    await backend.answerPlanReview({ projectPath: PROJECT, toolUseId: 'tu-plan-1', approved: true, scope: SCOPE });
+    expect(await approvedPromise).toEqual({ behavior: 'allow', updatedInput: planInput });
+    expect(emits.find(e => e.type === 'plan_review_answered' && e.approved === true)).toBeDefined();
+
+    // Rejected plan → deny with corrective message
+    const rejectedPromise = capturedOptions.canUseTool(
+      'ExitPlanMode', planInput,
+      { toolUseID: 'tu-plan-2', signal: new AbortController().signal },
+    );
+    await new Promise(r => setTimeout(r, 5));
+    await backend.answerPlanReview({ projectPath: PROJECT, toolUseId: 'tu-plan-2', approved: false, scope: SCOPE });
+    const rejected = await rejectedPromise;
+    expect(rejected.behavior).toBe('deny');
+    expect(rejected.message).toContain('rejected');
+
+    fakeQuery.close();
+  });
+
+  it('(12) approve delegates unknown toolUseIds to approveImpl (Gemini path) and returns false when unhandled', async () => {
     const backend = new SdkBackend({
       queryFn: vi.fn(() => makeFakeQuery([])),
       emit: (p) => emits.push(p),
@@ -645,6 +726,13 @@ describe('SdkBackend', () => {
 
     const result = await backend.approve({ projectPath: PROJECT, toolUseId: 'nonexistent', approved: true, scope: SCOPE });
     expect(result).toBe(false);
+    // Must have fallen through to the CLI impl, which owns Gemini approvals.
+    expect(mockApproveImpl).toHaveBeenCalledWith(PROJECT, 'nonexistent', true, undefined, SCOPE);
+
+    // When the CLI impl handles it (e.g. a Gemini approval), approve reports true.
+    mockApproveImpl.mockResolvedValueOnce(true);
+    const handled = await backend.approve({ projectPath: PROJECT, toolUseId: 'gemini-tu', approved: false, scope: SCOPE });
+    expect(handled).toBe(true);
   });
 
   // ── Test 7: normal drain completion removes session; next send rebuilds ──
@@ -699,7 +787,7 @@ describe('SdkBackend', () => {
 
   // ── Task 2 Phase 2: AskUserQuestion + ExitPlanMode flows ─────────────────
 
-  it('(13) AskUserQuestion tool_use in assistant message emits question_needed; answerQuestion emits question_answered + pushes follow-up input', async () => {
+  it('(13) [bypass fallback] AskUserQuestion tool_use in assistant message emits question_needed; answerQuestion emits question_answered + pushes follow-up input', async () => {
     // Script a drain stream with an assistant message containing AskUserQuestion tool_use
     const TOOL_USE_ID = 'tool-ask-123';
     const QUESTION_TEXT = 'Which approach do you prefer?';
@@ -755,7 +843,9 @@ describe('SdkBackend', () => {
       return session;
     };
 
-    backend.send({ projectPath: PROJECT, message: 'start', scope: SCOPE });
+    // bypass → no canUseTool gate; cards come from drain detection and the
+    // answer is injected as a corrective user message (legacy flow).
+    backend.send({ projectPath: PROJECT, message: 'start', scope: SCOPE, permMode: 'bypass' });
 
     // Wait until question_needed is emitted
     await new Promise<void>((resolve) => {
@@ -798,7 +888,7 @@ describe('SdkBackend', () => {
     expect(typeof followUp.message.content).toBe('string');
   });
 
-  it('(14) ExitPlanMode tool_use in assistant message emits plan_review_needed; answerPlanReview(approved=true) emits plan_review_answered + pushes follow-up input', async () => {
+  it('(14) [bypass fallback] ExitPlanMode tool_use in assistant message emits plan_review_needed; answerPlanReview(approved=true) emits plan_review_answered + pushes follow-up input', async () => {
     const TOOL_USE_ID = 'tool-plan-456';
     const PLAN_TEXT = 'Step 1: Do A. Step 2: Do B.';
     const PLAN_FILE = '/tmp/plan.md';
@@ -848,7 +938,7 @@ describe('SdkBackend', () => {
       return session;
     };
 
-    backend.send({ projectPath: PROJECT, message: 'start', scope: SCOPE });
+    backend.send({ projectPath: PROJECT, message: 'start', scope: SCOPE, permMode: 'bypass' });
 
     // Wait until plan_review_needed is emitted
     await new Promise<void>((resolve) => {
@@ -1129,6 +1219,247 @@ describe('SdkBackend', () => {
 
     expect(buildSwarmMcpServer).not.toHaveBeenCalled();
     expect(capturedOptions.mcpServers?.swarm).toBeUndefined();
+    fakeQuery.close();
+  });
+
+  // ── Interrupt-aware turnSeq protocol + parity emits ───────────────────────
+
+  it('(28) send emits user_message with origin and the new turnSeq', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    const queryFn = vi.fn(() => fakeQuery);
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'hello from phone', scope: SCOPE, permMode: 'default', origin: 'remote' });
+    await new Promise(r => setTimeout(r, 10));
+
+    const um = emits.find(e => e.type === 'user_message');
+    expect(um).toBeDefined();
+    expect(um!.text).toBe('hello from phone');
+    expect(um!.origin).toBe('remote');
+    expect(um!.turnSeq).toBe(1);
+    fakeQuery.close();
+  });
+
+  it('(29) send mid-turn: pre-emptive done for the old turn; the old result is stamped with the OLD seq (stale-droppable)', async () => {
+    // Query yields nothing until we push the old turn's result manually.
+    let releaseResult: (() => void) | null = null;
+    const resultGate = new Promise<void>((res) => { releaseResult = res; });
+    async function* gen() {
+      await resultGate;
+      yield { type: 'result', stop_reason: 'end_turn', num_turns: 1 };
+      await new Promise(() => {}); // hang
+    }
+    const iterator = gen();
+    const fakeQuery: any = {
+      interrupt: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn(),
+      [Symbol.asyncIterator]() { return iterator; },
+    };
+    const queryFn = vi.fn(() => fakeQuery);
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+
+    // Turn 1 starts and stays in flight (no result yet)
+    backend.send({ projectPath: PROJECT, message: 'first', scope: SCOPE, permMode: 'default' });
+    await new Promise(r => setTimeout(r, 10));
+
+    // Turn 2 sent mid-flight — CLI protocol: done(1) first, then streaming_start(2)
+    backend.send({ projectPath: PROJECT, message: 'second', scope: SCOPE, permMode: 'default' });
+    await new Promise(r => setTimeout(r, 10));
+
+    const preemptiveDone = emits.find(e => e.type === 'done');
+    expect(preemptiveDone).toBeDefined();
+    expect(preemptiveDone!.turnSeq).toBe(1);
+    const starts = emits.filter(e => e.type === 'streaming_start');
+    expect(starts.map(s => s.turnSeq)).toEqual([1, 2]);
+
+    // Old turn's result finally drains — must be stamped with the OLD seq (1),
+    // NOT the new activeTurnSeq (2), so the renderer's stale guard drops it.
+    emits.length = 0;
+    releaseResult!();
+    await new Promise<void>((resolve) => {
+      const check = () => { if (emits.some(e => e.type === 'result')) resolve(); else setTimeout(check, 5); };
+      setTimeout(check, 5);
+    });
+    const staleResult = emits.find(e => e.type === 'result');
+    expect(staleResult!.turnSeq).toBe(1);
+    const staleDone = emits.find(e => e.type === 'done');
+    expect(staleDone!.turnSeq).toBe(1);
+
+    fakeQuery.close();
+  });
+
+  it('(30) result with terminal_reason background_requested carries wait.kind=background on result AND done', async () => {
+    const fakeQuery = makeFakeQuery([
+      { type: 'result', stop_reason: 'end_turn', num_turns: 1, terminal_reason: 'background_requested', background_tasks: [{}, {}] },
+    ]);
+    const queryFn = vi.fn(() => fakeQuery);
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.send({ projectPath: PROJECT, message: 'go', scope: SCOPE });
+    await new Promise<void>((resolve) => {
+      const check = () => { if (emits.some(e => e.type === 'done')) resolve(); else setTimeout(check, 5); };
+      setTimeout(check, 5);
+    });
+
+    const result = emits.find(e => e.type === 'result') as any;
+    const done = emits.find(e => e.type === 'done') as any;
+    expect(result.wait).toEqual({ kind: 'background', resumeInSeconds: null, taskCount: 2 });
+    expect(done.wait).toEqual({ kind: 'background', resumeInSeconds: null, taskCount: 2 });
+  });
+
+  it('(31) ScheduleWakeup tool_use then completed result → wait.kind=scheduled and the sweep skips the scope', async () => {
+    const fakeQuery = makeFakeQuery([
+      {
+        type: 'assistant',
+        message: { role: 'assistant', content: [{ type: 'tool_use', id: 'tw1', name: 'ScheduleWakeup', input: { delaySeconds: 300 } }] },
+      },
+      { type: 'result', stop_reason: 'end_turn', num_turns: 1, terminal_reason: 'completed' },
+    ], { hang: true });
+    const queryFn = vi.fn(() => fakeQuery);
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.send({ projectPath: PROJECT, message: 'loop it', scope: SCOPE });
+    await new Promise<void>((resolve) => {
+      const check = () => { if (emits.some(e => e.type === 'done')) resolve(); else setTimeout(check, 5); };
+      setTimeout(check, 5);
+    });
+
+    const done = emits.find(e => e.type === 'done') as any;
+    expect(done.wait.kind).toBe('scheduled');
+    expect(done.wait.resumeInSeconds).toBe(300);
+
+    // Sweep far in the future of lastActivity but before the wakeup deadline:
+    // the scope must NOT be suspended.
+    const key = `${PROJECT} ${SCOPE}`;
+    const session: any = (backend as any).sessions.get(key);
+    session.lastActivityAt = 1000;
+    session.wakeupDeadline = Date.now() + 300_000; // still pending
+    emits.length = 0;
+    // Way past the idle threshold but before the wakeup deadline → must skip.
+    (backend as any)._sweepOnce(session.wakeupDeadline - 1);
+    expect(emits.find(e => e.type === 'scope_suspended')).toBeUndefined();
+
+    // Past the deadline (+grace already included) the sweep may reap it.
+    (backend as any)._sweepOnce(session.wakeupDeadline + 1);
+    expect(emits.find(e => e.type === 'scope_suspended')).toBeDefined();
+
+    fakeQuery.close();
+  });
+
+  it('(32) interrupt emits done immediately, denies held approvals, and emits approval_resolved', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    let capturedOptions: any = null;
+    const queryFn = vi.fn((args: any) => { capturedOptions = args.options; return fakeQuery; });
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'work', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((r) => { const c = () => capturedOptions ? r() : setTimeout(c, 5); setTimeout(c, 5); });
+
+    // Hold an approval
+    const gatePromise = capturedOptions.canUseTool('Bash', { command: 'rm -rf x' }, { toolUseID: 'tu-int', signal: new AbortController().signal });
+    await new Promise(r => setTimeout(r, 5));
+    expect(emits.find(e => e.type === 'approval_needed')).toBeDefined();
+
+    emits.length = 0;
+    backend.interrupt(PROJECT, SCOPE);
+
+    // Held approval denied (query unblocked), card cleared, turn ended in the UI.
+    const permResult = await gatePromise;
+    expect(permResult.behavior).toBe('deny');
+    expect(emits.find(e => e.type === 'approval_resolved')).toBeDefined();
+    const done = emits.find(e => e.type === 'done');
+    expect(done).toBeDefined();
+    expect(done!.turnSeq).toBe(1);
+    expect(fakeQuery.interruptSpy).toHaveBeenCalled();
+
+    fakeQuery.close();
+  });
+
+  it('(33) session options carry the enriched spawn env and a stderr handler', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    let capturedOptions: any = null;
+    const queryFn = vi.fn((args: any) => { capturedOptions = args.options; return fakeQuery; });
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((r) => { const c = () => capturedOptions ? r() : setTimeout(c, 5); setTimeout(c, 5); });
+
+    expect(mockSpawnEnv).toHaveBeenCalled();
+    expect(capturedOptions.env).toEqual({ PATH: '/enriched/bin', NODE_OPTIONS: '--max-old-space-size=1024' });
+    expect(typeof capturedOptions.stderr).toBe('function');
+    capturedOptions.stderr('not logged in\n');
+    expect(emits.find(e => e.type === 'error' && String(e.text).includes('not logged in'))).toBeDefined();
+    fakeQuery.close();
+  });
+
+  it('(34) drain crash emits error with fatal:true', async () => {
+    async function* gen() { throw new Error('boom'); }
+    const iterator = gen();
+    const fakeQuery: any = {
+      interrupt: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn(),
+      [Symbol.asyncIterator]() { return iterator; },
+    };
+    const backend = new SdkBackend({ queryFn: vi.fn(() => fakeQuery), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.send({ projectPath: PROJECT, message: 'x', scope: SCOPE });
+    await new Promise<void>((resolve) => {
+      const check = () => { if (emits.some(e => e.type === 'error')) resolve(); else setTimeout(check, 5); };
+      setTimeout(check, 5);
+    });
+    const err = emits.find(e => e.type === 'error') as any;
+    expect(err.fatal).toBe(true);
+    expect(err.text).toContain('boom');
+  });
+
+  it('(36) send with a different model/effort/permMode recreates the session (resume-respawn, CLI parity)', async () => {
+    const fakeQuery1 = makeFakeQuery([], { hang: true });
+    const fakeQuery2 = makeFakeQuery([], { hang: true });
+    let calls = 0;
+    const queryFn = vi.fn((args: { prompt: any; options: any }) => {
+      capturedQueryArgs.push(args);
+      calls++;
+      return calls === 1 ? fakeQuery1 : fakeQuery2;
+    });
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+
+    backend.send({ projectPath: PROJECT, message: 'a', scope: SCOPE, permMode: 'default', model: 'model-a' });
+    await new Promise(r => setTimeout(r, 10));
+    // Same config → session reused, no new query
+    backend.send({ projectPath: PROJECT, message: 'b', scope: SCOPE, permMode: 'default', model: 'model-a' });
+    await new Promise(r => setTimeout(r, 10));
+    expect(queryFn).toHaveBeenCalledTimes(1);
+
+    // Give the live session a session ID so the respawn can stash it for resume
+    const key = `${PROJECT} ${SCOPE}`;
+    ((backend as any).sessions.get(key) as any).sessionId = 'sess-model-a';
+
+    // Changed model → old query closed, new query created with the new model + resume
+    backend.send({ projectPath: PROJECT, message: 'c', scope: SCOPE, permMode: 'default', model: 'model-b' });
+    await new Promise(r => setTimeout(r, 10));
+    expect(queryFn).toHaveBeenCalledTimes(2);
+    expect(fakeQuery1.closeSpy).toHaveBeenCalled();
+    expect(capturedQueryArgs[1].options.model).toBe('model-b');
+    expect(capturedQueryArgs[1].options.resume).toBe('sess-model-a');
+
+    fakeQuery2.close();
+  });
+
+  it('(35) compact with no live session creates one on demand and pushes /compact', async () => {
+    const pushed: any[] = [];
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    const queryFn = vi.fn((args: { prompt: any; options: any }) => {
+      (async () => { for await (const m of args.prompt) pushed.push(m); })();
+      return fakeQuery;
+    });
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    // No send() first — mirrors the post-idle-sweep state.
+    backend.compact({ projectPath: PROJECT, scope: SCOPE });
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(queryFn).toHaveBeenCalledTimes(1);
+    expect(emits.find((e) => e.type === 'streaming_start')).toBeTruthy();
+    expect(pushed.find((m) => m?.message?.content === '/compact')).toBeTruthy();
     fakeQuery.close();
   });
 });

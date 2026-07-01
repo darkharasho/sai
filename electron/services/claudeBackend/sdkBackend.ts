@@ -3,9 +3,10 @@
  * with one persistent `query()` per scope (projectPath + scope).
  *
  * Handles core chat (Phase 1), tool approvals via canUseTool, and the
- * AskUserQuestion / ExitPlanMode flows via tool-in-stream detection + answer
- * injection (Phase 2). Only `alwaysAllow` and the one-shot title/commit/model
- * helpers still delegate to the existing claude.ts impls.
+ * AskUserQuestion / ExitPlanMode flows via gated canUseTool promises (non-bypass)
+ * or tool-in-stream detection + answer injection (bypass). Only `alwaysAllow`
+ * and the one-shot title/commit/model helpers still delegate to the existing
+ * claude.ts impls.
  */
 
 import * as fs from 'fs';
@@ -15,6 +16,7 @@ import type { query as QueryFn, SDKUserMessage, PermissionResult, McpSdkServerCo
 import { enrichedEnv } from '../shellEnv';
 import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE } from '../chatNudges';
 import {
+  approveImpl,
   alwaysAllowImpl,
   generateCommitMessageImpl,
   generateTitleImpl,
@@ -24,7 +26,11 @@ import {
   writeCachedSlashCommands,
   readSaiSetting,
   getRemoteCeiling,
+  getMainWin,
+  spawnEnv,
 } from '../claude';
+import { notifyCompletion, notifyApproval, notifyQuestion, notifyPlanReview } from '../notify';
+import { classifyTurnEnd, isSchedulingTool, WAKEUP_GRACE_MS, type WaitMeta } from '../waitClassifier';
 import { clamp, type PermMode } from '../remote/clamp';
 import { parseUserMcpConfigPaths } from './userMcpConfig';
 import { buildSdkOptions } from './sdkOptions';
@@ -67,9 +73,35 @@ interface ScopeSession {
   lastActivityAt: number;
   /** True when waiting for approval / AskUserQuestion / plan review. */
   awaitingInput: boolean;
+  /** Normalized per-session config; a send with different values recreates the
+   *  session (CLI ensureProcess parity) so model/effort/permMode changes apply. */
+  config: { permMode: string; effort: string; model: string };
+  /** True when canUseTool is active for this session (non-bypass). When false
+   *  (bypass / orchestrator), question/plan cards come from drain detection. */
+  gated: boolean;
+  /** toolUseIds of canUseTool promises currently held for this session. */
+  heldToolUses: Set<string>;
+  /** A scheduling tool (ScheduleWakeup/CronCreate) fired this turn. */
+  sawSchedulingTool: boolean;
+  /** delaySeconds from the latest ScheduleWakeup input this turn. */
+  wakeupResumeInSeconds: number | null;
+  /** Turn ended in a scheduled wait — defer the idle sweep. */
+  pendingWakeup: boolean;
+  /** Epoch ms after which a pendingWakeup is considered abandoned. */
+  wakeupDeadline: number | null;
   /** Stored for the idle sweep so we never need to parse the scope key. */
   _projectPath: string;
   _scopeName: string;
+}
+
+/** A held canUseTool promise awaiting a user decision. */
+interface PendingGate {
+  kind: 'approval' | 'question' | 'plan';
+  resolve: (r: PermissionResult) => void;
+  input: Record<string, unknown>;
+  scopeKey: string;
+  projectPath: string;
+  scope: string;
 }
 
 // Use the SDK's SDKUserMessage type for the input channel
@@ -120,7 +152,57 @@ export function resolveClaudePath(): string | undefined {
   return undefined;
 }
 
+/** Append actionable hints to known failure shapes (missing binary, auth). */
+function friendlyError(text: string): string {
+  if (/ENOTDIR|ENOENT/.test(text)) {
+    return `${text}\n\nClaude Code executable not found. Install the Claude CLI or make sure \`claude\` is on your PATH, then retry.`;
+  }
+  if (/not logged in|invalid api key|authentication/i.test(text)) {
+    return `${text}\n\nClaude may not be logged in — run \`claude\` in a terminal to authenticate, then retry.`;
+  }
+  return text;
+}
+
+/** CLI-parity command derivation for approval cards (claude.ts:507-514). */
+function deriveCommand(input: Record<string, unknown>): string {
+  return (input.command as string)
+    || (input.file_path as string)
+    || (input.path as string)
+    || (input.pattern as string)
+    || (input.url as string)
+    || (input.query as string)
+    || (Object.values(input).find((v) => typeof v === 'string' && v.length > 0) as string)
+    || JSON.stringify(input);
+}
+
 // ─── Injectable deps ──────────────────────────────────────────────────────────
+
+/** OS-notification hooks (injectable for tests). */
+export interface SdkNotify {
+  approval(workspaceName: string, toolName: string, command: string): void;
+  question(workspaceName: string, question: string): void;
+  planReview(workspaceName: string): void;
+  completion(projectPath: string, info: { provider: string; duration?: number; turns?: number; cost?: number; summary?: string }): void;
+}
+
+const defaultNotify: SdkNotify = {
+  approval: (wsName, toolName, command) => {
+    const win = getMainWin();
+    if (win) notifyApproval(win, wsName, toolName, command);
+  },
+  question: (wsName, question) => {
+    const win = getMainWin();
+    if (win) notifyQuestion(win, wsName, question);
+  },
+  planReview: (wsName) => {
+    const win = getMainWin();
+    if (win) notifyPlanReview(win, wsName);
+  },
+  completion: (projectPath, info) => {
+    const win = getMainWin();
+    if (win) notifyCompletion(win, projectPath, info);
+  },
+};
 
 export interface SdkBackendDeps {
   /** Override the SDK's `query` function (for tests). */
@@ -129,6 +211,8 @@ export interface SdkBackendDeps {
   emit?: (payload: Record<string, unknown>) => void;
   /** How to resolve the claude executable path. Default: PATH scan. */
   resolveClaudePath?: () => string | undefined;
+  /** OS notification hooks. Default: notify.ts against the registered main window. */
+  notify?: SdkNotify;
   /**
    * Build the in-process SAI chat MCP server for a given workspace.
    * Called only for `kind === 'chat'` scopes. If omitted or returns undefined
@@ -152,12 +236,13 @@ export class SdkBackend implements ClaudeBackend {
   private readonly pendingResume = new Map<string, string>();
   /** Per-scope pending cwd/kind/appendSystemPrompt set by start() */
   private readonly scopeMeta = new Map<string, { cwd: string; kind: 'chat' | 'task' | 'orchestrator'; appendSystemPrompt?: string; orchestratorContext?: Record<string, unknown> | null }>();
-  /** Pending tool approval promises keyed by toolUseId */
-  private readonly pendingApprovals = new Map<string, (r: PermissionResult) => void>();
+  /** Held canUseTool promises (approvals, questions, plan reviews) keyed by toolUseId */
+  private readonly pendingGates = new Map<string, PendingGate>();
 
   private readonly queryFn: typeof QueryFn;
   private readonly _emit: (payload: Record<string, unknown>) => void;
   private readonly _resolveClaudePath: () => string | undefined;
+  private readonly _notify: SdkNotify;
   private readonly _buildChatMcpServer?: (workspace: string) => McpSdkServerConfigWithInstance | undefined;
   private readonly _buildSwarmMcpServer?: (workspace: string) => McpSdkServerConfigWithInstance | undefined;
   private idleSweepTimer: ReturnType<typeof setInterval> | null = null;
@@ -173,6 +258,7 @@ export class SdkBackend implements ClaudeBackend {
 
     this._emit = deps?.emit ?? defaultEmit;
     this._resolveClaudePath = deps?.resolveClaudePath ?? resolveClaudePath;
+    this._notify = deps?.notify ?? defaultNotify;
     this._buildChatMcpServer = deps?.buildChatMcpServer;
     this._buildSwarmMcpServer = deps?.buildSwarmMcpServer;
     this._startIdleSweep();
@@ -193,6 +279,7 @@ export class SdkBackend implements ClaudeBackend {
   send(args: SendArgs): void {
     const { projectPath, message, scope, permMode, effort, model, imagePaths, origin } = args;
     const scopeKey = toScopeKey(projectPath, scope);
+    const effectiveScope = scope ?? 'chat';
 
     // Mirror CLI sendImpl:740-743: clamp permMode by the remote ceiling when origin==='remote'
     const effectivePermMode =
@@ -201,26 +288,32 @@ export class SdkBackend implements ClaudeBackend {
         : permMode;
 
     try {
-      // Ensure a session exists for this scope
+      // Ensure a session exists for this scope — and that it matches the
+      // requested config. The CLI respawned on any permMode/effort/model change
+      // (ensureProcess); reusing the old query here silently ignored mid-session
+      // model switches and bypass toggles until the scope was idle-swept.
       let session = this.sessions.get(scopeKey);
+      const wantConfig = normalizeConfig(effectivePermMode, effort, model);
+      if (session && !configEquals(session.config, wantConfig)) {
+        this._resolveGatesForScope(scopeKey, 'Session restarted with new settings');
+        if (session.mapperState.streaming) {
+          // End the in-flight turn in the UI — its result will never arrive.
+          this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: session.activeTurnSeq });
+        }
+        if (session.sessionId) this.pendingResume.set(scopeKey, session.sessionId);
+        session.query.close();
+        this.sessions.delete(scopeKey);
+        session = undefined;
+      }
       if (!session) {
         session = this._createSession(scopeKey, projectPath, scope, { permMode: effectivePermMode, effort, model });
       }
 
-      // Bump turn counter
-      session.turnSeq += 1;
-      session.activeTurnSeq = session.turnSeq;
-      session.mapperState = { ...session.mapperState, streaming: true };
-      session.lastActivityAt = Date.now();
-      session.awaitingInput = false;
+      // A send while gates are held means the user moved on — unblock the query
+      // so the queued message can be processed (mirrors CLI clearing awaitingApproval).
+      this._resolveGatesForScope(scopeKey, 'The user sent a new message instead of responding to this request.');
 
-      // Emit streaming_start for this user turn
-      this._emit({
-        type: 'streaming_start',
-        projectPath,
-        scope: scope ?? 'chat',
-        turnSeq: session.turnSeq,
-      });
+      this._beginTurn(session, projectPath, effectiveScope);
 
       // Mirror CliBackend.sendImpl: prepend image refs the model can resolve.
       let content = message;
@@ -235,6 +328,18 @@ export class SdkBackend implements ClaudeBackend {
         message: { role: 'user', content },
         parent_tool_use_id: null,
       });
+
+      // CLI parity (claude.ts:801-808): echo the user's prompt so the desktop
+      // transcript shows remote-originated messages and the remote bus mirrors
+      // desktop-originated ones.
+      this._emit({
+        type: 'user_message',
+        projectPath,
+        scope: effectiveScope,
+        text: message,
+        origin: origin ?? 'desktop',
+        turnSeq: session.turnSeq,
+      });
     } catch (err) {
       // Surface SDK/session-creation failures to the chat instead of silently
       // producing "no thinking, no response" (e.g. the SDK runtime failing to
@@ -243,23 +348,47 @@ export class SdkBackend implements ClaudeBackend {
       const text = err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err);
       // eslint-disable-next-line no-console
       console.error('[SdkBackend.send] failed:', text);
+      // Capture the turn BEFORE tearing the session down so the recovery done
+      // isn't stamped with turnSeq 0 (which the renderer drops as stale).
+      const session = this.sessions.get(scopeKey);
+      const turnSeq = session?.activeTurnSeq ?? 0;
+      try { session?.query.close(); } catch { /* already dead */ }
       this.sessions.delete(scopeKey);
-      const cur = this.sessions.get(scopeKey);
-      const turnSeq = cur?.activeTurnSeq ?? 0;
-      this._emit({ type: 'error', text: `SDK backend error: ${text}`, projectPath, scope: scope ?? 'chat' });
-      this._emit({ type: 'done', projectPath, scope: scope ?? 'chat', turnSeq });
+      this._emit({ type: 'error', fatal: true, text: `SDK backend error: ${friendlyError(text)}`, projectPath, scope: effectiveScope });
+      this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq });
     }
   }
 
   // ─── interrupt ─────────────────────────────────────────────────────────────
 
   interrupt(projectPath: string, scope?: string): void {
-    const session = this.sessions.get(toScopeKey(projectPath, scope));
-    if (session) {
-      void session.query.interrupt();
-      // Clear awaitingInput so a user-Stop on an awaiting scope doesn't leave it
-      // permanently un-sweepable (mirrors CLI interruptImpl clearing awaitingApproval).
-      session.awaitingInput = false;
+    const scopeKey = toScopeKey(projectPath, scope);
+    const effectiveScope = scope ?? 'chat';
+    const session = this.sessions.get(scopeKey);
+    if (!session) return;
+
+    session.query.interrupt().catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn('[SdkBackend.interrupt] interrupt() rejected:', err instanceof Error ? err.message : String(err));
+    });
+
+    // Release any held canUseTool promises — a Stop during a pending approval
+    // must not leave the query wedged (and the resolver leaked) forever.
+    this._resolveGatesForScope(scopeKey, 'Interrupted by user');
+
+    // Clear awaitingInput so a user-Stop on an awaiting scope doesn't leave it
+    // permanently un-sweepable (mirrors CLI interruptImpl clearing awaitingApproval).
+    session.awaitingInput = false;
+    this._resetWaitTracking(session);
+
+    // CLI parity (claude.ts:830): end the turn in the UI immediately. The SDK's
+    // own result for the interrupted turn arrives later stamped with this same
+    // activeTurnSeq, after the renderer has reset its expected seq — the stale-turn
+    // guard drops it. If the interrupt failed and assistant frames keep coming,
+    // the mapper re-arms streaming_start (streaming is false), self-healing the UI.
+    if (session.mapperState.streaming) {
+      session.mapperState = { ...session.mapperState, streaming: false };
+      this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: session.activeTurnSeq });
     }
   }
 
@@ -269,6 +398,7 @@ export class SdkBackend implements ClaudeBackend {
     const scopeKey = toScopeKey(projectPath, scope);
     const session = this.sessions.get(scopeKey);
     if (session) {
+      this._resolveGatesForScope(scopeKey, 'Session switched');
       session.query.close();
       this.sessions.delete(scopeKey);
     }
@@ -282,30 +412,34 @@ export class SdkBackend implements ClaudeBackend {
   // ─── compact ───────────────────────────────────────────────────────────────
 
   compact(args: CompactArgs): void {
-    const { projectPath, scope } = args;
-    const session = this.sessions.get(toScopeKey(projectPath, scope));
-    if (!session) return;
+    const { projectPath, scope, permMode, effort, model } = args;
+    const scopeKey = toScopeKey(projectPath, scope);
+    const effectiveScope = scope ?? 'chat';
 
-    // Bump turn counter
-    session.turnSeq += 1;
-    session.activeTurnSeq = session.turnSeq;
-    session.mapperState = { ...session.mapperState, streaming: true };
-    session.lastActivityAt = Date.now();
+    try {
+      // Create the session on demand — after an idle-sweep suspension (exactly
+      // when context is large enough to need compacting) there is no live
+      // session, and a silent no-op here left auto-compact retrying forever.
+      let session = this.sessions.get(scopeKey);
+      if (!session) {
+        session = this._createSession(scopeKey, projectPath, scope, { permMode, effort, model });
+      }
 
-    // Emit streaming_start for this compact turn
-    this._emit({
-      type: 'streaming_start',
-      projectPath,
-      scope: scope ?? 'chat',
-      turnSeq: session.turnSeq,
-    });
+      this._beginTurn(session, projectPath, effectiveScope);
 
-    // Push the /compact user message into the input channel
-    session.pushInput({
-      type: 'user',
-      message: { role: 'user', content: '/compact' },
-      parent_tool_use_id: null,
-    });
+      // Push the /compact user message into the input channel
+      session.pushInput({
+        type: 'user',
+        message: { role: 'user', content: '/compact' },
+        parent_tool_use_id: null,
+      });
+    } catch (err) {
+      const text = err instanceof Error ? err.message : String(err);
+      // eslint-disable-next-line no-console
+      console.error('[SdkBackend.compact] failed:', text);
+      this._emit({ type: 'error', text: `Compact failed: ${friendlyError(text)}`, projectPath, scope: effectiveScope });
+      this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: this.sessions.get(scopeKey)?.activeTurnSeq ?? 0 });
+    }
   }
 
   // ─── destroy ───────────────────────────────────────────────────────────────
@@ -315,49 +449,74 @@ export class SdkBackend implements ClaudeBackend {
       clearInterval(this.idleSweepTimer);
       this.idleSweepTimer = null;
     }
+    // Release every held canUseTool promise before closing the queries.
+    for (const [toolUseId, gate] of Array.from(this.pendingGates.entries())) {
+      this.pendingGates.delete(toolUseId);
+      gate.resolve({ behavior: 'deny', message: 'Shutting down' });
+    }
     for (const session of this.sessions.values()) {
+      session.heldToolUses.clear();
       session.query.close();
     }
     this.sessions.clear();
   }
 
-  // ─── Delegated impls ───────────────────────────────────────────────────────
+  // ─── Approvals / questions / plan reviews ──────────────────────────────────
 
   approve(a: ApproveArgs): Promise<boolean> {
     const { projectPath, toolUseId, approved, modifiedCommand, scope } = a;
-    const resolver = this.pendingApprovals.get(toolUseId);
-    if (resolver) {
-      this.pendingApprovals.delete(toolUseId);
-      // Clear awaitingInput — user responded to the approval
-      const session = this.sessions.get(toScopeKey(projectPath, scope));
-      if (session) session.awaitingInput = false;
+    const effectiveScope = scope ?? 'chat';
+    const gate = this.pendingGates.get(toolUseId);
+    if (gate && gate.kind === 'approval') {
+      this._releaseGate(toolUseId, gate);
       if (approved) {
         const result: PermissionResult = { behavior: 'allow' };
         if (modifiedCommand !== undefined) {
-          result.updatedInput = { command: modifiedCommand };
+          // Merge, don't replace — clobbering non-command fields (description,
+          // timeout, …) breaks tools whose input carries more than the command.
+          result.updatedInput = { ...gate.input, command: modifiedCommand };
         }
-        resolver(result);
+        gate.resolve(result);
       } else {
-        resolver({ behavior: 'deny', message: 'User denied tool use' });
+        gate.resolve({ behavior: 'deny', message: 'User denied tool use' });
       }
+      // CLI parity: clear the approval card / titlebar approval state everywhere.
+      this._emit({ type: 'approval_resolved', projectPath, scope: effectiveScope });
       return Promise.resolve(true);
     }
-    // Not a pending SDK approval — return false (no-op)
-    return Promise.resolve(false);
+    // Not a pending SDK approval — delegate to the CLI impl, which also owns
+    // Gemini approvals (they route through the same claude:approve IPC).
+    return Promise.resolve(approveImpl(projectPath, toolUseId, approved, modifiedCommand, scope)).then((r) => r === true);
   }
+
   answerQuestion(a: AnswerQuestionArgs): Promise<boolean> {
     const { projectPath, toolUseId, answers, scope } = a;
     const effectiveScope = scope ?? 'chat';
+
+    const gate = this.pendingGates.get(toolUseId);
+    if (gate && gate.kind === 'question') {
+      // Mark the card answered in the UI immediately (parity with CLI)
+      this._emit({ type: 'question_answered', projectPath, scope: effectiveScope, toolUseId, answers });
+      this._releaseGate(toolUseId, gate);
+      // Deny with the answers as the message: the model receives them as the
+      // tool result in the SAME turn — no placeholder "dismissed" chatter, no
+      // extra user turn.
+      gate.resolve({
+        behavior: 'deny',
+        message: `The user answered via the UI:\n${JSON.stringify(answers, null, 2)}\nProceed based on these answers; do not re-ask the same question(s).`,
+      });
+      return Promise.resolve(true);
+    }
+
+    // Bypass-mode fallback: no gate was held (canUseTool absent), the tool
+    // auto-ran with a placeholder result — inject a corrective user message.
     const session = this.sessions.get(toScopeKey(projectPath, scope));
     if (!session) return Promise.resolve(false);
 
     session.awaitingInput = false;
-
-    // Mark the card answered in the UI immediately (parity with CLI)
     this._emit({ type: 'question_answered', projectPath, scope: effectiveScope, toolUseId, answers });
 
-    // Push a follow-up user message so the agent proceeds
-    const content = `[AskUserQuestion answers for tool call ${toolUseId}]\nThe user picked the following answers:\n${JSON.stringify(answers, null, 2)}`;
+    const content = `[AskUserQuestion answers for tool call ${toolUseId}]\nThe user picked the following answers (the earlier placeholder tool_result for this tool call should be disregarded):\n${JSON.stringify(answers, null, 2)}`;
     session.pushInput({
       type: 'user',
       message: { role: 'user', content },
@@ -370,11 +529,27 @@ export class SdkBackend implements ClaudeBackend {
   answerPlanReview(a: AnswerPlanArgs): Promise<boolean> {
     const { projectPath, toolUseId, approved, scope } = a;
     const effectiveScope = scope ?? 'chat';
+
+    const gate = this.pendingGates.get(toolUseId);
+    if (gate && gate.kind === 'plan') {
+      this._emit({ type: 'plan_review_answered', projectPath, scope: effectiveScope, toolUseId, approved });
+      this._releaseGate(toolUseId, gate);
+      if (approved) {
+        gate.resolve({ behavior: 'allow', updatedInput: gate.input });
+      } else {
+        gate.resolve({
+          behavior: 'deny',
+          message: 'The user rejected the plan. Revise it based on their feedback or ask clarifying questions before proceeding — do not start implementing.',
+        });
+      }
+      return Promise.resolve(true);
+    }
+
+    // Bypass-mode fallback: inject a corrective user message.
     const session = this.sessions.get(toScopeKey(projectPath, scope));
     if (!session) return Promise.resolve(false);
 
     session.awaitingInput = false;
-
     this._emit({ type: 'plan_review_answered', projectPath, scope: effectiveScope, toolUseId, approved });
 
     const content = approved
@@ -388,6 +563,7 @@ export class SdkBackend implements ClaudeBackend {
 
     return Promise.resolve(true);
   }
+
   alwaysAllow(projectPath: string, toolPattern: string) {
     return alwaysAllowImpl(projectPath, toolPattern);
   }
@@ -402,6 +578,73 @@ export class SdkBackend implements ClaudeBackend {
   }
 
   // ─── Private ───────────────────────────────────────────────────────────────
+
+  /**
+   * Start a new logical turn on a session: emit the pre-emptive `done` for an
+   * interrupted in-flight turn (CLI protocol, claude.ts:771-788), bump turnSeq,
+   * and emit streaming_start.
+   *
+   * The interrupt case deliberately leaves `activeTurnSeq` LAGGING at the old
+   * turn: when the superseded turn's `result` eventually drains it is stamped
+   * with the old seq and the renderer's stale-turn guard drops it — instead of
+   * it killing the new turn's thinking animation. The drain converges
+   * activeTurnSeq back to turnSeq when that result is processed.
+   */
+  private _beginTurn(session: ScopeSession, projectPath: string, effectiveScope: string): void {
+    const wasInterrupt = session.mapperState.streaming;
+    if (wasInterrupt) {
+      this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: session.turnSeq });
+    }
+
+    session.turnSeq += 1;
+    if (!wasInterrupt) {
+      session.activeTurnSeq = session.turnSeq;
+    }
+    // Interrupt case: activeTurnSeq stays at the old value until the old turn's
+    // result drains and the drain loop updates it to session.turnSeq.
+    session.mapperState = { ...session.mapperState, streaming: true };
+    session.lastActivityAt = Date.now();
+    session.awaitingInput = false;
+    this._resetWaitTracking(session);
+
+    this._emit({
+      type: 'streaming_start',
+      projectPath,
+      scope: effectiveScope,
+      sessionId: session.sessionId ?? null,
+      turnSeq: session.turnSeq,
+    });
+  }
+
+  /** Clear per-turn wait tracking (mirrors claude.ts emitStreamingStart). */
+  private _resetWaitTracking(session: ScopeSession): void {
+    session.sawSchedulingTool = false;
+    session.wakeupResumeInSeconds = null;
+    session.pendingWakeup = false;
+    session.wakeupDeadline = null;
+  }
+
+  /** Remove a gate's bookkeeping (heldToolUses / awaitingInput). Caller resolves. */
+  private _releaseGate(toolUseId: string, gate: PendingGate): void {
+    this.pendingGates.delete(toolUseId);
+    const session = this.sessions.get(gate.scopeKey);
+    if (session) {
+      session.heldToolUses.delete(toolUseId);
+      if (session.heldToolUses.size === 0) session.awaitingInput = false;
+    }
+  }
+
+  /** Deny-resolve every held gate for a scope (interrupt / new send / teardown). */
+  private _resolveGatesForScope(scopeKey: string, message: string): void {
+    for (const [toolUseId, gate] of Array.from(this.pendingGates.entries())) {
+      if (gate.scopeKey !== scopeKey) continue;
+      this._releaseGate(toolUseId, gate);
+      gate.resolve({ behavior: 'deny', message });
+      if (gate.kind === 'approval') {
+        this._emit({ type: 'approval_resolved', projectPath: gate.projectPath, scope: gate.scope });
+      }
+    }
+  }
 
   private _createSession(
     scopeKey: string,
@@ -464,6 +707,7 @@ export class SdkBackend implements ClaudeBackend {
       }
     }
 
+    const effectiveScope = scope ?? 'chat';
     const options = buildSdkOptions({
       kind,
       permMode: queryArgs.permMode,
@@ -476,6 +720,13 @@ export class SdkBackend implements ClaudeBackend {
       systemPromptOverride,
       canUseTool,
       mcpServers,
+      env: spawnEnv() as Record<string, string | undefined>,
+      stderr: (data: string) => {
+        const text = data.toString().trim();
+        if (text) {
+          this._emit({ type: 'error', text, projectPath, scope: effectiveScope });
+        }
+      },
     });
 
     // Build an async-iterable input channel (push-based queue)
@@ -529,6 +780,13 @@ export class SdkBackend implements ClaudeBackend {
       appendSystemPrompt,
       lastActivityAt: Date.now(),
       awaitingInput: false,
+      config: normalizeConfig(queryArgs.permMode, queryArgs.effort, queryArgs.model),
+      gated: !!canUseTool,
+      heldToolUses: new Set(),
+      sawSchedulingTool: false,
+      wakeupResumeInSeconds: null,
+      pendingWakeup: false,
+      wakeupDeadline: null,
       _projectPath: projectPath,
       _scopeName: scope ?? 'chat',
     };
@@ -541,19 +799,49 @@ export class SdkBackend implements ClaudeBackend {
 
   private _buildCanUseTool(projectPath: string, scope: string | undefined) {
     const effectiveScope = scope ?? 'chat';
+    const scopeKey = toScopeKey(projectPath, scope);
+    const wsName = projectPath.split(/[\\/]/).filter(Boolean).pop() || projectPath;
+
     return (toolName: string, input: Record<string, unknown>, opts: { toolUseID: string; [key: string]: unknown }): Promise<PermissionResult> => {
-      // AskUserQuestion / ExitPlanMode are NOT tool approvals — they have their own
-      // question/plan cards (emitted from the drain as question_needed /
-      // plan_review_needed). Auto-allow them here so they don't also pop the approval
-      // banner (which would crash on their missing `command`).
-      if (toolName === 'AskUserQuestion' || toolName === 'ExitPlanMode') {
-        return Promise.resolve({ behavior: 'allow', updatedInput: input });
-      }
       const toolUseId = opts.toolUseID;
-      const command = toolName === 'Bash' ? (input.command as string | undefined) : undefined;
-      // Mark session as awaiting user input so the idle sweep skips it
-      const session = this.sessions.get(toScopeKey(projectPath, scope));
+      const session = this.sessions.get(scopeKey);
       if (session) session.awaitingInput = true;
+
+      // AskUserQuestion / ExitPlanMode are NOT tool approvals — they have their
+      // own question/plan cards. Hold the promise until the user responds so the
+      // model cannot proceed past an unanswered question or an unapproved plan
+      // (previously these were auto-allowed, making plan approval decorative).
+      if (toolName === 'AskUserQuestion') {
+        const questions = Array.isArray(input.questions) ? (input.questions as Array<Record<string, unknown>>) : [];
+        const question = (questions[0]?.question as string | undefined) ?? 'The agent is waiting for your answer.';
+        this._emit({ type: 'question_needed', projectPath, scope: effectiveScope, toolUseId, question });
+        this._notify.question(wsName, question);
+        return new Promise<PermissionResult>((resolve) => {
+          this.pendingGates.set(toolUseId, { kind: 'question', resolve, input, scopeKey, projectPath, scope: effectiveScope });
+          session?.heldToolUses.add(toolUseId);
+        });
+      }
+
+      if (toolName === 'ExitPlanMode') {
+        this._emit({
+          type: 'plan_review_needed',
+          projectPath,
+          scope: effectiveScope,
+          toolUseId,
+          plan: (input.plan as string | undefined) ?? '',
+          planFilePath: (input.planFilePath as string | undefined) ?? '',
+        });
+        this._notify.planReview(wsName);
+        return new Promise<PermissionResult>((resolve) => {
+          this.pendingGates.set(toolUseId, { kind: 'plan', resolve, input, scopeKey, projectPath, scope: effectiveScope });
+          session?.heldToolUses.add(toolUseId);
+        });
+      }
+
+      // Regular tool approval. CLI-parity command/description so approval cards
+      // for Write/Edit/WebFetch/… show their target, not just Bash commands.
+      const command = deriveCommand(input);
+      const description = (input.description as string | undefined) || '';
       this._emit({
         type: 'approval_needed',
         projectPath,
@@ -561,11 +849,13 @@ export class SdkBackend implements ClaudeBackend {
         toolName,
         toolUseId,
         command,
-        description: undefined,
+        description,
         input,
       });
+      this._notify.approval(wsName, toolName, command);
       return new Promise<PermissionResult>((resolve) => {
-        this.pendingApprovals.set(toolUseId, resolve);
+        this.pendingGates.set(toolUseId, { kind: 'approval', resolve, input, scopeKey, projectPath, scope: effectiveScope });
+        session?.heldToolUses.add(toolUseId);
       });
     };
   }
@@ -582,40 +872,91 @@ export class SdkBackend implements ClaudeBackend {
             writeCachedSlashCommands(m.slash_commands as string[]);
           }
 
-          const { emits, state, sessionId } = mapSdkMessage(m, session.mapperState);
-          session.mapperState = state;
-
-          if (sessionId) {
-            session.sessionId = sessionId;
+          // Track the freshest session ID for resume — the runtime can rotate it
+          // (e.g. post-compact), and the sweep stashes whatever is stored here.
+          if (m?.session_id) {
+            session.sessionId = m.session_id as string;
           }
+
+          const wasStreaming = session.mapperState.streaming;
+
+          // Classify WHY a turn ended before mapping: a background yield or a
+          // scheduled wakeup is a wait, not a real completion (claude.ts:538-552).
+          let wait: WaitMeta | undefined;
+          if (m?.type === 'result') {
+            wait = classifyTurnEnd({
+              terminalReason: m.terminal_reason,
+              sawSchedulingTool: session.sawSchedulingTool,
+              wakeupResumeInSeconds: session.wakeupResumeInSeconds,
+              taskCount: Array.isArray(m.background_tasks) ? m.background_tasks.length : null,
+            });
+            session.pendingWakeup = wait.kind === 'scheduled';
+            session.wakeupDeadline = (wait.kind === 'scheduled' && typeof wait.resumeInSeconds === 'number')
+              ? Date.now() + wait.resumeInSeconds * 1000 + WAKEUP_GRACE_MS
+              : null;
+          }
+
+          const { emits, state } = mapSdkMessage(m, session.mapperState);
+          session.mapperState = state;
 
           // Capture the raw SDK message to inspect for special tool_use blocks
           const rawMsg = m;
 
           for (const e of emits) {
             if (e.type === 'streaming_start') {
-              // Re-arm: the mapper saw an assistant message while streaming=false
+              // Re-arm: the mapper saw an assistant frame (or a stream_event
+              // message_start) while streaming=false — a resumed turn.
               session.turnSeq += 1;
               session.activeTurnSeq = session.turnSeq;
-              this._emit({ ...e, projectPath, scope: effectiveScope, turnSeq: session.turnSeq });
+              this._resetWaitTracking(session);
+              this._emit({ ...e, projectPath, scope: effectiveScope, sessionId: session.sessionId ?? null, turnSeq: session.turnSeq });
             } else if (e.type === 'result' || e.type === 'done') {
-              this._emit({ ...e, projectPath, scope: effectiveScope, turnSeq: session.activeTurnSeq });
+              this._emit({ ...e, projectPath, scope: effectiveScope, turnSeq: session.activeTurnSeq, ...(wait ? { wait } : {}) });
             } else {
               this._emit({ ...e, projectPath, scope: effectiveScope });
             }
           }
 
-          // After forwarding an assistant message, inspect tool_use blocks for
-          // AskUserQuestion and ExitPlanMode (emit AFTER forward so cards render)
+          if (rawMsg?.type === 'result') {
+            // The old turn drained: converge activeTurnSeq onto the latest send's
+            // turnSeq (it lags during an interrupt — see _beginTurn).
+            session.activeTurnSeq = session.turnSeq;
+            // Only notify on a genuine completion — waits stay silent.
+            if (wasStreaming && wait?.kind === 'none') {
+              const info = {
+                provider: 'Claude',
+                duration: rawMsg.duration_ms as number | undefined,
+                turns: rawMsg.num_turns as number | undefined,
+                cost: rawMsg.total_cost_usd as number | undefined,
+                summary: rawMsg.result as string | undefined,
+              };
+              setTimeout(() => this._notify.completion(projectPath, info), 500);
+            }
+          }
+
+          // Inspect assistant tool_use blocks: scheduling-tool tracking (wait
+          // classification) always; question/plan cards only for UNGATED
+          // sessions (bypass/orchestrator) — gated sessions emit those from
+          // canUseTool, where the promise hold actually blocks the model.
           if (rawMsg?.type === 'assistant' && Array.isArray(rawMsg?.message?.content)) {
             for (const block of rawMsg.message.content as Array<Record<string, unknown>>) {
               if (block.type !== 'tool_use') continue;
 
-              if (block.name === 'AskUserQuestion') {
+              const blockName = block.name as string;
+              if (isSchedulingTool(blockName)) {
+                session.sawSchedulingTool = true;
+                const delay = (block.input as Record<string, unknown> | undefined)?.delaySeconds;
+                if (blockName === 'ScheduleWakeup' && typeof delay === 'number') {
+                  session.wakeupResumeInSeconds = delay;
+                }
+              }
+
+              if (session.gated) continue;
+
+              if (blockName === 'AskUserQuestion') {
                 const input = (block.input ?? {}) as Record<string, unknown>;
                 const questions = Array.isArray(input.questions) ? input.questions as Array<Record<string, unknown>> : [];
                 const question = (questions[0]?.question as string | undefined) ?? 'The agent is waiting for your answer.';
-                // Mark session as awaiting user input so the idle sweep skips it
                 const s = this.sessions.get(scopeKey);
                 if (s) s.awaitingInput = true;
                 this._emit({
@@ -625,9 +966,9 @@ export class SdkBackend implements ClaudeBackend {
                   toolUseId: block.id as string,
                   question,
                 });
-              } else if (block.name === 'ExitPlanMode') {
+                this._notify.question(projectPath.split(/[\\/]/).filter(Boolean).pop() || projectPath, question);
+              } else if (blockName === 'ExitPlanMode') {
                 const input = (block.input ?? {}) as Record<string, unknown>;
-                // Mark session as awaiting user input so the idle sweep skips it
                 const s = this.sessions.get(scopeKey);
                 if (s) s.awaitingInput = true;
                 this._emit({
@@ -638,15 +979,21 @@ export class SdkBackend implements ClaudeBackend {
                   plan: (input.plan as string | undefined) ?? '',
                   planFilePath: (input.planFilePath as string | undefined) ?? '',
                 });
+                this._notify.planReview(projectPath.split(/[\\/]/).filter(Boolean).pop() || projectPath);
               }
             }
           }
         }
       } catch (err) {
         const text = err instanceof Error ? err.message : String(err);
-        this._emit({ type: 'error', text, projectPath, scope: effectiveScope });
+        // fatal: swarm status mirroring marks the task failed (not done) on a
+        // crash — without the flag a dead drain reads as a clean completion.
+        this._emit({ type: 'error', fatal: true, text: friendlyError(text), projectPath, scope: effectiveScope });
         this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: session.activeTurnSeq });
       } finally {
+        // Release any gates still held by this scope — a closed query can never
+        // deliver the tool result, and the resolver would leak forever.
+        this._resolveGatesForScope(scopeKey, 'Session ended');
         // Remove the dead session only if it hasn't been replaced by a newer one
         // (e.g. setSessionId may have already deleted+recreated it)
         if (this.sessions.get(scopeKey) === session) {
@@ -668,6 +1015,10 @@ export class SdkBackend implements ClaudeBackend {
       lastActivityAt: s.lastActivityAt,
       streaming: s.mapperState.streaming,
       awaitingInput: s.awaitingInput,
+      // A scope sleeping on a ScheduleWakeup must not be reaped — closing the
+      // query kills the pending wakeup and the agent never resumes. Bounded by
+      // the wakeup deadline (+grace) so an abandoned wakeup can't defer forever.
+      pendingWakeup: s.pendingWakeup && (s.wakeupDeadline == null || now < s.wakeupDeadline),
     }));
     sweepIdleScopes({
       now,
@@ -701,6 +1052,15 @@ export class SdkBackend implements ClaudeBackend {
 
 function toScopeKey(projectPath: string, scope?: string): string {
   return `${projectPath} ${scope ?? 'chat'}`;
+}
+
+/** Same normalization the CLI's ensureProcess used for its respawn check. */
+function normalizeConfig(permMode?: string, effort?: string, model?: string): { permMode: string; effort: string; model: string } {
+  return { permMode: permMode || 'default', effort: effort || '', model: model || '' };
+}
+
+function configEquals(a: { permMode: string; effort: string; model: string }, b: { permMode: string; effort: string; model: string }): boolean {
+  return a.permMode === b.permMode && a.effort === b.effort && a.model === b.model;
 }
 
 /**

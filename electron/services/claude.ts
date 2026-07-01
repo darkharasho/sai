@@ -43,7 +43,7 @@ let subprocessMemoryCapMB = 0;
 export function setSubprocessMemoryCapMB(n: number): void {
   subprocessMemoryCapMB = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
-function spawnEnv(): NodeJS.ProcessEnv {
+export function spawnEnv(): NodeJS.ProcessEnv {
   return withNodeMemoryCap(enrichedEnv(), subprocessMemoryCapMB);
 }
 
@@ -62,6 +62,9 @@ export function writeCachedSlashCommands(commands: string[]) {
 }
 
 let mainWin: BrowserWindow | null = null;
+
+/** The registered main window, for backends that need it (OS notifications). */
+export function getMainWin(): BrowserWindow | null { return mainWin; }
 
 // Single instance across registerClaudeHandlers calls (dev hot reload
 // re-registers); cleared by destroyClaude on window close.
