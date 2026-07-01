@@ -119,7 +119,7 @@ type PermissionMode = 'default' | 'bypass';
 // Persisted model can be a known alias or an account-specific id (e.g. Fable);
 // the CLI validates it, so accept any non-empty string here.
 const isModelChoice = (v: unknown): v is ModelChoice => typeof v === 'string' && v.length > 0;
-const isEffortLevel = (v: unknown): v is EffortLevel => v === 'low' || v === 'medium' || v === 'high' || v === 'max';
+const isEffortLevel = (v: unknown): v is EffortLevel => v === 'low' || v === 'medium' || v === 'high' || v === 'xhigh' || v === 'max';
 
 // Cap the in-memory active-session message window. Older messages stay in
 // IndexedDB and are paginated in via ChatPanel's startReached callback.
@@ -2042,7 +2042,7 @@ export default function App() {
       if ('claude' in remote && typeof remote.claude === 'object') {
         const c = remote.claude;
         if (isModelChoice(c.model)) setModelChoice(c.model);
-        if (c.effort === 'low' || c.effort === 'medium' || c.effort === 'high' || c.effort === 'max') setEffortLevel(c.effort);
+        if (c.effort === 'low' || c.effort === 'medium' || c.effort === 'high' || c.effort === 'xhigh' || c.effort === 'max') setEffortLevel(c.effort);
         if (c.permission === 'default' || c.permission === 'bypass') setPermissionMode(c.permission);
       }
       if ('codex' in remote && typeof remote.codex === 'object') {

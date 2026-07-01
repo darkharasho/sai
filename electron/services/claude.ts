@@ -22,7 +22,8 @@ import { clamp, type PermMode } from './remote/clamp';
 import { exitTerminalEvents } from './claudeExit';
 import { imageReadResult } from './imageFiles';
 import type { StartArgs, CompactArgs } from './claudeBackend/types';
-import { getClaudeBackend } from './claudeBackend';
+import { getClaudeBackend, getClaudeBackendSetting } from './claudeBackend';
+export { touchActivity } from './workspace';
 import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE } from './chatNudges';
 import { classifyTurnEnd, isSchedulingTool, WAKEUP_GRACE_MS, type WaitMeta } from './waitClassifier';
 export { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE };
@@ -226,7 +227,7 @@ export function buildArgs(options: BuildArgsOptions = {}): string[] {
     args.push('--permission-mode', 'acceptEdits');
   }
 
-  if (effort && ['low', 'medium', 'high', 'max'].includes(effort)) {
+  if (effort && ['low', 'medium', 'high', 'xhigh', 'max'].includes(effort)) {
     args.push('--effort', effort);
   }
 
@@ -1540,6 +1541,11 @@ export function registerClaudeHandlers(win: BrowserWindow) {
   // Idle-scope sweep: stop Claude scopes that have been inactive for >30 min
   if (idleSweepTimer) clearInterval(idleSweepTimer);
   idleSweepTimer = setInterval(() => {
+    // SDK mode runs its own sweep inside SdkBackend over live query sessions.
+    // This CLI-side sweep only sees ws.claudeScopes records, which SDK activity
+    // never touches — sweeping from here fires spurious scope_suspended events
+    // (yellow badges) for scopes whose SDK session is alive and well.
+    if (getClaudeBackendSetting() === 'sdk') return;
     const records: { workspaceId: string; scope: string; lastActivityAt: number; streaming: boolean; awaitingInput: boolean; pendingWakeup: boolean }[] = [];
     for (const ws of listAllWorkspaces()) {
       for (const [scope, claude] of ws.claudeScopes.entries()) {

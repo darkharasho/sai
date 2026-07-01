@@ -3,9 +3,12 @@ import { useThinkingDriver } from './Chat/useThinkingDriver';
 
 interface ThinkingAnimationProps {
   color?: string;
+  /** Secondary label explaining a silent pause (thinking-token count, API
+   *  retry backoff, context compaction). Rendered muted after the status. */
+  hint?: string | null;
 }
 
-export default function ThinkingAnimation({ color }: ThinkingAnimationProps = {}) {
+export default function ThinkingAnimation({ color, hint }: ThinkingAnimationProps = {}) {
   const { saiAnimationEnabled, chainMode, displayText, clockText, Icon } = useThinkingDriver();
 
   return (
@@ -25,6 +28,11 @@ export default function ThinkingAnimation({ color }: ThinkingAnimationProps = {}
               ...
             </>}
       </span>
+      {hint && (
+        <span className="thinking-hint" style={{ opacity: 0.55, marginLeft: 8, fontSize: 12 }}>
+          {hint}
+        </span>
+      )}
     </div>
   );
 }

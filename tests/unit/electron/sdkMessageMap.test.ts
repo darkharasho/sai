@@ -163,11 +163,85 @@ describe('stream_event message_start re-arm', () => {
   });
 
   it('does NOT re-arm on non-message_start stream events while not streaming', () => {
-    const msg = { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'x' } } };
+    const msg = { type: 'stream_event', event: { type: 'content_block_stop', index: 0 } };
     const state: MapperState = { streaming: false, sessionIdSeen: true };
     const result = mapSdkMessage(msg, state);
     expect(result.emits).toHaveLength(1);
     expect(result.emits[0].type).toBe('stream_event');
     expect(result.state.streaming).toBe(false);
+  });
+});
+
+// --- live typing: text_delta conversion + final-frame text stripping ---
+describe('text delta live typing', () => {
+  it('converts a top-level text_delta stream event into a delta assistant frame', () => {
+    const msg = {
+      type: 'stream_event',
+      parent_tool_use_id: null,
+      event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Hel' } },
+    };
+    const state: MapperState = { streaming: true, sessionIdSeen: true };
+    const result = mapSdkMessage(msg, state);
+    expect(result.emits).toHaveLength(1);
+    expect(result.emits[0]).toEqual({
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: 'Hel', delta: true }] },
+    });
+    expect(result.state.deltaTextEmitted).toBe(true);
+  });
+
+  it('strips text blocks from the completed assistant frame after deltas were emitted', () => {
+    const msg = {
+      type: 'assistant',
+      parent_tool_use_id: null,
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Hello there' },
+          { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } },
+        ],
+      },
+    };
+    const state: MapperState = { streaming: true, sessionIdSeen: true, deltaTextEmitted: true };
+    const result = mapSdkMessage(msg, state);
+    const assistant = result.emits.find(e => e.type === 'assistant') as any;
+    expect(assistant.message.content).toEqual([
+      { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } },
+    ]);
+    expect(result.state.deltaTextEmitted).toBe(false);
+  });
+
+  it('keeps text on complete frames when no deltas were emitted (synthetic/error frames)', () => {
+    const msg = {
+      type: 'assistant',
+      parent_tool_use_id: null,
+      message: { role: 'assistant', content: [{ type: 'text', text: 'API Error: overloaded' }] },
+    };
+    const state: MapperState = { streaming: true, sessionIdSeen: true };
+    const result = mapSdkMessage(msg, state);
+    const assistant = result.emits.find(e => e.type === 'assistant') as any;
+    expect(assistant.message.content).toEqual([{ type: 'text', text: 'API Error: overloaded' }]);
+  });
+
+  it('does not convert subagent text deltas and does not strip subagent frames', () => {
+    const deltaMsg = {
+      type: 'stream_event',
+      parent_tool_use_id: 'toolu_parent',
+      event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'sub' } },
+    };
+    const state: MapperState = { streaming: true, sessionIdSeen: true, deltaTextEmitted: true };
+    const r1 = mapSdkMessage(deltaMsg, state);
+    expect(r1.emits[0].type).toBe('stream_event'); // forwarded raw, not converted
+
+    const finalMsg = {
+      type: 'assistant',
+      parent_tool_use_id: 'toolu_parent',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'subagent says' }] },
+    };
+    const r2 = mapSdkMessage(finalMsg, state);
+    const assistant = r2.emits.find(e => e.type === 'assistant') as any;
+    expect(assistant.message.content).toEqual([{ type: 'text', text: 'subagent says' }]);
+    // The top-level pending strip flag stays armed for the top-level final.
+    expect(r2.state.deltaTextEmitted).toBe(true);
   });
 });

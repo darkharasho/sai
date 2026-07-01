@@ -63,6 +63,7 @@ vi.mock('../../../electron/services/claude', () => ({
   getRemoteCeiling: mockGetRemoteCeiling,
   getMainWin: () => null,
   spawnEnv: mockSpawnEnv,
+  touchActivity: vi.fn(),
 }));
 
 // notify.ts touches electron `app` at module load — must be mocked in node env.
@@ -1139,23 +1140,37 @@ describe('SdkBackend', () => {
     mockReadFileSync.mockImplementation(() => { throw new Error('ENOENT'); });
   });
 
-  it('(20) compact emits streaming_start and pushes /compact', async () => {
+  it('(20) compact runs SILENTLY: pushes /compact, forwards only system frames, no streaming_start/result/done', async () => {
     const pushed: any[] = [];
-    const fakeQuery = makeFakeQuery([], { hang: true });
+    // Scripted frames the runtime would produce for the compact turn.
+    const fakeQuery = makeFakeQuery([
+      { type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'manual', pre_tokens: 150000 } },
+      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Compacted.' }] } },
+      { type: 'result', stop_reason: 'end_turn', num_turns: 1 },
+    ], { hang: true });
     const queryFn = vi.fn((args: { prompt: any; options: any }) => {
       (async () => { for await (const m of args.prompt) pushed.push(m); })();
       return fakeQuery;
     });
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
     backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.compact({ projectPath: PROJECT, scope: SCOPE });
+    await new Promise<void>((r) => setTimeout(r, 20));
+
+    expect(pushed.find((m) => m?.message?.content === '/compact')).toBeTruthy();
+    // Silent: no turn boundary, no assistant chatter, no result/done.
+    expect(emits.find((e) => e.type === 'streaming_start')).toBeUndefined();
+    expect(emits.find((e) => e.type === 'assistant')).toBeUndefined();
+    expect(emits.find((e) => e.type === 'result')).toBeUndefined();
+    expect(emits.find((e) => e.type === 'done')).toBeUndefined();
+    // System frames (compact notification) still pass through.
+    expect(emits.find((e) => e.type === 'system' && e.subtype === 'compact_boundary')).toBeTruthy();
+
+    // The result cleared the gate: a following send streams normally.
+    emits.length = 0;
     backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
     await new Promise<void>((r) => setTimeout(r, 10));
-    emits.length = 0; pushed.length = 0;
-    backend.compact({ projectPath: PROJECT, scope: SCOPE });
-    await new Promise<void>((r) => setTimeout(r, 10));
-
     expect(emits.find((e) => e.type === 'streaming_start')).toBeTruthy();
-    expect(pushed.find((m) => m?.message?.content === '/compact')).toBeTruthy();
     fakeQuery.close();
   });
 
@@ -1458,8 +1473,30 @@ describe('SdkBackend', () => {
     await new Promise((r) => setTimeout(r, 20));
 
     expect(queryFn).toHaveBeenCalledTimes(1);
-    expect(emits.find((e) => e.type === 'streaming_start')).toBeTruthy();
     expect(pushed.find((m) => m?.message?.content === '/compact')).toBeTruthy();
+    fakeQuery.close();
+  });
+
+  it('(37) send with a readable png attaches a real base64 image content block', async () => {
+    mockReadFileSync.mockReturnValueOnce(Buffer.from('fake-png-bytes') as any);
+    const pushed: any[] = [];
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    const queryFn = vi.fn((args: { prompt: any; options: any }) => {
+      (async () => { for await (const m of args.prompt) pushed.push(m); })();
+      return fakeQuery;
+    });
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'look', scope: SCOPE, permMode: 'default', imagePaths: ['/tmp/shot.png'] });
+    await new Promise((r) => setTimeout(r, 20));
+
+    const userMsg = pushed.find((m) => m?.type === 'user');
+    expect(Array.isArray(userMsg.message.content)).toBe(true);
+    expect(userMsg.message.content[0]).toEqual({
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/png', data: Buffer.from('fake-png-bytes').toString('base64') },
+    });
+    expect(userMsg.message.content[1]).toEqual({ type: 'text', text: 'look' });
     fakeQuery.close();
   });
 });

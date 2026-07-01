@@ -11,6 +11,7 @@ const EFFORT_OPTIONS: { id: EffortLevel; label: string }[] = [
   { id: 'low',    label: 'Low'    },
   { id: 'medium', label: 'Medium' },
   { id: 'high',   label: 'High'   },
+  { id: 'xhigh',  label: 'X-High' },
   { id: 'max',    label: 'Max'    },
 ];
 

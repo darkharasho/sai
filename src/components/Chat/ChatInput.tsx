@@ -125,7 +125,8 @@ const ADD_MENU_ITEMS: AutocompleteItem[] = [
 const EFFORT_CONFIG: Record<EffortLevel, { icon: typeof ChevronDown; label: string; color: string; next: EffortLevel }> = {
   low:    { icon: ChevronDown, label: 'Lo', color: 'var(--text-muted)', next: 'medium' },
   medium: { icon: Minus,       label: 'Med', color: 'var(--text-secondary)', next: 'high' },
-  high:   { icon: ChevronUp,   label: 'Hi', color: 'var(--accent)', next: 'max' },
+  high:   { icon: ChevronUp,   label: 'Hi', color: 'var(--accent)', next: 'xhigh' },
+  xhigh:  { icon: ChevronsUp,  label: 'XHi', color: 'var(--accent)', next: 'max' },
   max:    { icon: ChevronsUp,  label: 'Max', color: 'var(--orange)', next: 'low' },
 };
 

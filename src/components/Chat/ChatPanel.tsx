@@ -94,8 +94,8 @@ interface ChatPanelProps {
   overlayControl?: { mode: OverlayMode; onChange: (m: OverlayMode) => void };
   permissionMode: 'default' | 'bypass';
   onPermissionChange: (mode: 'default' | 'bypass') => void;
-  effortLevel: 'low' | 'medium' | 'high' | 'max';
-  onEffortChange: (level: 'low' | 'medium' | 'high' | 'max' | null) => void;
+  effortLevel: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  onEffortChange: (level: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null) => void;
   modelChoice: 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan' | (string & {});
   onModelChange: (model: 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan' | (string & {}) | null) => void;
   availableModels?: { id: string; label: string; description: string; recommended?: boolean; oneM?: boolean; extra?: boolean }[];
@@ -103,7 +103,7 @@ interface ChatPanelProps {
     modelOverridden: boolean;
     effortOverridden: boolean;
     globalModel: 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan' | (string & {});
-    globalEffort: 'low' | 'medium' | 'high' | 'max';
+    globalEffort: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   };
   aiProvider: 'claude' | 'codex' | 'gemini';
   codexModel: string;
@@ -431,6 +431,12 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // instead of waiting for end-of-turn.
   const STREAM_IDLE_MS = 250;
   const [streamSettled, setStreamSettled] = useState(true);
+  // Secondary label on the thinking indicator explaining SILENT pauses — the
+  // SDK emits progress signals (thinking token counts, API retry backoff,
+  // context compaction) during stretches with no text/tool output. Cleared as
+  // soon as real output flows or the turn ends.
+  const [streamHint, setStreamHint] = useState<string | null>(null);
+  const clearStreamHint = useCallback(() => setStreamHint(prev => (prev == null ? prev : null)), []);
   const saiAnimationEnabled = useSaiAnimationPref();
   const streamIdleTimerRef = useRef<number | null>(null);
   const flushStreamingText = useCallback(() => {
@@ -636,6 +642,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
       if (msg.type === 'streaming_start') {
         if (msg.turnSeq != null) turnSeqRef.current = msg.turnSeq;
+        clearStreamHint();
         setTurnStartIndex(messagesRef.current.length);
         if (turnStartedAtRef.current === null) {
           turnStartedAtRef.current = Date.now();
@@ -666,6 +673,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         if (msg.turnSeq != null && msg.turnSeq !== turnSeqRef.current) return;
         if (msg.type === 'done') {
           turnSeqRef.current = -1;
+          clearStreamHint();
           setTurnStartIndex(null);
           flushMessagesToParent();
           onTurnComplete?.();
@@ -694,6 +702,30 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         }]);
         // Don't set isStreaming=false here — errors can be non-fatal stderr warnings.
         // The authoritative end-of-turn signal is 'done' or 'process_exit'.
+        return;
+      }
+
+      // Silent-pause signals from the SDK: surface WHY nothing is streaming.
+      // thinking_tokens fires during adaptive thinking (whose text is omitted
+      // by default on Opus 4.7+), api_retry during rate-limit/overload backoff,
+      // and status:compacting while the runtime compacts context.
+      if (msg.type === 'system' && msg.subtype === 'thinking_tokens') {
+        const n = msg.estimated_tokens;
+        if (typeof n === 'number' && n > 0) {
+          const label = n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+          setStreamHint(`thinking · ${label} tokens`);
+        }
+        return;
+      }
+      if (msg.type === 'system' && msg.subtype === 'api_retry') {
+        const secs = Math.max(1, Math.ceil((msg.retry_delay_ms ?? 0) / 1000));
+        const attempt = typeof msg.attempt === 'number' && typeof msg.max_retries === 'number'
+          ? ` ${msg.attempt}/${msg.max_retries}` : '';
+        setStreamHint(`api error · retrying${attempt} in ${secs}s`);
+        return;
+      }
+      if (msg.type === 'system' && msg.subtype === 'status') {
+        setStreamHint(msg.status === 'compacting' ? 'compacting context…' : null);
         return;
       }
 
@@ -896,6 +928,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         }
 
         const text = textParts.join('');
+        // Real output is flowing — any silent-pause hint is stale.
+        if (text) clearStreamHint();
 
         if (text && tools.length === 0 && looksLikeApiError(text)) {
           const error = parseAiError(text);
@@ -1870,7 +1904,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
               exit={{ opacity: 0 }}
               transition={thinkingTransition}
             >
-              <ThinkingAnimation />
+              <ThinkingAnimation hint={streamHint} />
             </motion.div>
           )}
           {showPendingSaiThinking && (
@@ -1881,7 +1915,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
               exit={{ opacity: 0 }}
               transition={thinkingTransition}
             >
-              <ThinkingAnimation />
+              <ThinkingAnimation hint={streamHint} />
             </motion.div>
           )}
         </MotionPresence>

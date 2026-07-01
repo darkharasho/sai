@@ -28,7 +28,9 @@ import {
   getRemoteCeiling,
   getMainWin,
   spawnEnv,
+  touchActivity,
 } from '../claude';
+import { isImagePath, mimeForImagePath } from '../imageFiles';
 import { notifyCompletion, notifyApproval, notifyQuestion, notifyPlanReview } from '../notify';
 import { classifyTurnEnd, isSchedulingTool, WAKEUP_GRACE_MS, type WaitMeta } from '../waitClassifier';
 import { clamp, type PermMode } from '../remote/clamp';
@@ -87,6 +89,8 @@ interface ScopeSession {
   wakeupResumeInSeconds: number | null;
   /** Turn ended in a scheduled wait — defer the idle sweep. */
   pendingWakeup: boolean;
+  /** Silent turn (e.g. /compact): drop all non-system forwarding until result. */
+  suppressForward: boolean;
   /** Epoch ms after which a pendingWakeup is considered abandoned. */
   wakeupDeadline: number | null;
   /** Stored for the idle sweep so we never need to parse the scope key. */
@@ -161,6 +165,43 @@ function friendlyError(text: string): string {
     return `${text}\n\nClaude may not be logged in — run \`claude\` in a terminal to authenticate, then retry.`;
   }
   return text;
+}
+
+/** API image-block support: only these media types are accepted by the API. */
+const API_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+/** Max bytes we inline as base64 (API limit is ~5MB per image). */
+const MAX_INLINE_IMAGE_BYTES = 4_500_000;
+
+type UserContent = string | Array<Record<string, unknown>>;
+
+/**
+ * Build the user-message content. Attached images become real base64 image
+ * content blocks (the SDK accepts full MessageParam content) so the model sees
+ * them immediately instead of having to Read a `[Attached image: …]` path ref.
+ * Unsupported types / oversized / unreadable files fall back to the path ref.
+ */
+function buildUserContent(message: string, imagePaths?: string[]): UserContent {
+  if (!imagePaths || imagePaths.length === 0) return message;
+
+  const blocks: Array<Record<string, unknown>> = [];
+  const refs: string[] = [];
+  for (const p of imagePaths) {
+    try {
+      const mediaType = mimeForImagePath(p);
+      if (isImagePath(p) && API_IMAGE_TYPES.has(mediaType)) {
+        const buf = fs.readFileSync(p);
+        if (buf.length <= MAX_INLINE_IMAGE_BYTES) {
+          blocks.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data: buf.toString('base64') } });
+          continue;
+        }
+      }
+    } catch { /* unreadable — fall through to the path ref */ }
+    refs.push(`[Attached image: ${p}]`);
+  }
+
+  const text = refs.length > 0 ? `${refs.join('\n')}\n\n${message}` : message;
+  if (blocks.length === 0) return text;
+  return [...blocks, { type: 'text', text }];
 }
 
 /** CLI-parity command derivation for approval cards (claude.ts:507-514). */
@@ -313,19 +354,18 @@ export class SdkBackend implements ClaudeBackend {
       // so the queued message can be processed (mirrors CLI clearing awaitingApproval).
       this._resolveGatesForScope(scopeKey, 'The user sent a new message instead of responding to this request.');
 
-      this._beginTurn(session, projectPath, effectiveScope);
+      // A new user turn cancels any pending silent-compact suppression.
+      session.suppressForward = false;
 
-      // Mirror CliBackend.sendImpl: prepend image refs the model can resolve.
-      let content = message;
-      if (imagePaths && imagePaths.length > 0) {
-        const imageRefs = imagePaths.map((p) => `[Attached image: ${p}]`).join('\n');
-        content = `${imageRefs}\n\n${message}`;
-      }
+      this._beginTurn(session, projectPath, effectiveScope);
+      // Workspace auto-suspend watches this clock; without it a workspace with
+      // only SDK activity looks quiescent and gets suspended mid-stream.
+      try { touchActivity(projectPath); } catch { /* workspace registry unavailable (tests) */ }
 
       // Push the user message into the input channel
       session.pushInput({
         type: 'user',
-        message: { role: 'user', content },
+        message: { role: 'user', content: buildUserContent(message, imagePaths) },
         parent_tool_use_id: null,
       });
 
@@ -425,7 +465,12 @@ export class SdkBackend implements ClaudeBackend {
         session = this._createSession(scopeKey, projectPath, scope, { permMode, effort, model });
       }
 
-      this._beginTurn(session, projectPath, effectiveScope);
+      // CLI parity (compactImpl + suppressForward): the compact turn runs
+      // SILENTLY — no streaming_start, no forwarded output, no done. Only
+      // system frames (compact notification) pass through; the result clears
+      // the gate so the next send behaves normally.
+      session.suppressForward = true;
+      session.lastActivityAt = Date.now();
 
       // Push the /compact user message into the input channel
       session.pushInput({
@@ -780,6 +825,7 @@ export class SdkBackend implements ClaudeBackend {
       appendSystemPrompt,
       lastActivityAt: Date.now(),
       awaitingInput: false,
+      suppressForward: false,
       config: normalizeConfig(queryArgs.permMode, queryArgs.effort, queryArgs.model),
       gated: !!canUseTool,
       heldToolUses: new Set(),
@@ -876,6 +922,22 @@ export class SdkBackend implements ClaudeBackend {
           // (e.g. post-compact), and the sweep stashes whatever is stored here.
           if (m?.session_id) {
             session.sessionId = m.session_id as string;
+          }
+
+          // Silent turn (compact): mirror the CLI's suppressForward — drop all
+          // forwarding except system frames; the result closes the gate without
+          // emitting result/done (the turn never appeared in the UI).
+          if (session.suppressForward) {
+            if (m?.type === 'result') {
+              session.suppressForward = false;
+              session.mapperState = { ...session.mapperState, streaming: false };
+              session.activeTurnSeq = session.turnSeq;
+              continue;
+            }
+            if (m?.type === 'system') {
+              this._emit({ ...m, projectPath, scope: effectiveScope });
+            }
+            continue;
           }
 
           const wasStreaming = session.mapperState.streaming;

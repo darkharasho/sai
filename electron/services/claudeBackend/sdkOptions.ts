@@ -3,7 +3,7 @@ import type { Options, EffortLevel, CanUseTool } from '@anthropic-ai/claude-agen
 export interface SdkOptionInputs {
   kind: 'chat' | 'task' | 'orchestrator';
   permMode?: string;           // 'bypass' | 'default' | undefined
-  effort?: string;             // 'low'|'medium'|'high'|'max'
+  effort?: string;             // 'low'|'medium'|'high'|'xhigh'|'max'
   model?: string;
   cwd: string;
   sessionId?: string;          // when set → resume
@@ -16,7 +16,7 @@ export interface SdkOptionInputs {
   stderr?: (data: string) => void; // subprocess stderr (auth failures, crash diagnostics)
 }
 
-const VALID_EFFORT = new Set<string>(['low', 'medium', 'high', 'max']);
+const VALID_EFFORT = new Set<string>(['low', 'medium', 'high', 'xhigh', 'max']);
 
 /**
  * Pure function that maps SAI's per-scope config to the claude-agent-sdk
