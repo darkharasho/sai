@@ -10,7 +10,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import type { query as QueryFn, SDKUserMessage, PermissionResult, McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
+import { enrichedEnv } from '../shellEnv';
 import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE } from '../chatNudges';
 import {
   alwaysAllowImpl,
@@ -76,15 +78,42 @@ type SdkUserInputMessage = SDKUserMessage;
 // ─── resolveClaudePath ────────────────────────────────────────────────────────
 
 /**
- * Scan PATH for the `claude` executable.  Returns the first absolute path found,
- * or undefined (SDK uses its bundled runtime when the option is omitted).
+ * Locate the user's installed `claude` executable.
+ *
+ * CRITICAL for the packaged app: a Finder-launched GUI app inherits a minimal
+ * `process.env.PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`) that does NOT include the
+ * user's `claude` install (~/.claude/local, homebrew, nvm, volta, …). If we
+ * return undefined here, the SDK falls back to its bundled native binary, whose
+ * default resolution points *inside* `app.asar` — a file, not a directory — so
+ * `child_process.spawn` throws `spawn ENOTDIR` synchronously on every turn.
+ *
+ * To avoid that we scan the *enriched* login-shell PATH (same source the CLI
+ * backend uses via `spawnEnv()`), plus a set of well-known absolute install
+ * locations as a belt-and-suspenders fallback. Returns the first absolute path
+ * found, or undefined (SDK uses its bundled runtime when the option is omitted).
  */
 export function resolveClaudePath(): string | undefined {
-  const pathEnv = process.env.PATH ?? '';
-  const sep = process.platform === 'win32' ? ';' : ':';
-  const bin = process.platform === 'win32' ? 'claude.exe' : 'claude';
-  for (const dir of pathEnv.split(sep)) {
-    if (!dir) continue;
+  const isWin = process.platform === 'win32';
+  const sep = isWin ? ';' : ':';
+  const bin = isWin ? 'claude.exe' : 'claude';
+
+  // Prefer the enriched login-shell PATH over the raw (possibly stripped) one.
+  const pathEnv = enrichedEnv().PATH ?? process.env.PATH ?? '';
+  const dirs = pathEnv.split(sep).filter(Boolean);
+
+  // Well-known install locations, checked after PATH. On non-Windows only.
+  if (!isWin) {
+    const home = os.homedir();
+    dirs.push(
+      path.join(home, '.claude', 'local'),
+      path.join(home, '.local', 'bin'),
+      path.join(home, '.volta', 'bin'),
+      '/opt/homebrew/bin',
+      '/usr/local/bin',
+    );
+  }
+
+  for (const dir of dirs) {
     const candidate = path.join(dir, bin);
     if (fs.existsSync(candidate)) return candidate;
   }

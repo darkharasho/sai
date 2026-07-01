@@ -96,7 +96,11 @@ function heuristicEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-if (process.platform !== 'win32') captureShellEnv();
+// Capture the login-shell env at module load, then patch process.env.PATH once
+// the real PATH is known (see patchProcessPath).
+if (process.platform !== 'win32') {
+  captureShellEnv().then(patchProcessPath).catch(() => { /* ignore */ });
+}
 
 /**
  * Return the best available environment for spawning CLI processes.
@@ -107,6 +111,35 @@ export function enrichedEnv(): NodeJS.ProcessEnv {
     return { ...cachedShellEnv };
   }
   return heuristicEnv();
+}
+
+/**
+ * Merge the enriched login-shell PATH into `process.env.PATH` in place.
+ *
+ * A Finder-launched macOS app inherits a stripped PATH. Child processes spawned
+ * *without* an explicit env inherit that stripped PATH — most notably the
+ * `@anthropic-ai/claude-agent-sdk`, which spawns the `claude` CLI with a plain
+ * `{...process.env}`. Without this patch that CLI (and every tool it shells out
+ * to: git, node, rg, …) can't be found. The CLI backend sidesteps this by
+ * passing `enrichedEnv()` explicitly; the SDK gives us no env hook, so we widen
+ * the process-global PATH instead.
+ *
+ * Idempotent and safe to call repeatedly — entries are de-duplicated with the
+ * enriched dirs taking precedence. No-op on Windows.
+ */
+export function patchProcessPath(): void {
+  if (process.platform === 'win32') return;
+  const enriched = enrichedEnv().PATH;
+  if (!enriched) return;
+  const sep = path.delimiter;
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  for (const dir of [...enriched.split(sep), ...(process.env.PATH ?? '').split(sep)]) {
+    if (!dir || seen.has(dir)) continue;
+    seen.add(dir);
+    merged.push(dir);
+  }
+  process.env.PATH = merged.join(sep);
 }
 
 /**

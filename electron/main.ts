@@ -19,7 +19,7 @@ import { captureWindowFlow } from './capture/captureWindow';
 import { listDesktopWindows, captureDesktopSource, captureViaCli } from './capture/backends';
 import { activeWindowTitle, raiseWindowByTitle } from './capture/windowControl';
 import { gitStatusImpl, gitDiffImpl, gitStageImpl, gitUnstageImpl, gitCommitImpl, gitPushImpl, gitPullImpl } from './services/git';
-import { enrichedEnv } from './services/shellEnv';
+import { enrichedEnv, patchProcessPath } from './services/shellEnv';
 import {
   createRenderProtocolStore,
   resolveRenderAsset,
@@ -32,6 +32,12 @@ import {
 import { execFile as _execFile, execFileSync } from 'node:child_process';
 import { promisify as _promisify } from 'node:util';
 const _execFileP = _promisify(_execFile);
+
+// Widen the process-global PATH immediately (heuristic dirs) so early spawns —
+// including the claude-agent-sdk, which spawns the CLI with a plain
+// {...process.env} — can find `claude`, git, node, etc. even under a Finder-
+// stripped PATH. Re-patched with the real login-shell PATH once captured.
+patchProcessPath();
 
 protocol.registerSchemesAsPrivileged([
   {
