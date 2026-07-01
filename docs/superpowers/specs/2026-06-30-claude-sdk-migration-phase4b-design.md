@@ -1,7 +1,7 @@
 # Claude CLI → Agent SDK Migration — Phase 4b: Orchestrator / swarm in SDK mode
 
 **Date:** 2026-06-30
-**Status:** Design (pending review), then plan + execute
+**Status:** IMPLEMENTED on branch `claude-sdk-migration-phase4b` (commits d9517351..5b92e64f). 3 SDD tasks reviewed-clean; opus final review + flip-readiness audit = "mergeable, every ClaudeBackend method real across all kinds". Final review found the Approach-Y duplicate-card seam (renderer registers the orchestrator session unconditionally on sidebar-open, so the synthetic injection AND the SDK's real tool_use both render) — FIXED in 5b92e64f by gating the model-initiated synthetic injection to CLI mode only (Approach Y now correct-by-construction). tsc clean, 239 files/2255 tests. Live SDK-orchestrator dogfood pending; flag flip to `sdk` is the user's post-dogfood follow-up.
 **Depends on:** Phases 0–3 + 4a (all merged to main). This is the LAST migration phase before the `claudeBackend` flag can default to `sdk`.
 
 ## Background
