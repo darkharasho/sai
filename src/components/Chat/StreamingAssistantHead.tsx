@@ -47,7 +47,15 @@ export default function StreamingAssistantHead({ streaming, content, durationMs,
     // never strip already-shown text back to the thinking state (that could strand a
     // reply hidden if the final completion is then guarded out). Before first reveal,
     // a resume just returns to the thinking animation.
-    if (streaming) { if (!revealedRef.current) setPhase('thinking'); return; }
+    if (streaming) {
+      // A resume after a wait re-arms thinking even if we'd revealed: the turn is
+      // genuinely active again. Guard so a token-pause streamSettled flip (which
+      // also sets streaming true) cannot strip revealed text — only a real wake,
+      // signalled by content being empty again at streaming_start, re-enters thinking.
+      if (!revealedRef.current) { setPhase('thinking'); return; }
+      if (!content) { revealedRef.current = false; setPhase('thinking'); }
+      return;
+    }
     if (phase === 'revealed') return;
     if (!content) return;
     if (revealedRef.current) return;
