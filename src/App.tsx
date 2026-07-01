@@ -4694,6 +4694,18 @@ export default function App() {
     return ids;
   }, [suspendedScopes, activeProjectPath]);
 
+  const waitingSessionIds = useMemo(() => {
+    if (!activeProjectPath) return new Set<string>();
+    const prefix = `${activeProjectPath}:`;
+    const ids = new Set<string>();
+    for (const [k, v] of waitingScopes) {
+      if (k.startsWith(prefix) && v.wait.kind === 'scheduled') {
+        ids.add(k.slice(prefix.length));
+      }
+    }
+    return ids;
+  }, [waitingScopes, activeProjectPath]);
+
   const unreadSessionIds = useMemo(() => {
     const ids = new Set<string>();
     for (const s of sessions) {
@@ -5090,6 +5102,7 @@ export default function App() {
                 awaitingSessionIds={awaitingSessionIds}
                 errorSessionIds={errorSessionIds}
                 suspendedSessionIds={suspendedSessionIds}
+                waitingSessionIds={waitingSessionIds}
               />
             </motion.div>
           )}
