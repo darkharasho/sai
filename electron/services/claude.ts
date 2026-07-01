@@ -565,17 +565,25 @@ function ensureProcess(
         // Result signals end of a turn
         if (msg.type === 'result') {
           const wasBusy = claude.busy;
-          // Capture the turn this response belongs to BEFORE updating state.
-          // If the user sent a new message while this response was in flight,
-          // claude.turnSeq already points to the new turn — using activeTurnSeq
-          // ensures the renderer can ignore this stale result/done correctly.
           const responseTurnSeq = claude.activeTurnSeq;
+          // Classify WHY the turn ended: a background yield or a scheduled
+          // wakeup is a wait, not a real completion. Unknown reasons are 'none'.
+          const wait: WaitMeta = classifyTurnEnd({
+            terminalReason: msg.terminal_reason,
+            sawSchedulingTool: claude.sawSchedulingTool,
+            wakeupResumeInSeconds: claude.wakeupResumeInSeconds,
+            taskCount: Array.isArray(msg.background_tasks) ? msg.background_tasks.length : null,
+          });
           claude.busy = false;
           claude.streaming = false;
-          claude.activeTurnSeq = claude.turnSeq; // CLI will now respond to the next queued turn
-          emitChatMessage({ ...msg, projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq });
-          emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq });
-          if (wasBusy) setTimeout(() => notifyCompletion(win, ws.projectPath, {
+          claude.activeTurnSeq = claude.turnSeq;
+          // Defer the idle sweep while a scheduled wakeup is pending (cleared at
+          // the next streaming_start by emitStreamingStart).
+          claude.pendingWakeup = wait.kind === 'scheduled';
+          emitChatMessage({ ...msg, projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq, wait });
+          emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq, wait });
+          // Only notify on a genuine completion — waits stay silent.
+          if (wasBusy && wait.kind === 'none') setTimeout(() => notifyCompletion(win, ws.projectPath, {
             provider: 'Claude',
             duration: msg.duration_ms,
             turns: msg.num_turns,
@@ -1555,7 +1563,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
   // Idle-scope sweep: stop Claude scopes that have been inactive for >30 min
   if (idleSweepTimer) clearInterval(idleSweepTimer);
   idleSweepTimer = setInterval(() => {
-    const records: { workspaceId: string; scope: string; lastActivityAt: number; streaming: boolean; awaitingInput: boolean }[] = [];
+    const records: { workspaceId: string; scope: string; lastActivityAt: number; streaming: boolean; awaitingInput: boolean; pendingWakeup: boolean }[] = [];
     for (const ws of listAllWorkspaces()) {
       for (const [scope, claude] of ws.claudeScopes.entries()) {
         records.push({
@@ -1567,6 +1575,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
           // be swept — interrupting it kills the process that the answer is
           // injected into, leaving the prompt permanently unanswerable.
           awaitingInput: claude.awaitingQuestionAnswer || claude.awaitingApproval || claude.awaitingPlanReview,
+          pendingWakeup: claude.pendingWakeup,
         });
       }
     }
