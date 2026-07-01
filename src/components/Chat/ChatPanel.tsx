@@ -2106,26 +2106,23 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             </div>
           )}
           {promptSuggestion && !streamingForDisplay && !isWaiting && (
-            <div className="chat-suggestion-row" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 6px' }}>
+            <div className="chat-suggestion-row">
               <button
                 data-testid="prompt-suggestion-chip"
+                className="chat-suggestion-chip"
                 onClick={() => { const s = promptSuggestion; setPromptSuggestion(null); void handleSend(s); }}
                 title="Send suggested prompt"
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: '100%',
-                  padding: '3px 10px', borderRadius: 999, fontSize: 12, cursor: 'pointer',
-                  background: 'var(--surface-1)', border: '1px solid var(--border-hairline)', color: 'var(--text-secondary)',
-                }}
               >
-                <span style={{ opacity: 0.6 }}>↳</span>
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span className="chat-suggestion-arrow">↳</span>
+                <span className="chat-suggestion-text">
                   {promptSuggestion.length > 90 ? `${promptSuggestion.slice(0, 90)}…` : promptSuggestion}
                 </span>
               </button>
               <button
+                className="chat-suggestion-dismiss"
                 onClick={() => setPromptSuggestion(null)}
                 title="Dismiss suggestion"
-                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 12, padding: 2 }}
+                aria-label="Dismiss suggestion"
               >
                 ×
               </button>
@@ -2339,6 +2336,61 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           display: flex;
           justify-content: center;
           padding: 4px 16px;
+        }
+        /* Prompt-suggestion chip: aligned to the composer's 15% inset (matches
+           .input-wrapper) and themed like the surrounding chips. */
+        .chat-suggestion-row {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 15% 0;
+          min-width: 0;
+        }
+        .chat-suggestion-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 7px;
+          min-width: 0;
+          padding: 4px 12px;
+          border-radius: var(--radius-sm);
+          font-size: 12px;
+          font-family: inherit;
+          cursor: pointer;
+          background: var(--surface-2);
+          border: 1px solid var(--border-subtle);
+          color: var(--text-secondary);
+          transition: background 0.15s, border-color 0.15s, color 0.15s;
+        }
+        .chat-suggestion-chip:hover {
+          border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+          background: color-mix(in srgb, var(--accent) 8%, var(--surface-2));
+          color: var(--text);
+        }
+        .chat-suggestion-arrow {
+          color: var(--accent);
+          flex-shrink: 0;
+          font-weight: 600;
+        }
+        .chat-suggestion-text {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .chat-suggestion-dismiss {
+          background: none;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          font-size: 13px;
+          line-height: 1;
+          padding: 3px 5px;
+          border-radius: var(--radius-sm);
+          flex-shrink: 0;
+          transition: color 0.15s, background 0.15s;
+        }
+        .chat-suggestion-dismiss:hover {
+          color: var(--text);
+          background: rgba(255, 255, 255, 0.06);
         }
         .chat-composer-cancel {
           background: var(--red);
