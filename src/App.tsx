@@ -74,6 +74,7 @@ import { applyQuestionEvent } from './lib/awaitingQuestionTracker';
 import { turnEndIsStale } from './lib/turnSeqGuard';
 import { resolveClaudeConfig, setWorkspaceOverride, sanitizeOverrideMap, type ClaudeOverrideMap } from './lib/claudeWorkspaceConfig';
 import type { WaitMeta } from '../electron/services/waitClassifier';
+import { WAKEUP_GRACE_MS } from '../electron/services/waitClassifier';
 
 const SWARM_DEFAULT_CAP = 5;
 const SWARM_STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 min of no activity → presumed dead. Heartbeats (deriveSwarmMirror) refresh activity on any stream traffic; this headroom covers a single silent long-running tool/sub-agent.
@@ -4669,6 +4670,26 @@ export default function App() {
     }
     return ids;
   }, [waitingScopes, activeProjectPath]);
+
+  // Grace timeout: a scheduled wakeup that never fires must not pin the pill
+  // forever. Sweep every 5s; drop a scheduled entry past fire time + grace.
+  useEffect(() => {
+    const id = setInterval(() => {
+      setWaitingScopes(prev => {
+        const now = Date.now();
+        let changed = false;
+        const next = new Map(prev);
+        for (const [k, v] of prev) {
+          if (v.wait.kind === 'scheduled' && typeof v.wait.resumeInSeconds === 'number'
+              && now > v.startedAtMs + v.wait.resumeInSeconds * 1000 + WAKEUP_GRACE_MS) {
+            next.delete(k); changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }, 5000);
+    return () => clearInterval(id);
+  }, []);
 
   const unreadSessionIds = useMemo(() => {
     const ids = new Set<string>();

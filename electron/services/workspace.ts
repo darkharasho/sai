@@ -64,6 +64,10 @@ export interface WorkspaceClaude {
   /** True from a scheduled-wait result until the next resume (streaming_start).
    *  Defers the idle sweep and drives the "waiting to resume" sidebar marker. */
   pendingWakeup: boolean;
+  /** Absolute ms deadline for a pending scheduled wakeup (fire time + grace).
+   *  Null when no wakeup is pending or its delay is unknown. Past this, the idle
+   *  sweep stops deferring the scope. */
+  wakeupDeadline: number | null;
 }
 
 export interface WorkspaceCodex {
@@ -143,6 +147,7 @@ function newClaudeScope(cwd: string): WorkspaceClaude {
     sawSchedulingTool: false,
     wakeupResumeInSeconds: null,
     pendingWakeup: false,
+    wakeupDeadline: null,
   };
 }
 

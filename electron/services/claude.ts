@@ -24,7 +24,7 @@ import { imageReadResult } from './imageFiles';
 import type { StartArgs, CompactArgs } from './claudeBackend/types';
 import { getClaudeBackend } from './claudeBackend';
 import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE } from './chatNudges';
-import { classifyTurnEnd, isSchedulingTool, type WaitMeta } from './waitClassifier';
+import { classifyTurnEnd, isSchedulingTool, WAKEUP_GRACE_MS, type WaitMeta } from './waitClassifier';
 export { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE };
 
 const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
@@ -129,6 +129,7 @@ export function emitStreamingStart(
   claude.sawSchedulingTool = false;
   claude.wakeupResumeInSeconds = null;
   claude.pendingWakeup = false;
+  claude.wakeupDeadline = null;
   emitChatMessage({
     type: 'streaming_start',
     projectPath: ws.projectPath,
@@ -546,6 +547,9 @@ function ensureProcess(
           // Defer the idle sweep while a scheduled wakeup is pending (cleared at
           // the next streaming_start by emitStreamingStart).
           claude.pendingWakeup = wait.kind === 'scheduled';
+          claude.wakeupDeadline = (wait.kind === 'scheduled' && typeof wait.resumeInSeconds === 'number')
+            ? Date.now() + wait.resumeInSeconds * 1000 + WAKEUP_GRACE_MS
+            : null;
           emitChatMessage({ ...msg, projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq, wait });
           emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq, wait });
           // Only notify on a genuine completion — waits stay silent.
@@ -819,6 +823,7 @@ export function interruptImpl(projectPath: string, scope?: string): void {
     claude.approvalBuffered = [];
     claude.awaitingApproval = false;
     claude.pendingWakeup = false;
+    claude.wakeupDeadline = null;
     claude.sawSchedulingTool = false;
     claude.wakeupResumeInSeconds = null;
     proc.kill();
@@ -1544,7 +1549,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
           // be swept — interrupting it kills the process that the answer is
           // injected into, leaving the prompt permanently unanswerable.
           awaitingInput: claude.awaitingQuestionAnswer || claude.awaitingApproval || claude.awaitingPlanReview,
-          pendingWakeup: claude.pendingWakeup,
+          pendingWakeup: claude.pendingWakeup && (claude.wakeupDeadline == null || Date.now() < claude.wakeupDeadline),
         });
       }
     }

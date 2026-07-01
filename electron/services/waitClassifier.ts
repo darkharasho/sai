@@ -19,6 +19,10 @@ export interface ClassifyInput {
   taskCount?: number | null;
 }
 
+/** Extra slack after a scheduled wakeup's fire time before we treat it as
+ *  abandoned (drop the pill, stop deferring the idle sweep). */
+export const WAKEUP_GRACE_MS = 60_000;
+
 const SCHEDULING_TOOLS = new Set(['ScheduleWakeup', 'CronCreate']);
 
 export function isSchedulingTool(toolName: string): boolean {
