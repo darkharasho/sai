@@ -133,4 +133,25 @@ describe('buildSdkOptions', () => {
     const opts = buildSdkOptions({ kind: 'chat', cwd: '/ws' });
     expect(opts.settingSources).toEqual(['project', 'local']);
   });
+
+  // ── systemPromptOverride + orchestrator tests ────────────────────────────
+
+  it('systemPromptOverride replaces the preset systemPrompt with a plain string', () => {
+    const opts = buildSdkOptions({ kind: 'orchestrator', cwd: '/ws', systemPromptOverride: 'ORCH PROMPT' });
+    expect(opts.systemPrompt).toBe('ORCH PROMPT');
+  });
+
+  it('orchestrator disables built-in tools and blocks plugin tools', () => {
+    const opts = buildSdkOptions({ kind: 'orchestrator', cwd: '/ws', systemPromptOverride: 'x' });
+    expect(opts.tools).toEqual([]);
+    expect(opts.disallowedTools).toEqual(['Skill', 'Task', 'Agent', 'TodoWrite']);
+    expect(opts.permissionMode).toBe('bypassPermissions');
+  });
+
+  it('chat/task do NOT set tools:[] or disallowedTools, and keep the preset systemPrompt', () => {
+    const opts = buildSdkOptions({ kind: 'chat', cwd: '/ws', appendSystemPrompt: 'nudge' });
+    expect(opts.tools).toBeUndefined();
+    expect(opts.disallowedTools).toBeUndefined();
+    expect(opts.systemPrompt).toEqual({ type: 'preset', preset: 'claude_code', append: 'nudge' });
+  });
 });

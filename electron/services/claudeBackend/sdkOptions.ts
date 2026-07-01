@@ -9,6 +9,7 @@ export interface SdkOptionInputs {
   sessionId?: string;          // when set → resume
   claudeExecutablePath?: string;
   appendSystemPrompt?: string; // CHAT_RENDER_NUDGE + CHAT_GITHUB_WATCH_NUDGE + metaPreamble, joined
+  systemPromptOverride?: string; // full-replacement system prompt (orchestrator); overrides the preset+append form
   canUseTool?: CanUseTool;     // tool-approval callback; not set in bypass mode
   mcpServers?: Record<string, unknown>; // in-process SDK MCP servers (chat tools); set only for chat
 }
@@ -39,6 +40,7 @@ export function buildSdkOptions(input: SdkOptionInputs): Options {
     sessionId,
     claudeExecutablePath,
     appendSystemPrompt,
+    systemPromptOverride,
     canUseTool,
     mcpServers,
   } = input;
@@ -49,9 +51,11 @@ export function buildSdkOptions(input: SdkOptionInputs): Options {
       : 'acceptEdits';
 
   const systemPrompt: Options['systemPrompt'] =
-    appendSystemPrompt && appendSystemPrompt.length > 0
-      ? { type: 'preset', preset: 'claude_code', append: appendSystemPrompt }
-      : { type: 'preset', preset: 'claude_code' };
+    systemPromptOverride && systemPromptOverride.length > 0
+      ? systemPromptOverride
+      : appendSystemPrompt && appendSystemPrompt.length > 0
+        ? { type: 'preset', preset: 'claude_code', append: appendSystemPrompt }
+        : { type: 'preset', preset: 'claude_code' };
 
   const opts: Options = {
     permissionMode,
@@ -79,6 +83,11 @@ export function buildSdkOptions(input: SdkOptionInputs): Options {
 
   if (mcpServers && Object.keys(mcpServers).length > 0) {
     opts.mcpServers = mcpServers as Options['mcpServers'];
+  }
+
+  if (kind === 'orchestrator') {
+    opts.tools = [];
+    opts.disallowedTools = ['Skill', 'Task', 'Agent', 'TodoWrite'];
   }
 
   // canUseTool is never set in bypass mode (bypassPermissions handles all tools automatically)
