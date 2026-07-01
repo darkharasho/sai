@@ -59,7 +59,7 @@ async function _resolveTailnetEndpointWithEnv() {
 }
 import { registerTerminalHandlers, destroyAllTerminals } from './services/pty';
 import { registerClaudeHandlers, destroyClaude, setRemoteCeiling, setRemoteBus, setSubprocessMemoryCapMB } from './services/claude';
-import { getClaudeBackend } from './services/claudeBackend';
+import { getClaudeBackend, getClaudeBackendSetting } from './services/claudeBackend';
 import { RendererProxy } from './services/remote/renderer-proxy';
 import { registerGitHandlers } from './services/git';
 import { registerFsHandlers } from './services/fs';
@@ -529,6 +529,16 @@ function createWindow() {
       }
     });
 
+    // In SDK mode the runtime surfaces the real MCP tool_use block in the
+    // assistant stream, so the synthetic orchestrator-card injection below would
+    // render a DUPLICATE of each swarm card. Gate the MODEL-initiated synthetic
+    // injection to CLI mode only (CLI stream-json omits MCP tool_use blocks, so
+    // it needs the fallback). User-action cards (swarm:emit-card, Land/Discard
+    // clicks) have no real tool_use and are unaffected — they read
+    // swarmOrchestratorSessions directly. Read once at startup so it stays
+    // consistent with the backend getClaudeBackend() cached at first use.
+    const injectSyntheticOrchCards = getClaudeBackendSetting() !== 'sdk';
+
     // Single dispatch used by BOTH MCP transports: the socket SwarmMcpHost (CLI
     // mode) and the in-process SDK MCP server (SDK mode, via saiToolBridge). The
     // orchestrator-card injection below is a no-op for chat scopes (no
@@ -537,7 +547,7 @@ function createWindow() {
       const id = `mcp-${crypto.randomUUID()}`;
       // Deterministic tool_use id so the later tool_result can be matched.
       const toolUseId = `mcp-tooluse-${id}`;
-      const orchSessionId = swarmOrchestratorSessions.get(req.workspace);
+      const orchSessionId = injectSyntheticOrchCards ? swarmOrchestratorSessions.get(req.workspace) : undefined;
 
       // Inject a synthetic assistant tool_use into the orchestrator chat so a
       // SwarmToolCardSelector card renders inline. Claude CLI's stream-json
