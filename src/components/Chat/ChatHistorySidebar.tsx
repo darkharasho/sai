@@ -24,6 +24,9 @@ interface ChatHistorySidebarProps {
    *  Renders the yellow squircle (matches the suspended-workspace pattern in
    *  TitleBar). */
   suspendedSessionIds?: Set<string>;
+  /** Sessions currently in a scheduled-wakeup wait (waiting to resume).
+   *  Takes precedence over suspendedSessionIds when both are present. */
+  waitingSessionIds?: Set<string>;
 }
 
 function formatRelativeTime(timestamp: number): string {
@@ -86,6 +89,7 @@ export default function ChatHistorySidebar({
   awaitingSessionIds = new Set<string>(),
   errorSessionIds = new Set<string>(),
   suspendedSessionIds = new Set<string>(),
+  waitingSessionIds = new Set<string>(),
 }: ChatHistorySidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -344,21 +348,25 @@ export default function ChatHistorySidebar({
                                 const isAwaiting = awaitingSessionIds.has(session.id);
                                 const isError = errorSessionIds.has(session.id);
                                 const isSuspended = suspendedSessionIds.has(session.id);
+                                const isWaiting = waitingSessionIds.has(session.id);
                                 const isActive = session.id === activeSessionId;
                                 const state = isAwaiting || isError ? 'approval'
                                   : isRunning ? 'busy'
+                                  : isWaiting ? 'alive'
                                   : isUnread ? 'done'
                                   : isActive ? 'alive'
                                   : 'inactive';
                                 const title = isAwaiting ? 'Approval needed'
                                   : isError ? 'Error'
                                   : isRunning ? 'Working...'
+                                  : isWaiting ? 'Waiting to resume — Claude scheduled a wakeup'
                                   : isUnread ? 'Response complete'
                                   : isSuspended ? 'Suspended after 30 min idle — send a message to resume'
                                   : undefined;
                                 const testId = isAwaiting ? `sidebar-status-${session.id}-awaiting`
                                   : isError ? `sidebar-status-${session.id}-error`
                                   : isRunning ? `sidebar-status-${session.id}-busy`
+                                  : isWaiting ? `sidebar-status-${session.id}-waiting`
                                   : isUnread ? `sidebar-status-${session.id}-done`
                                   : isSuspended ? `sidebar-status-${session.id}-suspended`
                                   : isActive ? `sidebar-status-${session.id}-alive`

@@ -56,6 +56,18 @@ export interface WorkspaceClaude {
   lastActivityAt: number;
   /** True between streaming_start and done. Idle sweep skips streaming scopes. */
   streaming: boolean;
+  /** Set when a scheduling tool_use (ScheduleWakeup/CronCreate) is seen during the
+   *  current turn; reset at each streaming_start. Drives scheduled-wait classification. */
+  sawSchedulingTool: boolean;
+  /** delaySeconds from the latest ScheduleWakeup input this turn, else null. */
+  wakeupResumeInSeconds: number | null;
+  /** True from a scheduled-wait result until the next resume (streaming_start).
+   *  Defers the idle sweep and drives the "waiting to resume" sidebar marker. */
+  pendingWakeup: boolean;
+  /** Absolute ms deadline for a pending scheduled wakeup (fire time + grace).
+   *  Null when no wakeup is pending or its delay is unknown. Past this, the idle
+   *  sweep stops deferring the scope. */
+  wakeupDeadline: number | null;
 }
 
 export interface WorkspaceCodex {
@@ -132,6 +144,10 @@ function newClaudeScope(cwd: string): WorkspaceClaude {
     orchestratorContext: null,
     lastActivityAt: Date.now(),
     streaming: false,
+    sawSchedulingTool: false,
+    wakeupResumeInSeconds: null,
+    pendingWakeup: false,
+    wakeupDeadline: null,
   };
 }
 

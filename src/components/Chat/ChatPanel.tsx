@@ -9,6 +9,7 @@ import { SPRING, DISTANCE, EASING, useReducedMotionTransition } from './motion';
 import { useSaiAnimationPref } from './useSaiAnimationPref';
 import { parseToolResultBlocks } from '../../lib/toolResultContent';
 import { buildPendingQuestionAnswer } from '../../lib/pendingQuestionAnswer';
+import WaitingIndicator from './WaitingIndicator';
 
 // Projects whose brainstorm seed has already been consumed (or attempted) in
 // this renderer process. The seed is one-shot, but the chat start-effect can
@@ -76,6 +77,7 @@ const EMPTY_URL_SET: Set<string> = new Set();
 import ChatInput, { type ContextItem } from './ChatInput';
 import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, QueuedMessage, TerminalTab } from '../../types';
 import type { MetaWorkspaceRuntime } from '../../types';
+import type { WaitMeta } from '../../../electron/services/waitClassifier';
 import { buildHelpMessage } from './helpText';
 import { buildTaskRegistry, TaskRegistryContext } from './taskRegistry';
 import { parseAiError, looksLikeApiError } from './parseAiError';
@@ -193,6 +195,12 @@ interface ChatPanelProps {
    * mention insertion without going through ChatPanel's internal state.
    */
   mentionInsertRef?: React.MutableRefObject<((linkName: string) => void) | null>;
+  /**
+   * Optional: waiting state for this scope. Set when a turn ends with a
+   * wait classification (background_requested / scheduled) rather than a
+   * real completion. Consumed by Task 9 to render a waiting pill/indicator.
+   */
+  waiting?: { wait: WaitMeta; startedAtMs: number } | null;
 }
 
 const EMPTY_PROMPTS = [
@@ -398,7 +406,7 @@ const FAKE_ERROR_VARIANTS = {
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
-export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp, waiting = null }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(initialMessages || []);
   const taskRegistry = useMemo(() => buildTaskRegistry(messages), [messages]);
   const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);
@@ -1345,7 +1353,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // a follow-up right as the current turn finishes. The real `isStreaming` prop
   // still drives the turn/drain logic — only presentation uses this.
   const streamingForDisplay = isStreaming || drainInFlight || messageQueue.length > 0;
-  const showThinking = streamingForDisplay && !awaitingQuestion;
+  const isWaiting = !!waiting && waiting.wait.kind !== 'none';
+  // While waiting we are NOT thinking — suppress the thinking indicator.
+  const showThinking = streamingForDisplay && !awaitingQuestion && !isWaiting;
   const isSaiProvider = true; // All providers use the SAI animation system
   const saiMorphActive = isSaiProvider && saiAnimationEnabled;
   const lastMsg = messages[messages.length - 1];
@@ -1586,6 +1596,10 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     } else {
       window.sai.claudeSend(projectPath, prompt, imagePaths, permissionMode, effortLevel, modelChoice, claudeScope);
     }
+  };
+
+  const handleCancelWait = () => {
+    window.sai.claudeStop?.(projectPath, claudeScope);
   };
 
   const handleRetry = useCallback((errorMessageId: string) => {
@@ -1840,6 +1854,11 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
                 : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} renderToolCall={renderToolCall} renderMessage={renderMessage} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} watcherUrlAllowlist={watcherUrlsByMessageId.get(msg.id) ?? EMPTY_URL_SET} />
               )}
             </TaskRegistryContext.Provider>
+            {isWaiting && waiting && (
+              <div className="chat-waiting-row">
+                <WaitingIndicator wait={waiting.wait} startedAtMs={waiting.startedAtMs} onCancel={handleCancelWait} />
+              </div>
+            )}
           </>
         )}
         <MotionPresence>
@@ -1891,6 +1910,13 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       </div>
       <LayoutGroup>
         <div data-testid="chat-bottom-strip" className="chat-bottom-strip">
+          {isWaiting && (
+            <div className="chat-composer-cancel-row">
+              <button className="chat-composer-cancel" onClick={handleCancelWait} title="Cancel and stop waiting">
+                {waiting!.wait.kind === 'scheduled' ? 'Waiting to resume · Cancel' : 'Waiting · Cancel'}
+              </button>
+            </div>
+          )}
           <ChatInput
             onSend={handleSend}
             overlayControl={overlayControl}
@@ -2090,6 +2116,28 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           flex: 1 1 auto;
           min-height: 0;
         }
+        .chat-waiting-row {
+          display: flex;
+          justify-content: flex-start;
+          padding: 8px 16px 4px;
+        }
+        .chat-composer-cancel-row {
+          display: flex;
+          justify-content: center;
+          padding: 4px 16px;
+        }
+        .chat-composer-cancel {
+          background: var(--red);
+          color: #fff;
+          border: none;
+          cursor: pointer;
+          padding: 5px 12px;
+          border-radius: var(--radius-sm);
+          font-size: 12px;
+          font-weight: 600;
+          opacity: 0.85;
+        }
+        .chat-composer-cancel:hover { opacity: 1; }
         .chat-load-sentinel {
           display: flex;
           justify-content: center;

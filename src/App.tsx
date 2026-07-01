@@ -73,6 +73,8 @@ import { installRemoteProxyHandler } from './lib/remoteProxyClient';
 import { applyQuestionEvent } from './lib/awaitingQuestionTracker';
 import { turnEndIsStale } from './lib/turnSeqGuard';
 import { resolveClaudeConfig, setWorkspaceOverride, sanitizeOverrideMap, type ClaudeOverrideMap } from './lib/claudeWorkspaceConfig';
+import type { WaitMeta } from '../electron/services/waitClassifier';
+import { WAKEUP_GRACE_MS } from '../electron/services/waitClassifier';
 
 const SWARM_DEFAULT_CAP = 5;
 const SWARM_STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 min of no activity → presumed dead. Heartbeats (deriveSwarmMirror) refresh activity on any stream traffic; this headroom covers a single silent long-running tool/sub-agent.
@@ -259,10 +261,7 @@ export default function App() {
   const [streamingScopes, setStreamingScopes] = useState<Set<string>>(new Set());
   const streamingScopesRef = useRef<Set<string>>(new Set());
   streamingScopesRef.current = streamingScopes;
-  // [sai-stream-debug] When isStreaming was last cleared per scope: { turnSeq, at }.
-  // Used to catch the bug — assistant output arriving AFTER a clear means the turn
-  // kept going while the Stop button / thinking indicator had already vanished.
-  const streamClearedDbgRef = useRef<Map<string, { turnSeq: unknown; at: number }>>(new Map());
+  const [waitingScopes, setWaitingScopes] = useState<Map<string, { wait: WaitMeta; startedAtMs: number }>>(new Map());
   // Unsent draft text and attached context per workspace, persisted across
   // workspace switches and session-key remounts so partial messages survive
   // navigation.
@@ -2477,26 +2476,6 @@ export default function App() {
       }
       // Use composite key (projectPath:scope) for turnSeq tracking
       const scopeKey = `${msg.projectPath}:${msg.scope || 'chat'}`;
-      // [sai-stream-debug] THE BUG DETECTOR: assistant/stream output arriving for a
-      // scope whose streaming was already cleared, but BEFORE a new streaming_start —
-      // i.e. the turn kept going after Stop/thinking vanished. A `streaming_start`
-      // clears the marker (legitimate new turn). This firing is the smoking gun.
-      {
-        if (msg.type === 'streaming_start') {
-          streamClearedDbgRef.current.delete(scopeKey);
-        } else if (
-          (msg.type === 'assistant' || msg.type === 'stream_event')
-          && streamClearedDbgRef.current.has(scopeKey)
-        ) {
-          const dbg = streamClearedDbgRef.current.get(scopeKey)!;
-          // eslint-disable-next-line no-console
-          console.warn('[sai-stream-debug] ⚠️ POST-CLEAR OUTPUT — turn kept streaming after isStreaming cleared', JSON.stringify({
-            scopeKey, msgType: msg.type, sinceClearMs: Date.now() - dbg.at, clearedAtTurnSeq: dbg.turnSeq,
-          }));
-          // Only report the first frame after each clear to avoid log spam.
-          streamClearedDbgRef.current.delete(scopeKey);
-        }
-      }
       // Swarm status mirror — runs for every workspace+scope so background
       // tasks (whose ChatPanel isn't mounted) still get status/tool-count
       // updates. See src/lib/swarmStatusMirror.ts.
@@ -2688,6 +2667,11 @@ export default function App() {
           setChatStreamingWorkspaces(prev => prev.has(msg.projectPath) ? prev : new Set(prev).add(msg.projectPath));
         }
         setStreamingScopes(prev => prev.has(scopeKey) ? prev : new Set(prev).add(scopeKey));
+        // Clear any waiting state for this scope — the turn has resumed.
+        setWaitingScopes(prev => {
+          if (!prev.has(scopeKey)) return prev;
+          const next = new Map(prev); next.delete(scopeKey); return next;
+        });
         // Process is alive again — clear any suspended marker for this scope.
         setSuspendedScopes(prev => {
           if (!prev.has(scopeKey)) return prev;
@@ -2944,6 +2928,35 @@ export default function App() {
           }
           return;
         }
+        // Branch on wait classification before entering the completion path.
+        const waitMeta = (msg as any).wait as WaitMeta | undefined;
+        const isWait = !!waitMeta && waitMeta.kind !== 'none';
+        if (isWait) {
+          // A wait is NOT a completion: stop the thinking indicator but do not
+          // notify, toast, or mark the workspace finished. Show the waiting state.
+          setWaitingScopes(prev => {
+            const next = new Map(prev);
+            next.set(scopeKey, { wait: waitMeta!, startedAtMs: Date.now() });
+            return next;
+          });
+          setStreamingScopes(prev => {
+            if (!prev.has(scopeKey)) return prev;
+            const next = new Set(prev); next.delete(scopeKey); return next;
+          });
+          if ((msg.scope || 'chat') === 'chat') {
+            chatStreamingSessionRef.current.delete(msg.projectPath);
+            setChatStreamingWorkspaces(prev => {
+              if (!prev.has(msg.projectPath)) return prev;
+              const next = new Set(prev); next.delete(msg.projectPath); return next;
+            });
+          }
+          return; // skip the completion/notification path entirely
+        }
+        // Not a wait — a real end clears any lingering waiting state for this scope.
+        setWaitingScopes(prev => {
+          if (!prev.has(scopeKey)) return prev;
+          const next = new Map(prev); next.delete(scopeKey); return next;
+        });
         wsTurnSeqRef.current.set(scopeKey, -1);
         // Swarm-aware completion notification (gated by swarm.notifyOnComplete).
         {
@@ -3015,17 +3028,6 @@ export default function App() {
         }
         if ((msg.scope || 'chat') === 'chat') {
           chatStreamingSessionRef.current.delete(msg.projectPath);
-        }
-        // [sai-stream-debug] This is the exact moment isStreaming flips false
-        // (Stop button + thinking indicator vanish). Log what cleared it so we can
-        // tell an end-of-turn `done` from a stray mid-turn `result`. Logged OUTSIDE
-        // the setState updater so StrictMode's double-invoke doesn't double-log.
-        if (streamingScopesRef.current.has(scopeKey)) {
-          // eslint-disable-next-line no-console
-          console.log('[sai-stream-debug] CLEAR streamingScope', JSON.stringify({
-            scopeKey, msgType: msg.type, subtype: msg.subtype, turnSeq: msg.turnSeq,
-          }));
-          streamClearedDbgRef.current.set(scopeKey, { turnSeq: msg.turnSeq, at: Date.now() });
         }
         setStreamingScopes(prev => {
           if (!prev.has(scopeKey)) return prev;
@@ -4436,6 +4438,12 @@ export default function App() {
                         // No session-ID matching needed.
                         : streamingScopes.has(`${wsPath}:chat`)
                   }
+                  waiting={
+                    // waits are claude-only: waitingScopes never holds gemini/codex entries
+                    aiProvider === 'claude'
+                      ? waitingScopes.get(`${wsPath}:${ws.activeSession.id}`) ?? null
+                      : waitingScopes.get(`${wsPath}:chat`) ?? null
+                  }
                   awaitingQuestion={awaitingQuestionWorkspaces.has(wsPath)}
                   initialDraft={chatDraftsRef.current.get(wsPath) || ''}
                   onDraftChange={(draft: string) => handleDraftChange(wsPath, draft)}
@@ -4650,6 +4658,38 @@ export default function App() {
     }
     return ids;
   }, [suspendedScopes, activeProjectPath]);
+
+  const waitingSessionIds = useMemo(() => {
+    if (!activeProjectPath) return new Set<string>();
+    const prefix = `${activeProjectPath}:`;
+    const ids = new Set<string>();
+    for (const [k, v] of waitingScopes) {
+      if (k.startsWith(prefix) && v.wait.kind === 'scheduled') {
+        ids.add(k.slice(prefix.length));
+      }
+    }
+    return ids;
+  }, [waitingScopes, activeProjectPath]);
+
+  // Grace timeout: a scheduled wakeup that never fires must not pin the pill
+  // forever. Sweep every 5s; drop a scheduled entry past fire time + grace.
+  useEffect(() => {
+    const id = setInterval(() => {
+      setWaitingScopes(prev => {
+        const now = Date.now();
+        let changed = false;
+        const next = new Map(prev);
+        for (const [k, v] of prev) {
+          if (v.wait.kind === 'scheduled' && typeof v.wait.resumeInSeconds === 'number'
+              && now > v.startedAtMs + v.wait.resumeInSeconds * 1000 + WAKEUP_GRACE_MS) {
+            next.delete(k); changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }, 5000);
+    return () => clearInterval(id);
+  }, []);
 
   const unreadSessionIds = useMemo(() => {
     const ids = new Set<string>();
@@ -5047,6 +5087,7 @@ export default function App() {
                 awaitingSessionIds={awaitingSessionIds}
                 errorSessionIds={errorSessionIds}
                 suspendedSessionIds={suspendedSessionIds}
+                waitingSessionIds={waitingSessionIds}
               />
             </motion.div>
           )}

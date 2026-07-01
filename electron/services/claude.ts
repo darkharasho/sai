@@ -24,6 +24,7 @@ import { imageReadResult } from './imageFiles';
 import type { StartArgs, CompactArgs } from './claudeBackend/types';
 import { getClaudeBackend } from './claudeBackend';
 import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE } from './chatNudges';
+import { classifyTurnEnd, isSchedulingTool, WAKEUP_GRACE_MS, type WaitMeta } from './waitClassifier';
 export { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE };
 
 const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
@@ -122,6 +123,13 @@ export function emitStreamingStart(
       + `by the renderer's stale-turn guard, stranding the thinking animation + Stop button`,
     );
   }
+  // A new/resumed turn boundary clears any prior wait tracking: the resume
+  // itself proves the scope is active again, so it must not stay marked as
+  // waiting or defer the idle sweep past this point.
+  claude.sawSchedulingTool = false;
+  claude.wakeupResumeInSeconds = null;
+  claude.pendingWakeup = false;
+  claude.wakeupDeadline = null;
   emitChatMessage({
     type: 'streaming_start',
     projectPath: ws.projectPath,
@@ -379,40 +387,6 @@ function ensureProcess(
       ws.lastActivity = Date.now();
       try {
         const msg = JSON.parse(line);
-        // [sai-stream-debug] Trace every CLI result + turn-lifecycle frame to pin down
-        // the wait/restore bug: the CLI emits a real `result` when it pauses/waits on a
-        // background task/subagent, then RESUMES the same logical turn with more
-        // assistant output and NO new streaming_start — so streaming clears and the
-        // thinking/Stop indicators vanish while the turn keeps going. We need the field
-        // that distinguishes a paused result (stop_reason/terminal_reason) from a final
-        // one (stop_reason=end_turn). Remove once the fix lands.
-        if (msg.type === 'result' || (msg.type === 'system' && /compact|task/.test(String(msg.subtype || '')))) {
-          // eslint-disable-next-line no-console
-          console.log('[sai-stream-debug] CLI frame', JSON.stringify({
-            t: new Date().toISOString(),
-            type: msg.type,
-            subtype: msg.subtype,
-            stop_reason: msg.stop_reason,
-            terminal_reason: msg.terminal_reason,
-            num_turns: msg.num_turns,
-            is_error: msg.is_error,
-            scope,
-            turnSeq: claude.turnSeq,
-            activeTurnSeq: claude.activeTurnSeq,
-            streaming: claude.streaming,
-            busy: claude.busy,
-          }));
-        }
-        // [sai-stream-debug] THE RESTORE SIGNAL: assistant output arriving in the main
-        // process while we've already marked the turn ended (streaming=false) — i.e. the
-        // CLI resumed after a wait. This is the backend-side smoking gun for the fix.
-        if (msg.type === 'assistant' && !claude.streaming) {
-          // eslint-disable-next-line no-console
-          console.log('[sai-stream-debug] ⚠️ RESUME-AFTER-DONE assistant frame while streaming=false', JSON.stringify({
-            scope, turnSeq: claude.turnSeq, activeTurnSeq: claude.activeTurnSeq,
-            blocks: Array.isArray(msg.message?.content) ? msg.message.content.map((b: any) => b.type) : null,
-          }));
-        }
         // Capture session ID and forward to renderer
         if (msg.session_id && !claude.sessionId) {
           claude.sessionId = msg.session_id;
@@ -499,6 +473,13 @@ function ensureProcess(
                 toolUseId: block.id,
                 input: block.input || {},
               };
+              if (isSchedulingTool(block.name)) {
+                claude.sawSchedulingTool = true;
+                const delay = (block.input as any)?.delaySeconds;
+                if (block.name === 'ScheduleWakeup' && typeof delay === 'number') {
+                  claude.wakeupResumeInSeconds = delay;
+                }
+              }
               if (block.name === 'AskUserQuestion') {
                 askUserQuestionId = block.id;
               }
@@ -551,17 +532,28 @@ function ensureProcess(
         // Result signals end of a turn
         if (msg.type === 'result') {
           const wasBusy = claude.busy;
-          // Capture the turn this response belongs to BEFORE updating state.
-          // If the user sent a new message while this response was in flight,
-          // claude.turnSeq already points to the new turn — using activeTurnSeq
-          // ensures the renderer can ignore this stale result/done correctly.
           const responseTurnSeq = claude.activeTurnSeq;
+          // Classify WHY the turn ended: a background yield or a scheduled
+          // wakeup is a wait, not a real completion. Unknown reasons are 'none'.
+          const wait: WaitMeta = classifyTurnEnd({
+            terminalReason: msg.terminal_reason,
+            sawSchedulingTool: claude.sawSchedulingTool,
+            wakeupResumeInSeconds: claude.wakeupResumeInSeconds,
+            taskCount: Array.isArray(msg.background_tasks) ? msg.background_tasks.length : null,
+          });
           claude.busy = false;
           claude.streaming = false;
-          claude.activeTurnSeq = claude.turnSeq; // CLI will now respond to the next queued turn
-          emitChatMessage({ ...msg, projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq });
-          emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq });
-          if (wasBusy) setTimeout(() => notifyCompletion(win, ws.projectPath, {
+          claude.activeTurnSeq = claude.turnSeq;
+          // Defer the idle sweep while a scheduled wakeup is pending (cleared at
+          // the next streaming_start by emitStreamingStart).
+          claude.pendingWakeup = wait.kind === 'scheduled';
+          claude.wakeupDeadline = (wait.kind === 'scheduled' && typeof wait.resumeInSeconds === 'number')
+            ? Date.now() + wait.resumeInSeconds * 1000 + WAKEUP_GRACE_MS
+            : null;
+          emitChatMessage({ ...msg, projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq, wait });
+          emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq, wait });
+          // Only notify on a genuine completion — waits stay silent.
+          if (wasBusy && wait.kind === 'none') setTimeout(() => notifyCompletion(win, ws.projectPath, {
             provider: 'Claude',
             duration: msg.duration_ms,
             turns: msg.num_turns,
@@ -830,6 +822,10 @@ export function interruptImpl(projectPath: string, scope?: string): void {
     claude.pendingToolUse = null;
     claude.approvalBuffered = [];
     claude.awaitingApproval = false;
+    claude.pendingWakeup = false;
+    claude.wakeupDeadline = null;
+    claude.sawSchedulingTool = false;
+    claude.wakeupResumeInSeconds = null;
     proc.kill();
     emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope: scope || 'chat', turnSeq: claude.turnSeq });
   }
@@ -1541,7 +1537,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
   // Idle-scope sweep: stop Claude scopes that have been inactive for >30 min
   if (idleSweepTimer) clearInterval(idleSweepTimer);
   idleSweepTimer = setInterval(() => {
-    const records: { workspaceId: string; scope: string; lastActivityAt: number; streaming: boolean; awaitingInput: boolean }[] = [];
+    const records: { workspaceId: string; scope: string; lastActivityAt: number; streaming: boolean; awaitingInput: boolean; pendingWakeup: boolean }[] = [];
     for (const ws of listAllWorkspaces()) {
       for (const [scope, claude] of ws.claudeScopes.entries()) {
         records.push({
@@ -1553,6 +1549,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
           // be swept — interrupting it kills the process that the answer is
           // injected into, leaving the prompt permanently unanswerable.
           awaitingInput: claude.awaitingQuestionAnswer || claude.awaitingApproval || claude.awaitingPlanReview,
+          pendingWakeup: claude.pendingWakeup && (claude.wakeupDeadline == null || Date.now() < claude.wakeupDeadline),
         });
       }
     }
