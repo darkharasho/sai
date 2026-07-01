@@ -6,9 +6,13 @@ export interface ChatMessage {
   startedAt?: number;
   toolCalls?: ToolCall[];
   images?: string[];
-  /** Summarized model reasoning for this assistant segment ("Show reasoning"
-   *  setting; SDK backend only). Rendered as a collapsible above the reply. */
+  /** Summarized model reasoning ("Show reasoning" setting; SDK backend only).
+   *  Lives on its own transcript row: streams italic while reasoningLive, then
+   *  renders as a collapsed expandable disclosure. */
   reasoning?: string;
+  /** Transient: the reasoning row is still streaming (italic live style).
+   *  Stripped before persistence so history reloads collapsed. */
+  reasoningLive?: boolean;
   /**
    * Snapshots of GitHubWatcherCard state captured at phase transitions so the
    * card resumes from its last-known state when an old chat is reopened. Keyed

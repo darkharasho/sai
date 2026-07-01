@@ -406,6 +406,7 @@ const FAKE_ERROR_VARIANTS = {
 const RENDER_CHUNK = 50; // messages to show per window
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
+
 export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp, waiting = null }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(initialMessages || []);
   const taskRegistry = useMemo(() => buildTaskRegistry(messages), [messages]);
@@ -437,10 +438,18 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // soon as real output flows or the turn ends.
   const [streamHint, setStreamHint] = useState<string | null>(null);
   const clearStreamHint = useCallback(() => setStreamHint(prev => (prev == null ? prev : null)), []);
-  // Summarized reasoning accumulated for the CURRENT text segment ("Show
-  // reasoning" setting; SDK backend streams it as reasoning_delta). Attached
-  // to the next assistant bubble and shown live (tail) as the thinking hint.
-  const turnReasoningRef = useRef<string>('');
+  // Summarized reasoning ("Show reasoning" setting; SDK backend streams it as
+  // reasoning_delta). Rendered as a REAL transcript row: while the model thinks
+  // it streams in-place as italic text (reasoningLive), then collapses into an
+  // expandable "Reasoning" disclosure on the same row — scrolling and
+  // persisting with the rest of the history.
+  const reasoningPendingRef = useRef<string>('');
+  const reasoningRafRef = useRef<number | null>(null);
+  // Force the next text to open a NEW bubble instead of merging into the last
+  // one. Set at every turn boundary (streaming_start, including wait-resume
+  // re-arms) — merging a resumed turn's text into the previous segment's
+  // bubble is how completed messages were getting overwritten/absorbed.
+  const forceNewBubbleRef = useRef(true);
   // Predicted next prompt from the SDK (prompt_suggestion, arrives after
   // result). Rendered as a one-tap chip above the composer while idle.
   const [promptSuggestion, setPromptSuggestion] = useState<string | null>(null);
@@ -456,12 +465,68 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     streamPendingRef.current = '';
     setMessages(prev => {
       const last = prev[prev.length - 1];
-      if (!last || last.role !== 'assistant' || last.toolCalls) return prev;
-      const updated = [...prev];
-      updated[updated.length - 1] = { ...last, content: (last.content || '') + pending };
-      return updated;
+      // Reasoning rows are their own transcript entries — never merge reply
+      // text into them; open a fresh bubble instead of dropping the pending.
+      if (last?.role === 'assistant' && !last.toolCalls && !last.reasoning && !last.reasoningLive) {
+        const updated = [...prev];
+        updated[updated.length - 1] = { ...last, content: (last.content || '') + pending };
+        return updated;
+      }
+      return [...prev, {
+        id: `${Date.now()}-${Math.random()}`,
+        role: 'assistant' as const,
+        content: pending,
+        timestamp: Date.now(),
+        startedAt: Date.now(),
+      }];
     });
   }, [setMessages]);
+
+  // Flush buffered reasoning deltas into the live reasoning row (creating it
+  // on first flush). Coalesced per animation frame like reply text.
+  const flushReasoning = useCallback(() => {
+    if (reasoningRafRef.current != null) {
+      cancelAnimationFrame(reasoningRafRef.current);
+      reasoningRafRef.current = null;
+    }
+    const pending = reasoningPendingRef.current;
+    if (!pending) return;
+    reasoningPendingRef.current = '';
+    setMessages(prev => {
+      const last = prev[prev.length - 1];
+      if (last?.role === 'assistant' && last.reasoningLive) {
+        const updated = [...prev];
+        updated[updated.length - 1] = { ...last, reasoning: (last.reasoning || '') + pending };
+        return updated;
+      }
+      return [...prev, {
+        id: `${Date.now()}-reasoning-${Math.random()}`,
+        role: 'assistant' as const,
+        content: '',
+        reasoning: pending,
+        reasoningLive: true,
+        timestamp: Date.now(),
+      }];
+    });
+  }, [setMessages]);
+
+  // The reasoning segment is over (reply text/tools arrived, or the turn
+  // ended): collapse the live italic row into its expandable disclosure.
+  const finalizeReasoning = useCallback(() => {
+    flushReasoning();
+    setMessages(prev => {
+      for (let i = prev.length - 1; i >= 0; i--) {
+        const m = prev[i];
+        if (m.reasoningLive) {
+          const updated = [...prev];
+          updated[i] = { ...m, reasoningLive: undefined };
+          return updated;
+        }
+        if (m.role === 'user') break;
+      }
+      return prev;
+    });
+  }, [flushReasoning, setMessages]);
   const emptyPrompt = useMemo(() => EMPTY_PROMPTS[Math.floor(Math.random() * EMPTY_PROMPTS.length)], []);
   const [turnStartIndex, setTurnStartIndex] = useState<number | null>(null);
   const thinkingTransition = useReducedMotionTransition(SPRING.pop);
@@ -650,7 +715,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       if (msg.type === 'streaming_start') {
         if (msg.turnSeq != null) turnSeqRef.current = msg.turnSeq;
         clearStreamHint();
-        turnReasoningRef.current = '';
+        finalizeReasoning();
+        forceNewBubbleRef.current = true;
         setPromptSuggestion(null);
         setTurnStartIndex(messagesRef.current.length);
         if (turnStartedAtRef.current === null) {
@@ -683,6 +749,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         if (msg.type === 'done') {
           turnSeqRef.current = -1;
           clearStreamHint();
+          finalizeReasoning();
           setTurnStartIndex(null);
           flushMessagesToParent();
           onTurnComplete?.();
@@ -715,13 +782,17 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       }
 
       // Summarized reasoning stream ("Show reasoning" setting). Accumulate for
-      // the segment's bubble and show the live tail as the thinking hint —
-      // richer than the token count when reasoning text is available.
+      // the segment's bubble and mirror a bounded tail into the live italic
+      // block rendered above the thinking animation.
       if (msg.type === 'reasoning_delta') {
         if (typeof msg.text === 'string' && msg.text) {
-          turnReasoningRef.current += msg.text;
-          const tail = turnReasoningRef.current.replace(/\s+/g, ' ').trim();
-          if (tail) setStreamHint(tail.length > 80 ? `…${tail.slice(-80)}` : tail);
+          reasoningPendingRef.current += msg.text;
+          if (reasoningRafRef.current == null) {
+            reasoningRafRef.current = requestAnimationFrame(() => {
+              reasoningRafRef.current = null;
+              flushReasoning();
+            });
+          }
         }
         return;
       }
@@ -732,8 +803,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       // and status:compacting while the runtime compacts context.
       if (msg.type === 'system' && msg.subtype === 'thinking_tokens') {
         const n = msg.estimated_tokens;
-        // Reasoning text (when enabled) is a better hint than the token count.
-        if (typeof n === 'number' && n > 0 && !turnReasoningRef.current) {
+        if (typeof n === 'number' && n > 0) {
           const label = n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
           setStreamHint(`thinking · ${label} tokens`);
         }
@@ -1017,6 +1087,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         }
 
         if (text || tools.length > 0) {
+          // Real output starts: the current reasoning segment (if any) collapses
+          // into its expandable transcript row.
+          finalizeReasoning();
           // Streaming text-delta fast path: buffer into the rAF accumulator and
           // skip the setMessages entirely. Only applies when the last message is
           // already a pure-text assistant bubble we can append to.
@@ -1039,6 +1112,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             && tools.length === 0
             && lastNow?.role === 'assistant'
             && !lastNow.toolCalls
+            && !lastNow.reasoning
+            && !lastNow.reasoningLive
+            && !forceNewBubbleRef.current
           ) {
             streamPendingRef.current += text;
             if (streamRafRef.current == null) {
@@ -1050,28 +1126,23 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             markStreamingActive();
             return;
           }
-          // Attach accumulated summarized reasoning to the bubble this text
-          // creates/updates (captured OUTSIDE the updater — React may invoke
-          // updaters twice, and the ref clear must happen exactly once).
-          const segmentReasoning = text ? turnReasoningRef.current : '';
-          if (segmentReasoning) turnReasoningRef.current = '';
           setMessages(prev => {
             const last = prev[prev.length - 1];
-            // Update the last assistant message if it's a pure text message (no tool calls).
-            // Append only when the transport marks the block as a delta; otherwise replace.
-            // If the last message has tool calls, always create a new message so
-            // tool cards stay above the follow-up text response.
-            if (last?.role === 'assistant' && text && !tools.length && !last.toolCalls) {
+            // Merge into the last assistant message only when it's a pure text
+            // bubble (no tool calls, not a reasoning row):
+            //  - delta text APPENDS, unless a turn boundary demands a new bubble
+            //    (streaming_start / wait-resume re-arm — merging a resumed
+            //    turn's text into the previous segment overwrote/absorbed it);
+            //  - non-delta full text REPLACES only for snapshot transports
+            //    (gemini). Claude full frames are distinct segments — a resumed
+            //    turn or subagent message must never clobber the previous reply.
+            const shouldAppend = msg.message.content.some((block: any) => block.type === 'text' && block.delta);
+            const lastIsMergeableText = last?.role === 'assistant' && !last.toolCalls && !last.reasoning && !last.reasoningLive;
+            if (lastIsMergeableText && text && !tools.length
+                && (shouldAppend ? !forceNewBubbleRef.current : aiProvider !== 'claude')) {
               const updated = [...prev];
-              const shouldAppend = msg.message.content.some((block: any) => block.type === 'text' && block.delta);
               const newContent = shouldAppend ? last.content + text : text;
-              updated[updated.length - 1] = {
-                ...last,
-                content: newContent,
-                ...(segmentReasoning
-                  ? { reasoning: last.reasoning ? `${last.reasoning}\n\n${segmentReasoning}` : segmentReasoning }
-                  : {}),
-              };
+              updated[updated.length - 1] = { ...last, content: newContent };
               return updated;
             }
             // Before pushing a new assistant message, stamp durationMs on the most recent
@@ -1087,6 +1158,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             }
             const startedAt = nextSegmentStartRef.current ?? Date.now();
             nextSegmentStartRef.current = null;
+            forceNewBubbleRef.current = false;
             return [...stamped, {
               id: `${Date.now()}-${Math.random()}`,
               role: 'assistant',
@@ -1094,7 +1166,6 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
               timestamp: Date.now(),
               startedAt,
               toolCalls: tools.length > 0 ? tools : undefined,
-              ...(segmentReasoning ? { reasoning: segmentReasoning } : {}),
             }];
           });
           // A text segment created/updated via the slow path (e.g. the first delta of a
@@ -1489,7 +1560,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
   // Flush messages ref to parent synchronously before save — called by onTurnComplete
   const flushMessagesToParent = useCallback(() => {
-    onMessagesChange?.(messagesRef.current);
+    // Strip the transient live-reasoning flag so persisted history always
+    // reloads as the collapsed disclosure, never the streaming italic style.
+    onMessagesChange?.(messagesRef.current.map(m => (m.reasoningLive ? { ...m, reasoningLive: undefined } : m)));
   }, [onMessagesChange]);
 
   // GitHubWatcherCard dispatches a snapshot event on phase transitions. We attach

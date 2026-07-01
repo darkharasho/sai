@@ -807,12 +807,30 @@ function ChatMessage({
       {...effectiveEntryProps}
     >
       {message.role === 'assistant' && message.reasoning && (
-        <details className="chat-msg-reasoning" data-testid="msg-reasoning" style={{ margin: '0 0 6px 24px', fontSize: 12, color: 'var(--text-muted)' }}>
-          <summary style={{ cursor: 'pointer', userSelect: 'none', opacity: 0.8 }}>Reasoning</summary>
-          <div style={{ whiteSpace: 'pre-wrap', marginTop: 4, paddingLeft: 10, borderLeft: '2px solid var(--border-hairline)' }}>
+        message.reasoningLive ? (
+          <div
+            className="chat-msg-reasoning-live"
+            data-testid="msg-reasoning-live"
+            style={{
+              fontStyle: 'italic',
+              fontSize: 12,
+              lineHeight: 1.5,
+              color: 'var(--text-muted)',
+              margin: '0 8px 6px 24px',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}
+          >
             {message.reasoning}
           </div>
-        </details>
+        ) : (
+          <details className="chat-msg-reasoning" data-testid="msg-reasoning" style={{ margin: '0 0 6px 24px', fontSize: 12, color: 'var(--text-muted)' }}>
+            <summary style={{ cursor: 'pointer', userSelect: 'none', opacity: 0.8 }}>Reasoning</summary>
+            <div style={{ whiteSpace: 'pre-wrap', marginTop: 4, paddingLeft: 10, borderLeft: '2px solid var(--border-hairline)' }}>
+              {message.reasoning}
+            </div>
+          </details>
+        )
       )}
       {useMorphHead && (isAssistantStreaming || message.content) && (
         <StreamingAssistantHead
