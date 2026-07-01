@@ -8,6 +8,9 @@ export interface IdleScopeRecord {
    *  the agent is politely waiting — but it must not be swept: killing it makes
    *  the pending prompt unanswerable. */
   awaitingInput?: boolean;
+  /** The scope is deliberately waiting on a self-scheduled wakeup (ScheduleWakeup
+   *  / loop). It looks idle but must not be reaped — the timer will resume it. */
+  pendingWakeup?: boolean;
 }
 
 export interface SweepOptions {
@@ -21,6 +24,7 @@ export function sweepIdleScopes({ now, idleMs, scopes, stop }: SweepOptions): vo
   for (const r of scopes) {
     if (r.streaming) continue;
     if (r.awaitingInput) continue;
+    if (r.pendingWakeup) continue;
     if (now - r.lastActivityAt > idleMs) stop(r.workspaceId, r.scope);
   }
 }
