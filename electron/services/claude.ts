@@ -24,7 +24,7 @@ import { imageReadResult } from './imageFiles';
 import type { StartArgs, CompactArgs } from './claudeBackend/types';
 import { getClaudeBackend, getClaudeBackendSetting } from './claudeBackend';
 export { touchActivity } from './workspace';
-import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE } from './chatNudges';
+import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASKS_NUDGE } from './chatNudges';
 import { classifyTurnEnd, isSchedulingTool, WAKEUP_GRACE_MS, type WaitMeta } from './waitClassifier';
 export { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE };
 
@@ -289,6 +289,9 @@ export function buildArgs(options: BuildArgsOptions = {}): string[] {
       // Same story for the CI watcher card: the tool description carries the
       // trigger, but deferred tools don't expose descriptions, so nudge here.
       appendPrompts.push(CHAT_GITHUB_WATCH_NUDGE);
+      // And for the task-progress ring: newer models don't reach for
+      // TaskCreate/TodoWrite in headless sessions without an explicit trigger.
+      appendPrompts.push(CHAT_TASKS_NUDGE);
     }
 
     // Chat/task: pass through user MCP config path(s) from SAI settings.

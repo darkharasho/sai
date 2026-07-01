@@ -18,6 +18,20 @@ export const CHAT_RENDER_NUDGE =
   'user explicitly asks to save, add, or wire the component into the codebase. You can ' +
   're-render to iterate on feedback.';
 
+/**
+ * Newer Opus models under-reach for the task tools without an explicit trigger
+ * (the interactive CLI injects "consider using TaskCreate" reminders; headless
+ * SDK/stream-json sessions do not), which left SAI's task-progress ring —
+ * driven by TaskCreate/TaskUpdate/TodoWrite calls — permanently empty.
+ */
+export const CHAT_TASKS_NUDGE =
+  'For any multi-step piece of work (3+ distinct steps, refactors, features, ' +
+  'debugging sessions), track your progress with the task tools: create tasks with ' +
+  'TaskCreate before you start, mark each in_progress/completed with TaskUpdate as ' +
+  'you go (or use TodoWrite where the task tools are unavailable). SAI renders a ' +
+  'live progress ring from these — without them the user cannot see plan progress. ' +
+  'Skip them only for single-step or purely conversational requests.';
+
 export const CHAT_GITHUB_WATCH_NUDGE =
   'After you run `git push` (including pushing tags) or otherwise trigger a GitHub Actions ' +
   'workflow (gh workflow run, gh pr create, creating a release), show the user a live CI ' +

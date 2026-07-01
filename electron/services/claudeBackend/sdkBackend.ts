@@ -14,7 +14,7 @@ import * as path from 'path';
 import * as os from 'os';
 import type { query as QueryFn, SDKUserMessage, PermissionResult, McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
 import { enrichedEnv } from '../shellEnv';
-import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE } from '../chatNudges';
+import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASKS_NUDGE } from '../chatNudges';
 import {
   approveImpl,
   alwaysAllowImpl,
@@ -738,7 +738,7 @@ export class SdkBackend implements ClaudeBackend {
       if (server) {
         mcpServers = { sai: server };
       }
-      const nudges = [CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE];
+      const nudges = [CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASKS_NUDGE];
       const existing = appendSystemPrompt && appendSystemPrompt.trim() ? [appendSystemPrompt] : [];
       chatAppendSystemPrompt = [...nudges, ...existing].join('\n\n');
     }
