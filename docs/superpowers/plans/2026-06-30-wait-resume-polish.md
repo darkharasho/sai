@@ -969,3 +969,124 @@ git commit -m "chore(wait): remove sai-stream-debug instrumentation now that ter
 **Type consistency:** `WaitMeta`/`WaitKind` defined in Task 1 and imported everywhere (Tasks 6, 7, 8, 9). `pendingWakeup` consistent across `WorkspaceClaude` (Task 4), `IdleScopeRecord` (Task 3), and the record builder (Task 6). `waitingScopes` value shape `{ wait: WaitMeta; startedAtMs: number }` consistent between App (Task 8) and ChatPanel prop (Task 9) and WaitingIndicator props (Task 7). `handleCancelWait`/`onCancel` names consistent (Tasks 7, 9).
 
 **Open item carried from spec (non-blocking):** `/loop`/`CronCreate` with no `delaySeconds` → `resumeInSeconds: null` → WaitingIndicator shows the scheduled label with no countdown pill (Task 7 renders the count only when `isScheduled` with numeric `resumeInSeconds`). Behaves as designed.
+
+---
+
+### Task 13: Grace timeout — bound the scheduled wait (pill + sweep-defer)
+
+Implements the spec's promised "or timeout resolves it": a scheduled wait that never resumes must not pin the pill or defer the idle sweep forever.
+
+**Files:**
+- Modify: `electron/services/waitClassifier.ts` (export the grace constant)
+- Modify: `electron/services/workspace.ts` (`WorkspaceClaude` + `newClaudeScope`)
+- Modify: `electron/services/claude.ts` (result handler, `emitStreamingStart`, `interruptImpl`, idle-sweep record builder)
+- Modify: `src/App.tsx` (renderer pill sweeper)
+
+**Interfaces:**
+- Produces: `export const WAKEUP_GRACE_MS = 60_000` from `waitClassifier`; `WorkspaceClaude.wakeupDeadline: number | null`.
+
+- [ ] **Step 1: Export the grace constant**
+
+In `electron/services/waitClassifier.ts`, add near the top (after the type exports):
+
+```ts
+/** Extra slack after a scheduled wakeup's fire time before we treat it as
+ *  abandoned (drop the pill, stop deferring the idle sweep). */
+export const WAKEUP_GRACE_MS = 60_000;
+```
+
+- [ ] **Step 2: Add the deadline field**
+
+In `electron/services/workspace.ts`, in `WorkspaceClaude` (next to `pendingWakeup`):
+
+```ts
+  /** Absolute ms deadline for a pending scheduled wakeup (fire time + grace).
+   *  Null when no wakeup is pending or its delay is unknown. Past this, the idle
+   *  sweep stops deferring the scope. */
+  wakeupDeadline: number | null;
+```
+
+And initialize in `newClaudeScope` (next to `pendingWakeup: false,`):
+
+```ts
+    wakeupDeadline: null,
+```
+
+- [ ] **Step 3: Set the deadline on a scheduled wait**
+
+In `electron/services/claude.ts`, import the constant with the existing classifier import:
+
+```ts
+import { classifyTurnEnd, isSchedulingTool, WAKEUP_GRACE_MS, type WaitMeta } from './waitClassifier';
+```
+
+In the result handler, right where `claude.pendingWakeup = wait.kind === 'scheduled';` is set, add:
+
+```ts
+          claude.wakeupDeadline = (wait.kind === 'scheduled' && typeof wait.resumeInSeconds === 'number')
+            ? Date.now() + wait.resumeInSeconds * 1000 + WAKEUP_GRACE_MS
+            : null;
+```
+
+- [ ] **Step 4: Reset the deadline on resume and interrupt**
+
+In `emitStreamingStart` (alongside the existing `claude.pendingWakeup = false;` reset) add `claude.wakeupDeadline = null;`. In `interruptImpl` (alongside the `claude.pendingWakeup = false;` added in the post-review fix) add `claude.wakeupDeadline = null;`.
+
+- [ ] **Step 5: Bound the sweep defer**
+
+In the idle-sweep record builder (`records.push({...})`), replace the `pendingWakeup: claude.pendingWakeup,` line with:
+
+```ts
+          pendingWakeup: claude.pendingWakeup && (claude.wakeupDeadline == null || Date.now() < claude.wakeupDeadline),
+```
+
+(A null deadline — scheduled wait with no known delay — still defers; the common ScheduleWakeup-with-delay case is bounded.)
+
+- [ ] **Step 6: Renderer pill sweeper**
+
+In `src/App.tsx`, import the constant (type-import file already references waitClassifier):
+
+```ts
+import { WAKEUP_GRACE_MS } from '../electron/services/waitClassifier';
+```
+
+(match the relative depth used by the existing `import type { WaitMeta } from '../electron/services/waitClassifier'`.)
+
+Add a one-time effect (near the other top-level effects) that drops a scheduled pill whose grace deadline has passed:
+
+```tsx
+  // Grace timeout: a scheduled wakeup that never fires must not pin the pill
+  // forever. Sweep every 5s; drop a scheduled entry past fire time + grace.
+  useEffect(() => {
+    const id = setInterval(() => {
+      setWaitingScopes(prev => {
+        const now = Date.now();
+        let changed = false;
+        const next = new Map(prev);
+        for (const [k, v] of prev) {
+          if (v.wait.kind === 'scheduled' && typeof v.wait.resumeInSeconds === 'number'
+              && now > v.startedAtMs + v.wait.resumeInSeconds * 1000 + WAKEUP_GRACE_MS) {
+            next.delete(k); changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }, 5000);
+    return () => clearInterval(id);
+  }, []);
+```
+
+- [ ] **Step 7: Verify**
+
+Run: `npx tsc --noEmit -p tsconfig.json` — clean.
+Run: `npx vitest run --project unit tests/unit/waitClassifier.test.ts tests/unit/idleScopeSweep.test.ts` — PASS.
+Run: `npx vitest run --project unit` — full suite green (~1906), no regression.
+
+Reasoning check (state in report): a scheduled wait with `resumeInSeconds: 300` sets `wakeupDeadline = now + 360_000`; the sweep defers until then, after which the scope is reclaimable; the renderer drops the pill within ~5s of the same deadline. A resume (`emitStreamingStart`) or interrupt clears the deadline early.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add electron/services/waitClassifier.ts electron/services/workspace.ts electron/services/claude.ts src/App.tsx
+git commit -m "feat(wait): grace timeout bounds a stale scheduled wakeup (pill + sweep defer)"
+```

@@ -175,3 +175,25 @@ with the existing self-guard discipline in `StreamingAssistantHead`).
 - `/loop` and `CronCreate` without a fixed `delaySeconds`: show the spinner-style
   "waiting to resume" without a countdown (no fabricated timer), and rely on the
   wake time only when a concrete next-fire is known.
+
+## Known limitations (post-implementation)
+
+- **Multi-scope busy-count drift (pre-existing).** The per-workspace busy
+  counter is floor-tolerant (`Math.max(0, …)`) and each turn end emits both a
+  `result` and a `done`, so a workspace running two concurrent scopes could
+  already over-decrement. A wait skips its decrement (rebalanced by the eventual
+  real end's result+done pair), which in the single-scope path nets to zero but
+  with two concurrent scopes in one workspace can clear the "busy" state early —
+  a premature "finished" toast while a waiting scope is still live. This predates
+  the wait work and the wait path only amplifies it; a correct fix must decrement
+  exactly once per wait (guarding against the result+done double-count) and is
+  deferred rather than risk destabilizing the counter.
+
+## Grace timeout (implements spec "or timeout resolves it")
+
+- A scheduled wait carries a deadline: `startedAt + resumeInSeconds + WAKEUP_GRACE_MS`
+  (`WAKEUP_GRACE_MS = 60_000`). Past the deadline with no resume, the renderer
+  drops the waiting pill and the backend stops deferring the idle sweep for that
+  scope (so an abandoned wakeup is eventually reclaimed instead of pinning the
+  scope and pill forever). Scheduled waits with no known delay (`/loop`/`CronCreate`
+  without `delaySeconds`) have no deadline and rely on Cancel/restart — documented.
