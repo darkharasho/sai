@@ -76,8 +76,9 @@ interface ScopeSession {
   /** True when waiting for approval / AskUserQuestion / plan review. */
   awaitingInput: boolean;
   /** Normalized per-session config; a send with different values recreates the
-   *  session (CLI ensureProcess parity) so model/effort/permMode changes apply. */
-  config: { permMode: string; effort: string; model: string };
+   *  session (CLI ensureProcess parity) so model/effort/permMode/feature-setting
+   *  changes apply. */
+  config: { permMode: string; effort: string; model: string; features: string };
   /** True when canUseTool is active for this session (non-bypass). When false
    *  (bypass / orchestrator), question/plan cards come from drain detection. */
   gated: boolean;
@@ -772,6 +773,13 @@ export class SdkBackend implements ClaudeBackend {
           this._emit({ type: 'error', text, projectPath, scope: effectiveScope });
         }
       },
+      // Feature settings (also part of the session config compare, so toggling
+      // any of them resume-respawns the session on the next send).
+      thinkingSummarized: readSaiSetting('claudeShowReasoning') === true,
+      maxBudgetUsd: Number(readSaiSetting('claudeMaxBudgetUsd')) || undefined,
+      oneMContext: readSaiSetting('claude1MContext') === true,
+      promptSuggestions: kind === 'chat',
+      agentProgressSummaries: true,
     });
 
     // Build an async-iterable input channel (push-based queue)
@@ -917,6 +925,14 @@ export class SdkBackend implements ClaudeBackend {
           if (m?.type === 'system' && m?.subtype === 'init' && Array.isArray(m?.slash_commands)) {
             writeCachedSlashCommands(m.slash_commands as string[]);
           }
+          // Mid-session command-list changes (skills discovered dynamically):
+          // REPLACE the cache — supportedCommands() never reflects these.
+          if (m?.type === 'system' && m?.subtype === 'commands_changed' && Array.isArray(m?.commands)) {
+            const names = (m.commands as Array<{ name?: string }>)
+              .map((c) => (typeof c?.name === 'string' && c.name ? `/${c.name}` : null))
+              .filter((n): n is string => n !== null);
+            if (names.length > 0) writeCachedSlashCommands(names);
+          }
 
           // Track the freshest session ID for resume — the runtime can rotate it
           // (e.g. post-compact), and the sweep stashes whatever is stored here.
@@ -983,6 +999,26 @@ export class SdkBackend implements ClaudeBackend {
             // The old turn drained: converge activeTurnSeq onto the latest send's
             // turnSeq (it lags during an interrupt — see _beginTurn).
             session.activeTurnSeq = session.turnSeq;
+            // Accurate context meter: ask the runtime for its real per-category
+            // context accounting (fire-and-forget; renderer falls back to the
+            // usage-sum estimate when absent).
+            const q = session.query as unknown as { getContextUsage?: () => Promise<any> };
+            if (typeof q.getContextUsage === 'function') {
+              q.getContextUsage().then((u) => {
+                if (u && typeof u.totalTokens === 'number' && typeof u.maxTokens === 'number') {
+                  this._emit({
+                    type: 'context_usage',
+                    projectPath,
+                    scope: effectiveScope,
+                    totalTokens: u.totalTokens,
+                    maxTokens: u.maxTokens,
+                    percentage: u.percentage,
+                    model: u.model,
+                    categories: u.categories,
+                  });
+                }
+              }).catch(() => { /* control request unavailable — estimate stands */ });
+            }
             // Only notify on a genuine completion — waits stay silent.
             if (wasStreaming && wait?.kind === 'none') {
               const info = {
@@ -1116,13 +1152,25 @@ function toScopeKey(projectPath: string, scope?: string): string {
   return `${projectPath} ${scope ?? 'chat'}`;
 }
 
-/** Same normalization the CLI's ensureProcess used for its respawn check. */
-function normalizeConfig(permMode?: string, effort?: string, model?: string): { permMode: string; effort: string; model: string } {
-  return { permMode: permMode || 'default', effort: effort || '', model: model || '' };
+/** SDK feature settings that require a session respawn to apply. */
+function readSdkFeatureKey(): string {
+  return [
+    readSaiSetting('claudeShowReasoning') === true ? '1' : '0',
+    String(Number(readSaiSetting('claudeMaxBudgetUsd')) || 0),
+    readSaiSetting('claude1MContext') === true ? '1' : '0',
+  ].join('|');
 }
 
-function configEquals(a: { permMode: string; effort: string; model: string }, b: { permMode: string; effort: string; model: string }): boolean {
-  return a.permMode === b.permMode && a.effort === b.effort && a.model === b.model;
+/** Same normalization the CLI's ensureProcess used for its respawn check,
+ *  plus the SDK feature settings (reasoning display, budget cap, 1M context). */
+function normalizeConfig(permMode?: string, effort?: string, model?: string): { permMode: string; effort: string; model: string; features: string } {
+  return { permMode: permMode || 'default', effort: effort || '', model: model || '', features: readSdkFeatureKey() };
+}
+
+type SessionConfig = ReturnType<typeof normalizeConfig>;
+
+function configEquals(a: SessionConfig, b: SessionConfig): boolean {
+  return a.permMode === b.permMode && a.effort === b.effort && a.model === b.model && a.features === b.features;
 }
 
 /**

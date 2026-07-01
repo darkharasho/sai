@@ -6,6 +6,9 @@ export interface ChatMessage {
   startedAt?: number;
   toolCalls?: ToolCall[];
   images?: string[];
+  /** Summarized model reasoning for this assistant segment ("Show reasoning"
+   *  setting; SDK backend only). Rendered as a collapsible above the reply. */
+  reasoning?: string;
   /**
    * Snapshots of GitHubWatcherCard state captured at phase transitions so the
    * card resumes from its last-known state when an old chat is reopened. Keyed

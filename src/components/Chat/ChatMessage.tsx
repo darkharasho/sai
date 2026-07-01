@@ -806,6 +806,14 @@ function ChatMessage({
       layoutId={flipActive ? undefined : pinnedLayoutId}
       {...effectiveEntryProps}
     >
+      {message.role === 'assistant' && message.reasoning && (
+        <details className="chat-msg-reasoning" data-testid="msg-reasoning" style={{ margin: '0 0 6px 24px', fontSize: 12, color: 'var(--text-muted)' }}>
+          <summary style={{ cursor: 'pointer', userSelect: 'none', opacity: 0.8 }}>Reasoning</summary>
+          <div style={{ whiteSpace: 'pre-wrap', marginTop: 4, paddingLeft: 10, borderLeft: '2px solid var(--border-hairline)' }}>
+            {message.reasoning}
+          </div>
+        </details>
+      )}
       {useMorphHead && (isAssistantStreaming || message.content) && (
         <StreamingAssistantHead
           streaming={!!isAssistantStreaming}

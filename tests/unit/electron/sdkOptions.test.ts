@@ -176,3 +176,35 @@ describe('env and stderr wiring', () => {
     expect(opts.stderr).toBeUndefined();
   });
 });
+
+// --- SDK feature options (show reasoning, budget cap, 1M context, suggestions) ---
+describe('feature options', () => {
+  it('thinkingSummarized maps to adaptive thinking with summarized display', () => {
+    const opts = buildSdkOptions({ kind: 'chat', cwd: '/ws', thinkingSummarized: true });
+    expect(opts.thinking).toEqual({ type: 'adaptive', display: 'summarized' });
+  });
+
+  it('maxBudgetUsd passes through when positive, omitted otherwise', () => {
+    expect(buildSdkOptions({ kind: 'chat', cwd: '/ws', maxBudgetUsd: 5 }).maxBudgetUsd).toBe(5);
+    expect(buildSdkOptions({ kind: 'chat', cwd: '/ws', maxBudgetUsd: 0 }).maxBudgetUsd).toBeUndefined();
+    expect(buildSdkOptions({ kind: 'chat', cwd: '/ws' }).maxBudgetUsd).toBeUndefined();
+  });
+
+  it('oneMContext opts into the 1M context beta', () => {
+    expect(buildSdkOptions({ kind: 'chat', cwd: '/ws', oneMContext: true }).betas).toEqual(['context-1m-2025-08-07']);
+    expect(buildSdkOptions({ kind: 'chat', cwd: '/ws' }).betas).toBeUndefined();
+  });
+
+  it('promptSuggestions and agentProgressSummaries pass through when set', () => {
+    const opts = buildSdkOptions({ kind: 'chat', cwd: '/ws', promptSuggestions: true, agentProgressSummaries: true });
+    expect(opts.promptSuggestions).toBe(true);
+    expect(opts.agentProgressSummaries).toBe(true);
+    const off = buildSdkOptions({ kind: 'chat', cwd: '/ws' });
+    expect(off.promptSuggestions).toBeUndefined();
+    expect(off.agentProgressSummaries).toBeUndefined();
+  });
+
+  it('no thinking config when thinkingSummarized is off (runtime default display)', () => {
+    expect(buildSdkOptions({ kind: 'chat', cwd: '/ws' }).thinking).toBeUndefined();
+  });
+});

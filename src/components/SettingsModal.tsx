@@ -97,6 +97,9 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [editorMinimap, setEditorMinimap] = useState(true);
   const [aiProvider, setAiProvider] = useState<'claude' | 'codex' | 'gemini'>('claude');
   const [claudeBackend, setClaudeBackend] = useState<'cli' | 'sdk'>('cli');
+  const [claudeShowReasoning, setClaudeShowReasoning] = useState(false);
+  const [claudeMaxBudgetUsd, setClaudeMaxBudgetUsd] = useState(0);
+  const [claude1MContext, setClaude1MContext] = useState(false);
   const [providerOpen, setProviderOpen] = useState(false);
   const providerRef = useRef<HTMLDivElement>(null);
   const [commitMessageProvider, setCommitMessageProvider] = useState<'claude' | 'codex' | 'gemini'>('claude');
@@ -186,6 +189,9 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.settingsGet('claudeBackend', 'cli').then((v: string) => {
       if (v === 'cli' || v === 'sdk') setClaudeBackend(v);
     });
+    window.sai.settingsGet('claudeShowReasoning', false).then((v: boolean) => setClaudeShowReasoning(!!v));
+    window.sai.settingsGet('claudeMaxBudgetUsd', 0).then((v: number) => setClaudeMaxBudgetUsd(Number(v) || 0));
+    window.sai.settingsGet('claude1MContext', false).then((v: boolean) => setClaude1MContext(!!v));
     window.sai.settingsGet('commitMessageProvider', 'claude').then((v: string) => {
       if (v === 'claude' || v === 'codex' || v === 'gemini') setCommitMessageProvider(v as 'claude' | 'codex' | 'gemini');
     });
@@ -338,6 +344,24 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     setClaudeBackend(value);
     window.sai.settingsSet('claudeBackend', value);
     onSettingChange?.('claudeBackend', value);
+  };
+
+  const handleClaudeShowReasoningChange = (value: boolean) => {
+    setClaudeShowReasoning(value);
+    window.sai.settingsSet('claudeShowReasoning', value);
+    onSettingChange?.('claudeShowReasoning', value);
+  };
+
+  const handleClaudeMaxBudgetChange = (value: number) => {
+    setClaudeMaxBudgetUsd(value);
+    window.sai.settingsSet('claudeMaxBudgetUsd', value);
+    onSettingChange?.('claudeMaxBudgetUsd', value);
+  };
+
+  const handleClaude1MContextChange = (value: boolean) => {
+    setClaude1MContext(value);
+    window.sai.settingsSet('claude1MContext', value);
+    onSettingChange?.('claude1MContext', value);
   };
 
   const handleCommitProviderChange = (value: 'claude' | 'codex' | 'gemini') => {
@@ -968,7 +992,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       <div className="settings-row">
         <div className="settings-row-info">
           <div className="settings-row-name">Backend</div>
-          <div className="settings-row-desc">How SAI talks to Claude: the <b>CLI</b> (spawns the <code>claude</code> binary) or the <b>SDK</b> (@anthropic-ai/claude-agent-sdk). SDK is experimental — core chat only; approvals/questions/render tools aren't wired yet. Requires app restart to take effect.</div>
+          <div className="settings-row-desc">How SAI talks to Claude: the <b>CLI</b> (spawns the <code>claude</code> binary) or the <b>SDK</b> (@anthropic-ai/claude-agent-sdk). The SDK adds live typing, reasoning display, pause insights, and accurate context accounting. Requires app restart to take effect.</div>
         </div>
         <select
           className="settings-select"
@@ -976,8 +1000,59 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
           onChange={e => handleClaudeBackendChange(e.target.value as 'cli' | 'sdk')}
         >
           <option value="cli">CLI (default)</option>
-          <option value="sdk">SDK (experimental)</option>
+          <option value="sdk">SDK</option>
         </select>
+      </div>
+      <div className="settings-row settings-row-spaced">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Show reasoning</div>
+          <div className="settings-row-desc">Stream the model's summarized reasoning while it thinks and keep it as a collapsible on each reply. SDK backend only. Reasoning tokens bill as output tokens (or count toward plan limits).</div>
+        </div>
+        <button
+          className={`settings-toggle${claudeShowReasoning ? ' on' : ''}`}
+          onClick={() => handleClaudeShowReasoningChange(!claudeShowReasoning)}
+          role="switch"
+          aria-checked={claudeShowReasoning}
+          disabled={claudeBackend !== 'sdk'}
+          style={claudeBackend !== 'sdk' ? { opacity: 0.4, pointerEvents: 'none' } : undefined}
+        >
+          <span className="settings-toggle-thumb" />
+        </button>
+      </div>
+      <div className="settings-row">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Session budget cap</div>
+          <div className="settings-row-desc">Hard per-session spend limit — the turn stops with a budget error when exceeded. SDK backend only. Applies to new sessions.</div>
+        </div>
+        <select
+          className="settings-select"
+          value={claudeMaxBudgetUsd}
+          onChange={e => handleClaudeMaxBudgetChange(Number(e.target.value))}
+          disabled={claudeBackend !== 'sdk'}
+        >
+          <option value={0}>Off</option>
+          <option value={1}>$1</option>
+          <option value={2}>$2</option>
+          <option value={5}>$5</option>
+          <option value={10}>$10</option>
+          <option value={25}>$25</option>
+        </select>
+      </div>
+      <div className="settings-row settings-row-spaced">
+        <div className="settings-row-info">
+          <div className="settings-row-name">1M context window</div>
+          <div className="settings-row-desc">Opt into the 1M-token context beta for long sessions. SDK backend only; requires account access to 1M context.</div>
+        </div>
+        <button
+          className={`settings-toggle${claude1MContext ? ' on' : ''}`}
+          onClick={() => handleClaude1MContextChange(!claude1MContext)}
+          role="switch"
+          aria-checked={claude1MContext}
+          disabled={claudeBackend !== 'sdk'}
+          style={claudeBackend !== 'sdk' ? { opacity: 0.4, pointerEvents: 'none' } : undefined}
+        >
+          <span className="settings-toggle-thumb" />
+        </button>
       </div>
       <div className="settings-row">
         <div className="settings-row-info">

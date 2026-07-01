@@ -107,6 +107,19 @@ export function mapSdkMessage(msg: any, state: MapperState): MapResult {
       nextState = { ...nextState, deltaTextEmitted: true };
       return { emits, state: nextState, sessionId: capturedSessionId };
     }
+    // Summarized reasoning text ("Show reasoning" feature). Only streams when
+    // the session requested thinking display:"summarized" — otherwise thinking
+    // deltas carry no text and nothing is emitted.
+    if (
+      msg.parent_tool_use_id == null
+      && ev?.type === 'content_block_delta'
+      && ev.delta?.type === 'thinking_delta'
+      && typeof ev.delta.thinking === 'string'
+      && ev.delta.thinking.length > 0
+    ) {
+      emits.push({ type: 'reasoning_delta', text: ev.delta.thinking });
+      return { emits, state: nextState, sessionId: capturedSessionId };
+    }
     emits.push({ ...msg });
     return { emits, state: nextState, sessionId: capturedSessionId };
   }

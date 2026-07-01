@@ -1477,6 +1477,74 @@ describe('SdkBackend', () => {
     fakeQuery.close();
   });
 
+  it('(38) feature settings flow into SDK options and a settings change respawns the session', async () => {
+    const settings: Record<string, unknown> = { claudeShowReasoning: true, claudeMaxBudgetUsd: 5, claude1MContext: true };
+    mockReadSaiSetting.mockImplementation((key: string) => settings[key]);
+    const fakeQuery1 = makeFakeQuery([], { hang: true });
+    const fakeQuery2 = makeFakeQuery([], { hang: true });
+    let calls = 0;
+    const queryFn = vi.fn((args: { prompt: any; options: any }) => {
+      capturedQueryArgs.push(args);
+      calls++;
+      return calls === 1 ? fakeQuery1 : fakeQuery2;
+    });
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'a', scope: SCOPE, permMode: 'default' });
+    await new Promise(r => setTimeout(r, 10));
+
+    const opts = capturedQueryArgs[0].options;
+    expect(opts.thinking).toEqual({ type: 'adaptive', display: 'summarized' });
+    expect(opts.maxBudgetUsd).toBe(5);
+    expect(opts.betas).toEqual(['context-1m-2025-08-07']);
+    expect(opts.promptSuggestions).toBe(true);
+    expect(opts.agentProgressSummaries).toBe(true);
+
+    // Toggling a feature setting respawns the session on the next send.
+    settings.claudeShowReasoning = false;
+    backend.send({ projectPath: PROJECT, message: 'b', scope: SCOPE, permMode: 'default' });
+    await new Promise(r => setTimeout(r, 10));
+    expect(queryFn).toHaveBeenCalledTimes(2);
+    expect(capturedQueryArgs[1].options.thinking).toBeUndefined();
+
+    mockReadSaiSetting.mockReset();
+    mockReadSaiSetting.mockReturnValue(undefined);
+    fakeQuery2.close();
+  });
+
+  it('(39) emits context_usage after a result when the query supports getContextUsage', async () => {
+    const fakeQuery = makeFakeQuery([
+      { type: 'result', stop_reason: 'end_turn', num_turns: 1 },
+    ], { hang: true });
+    (fakeQuery as any).getContextUsage = vi.fn().mockResolvedValue({
+      totalTokens: 42_000, maxTokens: 200_000, percentage: 21, model: 'opus',
+      categories: [{ name: 'System prompt', tokens: 3000, color: '#abc' }],
+    });
+    const backend = new SdkBackend({ queryFn: vi.fn(() => fakeQuery), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.send({ projectPath: PROJECT, message: 'go', scope: SCOPE });
+    await new Promise<void>((resolve) => {
+      const check = () => { if (emits.some(e => e.type === 'context_usage')) resolve(); else setTimeout(check, 5); };
+      setTimeout(check, 5);
+    });
+
+    const cu = emits.find(e => e.type === 'context_usage') as any;
+    expect(cu.totalTokens).toBe(42_000);
+    expect(cu.maxTokens).toBe(200_000);
+    expect(cu.scope).toBe(SCOPE);
+    fakeQuery.close();
+  });
+
+  it('(40) commands_changed replaces the slash-command cache with slash-prefixed names', async () => {
+    const fakeQuery = makeFakeQuery([
+      { type: 'system', subtype: 'commands_changed', commands: [{ name: 'deploy', description: '' }, { name: 'lint', description: '' }] },
+    ], { hang: true });
+    const backend = new SdkBackend({ queryFn: vi.fn(() => fakeQuery), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.send({ projectPath: PROJECT, message: 'go', scope: SCOPE });
+    await new Promise(r => setTimeout(r, 20));
+    expect(mockWriteCachedSlashCommands).toHaveBeenCalledWith(['/deploy', '/lint']);
+    fakeQuery.close();
+  });
+
   it('(37) send with a readable png attaches a real base64 image content block', async () => {
     mockReadFileSync.mockReturnValueOnce(Buffer.from('fake-png-bytes') as any);
     const pushed: any[] = [];

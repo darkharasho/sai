@@ -437,6 +437,13 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // soon as real output flows or the turn ends.
   const [streamHint, setStreamHint] = useState<string | null>(null);
   const clearStreamHint = useCallback(() => setStreamHint(prev => (prev == null ? prev : null)), []);
+  // Summarized reasoning accumulated for the CURRENT text segment ("Show
+  // reasoning" setting; SDK backend streams it as reasoning_delta). Attached
+  // to the next assistant bubble and shown live (tail) as the thinking hint.
+  const turnReasoningRef = useRef<string>('');
+  // Predicted next prompt from the SDK (prompt_suggestion, arrives after
+  // result). Rendered as a one-tap chip above the composer while idle.
+  const [promptSuggestion, setPromptSuggestion] = useState<string | null>(null);
   const saiAnimationEnabled = useSaiAnimationPref();
   const streamIdleTimerRef = useRef<number | null>(null);
   const flushStreamingText = useCallback(() => {
@@ -643,6 +650,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       if (msg.type === 'streaming_start') {
         if (msg.turnSeq != null) turnSeqRef.current = msg.turnSeq;
         clearStreamHint();
+        turnReasoningRef.current = '';
+        setPromptSuggestion(null);
         setTurnStartIndex(messagesRef.current.length);
         if (turnStartedAtRef.current === null) {
           turnStartedAtRef.current = Date.now();
@@ -705,15 +714,71 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         return;
       }
 
+      // Summarized reasoning stream ("Show reasoning" setting). Accumulate for
+      // the segment's bubble and show the live tail as the thinking hint —
+      // richer than the token count when reasoning text is available.
+      if (msg.type === 'reasoning_delta') {
+        if (typeof msg.text === 'string' && msg.text) {
+          turnReasoningRef.current += msg.text;
+          const tail = turnReasoningRef.current.replace(/\s+/g, ' ').trim();
+          if (tail) setStreamHint(tail.length > 80 ? `…${tail.slice(-80)}` : tail);
+        }
+        return;
+      }
+
       // Silent-pause signals from the SDK: surface WHY nothing is streaming.
       // thinking_tokens fires during adaptive thinking (whose text is omitted
       // by default on Opus 4.7+), api_retry during rate-limit/overload backoff,
       // and status:compacting while the runtime compacts context.
       if (msg.type === 'system' && msg.subtype === 'thinking_tokens') {
         const n = msg.estimated_tokens;
-        if (typeof n === 'number' && n > 0) {
+        // Reasoning text (when enabled) is a better hint than the token count.
+        if (typeof n === 'number' && n > 0 && !turnReasoningRef.current) {
           const label = n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
           setStreamHint(`thinking · ${label} tokens`);
+        }
+        return;
+      }
+
+      // AI-generated subagent progress ("Analyzing authentication module").
+      if (msg.type === 'system' && msg.subtype === 'task_progress') {
+        const summary = (typeof msg.summary === 'string' && msg.summary) ? msg.summary
+          : (typeof msg.description === 'string' && msg.description) ? msg.description : '';
+        if (summary) setStreamHint(`agent · ${summary}`);
+        return;
+      }
+
+      // Mid-session slash-command changes (dynamically discovered skills).
+      if (msg.type === 'system' && msg.subtype === 'commands_changed' && Array.isArray(msg.commands)) {
+        const cmds = msg.commands
+          .map((c: any) => (typeof c?.name === 'string' && c.name ? `/${c.name}` : null))
+          .filter((n: string | null): n is string => n !== null);
+        if (cmds.length > 0) {
+          setSlashCommands(cmds);
+          onSlashCommandsUpdate?.(cmds);
+        }
+        return;
+      }
+
+      // Login flow in progress on the SDK subprocess.
+      if (msg.type === 'auth_status') {
+        setStreamHint(msg.isAuthenticating ? 'authenticating…' : null);
+        return;
+      }
+
+      // Predicted next prompt — arrives after the turn's result.
+      if (msg.type === 'prompt_suggestion') {
+        if (typeof msg.suggestion === 'string' && msg.suggestion.trim()) {
+          setPromptSuggestion(msg.suggestion.trim());
+        }
+        return;
+      }
+
+      // Authoritative context accounting from the runtime (getContextUsage) —
+      // replaces the usage-sum estimate computed from result frames.
+      if (msg.type === 'context_usage') {
+        if (typeof msg.totalTokens === 'number' && typeof msg.maxTokens === 'number' && msg.maxTokens > 0) {
+          setContextUsage(prev => ({ ...prev, used: msg.totalTokens, total: msg.maxTokens }));
         }
         return;
       }
@@ -985,6 +1050,11 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             markStreamingActive();
             return;
           }
+          // Attach accumulated summarized reasoning to the bubble this text
+          // creates/updates (captured OUTSIDE the updater — React may invoke
+          // updaters twice, and the ref clear must happen exactly once).
+          const segmentReasoning = text ? turnReasoningRef.current : '';
+          if (segmentReasoning) turnReasoningRef.current = '';
           setMessages(prev => {
             const last = prev[prev.length - 1];
             // Update the last assistant message if it's a pure text message (no tool calls).
@@ -995,7 +1065,13 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
               const updated = [...prev];
               const shouldAppend = msg.message.content.some((block: any) => block.type === 'text' && block.delta);
               const newContent = shouldAppend ? last.content + text : text;
-              updated[updated.length - 1] = { ...last, content: newContent };
+              updated[updated.length - 1] = {
+                ...last,
+                content: newContent,
+                ...(segmentReasoning
+                  ? { reasoning: last.reasoning ? `${last.reasoning}\n\n${segmentReasoning}` : segmentReasoning }
+                  : {}),
+              };
               return updated;
             }
             // Before pushing a new assistant message, stamp durationMs on the most recent
@@ -1018,6 +1094,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
               timestamp: Date.now(),
               startedAt,
               toolCalls: tools.length > 0 ? tools : undefined,
+              ...(segmentReasoning ? { reasoning: segmentReasoning } : {}),
             }];
           });
           // A text segment created/updated via the slow path (e.g. the first delta of a
@@ -1948,6 +2025,32 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             <div className="chat-composer-cancel-row">
               <button className="chat-composer-cancel" onClick={handleCancelWait} title="Cancel and stop waiting">
                 {waiting!.wait.kind === 'scheduled' ? 'Waiting to resume · Cancel' : 'Waiting · Cancel'}
+              </button>
+            </div>
+          )}
+          {promptSuggestion && !streamingForDisplay && !isWaiting && (
+            <div className="chat-suggestion-row" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 6px' }}>
+              <button
+                data-testid="prompt-suggestion-chip"
+                onClick={() => { const s = promptSuggestion; setPromptSuggestion(null); void handleSend(s); }}
+                title="Send suggested prompt"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: '100%',
+                  padding: '3px 10px', borderRadius: 999, fontSize: 12, cursor: 'pointer',
+                  background: 'var(--surface-1)', border: '1px solid var(--border-hairline)', color: 'var(--text-secondary)',
+                }}
+              >
+                <span style={{ opacity: 0.6 }}>↳</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {promptSuggestion.length > 90 ? `${promptSuggestion.slice(0, 90)}…` : promptSuggestion}
+                </span>
+              </button>
+              <button
+                onClick={() => setPromptSuggestion(null)}
+                title="Dismiss suggestion"
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 12, padding: 2 }}
+              >
+                ×
               </button>
             </div>
           )}

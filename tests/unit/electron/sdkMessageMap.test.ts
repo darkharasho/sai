@@ -245,3 +245,40 @@ describe('text delta live typing', () => {
     expect(r2.state.deltaTextEmitted).toBe(true);
   });
 });
+
+// --- summarized reasoning ("Show reasoning") ---
+describe('reasoning deltas', () => {
+  it('converts top-level thinking_delta stream events into reasoning_delta emits', () => {
+    const msg = {
+      type: 'stream_event',
+      parent_tool_use_id: null,
+      event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: 'Let me check the auth flow' } },
+    };
+    const state: MapperState = { streaming: true, sessionIdSeen: true };
+    const result = mapSdkMessage(msg, state);
+    expect(result.emits).toHaveLength(1);
+    expect(result.emits[0]).toEqual({ type: 'reasoning_delta', text: 'Let me check the auth flow' });
+  });
+
+  it('empty thinking deltas (display omitted) are forwarded raw, not converted', () => {
+    const msg = {
+      type: 'stream_event',
+      parent_tool_use_id: null,
+      event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: '' } },
+    };
+    const state: MapperState = { streaming: true, sessionIdSeen: true };
+    const result = mapSdkMessage(msg, state);
+    expect(result.emits[0].type).toBe('stream_event');
+  });
+
+  it('subagent thinking deltas are not converted', () => {
+    const msg = {
+      type: 'stream_event',
+      parent_tool_use_id: 'toolu_x',
+      event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: 'sub reasoning' } },
+    };
+    const state: MapperState = { streaming: true, sessionIdSeen: true };
+    const result = mapSdkMessage(msg, state);
+    expect(result.emits[0].type).toBe('stream_event');
+  });
+});

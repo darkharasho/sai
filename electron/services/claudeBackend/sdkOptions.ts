@@ -14,6 +14,17 @@ export interface SdkOptionInputs {
   mcpServers?: Record<string, unknown>; // in-process SDK MCP servers (chat tools); set only for chat
   env?: Record<string, string | undefined>; // subprocess env (enriched login-shell + memory cap)
   stderr?: (data: string) => void; // subprocess stderr (auth failures, crash diagnostics)
+  /** "Show reasoning" setting: request summarized thinking text (Opus 4.7+/Fable
+   *  default to display:"omitted", which streams empty thinking blocks). */
+  thinkingSummarized?: boolean;
+  /** Hard per-session spend cap in USD (0/undefined = off). */
+  maxBudgetUsd?: number;
+  /** Opt into the 1M-token context window beta. */
+  oneMContext?: boolean;
+  /** Emit a prompt_suggestion message after each turn (chat scopes). */
+  promptSuggestions?: boolean;
+  /** Periodic AI-generated progress summaries for running subagents. */
+  agentProgressSummaries?: boolean;
 }
 
 const VALID_EFFORT = new Set<string>(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -47,6 +58,11 @@ export function buildSdkOptions(input: SdkOptionInputs): Options {
     mcpServers,
     env,
     stderr,
+    thinkingSummarized,
+    maxBudgetUsd,
+    oneMContext,
+    promptSuggestions,
+    agentProgressSummaries,
   } = input;
 
   const permissionMode: Options['permissionMode'] =
@@ -94,6 +110,28 @@ export function buildSdkOptions(input: SdkOptionInputs): Options {
 
   if (stderr) {
     opts.stderr = stderr;
+  }
+
+  // "Show reasoning": adaptive thinking stays the default either way; this only
+  // opts the DISPLAY into summarized text (Opus 4.7+ default is "omitted").
+  if (thinkingSummarized) {
+    opts.thinking = { type: 'adaptive', display: 'summarized' };
+  }
+
+  if (typeof maxBudgetUsd === 'number' && maxBudgetUsd > 0) {
+    opts.maxBudgetUsd = maxBudgetUsd;
+  }
+
+  if (oneMContext) {
+    opts.betas = ['context-1m-2025-08-07'];
+  }
+
+  if (promptSuggestions) {
+    opts.promptSuggestions = true;
+  }
+
+  if (agentProgressSummaries) {
+    opts.agentProgressSummaries = true;
   }
 
   if (mcpServers && Object.keys(mcpServers).length > 0) {
