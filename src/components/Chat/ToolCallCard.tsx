@@ -1052,10 +1052,14 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
     try { return Object.keys(JSON.parse(toolCall.input || '{}').answers || {}).length > 0; } catch { return false; }
   })();
 
+  // A tool has settled once a result arrived at all — some tools (ToolSearch,
+  // quiet Bash commands) legitimately return an empty body, and truthiness
+  // here left their cards shimmering as "running" forever.
+  const settled = toolCall.output != null;
   const status: 'running' | 'done' | 'error' =
     isAskUserQuestion ? (askAnswered ? 'done' : 'running') :
-    toolCall.output && parseToolError(toolCall.output).isToolError ? 'error' :
-    toolCall.output ? 'done' : 'running';
+    settled && parseToolError(toolCall.output ?? '').isToolError ? 'error' :
+    settled ? 'done' : 'running';
 
   const hasBody = isAskUserQuestion ? true : isTask ? true : isBash ? !!toolCall.output : isTodo ? true : search ? (!!toolCall.output || !!query) : !!code;
 

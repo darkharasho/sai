@@ -106,6 +106,53 @@ describe('ChatMessage', () => {
     expect(container.querySelector('.tool-call-card')).toBeTruthy();
   });
 
+  describe('reasoning live state yields to running tools', () => {
+    const reasoningMsg = (toolCalls?: ChatMessageType['toolCalls']) => makeMessage({
+      reasoning: 'pondering deeply',
+      reasoningLive: true,
+      toolCalls,
+    });
+
+    it('shows the live reasoning card while no tool is running', () => {
+      render(<ChatMessage message={reasoningMsg()} />);
+      expect(screen.getByTestId('msg-reasoning-live')).toBeTruthy();
+    });
+
+    it('pauses the live card while a tool call is unresolved', () => {
+      const msg = reasoningMsg([
+        { id: 'tc1', type: 'terminal_command', name: 'Bash', input: '{"command":"ls"}' },
+      ]);
+      render(<ChatMessage message={msg} />);
+      expect(screen.queryByTestId('msg-reasoning-live')).toBeNull();
+      expect(screen.getByTestId('msg-reasoning')).toBeTruthy();
+    });
+
+    it('resumes the live card once every tool call has output', () => {
+      const msg = reasoningMsg([
+        { id: 'tc1', type: 'terminal_command', name: 'Bash', input: '{"command":"ls"}', output: 'file.txt' },
+      ]);
+      render(<ChatMessage message={msg} />);
+      expect(screen.getByTestId('msg-reasoning-live')).toBeTruthy();
+    });
+
+    it('resumes the live card when a tool settles with an empty-string output', () => {
+      const msg = reasoningMsg([
+        { id: 'tc1', type: 'file_search', name: 'ToolSearch', input: '{}', output: '' },
+      ]);
+      render(<ChatMessage message={msg} />);
+      expect(screen.getByTestId('msg-reasoning-live')).toBeTruthy();
+    });
+
+    it('stays paused while any of several tool calls is still running', () => {
+      const msg = reasoningMsg([
+        { id: 'tc1', type: 'terminal_command', name: 'Bash', input: '{}', output: 'done' },
+        { id: 'tc2', type: 'file_read', name: 'Read', input: '{}' },
+      ]);
+      render(<ChatMessage message={msg} />);
+      expect(screen.queryByTestId('msg-reasoning-live')).toBeNull();
+    });
+  });
+
   it('renders images when present', () => {
     const msg = makeMessage({
       images: ['data:image/png;base64,abc123'],

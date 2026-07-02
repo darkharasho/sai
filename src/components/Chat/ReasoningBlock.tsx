@@ -108,7 +108,8 @@ export default function ReasoningBlock({ text, live, startedAt, durationMs, toke
       )}
       <style>{`
         .rsn {
-          margin: 0 8px 10px 24px;
+          /* Full width to line up flush with the tool-call cards below it. */
+          margin: 0 0 10px;
           border: 1px solid var(--border-hairline);
           border-radius: 8px;
           background: var(--surface-2);

@@ -37,6 +37,23 @@ describe('ToolCallCard', () => {
     expect(badge?.getAttribute('data-status-transition')).toBe(JSON.stringify(SPRING.flick));
   });
 
+  it('marks the card running while output is absent', () => {
+    const { container } = render(
+      <ToolCallCard toolCall={{ id: 't', type: 'file_search', name: 'ToolSearch', input: '{}' }} />
+    );
+    expect(container.querySelector('.tool-call-card--running')).toBeTruthy();
+  });
+
+  it('settles to done on an EMPTY-string output (ToolSearch-style results)', () => {
+    // Some tools return an empty result body; presence of the result — not
+    // its truthiness — is what ends the running shimmer.
+    const { container } = render(
+      <ToolCallCard toolCall={{ id: 't', type: 'file_search', name: 'ToolSearch', input: '{}', output: '' }} />
+    );
+    expect(container.querySelector('.tool-call-card--running')).toBeNull();
+    expect(container.querySelector('.tool-status-done')).toBeTruthy();
+  });
+
   it('shows duration when durationMs is set', () => {
     const { getByTestId } = render(
       <ToolCallCard toolCall={{ id: 't1', type: 'other', name: 'Foo', input: '', output: 'done', durationMs: 3750 }} />
