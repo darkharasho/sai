@@ -363,7 +363,13 @@ export function renderEmojiSpan(props: any): React.ReactElement {
     : typeof className === 'string' ? className.split(/\s+/) : [];
   if (classes.includes('sai-emoji')) {
     const emoji = props['data-emoji'];
-    if (typeof emoji === 'string' && emoji.length > 0) return <EmojiIcon emoji={emoji} />;
+    if (typeof emoji === 'string' && emoji.length > 0) {
+      // rehypeStreamWords tags the marker with `sw` during live streaming so
+      // the icon fades in with the words around it — keep that wrapper.
+      return classes.includes('sw')
+        ? <span className="sw"><EmojiIcon emoji={emoji} /></span>
+        : <EmojiIcon emoji={emoji} />;
+    }
   }
   return <span className={className} {...rest} />;
 }

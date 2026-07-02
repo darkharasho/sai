@@ -28,6 +28,14 @@ function walk(node: { children?: ElementContent[]; tagName?: string }) {
     const child = children[i];
     if (child.type === 'element') {
       if (OPAQUE_TAGS.has(child.tagName)) continue;
+      // Emoji markers (rehypeEmojiIcons runs first) have no text children to
+      // wrap — tag the marker itself so the rendered icon fades in with the
+      // words around it instead of popping (renderEmojiSpan forwards the class).
+      const cls = (child.properties ??= {}).className;
+      if (Array.isArray(cls) && cls.includes('sai-emoji')) {
+        if (!cls.includes('sw')) cls.push('sw');
+        continue;
+      }
       walk(child);
     } else if (child.type === 'text') {
       const out = splitWords(child.value);

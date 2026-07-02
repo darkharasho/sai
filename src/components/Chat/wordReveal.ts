@@ -51,7 +51,15 @@ function collectItems(root: HTMLElement, snapMs: number): HTMLElement[] {
         child.textContent = '';
       } else if (child.nodeType === Node.ELEMENT_NODE) {
         const el = child as HTMLElement;
-        if (ATOMIC_TAGS.has(el.tagName)) {
+        // toUpperCase: SVG elements report a lowercase tagName ('svg'), unlike
+        // HTML elements. Emoji icons (accent SVGs / CSS-masked spans) carry no
+        // text nodes, so they must be revealed as atomic items too or they
+        // pop in ahead of the typing sweep.
+        if (
+          ATOMIC_TAGS.has(el.tagName.toUpperCase()) ||
+          el.classList.contains('sai-emoji-icon') ||
+          el.classList.contains('sai-emoji-mask')
+        ) {
           el.style.opacity = '0';
           el.style.transition = `opacity ${snapMs}ms linear`;
           items.push(el);
@@ -66,22 +74,11 @@ function collectItems(root: HTMLElement, snapMs: number): HTMLElement[] {
   return items;
 }
 
-/** The top-level block (direct child of `root`) that contains `node`, or null if
- *  `node` is itself a direct child of root with no intervening block. Used to grow
- *  the reveal block-by-block. */
-function topBlockOf(node: HTMLElement, root: HTMLElement): HTMLElement | null {
-  let el: HTMLElement = node;
-  while (el.parentElement && el.parentElement !== root) {
-    el = el.parentElement;
-  }
-  return el.parentElement === root ? el : null;
-}
-
 export function revealWords(container: HTMLElement, opts: RevealOpts = {}): RevealController {
   const cadenceMs = opts.cadenceMs ?? 52;
   const snapMs = opts.snapMs ?? 70;
   const budgetMs = opts.budgetMs ?? 1200;
-  const maxWords = opts.maxWords ?? 600;
+  const maxWords = opts.maxWords ?? 2000;
 
   const items = collectItems(container, snapMs);
 
@@ -92,20 +89,13 @@ export function revealWords(container: HTMLElement, opts: RevealOpts = {}): Reve
     return { cancel() {} };
   }
 
-  // Grow as we reveal: hide each top-level block until its first word is reached, so the
-  // message expands block-by-block instead of reserving its full height up front (opacity:0
-  // words still occupy layout). Without this, a multi-line reply shows a tall blank region
-  // that fills in from the top. Within a block, words still fade in left-to-right.
-  const blockOf = items.map((it) => topBlockOf(it, container));
-  const hiddenBlocks = new Set<HTMLElement>();
-  for (const b of blockOf) {
-    if (b && b.style.display !== 'none') { b.style.display = 'none'; hiddenBlocks.add(b); }
-  }
-
-  const showAll = () => {
-    showWords();
-    for (const b of hiddenBlocks) b.style.display = '';
-  };
+  // Layout-stable by design: opacity-0 words reserve the message's final height
+  // up front and ONLY opacity changes during the sweep. An earlier version hid
+  // trailing blocks (display:none) and grew the message block-by-block, but
+  // with the transcript pinned to its bottom that re-growth made the viewport
+  // ride the expanding edge — revealed text scrolled up past the reader and
+  // the reveal read as "the end is already there / it half-animates".
+  const showAll = showWords;
 
   // Honor the duration budget: short/medium replies reveal one item per tick at a
   // shrinking cadence; long replies keep an 8ms floor but reveal several items per
@@ -138,8 +128,6 @@ export function revealWords(container: HTMLElement, opts: RevealOpts = {}): Reve
     let last = items[i];
     for (let k = 0; k < perTick && i < items.length; k++) {
       const idx = i++;
-      const blk = blockOf[idx];
-      if (blk && blk.style.display === 'none') blk.style.display = '';
       last = items[idx];
       last.style.opacity = '1';
     }

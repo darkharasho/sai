@@ -4179,7 +4179,7 @@ export default function App() {
                           ? { handled: true, reply: (outcome as { handled: true; reply: string }).reply }
                           : false;
                       }}
-                      renderToolCall={(tc) => {
+                      renderToolCall={(tc, _defaultExpanded, seedGrow) => {
                         // Derive per-task tool_use bucket counts (last 60s)
                         // for SpawnTaskCard sparklines. We re-derive on each
                         // render — activityTick triggers re-renders so the
@@ -4203,6 +4203,7 @@ export default function App() {
                         return (
                         <SwarmToolCardSelector
                           toolCall={tc}
+                          seedGrow={seedGrow}
                           tasks={swarmTasksByWs.get(wsPath) ?? []}
                           approvals={swarmApprovalsByWs.get(wsPath) ?? []}
                           diffStats={swarmDiffStats}
@@ -4397,7 +4398,7 @@ export default function App() {
                     globalEffort: effortLevel,
                   }}
                   availableModels={claudeModels}
-                  renderToolCall={(tc) => {
+                  renderToolCall={(tc, _defaultExpanded, seedGrow) => {
                     const n = tc.name || '';
                     if (
                       n.endsWith('sai_render_html') ||
@@ -4410,7 +4411,7 @@ export default function App() {
                       n.endsWith('sai_confirm') ||
                       n.endsWith('sai_choose')
                     ) {
-                      return <RenderToolCallCard tc={tc} cwd={projectPath} />;
+                      return <RenderToolCallCard tc={tc} cwd={projectPath} seedGrow={seedGrow} />;
                     }
                     return null;
                   }}

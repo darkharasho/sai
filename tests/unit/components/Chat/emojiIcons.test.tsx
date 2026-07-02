@@ -2,12 +2,18 @@ import { describe, it, expect } from 'vitest';
 import { render } from '@testing-library/react';
 import ReactMarkdown from 'react-markdown';
 import { rehypeEmojiIcons } from '../../../../src/components/Chat/rehypeEmojiIcons';
+import { rehypeStreamWords } from '../../../../src/components/Chat/rehypeStreamWords';
 import { renderEmojiSpan, lookupIcon, fluentEmojiSlug, emojiName } from '../../../../src/components/Chat/emojiIcons';
 
 const components = { span: renderEmojiSpan } as any;
 function renderMd(text: string) {
   return render(
     <ReactMarkdown rehypePlugins={[rehypeEmojiIcons]} components={components}>{text}</ReactMarkdown>
+  );
+}
+function renderMdStreaming(text: string) {
+  return render(
+    <ReactMarkdown rehypePlugins={[rehypeEmojiIcons, rehypeStreamWords]} components={components}>{text}</ReactMarkdown>
   );
 }
 
@@ -35,6 +41,23 @@ describe('emoji rendering', () => {
     const { container } = renderMd('just text');
     expect(container.querySelector('.sai-emoji-icon, .sai-emoji-mask')).toBeNull();
     expect(container.textContent).toBe('just text');
+  });
+
+  it('streaming render wraps emoji icons in .sw so they fade in with the words', () => {
+    // Without the wrapper the icon mounts with no animation and pops ahead of
+    // the surrounding word fade (rehypeStreamWords only wraps text nodes).
+    const { container } = renderMdStreaming('nice ✅ work');
+    const icon = container.querySelector('.sai-emoji-icon');
+    expect(icon).toBeTruthy();
+    expect(icon!.closest('.sw')).toBeTruthy();
+    // Regular words still get their own .sw spans.
+    expect(container.querySelectorAll('.sw').length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('non-streaming render keeps emoji icons unwrapped (no stray .sw)', () => {
+    const { container } = renderMd('nice ✅ work');
+    expect(container.querySelector('.sai-emoji-icon')).toBeTruthy();
+    expect(container.querySelector('.sw')).toBeNull();
   });
 });
 

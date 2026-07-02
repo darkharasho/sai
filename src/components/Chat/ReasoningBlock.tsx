@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import { motion } from 'motion/react';
 import { Sparkles } from 'lucide-react';
+import { SPRING, useReducedMotionTransition } from './motion';
+import { SEED_GROW_INITIAL, SEED_GROW_ANIMATE, useSeedGrow } from './seedGrow';
 
 interface Props {
   text: string;
@@ -16,6 +19,8 @@ interface Props {
   durationMs?: number;
   /** Estimated thinking-token count (SDK thinking_tokens signal). */
   tokens?: number;
+  /** Card is born from the tail thinking row: mount with the grow-in entry. */
+  seedGrow?: boolean;
 }
 
 function formatDuration(ms: number): string {
@@ -36,8 +41,10 @@ function formatTokens(n: number): string {
  * under a gradient mask. Once finalized it settles into a quiet one-line
  * "Thought for Ns" card whose header toggles an expandable panel.
  */
-export default function ReasoningBlock({ text, live, quiet, startedAt, durationMs, tokens }: Props) {
+export default function ReasoningBlock({ text, live, quiet, startedAt, durationMs, tokens, seedGrow }: Props) {
   const [open, setOpen] = useState(false);
+  const grow = useSeedGrow(seedGrow);
+  const growTransition = useReducedMotionTransition(SPRING.pop);
   const [elapsed, setElapsed] = useState(0);
   const [peekOverflows, setPeekOverflows] = useState(false);
   const peekRef = useRef<HTMLDivElement | null>(null);
@@ -69,7 +76,10 @@ export default function ReasoningBlock({ text, live, quiet, startedAt, durationM
       : 'Reasoning';
 
   return (
-    <div
+    <motion.div
+      initial={grow ? SEED_GROW_INITIAL : false}
+      animate={grow ? SEED_GROW_ANIMATE : undefined}
+      transition={growTransition}
       className={`rsn${live ? ' rsn--live' : ''}${live && quiet ? ' rsn--quiet' : ''}${open ? ' rsn--open' : ''}`}
       data-testid={live ? 'msg-reasoning-live' : 'msg-reasoning'}
       data-quiet={live && quiet ? 'true' : undefined}
@@ -223,6 +233,6 @@ export default function ReasoningBlock({ text, live, quiet, startedAt, durationM
           .rsn-chev { transition: none; }
         }
       `}</style>
-    </div>
+    </motion.div>
   );
 }

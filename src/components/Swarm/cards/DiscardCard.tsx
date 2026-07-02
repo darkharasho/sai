@@ -1,18 +1,28 @@
 import React from 'react';
+import { motion } from 'motion/react';
+import { useSeedGrow } from '../../Chat/seedGrow';
+import { SPRING, useReducedMotionTransition } from '../../Chat/motion';
 import type { ToolCall } from '../../../types';
 import { cardBase, safeJsonParse } from './cardStyles';
 
 interface Props {
   toolCall: ToolCall;
+  /** Card is born from the tail thinking row: mount with the grow-in entry. */
+  seedGrow?: boolean;
 }
 
-export default function DiscardCard({ toolCall }: Props) {
+export default function DiscardCard({ toolCall, seedGrow }: Props) {
+  const grow = useSeedGrow(seedGrow);
+  const growTransition = useReducedMotionTransition(SPRING.pop);
   const input = safeJsonParse<any>(toolCall.input) ?? {};
   const branch: string = input.branch ?? input.taskRef ?? 'branch';
   return (
-    <div
+    <motion.div
       data-testid="swarm-discard-card"
-      style={{ ...cardBase, padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, opacity: 0.9 }}
+      style={{ ...cardBase, padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, opacity: 0.9, ...(grow ? { overflow: 'hidden' } : null) }}
+      initial={grow ? { height: 0, paddingTop: 0, paddingBottom: 0, opacity: 0 } : false}
+      animate={grow ? { height: 'auto', paddingTop: 6, paddingBottom: 6, opacity: 1 } : undefined}
+      transition={growTransition}
     >
       <span>🗑</span>
       <span>
@@ -21,6 +31,6 @@ export default function DiscardCard({ toolCall }: Props) {
           {branch}
         </code>
       </span>
-    </div>
+    </motion.div>
   );
 }

@@ -1,4 +1,7 @@
 import React from 'react';
+import { motion } from 'motion/react';
+import { useSeedGrow } from '../../Chat/seedGrow';
+import { SPRING, useReducedMotionTransition } from '../../Chat/motion';
 import type { ToolCall } from '../../../types';
 import { cardBase, cardHeader, SWARM_GREEN, SWARM_RED, safeJsonParse, btnBase, btnPrimary, btnDanger } from './cardStyles';
 
@@ -23,6 +26,8 @@ interface Props {
   onLand?: (taskId: string) => void;
   onDiscard?: (taskId: string) => void;
   onDiff?: (taskId: string) => void;
+  /** Card is born from the tail thinking row: mount with the grow-in entry. */
+  seedGrow?: boolean;
 }
 
 function formatDuration(ms: number | undefined): string {
@@ -34,20 +39,26 @@ function formatDuration(ms: number | undefined): string {
   return rem > 0 ? `${min}m ${rem}s` : `${min}m`;
 }
 
-export default function TaskCompletedCard({ toolCall, diffStats, onLand, onDiscard, onDiff }: Props) {
+export default function TaskCompletedCard({ toolCall, diffStats, onLand, onDiscard, onDiff, seedGrow }: Props) {
+  const grow = useSeedGrow(seedGrow);
+  const growTransition = useReducedMotionTransition(SPRING.pop);
   const input = safeJsonParse<Input>(toolCall.input) ?? {};
   const liveStats = input.taskId ? diffStats?.get(input.taskId) : undefined;
   const adds = liveStats?.additions ?? input.additions ?? 0;
   const dels = liveStats?.deletions ?? input.deletions ?? 0;
   const taskId = input.taskId;
   return (
-    <div
+    <motion.div
       data-testid="swarm-task-completed-card"
       style={{
         ...cardBase,
         borderColor: SWARM_GREEN,
         background: 'rgba(58,168,108,0.06)',
+        ...(grow ? { overflow: 'hidden' } : null),
       }}
+      initial={grow ? { height: 0, paddingTop: 0, paddingBottom: 0, opacity: 0 } : false}
+      animate={grow ? { height: 'auto', paddingTop: 10, paddingBottom: 10, opacity: 1 } : undefined}
+      transition={growTransition}
     >
       <div style={{ ...cardHeader, color: SWARM_GREEN }}>
         <span>✓ Task completed</span>
@@ -95,6 +106,6 @@ export default function TaskCompletedCard({ toolCall, diffStats, onLand, onDisca
           </div>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 }

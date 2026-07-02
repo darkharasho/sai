@@ -72,10 +72,12 @@ describe('ChatMessage', () => {
 
   it('shows arrived assistant text live while streaming (spec change 2026-06-11)', () => {
     // The morph head used to hold ALL text until the stream settled, which
-    // swallowed long stretches of reply during tool-heavy turns. Arrived text
-    // now renders live; the head keeps the animated logo + clock.
-    const msg = makeMessage({ role: 'assistant', content: 'partial chunk' });
-    const { container } = render(<ChatMessage message={msg} isStreaming />);
+    // swallowed long stretches of reply during tool-heavy turns. Text the user
+    // watches arrive (content grows across renders) renders live; the head
+    // keeps the animated logo + clock.
+    const msg = makeMessage({ role: 'assistant', content: 'partial ' });
+    const { container, rerender } = render(<ChatMessage message={msg} isStreaming />);
+    rerender(<ChatMessage message={{ ...msg, content: 'partial chunk' }} isStreaming />);
     const head = container.querySelector('.sah-root');
     expect(head).toBeTruthy();
     const md = container.querySelector('.sah-md') as HTMLElement | null;
@@ -520,17 +522,23 @@ describe('ChatMessage', () => {
     // Live-shown text was already watched arriving; re-animating it at settle
     // would replay content the user has read.
     vi.useFakeTimers();
+    let now = 10_000;
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => now);
     try {
-      const msg = { id: 'rv-stream', role: 'assistant' as const, content: 'streamed then done', timestamp: Date.now() };
+      const msg = { id: 'rv-stream', role: 'assistant' as const, content: 'streamed then', timestamp: Date.now() };
+      const grown = { ...msg, content: 'streamed then done' };
       const { container, rerender } = render(
         <ChatMessage message={msg} projectPath="/p" isStreaming={true} />
       );
-      rerender(<ChatMessage message={msg} projectPath="/p" isStreaming={false} />);
+      rerender(<ChatMessage message={grown} projectPath="/p" isStreaming={true} />);
+      now += 500; // watched past the threshold
+      rerender(<ChatMessage message={grown} projectPath="/p" isStreaming={false} />);
       act(() => { vi.advanceTimersByTime(300); });
       expect(container.querySelectorAll('.rv-word').length).toBe(0);
       const md = container.querySelector('.sah-md') as HTMLElement | null;
       expect(md?.style.display).not.toBe('none');
     } finally {
+      nowSpy.mockRestore();
       vi.useRealTimers();
     }
   });

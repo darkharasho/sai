@@ -1,4 +1,7 @@
 import React from 'react';
+import { motion } from 'motion/react';
+import { useSeedGrow } from '../../Chat/seedGrow';
+import { SPRING, useReducedMotionTransition } from '../../Chat/motion';
 import type { ToolCall, SwarmTask, SwarmTaskStatus } from '../../../types';
 import { cardBase, cardHeader, safeJsonParse, btnBase, btnPrimary, btnDanger } from './cardStyles';
 import Sparkline from '../Sparkline';
@@ -31,6 +34,8 @@ interface Props {
   onRetry?: (prompt: string) => void;
   /** Scroll the orchestrator chat to the inline approval card for this task. */
   onScrollToApproval?: (taskId: string) => void;
+  /** Card is born from the tail thinking row: mount with the grow-in entry. */
+  seedGrow?: boolean;
 }
 
 const STATUS_COLORS: Record<SwarmTaskStatus, string> = {
@@ -124,12 +129,21 @@ export default function SpawnTaskCard({
   onDiff,
   onRetry,
   onScrollToApproval,
+  seedGrow,
 }: Props) {
+  const grow = useSeedGrow(seedGrow);
+  const growTransition = useReducedMotionTransition(SPRING.pop);
   const dispatched = parseDispatched(toolCall);
   const count = dispatched.length;
 
   return (
-    <div data-testid="swarm-spawn-card" style={cardBase}>
+    <motion.div
+      data-testid="swarm-spawn-card"
+      style={grow ? { ...cardBase, overflow: 'hidden' } : cardBase}
+      initial={grow ? { height: 0, paddingTop: 0, paddingBottom: 0, opacity: 0 } : false}
+      animate={grow ? { height: 'auto', paddingTop: 10, paddingBottom: 10, opacity: 1 } : undefined}
+      transition={growTransition}
+    >
       <div style={cardHeader}>
         <span>
           <span style={{ color: 'var(--accent)' }}>⚡</span>{' '}
@@ -256,6 +270,6 @@ export default function SpawnTaskCard({
           <li style={{ opacity: 0.6, fontSize: 11 }}>No tasks parsed from input</li>
         )}
       </ul>
-    </div>
+    </motion.div>
   );
 }

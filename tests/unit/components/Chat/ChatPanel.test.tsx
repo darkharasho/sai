@@ -1155,6 +1155,57 @@ describe('ChatPanel', () => {
       expect(streamingMsg).toBeTruthy();
     });
 
+    it('SAI: hides the pending thinking row while a reasoning card is live', async () => {
+      const props = { ...baseProps(), aiProvider: 'claude' as const };
+      const { container, rerender } = render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+      await act(async () => {
+        for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+          (handler as (m: any) => void)({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+          (handler as (m: any) => void)({ type: 'reasoning_delta', text: 'weighing options...', projectPath: '/project', scope: 'chat' });
+        }
+      });
+      rerender(<ChatPanel {...props} isStreaming />);
+
+      // The reasoning flush is rAF-batched (stubbed to setTimeout 0) — once the
+      // live reasoning card exists it owns the working signal, so the pending
+      // thinking row must not double up below it.
+      await waitFor(() => {
+        expect(container.querySelector('[data-testid="thinking-animation"]')).toBeNull();
+      });
+
+      // A tool call finalizes the reasoning segment — but the running tool card
+      // is now the working signal (and the row's morph target), so the row stays
+      // hidden until the tool resolves.
+      await act(async () => {
+        for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+          (handler as (m: any) => void)({
+            type: 'assistant',
+            message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: {} }] },
+            projectPath: '/project',
+            scope: 'chat',
+          });
+        }
+      });
+      rerender(<ChatPanel {...props} isStreaming />);
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeNull();
+
+      // Tool result arrives, turn still live → the pending row takes back over.
+      await act(async () => {
+        for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+          (handler as (m: any) => void)({
+            type: 'user',
+            message: { content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'ok' }] },
+            projectPath: '/project',
+            scope: 'chat',
+          });
+        }
+      });
+      rerender(<ChatPanel {...props} isStreaming />);
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+    });
+
     it('all providers use SAI animation system — no provider-specific banners', async () => {
       const props = { ...baseProps(), aiProvider: 'gemini' as const };
       const { container, rerender } = render(<ChatPanel {...props} />);
@@ -1188,7 +1239,15 @@ describe('ChatPanel', () => {
       scope: 'chat',
     });
 
-    it('SAI: keeps a thinking row during a no-preamble tool call', async () => {
+    // A tool result event resolving the tool spawned by toolUseEvent().
+    const toolResultEvent = () => ({
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'ok' }] },
+      projectPath: '/project',
+      scope: 'chat',
+    });
+
+    it('SAI: the running tool card owns the working signal; the row returns on its result', async () => {
       const props = { ...baseProps(), aiProvider: 'claude' as const };
       const { container, rerender } = render(<ChatPanel {...props} />);
       await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
@@ -1199,11 +1258,23 @@ describe('ChatPanel', () => {
         }
       });
       rerender(<ChatPanel {...props} isStreaming />);
-      // The tool is running and the AI is still working → a thinking row must remain.
+      // While the tool runs, its shimmering card is the working signal and the
+      // thinking row yields to it (the newborn card mounts with the seedGrow entry).
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeNull();
+      expect(container.querySelector('[data-msg-toolcalls="1"]')).toBeTruthy();
+
+      // Tool resolved but the turn continues → the thinking row must come back
+      // so the working state never goes signal-less.
+      await act(async () => {
+        for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+          (handler as (m: any) => void)(toolResultEvent());
+        }
+      });
+      rerender(<ChatPanel {...props} isStreaming />);
       expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
     });
 
-    it('SAI: keeps a thinking row when a typed response leads into a tool call', async () => {
+    it('SAI: typed response into a tool call — card owns the signal, row returns after', async () => {
       const props = { ...baseProps(), aiProvider: 'claude' as const };
       const { container, rerender } = render(<ChatPanel {...props} />);
       await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
@@ -1214,8 +1285,17 @@ describe('ChatPanel', () => {
         }
       });
       rerender(<ChatPanel {...props} isStreaming />);
-      // The typed text reveals (in the mocked ChatMessage) AND a thinking row remains
-      // below it while the tool runs — the animation must not vanish.
+      // The typed text reveals (in the mocked ChatMessage); the running tool card
+      // below it carries the working signal, not a duplicate thinking row.
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeNull();
+      expect(container.querySelector('[data-msg-toolcalls="1"]')).toBeTruthy();
+
+      await act(async () => {
+        for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+          (handler as (m: any) => void)(toolResultEvent());
+        }
+      });
+      rerender(<ChatPanel {...props} isStreaming />);
       expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
     });
   });

@@ -184,7 +184,13 @@ describe('StreamingAssistantHead', () => {
   it('skips the morph blackout for text the user watched stream in live', async () => {
     // While 'morphing' the md is display:none; for live-shown text that was a
     // 250ms blackout of already-visible reply text on every idle settle.
+    // "Watched live" = content GREW after mount (a delta stream).
     const { container, rerender } = render(
+      <StreamingAssistantHead streaming content="visible" messageId="m-noblink">
+        <p>visible</p>
+      </StreamingAssistantHead>
+    );
+    rerender(
       <StreamingAssistantHead streaming content="visible text" messageId="m-noblink">
         <p>visible text</p>
       </StreamingAssistantHead>
@@ -260,7 +266,13 @@ describe('reveal replay on remount (workspace/chat swap)', () => {
 
 describe('live text during streaming (no swallowed messages)', () => {
   it('shows arrived text while still streaming instead of holding it', () => {
-    const { container } = render(
+    // A delta stream: content grows after mount, so it renders live.
+    const { container, rerender } = render(
+      <StreamingAssistantHead streaming content="partial " messageId="m-live">
+        <p>partial </p>
+      </StreamingAssistantHead>
+    );
+    rerender(
       <StreamingAssistantHead streaming content="partial reply so far" messageId="m-live">
         <p>partial reply so far</p>
       </StreamingAssistantHead>
@@ -272,13 +284,53 @@ describe('live text during streaming (no swallowed messages)', () => {
     expect(container.querySelector('.sah-clock')).toBeTruthy();
   });
 
+  it('holds a complete-frame segment in thinking, then morphs and reveals at settle', async () => {
+    // A segment that MOUNTS with its full text while streaming (a non-delta
+    // frame — the common shape of the final reply after tool runs) was never
+    // watched arriving: it must keep the typing status and word-reveal instead
+    // of popping in fully-formed (regression: liveShown misclassified it).
+    _resetRevealRegistry();
+    const { container, rerender } = render(
+      <StreamingAssistantHead streaming content="the full reply at once" messageId="m-frame">
+        <p>the full reply at once</p>
+      </StreamingAssistantHead>
+    );
+    // Still thinking: status visible, md hidden.
+    expect(container.querySelector('.sah-root')?.getAttribute('data-phase')).toBe('thinking');
+    expect(container.querySelector('.sah-status')).toBeTruthy();
+    expect((container.querySelector('.sah-md') as HTMLElement).style.display).toBe('none');
+    // Turn settles → morph → word reveal plays.
+    await act(async () => {
+      rerender(
+        <StreamingAssistantHead streaming={false} content="the full reply at once" messageId="m-frame">
+          <p>the full reply at once</p>
+        </StreamingAssistantHead>
+      );
+    });
+    // The 250ms morph timer arms in an effect after the settle commit — wait it
+    // out in a separate act pass.
+    await act(async () => { await new Promise(res => setTimeout(res, 320)); });
+    expect(container.querySelector('.sah-root')?.getAttribute('data-phase')).toBe('revealed');
+    expect(revealSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('does not word-reveal text the user already watched stream in', async () => {
     _resetRevealRegistry();
+    // "Watched" is time-based: the text must be on screen streaming for at
+    // least the watch threshold, not merely have grown once.
+    let now = 10_000;
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => now);
     const r = render(
+      <StreamingAssistantHead streaming content="text already" messageId="m-live2">
+        <p>text already</p>
+      </StreamingAssistantHead>
+    );
+    r.rerender(
       <StreamingAssistantHead streaming content="text already on screen" messageId="m-live2">
         <p>text already on screen</p>
       </StreamingAssistantHead>
     );
+    now += 500; // watched past the threshold
     r.rerender(
       <StreamingAssistantHead streaming={false} content="text already on screen" durationMs={900} messageId="m-live2">
         <p>text already on screen</p>
@@ -286,5 +338,37 @@ describe('live text during streaming (no swallowed messages)', () => {
     );
     await act(async () => { await new Promise(res => setTimeout(res, 300)); });
     expect(revealSpy).not.toHaveBeenCalled();
+    nowSpy.mockRestore();
+  });
+
+  it('DOES word-reveal a quick burst that was only briefly on screen', async () => {
+    _resetRevealRegistry();
+    // Content grew, but settled well under the watch threshold — the user
+    // never read it arriving, so the typing sweep must still play.
+    let now = 10_000;
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const r = render(
+      <StreamingAssistantHead streaming content="quick " messageId="m-burst">
+        <p>quick </p>
+      </StreamingAssistantHead>
+    );
+    r.rerender(
+      <StreamingAssistantHead streaming content="quick burst reply" messageId="m-burst">
+        <p>quick burst reply</p>
+      </StreamingAssistantHead>
+    );
+    now += 100; // settled almost immediately
+    await act(async () => {
+      r.rerender(
+        <StreamingAssistantHead streaming={false} content="quick burst reply" messageId="m-burst">
+          <p>quick burst reply</p>
+        </StreamingAssistantHead>
+      );
+      await new Promise(res => setTimeout(res, 50));
+    });
+    expect(revealSpy).toHaveBeenCalledTimes(1);
+    // No morph blackout for text that was visible: straight to revealed.
+    expect(r.container.querySelector('.sah-root')?.getAttribute('data-phase')).toBe('revealed');
+    nowSpy.mockRestore();
   });
 });
