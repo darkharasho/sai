@@ -8,6 +8,7 @@ const POLL_INTERVAL = 60_000; // 60 seconds
 const CREDENTIALS_PATH = path.join(process.env.HOME || '', '.claude', '.credentials.json');
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+let registeredWin: BrowserWindow | null = null;
 let cachedToken: string | null = null;
 let tokenReadFailed = false;
 let backoffUntil = 0; // Timestamp — skip polls until this time
@@ -73,7 +74,19 @@ function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
   } catch { /* Window destroyed */ }
 }
 
+/**
+ * Broadcast a usage payload to the renderer's usage:update listeners.
+ * Called by the SDK backend with the rate-limit windows from the runtime's
+ * get_usage control request — same shape as the OAuth endpoint's response
+ * (per-window { utilization: 0-100, resets_at: ISO }), so the renderer merge
+ * is source-agnostic.
+ */
+export function publishUsage(data: Record<string, unknown>) {
+  if (registeredWin) safeSend(registeredWin, 'usage:update', data);
+}
+
 export function registerUsageHandlers(win: BrowserWindow) {
+  registeredWin = win;
   // Manual fetch
   ipcMain.handle('usage:fetch', async () => {
     const token = readOAuthToken();

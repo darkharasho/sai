@@ -276,7 +276,26 @@ export interface SdkBackendDeps {
    * undefined (e.g. dispatch not yet registered), no swarm server is attached.
    */
   buildSwarmMcpServer?: (workspace: string) => McpSdkServerConfigWithInstance | undefined;
+  /**
+   * Where to broadcast plan rate-limit windows fetched from the runtime's
+   * get_usage control request. Default: usage.ts publishUsage (the same
+   * usage:update channel the OAuth poller feeds).
+   */
+  publishUsage?: (data: Record<string, unknown>) => void;
 }
+
+/** Lazy-required so tests (node env, electron absent) never load usage.ts. */
+function defaultPublishUsage(data: Record<string, unknown>): void {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../usage').publishUsage(data);
+  } catch { /* electron unavailable (tests) */ }
+}
+
+/** Min gap between get_usage control requests across all scopes — the data is
+ *  account-level, so one fetch serves every workspace; the 60s OAuth poller
+ *  covers idle periods. */
+const USAGE_FETCH_MIN_INTERVAL_MS = 30_000;
 
 // ─── SdkBackend ───────────────────────────────────────────────────────────────
 
@@ -295,7 +314,10 @@ export class SdkBackend implements ClaudeBackend {
   private readonly _notify: SdkNotify;
   private readonly _buildChatMcpServer?: (workspace: string) => McpSdkServerConfigWithInstance | undefined;
   private readonly _buildSwarmMcpServer?: (workspace: string) => McpSdkServerConfigWithInstance | undefined;
+  private readonly _publishUsage: (data: Record<string, unknown>) => void;
   private idleSweepTimer: ReturnType<typeof setInterval> | null = null;
+  /** Epoch ms of the last get_usage control request (all scopes). */
+  private lastUsageFetchAt = 0;
 
   constructor(deps?: SdkBackendDeps) {
     if (deps?.queryFn) {
@@ -311,6 +333,7 @@ export class SdkBackend implements ClaudeBackend {
     this._notify = deps?.notify ?? defaultNotify;
     this._buildChatMcpServer = deps?.buildChatMcpServer;
     this._buildSwarmMcpServer = deps?.buildSwarmMcpServer;
+    this._publishUsage = deps?.publishUsage ?? defaultPublishUsage;
     this._startIdleSweep();
   }
 
@@ -1040,6 +1063,26 @@ export class SdkBackend implements ClaudeBackend {
                   });
                 }
               }).catch(() => { /* control request unavailable — estimate stands */ });
+            }
+            // Plan rate-limit windows: ask the runtime for the structured
+            // /usage data and feed it to the same usage:update channel the
+            // OAuth poller uses, so the bars are fresh right after each turn.
+            // Throttled globally — the data is account-level, not per-scope.
+            // The method name is the SDK's own experimental marker; guard the
+            // call so an SDK that renames/removes it degrades to poller-only.
+            const uq = session.query as unknown as {
+              usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?: () => Promise<any>;
+            };
+            if (
+              typeof uq.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET === 'function'
+              && Date.now() - this.lastUsageFetchAt >= USAGE_FETCH_MIN_INTERVAL_MS
+            ) {
+              this.lastUsageFetchAt = Date.now();
+              uq.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET().then((u) => {
+                if (u && u.rate_limits_available === true && u.rate_limits && typeof u.rate_limits === 'object') {
+                  this._publishUsage(u.rate_limits as Record<string, unknown>);
+                }
+              }).catch(() => { /* API-key session or older runtime — poller stands */ });
             }
             // Only notify on a genuine completion — waits stay silent.
             if (wasStreaming && wait?.kind === 'none') {

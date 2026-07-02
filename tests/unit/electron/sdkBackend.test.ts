@@ -1582,6 +1582,67 @@ describe('SdkBackend', () => {
     fakeQuery.close();
   });
 
+  it('(41) publishes rate-limit windows after a result when the runtime supports get_usage', async () => {
+    const fakeQuery = makeFakeQuery([
+      { type: 'result', stop_reason: 'end_turn', num_turns: 1 },
+    ], { hang: true });
+    const rateLimits = {
+      five_hour: { utilization: 34, resets_at: '2026-07-02T18:00:00Z' },
+      seven_day: { utilization: 61, resets_at: '2026-07-06T00:00:00Z' },
+      seven_day_opus: null,
+    };
+    (fakeQuery as any).usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = vi.fn().mockResolvedValue({
+      session: { total_cost_usd: 0.5 },
+      subscription_type: 'max',
+      rate_limits_available: true,
+      rate_limits: rateLimits,
+    });
+    const published: any[] = [];
+    const backend = new SdkBackend({
+      queryFn: vi.fn(() => fakeQuery),
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+      publishUsage: (d) => published.push(d),
+    });
+    backend.send({ projectPath: PROJECT, message: 'go', scope: SCOPE });
+    await new Promise<void>((resolve) => {
+      const check = () => { if (published.length > 0) resolve(); else setTimeout(check, 5); };
+      setTimeout(check, 5);
+    });
+
+    expect(published[0]).toEqual(rateLimits);
+    fakeQuery.close();
+  });
+
+  it('(42) does not publish usage when rate limits are unavailable, and throttles repeat fetches', async () => {
+    const fakeQuery = makeFakeQuery([
+      { type: 'result', stop_reason: 'end_turn', num_turns: 1 },
+      { type: 'result', stop_reason: 'end_turn', num_turns: 1 },
+    ], { hang: true });
+    const usageFn = vi.fn().mockResolvedValue({
+      session: { total_cost_usd: 0 },
+      subscription_type: null,
+      rate_limits_available: false,
+      rate_limits: null,
+    });
+    (fakeQuery as any).usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = usageFn;
+    const published: any[] = [];
+    const backend = new SdkBackend({
+      queryFn: vi.fn(() => fakeQuery),
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+      publishUsage: (d) => published.push(d),
+    });
+    backend.send({ projectPath: PROJECT, message: 'go', scope: SCOPE });
+    await new Promise((r) => setTimeout(r, 30));
+
+    // API-key session: fetched but never published; second result inside the
+    // 30s window doesn't re-fetch.
+    expect(usageFn).toHaveBeenCalledTimes(1);
+    expect(published).toEqual([]);
+    fakeQuery.close();
+  });
+
   it('(40) commands_changed replaces the slash-command cache with slash-prefixed names', async () => {
     const fakeQuery = makeFakeQuery([
       { type: 'system', subtype: 'commands_changed', commands: [{ name: 'deploy', description: '' }, { name: 'lint', description: '' }] },
