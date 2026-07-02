@@ -406,6 +406,23 @@ const FAKE_ERROR_VARIANTS = {
 } as const;
 
 const RENDER_CHUNK = 50; // messages to show per window
+
+// Shared motion props for the tail thinking rows.
+// - Enter must NOT animate height to 'auto': framer resolves 'auto' by
+//   measuring at animation start, and the row's content (typewriter text
+//   starts empty) can measure ~8px — the value then freezes as inline height
+//   under overflow:hidden = an invisible row. Exit DOES collapse height: it
+//   measures the real current height, so the transcript slides smoothly when
+//   the row yields to a card.
+// - flexShrink 0: the messages column is a flex container and crushes this
+//   wrapper otherwise — with overflow:hidden (needed for the exit collapse)
+//   the crush becomes an actual clip.
+const THINKING_ROW_MOTION = {
+  initial: { opacity: 0, y: DISTANCE.lift },
+  animate: { opacity: 1, y: 0 },
+  exit: { opacity: 0, height: 0 },
+  style: { overflow: 'hidden', flexShrink: 0 },
+} as const;
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
 
@@ -2120,22 +2137,10 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             slides smoothly instead of snapping when the row swaps with a
             newborn card or a streaming head. */}
         <AnimatePresence mode="sync" initial={false}>
-          {/* Enter must NOT animate height to 'auto': framer resolves 'auto' by
-              measuring at animation start, and the row's content (typewriter
-              text starts empty) can measure ~8px — the value then freezes as
-              inline height under overflow:hidden = an invisible row. Exit DOES
-              collapse height: it measures the real current height, so the
-              transcript slides smoothly when the row yields to a card. */}
           {showDetachedBanner && (
             <motion.div
               key={`thinking-${rowSeqRef.current}`}
-              initial={{ opacity: 0, y: DISTANCE.lift }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, height: 0 }}
-              // flexShrink 0: the messages column is a flex container and
-              // crushes this wrapper otherwise — with overflow:hidden (needed
-              // for the exit collapse) the crush becomes an actual clip.
-              style={{ overflow: 'hidden', flexShrink: 0 }}
+              {...THINKING_ROW_MOTION}
               transition={rowTransition}
             >
               <ThinkingAnimation hint={streamHint} />
@@ -2144,13 +2149,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           {showPendingSaiThinking && (
             <motion.div
               key={`thinking-pending-${rowSeqRef.current}`}
-              initial={{ opacity: 0, y: DISTANCE.lift }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, height: 0 }}
-              // flexShrink 0: the messages column is a flex container and
-              // crushes this wrapper otherwise — with overflow:hidden (needed
-              // for the exit collapse) the crush becomes an actual clip.
-              style={{ overflow: 'hidden', flexShrink: 0 }}
+              {...THINKING_ROW_MOTION}
               transition={rowTransition}
             >
               <ThinkingAnimation hint={streamHint} />

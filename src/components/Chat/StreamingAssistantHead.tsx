@@ -66,9 +66,16 @@ export default function StreamingAssistantHead({ streaming, content, durationMs,
     firstGrowthAtRef.current != null && performance.now() - firstGrowthAtRef.current >= WATCHED_MS;
   const showLive = streaming && !!content && liveShownRef.current;
   // Once genuinely watched, mark the registry — a swap-away mid-stream must
-  // remount as already-seen instead of re-typing text the user read.
+  // remount as already-seen instead of re-typing text the user read. Sampled
+  // per render (the threshold is wall-time and this renders per token), but
+  // marked at most once.
+  const markedWatchedRef = useRef(false);
   useEffect(() => {
-    if (messageId && watchedNow()) markRevealed(messageId);
+    if (markedWatchedRef.current || !messageId) return;
+    if (watchedNow()) {
+      markedWatchedRef.current = true;
+      markRevealed(messageId);
+    }
   });
 
   useEffect(() => {
