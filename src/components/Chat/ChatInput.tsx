@@ -1493,7 +1493,11 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
           padding: 2px 2px 0 2px;
           background: linear-gradient(135deg, var(--accent) 0%, var(--orange) 20%, var(--red) 50%, var(--orange) 80%, var(--accent) 100%);
           background-size: 300% 300%;
-          animation: gradient-sweep 20s ease-in-out infinite alternate;
+          /* steps(): background-position isn't compositable, so a continuous
+             sweep re-rasters this masked ring every vsync forever and pins the
+             viz compositor (100% CPU on software rendering). 80 steps = one
+             cheap repaint per 250ms, visually identical for a soft gradient. */
+          animation: gradient-sweep 20s steps(80) infinite alternate;
           -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
           -webkit-mask-composite: xor;
           mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
@@ -1570,7 +1574,9 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
           padding: 2px;
           background: linear-gradient(135deg, var(--accent) 0%, var(--orange) 20%, var(--red) 50%, var(--orange) 80%, var(--accent) 100%);
           background-size: 300% 300%;
-          animation: gradient-sweep 20s ease-in-out infinite alternate;
+          /* steps(): see .context-chip::before — continuous background-position
+             animation re-rasters every frame and pins the viz compositor. */
+          animation: gradient-sweep 20s steps(80) infinite alternate;
           -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
           -webkit-mask-composite: xor;
           mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
@@ -1627,6 +1633,9 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
         @keyframes gradient-sweep {
           0% { background-position: 0% 0%; }
           100% { background-position: 100% 100%; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .input-box::before, .context-chip::before { animation: none; }
         }
         @keyframes ticker-slide-up {
           0% { transform: translateY(8px); opacity: 0.3; }
