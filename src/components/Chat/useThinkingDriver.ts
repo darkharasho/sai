@@ -112,6 +112,19 @@ export function useThinkingDriver(active = true): ThinkingDriver {
   const elapsedRef = useRef(0);
   const [clockText, setClockText] = useState('00:00.0');
 
+  // Re-base the clock each time the driver re-activates (a head re-entering
+  // thinking after a reveal or a wait/resume). Without this the clock keeps
+  // counting from mount, so later segments read as session-total time.
+  const prevActiveRef = useRef(active);
+  useEffect(() => {
+    if (active && !prevActiveRef.current) {
+      mountedAtRef.current = performance.now();
+      elapsedRef.current = 0;
+      setClockText('00:00.0');
+    }
+    prevActiveRef.current = active;
+  }, [active]);
+
   useEffect(() => {
     if (!saiAnimationEnabled || !active) return;
     const id = setInterval(() => {
