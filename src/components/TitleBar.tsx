@@ -71,6 +71,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
   const [recentProjects, setRecentProjects] = useState<string[]>([]);
   const [recentQuery, setRecentQuery] = useState('');
   const [recentFocused, setRecentFocused] = useState(false);
+  const recentInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     window.sai.updateGetVersion().then((v: string) => setVersion(v));
@@ -119,7 +120,17 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
       }
     };
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') { setOpen(false); return; }
+      // Type-to-search: printable keystrokes with nothing focused go to the
+      // recent filter, seeding it with the typed character.
+      if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      const input = recentInputRef.current;
+      if (!input) return;
+      e.preventDefault();
+      setRecentQuery(q => q + e.key);
+      input.focus();
     };
     if (open) {
       document.addEventListener('mousedown', handleClick);
@@ -195,6 +206,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         }}>
           <Search size={12} color={recentFocused ? 'var(--accent)' : 'var(--text-muted)'} style={{ flexShrink: 0 }} />
           <input
+            ref={recentInputRef}
             type="text"
             value={recentQuery}
             onChange={(e) => setRecentQuery(e.target.value)}
