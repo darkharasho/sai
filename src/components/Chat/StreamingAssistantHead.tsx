@@ -62,13 +62,25 @@ export default function StreamingAssistantHead({ streaming, content, durationMs,
     revealedRef.current = true;
     frozenMsRef.current = durationMs ?? driver.elapsedMs;
 
-    if (prefersReducedMotion()) { setPhase('revealed'); return; }
+    // The morph blur transitions the STATUS text away — pointless (and a 250ms
+    // display:none blackout of already-visible reply text, i.e. mid-reply
+    // flashing) when the user watched the content stream in live.
+    if (prefersReducedMotion() || liveShownRef.current) { setPhase('revealed'); return; }
 
     setPhase('morphing');
-    const t = setTimeout(() => setPhase('revealed'), STATUS_BLUR_MS);
-    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streaming, content]);
+
+  // Complete the morph on a timer keyed ONLY on phase. When this lived in the
+  // effect above, a token arriving during the 250ms morph re-ran it: the
+  // cleanup cancelled the timer and the re-run bailed on revealedRef, leaving
+  // the phase stuck at 'morphing' — and the md is display:none there, so the
+  // finished reply rendered as a BLANK message (logo + clock, no text).
+  useEffect(() => {
+    if (phase !== 'morphing') return;
+    const t = setTimeout(() => setPhase('revealed'), STATUS_BLUR_MS);
+    return () => clearTimeout(t);
+  }, [phase]);
 
   // Reveal exactly once when we reach the revealed phase. Deliberately NO
   // cancel-on-cleanup: under StrictMode the cleanup would force-complete the reveal

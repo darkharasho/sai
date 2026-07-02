@@ -156,6 +156,51 @@ describe('StreamingAssistantHead', () => {
     expect(container.querySelector('.sah-clock')?.textContent).toBe('[00:05.0]');
   });
 
+  it('does not strand the reply hidden when content updates during the morph window', async () => {
+    // Regression: the morph→revealed timer lived in the [streaming, content]
+    // effect, so a token arriving during the 250ms morph cancelled it via
+    // cleanup and the re-run bailed on revealedRef — phase stuck at 'morphing'
+    // (md display:none) and the finished reply rendered blank.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { container, rerender } = render(
+      <StreamingAssistantHead streaming content=""><p>almost</p></StreamingAssistantHead>
+    );
+    await act(async () => {
+      rerender(<StreamingAssistantHead streaming={false} content="almost"><p>almost</p></StreamingAssistantHead>);
+    });
+    // content changes mid-morph (late flush while settled)
+    await act(async () => { vi.advanceTimersByTime(100); });
+    await act(async () => {
+      rerender(<StreamingAssistantHead streaming={false} content="almost done"><p>almost done</p></StreamingAssistantHead>);
+    });
+    await act(async () => { vi.advanceTimersByTime(300); });
+
+    expect(container.querySelector('.sah-root')?.getAttribute('data-phase')).toBe('revealed');
+    const md = container.querySelector('.sah-md') as HTMLElement;
+    expect(md.style.display).not.toBe('none');
+    expect(md.textContent).toContain('almost done');
+  });
+
+  it('skips the morph blackout for text the user watched stream in live', async () => {
+    // While 'morphing' the md is display:none; for live-shown text that was a
+    // 250ms blackout of already-visible reply text on every idle settle.
+    const { container, rerender } = render(
+      <StreamingAssistantHead streaming content="visible text" messageId="m-noblink">
+        <p>visible text</p>
+      </StreamingAssistantHead>
+    );
+    await act(async () => {
+      rerender(
+        <StreamingAssistantHead streaming={false} content="visible text" messageId="m-noblink">
+          <p>visible text</p>
+        </StreamingAssistantHead>
+      );
+    });
+    // immediately after the settle — no morphing phase, no hidden md
+    expect(container.querySelector('.sah-root')?.getAttribute('data-phase')).toBe('revealed');
+    expect((container.querySelector('.sah-md') as HTMLElement).style.display).not.toBe('none');
+  });
+
   it('reveals exactly once under StrictMode (no cancel-on-cleanup force-complete)', () => {
     // Regression for commit 34660bf: StrictMode double-invokes effects; a
     // cancel-on-cleanup would force-complete the reveal before the real run.
