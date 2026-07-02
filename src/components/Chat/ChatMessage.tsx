@@ -295,6 +295,7 @@ function ChatMessage({
   isStreaming = false,
   isFirstAssistantOfTurn = false,
   pinnedLayoutId,
+  seedGrow,
   renderToolCall,
   renderMessage,
   metaRuntime,
@@ -312,8 +313,14 @@ function ChatMessage({
   isStreaming?: boolean;
   isFirstAssistantOfTurn?: boolean;
   pinnedLayoutId?: string;
-  /** Optional override for tool-call rendering. Return `null` to fall back to the default `ToolCallCard`. */
-  renderToolCall?: (tc: import('../../types').ToolCall, defaultExpanded: boolean) => React.ReactNode | null;
+  /** This message's live reasoning card / running tool card was born from the
+   *  tail thinking row — that card mounts with the grow-in entry (see seedGrow.ts). */
+  seedGrow?: boolean;
+  /** Optional override for tool-call rendering. Return `null` to fall back to the
+   *  default `ToolCallCard`. When `seedGrow` is true this call's card is born
+   *  from the tail thinking row — mount it with the grow-in entry (see
+   *  seedGrow.ts) so the row visibly becomes the card. */
+  renderToolCall?: (tc: import('../../types').ToolCall, defaultExpanded: boolean, seedGrow?: boolean) => React.ReactNode | null;
   /** Optional whole-message override (e.g. for inline approval cards). Return `null` to use the default renderer. */
   renderMessage?: (message: ChatMessageType) => React.ReactNode | null;
   /** Active meta-workspace runtime; when set, tool-call cards show a project chip. */
@@ -738,6 +745,13 @@ function ChatMessage({
 
   const isAssistantStreaming = isStreaming && message.role === 'assistant';
   const streamedThisSession = STREAMED_MESSAGES.has(message.id);
+  // Instance-scoped "streamed while THIS mount watched": the .sw stream-word
+  // spans carry a fade-in animation that replays on every mount, so a
+  // workspace/chat swap must not re-apply the stream plugins to a message that
+  // finished streaming — only mounts that actually rendered it streaming keep
+  // them (for word-wrap stability across the settle).
+  const sawStreamingRef = useRef(false);
+  if (isAssistantStreaming) sawStreamingRef.current = true;
   const fresh = Date.now() - (message.timestamp ?? 0) <= REVEAL_FRESH_MS;
   const useMorphHead =
     message.role === 'assistant' &&
@@ -828,6 +842,7 @@ function ChatMessage({
           startedAt={message.timestamp}
           durationMs={message.reasoningDurationMs}
           tokens={message.reasoningTokens}
+          seedGrow={!!message.reasoningLive && seedGrow}
         />
       )}
       {useMorphHead && (isAssistantStreaming || message.content) && (
@@ -838,7 +853,7 @@ function ChatMessage({
           messageId={message.id}
         >
           <ReactMarkdown
-            {...((isAssistantStreaming || streamedThisSession) ? ASSISTANT_MD_PLUGINS_STREAM : ASSISTANT_MD_PLUGINS)}
+            {...(sawStreamingRef.current ? ASSISTANT_MD_PLUGINS_STREAM : ASSISTANT_MD_PLUGINS)}
             components={markdownComponents}
           >
             {typeof message.content === 'string' ? message.content : String(message.content ?? '')}
@@ -887,13 +902,20 @@ function ChatMessage({
       )}
       {message.toolCalls && message.toolCalls.length > 0 && (
         <Stagger cadence="default">
-          {message.toolCalls.map((tc, i) => {
-            if (renderToolCall) {
-              const custom = renderToolCall(tc, toolCallsExpanded);
-              if (custom != null) return <React.Fragment key={i}>{custom}</React.Fragment>;
-            }
-            return <ToolCallCard key={i} toolCall={tc} defaultExpanded={toolCallsExpanded} metaRuntime={metaRuntime} onAnswerQuestion={onAnswerQuestion} onAnswerPlanReview={onAnswerPlanReview} />;
-          })}
+          {(() => {
+            // The newest running tool card is the one born from the thinking row —
+            // unless the live reasoning card above already claimed the seed.
+            const seedToolIdx = seedGrow && !message.reasoningLive
+              ? message.toolCalls.reduce((acc, tc, idx) => (tc.output == null ? idx : acc), -1)
+              : -1;
+            return message.toolCalls.map((tc, i) => {
+              if (renderToolCall) {
+                const custom = renderToolCall(tc, toolCallsExpanded, i === seedToolIdx);
+                if (custom != null) return <React.Fragment key={i}>{custom}</React.Fragment>;
+              }
+              return <ToolCallCard key={i} toolCall={tc} defaultExpanded={toolCallsExpanded} metaRuntime={metaRuntime} onAnswerQuestion={onAnswerQuestion} onAnswerPlanReview={onAnswerPlanReview} seedGrow={i === seedToolIdx} />;
+            });
+          })()}
         </Stagger>
       )}
       {lightboxSrc && <ImageModal src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
@@ -1156,6 +1178,7 @@ export default memo(ChatMessage, (prev, next) =>
   prev.isStreaming === next.isStreaming &&
   prev.isFirstAssistantOfTurn === next.isFirstAssistantOfTurn &&
   prev.pinnedLayoutId === next.pinnedLayoutId &&
+  prev.seedGrow === next.seedGrow &&
   Boolean(prev.onRetry) === Boolean(next.onRetry) &&
   prev.onClearContext === next.onClearContext &&
   prev.renderToolCall === next.renderToolCall &&

@@ -1,4 +1,7 @@
 import { useState, useEffect } from 'react';
+import { motion } from 'motion/react';
+import { SEED_GROW_INITIAL, SEED_GROW_ANIMATE, useSeedGrow } from './seedGrow';
+import { SPRING, useReducedMotionTransition } from './motion';
 import './RenderToolCard.css';
 import type { ToolCall } from '../../types';
 import type { RenderEntry } from '../../render/renderStore';
@@ -202,8 +205,10 @@ function RenderCode({ code, lang }: { code: string; lang: string }) {
   return <div className="sai-rc__codehl" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-export function RenderToolCallCard({ tc, cwd = '' }: { tc: ToolCall; cwd?: string }) {
+export function RenderToolCallCard({ tc, cwd = '', seedGrow }: { tc: ToolCall; cwd?: string; /** Card is born from the tail thinking row: mount with the grow-in entry. */ seedGrow?: boolean }) {
   const [showCode, setShowCode] = useState(false);
+  const grow = useSeedGrow(seedGrow);
+  const growTransition = useReducedMotionTransition(SPRING.pop);
   const built = entryFromToolCall(tc, cwd);
   if (!built) return null;
   const { entry, code } = built;
@@ -227,8 +232,11 @@ export function RenderToolCallCard({ tc, cwd = '' }: { tc: ToolCall; cwd?: strin
 
   return (
     <div className="sai-rc-wrap">
-      <div
+      <motion.div
         className="sai-rc"
+        initial={grow ? SEED_GROW_INITIAL : false}
+        animate={grow ? SEED_GROW_ANIMATE : undefined}
+        transition={growTransition}
         data-testid="render-tool-call-card"
         data-layout={layout}
         data-expanded={showCode ? 'true' : 'false'}
@@ -265,7 +273,7 @@ export function RenderToolCallCard({ tc, cwd = '' }: { tc: ToolCall; cwd?: strin
           <div className="sai-rc__render"><RenderRegion entry={entry} /></div>
           <div className="sai-rc__code" data-testid="render-code"><RenderCode code={code} lang={lang} /></div>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }

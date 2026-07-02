@@ -9,6 +9,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import type { ToolCall, MetaWorkspaceRuntime } from '../../types';
 import { SPRING, useReducedMotionTransition } from './motion';
+import { SEED_GROW_INITIAL, SEED_GROW_ANIMATE, useSeedGrow } from './seedGrow';
 import { getShikiHighlighter, getActiveHighlightTheme } from '../../themes';
 import { DOT_MASK_URL } from '../../lib/assets';
 import { owningLink } from '../../lib/syntheticRoot';
@@ -988,7 +989,7 @@ function toolProjectLinkName(toolCall: ToolCall, runtime: MetaWorkspaceRuntime |
   return runtime.projects.some(pp => pp.linkName === seg) ? seg : null;
 }
 
-export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRuntime, onAnswerQuestion, onAnswerPlanReview }: { toolCall: ToolCall; defaultExpanded?: boolean; metaRuntime?: MetaWorkspaceRuntime | null; onAnswerQuestion?: (toolUseId: string, answers: Record<string, string | string[]>) => Promise<void> | void; onAnswerPlanReview?: (toolUseId: string, approved: boolean) => Promise<void> | void }) {
+export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRuntime, onAnswerQuestion, onAnswerPlanReview, seedGrow }: { toolCall: ToolCall; defaultExpanded?: boolean; metaRuntime?: MetaWorkspaceRuntime | null; onAnswerQuestion?: (toolUseId: string, answers: Record<string, string | string[]>) => Promise<void> | void; onAnswerPlanReview?: (toolUseId: string, approved: boolean) => Promise<void> | void; /** Card is born from the tail thinking row: mount with the grow-in entry. */ seedGrow?: boolean }) {
   // --- ExitPlanMode: render a dedicated plan review card instead of the generic tool card ---
   const isExitPlanMode = toolCall.name === 'ExitPlanMode';
   if (isExitPlanMode) {
@@ -1035,6 +1036,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
     ? parseSearchResults(toolCall.output)
     : null;
   const entryTransition = useReducedMotionTransition(SPRING.pop);
+  const grow = useSeedGrow(seedGrow);
   const badgeTransition = useReducedMotionTransition(SPRING.flick);
   const chevronTransition = useReducedMotionTransition(SPRING.flick);
   const expandTransition = useReducedMotionTransition({ height: { duration: 0.26, ease: [0.22, 1, 0.36, 1] as const }, opacity: { duration: 0.18 } });
@@ -1077,8 +1079,8 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
         data-entry-transition={JSON.stringify(entryTransition)}
         data-entry-y={String(10)}
         layout
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
+        initial={grow ? SEED_GROW_INITIAL : { opacity: 0, y: 10 }}
+        animate={grow ? SEED_GROW_ANIMATE : { opacity: 1, y: 0 }}
         transition={entryTransition}
         variants={{ hidden: { opacity: 0, y: 10 }, visible: { opacity: 1, y: 0 } }}
         className={`tool-call-card${status === 'running' ? ' tool-call-card--running' : ''}`}

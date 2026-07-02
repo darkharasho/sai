@@ -4,9 +4,9 @@ import { motion, AnimatePresence, LayoutGroup } from 'motion/react';
 import { setFlipRect } from './flipRegistry';
 import ThinkingAnimation from '../ThinkingAnimation';
 import SaiLogo from '../SaiLogo';
-import MotionPresence from './MotionPresence';
 import { SPRING, DISTANCE, EASING, useReducedMotionTransition } from './motion';
 import { useSaiAnimationPref } from './useSaiAnimationPref';
+import { markRevealed } from './revealRegistry';
 import { parseToolResultBlocks } from '../../lib/toolResultContent';
 import { buildPendingQuestionAnswer } from '../../lib/pendingQuestionAnswer';
 import WaitingIndicator from './WaitingIndicator';
@@ -163,7 +163,9 @@ interface ChatPanelProps {
    * Return `null` to fall back to the default `<ToolCallCard>`. Used by the
    * orchestrator chat to swap in purpose-built swarm cards.
    */
-  renderToolCall?: (tc: ToolCall, defaultExpanded: boolean) => React.ReactNode | null;
+  /** See ChatMessage: `seedGrow` marks this call's card as born from the tail
+   *  thinking row — mount it with the grow-in entry (seedGrow.ts). */
+  renderToolCall?: (tc: ToolCall, defaultExpanded: boolean, seedGrow?: boolean) => React.ReactNode | null;
   /**
    * Optional: override how an entire message is rendered. Return `null` to
    * fall back to the default render. Used by the orchestrator chat to render
@@ -408,7 +410,17 @@ const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
 
 export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp, waiting = null }: ChatPanelProps) {
-  const [messages, setMessagesRaw] = useState<ChatMessageType[]>(initialMessages || []);
+  const [messages, setMessagesRaw] = useState<ChatMessageType[]>(() => {
+    const initial = initialMessages || [];
+    // Anything present at mount is history, not a fresh arrival — a workspace/
+    // chat swap must never replay typing/reveal animations for it. (Messages
+    // still streaming remount with empty-or-partial content and keep going
+    // live; see StreamingAssistantHead's liveShown seeding.)
+    for (const m of initial) {
+      if (m.role === 'assistant' && m.content) markRevealed(m.id);
+    }
+    return initial;
+  });
   const taskRegistry = useMemo(() => buildTaskRegistry(messages), [messages]);
   const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);
   const setMessages = useCallback((updater: ChatMessageType[] | ((prev: ChatMessageType[]) => ChatMessageType[])) => {
@@ -538,7 +550,15 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   }, [flushReasoning, setMessages]);
   const emptyPrompt = useMemo(() => EMPTY_PROMPTS[Math.floor(Math.random() * EMPTY_PROMPTS.length)], []);
   const [turnStartIndex, setTurnStartIndex] = useState<number | null>(null);
-  const thinkingTransition = useReducedMotionTransition(SPRING.pop);
+  // Height collapse/grow for the tail thinking rows: a tween, not a spring —
+  // overshoot on height reads as a bounce of the whole transcript tail.
+  const rowTransition = useReducedMotionTransition({ duration: 0.22, ease: EASING.out });
+  // Fresh AnimatePresence key per appearance of the tail rows. Re-entering with
+  // the key of a previously-exited child can resurrect its exit state (stuck at
+  // height 0 / opacity 0 — an invisible thinking row on the next turn); a new
+  // key guarantees a clean enter animation every time.
+  const rowSeqRef = useRef(0);
+  const prevRowShownRef = useRef(false);
   const dockTransition = useReducedMotionTransition(SPRING.dock);
   const followBtnTransition = useReducedMotionTransition(SPRING.flick);
   const turnSeqRef = useRef(0); // tracks the active turn's sequence number
@@ -1575,10 +1595,29 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // call after a typed response). The first-text-delta no longer leaves a stale window
   // here because the slow path now clears streamSettled when it creates a text segment.
   const hasStreamingAssistantSegment = !streamSettled && lastMsg?.role === 'assistant';
+  // A live reasoning card is already the working signal (shimmering label, its
+  // own elapsed timer) — a thinking row below it would be a duplicate spinner.
+  const hasLiveReasoning = lastMsg?.role === 'assistant' && !!lastMsg.reasoningLive;
+  // Same rule for a running tool: its card shimmers with a pulsing badge, so the
+  // tail row yields to it. The row exits in the same commit the card mounts, and
+  // the card mounts with the grow-in entry (seedGrow) — the row visibly becomes
+  // the card instead of a card popping in above a stationary spinner.
+  const hasRunningTailTool = lastMsg?.role === 'assistant' && !!lastMsg.toolCalls?.some(tc => tc.output == null);
   // SAI morph path: only a pending tail row when no segment head is actively thinking.
-  const showPendingSaiThinking = showThinking && saiMorphActive && !hasStreamingAssistantSegment;
-  // Detached banner: non-SAI providers, OR SAI with the animation pref off (today's fallback).
-  const showDetachedBanner = showThinking && !saiMorphActive;
+  const showPendingSaiThinking = showThinking && saiMorphActive && !hasStreamingAssistantSegment
+    && !hasLiveReasoning && !hasRunningTailTool;
+  // Detached banner: non-SAI providers, OR SAI with the animation pref off (today's
+  // fallback). No grow-in here, so it only yields to the reasoning card, keeping the
+  // legacy always-on banner during tool runs.
+  const showDetachedBanner = showThinking && !saiMorphActive && !hasLiveReasoning;
+  // The message whose newborn card (live reasoning / running tool) replaces the
+  // row this commit — that card mounts with the grow-in entry.
+  const seedGrowMsgId = saiMorphActive && streamingForDisplay && (hasLiveReasoning || hasRunningTailTool)
+    ? lastMsg?.id : undefined;
+  // Bump the row key on each hidden→shown edge (see rowSeqRef above).
+  const rowShown = showPendingSaiThinking || showDetachedBanner;
+  if (rowShown && !prevRowShownRef.current) rowSeqRef.current++;
+  prevRowShownRef.current = rowShown;
   const hasHiddenMessages = renderStart > 0;
 
   useEffect(() => {
@@ -2066,7 +2105,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
                     />
                   </div>
                 )
-                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} renderToolCall={renderToolCall} renderMessage={renderMessage} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} watcherUrlAllowlist={watcherUrlsByMessageId.get(msg.id) ?? EMPTY_URL_SET} />
+                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} seedGrow={msg.id === seedGrowMsgId} renderToolCall={renderToolCall} renderMessage={renderMessage} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} watcherUrlAllowlist={watcherUrlsByMessageId.get(msg.id) ?? EMPTY_URL_SET} />
               )}
             </TaskRegistryContext.Provider>
             {isWaiting && waiting && (
@@ -2076,30 +2115,48 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             )}
           </>
         )}
-        <MotionPresence>
+        {/* mode="sync" (not popLayout): the exiting row keeps its place in
+            layout while its height collapses, so the transcript above/below
+            slides smoothly instead of snapping when the row swaps with a
+            newborn card or a streaming head. */}
+        <AnimatePresence mode="sync" initial={false}>
+          {/* Enter must NOT animate height to 'auto': framer resolves 'auto' by
+              measuring at animation start, and the row's content (typewriter
+              text starts empty) can measure ~8px — the value then freezes as
+              inline height under overflow:hidden = an invisible row. Exit DOES
+              collapse height: it measures the real current height, so the
+              transcript slides smoothly when the row yields to a card. */}
           {showDetachedBanner && (
             <motion.div
-              key="thinking"
+              key={`thinking-${rowSeqRef.current}`}
               initial={{ opacity: 0, y: DISTANCE.lift }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              transition={thinkingTransition}
+              exit={{ opacity: 0, height: 0 }}
+              // flexShrink 0: the messages column is a flex container and
+              // crushes this wrapper otherwise — with overflow:hidden (needed
+              // for the exit collapse) the crush becomes an actual clip.
+              style={{ overflow: 'hidden', flexShrink: 0 }}
+              transition={rowTransition}
             >
               <ThinkingAnimation hint={streamHint} />
             </motion.div>
           )}
           {showPendingSaiThinking && (
             <motion.div
-              key="thinking-pending"
+              key={`thinking-pending-${rowSeqRef.current}`}
               initial={{ opacity: 0, y: DISTANCE.lift }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              transition={thinkingTransition}
+              exit={{ opacity: 0, height: 0 }}
+              // flexShrink 0: the messages column is a flex container and
+              // crushes this wrapper otherwise — with overflow:hidden (needed
+              // for the exit collapse) the crush becomes an actual clip.
+              style={{ overflow: 'hidden', flexShrink: 0 }}
+              transition={rowTransition}
             >
               <ThinkingAnimation hint={streamHint} />
             </motion.div>
           )}
-        </MotionPresence>
+        </AnimatePresence>
         <div ref={messagesEndRef} />
       </div>
       <div className="follow-btn-anchor">

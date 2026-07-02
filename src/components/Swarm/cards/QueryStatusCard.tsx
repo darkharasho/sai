@@ -1,9 +1,14 @@
 import React, { useState } from 'react';
+import { motion } from 'motion/react';
+import { useSeedGrow } from '../../Chat/seedGrow';
+import { SPRING, useReducedMotionTransition } from '../../Chat/motion';
 import type { ToolCall } from '../../../types';
 import { cardBase, cardHeader, safeJsonParse } from './cardStyles';
 
 interface Props {
   toolCall: ToolCall;
+  /** Card is born from the tail thinking row: mount with the grow-in entry. */
+  seedGrow?: boolean;
 }
 
 interface SnapshotShape {
@@ -23,7 +28,9 @@ function parseSnapshot(toolCall: ToolCall): SnapshotShape | null {
   return null;
 }
 
-export default function QueryStatusCard({ toolCall }: Props) {
+export default function QueryStatusCard({ toolCall, seedGrow }: Props) {
+  const grow = useSeedGrow(seedGrow);
+  const growTransition = useReducedMotionTransition(SPRING.pop);
   const [expanded, setExpanded] = useState(false);
   const snap = parseSnapshot(toolCall);
   const active = snap?.active ?? 0;
@@ -32,7 +39,13 @@ export default function QueryStatusCard({ toolCall }: Props) {
   const tasks = snap?.tasks ?? [];
 
   return (
-    <div data-testid="swarm-query-card" style={cardBase}>
+    <motion.div
+      data-testid="swarm-query-card"
+      style={grow ? { ...cardBase, overflow: 'hidden' } : cardBase}
+      initial={grow ? { height: 0, paddingTop: 0, paddingBottom: 0, opacity: 0 } : false}
+      animate={grow ? { height: 'auto', paddingTop: 10, paddingBottom: 10, opacity: 1 } : undefined}
+      transition={growTransition}
+    >
       <div style={cardHeader}>
         <span>● Status</span>
         {tasks.length > 0 && (
@@ -72,6 +85,6 @@ export default function QueryStatusCard({ toolCall }: Props) {
       {!snap && (
         <div style={{ marginTop: 6, opacity: 0.6, fontSize: 11 }}>Awaiting snapshot…</div>
       )}
-    </div>
+    </motion.div>
   );
 }

@@ -27,6 +27,8 @@ interface Props {
   onRetry?: (prompt: string) => void;
   onScrollToApproval?: (taskId: string) => void;
   onLandAllGreen?: () => void;
+  /** Card is born from the tail thinking row: mount with the grow-in entry. */
+  seedGrow?: boolean;
 }
 
 const SWARM_PREFIX = 'mcp__swarm__';
@@ -41,7 +43,7 @@ export default function SwarmToolCardSelector(props: Props): React.ReactElement 
   const {
     toolCall, tasks, approvals, diffStats, toolHistory,
     onFocusTask, onRebaseRetry, onLand, onDiscard, onDiff, onRetry, onScrollToApproval,
-    onLandAllGreen,
+    onLandAllGreen, seedGrow,
   } = props;
   if (!toolCall.name?.startsWith(SWARM_PREFIX)) return null;
   const baseName = toolCall.name.slice(SWARM_PREFIX.length);
@@ -60,20 +62,21 @@ export default function SwarmToolCardSelector(props: Props): React.ReactElement 
           onDiff={onDiff}
           onRetry={onRetry}
           onScrollToApproval={onScrollToApproval}
+          seedGrow={seedGrow}
         />
       );
     case 'query_status':
-      return <QueryStatusCard toolCall={toolCall} />;
+      return <QueryStatusCard toolCall={toolCall} seedGrow={seedGrow} />;
     case 'land':
-      return <LandCard toolCall={toolCall} onRebaseRetry={onRebaseRetry} />;
+      return <LandCard toolCall={toolCall} onRebaseRetry={onRebaseRetry} seedGrow={seedGrow} />;
     case 'discard':
-      return <DiscardCard toolCall={toolCall} />;
+      return <DiscardCard toolCall={toolCall} seedGrow={seedGrow} />;
     case 'pause_task':
     case 'resume_task':
-      return <PauseResumeCard toolCall={toolCall} tasks={tasks} />;
+      return <PauseResumeCard toolCall={toolCall} tasks={tasks} seedGrow={seedGrow} />;
     case 'approve_tool_call':
     case 'deny_tool_call':
-      return <ApprovalActionCard toolCall={toolCall} tasks={tasks} approvals={approvals} />;
+      return <ApprovalActionCard toolCall={toolCall} tasks={tasks} approvals={approvals} seedGrow={seedGrow} />;
     case 'task_completed':
       return (
         <TaskCompletedCard
@@ -82,12 +85,13 @@ export default function SwarmToolCardSelector(props: Props): React.ReactElement 
           onLand={onLand}
           onDiscard={onDiscard}
           onDiff={onDiff}
+          seedGrow={seedGrow}
         />
       );
     case 'task_failed':
-      return <TaskFailedCard toolCall={toolCall} onRetry={onRetry} onDiscard={onDiscard} />;
+      return <TaskFailedCard toolCall={toolCall} onRetry={onRetry} onDiscard={onDiscard} seedGrow={seedGrow} />;
     case 'auto_approved':
-      return <AutoApprovedCard toolCall={toolCall} />;
+      return <AutoApprovedCard toolCall={toolCall} seedGrow={seedGrow} />;
     case 'batch_complete': {
       const hasLandable = !!tasks?.some(t => t.status === 'done');
       return (
@@ -95,6 +99,7 @@ export default function SwarmToolCardSelector(props: Props): React.ReactElement 
           toolCall={toolCall}
           onLandAll={onLandAllGreen}
           hasLandable={hasLandable}
+          seedGrow={seedGrow}
         />
       );
     }

@@ -1,4 +1,7 @@
 import React from 'react';
+import { motion } from 'motion/react';
+import { useSeedGrow } from '../../Chat/seedGrow';
+import { SPRING, useReducedMotionTransition } from '../../Chat/motion';
 import type { ToolCall } from '../../../types';
 import { cardBase, cardHeader, SWARM_RED, monoBox, safeJsonParse, btnBase, btnPrimary, btnDanger } from './cardStyles';
 
@@ -14,20 +17,28 @@ interface Props {
   toolCall: ToolCall;
   onRetry?: (prompt: string) => void;
   onDiscard?: (taskId: string) => void;
+  /** Card is born from the tail thinking row: mount with the grow-in entry. */
+  seedGrow?: boolean;
 }
 
-export default function TaskFailedCard({ toolCall, onRetry, onDiscard }: Props) {
+export default function TaskFailedCard({ toolCall, onRetry, onDiscard, seedGrow }: Props) {
+  const grow = useSeedGrow(seedGrow);
+  const growTransition = useReducedMotionTransition(SPRING.pop);
   const input = safeJsonParse<Input>(toolCall.input) ?? {};
   const taskId = input.taskId;
   const prompt = input.prompt;
   return (
-    <div
+    <motion.div
       data-testid="swarm-task-failed-card"
       style={{
         ...cardBase,
         borderColor: SWARM_RED,
         background: 'rgba(180,68,68,0.05)',
+        ...(grow ? { overflow: 'hidden' } : null),
       }}
+      initial={grow ? { height: 0, paddingTop: 0, paddingBottom: 0, opacity: 0 } : false}
+      animate={grow ? { height: 'auto', paddingTop: 10, paddingBottom: 10, opacity: 1 } : undefined}
+      transition={growTransition}
     >
       <div style={{ ...cardHeader, color: SWARM_RED }}>
         <span>✗ Task failed</span>
@@ -61,6 +72,6 @@ export default function TaskFailedCard({ toolCall, onRetry, onDiscard }: Props) 
           {input.reason}
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }

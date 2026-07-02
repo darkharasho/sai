@@ -1,4 +1,7 @@
 import React from 'react';
+import { motion } from 'motion/react';
+import { useSeedGrow } from '../../Chat/seedGrow';
+import { SPRING, useReducedMotionTransition } from '../../Chat/motion';
 import type { ToolCall } from '../../../types';
 import { cardBase, SWARM_GREEN, SWARM_RED, safeJsonParse, btnPrimary } from './cardStyles';
 import Sparkline from '../Sparkline';
@@ -19,6 +22,8 @@ interface Props {
   onLandAll?: () => void;
   /** True if there are still tasks in `done` state we could land. */
   hasLandable?: boolean;
+  /** Card is born from the tail thinking row: mount with the grow-in entry. */
+  seedGrow?: boolean;
 }
 
 function formatDuration(ms: number | undefined): string {
@@ -80,7 +85,9 @@ function Stat({ label, value, color, emphasized }: StatProps) {
   );
 }
 
-export default function BatchCompleteCard({ toolCall, onLandAll, hasLandable }: Props) {
+export default function BatchCompleteCard({ toolCall, onLandAll, hasLandable, seedGrow }: Props) {
+  const grow = useSeedGrow(seedGrow);
+  const growTransition = useReducedMotionTransition(SPRING.pop);
   const input = safeJsonParse<Input>(toolCall.input) ?? {};
   const total = input.totalTasks ?? 0;
   const landed = input.landed ?? 0;
@@ -91,14 +98,18 @@ export default function BatchCompleteCard({ toolCall, onLandAll, hasLandable }: 
   const showCost = typeof input.totalCost === 'number';
 
   return (
-    <div
+    <motion.div
       data-testid="swarm-batch-complete-card"
       style={{
         ...cardBase,
         width: '100%',
         padding: 16,
         margin: '12px 0',
+        ...(grow ? { overflow: 'hidden' } : null),
       }}
+      initial={grow ? { height: 0, paddingTop: 0, paddingBottom: 0, opacity: 0 } : false}
+      animate={grow ? { height: 'auto', paddingTop: 16, paddingBottom: 16, opacity: 1 } : undefined}
+      transition={growTransition}
     >
       <div
         style={{
@@ -232,6 +243,6 @@ export default function BatchCompleteCard({ toolCall, onLandAll, hasLandable }: 
           </button>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 }
