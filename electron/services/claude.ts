@@ -23,7 +23,7 @@ import { exitTerminalEvents } from './claudeExit';
 import { imageReadResult } from './imageFiles';
 import type { StartArgs, CompactArgs } from './claudeBackend/types';
 import { getClaudeBackend, getClaudeBackendSetting } from './claudeBackend';
-export { touchActivity } from './workspace';
+export { touchActivity, getOrCreate as getOrCreateWorkspace } from './workspace';
 import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASKS_NUDGE } from './chatNudges';
 import { classifyTurnEnd, isSchedulingTool, WAKEUP_GRACE_MS, type WaitMeta } from './waitClassifier';
 export { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE };

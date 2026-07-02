@@ -28,7 +28,7 @@ import {
   getRemoteCeiling,
   getMainWin,
   spawnEnv,
-  touchActivity,
+  getOrCreateWorkspace,
 } from '../claude';
 import { isImagePath, mimeForImagePath } from '../imageFiles';
 import { notifyCompletion, notifyApproval, notifyQuestion, notifyPlanReview } from '../notify';
@@ -319,6 +319,9 @@ export class SdkBackend implements ClaudeBackend {
     const scopeKey = toScopeKey(projectPath, scope);
     const cwd = scopeCwd ?? projectPath;
     this.scopeMeta.set(scopeKey, { cwd, kind, appendSystemPrompt: metaPreamble, orchestratorContext });
+    // Register with the workspace registry — the titlebar dropdown lists only
+    // registered-active workspaces (CLI parity: startImpl's getOrCreate).
+    try { getOrCreateWorkspace(projectPath); } catch { /* workspace registry unavailable (tests) */ }
     return { slashCommands: readCachedSlashCommands() };
   }
 
@@ -366,8 +369,9 @@ export class SdkBackend implements ClaudeBackend {
 
       this._beginTurn(session, projectPath, effectiveScope);
       // Workspace auto-suspend watches this clock; without it a workspace with
-      // only SDK activity looks quiescent and gets suspended mid-stream.
-      try { touchActivity(projectPath); } catch { /* workspace registry unavailable (tests) */ }
+      // only SDK activity looks quiescent and gets suspended mid-stream. Also
+      // re-activates a suspended registry entry so the dropdown flips it back.
+      try { getOrCreateWorkspace(projectPath); } catch { /* workspace registry unavailable (tests) */ }
 
       // Push the user message into the input channel
       session.pushInput({
@@ -1114,6 +1118,38 @@ export class SdkBackend implements ClaudeBackend {
     };
 
     void drain();
+  }
+
+  // ─── Workspace suspend integration ─────────────────────────────────────────
+
+  /** Close every live session for a workspace (dropdown Suspend/Close and the
+   *  auto-suspend timer, via workspace.ts backend hooks). Session ids are
+   *  stashed so the conversation resumes on the next send. */
+  suspendWorkspace(projectPath: string): void {
+    for (const [scopeKey, session] of this.sessions) {
+      if (session._projectPath !== projectPath) continue;
+      this._resolveGatesForScope(scopeKey, 'Workspace suspended');
+      if (session.mapperState.streaming) {
+        // End the in-flight turn in the UI — its result will never arrive.
+        this._emit({ type: 'done', projectPath, scope: session._scopeName, turnSeq: session.activeTurnSeq });
+      }
+      if (session.sessionId) this.pendingResume.set(scopeKey, session.sessionId);
+      session.query.close();
+      this.sessions.delete(scopeKey);
+    }
+  }
+
+  /** True when any session for the workspace is mid-turn, blocked on user
+   *  input, or sleeping on a live ScheduleWakeup — the auto-suspend timer must
+   *  not reap it (workspace.ts isWorkspaceQuiescent can't see SDK sessions). */
+  isWorkspaceBusy(projectPath: string): boolean {
+    const now = Date.now();
+    for (const session of this.sessions.values()) {
+      if (session._projectPath !== projectPath) continue;
+      if (session.mapperState.streaming || session.awaitingInput) return true;
+      if (session.pendingWakeup && (session.wakeupDeadline == null || now < session.wakeupDeadline)) return true;
+    }
+    return false;
   }
 
   // ─── Idle sweep ────────────────────────────────────────────────────────────

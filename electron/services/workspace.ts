@@ -176,6 +176,21 @@ export function getClaude(
 
 const workspaces = new Map<string, Workspace>();
 
+/**
+ * Seam for the SDK backend: its sessions live outside this registry, so
+ * suspend() can't kill them and isWorkspaceQuiescent() can't see them.
+ * Registered by claudeBackend/index.ts when the SDK backend is constructed;
+ * no-ops under the CLI backend, whose processes live in ws.claudeScopes.
+ */
+export interface WorkspaceBackendHooks {
+  suspend?: (projectPath: string) => void;
+  isBusy?: (projectPath: string) => boolean;
+}
+let backendHooks: WorkspaceBackendHooks = {};
+export function registerWorkspaceBackendHooks(hooks: WorkspaceBackendHooks): void {
+  backendHooks = hooks;
+}
+
 export function getOrCreate(projectPath: string): Workspace {
   const existing = workspaces.get(projectPath);
   if (existing) {
@@ -300,6 +315,9 @@ export function suspend(projectPath: string, win: BrowserWindow): void {
   }
   ws.terminals.clear();
 
+  // Close SDK-backend sessions, which live outside this registry.
+  try { backendHooks.suspend?.(projectPath); } catch { /* backend already down */ }
+
   ws.status = 'suspended';
 
   try {
@@ -351,6 +369,7 @@ export function isWorkspaceQuiescent(ws: Workspace): boolean {
   }
   if (ws.codex.busy) return false;
   if (ws.gemini.busy) return false;
+  try { if (backendHooks.isBusy?.(ws.projectPath)) return false; } catch { /* backend unavailable */ }
   return true;
 }
 

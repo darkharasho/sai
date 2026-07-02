@@ -58,6 +58,7 @@ vi.mock('@electron/services/workspace', () => ({
   getClaude: vi.fn(),
   touchActivity: vi.fn(),
   listAllWorkspaces: vi.fn().mockReturnValue([]),
+  registerWorkspaceBackendHooks: vi.fn(),
 }));
 
 vi.mock('@electron/services/notify', () => ({

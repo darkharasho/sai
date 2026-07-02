@@ -32,6 +32,7 @@ const {
   mockReadSaiSetting,
   mockGetRemoteCeiling,
   mockSpawnEnv,
+  mockGetOrCreateWorkspace,
 } = vi.hoisted(() => ({
   mockApproveImpl: vi.fn().mockResolvedValue(undefined),
   mockAnswerQuestionImpl: vi.fn().mockResolvedValue(true),
@@ -45,6 +46,7 @@ const {
   mockReadSaiSetting: vi.fn().mockReturnValue(undefined),
   mockGetRemoteCeiling: vi.fn().mockReturnValue(null),
   mockSpawnEnv: vi.fn().mockReturnValue({ PATH: '/enriched/bin', NODE_OPTIONS: '--max-old-space-size=1024' }),
+  mockGetOrCreateWorkspace: vi.fn(),
 }));
 
 vi.mock('../../../electron/services/claude', () => ({
@@ -63,7 +65,7 @@ vi.mock('../../../electron/services/claude', () => ({
   getRemoteCeiling: mockGetRemoteCeiling,
   getMainWin: () => null,
   spawnEnv: mockSpawnEnv,
-  touchActivity: vi.fn(),
+  getOrCreateWorkspace: mockGetOrCreateWorkspace,
 }));
 
 // notify.ts touches electron `app` at module load — must be mocked in node env.
@@ -1611,6 +1613,80 @@ describe('SdkBackend', () => {
       source: { type: 'base64', media_type: 'image/png', data: Buffer.from('fake-png-bytes').toString('base64') },
     });
     expect(userMsg.message.content[1]).toEqual({ type: 'text', text: 'look' });
+    fakeQuery.close();
+  });
+
+  it('(41) start and send register the workspace as active in the registry', async () => {
+    mockGetOrCreateWorkspace.mockClear();
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    const queryFn = vi.fn(() => fakeQuery);
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    expect(mockGetOrCreateWorkspace).toHaveBeenCalledWith(PROJECT);
+
+    mockGetOrCreateWorkspace.mockClear();
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
+    expect(mockGetOrCreateWorkspace).toHaveBeenCalledWith(PROJECT);
+    fakeQuery.close();
+  });
+
+  it('(42) suspendWorkspace closes every session for the workspace, stashes resume ids, and leaves other workspaces alone', async () => {
+    const q1 = makeFakeQuery([], { hang: true });
+    const q2 = makeFakeQuery([], { hang: true });
+    const queries = [q1, q2];
+    const queryFn = vi.fn(() => queries.shift()!);
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
+    backend.send({ projectPath: '/other/project', message: 'hi', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((r) => setTimeout(r, 10));
+
+    const key = `${PROJECT} ${SCOPE}`;
+    const session: any = (backend as any).sessions.get(key);
+    session.sessionId = 'sess-42';
+
+    emits.length = 0;
+    backend.suspendWorkspace(PROJECT);
+
+    // The streaming turn is ended in the UI, the query closed, the session removed.
+    expect(emits.find((e) => e.type === 'done' && e.projectPath === PROJECT)).toBeTruthy();
+    expect(q1.closeSpy).toHaveBeenCalled();
+    expect((backend as any).sessions.has(key)).toBe(false);
+    expect((backend as any).pendingResume.get(key)).toBe('sess-42');
+
+    // The other workspace's session is untouched.
+    expect(q2.closeSpy).not.toHaveBeenCalled();
+    expect((backend as any).sessions.has(`/other/project ${SCOPE}`)).toBe(true);
+    q2.close();
+  });
+
+  it('(43) isWorkspaceBusy reflects streaming / awaiting-input / pending-wakeup sessions', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    const queryFn = vi.fn(() => fakeQuery);
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((r) => setTimeout(r, 10));
+
+    const session: any = (backend as any).sessions.get(`${PROJECT} ${SCOPE}`);
+    session.mapperState.streaming = true;
+    expect(backend.isWorkspaceBusy(PROJECT)).toBe(true);
+    expect(backend.isWorkspaceBusy('/other/project')).toBe(false);
+
+    session.mapperState.streaming = false;
+    session.awaitingInput = false;
+    session.pendingWakeup = false;
+    expect(backend.isWorkspaceBusy(PROJECT)).toBe(false);
+
+    session.awaitingInput = true;
+    expect(backend.isWorkspaceBusy(PROJECT)).toBe(true);
+
+    session.awaitingInput = false;
+    session.pendingWakeup = true;
+    session.wakeupDeadline = null;
+    expect(backend.isWorkspaceBusy(PROJECT)).toBe(true);
+    session.wakeupDeadline = Date.now() - 1000; // expired wakeup no longer defers
+    expect(backend.isWorkspaceBusy(PROJECT)).toBe(false);
+
     fakeQuery.close();
   });
 });

@@ -4,6 +4,7 @@ import { SdkBackend } from './sdkBackend';
 import { buildSaiChatMcpServer } from './saiMcpServer';
 import { buildSwarmMcpServer } from './swarmMcpServer';
 import { getSaiToolDispatch } from '../saiToolBridge';
+import { registerWorkspaceBackendHooks } from '../workspace';
 import type { ClaudeBackend } from './types';
 export * from './types';
 
@@ -17,7 +18,7 @@ export function getClaudeBackend(): ClaudeBackend {
   if (active) return active;
   const which = getClaudeBackendSetting();
   if (which === 'sdk') {
-    active = new SdkBackend({
+    const sdk = new SdkBackend({
       buildChatMcpServer: (workspace: string) => {
         const dispatch = getSaiToolDispatch();
         if (!dispatch) return undefined; // main.ts hasn't registered the round-trip yet
@@ -29,6 +30,13 @@ export function getClaudeBackend(): ClaudeBackend {
         return buildSwarmMcpServer({ workspace, dispatch });
       },
     });
+    // SDK sessions live outside the workspace registry — wire suspend/quiescence
+    // through so the dropdown's Suspend/Close and the auto-suspend timer see them.
+    registerWorkspaceBackendHooks({
+      suspend: (projectPath) => sdk.suspendWorkspace(projectPath),
+      isBusy: (projectPath) => sdk.isWorkspaceBusy(projectPath),
+    });
+    active = sdk;
   } else {
     active = new CliBackend();
   }
