@@ -20,7 +20,9 @@ export default function ThinkingAnimation({ color, hint }: ThinkingAnimationProp
         <span className="thinking-clock">[{clockText}]</span>
       )}
       <span className="thinking-text" style={color ? { color } : undefined}>
-        {displayText}
+        {/* Shimmer only without a color override — the shimmer gradient would
+            discard the caller's custom color. */}
+        <span className={color ? undefined : 'sai-shimmer'}>{displayText}</span>
         {saiAnimationEnabled
           ? <span className="thinking-cursor thinking-cursor-block" style={color ? { backgroundColor: color } : undefined} />
           : <>

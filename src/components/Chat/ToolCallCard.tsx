@@ -1077,7 +1077,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
         animate={{ opacity: 1, y: 0 }}
         transition={entryTransition}
         variants={{ hidden: { opacity: 0, y: 10 }, visible: { opacity: 1, y: 0 } }}
-        className="tool-call-card"
+        className={`tool-call-card${status === 'running' ? ' tool-call-card--running' : ''}`}
       >
         <div className={`tool-call-header${hasBody ? ' tool-call-header-expandable' : ''}`} onClick={() => hasBody && setExpanded(!expanded)}>
           <AnimatePresence mode="popLayout" initial={false}>
@@ -1287,10 +1287,13 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
           .tool-call-card {
             margin: 2px 0;
             background: var(--surface-2);
-            border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-md);
+            border: 1px solid var(--border-hairline);
+            border-radius: 8px;
             overflow: hidden;
-            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+            transition: border-color .25s ease;
+          }
+          .tool-call-card--running {
+            border-color: color-mix(in srgb, var(--accent) 22%, transparent);
           }
           .tool-call-header {
             padding: 8px 12px;
@@ -1299,14 +1302,33 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             gap: 8px;
             font-size: 12px;
             color: var(--text-secondary);
-            background: var(--surface-3);
             border-bottom: 1px solid var(--border-hairline);
           }
           .tool-call-header-expandable {
             cursor: pointer;
           }
           .tool-call-header-expandable:hover {
-            background: var(--bg-hover);
+            background: var(--surface-3);
+          }
+          .tool-call-card--running .tool-call-name {
+            background: linear-gradient(
+              90deg,
+              var(--text-muted) 20%,
+              color-mix(in srgb, var(--accent) 75%, #fff) 50%,
+              var(--text-muted) 80%
+            );
+            background-size: 200% 100%;
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            animation: sai-shimmer 2.2s linear infinite;
+          }
+          @media (prefers-reduced-motion: reduce) {
+            .tool-call-card--running .tool-call-name {
+              animation: none;
+              background: none;
+              color: var(--text);
+            }
           }
           .tool-call-icon {
             color: var(--accent);

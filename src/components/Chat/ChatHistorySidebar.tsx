@@ -378,7 +378,7 @@ export default function ChatHistorySidebar({
                                 );
                               })()}
                               <span
-                                className="chat-history-card-title"
+                                className={`chat-history-card-title${streamingSessionIds.has(session.id) ? ' sai-shimmer' : ''}`}
                               >{session.title || 'Untitled'}</span>
                               {titleGeneratingIds?.has(session.id) && (
                                 <SaiLogo mode="scanner" size={12} className="chat-history-title-spinner" ariaLabel="Generating title" />

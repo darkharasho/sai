@@ -12,14 +12,13 @@ export const SWARM_RED = '#b44';
 export const SWARM_GREEN = '#3a8';
 
 export const cardBase: CSSProperties = {
-  border: '1px solid var(--border)',
-  background: 'var(--bg-elevated)',
+  border: '1px solid var(--border-hairline)',
+  background: 'var(--surface-2)',
   borderRadius: 8,
   padding: '10px 12px',
   margin: '6px 0',
   fontSize: 12,
   color: 'var(--text)',
-  boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
 };
 
 export const cardHeader: CSSProperties = {
