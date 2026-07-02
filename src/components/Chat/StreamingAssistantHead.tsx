@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { motion } from 'motion/react';
 import SaiLogo from '../SaiLogo';
 import { useThinkingDriver } from './useThinkingDriver';
 import { revealWords } from './wordReveal';
 import { hasRevealed, markRevealed } from './revealRegistry';
-import { prefersReducedMotion } from './motion';
+import { prefersReducedMotion, EASING } from './motion';
 
 function formatMs(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -14,6 +15,9 @@ function formatMs(ms: number): string {
 }
 
 const STATUS_BLUR_MS = 250;
+// Streaming text on screen at least this long counts as "watched" — anything
+// briefer still gets the settle word-reveal.
+const WATCHED_MS = 400;
 
 type Phase = 'thinking' | 'morphing' | 'revealed';
 
@@ -34,12 +38,38 @@ export default function StreamingAssistantHead({ streaming, content, durationMs,
   const mdRef = useRef<HTMLDivElement | null>(null);
   const frozenMsRef = useRef<number>(0);
   const revealedRef = useRef(false);
-  // Text that has been SHOWN live during streaming must not word-reveal again
-  // at settle (and is marked revealed so remounts render statically). Live
-  // display replaced the old hold-until-settle behavior, which swallowed
-  // long stretches of reply text during tool-heavy turns.
-  const liveShownRef = useRef(false);
-  if (streaming && content) liveShownRef.current = true;
+  // Set at settle when the md was hidden until now: it enters with a height
+  // grow instead of snapping from 0 to full height in one frame.
+  const growMdRef = useRef(false);
+  // Two distinct questions, two signals:
+  //   shown   — has this text been on screen during streaming? Controls live
+  //             display and whether the morph blur may run (blacking out
+  //             visible text mid-reply is never OK).
+  //   watched — was it on screen long enough (WATCHED_MS) that the user
+  //             actually read it arriving? Only watched text skips the settle
+  //             word-reveal; a quick burst that flashed up for a moment still
+  //             gets its typing sweep. Growth alone was the old signal, and it
+  //             misclassified fast bursts as watched — small replies popped in
+  //             with no animation at all.
+  const mountContentRef = useRef(content);
+  // Seed from the registry: a mid-stream remount (workspace/chat swap) of a
+  // message whose text was already on screen must keep showing it live, not
+  // regress to the thinking row and later re-reveal.
+  const alreadySeen = useRef(!!(messageId && hasRevealed(messageId))).current;
+  const liveShownRef = useRef(alreadySeen);
+  const firstGrowthAtRef = useRef<number | null>(alreadySeen ? 0 : null);
+  if (streaming && content && content !== mountContentRef.current) {
+    liveShownRef.current = true;
+    if (firstGrowthAtRef.current == null) firstGrowthAtRef.current = performance.now();
+  }
+  const watchedNow = () =>
+    firstGrowthAtRef.current != null && performance.now() - firstGrowthAtRef.current >= WATCHED_MS;
+  const showLive = streaming && !!content && liveShownRef.current;
+  // Once genuinely watched, mark the registry — a swap-away mid-stream must
+  // remount as already-seen instead of re-typing text the user read.
+  useEffect(() => {
+    if (messageId && watchedNow()) markRevealed(messageId);
+  });
 
   useEffect(() => {
     // `streaming` is driven by an idle debounce (streamSettled), so it can flip
@@ -62,11 +92,15 @@ export default function StreamingAssistantHead({ streaming, content, durationMs,
     revealedRef.current = true;
     frozenMsRef.current = durationMs ?? driver.elapsedMs;
 
-    // The morph blur transitions the STATUS text away — pointless (and a 250ms
-    // display:none blackout of already-visible reply text, i.e. mid-reply
-    // flashing) when the user watched the content stream in live.
+    // The morph blur transitions the STATUS text away. It must not run when
+    // text is already on screen (a 250ms display:none blackout of visible
+    // reply text = mid-reply flashing) — shown-but-unwatched text goes
+    // straight to revealed and gets its sweep there.
     if (prefersReducedMotion() || liveShownRef.current) { setPhase('revealed'); return; }
 
+    // Coming from a hidden md (status was showing): grow the reply in instead
+    // of snapping to full height — the height jump read as "messy".
+    growMdRef.current = true;
     setPhase('morphing');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streaming, content]);
@@ -100,8 +134,10 @@ export default function StreamingAssistantHead({ streaming, content, durationMs,
     // (workspace/chat swap) must show the content statically, not replay the
     // animation. revealStartedRef only survives within one mount.
     if (messageId && hasRevealed(messageId)) return;
-    // Text the user already watched stream in live must not re-animate.
-    if (liveShownRef.current) {
+    // Text the user WATCHED stream in must not re-animate. A quick burst that
+    // was only briefly on screen still sweeps — that's the typing the user
+    // expects on short replies.
+    if (watchedNow()) {
       revealStartedRef.current = true;
       if (messageId) markRevealed(messageId);
       return;
@@ -134,19 +170,28 @@ export default function StreamingAssistantHead({ streaming, content, durationMs,
             [{clock}]
           </div>
         )}
-        {phase !== 'revealed' && !(streaming && content) && (
+        {phase !== 'revealed' && !showLive && (
           <span className={`sah-status sai-shimmer${phase === 'morphing' ? ' sah-status--gone' : ''}`}>
             {driver.displayText}
             <span className="thinking-cursor thinking-cursor-block" />
           </span>
         )}
-        <div
+        <motion.div
+          // Re-key at the reveal so the grow entry starts exactly when the md
+          // becomes visible (mounting it earlier would run the animation while
+          // still display:none).
+          key={phase === 'revealed' && growMdRef.current ? 'md-grow' : 'md'}
           ref={mdRef}
-          className={`chat-msg-md sah-md${streaming && content ? ' sah-md--streaming' : ''}`}
-          style={phase === 'revealed' || (streaming && content) ? undefined : { display: 'none' }}
+          initial={phase === 'revealed' && growMdRef.current ? { height: 0, opacity: 0 } : false}
+          animate={phase === 'revealed' && growMdRef.current ? { height: 'auto', opacity: 1 } : undefined}
+          transition={{ duration: 0.24, ease: EASING.out }}
+          className={`chat-msg-md sah-md${showLive ? ' sah-md--streaming' : ''}`}
+          style={phase === 'revealed' || showLive
+            ? (growMdRef.current ? { overflow: 'hidden' } : undefined)
+            : { display: 'none' }}
         >
           {children}
-        </div>
+        </motion.div>
       </div>
       <style>{`
         .sah-clock { transition: color .45s ease; }

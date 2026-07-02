@@ -20,6 +20,22 @@ describe('revealWords', () => {
     expect(el.querySelector('pre .rv-word')).toBeNull();
   });
 
+  it('hides emoji icons (svg + masked span) as atomic items instead of popping them', () => {
+    // SVG elements report a LOWERCASE tagName; mask emojis are empty spans with
+    // no text nodes — both must join the sweep or they render ahead of it.
+    const el = mount(
+      '<p>party <svg class="sai-emoji-icon"></svg> time <span class="sai-emoji-mask"></span> now</p>'
+    );
+    revealWords(el);
+    const icon = el.querySelector('.sai-emoji-icon') as HTMLElement;
+    const mask = el.querySelector('.sai-emoji-mask') as HTMLElement;
+    expect(icon.style.opacity).toBe('0');
+    expect(mask.style.opacity).toBe('0');
+    vi.runAllTimers();
+    expect(icon.style.opacity).toBe('1');
+    expect(mask.style.opacity).toBe('1');
+  });
+
   it('reveals every item and removes the caret after all timers run', () => {
     const el = mount('<p>one two three</p>');
     revealWords(el);
@@ -71,25 +87,17 @@ describe('revealWords', () => {
     expect(el.querySelector('.rv-caret')).toBeNull();
   });
 
-  it('grows block-by-block: unreached blocks reserve no layout until revealed', () => {
+  it('is layout-stable: no block is ever display:none during the reveal', () => {
+    // Blocks used to hide until the sweep reached them, but the resulting
+    // height re-growth fought the bottom-pinned transcript scroll (revealed
+    // text scrolled up past the reader). Words reserve final layout up front;
+    // only opacity animates.
     const el = mount('<p>one two three</p><p>four five six</p><p>seven eight nine</p>');
     revealWords(el, { cadenceMs: 10, snapMs: 0, budgetMs: 1000 });
     const blocks = el.querySelectorAll<HTMLElement>('p');
-    // First block enters layout immediately; later blocks are display:none (no reserved space)
-    // so a multi-line reply doesn't show a tall blank region while it types in.
-    expect(blocks[0].style.display).not.toBe('none');
-    expect(blocks[1].style.display).toBe('none');
-    expect(blocks[2].style.display).toBe('none');
-    // Each block un-hides as the reveal reaches it.
+    blocks.forEach(b => expect(b.style.display).not.toBe('none'));
     vi.runAllTimers();
     blocks.forEach(b => expect(b.style.display).not.toBe('none'));
-  });
-
-  it('cancel() un-hides every block (no content left reserved-but-hidden)', () => {
-    const el = mount('<p>aa bb</p><p>cc dd</p>');
-    const ctrl = revealWords(el, { cadenceMs: 10 });
-    ctrl.cancel();
-    el.querySelectorAll<HTMLElement>('p').forEach(b => expect(b.style.display).not.toBe('none'));
   });
 
   it('does not hide blocks on the instant (over-maxWords) path', () => {
