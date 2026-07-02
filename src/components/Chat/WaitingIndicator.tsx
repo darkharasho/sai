@@ -1,5 +1,6 @@
 // src/components/Chat/WaitingIndicator.tsx
 import { useEffect, useState } from 'react';
+import { AlarmClock } from 'lucide-react';
 import type { WaitMeta } from '../../../electron/services/waitClassifier';
 import { formatCountdown, formatWakeTime } from './formatCountdown';
 
@@ -31,7 +32,7 @@ export default function WaitingIndicator({ wait, startedAtMs, onCancel }: Props)
   return (
     <div className="sai-waiting" role="status" aria-live="polite">
       {wait.kind === 'scheduled'
-        ? <span className="sai-waiting-icon sai-waiting-ring" aria-hidden>⏰</span>
+        ? <span className="sai-waiting-icon sai-waiting-ring" aria-hidden><AlarmClock size={14} /></span>
         : <span className="sai-waiting-icon" aria-hidden><span className="sai-waiting-orbit" /></span>}
       <span className="sai-waiting-label sai-shimmer">{label}</span>
       {isScheduled && (

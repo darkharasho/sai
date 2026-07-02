@@ -2125,13 +2125,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       </div>
       <LayoutGroup>
         <div data-testid="chat-bottom-strip" className="chat-bottom-strip">
-          {isWaiting && (
-            <div className="chat-composer-cancel-row">
-              <button className="chat-composer-cancel" onClick={handleCancelWait} title="Cancel and stop waiting">
-                {waiting!.wait.kind === 'scheduled' ? 'Waiting to resume · Cancel' : 'Waiting · Cancel'}
-              </button>
-            </div>
-          )}
+          {/* The WaitingIndicator pill in the transcript owns the waiting
+              affordance; the composer keeps its stop button live instead of
+              growing a second cancel row here. */}
           {promptSuggestion && !streamingForDisplay && !isWaiting && (
             <div className="chat-suggestion-row">
               <button
@@ -2168,6 +2164,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             onDeny={handleDeny}
             onAlwaysAllow={handleAlwaysAllow}
             isStreaming={streamingForDisplay}
+            waiting={isWaiting}
             awaitingQuestion={awaitingQuestion}
             messages={messages}
             onStop={() => aiProvider === 'gemini' ? (window.sai as any).geminiStop(projectPath) : aiProvider === 'codex' ? window.sai.codexStop(projectPath) : window.sai.claudeStop?.(projectPath, claudeScope)}

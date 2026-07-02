@@ -2,14 +2,16 @@ import { describe, it, expect } from 'vitest';
 import { formatCountdown, formatWakeTime } from '@/components/Chat/formatCountdown';
 
 describe('formatCountdown', () => {
-  it('coarse minutes when >= 2 min out', () => {
-    expect(formatCountdown(1720)).toBe('~29m');
-    expect(formatCountdown(120)).toBe('~2m');
-  });
-  it('live MM:SS under 2 min', () => {
+  it('live MM:SS under an hour', () => {
+    expect(formatCountdown(1720)).toBe('28:40');
+    expect(formatCountdown(120)).toBe('02:00');
     expect(formatCountdown(119)).toBe('01:59');
     expect(formatCountdown(72)).toBe('01:12');
     expect(formatCountdown(5)).toBe('00:05');
+  });
+  it('live H:MM:SS at an hour or more', () => {
+    expect(formatCountdown(3600)).toBe('1:00:00');
+    expect(formatCountdown(4930)).toBe('1:22:10');
   });
   it('zero or negative shows resuming', () => {
     expect(formatCountdown(0)).toBe('resuming…');

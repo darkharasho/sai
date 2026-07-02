@@ -1,10 +1,11 @@
-/** Coarse '~Nm' while >= 2 min out; live 'MM:SS' under 2 min; 'resuming…' at/under 0. */
+/** Live countdown: 'H:MM:SS' at an hour or more, 'MM:SS' below, 'resuming…' at/under 0. */
 export function formatCountdown(secondsRemaining: number): string {
   const s = Math.floor(secondsRemaining);
   if (s <= 0) return 'resuming…';
-  if (s >= 120) return `~${Math.round(s / 60)}m`;
-  const m = Math.floor(s / 60);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
   const rem = s % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
   return `${String(m).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
 }
 
