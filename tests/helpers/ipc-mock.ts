@@ -15,7 +15,6 @@ export interface MockSai {
   terminalKill: ReturnType<typeof vi.fn>;
   terminalGetProcess: ReturnType<typeof vi.fn>;
   terminalGetCwd: ReturnType<typeof vi.fn>;
-  terminalGetShellHistory: ReturnType<typeof vi.fn>;
   terminalIsAwaitingInput: ReturnType<typeof vi.fn>;
   terminalTabComplete: ReturnType<typeof vi.fn>;
   terminalOnData: ReturnType<typeof vi.fn>;
@@ -157,7 +156,6 @@ export function createMockSai(): MockSai {
     terminalKill: vi.fn(),
     terminalGetProcess: vi.fn().mockResolvedValue('bash'),
     terminalGetCwd: vi.fn().mockResolvedValue('/home/user/project'),
-    terminalGetShellHistory: vi.fn().mockResolvedValue([]),
     terminalIsAwaitingInput: vi.fn().mockResolvedValue(false),
     terminalTabComplete: vi.fn().mockResolvedValue([]),
     terminalOnData: noopUnsubscribe,

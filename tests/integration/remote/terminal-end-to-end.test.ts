@@ -1,10 +1,35 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import WebSocket from 'ws';
 import { RemoteModule } from '@electron/services/remote';
 import { BridgeServer } from '@electron/services/remote/bridge-server';
 import { PairingStore } from '@electron/services/remote/pairing-store';
 import { SessionBus } from '@electron/services/remote/session-bus';
 import { PhoneTerminalRegistry } from '@electron/services/remote/terminal-store';
+
+// These tests spawn REAL shells through createTerminalImpl, which wires up
+// SAI's history scaffolding (`history -a` at every prompt). Left pointed at
+// the developer's real HOME, every probe command typed below ("echo
+// hello-from-pty; exit 0") would be appended to their actual shell history —
+// and their rc files would run during shell init (slow, and the source of DSR
+// flakiness). Redirect HOME to a scratch dir so the shells are hermetic.
+let scratchHome: string;
+const savedHome = process.env.HOME;
+const savedHistfile = process.env.HISTFILE;
+
+beforeAll(() => {
+  scratchHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sai-terminal-e2e-home-'));
+  process.env.HOME = scratchHome;
+  delete process.env.HISTFILE;
+});
+
+afterAll(() => {
+  if (savedHome !== undefined) process.env.HOME = savedHome; else delete process.env.HOME;
+  if (savedHistfile !== undefined) process.env.HISTFILE = savedHistfile;
+  try { fs.rmSync(scratchHome, { recursive: true, force: true }); } catch { /* best effort */ }
+});
 
 describe('mobile remote terminal end-to-end', () => {
   it.skipIf(process.platform === 'win32')('spawn → echo hello → exit 0 → replay on reconnect', async () => {

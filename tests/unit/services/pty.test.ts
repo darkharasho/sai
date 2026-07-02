@@ -228,11 +228,10 @@ describe.skipIf(process.platform === 'win32')('Regression 62618bd: node-pty spaw
       await mockIpcMain._invoke('terminal:create', '/tmp');
 
       const ptyModule = await import('node-pty');
-      expect(ptyModule.spawn).toHaveBeenCalledWith(
-        '/bin/bash',
-        expect.anything(),
-        expect.anything(),
-      );
+      // The wrapper is /bin/sh; the user shell is exec'd via argv passthrough
+      const call = vi.mocked(ptyModule.spawn).mock.calls.at(-1)!;
+      expect(call[0]).toBe('/bin/sh');
+      expect(call[1]).toContain('/bin/bash');
     } finally {
       if (savedShell !== undefined) process.env.SHELL = savedShell;
     }
@@ -249,11 +248,9 @@ describe.skipIf(process.platform === 'win32')('Regression 62618bd: node-pty spaw
       await mockIpcMain._invoke('terminal:create', '/tmp');
 
       const ptyModule = await import('node-pty');
-      expect(ptyModule.spawn).toHaveBeenCalledWith(
-        '/usr/bin/zsh',
-        expect.anything(),
-        expect.anything(),
-      );
+      const call = vi.mocked(ptyModule.spawn).mock.calls.at(-1)!;
+      expect(call[0]).toBe('/bin/sh');
+      expect(call[1]).toContain('/usr/bin/zsh');
     } finally {
       if (savedShell !== undefined) {
         process.env.SHELL = savedShell;
@@ -395,14 +392,15 @@ describe('terminal:create', () => {
     await setupWithTerminal('/tmp');
     const ptyModule = await import('node-pty');
     expect(ptyModule.spawn).toHaveBeenCalledWith(
-      expect.any(String),
-      ['-c', expect.stringContaining('stty -echoctl')],
+      '/bin/sh',
+      expect.arrayContaining(['-c', expect.stringContaining('stty -echoctl')]),
       expect.objectContaining({ name: 'xterm-256color' }),
     );
-    const args = (ptyModule.spawn as any).mock.calls[0][1];
-    expect(args[1]).toContain('exec');
-    // bash → --rcfile, zsh → -i with ZDOTDIR, other shells → --login
-    expect(args[1]).toMatch(/--rcfile|--login|"-i"/);
+    const args = (ptyModule.spawn as any).mock.calls[0][1] as string[];
+    expect(args[1]).toContain('exec "$@"');
+    // bash → --rcfile, zsh → -i with ZDOTDIR, other shells → --login,
+    // passed as discrete argv entries after the wrapper's $0 placeholder
+    expect(args.some(a => a === '--rcfile' || a === '--login' || a === '-i')).toBe(true);
   });
 
   it('uses cwd from argument', async () => {
@@ -660,20 +658,21 @@ describe.skipIf(process.platform !== 'linux')('systemd scope isolation (Linux cg
     expect(args).toContain('--user');
     expect(args).toContain('--scope');
     expect(args).toContain('--quiet');
-    // The actual shell should appear after '--' with -c and init script
+    // After '--' comes the /bin/sh wrapper, then the user shell via "$@"
     const dashDashIdx = args.indexOf('--');
     expect(dashDashIdx).toBeGreaterThan(-1);
+    expect(args[dashDashIdx + 1]).toBe('/bin/sh');
     expect(args[dashDashIdx + 2]).toBe('-c');
     expect(args[dashDashIdx + 3]).toContain('stty -echoctl');
-    expect(args[dashDashIdx + 3]).toMatch(/--rcfile|--login|"-i"/);
+    expect(args.some(a => a === '--rcfile' || a === '--login' || a === '-i')).toBe(true);
   });
 
   it('falls back to direct shell spawn when canUseSystemdScope returns false', async () => {
     const { cmd, args } = await spawnArgsFor(false);
-    expect(cmd).not.toBe('systemd-run');
+    expect(cmd).toBe('/bin/sh');
     expect(args[0]).toBe('-c');
     expect(args[1]).toContain('stty -echoctl');
-    expect(args[1]).toMatch(/--rcfile|--login|"-i"/);
+    expect(args.some(a => a === '--rcfile' || a === '--login' || a === '-i')).toBe(true);
   });
 });
 
@@ -761,22 +760,20 @@ describe.skipIf(process.platform === 'win32')('desktop terminal:create uses hist
 
   it('bash: execs with --rcfile pointing at the sai shell-init bashrc, not --login', async () => {
     const { args } = await spawnArgsWithShell('/bin/bash');
-    const shellInit = args[args.indexOf('-c') + 1];
-    expect(shellInit).toContain('--rcfile');
-    expect(shellInit).toContain('bashrc');
-    expect(shellInit).not.toContain('--login');
+    expect(args).toContain('--rcfile');
+    expect(args[args.indexOf('--rcfile') + 1]).toContain('bashrc');
+    expect(args).not.toContain('--login');
   });
 
   it('zsh: execs interactive with ZDOTDIR pointing at the sai shell-init dir', async () => {
     const { args, env } = await spawnArgsWithShell('/usr/bin/zsh');
-    const shellInit = args[args.indexOf('-c') + 1];
-    expect(shellInit).not.toContain('--login');
+    expect(args).toContain('-i');
+    expect(args).not.toContain('--login');
     expect(env.ZDOTDIR).toContain('sai-shell-init');
   });
 
   it('unsupported shells still fall back to --login', async () => {
     const { args } = await spawnArgsWithShell('/usr/bin/fish');
-    const shellInit = args[args.indexOf('-c') + 1];
-    expect(shellInit).toContain('--login');
+    expect(args).toContain('--login');
   });
 });

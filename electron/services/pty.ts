@@ -2,7 +2,7 @@ import * as pty from 'node-pty';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import { get, touchActivity } from './workspace';
 import { RingBuffer } from './remote/ring-buffer';
 
@@ -12,13 +12,24 @@ import { RingBuffer } from './remote/ring-buffer';
 // other tab. Without this, bash/zsh only flush history on clean exit (and
 // overwrite each other), so cross-tab history and post-restart history both
 // silently disappear.
-let shellInitDir: string | undefined;
+// The init files live under Electron's userData dir (user-owned), NOT /tmp:
+// /tmp is world-writable, so a fixed /tmp path could be pre-created by another
+// local user to inject rc content, and tmp reapers can delete the files while
+// the app runs. Files are rewritten on every ensure so they self-heal.
+function shellInitBaseDir(): string {
+  try {
+    const dir = app?.getPath?.('userData');
+    if (dir) return dir;
+  } catch { /* app not ready (tests) — fall through */ }
+  return os.tmpdir();
+}
+
 function ensureShellInitDir(): string {
-  if (shellInitDir && fs.existsSync(shellInitDir)) return shellInitDir;
   const user = (os.userInfo().username || 'user').replace(/[^A-Za-z0-9._-]/g, '_');
-  const dir = path.join(os.tmpdir(), `sai-shell-init-${user}`);
+  const dir = path.join(shellInitBaseDir(), `sai-shell-init-${user}`);
   const zdot = path.join(dir, 'zsh');
-  fs.mkdirSync(zdot, { recursive: true });
+  fs.mkdirSync(zdot, { recursive: true, mode: 0o700 });
+  try { fs.chmodSync(dir, 0o700); } catch { /* best effort */ }
   fs.writeFileSync(path.join(dir, 'bashrc'),
     `[ -f /etc/profile ] && . /etc/profile\n` +
     `if [ -f "$HOME/.bash_profile" ]; then . "$HOME/.bash_profile"\n` +
@@ -37,8 +48,10 @@ function ensureShellInitDir(): string {
     `[ -f "$HOME/.zprofile" ] && source "$HOME/.zprofile"\n` +
     `[ -f "$HOME/.zshrc" ] && source "$HOME/.zshrc"\n` +
     `[ -f "$HOME/.zlogin" ] && source "$HOME/.zlogin"\n` +
-    `setopt INC_APPEND_HISTORY SHARE_HISTORY\n`);
-  shellInitDir = dir;
+    // INC_APPEND_HISTORY only — SHARE_HISTORY would also *read* other
+    // sessions' commands live, interleaving foreign entries into up-arrow
+    // mid-session. Matches the bash scaffolding (history -a: write-only).
+    `setopt INC_APPEND_HISTORY\n`);
   return dir;
 }
 
@@ -168,13 +181,16 @@ export function createTerminalImpl(opts: {
     delete env.CHROME_DESKTOP;
     delete env.INVOCATION_ID;
     const shellArgs = buildShellLaunchArgs(shell, env);
-    const quotedArgs = shellArgs.map(a => `"${a.replace(/"/g, '\\"')}"`).join(' ');
-    const shellInit = `stty -echoctl 2>/dev/null; exec "${shell}" ${quotedArgs}`;
+    // Wrap via /bin/sh, not the user's shell: the -c string is POSIX syntax
+    // (csh/tcsh reject `2>/dev/null`), and the shell + its args pass through
+    // argv ("$@") so paths containing quotes/$/spaces are never re-parsed.
+    const shellInit = 'stty -echoctl 2>/dev/null; exec "$@"';
+    const wrapper = ['-c', shellInit, 'sai-shell', shell, ...shellArgs];
     const useScope = canUseSystemdScope();
-    spawnCmd = useScope ? 'systemd-run' : shell;
+    spawnCmd = useScope ? 'systemd-run' : '/bin/sh';
     spawnArgs = useScope
-      ? ['--user', '--scope', '--quiet', '--', shell, '-c', shellInit]
-      : ['-c', shellInit];
+      ? ['--user', '--scope', '--quiet', '--', '/bin/sh', ...wrapper]
+      : wrapper;
     ptyName = 'xterm-256color';
     fallbackCwd = process.env.HOME || '/';
   }
@@ -384,32 +400,6 @@ export function registerTerminalHandlers(win: BrowserWindow) {
     });
   });
 
-  ipcMain.handle('terminal:getShellHistory', async (_event, count: number) => {
-    const fs = require('fs') as typeof import('fs');
-    const path = require('path') as typeof import('path');
-    const os = require('os') as typeof import('os');
-    const home = os.homedir();
-    const candidates = [
-      path.join(home, '.zsh_history'),
-      path.join(home, '.bash_history'),
-    ];
-    for (const histFile of candidates) {
-      try {
-        const content = fs.readFileSync(histFile, 'utf-8');
-        const lines = content.split('\n').filter(Boolean);
-        // zsh extended history format: lines starting with ": timestamp:0;" — extract the command part
-        const parsed = lines.map(l => {
-          const m = l.match(/^: \d+:\d+;(.*)$/);
-          return m ? m[1] : l;
-        });
-        return parsed.slice(-count);
-      } catch {
-        continue;
-      }
-    }
-    return [];
-  });
-
   ipcMain.on('terminal:write', (_event, id: number, data: string) => {
     allTerminals.get(id)?.write(data);
     // Update activity for owning workspace
@@ -422,7 +412,10 @@ export function registerTerminalHandlers(win: BrowserWindow) {
   });
 
   ipcMain.on('terminal:resize', (_event, id: number, cols: number, rows: number) => {
-    allTerminals.get(id)?.resize(cols, rows);
+    // Reject degenerate dimensions — resize(0, 0) corrupts the pty and a
+    // renderer bug (hidden container fit) shouldn't take the shell down.
+    if (!Number.isFinite(cols) || !Number.isFinite(rows) || cols < 1 || rows < 1) return;
+    allTerminals.get(id)?.resize(Math.floor(cols), Math.floor(rows));
   });
 
   ipcMain.on('terminal:kill', (_event, id: number) => {
