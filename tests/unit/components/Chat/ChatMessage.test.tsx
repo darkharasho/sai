@@ -106,50 +106,56 @@ describe('ChatMessage', () => {
     expect(container.querySelector('.tool-call-card')).toBeTruthy();
   });
 
-  describe('reasoning live state yields to running tools', () => {
+  describe('reasoning animations quiet while a tool runs', () => {
     const reasoningMsg = (toolCalls?: ChatMessageType['toolCalls']) => makeMessage({
       reasoning: 'pondering deeply',
       reasoningLive: true,
       toolCalls,
     });
 
-    it('shows the live reasoning card while no tool is running', () => {
+    it('animates the live reasoning card while no tool is running', () => {
       render(<ChatMessage message={reasoningMsg()} />);
-      expect(screen.getByTestId('msg-reasoning-live')).toBeTruthy();
+      const card = screen.getByTestId('msg-reasoning-live');
+      expect(card.getAttribute('data-quiet')).toBeNull();
+      expect(card.querySelector('.sai-shimmer')).toBeTruthy();
     });
 
-    it('pauses the live card while a tool call is unresolved', () => {
+    it('stays live but quiets the animations while a tool call is unresolved', () => {
       const msg = reasoningMsg([
         { id: 'tc1', type: 'terminal_command', name: 'Bash', input: '{"command":"ls"}' },
       ]);
       render(<ChatMessage message={msg} />);
-      expect(screen.queryByTestId('msg-reasoning-live')).toBeNull();
-      expect(screen.getByTestId('msg-reasoning')).toBeTruthy();
+      const card = screen.getByTestId('msg-reasoning-live');
+      expect(card.getAttribute('data-quiet')).toBe('true');
+      expect(card.querySelector('.sai-shimmer')).toBeNull();
+      expect(card.querySelector('.rsn-peek')).toBeTruthy();
     });
 
-    it('resumes the live card once every tool call has output', () => {
+    it('resumes the animations once every tool call has output', () => {
       const msg = reasoningMsg([
         { id: 'tc1', type: 'terminal_command', name: 'Bash', input: '{"command":"ls"}', output: 'file.txt' },
       ]);
       render(<ChatMessage message={msg} />);
-      expect(screen.getByTestId('msg-reasoning-live')).toBeTruthy();
+      const card = screen.getByTestId('msg-reasoning-live');
+      expect(card.getAttribute('data-quiet')).toBeNull();
+      expect(card.querySelector('.sai-shimmer')).toBeTruthy();
     });
 
-    it('resumes the live card when a tool settles with an empty-string output', () => {
+    it('resumes the animations when a tool settles with an empty-string output', () => {
       const msg = reasoningMsg([
         { id: 'tc1', type: 'file_search', name: 'ToolSearch', input: '{}', output: '' },
       ]);
       render(<ChatMessage message={msg} />);
-      expect(screen.getByTestId('msg-reasoning-live')).toBeTruthy();
+      expect(screen.getByTestId('msg-reasoning-live').getAttribute('data-quiet')).toBeNull();
     });
 
-    it('stays paused while any of several tool calls is still running', () => {
+    it('stays quiet while any of several tool calls is still running', () => {
       const msg = reasoningMsg([
         { id: 'tc1', type: 'terminal_command', name: 'Bash', input: '{}', output: 'done' },
         { id: 'tc2', type: 'file_read', name: 'Read', input: '{}' },
       ]);
       render(<ChatMessage message={msg} />);
-      expect(screen.queryByTestId('msg-reasoning-live')).toBeNull();
+      expect(screen.getByTestId('msg-reasoning-live').getAttribute('data-quiet')).toBe('true');
     });
   });
 

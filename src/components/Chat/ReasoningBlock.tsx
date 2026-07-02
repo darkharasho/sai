@@ -5,6 +5,9 @@ interface Props {
   text: string;
   /** Still streaming: shimmer header, live timer, auto-following peek window. */
   live?: boolean;
+  /** Live but yielding: a running tool card is the working signal, so the
+   *  shimmer/spark animations rest while the card keeps its live layout. */
+  quiet?: boolean;
   /** When the reasoning row was created — drives the live elapsed timer so it
    *  survives remounts (workspace/chat swaps) without resetting to zero. */
   startedAt?: number;
@@ -32,7 +35,7 @@ function formatTokens(n: number): string {
  * under a gradient mask. Once finalized it settles into a quiet one-line
  * "Thought for Ns" card whose header toggles an expandable panel.
  */
-export default function ReasoningBlock({ text, live, startedAt, durationMs, tokens }: Props) {
+export default function ReasoningBlock({ text, live, quiet, startedAt, durationMs, tokens }: Props) {
   const [open, setOpen] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [peekOverflows, setPeekOverflows] = useState(false);
@@ -66,8 +69,9 @@ export default function ReasoningBlock({ text, live, startedAt, durationMs, toke
 
   return (
     <div
-      className={`rsn${live ? ' rsn--live' : ''}${open ? ' rsn--open' : ''}`}
+      className={`rsn${live ? ' rsn--live' : ''}${live && quiet ? ' rsn--quiet' : ''}${open ? ' rsn--open' : ''}`}
       data-testid={live ? 'msg-reasoning-live' : 'msg-reasoning'}
+      data-quiet={live && quiet ? 'true' : undefined}
     >
       <div
         className="rsn-head"
@@ -79,7 +83,7 @@ export default function ReasoningBlock({ text, live, startedAt, durationMs, toke
         }}
       >
         <Sparkles size={14} className="rsn-spark" />
-        <span className={`rsn-label${live ? ' sai-shimmer' : ''}`}>{label}</span>
+        <span className={`rsn-label${live && !quiet ? ' sai-shimmer' : ''}`}>{label}</span>
         {live ? (
           <span className="rsn-time">
             {typeof tokens === 'number' && tokens > 0 ? `${formatTokens(tokens)} tokens · ` : ''}
@@ -132,6 +136,9 @@ export default function ReasoningBlock({ text, live, startedAt, durationMs, toke
           animation: rsn-spark-spin 3.2s linear infinite;
         }
         @keyframes rsn-spark-spin { to { transform: rotate(360deg); } }
+        /* Quiet: a running tool card owns the working signal, so the spark
+           rests and dims while the card keeps its live layout. */
+        .rsn--quiet .rsn-spark { animation: none; color: var(--text-muted); }
         .rsn-label { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
         .rsn-time {
           margin-left: auto;

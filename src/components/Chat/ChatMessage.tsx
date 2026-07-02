@@ -820,10 +820,11 @@ function ChatMessage({
       {message.role === 'assistant' && message.reasoning && (
         <ReasoningBlock
           text={message.reasoning}
-          // Yield the live signal to a running tool: while any tool call in
-          // this message is unresolved its card already shimmers, so the
-          // reasoning card goes quiet and picks back up on the tool result.
-          live={!!message.reasoningLive && !message.toolCalls?.some(tc => tc.output == null)}
+          live={!!message.reasoningLive}
+          // While any tool call in this message is unresolved its card already
+          // shimmers, so the reasoning card's animations rest — the card itself
+          // stays in its live layout and picks back up on the tool result.
+          quiet={message.toolCalls?.some(tc => tc.output == null)}
           startedAt={message.timestamp}
           durationMs={message.reasoningDurationMs}
           tokens={message.reasoningTokens}
