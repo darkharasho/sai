@@ -73,7 +73,7 @@ export default function ReasoningBlock({ text, live, startedAt, durationMs, toke
           if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(o => !o); }
         }}
       >
-        <Sparkles size={12} className="rsn-spark" />
+        <Sparkles size={14} className="rsn-spark" />
         <span className="rsn-label">{label}</span>
         {live ? (
           <span className="rsn-time">
@@ -103,8 +103,7 @@ export default function ReasoningBlock({ text, live, startedAt, durationMs, toke
       )}
       <style>{`
         .rsn {
-          max-width: 640px;
-          margin: 0 8px 8px 24px;
+          margin: 0 8px 10px 24px;
           border: 1px solid var(--border-hairline);
           border-radius: 8px;
           background: var(--surface-2);
@@ -116,7 +115,7 @@ export default function ReasoningBlock({ text, live, startedAt, durationMs, toke
           display: flex;
           align-items: center;
           gap: 8px;
-          padding: 6px 12px;
+          padding: 8px 14px;
           user-select: none;
         }
         .rsn:not(.rsn--live) .rsn-head { cursor: pointer; }
@@ -127,7 +126,7 @@ export default function ReasoningBlock({ text, live, startedAt, durationMs, toke
           animation: rsn-spark-spin 3.2s linear infinite;
         }
         @keyframes rsn-spark-spin { to { transform: rotate(360deg); } }
-        .rsn-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+        .rsn-label { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
         .rsn--live .rsn-label {
           background: linear-gradient(
             90deg,
@@ -168,15 +167,17 @@ export default function ReasoningBlock({ text, live, startedAt, durationMs, toke
         .rsn--open .rsn-chev { transform: rotate(90deg); }
         .rsn-peek {
           position: relative;
-          max-height: 66px;
+          /* Grows naturally with the streamed text up to ~10 lines, then the
+             newest lines stay pinned (auto-scroll) under the gradient mask. */
+          max-height: 220px;
           overflow: hidden;
-          padding: 0 12px 8px 32px;
-          -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 26px);
-          mask-image: linear-gradient(180deg, transparent 0, #000 26px);
+          padding: 0 14px 10px 34px;
+          -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 30px);
+          mask-image: linear-gradient(180deg, transparent 0, #000 30px);
         }
         .rsn-peek-text {
-          font-size: 12px;
-          line-height: 1.55;
+          font-size: 13px;
+          line-height: 1.6;
           color: var(--text-muted);
           white-space: pre-wrap;
           word-break: break-word;
@@ -191,9 +192,9 @@ export default function ReasoningBlock({ text, live, startedAt, durationMs, toke
         }
         .rsn-body {
           position: relative;
-          padding: 2px 14px 12px 32px;
-          font-size: 12px;
-          line-height: 1.55;
+          padding: 2px 16px 14px 34px;
+          font-size: 13px;
+          line-height: 1.6;
           color: var(--text-secondary);
           white-space: pre-wrap;
           word-break: break-word;
