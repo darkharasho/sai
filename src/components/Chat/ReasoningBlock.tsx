@@ -30,8 +30,9 @@ function formatTokens(n: number): string {
 
 /**
  * The reasoning transcript row. While the model thinks it renders as a live
- * card: slow-spinning spark, shimmering "Reasoning" label, running timer and a
- * three-line "peek" window where new words fade in and older lines scroll up
+ * card: shimmering "Reasoning" label (the same working signal as a running
+ * tool card — no bespoke spinner), running timer and a three-line "peek"
+ * window where new words fade in and older lines scroll up
  * under a gradient mask. Once finalized it settles into a quiet one-line
  * "Thought for Ns" card whose header toggles an expandable panel.
  */
@@ -131,15 +132,15 @@ export default function ReasoningBlock({ text, live, quiet, startedAt, durationM
         .rsn:not(.rsn--live) .rsn-head { cursor: pointer; }
         .rsn:not(.rsn--live) .rsn-head:hover { background: var(--surface-3); }
         .rsn-spark { color: var(--text-muted); flex-shrink: 0; }
-        .rsn--live .rsn-spark {
-          color: var(--accent);
-          animation: rsn-spark-spin 3.2s linear infinite;
-        }
-        @keyframes rsn-spark-spin { to { transform: rotate(360deg); } }
+        .rsn--live .rsn-spark { color: var(--accent); }
         /* Quiet: a running tool card owns the working signal, so the spark
-           rests and dims while the card keeps its live layout. */
-        .rsn--quiet .rsn-spark { animation: none; color: var(--text-muted); }
-        .rsn-label { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+           dims while the card keeps its live layout. */
+        .rsn--quiet .rsn-spark { color: var(--text-muted); }
+        .rsn-label { font-size: 13px; font-weight: 600; }
+        /* Only color the label when the shimmer isn't driving it — this style
+           tag loads after globals.css, so an unconditional color here would
+           override .sai-shimmer's transparent text and hide the gradient. */
+        .rsn-label:not(.sai-shimmer) { color: var(--text-secondary); }
         .rsn-time {
           margin-left: auto;
           font-family: 'Geist Mono', monospace;
@@ -217,7 +218,6 @@ export default function ReasoningBlock({ text, live, quiet, startedAt, durationM
           to { opacity: 1; transform: none; }
         }
         @media (prefers-reduced-motion: reduce) {
-          .rsn--live .rsn-spark { animation: none; }
           .rsn-w { animation: none; }
           .rsn-body { animation: none; }
           .rsn-chev { transition: none; }
