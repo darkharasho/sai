@@ -130,7 +130,7 @@ export default function StreamingAssistantHead({ streaming, content, durationMs,
         )}
         <div
           ref={mdRef}
-          className="chat-msg-md sah-md"
+          className={`chat-msg-md sah-md${streaming && content ? ' sah-md--streaming' : ''}`}
           style={phase === 'revealed' || (streaming && content) ? undefined : { display: 'none' }}
         >
           {children}

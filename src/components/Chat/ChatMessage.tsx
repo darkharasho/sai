@@ -22,6 +22,8 @@ import StreamingAssistantHead from './StreamingAssistantHead';
 import { hasRevealed, markRevealed } from './revealRegistry';
 import { useSaiAnimationPref } from './useSaiAnimationPref';
 import { rehypeEmojiIcons } from './rehypeEmojiIcons';
+import { rehypeStreamWords } from './rehypeStreamWords';
+import ReasoningBlock from './ReasoningBlock';
 import { renderEmojiSpan } from './emojiIcons';
 
 // Message IDs that have already played their entry animation. Prevents the
@@ -48,6 +50,15 @@ const MD_PLUGINS = {
 const ASSISTANT_MD_PLUGINS = {
   ...MD_PLUGINS,
   rehypePlugins: [rehypeHighlight, rehypeFilePaths, rehypeEmojiIcons],
+};
+
+// Live-streaming variant: additionally wraps words in `.sw` spans so text
+// arriving mid-stream fades in per word (see rehypeStreamWords). Only used for
+// messages that streamed token-by-token this session — static/history renders
+// use ASSISTANT_MD_PLUGINS so nothing animates on remount.
+const ASSISTANT_MD_PLUGINS_STREAM = {
+  ...MD_PLUGINS,
+  rehypePlugins: [rehypeHighlight, rehypeFilePaths, rehypeEmojiIcons, rehypeStreamWords],
 };
 
 const FILE_PATH_RE = /(?<![:/])\b((?:\.{1,2}\/)?(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte))(?::(\d+))?\b|(?<![:/.\w])((?:\/[\w.-]+)+\.(?:ts|tsx|js|jsx|mjs|cjs|py|md|json|css|scss|sass|html|yaml|yml|toml|sh|bash|zsh|go|rs|rb|java|c|cpp|h|hpp|vue|svelte))(?::(\d+))?\b/g;
@@ -807,30 +818,13 @@ function ChatMessage({
       {...effectiveEntryProps}
     >
       {message.role === 'assistant' && message.reasoning && (
-        message.reasoningLive ? (
-          <div
-            className="chat-msg-reasoning-live"
-            data-testid="msg-reasoning-live"
-            style={{
-              fontStyle: 'italic',
-              fontSize: 12,
-              lineHeight: 1.5,
-              color: 'var(--text-muted)',
-              margin: '0 8px 6px 24px',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-            }}
-          >
-            {message.reasoning}
-          </div>
-        ) : (
-          <details className="chat-msg-reasoning" data-testid="msg-reasoning" style={{ margin: '0 0 6px 24px', fontSize: 12, color: 'var(--text-muted)' }}>
-            <summary style={{ cursor: 'pointer', userSelect: 'none', opacity: 0.8 }}>Reasoning</summary>
-            <div style={{ whiteSpace: 'pre-wrap', marginTop: 4, paddingLeft: 10, borderLeft: '2px solid var(--border-hairline)' }}>
-              {message.reasoning}
-            </div>
-          </details>
-        )
+        <ReasoningBlock
+          text={message.reasoning}
+          live={!!message.reasoningLive}
+          startedAt={message.timestamp}
+          durationMs={message.reasoningDurationMs}
+          tokens={message.reasoningTokens}
+        />
       )}
       {useMorphHead && (isAssistantStreaming || message.content) && (
         <StreamingAssistantHead
@@ -839,7 +833,10 @@ function ChatMessage({
           durationMs={message.durationMs}
           messageId={message.id}
         >
-          <ReactMarkdown {...ASSISTANT_MD_PLUGINS} components={markdownComponents}>
+          <ReactMarkdown
+            {...((isAssistantStreaming || streamedThisSession) ? ASSISTANT_MD_PLUGINS_STREAM : ASSISTANT_MD_PLUGINS)}
+            components={markdownComponents}
+          >
             {typeof message.content === 'string' ? message.content : String(message.content ?? '')}
           </ReactMarkdown>
         </StreamingAssistantHead>
