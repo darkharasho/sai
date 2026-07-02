@@ -13,6 +13,12 @@ export interface ChatMessage {
   /** Transient: the reasoning row is still streaming (italic live style).
    *  Stripped before persistence so history reloads collapsed. */
   reasoningLive?: boolean;
+  /** How long the reasoning segment streamed, captured when the live row is
+   *  finalized. Drives the settled "Thought for Ns" label. */
+  reasoningDurationMs?: number;
+  /** Latest estimated thinking-token count for this reasoning segment
+   *  (SDK `thinking_tokens` signal), shown on the reasoning card. */
+  reasoningTokens?: number;
   /**
    * Snapshots of GitHubWatcherCard state captured at phase transitions so the
    * card resumes from its last-known state when an old chat is reopened. Keyed

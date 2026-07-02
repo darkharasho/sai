@@ -445,6 +445,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // persisting with the rest of the history.
   const reasoningPendingRef = useRef<string>('');
   const reasoningRafRef = useRef<number | null>(null);
+  // True while a live reasoning row is on screen — thinking_tokens counts are
+  // routed onto that card instead of the thinking-indicator hint.
+  const reasoningActiveRef = useRef(false);
   // Force the next text to open a NEW bubble instead of merging into the last
   // one. Set at every turn boundary (streaming_start, including wait-resume
   // re-arms) — merging a resumed turn's text into the previous segment's
@@ -492,6 +495,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     const pending = reasoningPendingRef.current;
     if (!pending) return;
     reasoningPendingRef.current = '';
+    reasoningActiveRef.current = true;
     setMessages(prev => {
       const last = prev[prev.length - 1];
       if (last?.role === 'assistant' && last.reasoningLive) {
@@ -514,12 +518,17 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // ended): collapse the live italic row into its expandable disclosure.
   const finalizeReasoning = useCallback(() => {
     flushReasoning();
+    reasoningActiveRef.current = false;
     setMessages(prev => {
       for (let i = prev.length - 1; i >= 0; i--) {
         const m = prev[i];
         if (m.reasoningLive) {
           const updated = [...prev];
-          updated[i] = { ...m, reasoningLive: undefined };
+          updated[i] = {
+            ...m,
+            reasoningLive: undefined,
+            reasoningDurationMs: Date.now() - (m.timestamp ?? Date.now()),
+          };
           return updated;
         }
         if (m.role === 'user') break;
@@ -804,8 +813,26 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       if (msg.type === 'system' && msg.subtype === 'thinking_tokens') {
         const n = msg.estimated_tokens;
         if (typeof n === 'number' && n > 0) {
-          const label = n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
-          setStreamHint(`thinking · ${label} tokens`);
+          // A live reasoning card owns the count — putting it on the thinking
+          // indicator too duplicates the signal (and lingers after the card).
+          if (reasoningActiveRef.current) {
+            clearStreamHint();
+            setMessages(prev => {
+              for (let i = prev.length - 1; i >= 0; i--) {
+                const m = prev[i];
+                if (m.reasoningLive) {
+                  const updated = [...prev];
+                  updated[i] = { ...m, reasoningTokens: n };
+                  return updated;
+                }
+                if (m.role === 'user') break;
+              }
+              return prev;
+            });
+          } else {
+            const label = n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+            setStreamHint(`thinking · ${label} tokens`);
+          }
         }
         return;
       }
