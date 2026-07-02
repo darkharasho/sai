@@ -2141,6 +2141,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             <motion.div
               key={`thinking-${rowSeqRef.current}`}
               {...THINKING_ROW_MOTION}
+              className="thinking-row-wrap"
               transition={rowTransition}
             >
               <ThinkingAnimation hint={streamHint} />
@@ -2150,6 +2151,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             <motion.div
               key={`thinking-pending-${rowSeqRef.current}`}
               {...THINKING_ROW_MOTION}
+              className="thinking-row-wrap"
               transition={rowTransition}
             >
               <ThinkingAnimation hint={streamHint} />

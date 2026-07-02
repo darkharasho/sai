@@ -83,4 +83,29 @@ describe('ThinkingAnimation', () => {
 
     expect(container.querySelector('.thinking-clock')).toBeNull();
   });
+
+  it('renders a "kind · detail" hint as a sub-line with a kind chip, outside the animated row', () => {
+    const { container, getByTestId } = render(
+      <ThinkingAnimation hint="agent · Reading src/components/Chat/ChatMessage.tsx" />
+    );
+    const line = getByTestId('thinking-hint');
+    // Sub-line lives OUTSIDE the animated row (the typewriter's width changes
+    // every frame — inline hints jittered along with it).
+    expect(container.querySelector('.thinking-animation')!.contains(line)).toBe(false);
+    expect(line.querySelector('.thinking-hint-kind')?.textContent).toBe('agent');
+    expect(line.querySelector('.thinking-hint-detail')?.textContent).toBe('Reading src/components/Chat/ChatMessage.tsx');
+    expect(line.querySelector('svg')).toBeTruthy();
+  });
+
+  it('renders a plain hint (no separator) as detail only — no chip', () => {
+    const { getByTestId } = render(<ThinkingAnimation hint="authenticating…" />);
+    const line = getByTestId('thinking-hint');
+    expect(line.querySelector('.thinking-hint-kind')).toBeNull();
+    expect(line.querySelector('.thinking-hint-detail')?.textContent).toBe('authenticating…');
+  });
+
+  it('renders no hint line when hint is absent', () => {
+    const { container } = render(<ThinkingAnimation />);
+    expect(container.querySelector('[data-testid="thinking-hint"]')).toBeNull();
+  });
 });

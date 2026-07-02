@@ -14,8 +14,10 @@ async function rowVisibility(window: any): Promise<any> {
   return window.evaluate(() => {
     const row = document.querySelector('.thinking-animation') as HTMLElement | null;
     if (!row) return { present: false, opacity: 0, height: 0 };
-    // The animated wrapper is the motion.div around the row.
-    const wrap = row.parentElement as HTMLElement;
+    // The animated wrapper is the motion.div around the row (stable class —
+    // parentElement would now hit the .thinking-wrap layout div instead).
+    const wrap = row.closest('.thinking-row-wrap') as HTMLElement;
+    if (!wrap) return { present: false, opacity: 0, height: 0 };
     const cs = getComputedStyle(wrap);
     const rect = wrap.getBoundingClientRect();
     const rowRect = row.getBoundingClientRect();
