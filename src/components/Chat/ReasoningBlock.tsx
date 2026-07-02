@@ -35,6 +35,7 @@ function formatTokens(n: number): string {
 export default function ReasoningBlock({ text, live, startedAt, durationMs, tokens }: Props) {
   const [open, setOpen] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const [peekOverflows, setPeekOverflows] = useState(false);
   const peekRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -46,11 +47,15 @@ export default function ReasoningBlock({ text, live, startedAt, durationMs, toke
     return () => clearInterval(t);
   }, [live, startedAt]);
 
-  // Keep the peek window pinned to the newest thought as text streams in.
+  // Keep the peek window pinned to the newest thought as text streams in, and
+  // only mask the top edge once older lines actually scroll under it — while
+  // the peek is still growing the first lines should read at full strength.
   useEffect(() => {
     if (!live) return;
     const el = peekRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    setPeekOverflows(el.scrollHeight > el.clientHeight + 1);
   }, [live, text]);
 
   const label = live
@@ -74,7 +79,7 @@ export default function ReasoningBlock({ text, live, startedAt, durationMs, toke
         }}
       >
         <Sparkles size={14} className="rsn-spark" />
-        <span className="rsn-label">{label}</span>
+        <span className={`rsn-label${live ? ' sai-shimmer' : ''}`}>{label}</span>
         {live ? (
           <span className="rsn-time">
             {typeof tokens === 'number' && tokens > 0 ? `${formatTokens(tokens)} tokens · ` : ''}
@@ -90,7 +95,7 @@ export default function ReasoningBlock({ text, live, startedAt, durationMs, toke
         )}
       </div>
       {live && (
-        <div className="rsn-peek" ref={peekRef}>
+        <div className={`rsn-peek${peekOverflows ? ' rsn-peek--masked' : ''}`} ref={peekRef}>
           <div className="rsn-peek-text">
             {text.split(/(\s+)/).map((part, i) =>
               /^\s+$/.test(part) ? part : <span key={i} className="rsn-w">{part}</span>
@@ -127,23 +132,6 @@ export default function ReasoningBlock({ text, live, startedAt, durationMs, toke
         }
         @keyframes rsn-spark-spin { to { transform: rotate(360deg); } }
         .rsn-label { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
-        .rsn--live .rsn-label {
-          background: linear-gradient(
-            90deg,
-            var(--text-muted) 20%,
-            color-mix(in srgb, var(--accent) 75%, #fff) 50%,
-            var(--text-muted) 80%
-          );
-          background-size: 200% 100%;
-          -webkit-background-clip: text;
-          background-clip: text;
-          color: transparent;
-          animation: rsn-shimmer 2.2s linear infinite;
-        }
-        @keyframes rsn-shimmer {
-          from { background-position: 200% 0; }
-          to { background-position: -200% 0; }
-        }
         .rsn-time {
           margin-left: auto;
           font-family: 'Geist Mono', monospace;
@@ -172,6 +160,8 @@ export default function ReasoningBlock({ text, live, startedAt, durationMs, toke
           max-height: 220px;
           overflow: hidden;
           padding: 0 14px 10px 34px;
+        }
+        .rsn-peek--masked {
           -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 30px);
           mask-image: linear-gradient(180deg, transparent 0, #000 30px);
         }
@@ -220,7 +210,6 @@ export default function ReasoningBlock({ text, live, startedAt, durationMs, toke
         }
         @media (prefers-reduced-motion: reduce) {
           .rsn--live .rsn-spark { animation: none; }
-          .rsn--live .rsn-label { animation: none; color: var(--text-secondary); background: none; }
           .rsn-w { animation: none; }
           .rsn-body { animation: none; }
           .rsn-chev { transition: none; }

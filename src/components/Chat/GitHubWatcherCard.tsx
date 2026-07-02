@@ -589,7 +589,7 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
               transition={pop}
             >
               <StatusIcon size={18} />
-              <span className="gh-watcher-badge-label">{theme.label}</span>
+              <span className={`gh-watcher-badge-label${isLive ? ' sai-shimmer' : ''}`}>{theme.label}</span>
               {isLive && <span className="gh-watcher-badge-pulse" aria-hidden />}
             </motion.div>
           </AnimatePresence>

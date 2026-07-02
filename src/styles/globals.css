@@ -337,6 +337,34 @@ pre {
   .sw { animation: none; }
   .sah-md--streaming > *:last-child::after { animation: none; }
 }
+
+/* Shimmering "working" text — the live-state signal established by the
+   reasoning card. Apply to a label ONLY while its surface is actively
+   working (streaming, running, rendering); settled states stay quiet. */
+.sai-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--text-muted) 20%,
+    color-mix(in srgb, var(--accent) 75%, #fff) 50%,
+    var(--text-muted) 80%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: sai-shimmer 2.2s linear infinite;
+}
+@keyframes sai-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sai-shimmer {
+    animation: none;
+    background: none;
+    color: var(--text-secondary);
+  }
+}
 .sai-emoji-icon {
   display: inline-block;
   width: 1.3em;

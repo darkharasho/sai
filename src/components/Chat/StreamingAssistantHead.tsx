@@ -135,7 +135,7 @@ export default function StreamingAssistantHead({ streaming, content, durationMs,
           </div>
         )}
         {phase !== 'revealed' && !(streaming && content) && (
-          <span className={`sah-status${phase === 'morphing' ? ' sah-status--gone' : ''}`}>
+          <span className={`sah-status sai-shimmer${phase === 'morphing' ? ' sah-status--gone' : ''}`}>
             {driver.displayText}
             <span className="thinking-cursor thinking-cursor-block" />
           </span>
@@ -153,10 +153,13 @@ export default function StreamingAssistantHead({ streaming, content, durationMs,
         .sah-clock--done { color: var(--text-muted); }
         .sah-status {
           font-family: 'Departure Mono', 'Geist Mono', 'JetBrains Mono', monospace;
-          font-size: 13px; letter-spacing: 0.4px; color: var(--accent);
+          font-size: 13px; letter-spacing: 0.4px;
           transition: opacity .25s ease, filter .25s ease;
         }
         .sah-status--gone { opacity: 0; filter: blur(2px); }
+        /* The shimmer makes the status text color transparent; the block
+           cursor draws with currentColor, so give it a real color. */
+        .sah-status .thinking-cursor-block { background: var(--accent); }
         .sah-root { animation: sah-drop .42s cubic-bezier(.2,.8,.2,1); }
         @keyframes sah-drop { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
         @media (prefers-reduced-motion: reduce) {

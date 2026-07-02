@@ -1,11 +1,10 @@
 /* ── RenderToolCard (Task 9) — full-width panel card ─────────────────────── */
 .sai-render-card {
   width: 100%;
-  background: var(--surface-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-xl);
+  background: var(--surface-2);
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
   overflow: hidden;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
 }
 .sai-render-card__bar {
   display: flex;
@@ -13,7 +12,6 @@
   gap: 8px;
   padding: 10px 14px;
   font-size: 13px;
-  background: var(--surface-3);
   border-bottom: 1px solid var(--border-hairline);
 }
 .sai-render-card__title {
@@ -50,7 +48,7 @@
   justify-content: center;
   min-height: 320px;
   padding: 18px;
-  background: var(--surface-2);
+  background: var(--surface-1);
 }
 .sai-render-card__err { padding: 12px 14px; color: var(--red); }
 .sai-render-card__code {
@@ -111,11 +109,10 @@
   display: inline-flex;
   flex-direction: column;
   max-width: 100%;
-  background: var(--surface-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
   overflow: hidden;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
 }
 
 /* Header — compact */
@@ -170,7 +167,7 @@
   flex: 0 0 auto;
   align-self: stretch;
   padding: 3px;
-  background: var(--surface-2);
+  background: var(--surface-1);
   display: flex; align-items: stretch;
 }
 .sai-rc__render [data-render-region] {

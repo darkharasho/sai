@@ -40,7 +40,7 @@ export default function SwarmTaskRow(p: Props) {
       style={{ borderLeft: `3px solid ${STATUS_COLOR[p.status]}` }}
     >
       <div className="row-main">
-        <div className="row-title">{p.title}</div>
+        <div className={`row-title${p.isStreaming ? ' sai-shimmer' : ''}`}>{p.title}</div>
         <div className="row-sub">
           {p.projectLinkName && <span className="row-project">{p.projectLinkName}</span>}
           {p.projectLinkName && ' · '}
