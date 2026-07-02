@@ -59,6 +59,10 @@ export interface WorkspaceClaude {
   /** Set when a scheduling tool_use (ScheduleWakeup/CronCreate) is seen during the
    *  current turn; reset at each streaming_start. Drives scheduled-wait classification. */
   sawSchedulingTool: boolean;
+  /** Set when a background launch tool_use (Bash/Agent run_in_background, Workflow)
+   *  is seen during the current turn; reset at each streaming_start. Drives
+   *  background-wait classification for turns the CLI ends 'completed'. */
+  sawBackgroundLaunch: boolean;
   /** delaySeconds from the latest ScheduleWakeup input this turn, else null. */
   wakeupResumeInSeconds: number | null;
   /** True from a scheduled-wait result until the next resume (streaming_start).
@@ -145,6 +149,7 @@ function newClaudeScope(cwd: string): WorkspaceClaude {
     lastActivityAt: Date.now(),
     streaming: false,
     sawSchedulingTool: false,
+    sawBackgroundLaunch: false,
     wakeupResumeInSeconds: null,
     pendingWakeup: false,
     wakeupDeadline: null,

@@ -32,7 +32,7 @@ import {
 } from '../claude';
 import { isImagePath, mimeForImagePath } from '../imageFiles';
 import { notifyCompletion, notifyApproval, notifyQuestion, notifyPlanReview } from '../notify';
-import { classifyTurnEnd, isSchedulingTool, WAKEUP_GRACE_MS, type WaitMeta } from '../waitClassifier';
+import { classifyTurnEnd, isSchedulingTool, isBackgroundLaunch, WAKEUP_GRACE_MS, type WaitMeta } from '../waitClassifier';
 import { clamp, type PermMode } from '../remote/clamp';
 import { parseUserMcpConfigPaths } from './userMcpConfig';
 import { buildSdkOptions } from './sdkOptions';
@@ -86,6 +86,8 @@ interface ScopeSession {
   heldToolUses: Set<string>;
   /** A scheduling tool (ScheduleWakeup/CronCreate) fired this turn. */
   sawSchedulingTool: boolean;
+  /** A background launch (Bash/Agent run_in_background, Workflow) fired this turn. */
+  sawBackgroundLaunch: boolean;
   /** delaySeconds from the latest ScheduleWakeup input this turn. */
   wakeupResumeInSeconds: number | null;
   /** Turn ended in a scheduled wait — defer the idle sweep. */
@@ -679,6 +681,7 @@ export class SdkBackend implements ClaudeBackend {
   /** Clear per-turn wait tracking (mirrors claude.ts emitStreamingStart). */
   private _resetWaitTracking(session: ScopeSession): void {
     session.sawSchedulingTool = false;
+    session.sawBackgroundLaunch = false;
     session.wakeupResumeInSeconds = null;
     session.pendingWakeup = false;
     session.wakeupDeadline = null;
@@ -853,6 +856,7 @@ export class SdkBackend implements ClaudeBackend {
       gated: !!canUseTool,
       heldToolUses: new Set(),
       sawSchedulingTool: false,
+      sawBackgroundLaunch: false,
       wakeupResumeInSeconds: null,
       pendingWakeup: false,
       wakeupDeadline: null,
@@ -980,6 +984,7 @@ export class SdkBackend implements ClaudeBackend {
             wait = classifyTurnEnd({
               terminalReason: m.terminal_reason,
               sawSchedulingTool: session.sawSchedulingTool,
+              sawBackgroundLaunch: session.sawBackgroundLaunch,
               wakeupResumeInSeconds: session.wakeupResumeInSeconds,
               taskCount: Array.isArray(m.background_tasks) ? m.background_tasks.length : null,
             });
@@ -1064,6 +1069,9 @@ export class SdkBackend implements ClaudeBackend {
                 if (blockName === 'ScheduleWakeup' && typeof delay === 'number') {
                   session.wakeupResumeInSeconds = delay;
                 }
+              }
+              if (isBackgroundLaunch(blockName, block.input)) {
+                session.sawBackgroundLaunch = true;
               }
 
               if (session.gated) continue;

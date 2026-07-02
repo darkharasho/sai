@@ -25,7 +25,7 @@ import type { StartArgs, CompactArgs } from './claudeBackend/types';
 import { getClaudeBackend, getClaudeBackendSetting } from './claudeBackend';
 export { touchActivity, getOrCreate as getOrCreateWorkspace } from './workspace';
 import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASKS_NUDGE } from './chatNudges';
-import { classifyTurnEnd, isSchedulingTool, WAKEUP_GRACE_MS, type WaitMeta } from './waitClassifier';
+import { classifyTurnEnd, isSchedulingTool, isBackgroundLaunch, WAKEUP_GRACE_MS, type WaitMeta } from './waitClassifier';
 export { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE };
 
 const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
@@ -131,6 +131,7 @@ export function emitStreamingStart(
   // itself proves the scope is active again, so it must not stay marked as
   // waiting or defer the idle sweep past this point.
   claude.sawSchedulingTool = false;
+  claude.sawBackgroundLaunch = false;
   claude.wakeupResumeInSeconds = null;
   claude.pendingWakeup = false;
   claude.wakeupDeadline = null;
@@ -487,6 +488,9 @@ function ensureProcess(
                   claude.wakeupResumeInSeconds = delay;
                 }
               }
+              if (isBackgroundLaunch(block.name, block.input)) {
+                claude.sawBackgroundLaunch = true;
+              }
               if (block.name === 'AskUserQuestion') {
                 askUserQuestionId = block.id;
               }
@@ -545,6 +549,7 @@ function ensureProcess(
           const wait: WaitMeta = classifyTurnEnd({
             terminalReason: msg.terminal_reason,
             sawSchedulingTool: claude.sawSchedulingTool,
+            sawBackgroundLaunch: claude.sawBackgroundLaunch,
             wakeupResumeInSeconds: claude.wakeupResumeInSeconds,
             taskCount: Array.isArray(msg.background_tasks) ? msg.background_tasks.length : null,
           });
@@ -832,6 +837,7 @@ export function interruptImpl(projectPath: string, scope?: string): void {
     claude.pendingWakeup = false;
     claude.wakeupDeadline = null;
     claude.sawSchedulingTool = false;
+    claude.sawBackgroundLaunch = false;
     claude.wakeupResumeInSeconds = null;
     proc.kill();
     emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope: scope || 'chat', turnSeq: claude.turnSeq });
