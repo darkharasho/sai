@@ -1307,41 +1307,33 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     };
   }, [projectPath, aiProvider, activeMetaRuntime, flushStreamingText]);
 
-  // Poll the Anthropic usage API for real utilization percentages
+  // Real utilization percentages arrive on usage:update from two sources:
+  // the main-process OAuth poller (60s) and the SDK backend's post-turn
+  // get_usage fetch. Both send per-window { utilization: 0-100, resets_at: ISO }.
   useEffect(() => {
+    // five_hour → Current session; seven_day → All models; seven_day_* →
+    // per-model weekly buckets (labeled "<Model> only" by ChatInput).
+    const WINDOW_KEYS = ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet', 'seven_day_oauth_apps'];
     const handleUsage = (data: any) => {
       if (!data) return;
       setRateLimits(prev => {
         const next = new Map(prev);
-        // five_hour → Current session
-        if (data.five_hour) {
-          const existing = next.get('five_hour') || {
-            rateLimitType: 'five_hour',
+        for (const key of WINDOW_KEYS) {
+          const w = data[key];
+          // null windows (SDK sends them for unprovisioned buckets) must not
+          // zero a bar that has real data — skip anything non-numeric.
+          if (!w || typeof w.utilization !== 'number') continue;
+          const existing = next.get(key) || {
+            rateLimitType: key,
             resetsAt: 0,
             status: 'unknown',
             isUsingOverage: false,
             overageResetsAt: 0,
           };
-          next.set('five_hour', {
+          next.set(key, {
             ...existing,
-            utilization: (data.five_hour.utilization ?? 0) / 100, // API returns 0-100, we use 0-1
-            ...(data.five_hour.resets_at ? { resetsAt: Math.floor(new Date(data.five_hour.resets_at).getTime() / 1000) } : {}),
-            lastUpdated: Date.now(),
-          });
-        }
-        // seven_day → Weekly (All models)
-        if (data.seven_day) {
-          const existing = next.get('seven_day') || {
-            rateLimitType: 'seven_day',
-            resetsAt: 0,
-            status: 'unknown',
-            isUsingOverage: false,
-            overageResetsAt: 0,
-          };
-          next.set('seven_day', {
-            ...existing,
-            utilization: (data.seven_day.utilization ?? 0) / 100,
-            ...(data.seven_day.resets_at ? { resetsAt: Math.floor(new Date(data.seven_day.resets_at).getTime() / 1000) } : {}),
+            utilization: w.utilization / 100, // API returns 0-100, we use 0-1
+            ...(w.resets_at ? { resetsAt: Math.floor(new Date(w.resets_at).getTime() / 1000) } : {}),
             lastUpdated: Date.now(),
           });
         }
