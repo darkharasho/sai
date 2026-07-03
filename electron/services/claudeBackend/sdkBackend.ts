@@ -376,7 +376,10 @@ export class SdkBackend implements ClaudeBackend {
         this._resolveGatesForScope(scopeKey, 'Session restarted with new settings');
         if (session.mapperState.streaming) {
           // End the in-flight turn in the UI — its result will never arrive.
-          this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: session.activeTurnSeq });
+          // Stamped with turnSeq (the last streaming_start's seq — what the
+          // renderer's stale-turn guard expects), NOT activeTurnSeq, which lags
+          // after an interrupt and would get this done dropped as stale.
+          this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: session.turnSeq });
         }
         if (session.sessionId) this.pendingResume.set(scopeKey, session.sessionId);
         session.query.close();
@@ -427,9 +430,12 @@ export class SdkBackend implements ClaudeBackend {
       // eslint-disable-next-line no-console
       console.error('[SdkBackend.send] failed:', text);
       // Capture the turn BEFORE tearing the session down so the recovery done
-      // isn't stamped with turnSeq 0 (which the renderer drops as stale).
+      // carries the seq the renderer expects (turnSeq — activeTurnSeq lags after
+      // an interrupt and would be dropped as stale). With no session at all,
+      // stamp null: the stale-turn guard treats an unknown seq as current, so
+      // the recovery done always unsticks the UI.
       const session = this.sessions.get(scopeKey);
-      const turnSeq = session?.activeTurnSeq ?? 0;
+      const turnSeq = session?.turnSeq ?? null;
       try { session?.query.close(); } catch { /* already dead */ }
       this.sessions.delete(scopeKey);
       this._emit({ type: 'error', fatal: true, text: `SDK backend error: ${friendlyError(text)}`, projectPath, scope: effectiveScope });
@@ -443,7 +449,14 @@ export class SdkBackend implements ClaudeBackend {
     const scopeKey = toScopeKey(projectPath, scope);
     const effectiveScope = scope ?? 'chat';
     const session = this.sessions.get(scopeKey);
-    if (!session) return;
+    if (!session) {
+      // No live session (drain died, scope swept, session switched) but the
+      // renderer may still believe the scope is streaming — a user Stop must
+      // ALWAYS unstick the UI. turnSeq null is treated as current by the
+      // renderer's stale-turn guard, so this done can never be dropped.
+      this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: null });
+      return;
+    }
 
     session.query.interrupt().catch((err) => {
       // eslint-disable-next-line no-console
@@ -459,16 +472,22 @@ export class SdkBackend implements ClaudeBackend {
     session.awaitingInput = false;
     this._resetWaitTracking(session);
 
-    // CLI parity (claude.ts:830): end the turn in the UI immediately. The SDK's
-    // own result for the interrupted turn arrives later stamped with this same
-    // activeTurnSeq, after the renderer has reset its expected seq — the stale-turn
-    // guard drops it. If the interrupt failed and assistant frames keep coming,
-    // the mapper re-arms streaming_start (streaming is false), self-healing the UI.
     if (session.mapperState.streaming) {
       session.mapperState = { ...session.mapperState, streaming: false };
       session.awaitingInterruptResult = true;
-      this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: session.activeTurnSeq });
     }
+    // CLI parity (claude.ts:823-843): end the turn in the UI immediately and
+    // UNCONDITIONALLY — even when the mapper already saw the turn end, the
+    // renderer may disagree (a previously dropped turn-end) and Stop is the
+    // user's unstick of last resort. Stamped with turnSeq, the seq the
+    // renderer's stale-turn guard expects: activeTurnSeq lags after an
+    // interrupt/chained send, and a done stamped with the lagging seq is
+    // dropped as stale, making Stop a visible no-op. The SDK's own result for
+    // the interrupted turn arrives later stamped with the lagging activeTurnSeq
+    // and is dropped by the guard; if the interrupt failed and assistant frames
+    // keep coming, the mapper re-arms streaming_start (streaming is false),
+    // self-healing the UI.
+    this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: session.turnSeq });
   }
 
   // ─── setSessionId ──────────────────────────────────────────────────────────
@@ -478,6 +497,10 @@ export class SdkBackend implements ClaudeBackend {
     const session = this.sessions.get(scopeKey);
     if (session) {
       this._resolveGatesForScope(scopeKey, 'Session switched');
+      if (session.mapperState.streaming) {
+        // End the in-flight turn in the UI — its result will never arrive.
+        this._emit({ type: 'done', projectPath, scope: session._scopeName, turnSeq: session.turnSeq });
+      }
       session.query.close();
       this.sessions.delete(scopeKey);
     }
@@ -1176,8 +1199,13 @@ export class SdkBackend implements ClaudeBackend {
         const text = err instanceof Error ? err.message : String(err);
         // fatal: swarm status mirroring marks the task failed (not done) on a
         // crash — without the flag a dead drain reads as a clean completion.
+        // done stamped with turnSeq (renderer-expected seq), not activeTurnSeq —
+        // a crash right after an interrupt/chained send would otherwise emit a
+        // lagging seq the stale-turn guard drops, stranding the thinking
+        // animation with the session gone (so Stop couldn't recover it either).
         this._emit({ type: 'error', fatal: true, text: friendlyError(text), projectPath, scope: effectiveScope });
-        this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: session.activeTurnSeq });
+        this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: session.turnSeq });
+        session.mapperState = { ...session.mapperState, streaming: false };
       } finally {
         // Release any gates still held by this scope — a closed query can never
         // deliver the tool result, and the resolver would leak forever.
@@ -1185,6 +1213,16 @@ export class SdkBackend implements ClaudeBackend {
         // Remove the dead session only if it hasn't been replaced by a newer one
         // (e.g. setSessionId may have already deleted+recreated it)
         if (this.sessions.get(scopeKey) === session) {
+          // A drain that ENDS while the turn is still visibly streaming (the
+          // runtime subprocess exited without a result frame) can never deliver
+          // its turn-end — without this the renderer streams forever and the
+          // follow-up Stop finds no session. Teardown paths that already emitted
+          // their own done (suspend, config restart, sweep, setSessionId) delete
+          // the session from the map first, so this only fires for unexpected
+          // drain deaths.
+          if (session.mapperState.streaming) {
+            this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: session.turnSeq });
+          }
           this.sessions.delete(scopeKey);
         }
       }
@@ -1204,7 +1242,8 @@ export class SdkBackend implements ClaudeBackend {
       this._resolveGatesForScope(scopeKey, 'Workspace suspended');
       if (session.mapperState.streaming) {
         // End the in-flight turn in the UI — its result will never arrive.
-        this._emit({ type: 'done', projectPath, scope: session._scopeName, turnSeq: session.activeTurnSeq });
+        // turnSeq, not activeTurnSeq: the lagging seq gets dropped as stale.
+        this._emit({ type: 'done', projectPath, scope: session._scopeName, turnSeq: session.turnSeq });
       }
       if (session.sessionId) this.pendingResume.set(scopeKey, session.sessionId);
       session.query.close();

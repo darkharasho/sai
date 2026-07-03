@@ -1443,6 +1443,140 @@ describe('SdkBackend', () => {
     fakeQuery.close();
   });
 
+  it('(32c) interrupt with NO live session still emits done(turnSeq=null) — Stop must always unstick the UI', async () => {
+    const backend = new SdkBackend({ queryFn: vi.fn(), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    // No send ever happened (or the drain died and deleted the session):
+    // the renderer may still believe the scope is streaming.
+    backend.interrupt(PROJECT, SCOPE);
+    const done = emits.find(e => e.type === 'done');
+    expect(done).toBeDefined();
+    // null is treated as "current" by the renderer's stale-turn guard — this
+    // done can never be dropped.
+    expect(done!.turnSeq).toBeNull();
+    expect(done!.scope).toBe(SCOPE);
+  });
+
+  it('(32d) interrupt after the mapper saw the turn end still emits done — recovers a renderer that missed the turn-end', async () => {
+    const fakeQuery = makeFakeQuery([
+      { type: 'result', stop_reason: 'end_turn', num_turns: 1 },
+    ], { hang: true });
+    const backend = new SdkBackend({ queryFn: vi.fn(() => fakeQuery), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.send({ projectPath: PROJECT, message: 'x', scope: SCOPE });
+    await new Promise<void>((resolve) => {
+      const check = () => { if (emits.some(e => e.type === 'done')) resolve(); else setTimeout(check, 5); };
+      setTimeout(check, 5);
+    });
+
+    // Turn ended backend-side; a stranded renderer hits Stop anyway.
+    emits.length = 0;
+    backend.interrupt(PROJECT, SCOPE);
+    const done = emits.find(e => e.type === 'done');
+    expect(done).toBeDefined();
+    expect(done!.turnSeq).toBe(1);
+
+    fakeQuery.close();
+  });
+
+  it('(32e) send mid-turn then Stop: done is stamped with the NEW turnSeq, not the lagging activeTurnSeq', async () => {
+    // Turn 1 stays in flight forever (its result never drains — worst case).
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    const backend = new SdkBackend({ queryFn: vi.fn(() => fakeQuery), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+
+    backend.send({ projectPath: PROJECT, message: 'first', scope: SCOPE, permMode: 'default' });
+    await new Promise(r => setTimeout(r, 10));
+    // Chained send: turnSeq → 2, activeTurnSeq deliberately lags at 1.
+    backend.send({ projectPath: PROJECT, message: 'second', scope: SCOPE, permMode: 'default' });
+    await new Promise(r => setTimeout(r, 10));
+
+    emits.length = 0;
+    backend.interrupt(PROJECT, SCOPE);
+    const done = emits.find(e => e.type === 'done');
+    expect(done).toBeDefined();
+    // Renderer expects seq 2 (the last streaming_start). A done stamped with
+    // the lagging seq 1 would be dropped as stale — Stop would do nothing.
+    expect(done!.turnSeq).toBe(2);
+
+    fakeQuery.close();
+  });
+
+  it('(32f) drain that ends mid-stream (runtime died without a result) emits a final done with the expected turnSeq', async () => {
+    // One assistant frame arms streaming, then the stream just ENDS.
+    async function* gen() {
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'partial…' }] } };
+    }
+    const iterator = gen();
+    const fakeQuery: any = {
+      interrupt: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn(),
+      [Symbol.asyncIterator]() { return iterator; },
+    };
+    const backend = new SdkBackend({ queryFn: vi.fn(() => fakeQuery), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.send({ projectPath: PROJECT, message: 'x', scope: SCOPE });
+    await new Promise<void>((resolve) => {
+      const check = () => { if (emits.some(e => e.type === 'done')) resolve(); else setTimeout(check, 5); };
+      setTimeout(check, 5);
+    });
+
+    const done = emits.find(e => e.type === 'done');
+    expect(done!.turnSeq).toBe(1);
+    // Session torn down — nothing left for a follow-up Stop to find, which is
+    // exactly why the done above must have been emitted.
+    expect((backend as any).sessions.size).toBe(0);
+  });
+
+  it('(32g) drain crash after a chained send emits done with the CURRENT turnSeq, not the lagging activeTurnSeq', async () => {
+    let releaseCrash: (() => void) | null = null;
+    const crashGate = new Promise<void>((res) => { releaseCrash = res; });
+    async function* gen(): AsyncGenerator<any> {
+      await crashGate;
+      throw new Error('runtime died');
+    }
+    const iterator = gen();
+    const fakeQuery: any = {
+      interrupt: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn(),
+      [Symbol.asyncIterator]() { return iterator; },
+    };
+    const backend = new SdkBackend({ queryFn: vi.fn(() => fakeQuery), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+
+    backend.send({ projectPath: PROJECT, message: 'first', scope: SCOPE, permMode: 'default' });
+    await new Promise(r => setTimeout(r, 10));
+    // Chained send leaves activeTurnSeq lagging at 1, renderer expects 2.
+    backend.send({ projectPath: PROJECT, message: 'second', scope: SCOPE, permMode: 'default' });
+    await new Promise(r => setTimeout(r, 10));
+
+    emits.length = 0;
+    releaseCrash!();
+    await new Promise<void>((resolve) => {
+      const check = () => { if (emits.some(e => e.type === 'error')) resolve(); else setTimeout(check, 5); };
+      setTimeout(check, 5);
+    });
+    const done = emits.find(e => e.type === 'done');
+    expect(done).toBeDefined();
+    expect(done!.turnSeq).toBe(2);
+  });
+
+  it('(32h) setSessionId on a streaming scope ends the in-flight turn in the UI before teardown', async () => {
+    const fakeQuery = makeFakeQuery([
+      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'working…' }] } },
+    ], { hang: true });
+    const backend = new SdkBackend({ queryFn: vi.fn(() => fakeQuery), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.send({ projectPath: PROJECT, message: 'x', scope: SCOPE });
+    await new Promise<void>((resolve) => {
+      const check = () => { if (emits.some(e => e.type === 'assistant')) resolve(); else setTimeout(check, 5); };
+      setTimeout(check, 5);
+    });
+
+    emits.length = 0;
+    backend.setSessionId(PROJECT, 'other-session', SCOPE);
+    const done = emits.find(e => e.type === 'done');
+    expect(done).toBeDefined();
+    expect(done!.turnSeq).toBe(1);
+    expect(done!.scope).toBe(SCOPE);
+  });
+
   it('(33) session options carry the enriched spawn env and a stderr handler', async () => {
     const fakeQuery = makeFakeQuery([], { hang: true });
     let capturedOptions: any = null;
