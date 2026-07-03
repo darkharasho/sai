@@ -26,6 +26,7 @@ export interface MockSai {
   claudeGenerateCommitMessage: ReturnType<typeof vi.fn>;
   claudeStop: ReturnType<typeof vi.fn>;
   claudeSetSessionId: ReturnType<typeof vi.fn>;
+  claudeReconcileScope: ReturnType<typeof vi.fn>;
   claudeApprove: ReturnType<typeof vi.fn>;
   claudeAlwaysAllow: ReturnType<typeof vi.fn>;
   claudeOnMessage: ReturnType<typeof vi.fn>;
@@ -167,6 +168,7 @@ export function createMockSai(): MockSai {
     claudeGenerateCommitMessage: vi.fn().mockResolvedValue(''),
     claudeStop: vi.fn(),
     claudeSetSessionId: vi.fn(),
+    claudeReconcileScope: vi.fn(),
     claudeApprove: vi.fn().mockResolvedValue(undefined),
     claudeAlwaysAllow: vi.fn().mockResolvedValue(undefined),
     claudeOnMessage: noopUnsubscribe,

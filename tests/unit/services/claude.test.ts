@@ -202,7 +202,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 import { spawn } from 'node:child_process';
 import { createMockBrowserWindow } from '../../helpers/electron-mock';
 import { MockChildProcess } from '../../helpers/process-mock';
-import { registerClaudeHandlers, setSessionIdImpl, emitStreamingStart } from '@electron/services/claude';
+import { registerClaudeHandlers, setSessionIdImpl, emitStreamingStart, reconcileScopeImpl } from '@electron/services/claude';
 
 // ---------------------------------------------------------------------------
 // Per-test process registry
@@ -1402,5 +1402,53 @@ describe('setSessionIdImpl', () => {
     setSessionIdImpl(PROJECT, 'sess-next', 'chat');
     expect(kill).toHaveBeenCalled();
     expect(claude.sessionId).toBe('sess-next');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reconcileScopeImpl — backend-truth resync for stuck renderer streaming state
+// ---------------------------------------------------------------------------
+
+describe('reconcileScopeImpl', () => {
+  const PROJECT = '/test/reconcile';
+
+  it('emits an unstick done(turnSeq null) for an unknown scope', () => {
+    reconcileScopeImpl(PROJECT, 'ghost');
+    const done = sentMessages(win).find(m => m.type === 'done');
+    expect(done).toBeDefined();
+    expect(done.turnSeq).toBeNull();
+    expect(done.scope).toBe('ghost');
+  });
+
+  it('emits an unstick done for an idle scope, but stays silent while streaming or busy', () => {
+    const ws = workspaceState.getOrCreate(PROJECT);
+    const claude = ws.claudeScopes.get('chat')!;
+
+    claude.streaming = true;
+    reconcileScopeImpl(PROJECT, 'chat');
+    expect(sentMessages(win).filter(m => m.type === 'done')).toHaveLength(0);
+
+    claude.streaming = false;
+    claude.busy = true;
+    reconcileScopeImpl(PROJECT, 'chat');
+    expect(sentMessages(win).filter(m => m.type === 'done')).toHaveLength(0);
+
+    claude.busy = false;
+    reconcileScopeImpl(PROJECT, 'chat');
+    const done = sentMessages(win).find(m => m.type === 'done');
+    expect(done).toBeDefined();
+    expect(done.turnSeq).toBeNull();
+  });
+
+  it('re-emits the scheduled wait for a scope sleeping on a wakeup', () => {
+    const ws = workspaceState.getOrCreate(PROJECT);
+    const claude = ws.claudeScopes.get('chat')!;
+    claude.pendingWakeup = true;
+    claude.wakeupDeadline = Date.now() + 120_000;
+    reconcileScopeImpl(PROJECT, 'chat');
+    const done = sentMessages(win).find(m => m.type === 'done');
+    expect(done).toBeDefined();
+    expect(done.turnSeq).toBeNull();
+    expect(done.wait?.kind).toBe('scheduled');
   });
 });

@@ -4987,6 +4987,31 @@ export default function App() {
     return () => clearInterval(id);
   }, [releaseBusySlot]);
 
+  // Backend-truth reconciler: streaming state is event-sourced (streaming_start
+  // sets it, result/done clears it) with staleness guards and NO resync — a
+  // single lost or stale-dropped turn-end strands a chat in "working" forever
+  // (stop button up, queue never drains; live-observed for 3h on 2026-07-03).
+  // Every 20s, ask the backend to re-assert reality for each scope we believe
+  // is streaming. The backend stays silent for genuinely busy scopes, re-emits
+  // the wait done for waiting scopes, and answers a stuck scope with an
+  // unconditional-unstick done (turnSeq null — never stale-droppable), which
+  // flows the normal turn-end path and clears all derived state consistently.
+  // Claude session scopes only: gemini/codex ride the shared 'chat' scope,
+  // which the claude backend would always (wrongly) report idle.
+  useEffect(() => {
+    const hasStreaming = streamingScopes.size > 0;
+    if (!hasStreaming) return;
+    const id = setInterval(() => {
+      for (const key of streamingScopesRef.current) {
+        const projectPath = scopeKeyProjectPath(key);
+        const scope = key.slice(projectPath.length + 1);
+        if (!projectPath || !scope || scope === 'chat') continue;
+        window.sai.claudeReconcileScope?.(projectPath, scope);
+      }
+    }, 20_000);
+    return () => clearInterval(id);
+  }, [streamingScopes.size > 0]);
+
   const unreadSessionIds = useMemo(() => {
     const ids = new Set<string>();
     for (const s of sessions) {

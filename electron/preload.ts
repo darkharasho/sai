@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('sai', {
   claudeCompact: (projectPath: string, permMode?: string, effort?: string, model?: string, scope?: string) => ipcRenderer.send('claude:compact', projectPath, permMode, effort, model, scope),
   claudeStop: (projectPath: string, scope?: string) => ipcRenderer.send('claude:stop', projectPath, scope),
   claudeSetSessionId: (projectPath: string, sessionId: string | undefined, scope?: string) => ipcRenderer.send('claude:setSessionId', projectPath, sessionId, scope),
+  claudeReconcileScope: (projectPath: string, scope?: string) => ipcRenderer.send('claude:reconcileScope', projectPath, scope),
   claudeApprove: (projectPath: string, toolUseId: string, approved: boolean, modifiedCommand?: string, scope?: string) =>
     ipcRenderer.invoke('claude:approve', projectPath, toolUseId, approved, modifiedCommand, scope),
   claudeAnswerQuestion: (projectPath: string, toolUseId: string, answers: Record<string, string | string[]>, scope?: string) =>

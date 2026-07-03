@@ -49,6 +49,13 @@ export interface ClaudeBackend {
   start(args: StartArgs): { slashCommands: string[] } | undefined;
   send(args: SendArgs): void;
   interrupt(projectPath: string, scope?: string): void;
+  /** Re-assert backend truth for a scope the renderer believes is streaming.
+   *  If the scope is genuinely busy: no-op. If it is idle (or unknown), emit
+   *  an unconditional-unstick `done` (turnSeq null — never stale-droppable);
+   *  if it is in a wait state, re-emit the wait done. Safety net for lost or
+   *  stale-dropped turn-ends — the renderer's streaming state is event-sourced
+   *  and otherwise never reconciles with reality. */
+  reconcileScope(projectPath: string, scope?: string): void;
   setSessionId(projectPath: string, sessionId: string | undefined, scope?: string): void;
   compact(args: CompactArgs): void;
   approve(args: ApproveArgs): Promise<boolean>;

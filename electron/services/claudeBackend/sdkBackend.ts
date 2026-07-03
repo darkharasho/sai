@@ -94,6 +94,12 @@ interface ScopeSession {
   wakeupResumeInSeconds: number | null;
   /** Turn ended in a scheduled wait — defer the idle sweep. */
   pendingWakeup: boolean;
+  /** Turn ended in a background wait (Agent/Bash/Workflow still running) — the
+   *  runtime re-invokes the model when the task finishes, but only while this
+   *  query is alive. Every flag above reads idle in this state, so teardown
+   *  paths (setSessionId on chat select) must check it or they silently kill
+   *  the pending resume. Cleared at the next streaming_start. */
+  pendingBackgroundResume: boolean;
   /** Silent turn (e.g. /compact): drop all non-system forwarding until result. */
   suppressForward: boolean;
   /** interrupt() ended the turn in the UI, but the runtime's result for that
@@ -490,17 +496,60 @@ export class SdkBackend implements ClaudeBackend {
     this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: session.turnSeq });
   }
 
+  // ─── reconcileScope ────────────────────────────────────────────────────────
+
+  reconcileScope(projectPath: string, scope?: string): void {
+    const scopeKey = toScopeKey(projectPath, scope);
+    const effectiveScope = scope ?? 'chat';
+    const session = this.sessions.get(scopeKey);
+    if (session) {
+      // Genuinely mid-turn (or holding a gate / awaiting an interrupt result):
+      // the real turn-end will arrive through the drain — do not fabricate one.
+      if (session.mapperState.streaming || session.awaitingInput || session.awaitingInterruptResult) return;
+      // In a wait: re-assert the wait instead of clearing it, so a renderer
+      // that lost the original wait done recovers the pill, not a dead chat.
+      if (session.pendingBackgroundResume) {
+        this._emit({
+          type: 'done', projectPath, scope: effectiveScope, turnSeq: null,
+          wait: { kind: 'background', resumeInSeconds: null, taskCount: null },
+        });
+        return;
+      }
+      if (session.pendingWakeup && (session.wakeupDeadline == null || Date.now() < session.wakeupDeadline)) {
+        const remaining = session.wakeupDeadline == null
+          ? null
+          : Math.max(0, Math.round((session.wakeupDeadline - WAKEUP_GRACE_MS - Date.now()) / 1000));
+        this._emit({
+          type: 'done', projectPath, scope: effectiveScope, turnSeq: null,
+          wait: { kind: 'scheduled', resumeInSeconds: remaining, taskCount: null },
+        });
+        return;
+      }
+    }
+    // Idle live session, or no session at all (swept / never started / died):
+    // the renderer's streaming belief is stale. turnSeq null is treated as
+    // current by the stale-turn guard, so this done can never be dropped.
+    this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: null });
+  }
+
   // ─── setSessionId ──────────────────────────────────────────────────────────
 
   setSessionId(projectPath: string, sessionId: string | undefined, scope?: string): void {
     const scopeKey = toScopeKey(projectPath, scope);
     const session = this.sessions.get(scopeKey);
     if (session) {
+      // CLI parity (setSessionIdImpl): a busy scope is left untouched. The
+      // renderer calls this on every chat select, so tearing down here killed
+      // any chat that was streaming in the background the moment the user
+      // switched back to it. The live session IS the requested session — its
+      // id is stashed for resume when it's closed (sweep/config restart).
+      const busy = session.mapperState.streaming
+        || session.awaitingInput
+        || session.awaitingInterruptResult
+        || session.pendingBackgroundResume
+        || (session.pendingWakeup && (session.wakeupDeadline == null || Date.now() < session.wakeupDeadline));
+      if (busy) return;
       this._resolveGatesForScope(scopeKey, 'Session switched');
-      if (session.mapperState.streaming) {
-        // End the in-flight turn in the UI — its result will never arrive.
-        this._emit({ type: 'done', projectPath, scope: session._scopeName, turnSeq: session.turnSeq });
-      }
       session.query.close();
       this.sessions.delete(scopeKey);
     }
@@ -732,6 +781,7 @@ export class SdkBackend implements ClaudeBackend {
     session.sawBackgroundLaunch = false;
     session.wakeupResumeInSeconds = null;
     session.pendingWakeup = false;
+    session.pendingBackgroundResume = false;
     session.wakeupDeadline = null;
   }
 
@@ -917,6 +967,7 @@ export class SdkBackend implements ClaudeBackend {
       sawBackgroundLaunch: false,
       wakeupResumeInSeconds: null,
       pendingWakeup: false,
+      pendingBackgroundResume: false,
       wakeupDeadline: null,
       _projectPath: projectPath,
       _scopeName: scope ?? 'chat',
@@ -1057,6 +1108,7 @@ export class SdkBackend implements ClaudeBackend {
               taskCount: Array.isArray(m.background_tasks) ? m.background_tasks.length : null,
             });
             session.pendingWakeup = wait.kind === 'scheduled';
+            session.pendingBackgroundResume = wait.kind === 'background';
             session.wakeupDeadline = (wait.kind === 'scheduled' && typeof wait.resumeInSeconds === 'number')
               ? Date.now() + wait.resumeInSeconds * 1000 + WAKEUP_GRACE_MS
               : null;
@@ -1259,6 +1311,9 @@ export class SdkBackend implements ClaudeBackend {
     for (const session of this.sessions.values()) {
       if (session._projectPath !== projectPath) continue;
       if (session.mapperState.streaming || session.awaitingInput) return true;
+      // A background wait counts as busy: suspending the workspace closes the
+      // query and the finished task can never resume the conversation.
+      if (session.pendingBackgroundResume) return true;
       if (session.pendingWakeup && (session.wakeupDeadline == null || now < session.wakeupDeadline)) return true;
     }
     return false;
@@ -1277,7 +1332,9 @@ export class SdkBackend implements ClaudeBackend {
       // A scope sleeping on a ScheduleWakeup must not be reaped — closing the
       // query kills the pending wakeup and the agent never resumes. Bounded by
       // the wakeup deadline (+grace) so an abandoned wakeup can't defer forever.
-      pendingWakeup: s.pendingWakeup && (s.wakeupDeadline == null || now < s.wakeupDeadline),
+      // Same for a background wait: the runtime resumes the turn only while
+      // this query is alive (unbounded — the runtime owns the task's lifetime).
+      pendingWakeup: (s.pendingWakeup && (s.wakeupDeadline == null || now < s.wakeupDeadline)) || s.pendingBackgroundResume,
     }));
     sweepIdleScopes({
       now,

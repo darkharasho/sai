@@ -726,6 +726,32 @@ export function setSessionIdImpl(projectPath: string, sessionId: string | undefi
   claude.sessionId = sessionId;
 }
 
+/** Re-assert backend truth for a scope the renderer believes is streaming
+ *  (mirrors SdkBackend.reconcileScope). Busy scopes are left alone — their
+ *  real turn-end will arrive. Idle/unknown scopes emit an unconditional
+ *  unstick `done` (turnSeq null is never stale-droppable); a scheduled wait
+ *  re-emits its wait done so a renderer that lost it recovers the pill. */
+export function reconcileScopeImpl(projectPath: string, scope?: string): void {
+  const effectiveScope = scope || 'chat';
+  const ws = get(projectPath);
+  const claude = ws?.claudeScopes.get(effectiveScope);
+  if (claude) {
+    if (claude.streaming || claude.busy || claude.awaitingApproval
+      || claude.awaitingQuestionAnswer || claude.awaitingPlanReview) return;
+    if (claude.pendingWakeup && (claude.wakeupDeadline == null || Date.now() < claude.wakeupDeadline)) {
+      const remaining = claude.wakeupDeadline == null
+        ? null
+        : Math.max(0, Math.round((claude.wakeupDeadline - WAKEUP_GRACE_MS - Date.now()) / 1000));
+      emitChatMessage({
+        type: 'done', projectPath, scope: effectiveScope, turnSeq: null,
+        wait: { kind: 'scheduled', resumeInSeconds: remaining, taskCount: null },
+      });
+      return;
+    }
+  }
+  emitChatMessage({ type: 'done', projectPath, scope: effectiveScope, turnSeq: null });
+}
+
 export function sendImpl(
   projectPath: string,
   message: string,
@@ -1502,6 +1528,12 @@ export function registerClaudeHandlers(win: BrowserWindow) {
   // claude:send — write message to persistent process stdin
   ipcMain.on('claude:send', (_event, projectPath: string, message: string, imagePaths?: string[], permMode?: string, effort?: string, model?: string, scope?: string) =>
     getClaudeBackend().send({ projectPath, message, imagePaths, permMode, effort, model, scope })
+  );
+
+  // claude:reconcileScope — renderer believes this scope is streaming; the
+  // backend re-asserts the truth (unstick done when idle, no-op when busy).
+  ipcMain.on('claude:reconcileScope', (_event, projectPath: string, scope?: string) =>
+    getClaudeBackend().reconcileScope(projectPath, scope)
   );
 
   // claude:compact — silently write /compact to stdin without starting a turn.

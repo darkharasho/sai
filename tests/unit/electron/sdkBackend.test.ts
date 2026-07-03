@@ -282,6 +282,138 @@ describe('SdkBackend', () => {
     expect(dones[1].turnSeq).toBe(2);
   });
 
+  // ── Test 2b: background launch → done carries wait.kind 'background' ──
+
+  it('(2b) a turn that dispatched Agent run_in_background ends with wait.kind=background on result+done', async () => {
+    const fakeQuery = makeFakeQuery([
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'dispatching reviewer…' },
+            { type: 'tool_use', id: 'tu-agent-1', name: 'Agent', input: { prompt: 'review it', run_in_background: true } },
+          ],
+        },
+      },
+      { type: 'result', stop_reason: 'end_turn', num_turns: 1, terminal_reason: 'completed' },
+    ], { hang: true });
+
+    const backend = new SdkBackend({
+      queryFn: vi.fn(() => fakeQuery),
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+    });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'go', scope: SCOPE, permMode: 'bypass' });
+    await new Promise<void>((resolve) => {
+      const check = () => { if (emits.some(e => e.type === 'done')) resolve(); else setTimeout(check, 5); };
+      setTimeout(check, 5);
+    });
+
+    const done = emits.find(e => e.type === 'done') as any;
+    const result = emits.find(e => e.type === 'result') as any;
+    expect(result?.wait?.kind).toBe('background');
+    expect(done?.wait?.kind).toBe('background');
+    fakeQuery.close();
+  });
+
+  // ── Test 2c: background-wait scope survives a chat select (setSessionId) ──
+
+  it('(2c) setSessionId on a scope waiting for a background-task resume leaves the query alive', async () => {
+    const fakeQuery = makeFakeQuery([
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool_use', id: 'tu-agent-1', name: 'Agent', input: { prompt: 'review', run_in_background: true } }],
+        },
+      },
+      // Turn ends while the reviewer keeps running — the runtime will re-invoke
+      // the model when it finishes, but only if the query stays alive.
+      { type: 'result', stop_reason: 'end_turn', num_turns: 1, terminal_reason: 'completed' },
+    ], { hang: true });
+
+    const backend = new SdkBackend({
+      queryFn: vi.fn(() => fakeQuery),
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+    });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'go', scope: SCOPE, permMode: 'bypass' });
+    await new Promise<void>((resolve) => {
+      const check = () => { if (emits.some(e => e.type === 'done')) resolve(); else setTimeout(check, 5); };
+      setTimeout(check, 5);
+    });
+    expect((emits.find(e => e.type === 'done') as any)?.wait?.kind).toBe('background');
+
+    // User switches away and back to this chat → renderer calls setSessionId.
+    emits.length = 0;
+    backend.setSessionId(PROJECT, 'persisted-session-id', SCOPE);
+    expect(fakeQuery.closeSpy).not.toHaveBeenCalled();
+    // No synthetic done either — one would clear the renderer's waiting pill.
+    expect(emits.find(e => e.type === 'done')).toBeUndefined();
+    fakeQuery.close();
+  });
+
+  // ── Test 2d: reconcileScope re-asserts backend truth for stuck renderers ──
+
+  it('(2d) reconcileScope emits an unstick done(turnSeq null) when the scope is idle or unknown, and stays silent while busy', async () => {
+    const backend = new SdkBackend({
+      queryFn: vi.fn(() => makeFakeQuery([], { hang: true })),
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+    });
+
+    // Unknown scope (no session at all — e.g. swept): must unstick.
+    backend.reconcileScope(PROJECT, 'ghost-scope');
+    let done = emits.find(e => e.type === 'done') as any;
+    expect(done).toBeDefined();
+    expect(done.turnSeq).toBeNull();
+    expect(done.scope).toBe('ghost-scope');
+    expect(done.wait).toBeUndefined();
+
+    // Streaming scope: backend is mid-turn — reconcile must NOT end it.
+    emits.length = 0;
+    backend.send({ projectPath: PROJECT, message: 'work', scope: SCOPE, permMode: 'bypass' });
+    await new Promise(r => setTimeout(r, 10));
+    backend.reconcileScope(PROJECT, SCOPE);
+    expect(emits.filter(e => e.type === 'done')).toHaveLength(0);
+  });
+
+  it('(2e) reconcileScope on a live idle session unsticks, and re-asserts the wait for a background-waiting scope', async () => {
+    const fakeQuery = makeFakeQuery([
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool_use', id: 'tu-1', name: 'Agent', input: { prompt: 'go', run_in_background: true } }],
+        },
+      },
+      { type: 'result', stop_reason: 'end_turn', num_turns: 1, terminal_reason: 'completed' },
+    ], { hang: true });
+    const backend = new SdkBackend({
+      queryFn: vi.fn(() => fakeQuery),
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+    });
+    backend.send({ projectPath: PROJECT, message: 'go', scope: SCOPE, permMode: 'bypass' });
+    await new Promise<void>((resolve) => {
+      const check = () => { if (emits.some(e => e.type === 'done')) resolve(); else setTimeout(check, 5); };
+      setTimeout(check, 5);
+    });
+
+    // Background wait: reconcile re-emits the wait done (renderer may have
+    // lost the original) instead of clearing the state.
+    emits.length = 0;
+    backend.reconcileScope(PROJECT, SCOPE);
+    const waitDone = emits.find(e => e.type === 'done') as any;
+    expect(waitDone).toBeDefined();
+    expect(waitDone.turnSeq).toBeNull();
+    expect(waitDone.wait?.kind).toBe('background');
+    fakeQuery.close();
+  });
+
   // ── Test 3: interrupt() calls query.interrupt() ──
 
   it('(3) interrupt() calls the query interrupt spy', async () => {
@@ -1558,7 +1690,7 @@ describe('SdkBackend', () => {
     expect(done!.turnSeq).toBe(2);
   });
 
-  it('(32h) setSessionId on a streaming scope ends the in-flight turn in the UI before teardown', async () => {
+  it('(32h) setSessionId on a streaming scope leaves the live query running (CLI parity: selecting a background-streaming chat must not kill its turn)', async () => {
     const fakeQuery = makeFakeQuery([
       { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'working…' }] } },
     ], { hang: true });
@@ -1571,10 +1703,34 @@ describe('SdkBackend', () => {
 
     emits.length = 0;
     backend.setSessionId(PROJECT, 'other-session', SCOPE);
-    const done = emits.find(e => e.type === 'done');
-    expect(done).toBeDefined();
-    expect(done!.turnSeq).toBe(1);
-    expect(done!.scope).toBe(SCOPE);
+    // Mirrors setSessionIdImpl (claude.ts): a streaming/busy scope is left
+    // alone — no teardown, no synthetic done, the stream keeps flowing.
+    expect(fakeQuery.closeSpy).not.toHaveBeenCalled();
+    expect(emits.find(e => e.type === 'done')).toBeUndefined();
+  });
+
+  it('(32i) setSessionId on a scope awaiting tool approval leaves the gate and query intact', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    let canUseTool: any;
+    const queryFn = vi.fn((args: { prompt: any; options: any }) => {
+      canUseTool = args.options.canUseTool;
+      return fakeQuery;
+    });
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.send({ projectPath: PROJECT, message: 'x', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((r) => { const c = () => canUseTool ? r() : setTimeout(c, 5); setTimeout(c, 5); });
+
+    // Hold a gate open (approval pending), then end the visible stream so the
+    // scope is awaitingInput but not streaming.
+    let resolved: any = null;
+    void canUseTool('Bash', { command: 'ls' }, { tool_use_id: 'tu-1' }).then((r: any) => { resolved = r; });
+    await new Promise(r => setTimeout(r, 10));
+
+    emits.length = 0;
+    backend.setSessionId(PROJECT, 'other-session', SCOPE);
+    expect(fakeQuery.closeSpy).not.toHaveBeenCalled();
+    expect(resolved).toBeNull(); // gate not deny-resolved by the select
+    expect(emits.find(e => e.type === 'done')).toBeUndefined();
   });
 
   it('(33) session options carry the enriched spawn env and a stderr handler', async () => {
