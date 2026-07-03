@@ -87,17 +87,49 @@ describe('revealWords', () => {
     expect(el.querySelector('.rv-caret')).toBeNull();
   });
 
-  it('is layout-stable: no block is ever display:none during the reveal', () => {
-    // Blocks used to hide until the sweep reached them, but the resulting
-    // height re-growth fought the bottom-pinned transcript scroll (revealed
-    // text scrolled up past the reader). Words reserve final layout up front;
-    // only opacity animates.
+  it('grows as it types: trailing blocks stay hidden until the sweep reaches them', () => {
+    // Long replies used to reserve their FULL final height as opacity-0 words
+    // (a big blank slab until the reveal swept through). Blocks now un-hide as
+    // the caret reaches them; ChatPanel's ResizeObserver keeps the bottom pin.
     const el = mount('<p>one two three</p><p>four five six</p><p>seven eight nine</p>');
     revealWords(el, { cadenceMs: 10, snapMs: 0, budgetMs: 1000 });
     const blocks = el.querySelectorAll<HTMLElement>('p');
-    blocks.forEach(b => expect(b.style.display).not.toBe('none'));
+    // Prep (before any timers): first block visible, the rest hidden.
+    expect(blocks[0].style.display).not.toBe('none');
+    expect(blocks[1].style.display).toBe('none');
+    expect(blocks[2].style.display).toBe('none');
+    // Sweep reaches the second paragraph → it un-hides; the third is still hidden.
+    vi.advanceTimersByTime(35);
+    expect(blocks[1].style.display).not.toBe('none');
+    expect(blocks[2].style.display).toBe('none');
+    // Everything visible at the end.
     vi.runAllTimers();
     blocks.forEach(b => expect(b.style.display).not.toBe('none'));
+  });
+
+  it('subdivides lists: items grow one-by-one and the shell hides until reached', () => {
+    const el = mount('<p>intro</p><ul><li>alpha beta</li><li>gamma delta</li></ul>');
+    revealWords(el, { cadenceMs: 10, snapMs: 0, budgetMs: 1000 });
+    const ul = el.querySelector('ul') as HTMLElement;
+    const lis = el.querySelectorAll<HTMLElement>('li');
+    expect(ul.style.display).toBe('none');
+    expect(lis[0].style.display).toBe('none');
+    expect(lis[1].style.display).toBe('none');
+    vi.runAllTimers();
+    expect(ul.style.display).not.toBe('none');
+    lis.forEach(li => expect(li.style.display).not.toBe('none'));
+    el.querySelectorAll<HTMLElement>('.rv-word').forEach(w => {
+      expect(w.style.opacity).toBe('1');
+    });
+  });
+
+  it('cancel() un-hides every block, including trailing no-item blocks', () => {
+    const el = mount('<p>alpha beta</p><p>gamma</p><hr>');
+    const ctrl = revealWords(el, { cadenceMs: 10, snapMs: 0 });
+    ctrl.cancel();
+    el.querySelectorAll<HTMLElement>('p, hr').forEach(b => {
+      expect(b.style.display).not.toBe('none');
+    });
   });
 
   it('does not hide blocks on the instant (over-maxWords) path', () => {
