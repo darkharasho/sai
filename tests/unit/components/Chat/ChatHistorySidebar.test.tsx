@@ -7,8 +7,11 @@ vi.mock('../../../../src/chatDb', () => ({
   dbGetMessages: vi.fn().mockResolvedValue([]),
   dbDeleteSession: vi.fn().mockResolvedValue(undefined),
   dbSaveSession: vi.fn().mockResolvedValue(undefined),
+  dbPatchSessionMeta: vi.fn().mockResolvedValue(undefined),
   dbGetSessions: vi.fn().mockResolvedValue([]),
 }));
+
+import { dbSaveSession, dbPatchSessionMeta, dbDeleteSession } from '../../../../src/chatDb';
 
 function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
   const now = Date.now();
@@ -210,6 +213,65 @@ describe('ChatHistorySidebar', () => {
       sessions={[viewed]}
     />);
     expect(screen.queryByTestId('sidebar-status-v-done')).not.toBeInTheDocument();
+  });
+
+  it('renders question state on a session waiting for an answer', () => {
+    const s = makeSession({ id: 'q' });
+    render(<ChatHistorySidebar
+      {...baseProps}
+      sessions={[s]}
+      questionSessionIds={new Set(['q'])}
+    />);
+    expect(screen.getByTestId('sidebar-status-q-question')).toBeInTheDocument();
+  });
+
+  it('renders waiting state on a session with a scheduled wakeup', () => {
+    const s = makeSession({ id: 'w' });
+    render(<ChatHistorySidebar
+      {...baseProps}
+      sessions={[s]}
+      waitingSessionIds={new Set(['w'])}
+    />);
+    expect(screen.getByTestId('sidebar-status-w-waiting')).toBeInTheDocument();
+  });
+
+  it('pin persists via a meta patch, never a full save (which would wipe messages)', () => {
+    // Regression: sidebar rows are messageless; dbSaveSession(row) rewrote the
+    // messages store with [] and zeroed messageCount — silent history loss.
+    const s = makeSession({ id: 'p', title: 'Pin me' });
+    const { getByText } = render(<ChatHistorySidebar {...baseProps} sessions={[s]} />);
+    fireEvent.contextMenu(getByText('Pin me'));
+    fireEvent.click(screen.getByText('Pin to top'));
+    expect(dbPatchSessionMeta).toHaveBeenCalledWith('/test/project', 'p', { pinned: true });
+    expect(dbSaveSession).not.toHaveBeenCalled();
+  });
+
+  it('rename persists via a meta patch, never a full save', () => {
+    const s = makeSession({ id: 'r', title: 'Old name' });
+    const { getByText, container } = render(<ChatHistorySidebar {...baseProps} sessions={[s]} />);
+    fireEvent.contextMenu(getByText('Old name'));
+    fireEvent.click(screen.getByText('Rename'));
+    const input = container.querySelector('.chat-history-rename-input')!;
+    fireEvent.change(input, { target: { value: 'New name' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(dbPatchSessionMeta).toHaveBeenCalledWith('/test/project', 'r', { title: 'New name', titleEdited: true });
+    expect(dbSaveSession).not.toHaveBeenCalled();
+  });
+
+  it('delete removes the session from the DB and stops its scope', () => {
+    const claudeStop = vi.fn();
+    (window as any).sai = { ...(window as any).sai, claudeStop };
+    const s = makeSession({ id: 'd', title: 'Delete me' });
+    const onUpdateSessions = vi.fn();
+    const { getByText } = render(
+      <ChatHistorySidebar {...baseProps} sessions={[s]} onUpdateSessions={onUpdateSessions} />
+    );
+    fireEvent.contextMenu(getByText('Delete me'));
+    fireEvent.click(screen.getByText('Delete'));       // menu item → confirm step
+    fireEvent.click(screen.getByText('Delete'));       // confirm button
+    expect(onUpdateSessions).toHaveBeenCalledWith([]);
+    expect(dbDeleteSession).toHaveBeenCalledWith('d');
+    expect(claudeStop).toHaveBeenCalledWith('/test/project', 'd');
   });
 
   it('shows only sessions matching the active provider, inferring from session IDs for untagged sessions', () => {

@@ -7,6 +7,15 @@
 /* question: same "needs your input" triangle as approval, in blue — a scope
    blocked on an AskUserQuestion answer must stand out from plain busy gold. */
 .ws-sq-question  { background: #60a5fa; width: 16px; height: 16px; animation: ws-sq-flash 1.2s ease-in-out infinite; }
+/* error: the same "needs your eyes" triangle in red — the last turn ended in
+   an error and the session needs a look before it's trusted again. */
+.ws-sq-error     { background: #ef4444; width: 16px; height: 16px; animation: ws-sq-flash 1.2s ease-in-out infinite; }
+/* waiting: a scheduled wakeup is pending (ScheduleWakeup / loop). Calm blue
+   breathe — alive, not blocked on the user, distinct from busy gold. */
+.ws-sq-waiting  { background: #60a5fa; width: 9px; height: 9px; animation: ws-sq-breathe 2.2s ease-in-out infinite; }
+/* suspended: backing process reaped by the idle sweep. Static gold — same
+   hue as busy but motionless: resumable, nothing happening right now. */
+.ws-sq-suspended { background: #d4a72c; width: 9px; height: 9px; opacity: 0.65; }
 /* busy-done: one squircle split diagonally — gold (busy) over grey (done).
    Reads as two states at once with no nested detail, so it stays legible at
    the 9px status-dot size. Pulses on the busy rhythm. */

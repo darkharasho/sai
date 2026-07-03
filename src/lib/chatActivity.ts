@@ -90,13 +90,16 @@ export function computeCompletedWorkspaces(opts: {
 export function computeChatNotificationCount(opts: {
   unread: ReadonlySet<string>;
   awaiting: ReadonlySet<string>;
+  /** Sessions blocked on an AskUserQuestion answer / plan review. */
+  question?: ReadonlySet<string>;
   error: ReadonlySet<string>;
   activeSessionId?: string;
 }): number {
-  const { unread, awaiting, error, activeSessionId } = opts;
+  const { unread, awaiting, question, error, activeSessionId } = opts;
   const ids = new Set<string>();
   for (const id of unread) if (id !== activeSessionId) ids.add(id);
   for (const id of awaiting) if (id !== activeSessionId) ids.add(id);
+  for (const id of question ?? []) if (id !== activeSessionId) ids.add(id);
   for (const id of error) if (id !== activeSessionId) ids.add(id);
   return ids.size;
 }

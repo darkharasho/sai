@@ -19,8 +19,9 @@ const TRI_MASK = `url("${TRIANGLE_MASK_URL}") center / contain no-repeat`;
 
 export function WorkspaceSquircle({ state, title, className, 'data-testid': testId }: WorkspaceSquircleProps) {
   // Triangle = "needs your input": orange for approvals, blue for an
-  // AskUserQuestion waiting on an answer.
-  const isTriangle = state === 'approval' || state === 'question';
+  // AskUserQuestion waiting on an answer. Errors share the triangle shape
+  // (red) since they also want the user's eyes.
+  const isTriangle = state === 'approval' || state === 'question' || state === 'error';
 
   // busy-done ("something busy + something done") is a single squircle split
   // diagonally into the busy (gold) and done (grey) colors — see the CSS. It

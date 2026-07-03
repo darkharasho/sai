@@ -3,7 +3,7 @@ import { Search, X, Plus, Pin } from 'lucide-react';
 import { WorkspaceSquircle, StatusSlot } from '../shared/WorkspaceSquircle';
 import SaiLogo from '../SaiLogo';
 import { formatSessionDate, formatSessionTime, exportSessionAsMarkdown } from '../../sessions';
-import { dbGetMessages, dbDeleteSession, dbSaveSession } from '../../chatDb';
+import { dbGetMessages, dbDeleteSession, dbPatchSessionMeta } from '../../chatDb';
 import ChatHistoryContextMenu from './ChatHistoryContextMenu';
 import type { ChatSession } from '../../types';
 import { inferSessionProvider } from '../../lib/sessionProvider';
@@ -19,6 +19,8 @@ interface ChatHistorySidebarProps {
   titleGeneratingIds?: Set<string>;
   streamingSessionIds?: Set<string>;
   awaitingSessionIds?: Set<string>;
+  /** Sessions blocked on an AskUserQuestion answer or plan review. */
+  questionSessionIds?: Set<string>;
   errorSessionIds?: Set<string>;
   /** Sessions whose backing Claude process has been reaped by the idle sweep.
    *  Renders the yellow squircle (matches the suspended-workspace pattern in
@@ -87,6 +89,7 @@ export default function ChatHistorySidebar({
   titleGeneratingIds,
   streamingSessionIds = new Set<string>(),
   awaitingSessionIds = new Set<string>(),
+  questionSessionIds = new Set<string>(),
   errorSessionIds = new Set<string>(),
   suspendedSessionIds = new Set<string>(),
   waitingSessionIds = new Set<string>(),
@@ -229,7 +232,10 @@ export default function ChatHistorySidebar({
         onUpdateSessions(toggled);
         const session = toggled.find(s => s.id === sessionId);
         if (session) {
-          dbSaveSession(projectPath, session).catch(() => {});
+          // Meta-only patch: list rows are messageless, so a full
+          // dbSaveSession here would overwrite the persisted messages
+          // with an empty array.
+          dbPatchSessionMeta(projectPath, sessionId, { pinned: session.pinned }).catch(() => {});
         }
         break;
       }
@@ -262,14 +268,13 @@ export default function ChatHistorySidebar({
 
   const handleRenameSubmit = (sessionId: string) => {
     if (renameValue.trim()) {
+      const title = renameValue.trim();
       const updated = sessions.map(s =>
-        s.id === sessionId ? { ...s, title: renameValue.trim(), titleEdited: true } : s
+        s.id === sessionId ? { ...s, title, titleEdited: true } : s
       );
       onUpdateSessions(updated);
-      const session = updated.find(s => s.id === sessionId);
-      if (session) {
-        dbSaveSession(projectPath, session).catch(() => {});
-      }
+      // Meta-only patch — see the pin handler for why a full save is unsafe.
+      dbPatchSessionMeta(projectPath, sessionId, { title, titleEdited: true }).catch(() => {});
     }
     setRenamingId(null);
   };
@@ -346,26 +351,34 @@ export default function ChatHistorySidebar({
                               {(() => {
                                 const isRunning = streamingSessionIds.has(session.id);
                                 const isAwaiting = awaitingSessionIds.has(session.id);
+                                const isQuestion = questionSessionIds.has(session.id);
                                 const isError = errorSessionIds.has(session.id);
                                 const isSuspended = suspendedSessionIds.has(session.id);
                                 const isWaiting = waitingSessionIds.has(session.id);
                                 const isActive = session.id === activeSessionId;
-                                const state = isAwaiting || isError ? 'approval'
+                                // Priority: blocked-on-you states first, then live
+                                // activity, then passive markers.
+                                const state = isAwaiting ? 'approval'
+                                  : isQuestion ? 'question'
                                   : isRunning ? 'busy'
-                                  : isWaiting ? 'alive'
+                                  : isError ? 'error'
+                                  : isWaiting ? 'waiting'
                                   : isUnread ? 'done'
+                                  : isSuspended ? 'suspended'
                                   : isActive ? 'alive'
                                   : 'inactive';
                                 const title = isAwaiting ? 'Approval needed'
-                                  : isError ? 'Error'
+                                  : isQuestion ? 'Waiting for your answer'
                                   : isRunning ? 'Working...'
+                                  : isError ? 'Last turn ended in an error'
                                   : isWaiting ? 'Waiting to resume — Claude scheduled a wakeup'
                                   : isUnread ? 'Response complete'
                                   : isSuspended ? 'Suspended after 30 min idle — send a message to resume'
                                   : undefined;
                                 const testId = isAwaiting ? `sidebar-status-${session.id}-awaiting`
-                                  : isError ? `sidebar-status-${session.id}-error`
+                                  : isQuestion ? `sidebar-status-${session.id}-question`
                                   : isRunning ? `sidebar-status-${session.id}-busy`
+                                  : isError ? `sidebar-status-${session.id}-error`
                                   : isWaiting ? `sidebar-status-${session.id}-waiting`
                                   : isUnread ? `sidebar-status-${session.id}-done`
                                   : isSuspended ? `sidebar-status-${session.id}-suspended`

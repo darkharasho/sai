@@ -54,4 +54,57 @@ describe('computeChatToasts', () => {
     );
     expect(seeds).toHaveLength(0);
   });
+
+  it('suppresses "Reply ready" when the session left streaming for a wait', () => {
+    // Scheduled wakeup / background wait ends the streaming set membership
+    // but nothing finished — no toast.
+    const seeds = computeChatToasts(
+      new Set(['a']), new Set(),
+      new Set(), new Set(),
+      [mkSession('a', 'Chat A')],
+      'other',
+      1000,
+      new Set(['a']),
+    );
+    expect(seeds).toHaveLength(0);
+  });
+
+  it('emits an attention toast for a newly question-blocked non-active session', () => {
+    const seeds = computeChatToasts(
+      new Set(), new Set(),
+      new Set(), new Set(),
+      [mkSession('q', 'Chat Q')],
+      'other',
+      3000,
+      new Set(),
+      new Set(), new Set(['q']),
+    );
+    expect(seeds).toHaveLength(1);
+    expect(seeds[0].tone).toBe('attention');
+    expect(seeds[0].message).toContain('Waiting for your answer');
+    expect(seeds[0].message).toContain('Chat Q');
+  });
+
+  it('does not emit a question toast for the active session or unchanged sets', () => {
+    const active = computeChatToasts(
+      new Set(), new Set(),
+      new Set(), new Set(),
+      [mkSession('q', 'Chat Q')],
+      'q',
+      3000,
+      new Set(),
+      new Set(), new Set(['q']),
+    );
+    expect(active).toHaveLength(0);
+    const unchanged = computeChatToasts(
+      new Set(), new Set(),
+      new Set(), new Set(),
+      [mkSession('q', 'Chat Q')],
+      'other',
+      3000,
+      new Set(),
+      new Set(['q']), new Set(['q']),
+    );
+    expect(unchanged).toHaveLength(0);
+  });
 });

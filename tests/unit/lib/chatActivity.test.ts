@@ -43,6 +43,15 @@ describe('computeChatNotificationCount', () => {
     })).toBe(4);
   });
 
+  it('counts question-blocked sessions and dedupes them against other sets', () => {
+    expect(computeChatNotificationCount({
+      unread: new Set(['a']),
+      awaiting: new Set(),
+      question: new Set(['a', 'q']),
+      error: new Set(),
+    })).toBe(2); // a (deduped) + q
+  });
+
   it('deduplicates sessions appearing in multiple sets', () => {
     // 'a' is both unread and awaiting — still counts once
     expect(computeChatNotificationCount({

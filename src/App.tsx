@@ -70,7 +70,8 @@ import { executeSlashCommand } from './lib/orchestratorSlashCommands';
 import { isOrchestratorToolDrift, describeToolDrift } from './lib/orchestratorToolDrift';
 import { resolveTaskRef } from './lib/swarmRef';
 import { installRemoteProxyHandler } from './lib/remoteProxyClient';
-import { applyQuestionEvent } from './lib/awaitingQuestionTracker';
+import { applyQuestionEvent, questionWorkspaces, questionSessionIdsFor, scopeKeyProjectPath } from './lib/awaitingQuestionTracker';
+import { mergeSessionRefresh } from './lib/sessionRefresh';
 import { turnEndIsStale } from './lib/turnSeqGuard';
 import { resolveClaudeConfig, setWorkspaceOverride, sanitizeOverrideMap, type ClaudeOverrideMap } from './lib/claudeWorkspaceConfig';
 import type { WaitMeta } from '../electron/services/waitClassifier';
@@ -251,7 +252,18 @@ export default function App() {
   const [externallyModified, setExternallyModified] = useState<Set<string>>(new Set());
   const [completedWorkspaces, setCompletedWorkspaces] = useState<Set<string>>(new Set());
   const [busyWorkspaces, setBusyWorkspaces] = useState<Set<string>>(new Set());
-  const [awaitingQuestionWorkspaces, setAwaitingQuestionWorkspaces] = useState<Set<string>>(new Set());
+  // Scopes (`${projectPath}:${scope}`) blocked on an AskUserQuestion answer or
+  // plan review. Scope-keyed so one chat's turn ending can't clear a sibling
+  // chat's waiting state; the workspace-level set is derived below.
+  const [awaitingQuestionScopes, setAwaitingQuestionScopes] = useState<Set<string>>(new Set());
+  const awaitingQuestionWorkspaces = useMemo(
+    () => questionWorkspaces(awaitingQuestionScopes),
+    [awaitingQuestionScopes],
+  );
+  // Mirror for the claude:message handler (empty-deps effect) to do presence
+  // checks without stale closures — drives notification-count symmetry.
+  const awaitingQuestionScopesRef = useRef(awaitingQuestionScopes);
+  awaitingQuestionScopesRef.current = awaitingQuestionScopes;
   // Workspaces with an in-flight chat turn. Distinct from busyWorkspaces, which
   // also counts terminal-scope activity. Lifted out of ChatPanel so the panel's
   // streaming indicator survives remounts (e.g. session/key swaps).
@@ -263,6 +275,10 @@ export default function App() {
   const streamingScopesRef = useRef<Set<string>>(new Set());
   streamingScopesRef.current = streamingScopes;
   const [waitingScopes, setWaitingScopes] = useState<Map<string, { wait: WaitMeta; startedAtMs: number }>>(new Map());
+  // Mirror for handlers that must read the live map without re-subscribing
+  // (grace sweep, session-delete cleanup).
+  const waitingScopesRef = useRef(waitingScopes);
+  waitingScopesRef.current = waitingScopes;
   // Unsent draft text and attached context per workspace, persisted across
   // workspace switches and session-key remounts so partial messages survive
   // navigation.
@@ -277,12 +293,18 @@ export default function App() {
     else chatContextItemsRef.current.delete(wsPath);
   }, []);
   const [approvalSessions, setApprovalSessions] = useState<Map<string, Map<string, PendingApproval>>>(new Map());
+  const approvalSessionsRef = useRef(approvalSessions);
+  approvalSessionsRef.current = approvalSessions;
   // Sessions whose Claude scope has been reaped by the idle sweep. Cleared on
   // the next streaming_start for that scope (process respawned). Keyed by
   // `${projectPath}:${scope}` to match streamingScopes.
   const [suspendedScopes, setSuspendedScopes] = useState<Set<string>>(new Set());
   const [notificationCounts, setNotificationCounts] = useState<Map<string, number>>(new Map());
   const wsTurnSeqRef = useRef<Map<string, number>>(new Map());
+  // Monotonic token for async session loads (select/new/delete). A resolved
+  // tail load only applies if it's still the newest activation — see
+  // handleSelectSession.
+  const sessionLoadSeqRef = useRef(0);
   const [focusedChat, setFocusedChat] = useState(false);
   const [overlayEnabled, setOverlayEnabled] = useState(false);
   // Session-scoped overlay mode from the inline control under the chat input.
@@ -302,6 +324,12 @@ export default function App() {
     tone: ToastTone;
   }
   const [chatToasts, setChatToasts] = useState<ChatToastEntry[]>([]);
+  // Previous-tick snapshots for the chat-toast differ. Declared up here (not
+  // beside the toast effect) because handleUpdateSessions also prunes deleted
+  // session ids from them.
+  const prevStreamingRef = useRef<Set<string>>(new Set());
+  const prevAwaitingRef = useRef<Set<string>>(new Set());
+  const prevQuestionRef = useRef<Set<string>>(new Set());
   const dismissChatToast = useCallback((id: string) => {
     setChatToasts(prev => prev.filter(t => t.id !== id));
   }, []);
@@ -1787,6 +1815,21 @@ export default function App() {
     });
   }, []);
 
+  // Refresh a workspace's sessions list from the DB. All post-persist list
+  // refreshes go through here: the merge preserves in-memory view state
+  // (lastViewedAt stamped by a still-in-flight dbPatchSessionMeta) and keeps
+  // the not-yet-persisted active chat's row, so a slow refresh can't flicker
+  // a just-viewed session back to unread or drop the active row.
+  const refreshWorkspaceSessions = useCallback(async (wsPath: string): Promise<void> => {
+    try {
+      const fresh = await dbGetSessions(wsPath);
+      updateWorkspace(wsPath, ws => ({
+        ...ws,
+        sessions: mergeSessionRefresh(fresh, ws.sessions, ws.activeSession),
+      }));
+    } catch { /* best-effort */ }
+  }, [updateWorkspace]);
+
   // Apply replace edits to an open file's Monaco editor as a single undo group.
   // Looks up the live editor instance via the registry populated by MonacoEditor.
   // Falls back to rewriting OpenFile.content if no editor is mounted for this path
@@ -2302,9 +2345,7 @@ export default function App() {
           if (firstUserMsg) sessionToSave.title = generateSmartTitle(firstUserMsg.content);
         }
         queueSaveSession(wsPath, sessionToSave, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).then(() => {
-          dbGetSessions(wsPath).then(sessions => {
-            updateWorkspace(wsPath, ws2 => ({ ...ws2, sessions }));
-          });
+          void refreshWorkspaceSessions(wsPath);
         }).catch(() => {});
       });
     }, 30_000);
@@ -2452,6 +2493,26 @@ export default function App() {
   // for the same turn decrements once, not twice). Without this, workspaces
   // running multiple scopes lost their busy indicator after the first turn ended.
   const busyTurnByScopeRef = useRef(new Map<string, number>());
+  // Release a scope's busy slot outside the normal turn-end path (session
+  // deleted, scheduled-wakeup grace expired). Safe against the late done/result
+  // for the same turn: once the scope is no longer counted, the turn-end
+  // handler's endsCountedTurn check makes its own decrement a no-op. Never
+  // fires the completion toast/notification — nothing finished.
+  const releaseBusySlot = useCallback((projectPath: string, scopeKey: string) => {
+    if (!busyTurnByScopeRef.current.has(scopeKey)) return;
+    busyTurnByScopeRef.current.delete(scopeKey);
+    const count = busyScopeCountRef.current.get(projectPath) || 0;
+    const newCount = Math.max(0, count - 1);
+    busyScopeCountRef.current.set(projectPath, newCount);
+    if (newCount === 0) {
+      setBusyWorkspaces(prev => {
+        if (!prev.has(projectPath)) return prev;
+        const next = new Set(prev);
+        next.delete(projectPath);
+        return next;
+      });
+    }
+  }, []);
   // Per-task assistant message buffer for background swarm tasks.
   // Keyed by task sessionId (msg.scope). Flushed to chatDb on done/result so
   // background tasks (whose ChatPanel isn't mounted) still persist Claude's
@@ -2832,7 +2893,11 @@ export default function App() {
           next.set(msg.projectPath, inner);
           return next;
         });
-        if (msg.projectPath !== activeProjectPathRef.current) {
+        // Badge once per pending approval, not once per event: a re-emitted
+        // approval_needed for a scope that's already awaiting must not inflate
+        // the taskbar count (the matching resolve only decrements once).
+        const alreadyAwaiting = approvalSessionsRef.current.get(msg.projectPath)?.has(scopeForApproval) ?? false;
+        if (!alreadyAwaiting && msg.projectPath !== activeProjectPathRef.current) {
           setNotificationCounts(p => {
             const next = new Map(p);
             next.set(msg.projectPath, (next.get(msg.projectPath) || 0) + 1);
@@ -2840,9 +2905,11 @@ export default function App() {
           });
         }
       }
-      if (msg.type === 'question_needed') {
-        setAwaitingQuestionWorkspaces(prev => applyQuestionEvent(prev, msg));
-        if (msg.projectPath !== activeProjectPathRef.current) {
+      if (msg.type === 'question_needed' || msg.type === 'plan_review_needed') {
+        const key = `${msg.projectPath}:${msg.scope || 'chat'}`;
+        const alreadyWaiting = awaitingQuestionScopesRef.current.has(key);
+        setAwaitingQuestionScopes(prev => applyQuestionEvent(prev, msg));
+        if (!alreadyWaiting && msg.projectPath !== activeProjectPathRef.current) {
           setNotificationCounts(p => {
             const next = new Map(p);
             next.set(msg.projectPath, (next.get(msg.projectPath) || 0) + 1);
@@ -2850,21 +2917,20 @@ export default function App() {
           });
         }
       }
-      if (msg.type === 'question_answered') {
-        setAwaitingQuestionWorkspaces(prev => applyQuestionEvent(prev, msg));
-      }
-      if (msg.type === 'plan_review_needed') {
-        setAwaitingQuestionWorkspaces(prev => applyQuestionEvent(prev, msg));
-        if (msg.projectPath !== activeProjectPathRef.current) {
+      if (msg.type === 'question_answered' || msg.type === 'plan_review_answered') {
+        // Answering releases the badge slot the matching *_needed claimed.
+        const key = `${msg.projectPath}:${msg.scope || 'chat'}`;
+        if (awaitingQuestionScopesRef.current.has(key)) {
           setNotificationCounts(p => {
+            const cur = p.get(msg.projectPath);
+            if (!cur) return p;
             const next = new Map(p);
-            next.set(msg.projectPath, (next.get(msg.projectPath) || 0) + 1);
+            if (cur <= 1) next.delete(msg.projectPath);
+            else next.set(msg.projectPath, cur - 1);
             return next;
           });
         }
-      }
-      if (msg.type === 'plan_review_answered') {
-        setAwaitingQuestionWorkspaces(prev => applyQuestionEvent(prev, msg));
+        setAwaitingQuestionScopes(prev => applyQuestionEvent(prev, msg));
       }
       if (msg.type === 'approval_resolved') {
         const scope = msg.scope || 'chat';
@@ -2882,6 +2948,19 @@ export default function App() {
           });
         }
         const resolvedScope = msg.scope || 'chat';
+        // Release the badge slot the matching approval_needed claimed. Gated
+        // on a real pending entry so auto-approvals (which never surfaced UI
+        // or badged) can't drive the count negative.
+        if (approvalSessionsRef.current.get(msg.projectPath)?.has(resolvedScope)) {
+          setNotificationCounts(p => {
+            const cur = p.get(msg.projectPath);
+            if (!cur) return p;
+            const next = new Map(p);
+            if (cur <= 1) next.delete(msg.projectPath);
+            else next.set(msg.projectPath, cur - 1);
+            return next;
+          });
+        }
         setApprovalSessions(prev => {
           const inner = prev.get(msg.projectPath);
           if (!inner || !inner.has(resolvedScope)) return prev;
@@ -2921,7 +3000,7 @@ export default function App() {
       // Treat 'result' as authoritative end-of-turn — clear busy immediately
       // so the titlebar spinner doesn't stay stuck if the 'done' message is lost.
       if (msg.type === 'result' || msg.type === 'done') {
-        setAwaitingQuestionWorkspaces(prev => applyQuestionEvent(prev, msg));
+        setAwaitingQuestionScopes(prev => applyQuestionEvent(prev, msg));
         // Ignore a turn-end message (`result` OR `done`) from a SUPERSEDED turn.
         // When a follow-up is sent mid-flight (interrupt / autonomous chaining), the
         // prior turn's `result` arrives tagged with the old turnSeq while the new turn
@@ -3005,8 +3084,7 @@ export default function App() {
                     lastTurnErrored: turnErrored ? true : false,
                   }, 0);
                   // Refresh sessions list so sidebar message counts update.
-                  const refreshed = await dbGetSessions(wsPath);
-                  updateWorkspace(wsPath, w => ({ ...w, sessions: refreshed }));
+                  await refreshWorkspaceSessions(wsPath);
                 } catch (err) {
                   // eslint-disable-next-line no-console
                   console.error('background-session: persist messages failed', err);
@@ -3026,8 +3104,7 @@ export default function App() {
                     updatedAt: Date.now(),
                     lastTurnErrored: true,
                   }, 0);
-                  const refreshed = await dbGetSessions(wsPath);
-                  updateWorkspace(wsPath, w => ({ ...w, sessions: refreshed }));
+                  await refreshWorkspaceSessions(wsPath);
                 } catch { /* best-effort */ }
               })();
             }
@@ -3601,15 +3678,16 @@ export default function App() {
     if (sessionToSave.messages.length > 0) {
       updateWorkspace(wsPath, ws2 => ({ ...ws2, activeSession: sessionToSave }));
       queueSaveSession(wsPath, sessionToSave, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).then(() => {
-        dbGetSessions(wsPath).then(sessions => {
-          updateWorkspace(wsPath, ws2 => ({ ...ws2, sessions }));
-        });
+        void refreshWorkspaceSessions(wsPath);
       }).catch(() => {});
     }
-  }, [updateWorkspace]);
+  }, [updateWorkspace, refreshWorkspaceSessions]);
 
   const handleNewChat = () => {
     if (!activeProjectPath) return;
+    // Invalidate any in-flight session tail load so it can't resolve late and
+    // swap the panel back off the fresh chat.
+    sessionLoadSeqRef.current++;
     flushAndPersist(activeProjectPath);
     // Clear backend sessions so next message starts fresh
     (window.sai as any).codexSetSessionId(activeProjectPath, undefined);
@@ -3631,6 +3709,10 @@ export default function App() {
     flushAndPersist(activeProjectPath);
     const selected = sessions.find(s => s.id === id);
     if (!selected) return;
+    // Guard the async tail load against rapid re-selection: two quick clicks
+    // raced their dbGetMessagesTail promises and whichever resolved LAST won,
+    // even when it was the first click — leaving the panel on the wrong chat.
+    const loadSeq = ++sessionLoadSeqRef.current;
     // Rebind the backend Claude scope to the persisted CLI session id so
     // `--resume` is passed on the next spawn. The scope cache is in-memory only
     // and empty after an app restart, so without this the CLI starts a fresh
@@ -3647,6 +3729,7 @@ export default function App() {
     void dbPatchSessionMeta(activeProjectPath, selected.id, { lastViewedAt: viewedAt }).catch(() => {});
     // Load the tail from IndexedDB (full messages live there, not in the sessions list).
     dbGetMessagesTail(selected.id, MESSAGE_TAIL_LIMIT).then(({ messages, totalCount }) => {
+      if (loadSeq !== sessionLoadSeqRef.current) return; // superseded by a newer selection
       // Merge any in-flight buffered assistant content from background streaming.
       // Without this, clicking a streaming swarm task shows blank content because
       // the buffer hasn't been flushed to IndexedDB yet.
@@ -3756,20 +3839,120 @@ export default function App() {
 
   const handleUpdateSessions = useCallback((updated: ChatSession[]) => {
     if (!activeProjectPath) return;
-    updateWorkspace(activeProjectPath, ws => {
-      // Drop firstUserPersistRef + buffered messages for any session that
-      // disappeared from the list (typically: deletes from the sidebar).
-      // Otherwise the Set grows unbounded as users churn through chats.
-      const nextIds = new Set(updated.map(s => s.id));
-      for (const id of Array.from(firstUserPersistRef.current)) {
-        if (!nextIds.has(id)) firstUserPersistRef.current.delete(id);
+    const wsPath = activeProjectPath;
+    const nextIds = new Set(updated.map(s => s.id));
+    // All removed-session cleanup happens OUTSIDE the setState updater —
+    // StrictMode double-invokes updaters in dev, and the busy-slot release
+    // below isn't idempotent.
+    const prevWs = workspacesRef.current.get(wsPath);
+    const removedIds = (prevWs?.sessions ?? [])
+      .filter(s => !nextIds.has(s.id))
+      .map(s => s.id);
+    // Drop firstUserPersistRef + buffered messages for any session that
+    // disappeared from the list (typically: deletes from the sidebar).
+    // Otherwise the Set grows unbounded as users churn through chats.
+    for (const id of Array.from(firstUserPersistRef.current)) {
+      if (!nextIds.has(id)) firstUserPersistRef.current.delete(id);
+    }
+    for (const id of Array.from(taskMessagesBufferRef.current.keys())) {
+      if (!nextIds.has(id)) taskMessagesBufferRef.current.delete(id);
+    }
+    // Purge a deleted session's runtime status so it can't linger as a
+    // phantom: an un-resolved approval kept inflating the Chats badge
+    // forever, and stale waiting/suspended/streaming scope keys survived
+    // until app restart.
+    if (removedIds.length > 0) {
+      const removedKeys = removedIds.map(id => `${wsPath}:${id}`);
+      const removedIdSet = new Set(removedIds);
+      setApprovalSessions(prev => {
+        const inner = prev.get(wsPath);
+        if (!inner || !removedIds.some(id => inner.has(id))) return prev;
+        const innerNext = new Map(inner);
+        for (const id of removedIds) innerNext.delete(id);
+        const next = new Map(prev);
+        if (innerNext.size === 0) next.delete(wsPath);
+        else next.set(wsPath, innerNext);
+        return next;
+      });
+      setAwaitingQuestionScopes(prev => {
+        if (!removedKeys.some(k => prev.has(k))) return prev;
+        const next = new Set(prev);
+        for (const k of removedKeys) next.delete(k);
+        return next;
+      });
+      setWaitingScopes(prev => {
+        if (!removedKeys.some(k => prev.has(k))) return prev;
+        const next = new Map(prev);
+        for (const k of removedKeys) next.delete(k);
+        return next;
+      });
+      setSuspendedScopes(prev => {
+        if (!removedKeys.some(k => prev.has(k))) return prev;
+        const next = new Set(prev);
+        for (const k of removedKeys) next.delete(k);
+        return next;
+      });
+      // The sidebar already sent claudeStop for the deleted scope; clearing
+      // eagerly here covers backends whose stop path doesn't echo a done.
+      setStreamingScopes(prev => {
+        if (!removedKeys.some(k => prev.has(k))) return prev;
+        const next = new Set(prev);
+        for (const k of removedKeys) next.delete(k);
+        return next;
+      });
+      setMessageQueues(prev => {
+        if (!removedIds.some(id => prev.has(id))) return prev;
+        const next = new Map(prev);
+        for (const id of removedIds) next.delete(id);
+        return next;
+      });
+      for (const k of removedKeys) {
+        wsTurnSeqRef.current.delete(k);
+        releaseBusySlot(wsPath, k);
       }
-      for (const id of Array.from(taskMessagesBufferRef.current.keys())) {
-        if (!nextIds.has(id)) taskMessagesBufferRef.current.delete(id);
+      setChatToasts(prev => prev.filter(t => !removedIdSet.has(t.sessionId)));
+      // Refs used by the toast differ: prevStreaming/prevAwaiting must forget
+      // the deleted ids or the next effect run emits a spurious "Reply ready".
+      for (const id of removedIds) {
+        prevStreamingRef.current.delete(id);
+        prevAwaitingRef.current.delete(id);
+        prevQuestionRef.current.delete(id);
       }
-      return { ...ws, sessions: updated };
+    }
+    // Deleting the chat you're looking at swaps in a fresh one — keeping the
+    // deleted session active meant the next message silently resurrected it
+    // in the DB. Side effects stay out of the updater (StrictMode).
+    const activeDeleted = !!prevWs && removedIds.includes(prevWs.activeSession.id);
+    if (activeDeleted) {
+      sessionLoadSeqRef.current++; // cancel any in-flight tail load for the deleted chat
+      (window.sai as any).codexSetSessionId?.(wsPath, undefined);
+      window.sai.geminiSetSessionId?.(wsPath, undefined, 'chat');
+      wsMessagesRef.current.delete(wsPath);
+      wsFirstLoadedIdxRef.current.delete(wsPath);
+      const fresh = { ...createSession(), lastViewedAt: Date.now() };
+      updateWorkspace(wsPath, ws => ({
+        ...ws,
+        activeSession: fresh,
+        sessions: [{ ...fresh, aiProvider }, ...updated],
+      }));
+      return;
+    }
+    updateWorkspace(wsPath, ws => {
+      // Rename/pin of the active session must flow into activeSession too:
+      // the next flushAndPersist saves from activeSession, and a stale copy
+      // would write the old title/pin right back over the DB patch.
+      const activeRow = updated.find(s => s.id === ws.activeSession.id);
+      const activeSession = activeRow
+        ? {
+            ...ws.activeSession,
+            title: activeRow.title,
+            titleEdited: activeRow.titleEdited,
+            pinned: activeRow.pinned,
+          }
+        : ws.activeSession;
+      return { ...ws, sessions: updated, activeSession };
     });
-  }, [activeProjectPath, updateWorkspace]);
+  }, [activeProjectPath, updateWorkspace, releaseBusySlot, aiProvider]);
 
   const saveClaudeSetting = (key: string, value: any) => {
     window.sai.settingsGet('claude', {}).then((existing: any) => {
@@ -4094,7 +4277,7 @@ export default function App() {
                       onFileOpen={handleFileOpen}
                       isActive={wsPath === activeProjectPath}
                       isStreaming={streamingScopes.has(`${wsPath}:${orchSessionId}`)}
-                      awaitingQuestion={awaitingQuestionWorkspaces.has(wsPath)}
+                      awaitingQuestion={awaitingQuestionScopes.has(`${wsPath}:${orchSessionId}`)}
                       initialDraft={chatDraftsRef.current.get(wsPath) || ''}
                       onDraftChange={(draft: string) => handleDraftChange(wsPath, draft)}
                       initialContextItems={(chatContextItemsRef.current.get(wsPath) as any) || []}
@@ -4328,9 +4511,7 @@ export default function App() {
                             m.set(orchSessionId, latestMessages);
                             return m;
                           });
-                          dbGetSessions(wsPath).then(sessions => {
-                            updateWorkspace(wsPath, w2 => ({ ...w2, sessions }));
-                          });
+                          void refreshWorkspaceSessions(wsPath);
                         }).catch(() => {});
                       }}
                     />
@@ -4460,7 +4641,14 @@ export default function App() {
                       ? waitingScopes.get(`${wsPath}:${ws.activeSession.id}`) ?? null
                       : waitingScopes.get(`${wsPath}:chat`) ?? null
                   }
-                  awaitingQuestion={awaitingQuestionWorkspaces.has(wsPath)}
+                  awaitingQuestion={
+                    // Scope-precise: a sibling chat's pending question must not
+                    // freeze THIS panel's thinking indicator / send routing.
+                    // Claude chats are scoped by session id; other providers
+                    // ride the legacy 'chat' scope.
+                    awaitingQuestionScopes.has(`${wsPath}:${ws.activeSession.id}`)
+                    || awaitingQuestionScopes.has(`${wsPath}:chat`)
+                  }
                   initialDraft={chatDraftsRef.current.get(wsPath) || ''}
                   onDraftChange={(draft: string) => handleDraftChange(wsPath, draft)}
                   initialContextItems={(chatContextItemsRef.current.get(wsPath) as any) || []}
@@ -4488,9 +4676,7 @@ export default function App() {
                         if (firstUserMsg) session.title = generateSmartTitle(firstUserMsg.content);
                       }
                       queueSaveSession(wsPath, session, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).then(() => {
-                        dbGetSessions(wsPath).then(refreshed => {
-                          updateWorkspace(wsPath, w2 => ({ ...w2, sessions: refreshed }));
-                        });
+                        void refreshWorkspaceSessions(wsPath);
                       }).catch(() => {});
                     }
                   }}
@@ -4531,9 +4717,7 @@ export default function App() {
                       }
 
                       queueSaveSession(wsPath, updated, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).then(() => {
-                        dbGetSessions(wsPath).then(sessions => {
-                          updateWorkspace(wsPath, ws2 => ({ ...ws2, sessions }));
-                        });
+                        void refreshWorkspaceSessions(wsPath);
                       }).catch(() => {});
 
                       // Fire-and-forget AI title generation if enabled
@@ -4549,9 +4733,7 @@ export default function App() {
                                 if (w2.activeSession.titleEdited) return w2;
                                 const newSession = { ...w2.activeSession, title };
                                 queueSaveSession(wsPath, newSession, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).then(() => {
-                                  dbGetSessions(wsPath).then(sessions => {
-                                    updateWorkspace(wsPath, ws3 => ({ ...ws3, sessions }));
-                                  });
+                                  void refreshWorkspaceSessions(wsPath);
                                 }).catch(() => {});
                                 return { ...w2, activeSession: newSession };
                               });
@@ -4665,6 +4847,13 @@ export default function App() {
     return new Set(approvalSessions.get(activeProjectPath)?.keys() ?? []);
   }, [approvalSessions, activeProjectPath]);
 
+  // Sessions blocked on an AskUserQuestion answer or plan review — the
+  // sidebar's blue "waiting for your answer" triangle.
+  const questionSessionIds = useMemo(() => {
+    if (!activeProjectPath) return new Set<string>();
+    return questionSessionIdsFor(awaitingQuestionScopes, activeProjectPath);
+  }, [awaitingQuestionScopes, activeProjectPath]);
+
   const suspendedSessionIds = useMemo(() => {
     if (!activeProjectPath) return new Set<string>();
     const prefix = `${activeProjectPath}:`;
@@ -4687,25 +4876,49 @@ export default function App() {
     return ids;
   }, [waitingScopes, activeProjectPath]);
 
+  // ALL waiting sessions regardless of wait kind (scheduled + background).
+  // Used to suppress the "Reply ready" toast: a wait ends the streaming set
+  // membership but is not a completion.
+  const anyWaitSessionIds = useMemo(() => {
+    if (!activeProjectPath) return new Set<string>();
+    const prefix = `${activeProjectPath}:`;
+    const ids = new Set<string>();
+    for (const k of waitingScopes.keys()) {
+      if (k.startsWith(prefix)) ids.add(k.slice(prefix.length));
+    }
+    return ids;
+  }, [waitingScopes, activeProjectPath]);
+
   // Grace timeout: a scheduled wakeup that never fires must not pin the pill
   // forever. Sweep every 5s; drop a scheduled entry past fire time + grace.
+  // Expired keys are computed OUTSIDE the setState updater: the sweep also
+  // releases the scope's busy slot (a waiting turn keeps its slot so the
+  // workspace stays "working"), and that decrement isn't idempotent — inside
+  // the updater StrictMode's double-invoke would release it twice.
   useEffect(() => {
     const id = setInterval(() => {
-      setWaitingScopes(prev => {
-        const now = Date.now();
-        let changed = false;
-        const next = new Map(prev);
-        for (const [k, v] of prev) {
-          if (v.wait.kind === 'scheduled' && typeof v.wait.resumeInSeconds === 'number'
-              && now > v.startedAtMs + v.wait.resumeInSeconds * 1000 + WAKEUP_GRACE_MS) {
-            next.delete(k); changed = true;
-          }
+      const now = Date.now();
+      const expired: string[] = [];
+      for (const [k, v] of waitingScopesRef.current) {
+        if (v.wait.kind === 'scheduled' && typeof v.wait.resumeInSeconds === 'number'
+            && now > v.startedAtMs + v.wait.resumeInSeconds * 1000 + WAKEUP_GRACE_MS) {
+          expired.push(k);
         }
+      }
+      if (expired.length === 0) return;
+      setWaitingScopes(prev => {
+        const next = new Map(prev);
+        let changed = false;
+        for (const k of expired) changed = next.delete(k) || changed;
         return changed ? next : prev;
       });
+      // No turn is running anymore — without this the workspace spinner is
+      // pinned until some other turn in it ends. If the wakeup does fire
+      // later, streaming_start re-arms the slot normally.
+      for (const k of expired) releaseBusySlot(scopeKeyProjectPath(k), k);
     }, 5000);
     return () => clearInterval(id);
-  }, []);
+  }, [releaseBusySlot]);
 
   const unreadSessionIds = useMemo(() => {
     const ids = new Set<string>();
@@ -4734,20 +4947,19 @@ export default function App() {
   }, [sessions]);
 
   // Badge total for the NavBar Chats button: unread + awaiting approval +
-  // errored sessions other than the focused one. Mirrors the
-  // "needs-attention-elsewhere" pattern from the workspace dropdown badge.
+  // question-blocked + errored sessions other than the focused one. Mirrors
+  // the "needs-attention-elsewhere" pattern from the workspace dropdown badge.
   const chatNotificationCount = useMemo(
     () => computeChatNotificationCount({
       unread: unreadSessionIds,
       awaiting: awaitingSessionIds,
+      question: questionSessionIds,
       error: errorSessionIds,
       activeSessionId: activeSession?.id,
     }),
-    [unreadSessionIds, awaitingSessionIds, errorSessionIds, activeSession?.id],
+    [unreadSessionIds, awaitingSessionIds, questionSessionIds, errorSessionIds, activeSession?.id],
   );
 
-  const prevStreamingRef = useRef<Set<string>>(new Set());
-  const prevAwaitingRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const seeds = computeChatToasts(
@@ -4758,13 +4970,17 @@ export default function App() {
       sessions,
       activeSession?.id,
       Date.now(),
+      anyWaitSessionIds,
+      prevQuestionRef.current,
+      questionSessionIds,
     );
     if (seeds.length) {
       setChatToasts(prev => [...prev, ...seeds].slice(-3));
     }
     prevStreamingRef.current = streamingSessionIds;
     prevAwaitingRef.current = awaitingSessionIds;
-  }, [streamingSessionIds, awaitingSessionIds, sessions, activeSession?.id]);
+    prevQuestionRef.current = questionSessionIds;
+  }, [streamingSessionIds, awaitingSessionIds, questionSessionIds, sessions, activeSession?.id, anyWaitSessionIds]);
 
   // Dev-only test bridge — lets Playwright drive workspace state directly.
   useEffect(() => {
@@ -5101,6 +5317,7 @@ export default function App() {
                 titleGeneratingIds={titleGeneratingIds}
                 streamingSessionIds={streamingSessionIds}
                 awaitingSessionIds={awaitingSessionIds}
+                questionSessionIds={questionSessionIds}
                 errorSessionIds={errorSessionIds}
                 suspendedSessionIds={suspendedSessionIds}
                 waitingSessionIds={waitingSessionIds}
