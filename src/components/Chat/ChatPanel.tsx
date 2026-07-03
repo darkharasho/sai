@@ -461,6 +461,20 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // instead of waiting for end-of-turn.
   const STREAM_IDLE_MS = 250;
   const [streamSettled, setStreamSettled] = useState(true);
+  // Post-settle hold: set at each text-settle edge, auto-cleared shortly after
+  // (or at the next turn boundary). While held, the pending tail row stays
+  // hidden — the settle of the FINAL reply is normally followed within ~1s by
+  // the turn's result frame, and remounting a thinking row under a finished
+  // reply for that wrap-up gap read as "still thinking" after the response was
+  // done. A genuine mid-turn pause (model composing its next tool call)
+  // outlives the hold and gets its row back.
+  const SETTLE_HOLD_MS = 800;
+  const [postSettleHold, setPostSettleHold] = useState(false);
+  useEffect(() => {
+    if (!postSettleHold) return;
+    const t = window.setTimeout(() => setPostSettleHold(false), SETTLE_HOLD_MS);
+    return () => window.clearTimeout(t);
+  }, [postSettleHold]);
   // Secondary label on the thinking indicator explaining SILENT pauses — the
   // SDK emits progress signals (thinking token counts, API retry backoff,
   // context compaction) during stretches with no text/tool output. Cleared as
@@ -761,6 +775,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       if (msg.type === 'streaming_start') {
         if (msg.turnSeq != null) turnSeqRef.current = msg.turnSeq;
         clearStreamHint();
+        // A fresh turn (or a wait-resume re-arm) must show its thinking row
+        // immediately — never inherit the previous reply's post-settle hold.
+        setPostSettleHold(h => h ? false : h);
         finalizeReasoning();
         forceNewBubbleRef.current = true;
         setPromptSuggestion(null);
@@ -1163,12 +1180,16 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           // thinking phase. Used by both the fast path and the slow path's text branch.
           const markStreamingActive = () => {
             setStreamSettled(s => s ? false : s);
+            // Drop while streaming so the settle below is always a fresh
+            // false→true edge (re-arming the hold effect's timer).
+            setPostSettleHold(h => h ? false : h);
             if (streamIdleTimerRef.current != null) {
               clearTimeout(streamIdleTimerRef.current);
             }
             streamIdleTimerRef.current = window.setTimeout(() => {
               streamIdleTimerRef.current = null;
               setStreamSettled(true);
+              setPostSettleHold(true);
             }, STREAM_IDLE_MS);
           };
           if (
@@ -1613,8 +1634,11 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // the card instead of a card popping in above a stationary spinner.
   const hasRunningTailTool = lastMsg?.role === 'assistant' && !!lastMsg.toolCalls?.some(tc => tc.output == null);
   // SAI morph path: only a pending tail row when no segment head is actively thinking.
+  // postSettleHold keeps it hidden for a beat right after text settles, so the
+  // end-of-turn wrap-up (result frame in flight) doesn't flash a thinking row
+  // under a reply the user just watched finish.
   const showPendingSaiThinking = showThinking && saiMorphActive && !hasStreamingAssistantSegment
-    && !hasLiveReasoning && !hasRunningTailTool;
+    && !hasLiveReasoning && !hasRunningTailTool && !postSettleHold;
   // Detached banner: non-SAI providers, OR SAI with the animation pref off (today's
   // fallback). No grow-in here, so it only yields to the reasoning card, keeping the
   // legacy always-on banner during tool runs.
