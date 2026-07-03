@@ -1555,7 +1555,16 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     const last = userMessages[userMessages.length - 1];
     const el = last ? userMsgRefs.current.get(last.id) : null;
     const container = chatContainerRef.current;
-    if (!el || !container) { lastUserOutOfView.current = false; setPinnedUserMessage(null); return; }
+    if (!last || !container) { lastUserOutOfView.current = false; setPinnedUserMessage(null); return; }
+    if (!el) {
+      // The message exists but isn't mounted: the render window advanced past
+      // it (long AI turn pushed it out of the 50-message tail). Off-window is
+      // by definition out of view — keep the header pinned; the renderStart
+      // dep re-runs this when the window re-mounts it (scroll up / jump).
+      lastUserOutOfView.current = true;
+      setPinnedUserMessage(last);
+      return;
+    }
     lastUserOutOfView.current = false;
     setPinnedUserMessage(null);
     const observer = new IntersectionObserver(
@@ -1572,7 +1581,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [userMessages[userMessages.length - 1]?.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userMessages[userMessages.length - 1]?.id, renderStart]);
 
   const handleScroll = () => {
     const el = chatContainerRef.current;

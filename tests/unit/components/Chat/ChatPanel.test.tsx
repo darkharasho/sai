@@ -705,6 +705,30 @@ describe('ChatPanel', () => {
     expect(after).toBe(before);
   });
 
+  it('keeps the pinned header when a long turn pushes the last user message out of the render window', async () => {
+    // 1 user message followed by 59 assistant messages (> RENDER_CHUNK = 50):
+    // renderStart lands past the user bubble, so it is NOT mounted. Off-window
+    // is out of view by definition — the pinned header must show without any
+    // IntersectionObserver involvement (the bubble has no DOM node to observe).
+    const initialMessages = [
+      { id: 'u0', role: 'user' as const, content: 'the long question', timestamp: Date.now() },
+      ...Array.from({ length: 59 }, (_, i) =>
+        ({ id: `a${i + 1}`, role: 'assistant' as const, content: `asst ${i + 1}`, timestamp: Date.now() })),
+    ];
+
+    const props = { ...baseProps(), initialMessages };
+    const { container } = render(<ChatPanel {...props} />);
+
+    // The user bubble is outside the window (not mounted in the transcript)…
+    expect(container.querySelector('.chat-msg-user')).toBeNull();
+    // …but the pinned header still shows it, with the jump affordance.
+    await waitFor(() => {
+      const text = container.querySelector('.pinned-prompt-text');
+      expect(text?.textContent).toBe('the long question');
+    });
+    expect(container.querySelector('.pinned-prompt-jump')).toBeTruthy();
+  });
+
   it('/fake-error appends a default API-error system message in dev mode', async () => {
     const onMessagesChange = vi.fn();
     const props: ChatPanelProps = { ...baseProps(), onMessagesChange };
