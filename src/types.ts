@@ -349,6 +349,7 @@ declare global {
       ffMerge: (projectPath: string, source: string) => Promise<void>;
       diffStats: (cwd: string, baseBranch: string, branch: string) => Promise<{ additions: number; deletions: number; files: number }>;
       branchDiff: (cwd: string, baseBranch: string, branch: string) => Promise<string>;
+      gc?: (projectPath: string, liveTaskIds: string[], liveBranches: string[]) => Promise<{ removedWorktrees: number; deletedBranches: number }>;
     };
   }
 

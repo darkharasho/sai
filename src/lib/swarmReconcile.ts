@@ -29,14 +29,21 @@ export async function reconcileTasksOnStartup(
 
 /**
  * Given the live task set and persisted approval rows, return the ids of
- * approvals whose `taskId` no longer matches any task. These are orphans
- * (their task was lost/discarded) and should be pruned on startup so they
- * don't inflate counts or render as un-actionable cards.
+ * approvals that are no longer actionable:
+ *   - the task is gone entirely (lost/discarded), or
+ *   - the task is not `awaiting_approval` anymore. After the startup
+ *     reconcile every mid-flight task is `paused`, so a surviving approval
+ *     row points at a toolUseId in a process that no longer exists —
+ *     approving it would silently no-op while the tray shows it as live.
+ * Both kinds should be pruned on startup so they don't inflate counts or
+ * render as un-actionable cards.
  */
 export function findOrphanApprovalIds(
-  tasks: Pick<SwarmTask, 'id'>[],
+  tasks: Pick<SwarmTask, 'id' | 'status'>[],
   approvals: Pick<SwarmApproval, 'id' | 'taskId'>[],
 ): string[] {
-  const liveTaskIds = new Set(tasks.map(t => t.id));
-  return approvals.filter(a => !liveTaskIds.has(a.taskId)).map(a => a.id);
+  const awaitingTaskIds = new Set(
+    tasks.filter(t => t.status === 'awaiting_approval').map(t => t.id),
+  );
+  return approvals.filter(a => !awaitingTaskIds.has(a.taskId)).map(a => a.id);
 }

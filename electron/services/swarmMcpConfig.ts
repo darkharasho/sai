@@ -37,6 +37,10 @@ export function buildSwarmMcpConfig(input: SwarmMcpConfigInput) {
   };
 }
 
+// Every config file written this process, so quit can sweep them. The file
+// carries the swarm-host auth secret, hence 0o600 + best-effort cleanup.
+const writtenConfigPaths = new Set<string>();
+
 /**
  * Write the MCP config JSON to a tmp file and return the path.
  * The Claude CLI reads this via `--mcp-config <path>`.
@@ -45,6 +49,15 @@ export function writeSwarmMcpConfig(input: SwarmMcpConfigInput): string {
   const config = buildSwarmMcpConfig(input);
   const filename = `sai-swarm-mcp-${crypto.randomBytes(8).toString('hex')}.json`;
   const filepath = path.join(os.tmpdir(), filename);
-  fs.writeFileSync(filepath, JSON.stringify(config, null, 2));
+  fs.writeFileSync(filepath, JSON.stringify(config, null, 2), { mode: 0o600 });
+  writtenConfigPaths.add(filepath);
   return filepath;
+}
+
+/** Delete every config file written this session. Call on app quit. */
+export function cleanupSwarmMcpConfigs(): void {
+  for (const p of writtenConfigPaths) {
+    try { fs.unlinkSync(p); } catch { /* already gone */ }
+  }
+  writtenConfigPaths.clear();
 }

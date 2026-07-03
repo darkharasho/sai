@@ -42,3 +42,59 @@ export function findOrphanWorktrees(
 ): string[] {
   return worktreeDirTaskIds.filter(id => !liveTaskIds.has(id));
 }
+
+export interface GcWorktree {
+  /** Absolute worktree path (a `.sai-swarm/<ws>/<taskId>` dir). */
+  path: string;
+  /** Task id — the dir's basename. */
+  taskId: string;
+  /** Checked-out branch short name, or null (detached). */
+  branch: string | null;
+}
+
+export interface SwarmGcPlan {
+  /** Worktrees to remove (with their branch, when known). */
+  removeWorktrees: GcWorktree[];
+  /** `swarm/*` branches to delete that have no worktree left. */
+  deleteBranches: string[];
+}
+
+/**
+ * Plan the startup GC for one project root. Everything here is belt-and-
+ * braces conservative:
+ *   - only worktrees whose dir basename (the task id) is NOT a live task are
+ *     removed;
+ *   - only `swarm/`-prefixed branches are ever deleted, and only when they
+ *     are neither referenced by a live task nor checked out in a worktree
+ *     that survives the plan.
+ * Pure: the caller performs the actual git/fs mutations.
+ */
+export function planSwarmGc(args: {
+  /** Registered worktrees under this workspace's `.sai-swarm/<ws>/` root. */
+  swarmWorktrees: readonly GcWorktree[];
+  /** All local `swarm/*` branch short names. */
+  swarmBranches: readonly string[];
+  liveTaskIds: ReadonlySet<string>;
+  /** Branch names still referenced by live (non-landed/discarded) tasks. */
+  liveBranches: ReadonlySet<string>;
+}): SwarmGcPlan {
+  const removeWorktrees = args.swarmWorktrees.filter(w => !args.liveTaskIds.has(w.taskId));
+  const survivingBranches = new Set(
+    args.swarmWorktrees
+      .filter(w => args.liveTaskIds.has(w.taskId))
+      .map(w => w.branch)
+      .filter((b): b is string => b != null),
+  );
+  const removedBranches = new Set(
+    removeWorktrees.map(w => w.branch).filter((b): b is string => b != null),
+  );
+  const deleteBranches = args.swarmBranches.filter(b =>
+    b.startsWith('swarm/')
+    && !args.liveBranches.has(b)
+    && !survivingBranches.has(b)
+    // Branches whose worktree we remove in this same plan are deleted by
+    // removeWorktreeAndBranch already — don't double-delete.
+    && !removedBranches.has(b),
+  );
+  return { removeWorktrees, deleteBranches };
+}

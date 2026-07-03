@@ -356,6 +356,13 @@ export default function App() {
   // the ref re-syncs, so without this guard the same task fires task_completed
   // twice (visible as duplicate inline cards).
   const emittedLifecycleRef = useRef<Set<string>>(new Set());
+  // Forget a task's terminal dedupe keys. Called when the task (re)starts a
+  // turn — a resumed/re-approved task must be able to emit a SECOND completion
+  // card — and when the task is removed, so the set doesn't grow forever.
+  const clearLifecycleEmits = useCallback((taskId: string) => {
+    emittedLifecycleRef.current.delete(`${taskId}:done`);
+    emittedLifecycleRef.current.delete(`${taskId}:failed`);
+  }, []);
   // tool_use_ids of in-flight AI file edits, awaiting their tool_result so we can
   // hot-reload open files the instant an edit completes.
   const pendingEditsRef = useRef<Set<string>>(new Set());
@@ -671,6 +678,28 @@ export default function App() {
           m.set(ws, liveApprovals);
           return m;
         });
+        // Startup GC, once per workspace per session (this effect only runs on
+        // first hydration): reap `.sai-swarm` worktrees and `swarm/*` branches
+        // no live task owns — failed/abandoned tasks and old app versions leak
+        // them, and they accumulate forever otherwise. Live = anything not
+        // landed/discarded, so a done-but-unlanded task keeps its worktree.
+        // Meta workspaces file tasks under their real project roots; GC each
+        // distinct root (the synthetic root itself no-ops — it isn't a repo).
+        {
+          const live = tasks.filter(t => t.status !== 'landed' && t.status !== 'discarded');
+          const roots = new Set<string>([ws, ...tasks.map(t => t.projectPath ?? ws)]);
+          for (const root of roots) {
+            const liveHere = live.filter(t => (t.projectPath ?? ws) === root);
+            void window.sai.swarm?.gc?.(root, liveHere.map(t => t.id), liveHere.map(t => t.branch))
+              .then(res => {
+                if (res && (res.removedWorktrees > 0 || res.deletedBranches > 0)) {
+                  // eslint-disable-next-line no-console
+                  console.log(`[swarm-gc] ${root}: removed ${res.removedWorktrees} worktrees, ${res.deletedBranches} branches`);
+                }
+              })
+              .catch(() => { /* best-effort */ });
+          }
+        }
       } catch (err) {
         // best-effort: a hydrate failure shouldn't crash the workspace. Leaving
         // the ws un-hydrated lets a later activation retry.
@@ -759,6 +788,9 @@ export default function App() {
         }
         for (const id of deletes) {
           try { await swarmDeleteTask(id); } catch (err) { console.error('swarm: persist delete failed', id, err); }
+          // Removed tasks can't re-emit; drop their dedupe keys so the set
+          // doesn't grow unbounded over a long session.
+          clearLifecycleEmits(id);
         }
         persistedTasksRef.current.set(ws, nextTasks);
       }
@@ -981,6 +1013,8 @@ export default function App() {
   // so the scheduler releases the reserved cap slot (see SwarmScheduler.launch).
   const makeSwarmOnStart = useCallback(() => async (task: SwarmTask) => {
     const now = Date.now();
+    // A re-run must be able to emit fresh completion/failure cards.
+    clearLifecycleEmits(task.id);
     setSwarmTasksByWs(prev => {
       const m = new Map(prev);
       const list = (m.get(task.workspaceId) ?? []).map(t =>
@@ -1046,7 +1080,7 @@ export default function App() {
       removeFromList();
       throw err; // free the scheduler slot
     }
-  }, []);
+  }, [clearLifecycleEmits]);
 
   const ensureSwarmScheduler = useCallback((ws: string): SwarmScheduler => {
     let s = swarmSchedulers.current.get(ws);
@@ -2520,6 +2554,31 @@ export default function App() {
   // module (not a ref) so ChatPanel can drain its scope's buffer directly
   // when it subscribes — see chatFrameGate.ts for the gap-closing protocol.
   const taskMessagesBufferRef = { current: scopeMessageBuffer };
+  // Debounced persist of an orchestrator session's live message buffer.
+  // Shares orchSaveTimerRef with the ChatPanel onMessagesChange debounce so
+  // the two paths coalesce. Handler-injected cards (approval requests and
+  // their resolutions) go through here — they used to live only in
+  // orchMessagesRef until the next onTurnComplete, so a crash while an
+  // approval was pending dropped the card from history entirely.
+  const persistOrchMessagesDebounced = useCallback((wsPath: string, orchSessionId: string) => {
+    const existing = orchSaveTimerRef.current.get(orchSessionId);
+    if (existing) clearTimeout(existing);
+    orchSaveTimerRef.current.set(orchSessionId, setTimeout(() => {
+      orchSaveTimerRef.current.delete(orchSessionId);
+      const latest = orchMessagesRef.current.get(orchSessionId) || [];
+      if (latest.length === 0) return;
+      const wsNow = workspacesRef.current.get(wsPath);
+      const existingSession = wsNow?.sessions.find(s => s.id === orchSessionId);
+      if (!existingSession) return;
+      const updated = {
+        ...existingSession,
+        messages: latest,
+        updatedAt: Date.now(),
+        messageCount: latest.length,
+      };
+      queueSaveSession(wsPath, updated, 0).catch(() => { /* surfaced via sai-persist-error */ });
+    }, 400));
+  }, []);
   useEffect(() => {
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
       if (!msg.projectPath) return;
@@ -2877,6 +2936,9 @@ export default function App() {
               m.set(orchSessionId, next);
               return m;
             });
+            // Persist eagerly — a crash while the approval is pending must
+            // not drop the card from the orchestrator's history.
+            persistOrchMessagesDebounced(msg.projectPath, orchSessionId);
           }
         }
         const scopeForApproval = msg.scope || 'chat';
@@ -2938,6 +3000,8 @@ export default function App() {
           ? (swarmTasksByWsRef.current.get(msg.projectPath) ?? []).find(t => t.sessionId === scope)
           : undefined;
         if (swarmTask && swarmTask.status === 'awaiting_approval') {
+          // Resuming a turn — allow a fresh terminal card when it ends.
+          clearLifecycleEmits(swarmTask.id);
           setSwarmTasksByWs(prev => {
             const next = new Map(prev);
             const list = (next.get(msg.projectPath) ?? []).map(t =>
@@ -2994,6 +3058,9 @@ export default function App() {
               m.set(orchId, next);
               return m;
             });
+            // Persist the collapsed state so a restart doesn't resurrect the
+            // card as actionable.
+            persistOrchMessagesDebounced(msg.projectPath, orchId);
           }
         }
       }

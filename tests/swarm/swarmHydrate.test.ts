@@ -19,11 +19,15 @@ beforeEach(async () => {
 });
 
 describe('hydrateWorkspaceSwarm', () => {
-  it('reconciles zombies, prunes orphan approvals, returns live state', async () => {
+  it('reconciles zombies and prunes every stale approval', async () => {
     await swarmCreateTask(task({ id: 'streaming1', status: 'streaming' }));
     await swarmCreateTask(task({ id: 'awaiting1', status: 'awaiting_approval' }));
     await swarmCreateTask(task({ id: 'queued1', status: 'queued' }));
-    await swarmCreateApproval({ id: 'live', taskId: 'queued1', workspaceId: '/p', toolName: 'Bash', toolUseId: 'u1', createdAt: 1 });
+    // Both approvals are stale after a restart: 'demoted' belongs to a task
+    // the reconcile pauses (its provider process is gone, so the toolUseId is
+    // dead), 'orphan' has no task at all. Neither may survive hydration as an
+    // actionable row.
+    await swarmCreateApproval({ id: 'demoted', taskId: 'awaiting1', workspaceId: '/p', toolName: 'Bash', toolUseId: 'u1', createdAt: 1 });
     await swarmCreateApproval({ id: 'orphan', taskId: 'gone', workspaceId: '/p', toolName: 'Bash', toolUseId: 'u2', createdAt: 1 });
 
     const { tasks, liveApprovals } = await hydrateWorkspaceSwarm('/p');
@@ -33,8 +37,8 @@ describe('hydrateWorkspaceSwarm', () => {
     expect(byId.awaiting1).toBe('paused');
     expect(byId.queued1).toBe('queued');
 
-    expect(liveApprovals.map(a => a.id)).toEqual(['live']);
-    expect((await swarmGetApprovals('/p')).map(a => a.id)).toEqual(['live']);
+    expect(liveApprovals).toEqual([]);
+    expect(await swarmGetApprovals('/p')).toEqual([]);
   });
 
   it('returns empty state for a workspace with nothing persisted', async () => {

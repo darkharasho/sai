@@ -41,6 +41,23 @@ describe('swarmDb tasks', () => {
     await swarmCreateTask(baseTask({ id: 'w', workspaceId: '/p2' }));
     expect((await swarmGetTasks('/p1')).map(r => r.id)).toEqual(['z']);
   });
+
+  it('honors an explicit lastActivityAt in the patch instead of stamping now', async () => {
+    // Status-mirror patches carry the event's own timestamp; overriding it
+    // with Date.now() muddied the watchdog's staleness math.
+    await swarmCreateTask(baseTask({ id: 'ts' }));
+    await swarmUpdateTask('ts', { status: 'streaming', lastActivityAt: 12345 });
+    const [row] = await swarmGetTasks('/p');
+    expect(row.lastActivityAt).toBe(12345);
+  });
+
+  it('still defaults lastActivityAt to now when the patch omits it', async () => {
+    await swarmCreateTask(baseTask({ id: 'ts2' }));
+    const before = Date.now();
+    await swarmUpdateTask('ts2', { status: 'streaming' });
+    const [row] = await swarmGetTasks('/p');
+    expect(row.lastActivityAt).toBeGreaterThanOrEqual(before);
+  });
 });
 
 describe('swarmDb approvals', () => {

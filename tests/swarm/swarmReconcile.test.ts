@@ -69,14 +69,30 @@ describe('findOrphanApprovalIds', () => {
     id, taskId, workspaceId: '/p', toolName: 'Bash', toolUseId: 'u', createdAt: 1,
   });
 
-  it('returns approvals whose taskId has no live task', () => {
-    const tasks = [makeTask({ id: 't1' })];
+  it('returns approvals whose taskId has no task at all', () => {
+    const tasks = [makeTask({ id: 't1', status: 'awaiting_approval' })];
     const approvals = [appr('a1', 't1'), appr('a2', 'gone'), appr('a3', 'alsoGone')];
     expect(findOrphanApprovalIds(tasks, approvals).sort()).toEqual(['a2', 'a3']);
   });
 
-  it('returns empty when every approval has a live task', () => {
-    const tasks = [makeTask({ id: 't1' }), makeTask({ id: 't2' })];
+  it('returns approvals whose task is no longer awaiting_approval', () => {
+    // After the startup reconcile every mid-flight task is `paused`; its
+    // approval points at a toolUseId in a dead process and must be pruned —
+    // approving it would silently no-op while the tray shows it as live.
+    const tasks = [
+      makeTask({ id: 'paused1', status: 'paused' }),
+      makeTask({ id: 'queued1', status: 'queued' }),
+      makeTask({ id: 'waiting1', status: 'awaiting_approval' }),
+    ];
+    const approvals = [appr('a1', 'paused1'), appr('a2', 'queued1'), appr('a3', 'waiting1')];
+    expect(findOrphanApprovalIds(tasks, approvals).sort()).toEqual(['a1', 'a2']);
+  });
+
+  it('returns empty when every approval belongs to an awaiting task', () => {
+    const tasks = [
+      makeTask({ id: 't1', status: 'awaiting_approval' }),
+      makeTask({ id: 't2', status: 'awaiting_approval' }),
+    ];
     const approvals = [appr('a1', 't1'), appr('a2', 't2')];
     expect(findOrphanApprovalIds(tasks, approvals)).toEqual([]);
   });

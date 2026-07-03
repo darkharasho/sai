@@ -207,6 +207,22 @@ function resolveHunks(content: string, resolution: 'ours' | 'theirs' | 'both'): 
 
 export async function gitWorktreeAdd(repoCwd: string, worktreePath: string, branch: string, baseBranch: string) {
   await fs.promises.mkdir(path.dirname(worktreePath), { recursive: true });
+  // Idempotent for recovery: a half-materialized task (worktree created but
+  // the task row never learned its path, or a retry after a crash) must be
+  // able to re-run this without tripping over its own leftovers.
+  const existing = await git(repoCwd).raw(['worktree', 'list', '--porcelain']).catch(() => '');
+  if (existing.split('\n').some(l => l === `worktree ${worktreePath}`)) return;
+  // NB: no --quiet — simple-git only rejects when stderr is non-empty, and
+  // --quiet suppresses the "not a valid ref" message a missing branch writes.
+  const branchExists = await git(repoCwd)
+    .raw(['show-ref', '--verify', `refs/heads/${branch}`])
+    .then(() => true)
+    .catch(() => false);
+  if (branchExists) {
+    // Re-attach the surviving branch instead of failing on `-b`.
+    await git(repoCwd).raw(['worktree', 'add', worktreePath, branch]);
+    return;
+  }
   // create branch off baseBranch and check it out in the new worktree
   await git(repoCwd).raw(['worktree', 'add', '-b', branch, worktreePath, baseBranch]);
 }
@@ -243,6 +259,42 @@ export async function gitFastForwardMerge(repoCwd: string, sourceBranch: string)
     }
     throw err;
   }
+}
+
+export async function gitWorktreePrune(repoCwd: string): Promise<void> {
+  await git(repoCwd).raw(['worktree', 'prune']).catch(() => {});
+}
+
+export interface WorktreeListEntry {
+  path: string;
+  /** Branch ref short name (e.g. `swarm/foo-abc123`), or null for detached HEAD. */
+  branch: string | null;
+}
+
+/** Parse `git worktree list --porcelain` — one entry per registered worktree,
+ *  including the main checkout (callers filter it out by path). */
+export async function gitListWorktrees(repoCwd: string): Promise<WorktreeListEntry[]> {
+  const out = await git(repoCwd).raw(['worktree', 'list', '--porcelain']).catch(() => '');
+  const entries: WorktreeListEntry[] = [];
+  let current: Partial<WorktreeListEntry> | null = null;
+  for (const line of out.split('\n')) {
+    if (line.startsWith('worktree ')) {
+      if (current?.path) entries.push({ path: current.path, branch: current.branch ?? null });
+      current = { path: line.slice('worktree '.length).trim(), branch: null };
+    } else if (line.startsWith('branch ') && current) {
+      current.branch = line.slice('branch '.length).trim().replace(/^refs\/heads\//, '');
+    }
+  }
+  if (current?.path) entries.push({ path: current.path, branch: current.branch ?? null });
+  return entries;
+}
+
+/** Short names of local branches under the given prefix (e.g. 'swarm/'). */
+export async function gitListBranches(repoCwd: string, prefix: string): Promise<string[]> {
+  const out = await git(repoCwd)
+    .raw(['for-each-ref', '--format=%(refname:short)', `refs/heads/${prefix}`])
+    .catch(() => '');
+  return out.split('\n').map(l => l.trim()).filter(Boolean);
 }
 
 export async function gitBranchDiff(

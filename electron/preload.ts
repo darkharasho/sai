@@ -399,6 +399,8 @@ contextBridge.exposeInMainWorld('sai', {
       ipcRenderer.invoke('swarm:diff-stats', cwd, baseBranch, branch),
     branchDiff: (cwd: string, baseBranch: string, branch: string) =>
       ipcRenderer.invoke('swarm:branch-diff', cwd, baseBranch, branch),
+    gc: (projectPath: string, liveTaskIds: string[], liveBranches: string[]) =>
+      ipcRenderer.invoke('swarm:gc', projectPath, liveTaskIds, liveBranches),
   },
   remote: {
     setEnabled: (enabled: boolean) => ipcRenderer.invoke('remote:setEnabled', enabled),

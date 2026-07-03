@@ -87,6 +87,7 @@ import { registerBrainstormHandlers } from './services/brainstorm';
 import { registerSearchHandlers } from './services/search';
 import { registerSwarmHandlers } from './services/swarm';
 import * as swarmMcpHost from './services/swarmMcpHost';
+import { cleanupSwarmMcpConfigs } from './services/swarmMcpConfig';
 import { setSaiToolDispatch } from './services/saiToolBridge';
 import {
   listMetaWorkspaces, createMetaWorkspace, updateMetaWorkspace,
@@ -1276,6 +1277,8 @@ app.whenReady().then(() => {
 let _quitInProgress = false;
 app.on('before-quit', (e) => {
   try { swarmMcpHost.stop(); } catch { /* noop */ }
+  // Config tmp files carry the swarm-host auth secret — don't leave them behind.
+  try { cleanupSwarmMcpConfigs(); } catch { /* noop */ }
   // Synchronously release the remote bridge port before Electron exits.
   if (remote && !_quitInProgress) {
     _quitInProgress = true;

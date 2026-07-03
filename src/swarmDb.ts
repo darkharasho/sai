@@ -108,7 +108,11 @@ export async function swarmUpdateTask(id: string, patch: Partial<SwarmTask>): Pr
         resolve();
         return;
       }
-      store.put({ ...cur, ...patch, lastActivityAt: Date.now() });
+      // Respect an explicit lastActivityAt from the caller (status-mirror
+      // patches carry the event's own timestamp); only default to now when
+      // the patch doesn't say — otherwise every meta write muddies the
+      // watchdog's staleness math.
+      store.put({ ...cur, ...patch, lastActivityAt: patch.lastActivityAt ?? Date.now() });
     };
     getReq.onerror = () => reject(getReq.error);
 
