@@ -88,6 +88,12 @@ vi.mock('fs', async (importOriginal) => {
   return { ...actual, readFileSync: mockReadFileSync };
 });
 
+// externalMcp reads the real ~/.claude.json / plugin dirs at session creation;
+// stub it so unit tests stay hermetic (and don't consume once-mocked fs reads).
+vi.mock('../../../electron/services/claudeBackend/externalMcp', () => ({
+  loadExternalMcpForSdk: () => ({ servers: {}, plugins: [] }),
+}));
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 interface FakeQuery extends AsyncIterable<any> {

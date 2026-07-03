@@ -367,6 +367,12 @@ contextBridge.exposeInMainWorld('sai', {
   mcpRemove: (name: string) => ipcRenderer.invoke('mcp:remove', name),
   mcpUpdate: (name: string, updates: any) => ipcRenderer.invoke('mcp:update', name, updates),
   mcpRegistryList: () => ipcRenderer.invoke('mcp:registryList'),
+  mcpRuntimeStatus: () => ipcRenderer.invoke('mcp:runtimeStatus'),
+  onMcpRuntimeStatus: (cb: (status: any) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, status: any) => cb(status);
+    ipcRenderer.on('mcp:runtime-status', listener);
+    return () => ipcRenderer.removeListener('mcp:runtime-status', listener);
+  },
   onSwarmToolRequest: (cb: (req: { id: string; tool: string; input: any; workspace: string }) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, req: { id: string; tool: string; input: any; workspace: string }) => cb(req);
     ipcRenderer.on('swarm:tool-request', listener);

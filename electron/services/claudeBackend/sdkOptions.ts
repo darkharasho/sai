@@ -1,4 +1,4 @@
-import type { Options, EffortLevel, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
+import type { Options, EffortLevel, CanUseTool, SdkPluginConfig } from '@anthropic-ai/claude-agent-sdk';
 
 export interface SdkOptionInputs {
   kind: 'chat' | 'task' | 'orchestrator';
@@ -12,6 +12,7 @@ export interface SdkOptionInputs {
   systemPromptOverride?: string; // full-replacement system prompt (orchestrator); overrides the preset+append form
   canUseTool?: CanUseTool;     // tool-approval callback; not set in bypass mode
   mcpServers?: Record<string, unknown>; // in-process SDK MCP servers (chat tools); set only for chat
+  plugins?: SdkPluginConfig[]; // installed Claude Code plugins (skills/agents/hooks/MCP), chat+task only
   env?: Record<string, string | undefined>; // subprocess env (enriched login-shell + memory cap)
   stderr?: (data: string) => void; // subprocess stderr (auth failures, crash diagnostics)
   /** "Show reasoning" setting: request summarized thinking text (Opus 4.7+/Fable
@@ -56,6 +57,7 @@ export function buildSdkOptions(input: SdkOptionInputs): Options {
     systemPromptOverride,
     canUseTool,
     mcpServers,
+    plugins,
     env,
     stderr,
     thinkingSummarized,
@@ -136,6 +138,10 @@ export function buildSdkOptions(input: SdkOptionInputs): Options {
 
   if (mcpServers && Object.keys(mcpServers).length > 0) {
     opts.mcpServers = mcpServers as Options['mcpServers'];
+  }
+
+  if (plugins && plugins.length > 0) {
+    opts.plugins = plugins;
   }
 
   if (kind === 'orchestrator') {

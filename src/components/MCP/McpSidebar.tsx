@@ -21,6 +21,7 @@ export default function McpSidebar() {
   const [view, setView] = useState<View>('list');
   const [selectedServer, setSelectedServer] = useState<McpServer | null>(null);
   const [selectedRegistryServer, setSelectedRegistryServer] = useState<RegistryMcpServer | null>(null);
+  const [runtime, setRuntime] = useState<Record<string, { status: string }>>({});
 
   const loadInstalled = async () => {
     setLoading(true);
@@ -59,6 +60,32 @@ export default function McpSidebar() {
   };
 
   useEffect(() => { loadInstalled(); }, []);
+
+  // Live connection status from the SDK backend (init-message report). The CLI
+  // backend never reports this, so badges only appear in SDK mode.
+  useEffect(() => {
+    const api = window.sai as any;
+    let cancelled = false;
+    api.mcpRuntimeStatus?.().then((r: any) => {
+      if (!cancelled && r?.servers) setRuntime(r.servers);
+    }).catch(() => {});
+    const off = api.onMcpRuntimeStatus?.((r: any) => {
+      if (r?.servers) setRuntime(r.servers);
+    });
+    return () => { cancelled = true; off?.(); };
+  }, []);
+
+  // Runtime entries are keyed by the name the SDK saw; plugin servers appear in
+  // the sidebar as `plugin:<short>:<name>` — fall back to matching the bare
+  // server name or the `<short>-<name>` key used when SAI owns the connection.
+  const runtimeFor = (sidebarName: string): string | undefined => {
+    if (runtime[sidebarName]) return runtime[sidebarName].status;
+    const m = /^plugin:([^:]+):(.+)$/.exec(sidebarName);
+    if (m) {
+      return runtime[m[2]]?.status ?? runtime[`${m[1]}-${m[2]}`]?.status;
+    }
+    return undefined;
+  };
 
   useEffect(() => {
     if (tab === 'browse' && registry.length === 0) {
@@ -192,6 +219,12 @@ export default function McpSidebar() {
               <div className="card-desc">{server.description || server.transport}</div>
             </div>
             <div className="card-right">
+              {(() => {
+                const rt = runtimeFor(server.name);
+                if (!rt) return null;
+                const ok = rt === 'connected';
+                return <span className={`card-runtime ${ok ? 'ok' : 'bad'}`}>{ok ? 'connected' : rt}</span>;
+              })()}
               <span className={`status-dot ${server.enabled ? 'active' : 'inactive'}`} />
               <ChevronRight size={12} className="card-chevron" />
             </div>
@@ -392,6 +425,16 @@ export default function McpSidebar() {
         }
         .status-dot.active { color: var(--green); }
         .status-dot.inactive { color: var(--red); }
+        .card-runtime {
+          font-size: 9px;
+          padding: 1px 6px;
+          border-radius: 999px;
+          border: 1px solid var(--border-subtle);
+          color: var(--text-muted);
+          white-space: nowrap;
+        }
+        .card-runtime.ok { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, transparent); }
+        .card-runtime.bad { color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, transparent); }
         .card-chevron { color: var(--text-muted); font-size: 10px; }
         .card-install-btn {
           padding: 2px 8px;

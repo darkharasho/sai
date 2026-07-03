@@ -2,6 +2,7 @@ import { ipcMain } from 'electron';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { getMcpRuntimeStatus } from './claudeBackend/mcpRuntimeStatus';
 
 interface McpConfigEntry {
   type?: string;
@@ -219,6 +220,9 @@ export function registerMcpHandlers() {
       return { error: err.message || 'Failed to update MCP server' };
     }
   });
+
+  // Live connection status reported by the SDK backend's init messages.
+  ipcMain.handle('mcp:runtimeStatus', async () => getMcpRuntimeStatus());
 
   ipcMain.handle('mcp:registryList', async () => {
     try {

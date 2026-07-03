@@ -12,7 +12,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import type { query as QueryFn, SDKUserMessage, PermissionResult, McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
+import type { query as QueryFn, SDKUserMessage, PermissionResult, McpSdkServerConfigWithInstance, SdkPluginConfig } from '@anthropic-ai/claude-agent-sdk';
 import { enrichedEnv } from '../shellEnv';
 import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASKS_NUDGE } from '../chatNudges';
 import {
@@ -35,6 +35,8 @@ import { notifyCompletion, notifyApproval, notifyQuestion, notifyPlanReview } fr
 import { classifyTurnEnd, isSchedulingTool, isBackgroundLaunch, WAKEUP_GRACE_MS, type WaitMeta } from '../waitClassifier';
 import { clamp, type PermMode } from '../remote/clamp';
 import { parseUserMcpConfigPaths } from './userMcpConfig';
+import { loadExternalMcpForSdk } from './externalMcp';
+import { recordMcpRuntimeStatus, getMcpRuntimeStatus } from './mcpRuntimeStatus';
 import { buildSdkOptions } from './sdkOptions';
 import { buildOrchestratorSystemPrompt, resolveOrchestratorPromptContext, type OrchestratorPromptContext } from '../../../src/lib/orchestratorSystemPrompt';
 import { mapSdkMessage, type MapperState } from './sdkMessageMap';
@@ -783,13 +785,22 @@ export class SdkBackend implements ClaudeBackend {
       chatAppendSystemPrompt = [...nudges, ...existing].join('\n\n');
     }
 
+    let plugins: SdkPluginConfig[] | undefined;
     if (kind === 'chat' || kind === 'task') {
-      const userServers = parseUserMcpConfigPaths(
+      // ~/.claude.json servers (minus the disabled list) + installed plugins —
+      // the same external surface the CLI path forwards. mcpConfigPath entries
+      // are an explicit override, so they win over .claude.json on collision.
+      const external = loadExternalMcpForSdk();
+      const overrideServers = parseUserMcpConfigPaths(
         readSaiSetting('mcpConfigPath'),
         (p) => fs.readFileSync(p, 'utf-8'),
       );
+      const userServers = { ...external.servers, ...overrideServers };
       if (Object.keys(userServers).length > 0) {
         mcpServers = { ...userServers, ...(mcpServers ?? {}) }; // SAI's `sai` key wins on collision
+      }
+      if (external.plugins.length > 0) {
+        plugins = external.plugins;
       }
     }
 
@@ -806,6 +817,7 @@ export class SdkBackend implements ClaudeBackend {
       systemPromptOverride,
       canUseTool,
       mcpServers,
+      plugins,
       env: spawnEnv() as Record<string, string | undefined>,
       stderr: (data: string) => {
         const text = data.toString().trim();
@@ -966,6 +978,16 @@ export class SdkBackend implements ClaudeBackend {
           session.lastActivityAt = Date.now();
           if (m?.type === 'system' && m?.subtype === 'init' && Array.isArray(m?.slash_commands)) {
             writeCachedSlashCommands(m.slash_commands as string[]);
+          }
+          // Live MCP/plugin status for the sidebar (SDK-only capability — the
+          // CLI never reports per-server connection state).
+          if (m?.type === 'system' && m?.subtype === 'init' && Array.isArray(m?.mcp_servers)) {
+            recordMcpRuntimeStatus(
+              scopeKey,
+              m.mcp_servers as Array<{ name?: string; status?: string }>,
+              Array.isArray(m?.plugins) ? (m.plugins as Array<{ name?: string; path?: string }>) : undefined,
+            );
+            getMainWin()?.webContents.send('mcp:runtime-status', getMcpRuntimeStatus());
           }
           // Mid-session command-list changes (skills discovered dynamically):
           // REPLACE the cache — supportedCommands() never reflects these.

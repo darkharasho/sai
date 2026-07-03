@@ -207,4 +207,11 @@ describe('feature options', () => {
   it('no thinking config when thinkingSummarized is off (runtime default display)', () => {
     expect(buildSdkOptions({ kind: 'chat', cwd: '/ws' }).thinking).toBeUndefined();
   });
+
+  it('plugins pass through when non-empty, omitted otherwise', () => {
+    const plugins = [{ type: 'local' as const, path: '/plugins/tools' }];
+    expect(buildSdkOptions({ kind: 'chat', cwd: '/ws', plugins }).plugins).toEqual(plugins);
+    expect(buildSdkOptions({ kind: 'chat', cwd: '/ws', plugins: [] }).plugins).toBeUndefined();
+    expect(buildSdkOptions({ kind: 'chat', cwd: '/ws' }).plugins).toBeUndefined();
+  });
 });
