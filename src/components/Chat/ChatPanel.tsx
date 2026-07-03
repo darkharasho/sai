@@ -8,6 +8,7 @@ import { SPRING, DISTANCE, EASING, useReducedMotionTransition } from './motion';
 import { useSaiAnimationPref } from './useSaiAnimationPref';
 import { markRevealed } from './revealRegistry';
 import { parseToolResultBlocks } from '../../lib/toolResultContent';
+import { registerChatListener, unregisterChatListener, takeBufferedMessages, reconcileDrainedMessages } from '../../lib/chatFrameGate';
 import { buildPendingQuestionAnswer } from '../../lib/pendingQuestionAnswer';
 import WaitingIndicator from './WaitingIndicator';
 
@@ -740,6 +741,15 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       }
     });
 
+    // Gap-closing gate (chatFrameGate.ts): register BEFORE subscribing so App
+    // stops buffering for this scope, then drain what accumulated in the mount
+    // gap right after subscribing. All synchronous — no frame can interleave
+    // between these statements. Only regular claude chats participate: task
+    // scopes keep the always-buffer behavior (orchestrator taskOutput reads
+    // the live buffer), and gemini/codex use the never-buffered 'chat' scope.
+    const gateScope = aiProvider === 'claude' && claudeKind === 'chat' && claudeScope !== 'chat'
+      ? claudeScope : null;
+    if (gateScope) registerChatListener(gateScope);
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
       // Only process messages for this workspace and chat scope.
       // Claude uses session UUIDs as scopes for multi-scope isolation.
@@ -1326,12 +1336,23 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       }
     });
 
+    // Drain frames App buffered while no listener was registered for this
+    // scope (the select→subscribe mount gap). Reconciled by id so entries the
+    // select-time merge already seeded are updated in place, not duplicated.
+    if (gateScope) {
+      const pending = takeBufferedMessages(gateScope);
+      if (pending.length > 0) {
+        setMessages(prev => reconcileDrainedMessages(prev, pending));
+      }
+    }
+
     return () => {
       flushStreamingText();
       if (streamIdleTimerRef.current != null) {
         clearTimeout(streamIdleTimerRef.current);
         streamIdleTimerRef.current = null;
       }
+      if (gateScope) unregisterChatListener(gateScope);
       cleanup();
     };
   }, [projectPath, aiProvider, activeMetaRuntime, flushStreamingText]);

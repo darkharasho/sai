@@ -83,6 +83,7 @@ import { swarmBranchName } from './lib/swarmSlug';
 import { shouldRequireApproval } from './lib/swarmApprovalPolicy';
 import { deriveSwarmMirror, applySwarmPatch } from './lib/swarmStatusMirror';
 import { convertAssistantEnvelope, appendAssistantChunk, mergePersistedWithBuffer } from './lib/swarmTaskMessageBuffer';
+import { hasChatListener, scopeMessageBuffer } from './lib/chatFrameGate';
 import { isImageFile } from './utils/imageFiles';
 import { getMonacoEditorFor } from './utils/monacoEditorRegistry';
 import * as monaco from 'monaco-editor';
@@ -2454,8 +2455,10 @@ export default function App() {
   // Per-task assistant message buffer for background swarm tasks.
   // Keyed by task sessionId (msg.scope). Flushed to chatDb on done/result so
   // background tasks (whose ChatPanel isn't mounted) still persist Claude's
-  // reply alongside the injected user prompt.
-  const taskMessagesBufferRef = useRef<Map<string, ChatMessage[]>>(new Map());
+  // reply alongside the injected user prompt. Lives in the chatFrameGate
+  // module (not a ref) so ChatPanel can drain its scope's buffer directly
+  // when it subscribes — see chatFrameGate.ts for the gap-closing protocol.
+  const taskMessagesBufferRef = { current: scopeMessageBuffer };
   useEffect(() => {
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
       if (!msg.projectPath) return;
@@ -2637,8 +2640,11 @@ export default function App() {
           // listener — messages arriving in that gap would be lost by both
           // paths. The buffer is merged on session select and deduplicated by
           // mergePersistedWithBuffer, so double-capturing is harmless.
+          // Regular chat scopes close the same gap via chatFrameGate: buffer
+          // until the panel REGISTERS its listener; the panel then drains the
+          // buffer synchronously right after subscribing (reconciled by id).
           const isTaskScope = (swarmTasksByWsRef.current.get(msg.projectPath) ?? []).some(t => t.sessionId === scope);
-          if (!isFocusedHere || isTaskScope) {
+          if (!isFocusedHere || isTaskScope || !hasChatListener(scope)) {
             const converted = convertAssistantEnvelope(msg);
             if (converted) {
               const prev = taskMessagesBufferRef.current.get(scope) ?? [];

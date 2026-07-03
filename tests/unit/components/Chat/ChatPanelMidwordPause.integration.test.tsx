@@ -3,6 +3,7 @@ import { act, render, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { installMockSai } from '../../../helpers/ipc-mock';
 import { _resetRevealRegistry } from '../../../../src/components/Chat/revealRegistry';
+import { scopeMessageBuffer, hasChatListener, _resetChatFrameGate } from '../../../../src/lib/chatFrameGate';
 
 // Repro for the v1.12.14 dogfood report: a reply that pauses mid-sentence
 // longer than the stream-idle settle (250ms), then keeps streaming, rendered
@@ -67,6 +68,7 @@ describe('mid-sentence pause past the settle debounce', () => {
 
   beforeEach(() => {
     _resetRevealRegistry();
+    _resetChatFrameGate();
     mockSai = installMockSai();
     mockSai.settingsGet.mockImplementation((_key: string, fallback: unknown) => Promise.resolve(fallback));
     mockSai.claudeOnMessage.mockImplementation(() => () => {});
@@ -166,5 +168,26 @@ describe('mid-sentence pause past the settle debounce', () => {
     expect(text).toContain(FULL);
     // Replaced, not duplicated: the head prefix appears exactly once.
     expect(text.split('I left out the two Discord-').length).toBe(2);
+  });
+
+  it('drains frames buffered before the panel subscribed (focus-swap gap)', async () => {
+    // App buffered content for this scope while no ChatPanel listener was
+    // registered; the panel must pick it up at mount.
+    scopeMessageBuffer.set('session-gap', [
+      { id: 'gap-1', role: 'assistant', content: 'buffered while unmounted', timestamp: Date.now() },
+    ] as any);
+
+    const props = { ...baseProps(), claudeScope: 'session-gap', sessionId: 'session-gap' } as any;
+    const { container } = render(<ChatPanel {...props} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+    // Panel took ownership: the buffer is drained and the listener registered.
+    expect(hasChatListener('session-gap')).toBe(true);
+    expect(scopeMessageBuffer.has('session-gap')).toBe(false);
+    // The word-reveal interleaves caret glyphs — strip them before matching.
+    await waitFor(() => {
+      const text = container.textContent?.replace(/[▋▊▍]/g, '') ?? '';
+      expect(text).toContain('buffered while unmounted');
+    });
   });
 });
