@@ -173,13 +173,13 @@ export default function Chat({ client, statusStore, watcherStore, active, onActi
         // Process blocks IN ORDER so text+tool+text sequences interleave correctly.
         const content = (msg as any).message?.content;
         const blocks: Array<
-          | { kind: 'text'; text: string }
+          | { kind: 'text'; text: string; final?: boolean }
           | { kind: 'tool'; id: string; name: string; input?: Record<string, unknown> }
         > = [];
         if (Array.isArray(content)) {
           for (const b of content) {
             if (b?.type === 'text' && typeof b.text === 'string' && b.text.length) {
-              blocks.push({ kind: 'text', text: b.text });
+              blocks.push({ kind: 'text', text: b.text, final: !!(b as any).final });
             } else if (b?.type === 'tool_use' && typeof b.id === 'string') {
               blocks.push({ kind: 'tool', id: b.id, name: b.name ?? 'tool', input: b.input });
             }
@@ -194,7 +194,10 @@ export default function Chat({ client, statusStore, watcherStore, active, onActi
             if (blk.kind === 'text') {
               const last = next[next.length - 1];
               if (last && last.role === 'assistant' && last.streaming) {
-                next[next.length - 1] = { ...last, text: (last.text ?? '') + blk.text };
+                // `final` marks the SDK's post-delta reconcile copy of the full
+                // message text: it replaces the accumulation instead of
+                // appending (heals lost deltas, never duplicates).
+                next[next.length - 1] = { ...last, text: blk.final ? blk.text : (last.text ?? '') + blk.text };
               } else {
                 next.push({ id: `a-${Date.now()}-${next.length}`, role: 'assistant', text: blk.text, streaming: true });
               }

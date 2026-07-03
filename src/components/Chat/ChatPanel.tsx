@@ -1144,6 +1144,11 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         }
 
         const text = textParts.join('');
+        // SDK reconcile frame: the complete message's text, re-sent after its
+        // deltas with a `final` tag. Authoritative — REPLACES the accumulated
+        // delta text, healing any deltas lost in transit (the focus-swap
+        // listener gap used to leave replies truncated mid-word).
+        const isFinalText = msg.message.content.some((block: any) => block.type === 'text' && block.final);
         // Real output is flowing — any silent-pause hint is stale.
         if (text) clearStreamHint();
 
@@ -1223,8 +1228,11 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             //    turn or subagent message must never clobber the previous reply.
             const shouldAppend = msg.message.content.some((block: any) => block.type === 'text' && block.delta);
             const lastIsMergeableText = last?.role === 'assistant' && !last.toolCalls && !last.reasoning && !last.reasoningLive;
+            // Claude full frames never merge (distinct segments) — EXCEPT the
+            // final-tagged reconcile frame, whose text replaces the delta
+            // accumulation on the same bubble.
             if (lastIsMergeableText && text && !tools.length
-                && (shouldAppend ? !forceNewBubbleRef.current : aiProvider !== 'claude')) {
+                && (shouldAppend ? !forceNewBubbleRef.current : (aiProvider !== 'claude' || isFinalText))) {
               const updated = [...prev];
               const newContent = shouldAppend ? last.content + text : text;
               updated[updated.length - 1] = { ...last, content: newContent };

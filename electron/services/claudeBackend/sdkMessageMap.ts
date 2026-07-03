@@ -66,14 +66,23 @@ export function mapSdkMessage(msg: any, state: MapperState): MapResult {
       emits.push({ type: 'streaming_start' });
       nextState = { ...nextState, streaming: true };
     }
-    // Live-typing dedupe: when this top-level message's text already streamed
-    // out as delta frames, strip the text blocks from the complete frame —
-    // the deltas ARE the text; forwarding it again would duplicate the bubble
-    // in every consumer (ChatPanel, remote transcript, task buffer). tool_use
-    // and other blocks pass through untouched.
+    // Live-typing reconcile: when this top-level message's text already
+    // streamed out as delta frames, tag its text blocks `final` instead of
+    // forwarding them as fresh content. Consumers REPLACE their accumulated
+    // delta text with this authoritative copy (ChatPanel, task buffer) rather
+    // than appending a duplicate bubble — and any deltas lost in transit
+    // (e.g. the focus-swap listener-registration gap that truncated replies
+    // mid-word) are healed by the full text. tool_use and other blocks pass
+    // through untouched.
     if (msg.parent_tool_use_id == null && state.deltaTextEmitted && Array.isArray(msg.message?.content)) {
-      const stripped = (msg.message.content as Array<{ type?: string }>).filter((b) => b?.type !== 'text');
-      emits.push({ ...msg, message: { ...msg.message, content: stripped } });
+      const blocks = msg.message.content as Array<{ type?: string }>;
+      const hasTools = blocks.some((b) => b?.type === 'tool_use');
+      // Mixed text+tool frames keep the strip: consumers push tool frames as a
+      // NEW message, so a final-tagged text would duplicate next to the card.
+      const content = hasTools
+        ? blocks.filter((b) => b?.type !== 'text')
+        : blocks.map((b) => (b?.type === 'text' ? { ...b, final: true } : b));
+      emits.push({ ...msg, message: { ...msg.message, content } });
       nextState = { ...nextState, deltaTextEmitted: false };
     } else {
       emits.push({ ...msg });

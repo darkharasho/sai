@@ -18,7 +18,7 @@ describe('convertAssistantEnvelope', () => {
       type: 'assistant',
       message: { content: [{ type: 'text', text: 'hello ' }, { type: 'text', text: 'world' }] },
     });
-    expect(out).toEqual({ text: 'hello world', tools: [], isDelta: false });
+    expect(out).toEqual({ text: 'hello world', tools: [], isDelta: false, isFinal: false });
   });
 
   it('marks delta when any text block is a delta', () => {
@@ -45,7 +45,7 @@ describe('convertAssistantEnvelope', () => {
 
   it('handles string content', () => {
     const out = convertAssistantEnvelope({ type: 'assistant', message: { content: 'plain' } });
-    expect(out).toEqual({ text: 'plain', tools: [], isDelta: false });
+    expect(out).toEqual({ text: 'plain', tools: [], isDelta: false, isFinal: false });
   });
 
   it('returns null when no usable content', () => {

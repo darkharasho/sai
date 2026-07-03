@@ -211,6 +211,28 @@ describe('text delta live typing', () => {
     expect(result.state.deltaTextEmitted).toBe(false);
   });
 
+  it('tags pure-text complete frames as final after deltas were emitted (reconcile copy)', () => {
+    const msg = {
+      type: 'assistant',
+      parent_tool_use_id: null,
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: 'hm' },
+          { type: 'text', text: 'I left out the two Discord-embed CI fixes.' },
+        ],
+      },
+    };
+    const state: MapperState = { streaming: true, sessionIdSeen: true, deltaTextEmitted: true };
+    const result = mapSdkMessage(msg, state);
+    const assistant = result.emits.find(e => e.type === 'assistant') as any;
+    expect(assistant.message.content).toEqual([
+      { type: 'thinking', thinking: 'hm' },
+      { type: 'text', text: 'I left out the two Discord-embed CI fixes.', final: true },
+    ]);
+    expect(result.state.deltaTextEmitted).toBe(false);
+  });
+
   it('keeps text on complete frames when no deltas were emitted (synthetic/error frames)', () => {
     const msg = {
       type: 'assistant',

@@ -17,6 +17,9 @@ export interface ConvertedAssistant {
   tools: ToolCall[];
   /** True when the streamed message contains `delta` text blocks (mid-stream). */
   isDelta: boolean;
+  /** True when the text came from the SDK's `final`-tagged reconcile copy
+   *  (the complete frame re-sent after its deltas). */
+  isFinal: boolean;
 }
 
 /**
@@ -31,7 +34,7 @@ export function convertAssistantEnvelope(msg: any): ConvertedAssistant | null {
   // Some providers/transports send a string content instead of blocks.
   if (typeof content === 'string') {
     return content.length > 0
-      ? { text: content, tools: [], isDelta: false }
+      ? { text: content, tools: [], isDelta: false, isFinal: false }
       : null;
   }
 
@@ -40,12 +43,14 @@ export function convertAssistantEnvelope(msg: any): ConvertedAssistant | null {
   const textParts: string[] = [];
   const tools: ToolCall[] = [];
   let isDelta = false;
+  let isFinal = false;
 
   for (const block of content) {
     if (!block || typeof block !== 'object') continue;
     if (block.type === 'text' && typeof block.text === 'string' && block.text.length > 0) {
       textParts.push(block.text);
       if (block.delta) isDelta = true;
+      if (block.final) isFinal = true;
     } else if (block.type === 'tool_use') {
       const name: string = block.name || 'tool';
       const inputStr = typeof block.input === 'string'
@@ -67,7 +72,7 @@ export function convertAssistantEnvelope(msg: any): ConvertedAssistant | null {
   }
 
   if (textParts.length === 0 && tools.length === 0) return null;
-  return { text: textParts.join(''), tools, isDelta };
+  return { text: textParts.join(''), tools, isDelta, isFinal };
 }
 
 /**
@@ -87,7 +92,7 @@ export function appendAssistantChunk(
   now: number = Date.now(),
   newId: () => string = () => `${now}-${Math.random().toString(36).slice(2, 10)}`,
 ): ChatMessage[] {
-  const { text, tools, isDelta } = converted;
+  const { text, tools, isDelta, isFinal } = converted;
   const last = buf[buf.length - 1];
 
   if (last && last.role === 'assistant' && text && tools.length === 0 && !last.toolCalls) {
@@ -104,6 +109,9 @@ export function appendAssistantChunk(
     timestamp: now,
   };
   if (tools.length > 0) msg.toolCalls = tools;
+  // Mark reconcile copies so mergePersistedWithBuffer can dedupe them against
+  // an already-persisted copy of the same reply (focus swapped mid-message).
+  if (isFinal && tools.length === 0) (msg as ChatMessage & { finalCopy?: boolean }).finalCopy = true;
   return [...buf, msg];
 }
 
@@ -121,6 +129,28 @@ export function mergePersistedWithBuffer(
 ): ChatMessage[] {
   if (buffered.length === 0) return existing;
   const seen = new Set(existing.map(m => m.id));
-  const fresh = buffered.filter(m => !seen.has(m.id));
-  return [...existing, ...fresh];
+  let fresh = buffered.filter(m => !seen.has(m.id));
+  const base = [...existing];
+  // Reconcile instead of duplicating: a buffered RECONCILE COPY (the SDK's
+  // final-tagged complete frame, captured when focus swapped away mid-message)
+  // whose text equals-or-extends the last persisted assistant text REPLACES
+  // that bubble — the fuller copy wins, no duplicate.
+  const last = base[base.length - 1];
+  const first = fresh[0] as (ChatMessage & { finalCopy?: boolean }) | undefined;
+  if (
+    last && first && first.finalCopy
+    && last.role === 'assistant' && first.role === 'assistant'
+    && !last.toolCalls
+    && typeof last.content === 'string' && typeof first.content === 'string'
+    && last.content.length > 0
+    && first.content.startsWith(last.content)
+  ) {
+    base[base.length - 1] = { ...last, content: first.content, timestamp: first.timestamp };
+    fresh = fresh.slice(1);
+  }
+  // The marker is transport-internal — never persist it.
+  return [...base, ...fresh].map((m) => {
+    const { finalCopy, ...rest } = m as ChatMessage & { finalCopy?: boolean };
+    return finalCopy ? (rest as ChatMessage) : m;
+  });
 }
