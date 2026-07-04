@@ -1181,8 +1181,11 @@ export class SdkBackend implements ClaudeBackend {
                 }
               }).catch(() => { /* API-key session or older runtime — poller stands */ });
             }
-            // Only notify on a genuine completion — waits stay silent.
-            if (wasStreaming && wait?.kind === 'none') {
+            // Only notify on a genuine completion — waits stay silent. Only
+            // chat-kind scopes are a "turn end" for the user: task/orchestrator
+            // scopes finishing must not fire the turn-end notification (swarm
+            // tasks have their own opt-in notification in the renderer).
+            if (wasStreaming && wait?.kind === 'none' && session.kind === 'chat') {
               const info = {
                 provider: 'Claude',
                 duration: rawMsg.duration_ms as number | undefined,

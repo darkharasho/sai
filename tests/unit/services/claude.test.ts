@@ -72,6 +72,7 @@ const {
     pendingToolUse: { toolName: string; toolUseId: string; input: Record<string, any> } | null;
     approvalBuffered: any[];
     awaitingApproval: boolean;
+    kind: 'chat' | 'task' | 'orchestrator';
   };
 
   type Workspace = {
@@ -96,6 +97,7 @@ const {
       pendingToolUse: null,
       approvalBuffered: [],
       awaitingApproval: false,
+      kind: 'chat',
     };
   }
 
@@ -203,6 +205,7 @@ import { spawn } from 'node:child_process';
 import { createMockBrowserWindow } from '../../helpers/electron-mock';
 import { MockChildProcess } from '../../helpers/process-mock';
 import { registerClaudeHandlers, setSessionIdImpl, emitStreamingStart, reconcileScopeImpl } from '@electron/services/claude';
+import { notifyCompletion } from '@electron/services/notify';
 
 // ---------------------------------------------------------------------------
 // Per-test process registry
@@ -1450,5 +1453,48 @@ describe('reconcileScopeImpl', () => {
     expect(done).toBeDefined();
     expect(done.turnSeq).toBeNull();
     expect(done.wait?.kind).toBe('scheduled');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Completion notification gating — only chat-kind scopes are a "turn end" for
+// the user; task/orchestrator scopes finishing must not fire notifyCompletion
+// (tasks have their own opt-in notification in the renderer).
+// ---------------------------------------------------------------------------
+
+describe('completion notification gating by scope kind', () => {
+  const PROJECT = '/test/notify-gating';
+  const NOTIFY_DELAY = 600; // notifyCompletion is scheduled with a 500ms setTimeout
+
+  async function runTurn(scope: string, kind: 'chat' | 'task' | 'orchestrator') {
+    const ws = workspaceState.getOrCreate(PROJECT);
+    workspaceState.getClaude(ws, scope).cwd = PROJECT;
+    mockIpcMain._emit('claude:send', PROJECT, 'do work', [], undefined, undefined, undefined, scope);
+    await flushAsync();
+    ws.claudeScopes.get(scope)!.kind = kind;
+    pushLines(getLatestProcess(), { type: 'result', duration_ms: 500, num_turns: 1, result: 'done' });
+    await flushAsync();
+    await new Promise((r) => setTimeout(r, NOTIFY_DELAY));
+  }
+
+  // Earlier tests leave their own 500ms notify timers pending, and those fire
+  // during this suite's waits — count only calls for THIS project path.
+  function callsForProject() {
+    return vi.mocked(notifyCompletion).mock.calls.filter((c) => c[1] === PROJECT);
+  }
+
+  it('fires notifyCompletion when a chat-kind scope finishes', async () => {
+    await runTurn('chat', 'chat');
+    expect(callsForProject()).toHaveLength(1);
+  });
+
+  it('does not fire notifyCompletion when a task-kind scope finishes', async () => {
+    await runTurn('swarm-task-1', 'task');
+    expect(callsForProject()).toHaveLength(0);
+  });
+
+  it('does not fire notifyCompletion when an orchestrator scope finishes', async () => {
+    await runTurn('orchestrator-1', 'orchestrator');
+    expect(callsForProject()).toHaveLength(0);
   });
 });

@@ -564,8 +564,11 @@ function ensureProcess(
             : null;
           emitChatMessage({ ...msg, projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq, wait });
           emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq, wait });
-          // Only notify on a genuine completion — waits stay silent.
-          if (wasBusy && wait.kind === 'none') setTimeout(() => notifyCompletion(win, ws.projectPath, {
+          // Only notify on a genuine completion — waits stay silent. Only
+          // chat-kind scopes are a "turn end" for the user: task/orchestrator
+          // scopes finishing must not fire the turn-end notification (swarm
+          // tasks have their own opt-in notification in the renderer).
+          if (wasBusy && wait.kind === 'none' && claude.kind === 'chat') setTimeout(() => notifyCompletion(win, ws.projectPath, {
             provider: 'Claude',
             duration: msg.duration_ms,
             turns: msg.num_turns,

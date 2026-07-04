@@ -2046,4 +2046,51 @@ describe('SdkBackend', () => {
 
     fakeQuery.close();
   });
+
+  // ── Completion notification gating: only chat-kind scopes are a "turn end"
+  //    for the user — task/orchestrator results must not fire the OS
+  //    completion notification (tasks have their own opt-in path in App.tsx).
+
+  function makeNotifySpy() {
+    return {
+      approval: vi.fn(),
+      question: vi.fn(),
+      planReview: vi.fn(),
+      completion: vi.fn(),
+    };
+  }
+
+  async function runTurnWithKind(kind: 'chat' | 'task' | 'orchestrator', scope: string) {
+    const notify = makeNotifySpy();
+    const fakeQuery = makeFakeQuery([
+      { type: 'result', stop_reason: 'end_turn', num_turns: 1, duration_ms: 100 },
+    ]);
+    const queryFn = vi.fn(() => fakeQuery);
+    const backend = new SdkBackend({
+      queryFn,
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+      notify,
+    });
+    backend.start({ projectPath: PROJECT, scope, scopeCwd: PROJECT, kind });
+    await collectUntilDone(backend, emits, { projectPath: PROJECT, message: 'go', scope, permMode: 'bypass' });
+    // completion is scheduled with a 500ms setTimeout — wait past it.
+    await new Promise((r) => setTimeout(r, 600));
+    return notify;
+  }
+
+  it('(44) chat-kind result fires the completion notification', async () => {
+    const notify = await runTurnWithKind('chat', 'chat');
+    expect(notify.completion).toHaveBeenCalledTimes(1);
+  });
+
+  it('(45) task-kind result does NOT fire the completion notification', async () => {
+    const notify = await runTurnWithKind('task', 'swarm-task-1');
+    expect(notify.completion).not.toHaveBeenCalled();
+  });
+
+  it('(46) orchestrator result does NOT fire the completion notification', async () => {
+    const notify = await runTurnWithKind('orchestrator', 'orchestrator-1');
+    expect(notify.completion).not.toHaveBeenCalled();
+  });
 });
