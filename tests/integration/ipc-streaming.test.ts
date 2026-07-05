@@ -102,16 +102,24 @@ vi.mock('@electron/services/workspace', () => ({
 
 vi.mock('@electron/services/notify', () => ({ notifyCompletion: vi.fn() }));
 
+// This suite drives the CLI backend path end-to-end; the app default is now
+// 'sdk', so serve an explicit claudeBackend:'cli' from the settings file
+// (readSaiSetting) to keep claude:send routing through CliBackend/sendImpl.
+const { readFileSyncImpl } = vi.hoisted(() => ({
+  readFileSyncImpl: (p: unknown) =>
+    String(p).endsWith('settings.json') ? '{"claudeBackend":"cli"}' : '[]',
+}));
+
 vi.mock('node:fs', () => ({
   default: {
     existsSync: vi.fn().mockReturnValue(false),
-    readFileSync: vi.fn().mockReturnValue('[]'),
+    readFileSync: vi.fn(readFileSyncImpl),
     writeFileSync: vi.fn(),
     readdirSync: vi.fn().mockReturnValue([]),
     mkdirSync: vi.fn(),
   },
   existsSync: vi.fn().mockReturnValue(false),
-  readFileSync: vi.fn().mockReturnValue('[]'),
+  readFileSync: vi.fn(readFileSyncImpl),
   writeFileSync: vi.fn(),
   readdirSync: vi.fn().mockReturnValue([]),
   mkdirSync: vi.fn(),

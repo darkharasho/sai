@@ -99,6 +99,9 @@ const { fsMock } = vi.hoisted(() => {
     existsSync: vi.fn().mockReturnValue(false),
     readFileSync: vi.fn((p: string) => {
       if (store.has(p)) return store.get(p)!;
+      // This suite drives the CLI backend path; the app default is now 'sdk',
+      // so serve an explicit claudeBackend:'cli' from the settings file.
+      if (String(p).endsWith('settings.json')) return '{"claudeBackend":"cli"}';
       return '[]';
     }),
     writeFileSync: vi.fn((p: string, content: string) => {
@@ -204,6 +207,8 @@ beforeEach(() => {
   fsMock.store.clear();
   fsMock.readFileSync.mockImplementation((p: string) => {
     if (fsMock.store.has(p)) return fsMock.store.get(p)!;
+    // CLI-path suite: the app default is now 'sdk' — keep routing through CLI.
+    if (String(p).endsWith('settings.json')) return '{"claudeBackend":"cli"}';
     return '[]';
   });
   vi.mocked(spawn).mockImplementation(defaultSpawnImpl as any);
