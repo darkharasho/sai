@@ -25,7 +25,7 @@ import type { StartArgs, CompactArgs } from './claudeBackend/types';
 import { getClaudeBackend, getClaudeBackendSetting } from './claudeBackend';
 export { touchActivity, getOrCreate as getOrCreateWorkspace } from './workspace';
 import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASKS_NUDGE } from './chatNudges';
-import { classifyTurnEnd, isSchedulingTool, isBackgroundLaunch, WAKEUP_GRACE_MS, type WaitMeta } from './waitClassifier';
+import { classifyTurnEnd, isSchedulingTool, isBackgroundLaunch, isAsyncLaunchResult, WAKEUP_GRACE_MS, type WaitMeta } from './waitClassifier';
 export { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE };
 
 const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
@@ -132,6 +132,7 @@ export function emitStreamingStart(
   // waiting or defer the idle sweep past this point.
   claude.sawSchedulingTool = false;
   claude.sawBackgroundLaunch = false;
+  claude.sawAsyncLaunchResult = false;
   claude.wakeupResumeInSeconds = null;
   claude.pendingWakeup = false;
   claude.wakeupDeadline = null;
@@ -504,6 +505,15 @@ function ensureProcess(
         // --- Detect tool_result denial (approval needed) ---
         if (msg.type === 'user' && msg.message?.content) {
           const content = Array.isArray(msg.message.content) ? msg.message.content : [];
+          // Async-launch tool_results: the runtime can background a launch the
+          // INPUT never asked for (Agent with no run_in_background flag came
+          // back "Async agent launched successfully." in a live transcript), so
+          // the result text is a launch signal the tool_use sniff above misses.
+          for (const block of content) {
+            if (block.type === 'tool_result' && isAsyncLaunchResult(block.content)) {
+              claude.sawAsyncLaunchResult = true;
+            }
+          }
           const denialBlock = content.find((block: any) => {
             if (block.type !== 'tool_result' || !block.is_error || typeof block.content !== 'string') return false;
             const lower = block.content.toLowerCase();
@@ -550,6 +560,7 @@ function ensureProcess(
             terminalReason: msg.terminal_reason,
             sawSchedulingTool: claude.sawSchedulingTool,
             sawBackgroundLaunch: claude.sawBackgroundLaunch,
+            sawAsyncLaunchResult: claude.sawAsyncLaunchResult,
             wakeupResumeInSeconds: claude.wakeupResumeInSeconds,
             taskCount: Array.isArray(msg.background_tasks) ? msg.background_tasks.length : null,
           });
@@ -867,6 +878,7 @@ export function interruptImpl(projectPath: string, scope?: string): void {
     claude.wakeupDeadline = null;
     claude.sawSchedulingTool = false;
     claude.sawBackgroundLaunch = false;
+    claude.sawAsyncLaunchResult = false;
     claude.wakeupResumeInSeconds = null;
     proc.kill();
     emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope: scope || 'chat', turnSeq: claude.turnSeq });

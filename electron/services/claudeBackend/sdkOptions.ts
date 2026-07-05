@@ -1,4 +1,4 @@
-import type { Options, EffortLevel, CanUseTool, SdkPluginConfig } from '@anthropic-ai/claude-agent-sdk';
+import type { Options, EffortLevel, CanUseTool, SdkPluginConfig, HookCallback } from '@anthropic-ai/claude-agent-sdk';
 
 export interface SdkOptionInputs {
   kind: 'chat' | 'task' | 'orchestrator';
@@ -26,6 +26,10 @@ export interface SdkOptionInputs {
   promptSuggestions?: boolean;
   /** Periodic AI-generated progress summaries for running subagents. */
   agentProgressSummaries?: boolean;
+  /** Stop-hook callback. The Stop hook's input carries background_tasks — the
+   *  runtime's in-flight work ledger — which is the authoritative way to tell
+   *  "session done" from "session paused waiting for background work". */
+  stopHook?: HookCallback;
 }
 
 const VALID_EFFORT = new Set<string>(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -65,6 +69,7 @@ export function buildSdkOptions(input: SdkOptionInputs): Options {
     oneMContext,
     promptSuggestions,
     agentProgressSummaries,
+    stopHook,
   } = input;
 
   const permissionMode: Options['permissionMode'] =
@@ -142,6 +147,10 @@ export function buildSdkOptions(input: SdkOptionInputs): Options {
 
   if (plugins && plugins.length > 0) {
     opts.plugins = plugins;
+  }
+
+  if (stopHook) {
+    opts.hooks = { Stop: [{ hooks: [stopHook] }] };
   }
 
   if (kind === 'orchestrator') {

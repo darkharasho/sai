@@ -32,7 +32,7 @@ import {
 } from '../claude';
 import { isImagePath, mimeForImagePath } from '../imageFiles';
 import { notifyCompletion, notifyApproval, notifyQuestion, notifyPlanReview } from '../notify';
-import { classifyTurnEnd, isSchedulingTool, isBackgroundLaunch, WAKEUP_GRACE_MS, type WaitMeta } from '../waitClassifier';
+import { classifyTurnEnd, isSchedulingTool, isBackgroundLaunch, isAsyncLaunchResult, WAKEUP_GRACE_MS, type WaitMeta } from '../waitClassifier';
 import { clamp, type PermMode } from '../remote/clamp';
 import { parseUserMcpConfigPaths } from './userMcpConfig';
 import { loadExternalMcpForSdk } from './externalMcp';
@@ -90,6 +90,16 @@ interface ScopeSession {
   sawSchedulingTool: boolean;
   /** A background launch (Bash/Agent run_in_background, Workflow) fired this turn. */
   sawBackgroundLaunch: boolean;
+  /** A tool_result reporting an async launch arrived this turn — the runtime
+   *  can background a launch whose input never asked for it, so the result
+   *  text is the only per-turn launch signal in that case. */
+  sawAsyncLaunchResult: boolean;
+  /** In-flight background task count the Stop hook reported for the current
+   *  stop, or null when the runtime sent no ledger (older runtimes / hook not
+   *  fired yet). This is the runtime's own task ledger — the authoritative
+   *  "paused waiting for background work" signal, covering resume turns that
+   *  launch nothing new. Cleared at the next streaming_start. */
+  stopBackgroundTaskCount: number | null;
   /** delaySeconds from the latest ScheduleWakeup input this turn. */
   wakeupResumeInSeconds: number | null;
   /** Turn ended in a scheduled wait — defer the idle sweep. */
@@ -779,6 +789,8 @@ export class SdkBackend implements ClaudeBackend {
   private _resetWaitTracking(session: ScopeSession): void {
     session.sawSchedulingTool = false;
     session.sawBackgroundLaunch = false;
+    session.sawAsyncLaunchResult = false;
+    session.stopBackgroundTaskCount = null;
     session.wakeupResumeInSeconds = null;
     session.pendingWakeup = false;
     session.pendingBackgroundResume = false;
@@ -878,6 +890,21 @@ export class SdkBackend implements ClaudeBackend {
     }
 
     const effectiveScope = scope ?? 'chat';
+
+    // Stop hook: stash the runtime's in-flight background-task ledger so the
+    // result-frame wait classification can tell "done" from "paused waiting
+    // for background work" (the hook runs before the result frame drains).
+    // Undefined background_tasks (older runtime) stays null — no signal, the
+    // per-turn launch sniffing decides alone. Never blocks the stop.
+    const stopHook = async (hookInput: Record<string, unknown>) => {
+      const s = this.sessions.get(scopeKey);
+      if (s) {
+        const tasks = (hookInput as { background_tasks?: unknown }).background_tasks;
+        s.stopBackgroundTaskCount = Array.isArray(tasks) ? tasks.length : null;
+      }
+      return {};
+    };
+
     const options = buildSdkOptions({
       kind,
       permMode: queryArgs.permMode,
@@ -905,6 +932,7 @@ export class SdkBackend implements ClaudeBackend {
       oneMContext: readSaiSetting('claude1MContext') === true,
       promptSuggestions: kind === 'chat',
       agentProgressSummaries: true,
+      stopHook,
     });
 
     // Build an async-iterable input channel (push-based queue)
@@ -965,6 +993,8 @@ export class SdkBackend implements ClaudeBackend {
       heldToolUses: new Set(),
       sawSchedulingTool: false,
       sawBackgroundLaunch: false,
+      sawAsyncLaunchResult: false,
+      stopBackgroundTaskCount: null,
       wakeupResumeInSeconds: null,
       pendingWakeup: false,
       pendingBackgroundResume: false,
@@ -1104,8 +1134,13 @@ export class SdkBackend implements ClaudeBackend {
               terminalReason: m.terminal_reason,
               sawSchedulingTool: session.sawSchedulingTool,
               sawBackgroundLaunch: session.sawBackgroundLaunch,
+              sawAsyncLaunchResult: session.sawAsyncLaunchResult,
               wakeupResumeInSeconds: session.wakeupResumeInSeconds,
-              taskCount: Array.isArray(m.background_tasks) ? m.background_tasks.length : null,
+              // The Stop hook's ledger (stashed just before this frame) is the
+              // authoritative in-flight count; result-frame background_tasks is
+              // the fallback for runtimes that ever attach it there.
+              taskCount: session.stopBackgroundTaskCount
+                ?? (Array.isArray(m.background_tasks) ? m.background_tasks.length : null),
             });
             session.pendingWakeup = wait.kind === 'scheduled';
             session.pendingBackgroundResume = wait.kind === 'background';
@@ -1194,6 +1229,18 @@ export class SdkBackend implements ClaudeBackend {
                 summary: rawMsg.result as string | undefined,
               };
               setTimeout(() => this._notify.completion(projectPath, info), 500);
+            }
+          }
+
+          // Async-launch tool_results: the runtime can background a launch the
+          // INPUT never asked for (Agent with no run_in_background flag came
+          // back "Async agent launched successfully." in a live transcript), so
+          // the result text is a launch signal the tool_use sniff below misses.
+          if (rawMsg?.type === 'user' && Array.isArray(rawMsg?.message?.content)) {
+            for (const block of rawMsg.message.content as Array<Record<string, unknown>>) {
+              if (block.type === 'tool_result' && isAsyncLaunchResult(block.content)) {
+                session.sawAsyncLaunchResult = true;
+              }
             }
           }
 

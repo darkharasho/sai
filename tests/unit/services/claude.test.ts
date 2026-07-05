@@ -1498,3 +1498,55 @@ describe('completion notification gating by scope kind', () => {
     expect(callsForProject()).toHaveLength(0);
   });
 });
+
+// ===========================================================================
+// Async-launch tool_result detection — the runtime can background a launch the
+// INPUT never asked for (live transcript 2026-07-05: Agent tool_use with no
+// run_in_background flag came back "Async agent launched successfully."), so
+// the tool_result text must count as a background launch for wait
+// classification, keeping the waiting pill up and the notification silent.
+// ===========================================================================
+
+describe('async-launch tool_result sets the background wait', () => {
+  const PROJECT = '/test/async-launch';
+  const NOTIFY_DELAY = 600;
+
+  async function runTurn(withAsyncLaunch: boolean) {
+    const ws = workspaceState.getOrCreate(PROJECT);
+    workspaceState.getClaude(ws, 'chat').cwd = PROJECT;
+    mockIpcMain._emit('claude:send', PROJECT, 'review it', [], undefined, undefined, undefined, 'chat');
+    await flushAsync();
+    const proc = getLatestProcess();
+    pushLines(proc, {
+      type: 'assistant',
+      message: { content: [{ type: 'tool_use', id: 'tu-1', name: 'Agent', input: { description: 'Review Task 4', prompt: 'review' } }] },
+    });
+    if (withAsyncLaunch) {
+      pushLines(proc, {
+        type: 'user',
+        message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu-1', content: [{ type: 'text', text: 'Async agent launched successfully.\nagentId: abc123' }] }] },
+      });
+    }
+    pushLines(proc, { type: 'result', terminal_reason: 'completed', duration_ms: 500, num_turns: 1, result: 'Task 4 done; reviewer running.' });
+    await flushAsync();
+    await new Promise((r) => setTimeout(r, NOTIFY_DELAY));
+  }
+
+  function callsForProject() {
+    return vi.mocked(notifyCompletion).mock.calls.filter((c) => c[1] === PROJECT);
+  }
+
+  it('classifies the turn as a background wait and stays silent', async () => {
+    await runTurn(true);
+    const done = sentMessages(win).find((m: any) => m.type === 'done' && m.projectPath === PROJECT) as any;
+    expect(done.wait?.kind).toBe('background');
+    expect(callsForProject()).toHaveLength(0);
+  });
+
+  it('without the async-launch result the turn is a real end', async () => {
+    await runTurn(false);
+    const done = sentMessages(win).find((m: any) => m.type === 'done' && m.projectPath === PROJECT) as any;
+    expect(done.wait?.kind ?? 'none').toBe('none');
+    expect(callsForProject()).toHaveLength(1);
+  });
+});

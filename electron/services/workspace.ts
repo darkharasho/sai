@@ -63,6 +63,11 @@ export interface WorkspaceClaude {
    *  is seen during the current turn; reset at each streaming_start. Drives
    *  background-wait classification for turns the CLI ends 'completed'. */
   sawBackgroundLaunch: boolean;
+  /** Set when a tool_result reporting an async launch is seen during the current
+   *  turn; reset at each streaming_start. The runtime can background a launch
+   *  whose input never asked for it (Agent with no run_in_background flag), so
+   *  the result text is the only launch signal in that case. */
+  sawAsyncLaunchResult: boolean;
   /** delaySeconds from the latest ScheduleWakeup input this turn, else null. */
   wakeupResumeInSeconds: number | null;
   /** True from a scheduled-wait result until the next resume (streaming_start).
@@ -150,6 +155,7 @@ function newClaudeScope(cwd: string): WorkspaceClaude {
     streaming: false,
     sawSchedulingTool: false,
     sawBackgroundLaunch: false,
+    sawAsyncLaunchResult: false,
     wakeupResumeInSeconds: null,
     pendingWakeup: false,
     wakeupDeadline: null,

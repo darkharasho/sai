@@ -2093,4 +2093,119 @@ describe('SdkBackend', () => {
     const notify = await runTurnWithKind('orchestrator', 'orchestrator-1');
     expect(notify.completion).not.toHaveBeenCalled();
   });
+
+  // ── Stop-hook background_tasks: the runtime's own in-flight task ledger is
+  //    the authoritative "paused waiting" signal. Repro from a live transcript
+  //    (otto, 2026-07-05): an Agent tool_use with NO run_in_background flag was
+  //    async-launched by the runtime; the turn's result was terminal_reason
+  //    'completed' with nothing for the input sniff to see, so the turn
+  //    classified 'none' — pill dropped, notify fired — while the reviewer
+  //    subagent was still running.
+
+  /** Run one turn where the Stop hook (captured from queryFn options) fires
+   *  with the given background_tasks payload just before the result frame. */
+  async function runTurnWithStopHook(backgroundTasks: unknown, frames?: any[]) {
+    const notify = makeNotifySpy();
+    let capturedOptions: any = null;
+
+    const defaultFrames = [
+      // Agent launch WITHOUT run_in_background — the input sniff must miss it.
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu-1', name: 'Agent', input: { description: 'Review Task 4', prompt: 'review it' } }] } },
+      { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu-1', content: [{ type: 'text', text: 'Async agent launched successfully.\nagentId: abc123' }] }] } },
+      { type: 'result', stop_reason: 'end_turn', terminal_reason: 'completed', num_turns: 1, duration_ms: 100 },
+    ];
+    const pending = frames ?? defaultFrames;
+
+    async function* gen() {
+      for (const msg of pending) {
+        if (msg.type === 'result') {
+          // The runtime runs Stop hooks when the model stops, before the final
+          // result frame is emitted — mirror that ordering.
+          const stopHooks = capturedOptions?.hooks?.Stop?.flatMap((m: any) => m.hooks) ?? [];
+          for (const h of stopHooks) {
+            await h(
+              { hook_event_name: 'Stop', stop_hook_active: false, ...(backgroundTasks !== undefined ? { background_tasks: backgroundTasks } : {}) },
+              undefined,
+              { signal: new AbortController().signal },
+            );
+          }
+        }
+        yield msg;
+      }
+    }
+    const iterator = gen();
+    const fakeQuery: any = {
+      interrupt: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn(),
+      [Symbol.asyncIterator]() { return iterator; },
+    };
+
+    const queryFn = vi.fn((args: { prompt: any; options: any }) => {
+      capturedOptions = args.options;
+      return fakeQuery;
+    });
+    const backend = new SdkBackend({
+      queryFn,
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+      notify,
+    });
+    await collectUntilDone(backend, emits, { projectPath: PROJECT, message: 'go', scope: SCOPE, permMode: 'bypass' });
+    await new Promise((r) => setTimeout(r, 600)); // past the 500ms notify delay
+    return { notify, emits };
+  }
+
+  it('(47) Stop-hook in-flight tasks classify the turn as a background wait (launch flag never set)', async () => {
+    const { notify } = await runTurnWithStopHook([
+      { id: 'afdba032ce2118862', type: 'subagent', status: 'running', description: 'Review Task 4 (spec + quality)' },
+    ]);
+    const done = emits.find(e => e.type === 'done') as any;
+    expect(done.wait?.kind).toBe('background');
+    expect(done.wait?.taskCount).toBe(1);
+    // Waits stay silent — no turn-end notification while the reviewer runs.
+    expect(notify.completion).not.toHaveBeenCalled();
+  });
+
+  it('(48) Stop-hook empty background_tasks is a real end — the authoritative zero overrides the launch sniff', async () => {
+    // The async-launch tool_result IS in the frames, but the ledger says the
+    // launched task already finished before the turn ended.
+    const { notify } = await runTurnWithStopHook([]);
+    const done = emits.find(e => e.type === 'done') as any;
+    expect(done.wait?.kind ?? 'none').toBe('none');
+    expect(notify.completion).toHaveBeenCalledTimes(1);
+  });
+
+  it('(49) no Stop-hook ledger: the async-launch tool_result sniff still classifies a background wait', async () => {
+    // Older runtime: hook input carries no background_tasks field at all, but
+    // the Agent launch came back "Async agent launched successfully."
+    const { notify } = await runTurnWithStopHook(undefined);
+    const done = emits.find(e => e.type === 'done') as any;
+    expect(done.wait?.kind).toBe('background');
+    expect(notify.completion).not.toHaveBeenCalled();
+  });
+
+  it('(49b) no Stop-hook ledger and no launches is a real end', async () => {
+    const { notify } = await runTurnWithStopHook(undefined, [
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'all done' }] } },
+      { type: 'result', stop_reason: 'end_turn', terminal_reason: 'completed', num_turns: 1, duration_ms: 50 },
+    ]);
+    const done = emits.find(e => e.type === 'done') as any;
+    expect(done.wait?.kind ?? 'none').toBe('none');
+    expect(notify.completion).toHaveBeenCalledTimes(1);
+  });
+
+  it('(50) resume turn that launches nothing still waits while tasks remain in flight', async () => {
+    // Models the "Task 4 done; reviewer running." turn: woken by a task
+    // notification, launches nothing, ends completed — but one task remains.
+    const { notify } = await runTurnWithStopHook(
+      [{ id: 't-rev', type: 'subagent', status: 'running', description: 'reviewer' }],
+      [
+        { type: 'assistant', message: { content: [{ type: 'text', text: 'Task 4 done; reviewer running.' }] } },
+        { type: 'result', stop_reason: 'end_turn', terminal_reason: 'completed', num_turns: 1, duration_ms: 50 },
+      ],
+    );
+    const done = emits.find(e => e.type === 'done') as any;
+    expect(done.wait?.kind).toBe('background');
+    expect(notify.completion).not.toHaveBeenCalled();
+  });
 });
