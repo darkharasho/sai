@@ -138,17 +138,21 @@ afterEach(() => {
 });
 
 describe('getClaudeBackendSetting', () => {
-  it("defaults to 'cli' when unset", () => {
+  it("defaults to 'sdk' when unset", () => {
     readSaiSetting.mockReturnValue(undefined);
+    expect(getClaudeBackendSetting()).toBe('sdk');
+  });
+  it("returns 'cli' when explicitly set to cli (opt-out escape hatch)", () => {
+    readSaiSetting.mockReturnValue('cli');
     expect(getClaudeBackendSetting()).toBe('cli');
   });
   it("returns 'sdk' when set to sdk", () => {
     readSaiSetting.mockReturnValue('sdk');
     expect(getClaudeBackendSetting()).toBe('sdk');
   });
-  it("falls back to 'cli' for unknown values", () => {
+  it("falls back to 'sdk' for unknown values", () => {
     readSaiSetting.mockReturnValue('weird');
-    expect(getClaudeBackendSetting()).toBe('cli');
+    expect(getClaudeBackendSetting()).toBe('sdk');
   });
 });
 
@@ -174,12 +178,12 @@ describe('CliBackend', () => {
 
 describe('getClaudeBackend', () => {
   afterEach(() => __setClaudeBackendForTests(null));
-  it('returns a CliBackend when flag is cli/absent', () => {
-    readSaiSetting.mockReturnValue(undefined);
+  it('returns a CliBackend only when the flag is explicitly cli', () => {
+    readSaiSetting.mockReturnValue('cli');
     expect(getClaudeBackend()).toBeInstanceOf(CliBackend);
   });
-  it('returns SdkBackend when flag is sdk', () => {
-    readSaiSetting.mockReturnValue('sdk');
+  it('returns SdkBackend when the flag is absent (default)', () => {
+    readSaiSetting.mockReturnValue(undefined);
     const be = getClaudeBackend();
     expect(be).toBeInstanceOf(SdkBackend);
     // destroy is optional on the interface but present on SdkBackend

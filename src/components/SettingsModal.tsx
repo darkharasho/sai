@@ -96,7 +96,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [editorFontSize, setEditorFontSize] = useState(13);
   const [editorMinimap, setEditorMinimap] = useState(true);
   const [aiProvider, setAiProvider] = useState<'claude' | 'codex' | 'gemini'>('claude');
-  const [claudeBackend, setClaudeBackend] = useState<'cli' | 'sdk'>('cli');
+  const [claudeBackend, setClaudeBackend] = useState<'cli' | 'sdk'>('sdk');
   const [claudeShowReasoning, setClaudeShowReasoning] = useState(false);
   const [claudeMaxBudgetUsd, setClaudeMaxBudgetUsd] = useState(0);
   const [claude1MContext, setClaude1MContext] = useState(false);
@@ -186,7 +186,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.settingsGet('aiProvider', 'claude').then((v: string) => {
       if (v === 'claude' || v === 'codex' || v === 'gemini') setAiProvider(v as 'claude' | 'codex' | 'gemini');
     });
-    window.sai.settingsGet('claudeBackend', 'cli').then((v: string) => {
+    window.sai.settingsGet('claudeBackend', 'sdk').then((v: string) => {
       if (v === 'cli' || v === 'sdk') setClaudeBackend(v);
     });
     window.sai.settingsGet('claudeShowReasoning', false).then((v: boolean) => setClaudeShowReasoning(!!v));
@@ -999,8 +999,8 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
           value={claudeBackend}
           onChange={e => handleClaudeBackendChange(e.target.value as 'cli' | 'sdk')}
         >
-          <option value="cli">CLI (default)</option>
-          <option value="sdk">SDK</option>
+          <option value="cli">CLI (legacy)</option>
+          <option value="sdk">SDK (default)</option>
         </select>
       </div>
       <div className="settings-row settings-row-spaced">

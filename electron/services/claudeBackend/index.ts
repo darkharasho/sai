@@ -9,7 +9,9 @@ import type { ClaudeBackend } from './types';
 export * from './types';
 
 export function getClaudeBackendSetting(): 'cli' | 'sdk' {
-  return readSaiSetting('claudeBackend') === 'sdk' ? 'sdk' : 'cli';
+  // SDK is the default (full cutover 2026-07-04); 'cli' is the explicit
+  // opt-out escape hatch while the legacy path still exists.
+  return readSaiSetting('claudeBackend') === 'cli' ? 'cli' : 'sdk';
 }
 
 let active: ClaudeBackend | null = null;
