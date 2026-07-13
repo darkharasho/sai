@@ -24,6 +24,11 @@ describe('inferWindow', () => {
     expect(r).toEqual({ kind: 'candidates', titles: ['App one', 'App two'] });
   });
 
+  it('reports a target miss instead of guessing when an explicit target matches nothing', () => {
+    const r = inferWindow([w('a', 'Firefox'), w('b', '')], { target: 'conduit-ui', projectNames: [] });
+    expect(r).toEqual({ kind: 'target-miss', titles: ['Firefox'] });
+  });
+
   it('picks the only remaining non-SAI window when nothing else matches', () => {
     const r = inferWindow([w('sai', 'SAI'), w('a', 'Editor')], { projectNames: ['nomatch'], selfSourceId: 'sai' });
     expect(r).toEqual({ kind: 'pick', window: w('a', 'Editor') });

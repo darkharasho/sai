@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { captureWindowFlow, type CaptureWindowDeps } from '../../../../electron/capture/captureWindow';
 
 const BLANK = Buffer.alloc(4000); // all zero → blank
@@ -60,6 +60,44 @@ describe('captureWindowFlow', () => {
       captureSource: async () => { throw new Error('boom'); },
     }));
     expect(r).toEqual({ ok: true, __mcpImage: { base64: 'CLI', mimeType: 'image/png' }, window: 'MyApp' });
+  });
+
+  it('returns a target-miss error instead of capturing an unrelated window', async () => {
+    const r = await captureWindowFlow({ target: 'conduit-ui' }, baseDeps({
+      listWindows: async () => [{ id: 'a', title: '' }],
+    }));
+    expect(r).toEqual({ ok: false, message: expect.stringContaining('No window matching "conduit-ui"') });
+  });
+
+  it('returns the portal frame without consulting the window list', async () => {
+    const listWindows = vi.fn(async () => []);
+    const r = await captureWindowFlow({ target: 'anything' }, baseDeps({
+      listWindows,
+      portal: async () => ({ ok: true, base64: 'PORTAL', rgba: CONTENT }),
+    }));
+    expect(r).toEqual({ ok: true, __mcpImage: { base64: 'PORTAL', mimeType: 'image/png' }, window: 'portal selection' });
+    expect(listWindows).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a portal decline to the user instead of falling through', async () => {
+    const r = await captureWindowFlow({}, baseDeps({
+      portal: async () => ({ ok: false, reason: 'declined', message: 'Screen capture was not granted' }),
+    }));
+    expect(r).toEqual({ ok: false, message: expect.stringContaining('not granted') });
+  });
+
+  it('falls through to legacy backends when the portal is unavailable', async () => {
+    const r = await captureWindowFlow({}, baseDeps({
+      portal: async () => ({ ok: false, reason: 'unavailable', message: 'screen-capture portal unavailable' }),
+    }));
+    expect(r).toEqual({ ok: true, __mcpImage: { base64: 'AAA', mimeType: 'image/png' }, window: 'MyApp' });
+  });
+
+  it('falls through to legacy backends when the portal frame is blank', async () => {
+    const r = await captureWindowFlow({}, baseDeps({
+      portal: async () => ({ ok: true, base64: 'BLANKPNG', rgba: BLANK }),
+    }));
+    expect(r).toEqual({ ok: true, __mcpImage: { base64: 'AAA', mimeType: 'image/png' }, window: 'MyApp' });
   });
 
   it('refuses the CLI fallback when the active window is SAI (never captures SAI)', async () => {

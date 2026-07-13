@@ -3,6 +3,7 @@ export interface InferContext { target?: string; projectNames: string[]; selfSou
 export type InferResult =
   | { kind: 'pick'; window: WindowCandidate }
   | { kind: 'candidates'; titles: string[] }
+  | { kind: 'target-miss'; titles: string[] }
   | { kind: 'none' };
 
 function matchAll(windows: WindowCandidate[], needle: string): WindowCandidate[] {
@@ -18,6 +19,9 @@ export function inferWindow(windows: WindowCandidate[], ctx: InferContext): Infe
     const hits = matchAll(pool, ctx.target.trim());
     if (hits.length === 1) return { kind: 'pick', window: hits[0] };
     if (hits.length > 1) return { kind: 'candidates', titles: hits.map((h) => h.title) };
+    // An explicit target that matches nothing is an error, not a cue to guess —
+    // falling through here used to pick unrelated (even untitled) windows.
+    return { kind: 'target-miss', titles: pool.map((p) => p.title).filter((t) => t.trim()) };
   }
 
   for (const name of ctx.projectNames) {

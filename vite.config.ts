@@ -17,7 +17,7 @@ export default defineConfig({
         vite: {
           build: {
             rollupOptions: {
-              external: ['electron', 'node-pty', 'simple-git', 'electron-updater', 'ws'],
+              external: ['electron', 'node-pty', 'simple-git', 'electron-updater', 'ws', 'dbus-next'],
             },
           },
         },

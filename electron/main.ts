@@ -17,6 +17,7 @@ import { clampRect, type Rect } from './capturePage';
 import { selectBackendChain } from './capture/selectBackend';
 import { captureWindowFlow } from './capture/captureWindow';
 import { listDesktopWindows, captureDesktopSource, captureViaCli } from './capture/backends';
+import { capturePortalViaDbus } from './capture/portalDbus';
 import { activeWindowTitle, raiseWindowByTitle } from './capture/windowControl';
 import { gitStatusImpl, gitDiffImpl, gitStageImpl, gitUnstageImpl, gitCommitImpl, gitPushImpl, gitPullImpl } from './services/git';
 import { enrichedEnv, patchProcessPath } from './services/shellEnv';
@@ -921,6 +922,9 @@ function createWindow() {
         raiseWindow: raiseWindowByTitle,
         activeWindowTitle,
         selfTitle: (mainWindow && !mainWindow.isDestroyed() ? mainWindow.getTitle() : undefined) ?? 'SAI',
+        portal: process.platform === 'linux' && (process.env.XDG_SESSION_TYPE ?? '').toLowerCase() === 'wayland'
+          ? () => capturePortalViaDbus(path.join(app.getPath('userData'), 'capture-portal.json'))
+          : undefined,
       },
     );
   });

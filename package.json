@@ -80,6 +80,7 @@
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-web-links": "^0.11.0",
     "@xterm/xterm": "^5.5.0",
+    "dbus-next": "^0.10.2",
     "diff2html": "^3.4.56",
     "electron-updater": "^6.8.3",
     "emoji-regex": "^10.6.0",
