@@ -17,6 +17,9 @@ export interface RenderEntry {
    * user approval before mounting the iframe with allow-same-origin.
    */
   appAccess?: boolean;
+  /** Initial/minimum viewport height for inline renders; the card grows to
+   *  fit taller content (max 4000). File-mode renders use payload.height. */
+  height?: number;
 }
 
 type Listener = () => void;

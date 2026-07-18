@@ -34,6 +34,7 @@ export function entryFromToolCall(tc: ToolCall, cwd = ''): { entry: RenderEntry;
   const name = tc.name || '';
   const input = parseInput(tc.input);
   const width = typeof input.width === 'number' && input.width > 0 ? input.width : 360;
+  const height = typeof input.height === 'number' && input.height > 0 ? input.height : undefined;
   const background = typeof input.background === 'string' ? input.background : undefined;
   const title = typeof input.title === 'string' ? input.title : '';
   const renderId = `chatcard-${tc.id ?? Math.abs(hashString(tc.input))}`;
@@ -51,6 +52,7 @@ export function entryFromToolCall(tc: ToolCall, cwd = ''): { entry: RenderEntry;
         payload: { component, props },
         title: title || component,
         width,
+        height,
         background,
         status: 'ready',
       },
@@ -66,7 +68,7 @@ export function entryFromToolCall(tc: ToolCall, cwd = ''): { entry: RenderEntry;
       return null;
     }
     return {
-      entry: { renderId, kind: 'html', payload: { html }, title: title || 'Chart', width, background, status: 'ready' },
+      entry: { renderId, kind: 'html', payload: { html }, title: title || 'Chart', width, height, background, status: 'ready' },
       code: html,
     };
   }
@@ -76,7 +78,7 @@ export function entryFromToolCall(tc: ToolCall, cwd = ''): { entry: RenderEntry;
         typeof input.after !== 'string' || input.after.length === 0) return null;
     const html = buildDiffHtml(input as unknown as DiffInput);
     return {
-      entry: { renderId, kind: 'html', payload: { html }, title: title || 'Diff', width, background, status: 'ready' },
+      entry: { renderId, kind: 'html', payload: { html }, title: title || 'Diff', width, height, background, status: 'ready' },
       code: html,
     };
   }
@@ -85,7 +87,7 @@ export function entryFromToolCall(tc: ToolCall, cwd = ''): { entry: RenderEntry;
     const diagram = typeof input.diagram === 'string' ? input.diagram : '';
     if (!diagram) return null;
     return {
-      entry: { renderId, kind: 'mermaid', payload: { diagram }, title: title || 'Diagram', width, background, status: 'ready' },
+      entry: { renderId, kind: 'mermaid', payload: { diagram }, title: title || 'Diagram', width, height, background, status: 'ready' },
       code: diagram,
     };
   }
@@ -99,7 +101,7 @@ export function entryFromToolCall(tc: ToolCall, cwd = ''): { entry: RenderEntry;
     const props = input.props && typeof input.props === 'object' && !Array.isArray(input.props)
       ? (input.props as Record<string, unknown>) : undefined;
     return {
-      entry: { renderId, kind: 'theme', payload: { components, vars, ...(props ? { props } : {}) }, title: title || 'Theme', width, background, status: 'ready' },
+      entry: { renderId, kind: 'theme', payload: { components, vars, ...(props ? { props } : {}) }, title: title || 'Theme', width, height, background, status: 'ready' },
       code: JSON.stringify(vars, null, 2),
     };
   }
@@ -108,7 +110,7 @@ export function entryFromToolCall(tc: ToolCall, cwd = ''): { entry: RenderEntry;
     const html = typeof input.html === 'string' ? input.html : '';
     if (!html) return null;
     return {
-      entry: { renderId, kind: 'form', payload: { html }, title: title || 'Form', width, background, status: 'ready' },
+      entry: { renderId, kind: 'form', payload: { html }, title: title || 'Form', width, height, background, status: 'ready' },
       code: html,
     };
   }
@@ -120,7 +122,7 @@ export function entryFromToolCall(tc: ToolCall, cwd = ''): { entry: RenderEntry;
     const cancelLabel = typeof input.cancelLabel === 'string' ? input.cancelLabel : 'Cancel';
     const html = buildChoiceHtml({ message, choices: [{ label: confirmLabel, value: true }, { label: cancelLabel, value: false }] });
     return {
-      entry: { renderId, kind: 'form', payload: { html }, title: title || 'Confirm', width, background, status: 'ready' },
+      entry: { renderId, kind: 'form', payload: { html }, title: title || 'Confirm', width, height, background, status: 'ready' },
       code: message,
     };
   }
@@ -133,7 +135,7 @@ export function entryFromToolCall(tc: ToolCall, cwd = ''): { entry: RenderEntry;
     if (!message || options.length === 0) return null;
     const html = buildChoiceHtml({ message, choices: options.map((o) => ({ label: o, value: o })) });
     return {
-      entry: { renderId, kind: 'form', payload: { html }, title: title || 'Choose', width, background, status: 'ready' },
+      entry: { renderId, kind: 'form', payload: { html }, title: title || 'Choose', width, height, background, status: 'ready' },
       code: message,
     };
   }
@@ -142,7 +144,6 @@ export function entryFromToolCall(tc: ToolCall, cwd = ''): { entry: RenderEntry;
   const htmlPath = typeof input.path === 'string' ? input.path : '';
   const html = typeof input.html === 'string' ? input.html : '';
   const baseDir = typeof input.baseDir === 'string' ? input.baseDir : '';
-  const height = typeof input.height === 'number' && input.height > 0 ? input.height : undefined;
 
   if (htmlPath || baseDir) {
     return {
@@ -152,6 +153,7 @@ export function entryFromToolCall(tc: ToolCall, cwd = ''): { entry: RenderEntry;
         payload: { mode: 'file', cwd, path: htmlPath || undefined, html: html || undefined, baseDir: baseDir || undefined, height },
         title: title || (htmlPath ? htmlPath : 'Site'),
         width,
+        height,
         background,
         status: 'ready',
       },
@@ -167,6 +169,7 @@ export function entryFromToolCall(tc: ToolCall, cwd = ''): { entry: RenderEntry;
       payload: { html },
       title: title || 'HTML',
       width,
+      height,
       background,
       status: 'ready',
       appAccess: input.appAccess === true,

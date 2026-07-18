@@ -105,3 +105,13 @@ it('path wins over html', () => {
   expect((built?.entry.payload as any).mode).toBe('file');
   expect((built?.entry.payload as any).path).toBe('a.html');
 });
+
+it('parses height onto the entry for inline html tool calls', () => {
+  const r = entryFromToolCall({ id: 't-h1', name: 'sai_render_html', input: JSON.stringify({ html: '<p>x</p>', height: 720 }) } as any);
+  expect(r?.entry.height).toBe(720);
+});
+
+it('entry.height is undefined when the input has none', () => {
+  const r = entryFromToolCall({ id: 't-h2', name: 'sai_render_html', input: JSON.stringify({ html: '<p>x</p>' }) } as any);
+  expect(r?.entry.height).toBeUndefined();
+});

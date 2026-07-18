@@ -26,7 +26,7 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
         baseDir: { type: 'string', description: 'For inline `html`: workspace dir that relative assets resolve against.' },
         title: { type: 'string', description: 'Label shown on the card/panel.' },
         width: { type: 'number', description: 'Initial/minimum viewport width in px (default 360); the canvas grows to fit wider content.' },
-        height: { type: 'number', description: 'Viewport height in px for file-backed renders (default 480).' },
+        height: { type: 'number', description: 'Initial/minimum viewport height in px (default 480); the card grows to fit taller content (max 4000). For full-screen or vh-based layouts, set this to the intended viewport height.' },
         background: { type: 'string', description: 'Canvas background behind the mock.' },
         appAccess: { type: 'boolean', description: 'Only set true if the snippet genuinely needs same-origin access to the app (localStorage, parent DOM). This is privileged: the user is asked to approve it before the render gains access. Leave unset for normal mockups — they still load images/fonts/CDN scripts over https.' },
       },
