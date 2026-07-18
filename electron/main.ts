@@ -1021,6 +1021,7 @@ function createWindow() {
     const html = typeof args?.html === 'string' ? args.html : '';
     if (!html) return null;
     const minWidth = Math.min(Math.max(Math.round(args?.width || 480), 80), 2000);
+    const hasExplicitHeight = typeof args?.height === 'number' && args.height > 0;
     const initialHeight = Math.min(Math.max(Math.round(args?.height || 480), 80), 4000);
     const background = (typeof args?.background === 'string' && sanitizeCssColor(args.background)) || '#1a1a1a';
     let win: BrowserWindow | null = null;
@@ -1056,7 +1057,7 @@ function createWindow() {
       const h = (await win.webContents.executeJavaScript(
         'Math.ceil(Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)) || 200',
       )) as number;
-      const height = Math.min(Math.max(Math.round(h), initialHeight), 4000);
+      const height = Math.min(Math.max(Math.round(h), hasExplicitHeight ? initialHeight : 40), 4000);
       win.setContentSize(width, height);
       await new Promise((r) => setTimeout(r, 60));
       const image = await win.webContents.capturePage({ x: 0, y: 0, width, height });

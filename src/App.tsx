@@ -1679,7 +1679,7 @@ export default function App() {
               const b64 = await saiAny.renderCaptureHtml!({
                 html: htmlInput,
                 width: typeof req.input?.width === 'number' ? req.input.width : undefined,
-                height: typeof req.input?.height === 'number' ? req.input.height : undefined,
+                height: typeof req.input?.height === 'number' ? req.input.height : 480,
                 background: (typeof req.input?.background === 'string' && sanitizeCssColor(req.input.background)) || resolveThemedSurface(),
               });
               if (!b64) throw new Error('capture returned no image');

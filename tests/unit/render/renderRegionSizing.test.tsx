@@ -8,6 +8,12 @@ const htmlEntry = (over: Record<string, unknown> = {}) => ({
   ...over,
 } as any);
 
+const formEntry = (over: Record<string, unknown> = {}) => ({
+  renderId: 'r2', kind: 'form', status: 'ready', width: 360,
+  payload: { html: '<form><button>Ok</button></form>' },
+  ...over,
+} as any);
+
 function postSize(iframe: HTMLIFrameElement, size: { height?: number; width?: number }) {
   act(() => {
     window.dispatchEvent(new MessageEvent('message', {
@@ -125,5 +131,32 @@ describe('RenderRegion auto-height via sizer', () => {
     const { iframe, postSize } = mountRegion({ height: 800 });
     await postSize({ height: 600 });
     expect(iframe.style.height).toBe('800px');
+  });
+});
+
+describe('RenderRegion form-kind height floor', () => {
+  const mountForm = (overrides: Record<string, unknown> = {}) => {
+    const { container } = render(<RenderRegion entry={formEntry(overrides)} />);
+    const iframe = container.querySelector('iframe')!;
+    return {
+      iframe,
+      postSize: (size: { height?: number; width?: number }) => postSize(iframe, size),
+    };
+  };
+
+  it('defaults the iframe height to 120 for form-kind when entry.height is absent', () => {
+    const { iframe } = mountForm({});
+    expect(iframe.style.height).toBe('120px');
+  });
+
+  it('grows to the reported height after a size message', async () => {
+    const { iframe, postSize } = mountForm({});
+    await postSize({ height: 300 });
+    expect(iframe.style.height).toBe('300px');
+  });
+
+  it('uses an explicit entry.height over the 120 floor for form-kind', () => {
+    const { iframe } = mountForm({ height: 500 });
+    expect(iframe.style.height).toBe('500px');
   });
 });

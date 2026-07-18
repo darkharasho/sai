@@ -131,7 +131,9 @@ function RenderedHtml({ entry, enableSubmit, onNaturalWidth }: {
   const userHtml = String(payload.html ?? '');
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const submittedRef = useRef(false);
-  const initialViewport = entry.height && entry.height > 0 ? entry.height : 480;
+  const initialViewport = entry.height && entry.height > 0
+    ? entry.height
+    : entry.kind === 'form' ? 120 : 480;
   const [sizer, setSizer] = useState(() => createHeightSizer(initialViewport));
   // Privileged same-origin access is opt-in (entry.appAccess) AND must be
   // approved here before we hand the render the app's origin. Until granted the
