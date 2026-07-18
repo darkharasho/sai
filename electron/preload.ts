@@ -287,7 +287,7 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.invoke('render:mintFileUrl', args),
   renderReleaseFileUrl: (token: string): Promise<boolean> =>
     ipcRenderer.invoke('render:releaseFileUrl', token),
-  renderCaptureHtml: (args: { html: string; width?: number; background?: string }): Promise<string | null> =>
+  renderCaptureHtml: (args: { html: string; width?: number; height?: number; background?: string }): Promise<string | null> =>
     ipcRenderer.invoke('render:captureHtml', args),
   renderCaptureFile: (args: { cwd: string; path?: string; html?: string; baseDir?: string; width?: number; height?: number }): Promise<string | null> =>
     ipcRenderer.invoke('render:captureFile', args),

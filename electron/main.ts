@@ -1017,16 +1017,17 @@ function createWindow() {
   // Render a mock's HTML in a hidden off-screen window and screenshot it, so the
   // agent can SEE its render without opening a visible browser tab. Returns a
   // bare base64 PNG (or null on failure).
-  ipcMain.handle('render:captureHtml', async (_event, args: { html?: string; width?: number; background?: string }) => {
+  ipcMain.handle('render:captureHtml', async (_event, args: { html?: string; width?: number; height?: number; background?: string }) => {
     const html = typeof args?.html === 'string' ? args.html : '';
     if (!html) return null;
     const minWidth = Math.min(Math.max(Math.round(args?.width || 480), 80), 2000);
+    const initialHeight = Math.min(Math.max(Math.round(args?.height || 480), 80), 4000);
     const background = (typeof args?.background === 'string' && sanitizeCssColor(args.background)) || '#1a1a1a';
     let win: BrowserWindow | null = null;
     try {
       win = new BrowserWindow({
         width: minWidth,
-        height: 1200,
+        height: initialHeight,
         show: false,
         // Park it far off any display so it never flashes on screen.
         x: -32000,
@@ -1049,7 +1050,7 @@ function createWindow() {
       )) as number;
       const width = Math.min(Math.max(minWidth, Math.round(naturalW) || 0), 2000);
       if (width > minWidth) {
-        win.setContentSize(width, 1200);
+        win.setContentSize(width, initialHeight);
         await new Promise((r) => setTimeout(r, 60));
       }
       const h = (await win.webContents.executeJavaScript(
