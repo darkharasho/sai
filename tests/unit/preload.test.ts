@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { exposeInMainWorld, send, invoke } = vi.hoisted(() => ({
+const { exposeInMainWorld, send, invoke, on, removeListener } = vi.hoisted(() => ({
   exposeInMainWorld: vi.fn(),
   send: vi.fn(),
   invoke: vi.fn(),
+  on: vi.fn(),
+  removeListener: vi.fn(),
 }));
 
 vi.mock('electron', () => ({
@@ -13,8 +15,8 @@ vi.mock('electron', () => ({
   ipcRenderer: {
     send,
     invoke,
-    on: vi.fn(),
-    removeListener: vi.fn(),
+    on,
+    removeListener,
   },
 }));
 
@@ -27,6 +29,8 @@ describe('electron preload bridge', () => {
   beforeEach(() => {
     send.mockClear();
     invoke.mockClear();
+    on.mockClear();
+    removeListener.mockClear();
   });
 
   it('exposes geminiSetSessionId and forwards the optional scope argument', () => {
@@ -61,6 +65,8 @@ describe('characterization: existing IPC routing', () => {
   beforeEach(() => {
     send.mockClear();
     invoke.mockClear();
+    on.mockClear();
+    removeListener.mockClear();
   });
 
   it('claudeSend forwards to claude:send with all positional args', () => {
@@ -177,6 +183,36 @@ describe('window.sai.provider routing', () => {
     it('routes codex to codex:setSessionId without scope', () => {
       (exposed as any).provider.setSessionId('codex', '/proj', 'sess-3');
       expect(send).toHaveBeenCalledWith('codex:setSessionId', '/proj', 'sess-3');
+    });
+  });
+
+  describe('brainstorm API', () => {
+    beforeEach(() => {
+      send.mockClear();
+      invoke.mockClear();
+      on.mockClear();
+      removeListener.mockClear();
+    });
+
+    it('brainstormGetBrief invokes brainstorm:getBrief', async () => {
+      await exposed.brainstormGetBrief('sid-1');
+      expect(invoke).toHaveBeenCalledWith('brainstorm:getBrief', 'sid-1');
+    });
+
+    it('brainstormEditBrief invokes brainstorm:editBrief with the patch', async () => {
+      await exposed.brainstormEditBrief('sid-1', { projectName: 'x' });
+      expect(invoke).toHaveBeenCalledWith('brainstorm:editBrief', 'sid-1', { projectName: 'x' });
+    });
+
+    it('brainstormOnBrief subscribes and unsubscribes brainstorm:brief:<sid>', () => {
+      const un = exposed.brainstormOnBrief('sid-1', () => {});
+      expect(on).toHaveBeenCalledWith('brainstorm:brief:sid-1', expect.any(Function));
+      un();
+      expect(removeListener).toHaveBeenCalledWith('brainstorm:brief:sid-1', expect.any(Function));
+    });
+
+    it('brainstormSynthesize is gone', () => {
+      expect((exposed as any).brainstormSynthesize).toBeUndefined();
     });
   });
 });
