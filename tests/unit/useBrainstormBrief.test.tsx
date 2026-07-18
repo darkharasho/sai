@@ -76,4 +76,23 @@ describe('useBrainstormBrief', () => {
     unmount();
     await waitFor(() => expect((window as any).sai.brainstormEnd).toHaveBeenCalledWith('sid-1'));
   });
+
+  it('invokes each per-send unsubscribe exactly once across finish and unmount', async () => {
+    const spies: Array<ReturnType<typeof vi.fn>> = [];
+    const wrap = (key: string) => vi.fn((sid: string, cb: Cb) => {
+      listeners[`${key}:${sid}`] = cb;
+      const u = vi.fn();
+      spies.push(u);
+      return u;
+    });
+    (window as any).sai.brainstormOnChunk = wrap('chunk');
+    (window as any).sai.brainstormOnDone = wrap('done');
+    (window as any).sai.brainstormOnError = wrap('error');
+    (window as any).sai.brainstormOnBrief = wrap('brief');
+    const { result, unmount } = renderHook(() => useBrainstormBrief());
+    await act(() => result.current.send('x'));
+    act(() => listeners['done:sid-1']('reply'));
+    unmount();
+    for (const u of spies) expect(u).toHaveBeenCalledTimes(1);
+  });
 });

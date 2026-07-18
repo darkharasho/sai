@@ -53,7 +53,10 @@ export function useBrainstormBrief(): UseBrainstormBrief {
     unsubsRef.current.forEach(u => u());
     unsubsRef.current = [];
     const sid = sessionIdRef.current;
-    if (sid) (window.sai as any).brainstormEnd(sid).catch(() => {});
+    if (sid) {
+      (window.sai as any).brainstormEnd(sid).catch(() => {});
+      sessionIdRef.current = null;
+    }
   }, []);
 
   const send = useCallback(async (message: string) => {
@@ -76,7 +79,12 @@ export function useBrainstormBrief(): UseBrainstormBrief {
       buffered += text;
       setStreamingText(buffered);
     });
-    const finish = () => { unsubChunk(); unsubDone(); unsubError(); };
+    const finish = () => {
+      unsubChunk();
+      unsubDone();
+      unsubError();
+      unsubsRef.current = unsubsRef.current.filter(u => u !== unsubChunk && u !== unsubDone && u !== unsubError);
+    };
     const unsubDone = (window.sai as any).brainstormOnDone(sid, (text: string) => {
       setMessages(prev => [...prev, { role: 'assistant', content: text }]);
       if (!briefRef.current.ready) setQuestionCount(c => c + 1);
