@@ -190,4 +190,43 @@ describe('NewProjectTakeover', () => {
     act(() => listeners['done']('first reply'));
     expect(screen.getByTestId('brainstorm-status-line')).toBeInTheDocument();
   });
+
+  it('error event shows retry button; clicking retry calls brainstormSend twice with same text', async () => {
+    const { listeners } = mockSai();
+    render(<NewProjectTakeover onClose={() => {}} onCreated={() => {}} />);
+    fireEvent.change(screen.getByTestId('brainstorm-composer'), { target: { value: 'build me a thing' } });
+    fireEvent.click(screen.getByTestId('brainstorm-send-btn'));
+    await waitFor(() => expect((window as any).sai.brainstormSend).toHaveBeenCalled());
+    act(() => listeners['error']('network failure'));
+    await waitFor(() => expect(screen.getByTestId('brainstorm-retry-btn')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('brainstorm-retry-btn'));
+    await waitFor(() => expect((window as any).sai.brainstormSend).toHaveBeenCalledTimes(2));
+    expect((window as any).sai.brainstormSend).toHaveBeenLastCalledWith('sid-1', 'build me a thing');
+  });
+
+  it('Escape in name editor does not trigger confirm or close takeover', async () => {
+    const { listeners } = mockSai();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<NewProjectTakeover onClose={() => {}} onCreated={() => {}} />);
+    // Make it dirty (send a message so transcriptDirty = true)
+    fireEvent.change(screen.getByTestId('brainstorm-composer'), { target: { value: 'hi' } });
+    fireEvent.click(screen.getByTestId('brainstorm-send-btn'));
+    await waitFor(() => expect((window as any).sai.brainstormSend).toHaveBeenCalled());
+    // Trigger a brief update so the name field has content
+    act(() => listeners['brief']({ ...EMPTY_BRIEF, projectName: 'toy', summary: 'A toy.' }));
+    act(() => listeners['done']('ok'));
+    // Open the name editor
+    fireEvent.click(screen.getByTestId('brief-name'));
+    const input = screen.getByDisplayValue('toy');
+    confirmSpy.mockClear();
+    // Fire Escape in the editor
+    fireEvent.keyDown(input, { key: 'Escape' });
+    // confirm should NOT have been called (event was stopped)
+    expect(confirmSpy).not.toHaveBeenCalled();
+    // Takeover still mounted
+    expect(screen.getByTestId('brief-pane')).toBeInTheDocument();
+    // Editor closed (display value gone / back to static)
+    expect(screen.queryByDisplayValue('toy')).toBeNull();
+    confirmSpy.mockRestore();
+  });
 });

@@ -61,6 +61,18 @@ function fakeQuery(opts: { text?: string; briefPatch?: Record<string, unknown>; 
   };
 }
 
+// Fake query that yields multiple assistant messages (text → tool_use → text pattern)
+function fakeQueryMultiMessage(texts: string[]) {
+  return function query(_args: { prompt: string; options: any }) {
+    return (async function* () {
+      for (const text of texts) {
+        yield { type: 'assistant', message: { content: [{ type: 'text', text }] } };
+      }
+      yield { type: 'result', subtype: 'success' };
+    })();
+  };
+}
+
 describe('runTurn', () => {
   it('streams text, applies brief updates, and appends the transcript', async () => {
     __setQueryFnForTest(fakeQuery({ text: 'Sounds fun!', briefPatch: { projectName: 'toy', summary: 'A toy.' } }) as any);
@@ -112,6 +124,15 @@ describe('runTurn', () => {
   it('returns an error for unknown sessions', async () => {
     const r = await runTurn({ sessionId: 'nope', userMessage: 'x', onChunk: () => {}, onBrief: () => {} });
     expect(r.ok).toBe(false);
+  });
+
+  it('separates text from multiple assistant messages with \\n\\n so blockquotes render correctly', async () => {
+    __setQueryFnForTest(fakeQueryMultiMessage(['Here is the brief.', '> Which users?']) as any);
+    const { sessionId } = createSession();
+    const chunks: string[] = [];
+    const r = await runTurn({ sessionId, userMessage: 'go', onChunk: c => chunks.push(c), onBrief: () => {} });
+    expect(r).toEqual({ ok: true, text: 'Here is the brief.\n\n> Which users?' });
+    expect(chunks).toEqual(['Here is the brief.', '\n\n', '> Which users?']);
   });
 });
 

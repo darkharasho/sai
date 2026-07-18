@@ -108,7 +108,7 @@ function EditableText({ testId, value, placeholder, mono, multiline, commit }: E
     onBlur: doCommit,
     onKeyDown: (e: React.KeyboardEvent) => {
       if (e.key === 'Enter' && !multiline) { e.preventDefault(); void doCommit(); }
-      if (e.key === 'Escape') cancel();
+      if (e.key === 'Escape') { e.stopPropagation(); cancel(); }
     },
     style: {
       ...cardBase,
@@ -187,7 +187,7 @@ function EditableList({ testId, items, placeholder, dashed, commit }: EditableLi
         onChange={e => setDraft(e.target.value)}
         onBlur={doCommit}
         onKeyDown={e => {
-          if (e.key === 'Escape') cancel();
+          if (e.key === 'Escape') { e.stopPropagation(); cancel(); }
         }}
         style={{
           ...cardBase,
@@ -377,7 +377,7 @@ function SetupDisclosure({ setup, onSetupChange, onBrowseParent, onConnectGitHub
 
 // ─── BriefPane (default export) ───────────────────────────────────────────────
 
-export default function BriefPane(props: BriefPaneProps): JSX.Element {
+export default function BriefPane(props: BriefPaneProps) {
   const { brief, onEditBrief, setup, onSetupChange, onBrowseParent, onConnectGitHub, onCreate, creating, createError, warnings, createdPath, onOpenProject } = props;
 
   const canCreate = !!(brief.projectName && brief.summary && setup.parentDir && !creating);

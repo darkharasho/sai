@@ -68,6 +68,37 @@ describe('useBrainstormBrief', () => {
     expect(result.current.isStreaming).toBe(false);
   });
 
+  it('error event removes user message from messages and sets failedMessage', async () => {
+    const { result } = renderHook(() => useBrainstormBrief());
+    await act(() => result.current.send('hello world'));
+    // User message should be in messages before error
+    expect(result.current.messages).toHaveLength(1);
+    act(() => listeners['error:sid-1']('network error'));
+    expect(result.current.messages).toHaveLength(0);
+    expect(result.current.failedMessage).toBe('hello world');
+  });
+
+  it('retry re-sends the failedMessage via send and calls brainstormSend again', async () => {
+    const { result } = renderHook(() => useBrainstormBrief());
+    await act(() => result.current.send('hello world'));
+    act(() => listeners['error:sid-1']('network error'));
+    expect(result.current.failedMessage).toBe('hello world');
+    await act(() => result.current.retry());
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0]).toEqual({ role: 'user', content: 'hello world' });
+    expect((window as any).sai.brainstormSend).toHaveBeenCalledTimes(2);
+    expect((window as any).sai.brainstormSend).toHaveBeenLastCalledWith('sid-1', 'hello world');
+  });
+
+  it('successful send clears failedMessage', async () => {
+    const { result } = renderHook(() => useBrainstormBrief());
+    await act(() => result.current.send('first'));
+    act(() => listeners['error:sid-1']('oops'));
+    expect(result.current.failedMessage).toBe('first');
+    await act(() => result.current.send('second'));
+    expect(result.current.failedMessage).toBeNull();
+  });
+
   it('transcriptDirty flips once content exists; ends the session on unmount', async () => {
     const { result, unmount } = renderHook(() => useBrainstormBrief());
     expect(result.current.transcriptDirty).toBe(false);

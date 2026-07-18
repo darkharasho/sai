@@ -11,9 +11,11 @@ export interface ConversationPaneProps {
   streamingText: string;
   isStreaming: boolean;
   error: string | null;
+  failedMessage: string | null;
   questionCount: number;   // status line: `question N of 5` while !ready
   briefReady: boolean;     // status line: `brief ready — refine or create`
   onSend(text: string): void;
+  onRetry(): void;
 }
 
 export default function ConversationPane({
@@ -21,10 +23,12 @@ export default function ConversationPane({
   streamingText,
   isStreaming,
   error,
+  failedMessage,
   questionCount,
   briefReady,
   onSend,
-}: ConversationPaneProps): JSX.Element {
+  onRetry,
+}: ConversationPaneProps) {
   const [draft, setDraft] = useState('');
   const [inputFocused, setInputFocused] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -105,7 +109,43 @@ export default function ConversationPane({
         {isStreaming && !streamingText && <ThinkingIndicator />}
 
         {error && (
-          <div style={{ fontSize: 11, color: '#f87171', padding: '4px 8px' }}>{error}</div>
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+            padding: '8px 10px',
+            background: 'rgba(248,113,113,0.07)',
+            border: '1px solid rgba(248,113,113,0.2)',
+            borderRadius: 6,
+          }}>
+            {failedMessage && (
+              <div style={{
+                fontSize: 12,
+                color: 'var(--text-muted)',
+                fontStyle: 'italic',
+                whiteSpace: 'pre-wrap',
+              }}>
+                {failedMessage}
+              </div>
+            )}
+            <div style={{ fontSize: 11, color: '#f87171' }}>{error}</div>
+            <button
+              data-testid="brainstorm-retry-btn"
+              onClick={onRetry}
+              style={{
+                alignSelf: 'flex-start',
+                background: 'rgba(248,113,113,0.1)',
+                border: '1px solid rgba(248,113,113,0.3)',
+                borderRadius: 4,
+                color: '#f87171',
+                cursor: 'pointer',
+                fontSize: 11,
+                padding: '3px 10px',
+              }}
+            >
+              Retry
+            </button>
+          </div>
         )}
 
         {/* Status line — shown under last assistant message once there is content */}

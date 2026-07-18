@@ -19,7 +19,7 @@ const DEFAULT_HELPERS: SetupState['helpers'] = {
   githubRepo: false,
 };
 
-export default function NewProjectTakeover({ onClose, onCreated }: NewProjectTakeoverProps): JSX.Element {
+export default function NewProjectTakeover({ onClose, onCreated }: NewProjectTakeoverProps) {
   const bs = useBrainstormBrief();
 
   // Setup state
@@ -211,9 +211,11 @@ export default function NewProjectTakeover({ onClose, onCreated }: NewProjectTak
             streamingText={bs.streamingText}
             isStreaming={bs.isStreaming}
             error={bs.error}
+            failedMessage={bs.failedMessage}
             questionCount={bs.questionCount}
             briefReady={bs.brief.ready}
             onSend={bs.send}
+            onRetry={bs.retry}
           />
         </div>
 

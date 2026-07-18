@@ -18,7 +18,9 @@ export interface UseBrainstormBrief {
   error: string | null;
   brief: ProjectBriefView;
   questionCount: number;
+  failedMessage: string | null;
   send(message: string): Promise<void>;
+  retry(): Promise<void>;
   editBrief(patch: Partial<ProjectBriefView>): Promise<{ ok: boolean; error?: string }>;
   end(): Promise<void>;
   transcriptDirty: boolean;
@@ -31,6 +33,7 @@ export function useBrainstormBrief(): UseBrainstormBrief {
   const [error, setError] = useState<string | null>(null);
   const [brief, setBrief] = useState<ProjectBriefView>(EMPTY_BRIEF);
   const [questionCount, setQuestionCount] = useState(0);
+  const [failedMessage, setFailedMessage] = useState<string | null>(null);
 
   const sessionIdRef = useRef<string | null>(null);
   const briefRef = useRef(brief);
@@ -61,6 +64,7 @@ export function useBrainstormBrief(): UseBrainstormBrief {
 
   const send = useCallback(async (message: string) => {
     setError(null);
+    setFailedMessage(null);
     setIsStreaming(true);
     setStreamingText('');
     setMessages(prev => [...prev, { role: 'user', content: message }]);
@@ -71,6 +75,9 @@ export function useBrainstormBrief(): UseBrainstormBrief {
     } catch (e: any) {
       setError(e?.message ?? 'Failed to start brainstorm');
       setIsStreaming(false);
+      // Remove the optimistically-added user message
+      setMessages(prev => prev.slice(0, -1));
+      setFailedMessage(message);
       return;
     }
 
@@ -96,6 +103,9 @@ export function useBrainstormBrief(): UseBrainstormBrief {
       setError(err);
       setStreamingText('');
       setIsStreaming(false);
+      // Remove the optimistically-added user message and stash it for retry
+      setMessages(prev => prev.slice(0, -1));
+      setFailedMessage(message);
       finish();
     });
     unsubsRef.current.push(unsubChunk, unsubDone, unsubError);
@@ -105,8 +115,23 @@ export function useBrainstormBrief(): UseBrainstormBrief {
     } catch (e: any) {
       setError(e?.message ?? 'Send failed');
       setIsStreaming(false);
+      // Remove the optimistically-added user message and stash it for retry
+      setMessages(prev => prev.slice(0, -1));
+      setFailedMessage(message);
+      // Clean up the per-send listeners that finish() would normally handle
+      finish();
     }
   }, [ensureSession]);
+
+  const retry = useCallback(async () => {
+    setFailedMessage(prev => {
+      if (prev !== null) {
+        // Kick off the send asynchronously; we clear failedMessage inside send()
+        void send(prev);
+      }
+      return null;
+    });
+  }, [send]);
 
   const editBrief = useCallback(async (patch: Partial<ProjectBriefView>) => {
     const sid = await ensureSession();
@@ -126,5 +151,5 @@ export function useBrainstormBrief(): UseBrainstormBrief {
   const transcriptDirty = messages.length > 0 ||
     brief.projectName !== null || brief.summary !== null || brief.goals.length > 0;
 
-  return { messages, streamingText, isStreaming, error, brief, questionCount, send, editBrief, end, transcriptDirty };
+  return { messages, streamingText, isStreaming, error, brief, questionCount, failedMessage, send, retry, editBrief, end, transcriptDirty };
 }

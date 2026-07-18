@@ -125,8 +125,15 @@ export async function runTurn(args: RunTurnArgs): Promise<RunTurnResult> {
     const q = resolveQueryFn()({ prompt, options });
     for await (const msg of q) {
       if (msg?.type === 'assistant' && msg.message?.content) {
+        let firstTextInMsg = true;
         for (const block of msg.message.content) {
           if (block.type === 'text' && typeof block.text === 'string') {
+            if (firstTextInMsg && fullText !== '') {
+              // Separator between distinct assistant messages (e.g. text → tool_use → text)
+              fullText += '\n\n';
+              args.onChunk('\n\n');
+            }
+            firstTextInMsg = false;
             fullText += block.text;
             args.onChunk(block.text);
           }
