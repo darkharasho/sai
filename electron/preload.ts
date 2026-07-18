@@ -298,8 +298,9 @@ contextBridge.exposeInMainWorld('sai', {
   brainstormStart: () => ipcRenderer.invoke('brainstorm:start'),
   brainstormSend: (sessionId: string, message: string) =>
     ipcRenderer.invoke('brainstorm:send', sessionId, message),
-  brainstormSynthesize: (sessionId: string, opts?: { force?: boolean }) =>
-    ipcRenderer.invoke('brainstorm:synthesize', sessionId, opts),
+  brainstormGetBrief: (sessionId: string) => ipcRenderer.invoke('brainstorm:getBrief', sessionId),
+  brainstormEditBrief: (sessionId: string, patch: Record<string, unknown>) =>
+    ipcRenderer.invoke('brainstorm:editBrief', sessionId, patch),
   brainstormEnd: (sessionId: string) => ipcRenderer.invoke('brainstorm:end', sessionId),
   brainstormConsumeSeed: (projectPath: string) => ipcRenderer.invoke('brainstorm:consumeSeed', projectPath),
   brainstormOnChunk: (sessionId: string, callback: (text: string) => void) => {
@@ -317,6 +318,12 @@ contextBridge.exposeInMainWorld('sai', {
   brainstormOnError: (sessionId: string, callback: (err: string) => void) => {
     const channel = `brainstorm:error:${sessionId}`;
     const listener = (_e: Electron.IpcRendererEvent, err: string) => callback(err);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
+  },
+  brainstormOnBrief: (sessionId: string, callback: (brief: any) => void) => {
+    const channel = `brainstorm:brief:${sessionId}`;
+    const listener = (_e: Electron.IpcRendererEvent, brief: any) => callback(brief);
     ipcRenderer.on(channel, listener);
     return () => ipcRenderer.removeListener(channel, listener);
   },
