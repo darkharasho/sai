@@ -489,6 +489,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
                     <div style={{ width: 1, height: 16, background: 'var(--border-hairline)', flexShrink: 0 }} />
                     <button
                       className="dropdown-item"
+                      data-testid="new-project-btn"
                       onClick={() => { setOpen(false); onNewProject?.(); }}
                       style={{
                         flex: 1, display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
