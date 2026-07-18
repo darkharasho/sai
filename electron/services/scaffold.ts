@@ -68,6 +68,13 @@ function githubPost(endpoint: string, body: object, token: string): Promise<any>
   });
 }
 
+function readmeContent(folderName: string, options: ScaffoldOptions): string {
+  const desc = options.brief?.summary
+    ? `\n\n${options.brief.summary}\n`
+    : options.context ? `\n\n${options.context}\n` : '';
+  return `# ${folderName}${desc}`;
+}
+
 export async function scaffoldProject(
   options: ScaffoldOptions,
   getToken: () => string | null,
@@ -134,8 +141,7 @@ export async function scaffoldProject(
   // Step 5 — README.md
   if (options.helpers.readme) {
     try {
-      const desc = options.context ? `\n\n${options.context}\n` : '';
-      fs.writeFileSync(path.join(resolved, 'README.md'), `# ${folderName}${desc}`, 'utf8');
+      fs.writeFileSync(path.join(resolved, 'README.md'), readmeContent(folderName, options), 'utf8');
     } catch (e: any) {
       warnings.push(`README.md: ${e.message}`);
     }
@@ -178,8 +184,7 @@ export async function scaffoldProject(
           const readmePath = path.join(resolved, 'README.md');
           if (!fs.existsSync(readmePath)) {
             try {
-              const desc = options.context ? `\n\n${options.context}\n` : '';
-              fs.writeFileSync(readmePath, `# ${folderName}${desc}`, 'utf8');
+              fs.writeFileSync(readmePath, readmeContent(folderName, options), 'utf8');
             } catch (e: any) {
               warnings.push(`README.md: ${e.message}`);
             }

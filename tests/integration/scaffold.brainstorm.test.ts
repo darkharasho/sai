@@ -78,7 +78,7 @@ describe('scaffoldProject — brainstorm seed', () => {
     const target = path.join(tmp, 'seed-proj');
     const r = await scaffoldProject({
       path: target,
-      context: 'A test project.',
+      context: 'legacy context, should not appear',
       helpers: { claudeMd: true, gitInit: false, gitignore: true, readme: true, claudeSettings: false, githubRepo: false },
       brief,
       brainstormTranscript: '**User:** hi',
@@ -93,6 +93,9 @@ describe('scaffoldProject — brainstorm seed', () => {
     expect(claudeMd).toContain('## Project Context');
     expect(claudeMd).toContain('## Goals');
     expect(claudeMd).not.toContain('## Open questions');
+    const readme = fs.readFileSync(path.join(target, 'README.md'), 'utf8');
+    expect(readme).toContain('A test project.');
+    expect(readme).not.toContain('legacy context, should not appear');
   });
 
   it('keeps the legacy plain-context path when no brief is provided', async () => {
