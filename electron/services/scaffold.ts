@@ -4,6 +4,7 @@ import path from 'node:path';
 import { execSync, execFileSync } from 'node:child_process';
 import https from 'node:https';
 import { ipcMain } from 'electron';
+import { renderSeedMarkdown, renderClaudeMdContext, type ProjectBrief } from './brainstorm/brief';
 
 export interface ScaffoldOptions {
   path: string;
@@ -21,6 +22,7 @@ export interface ScaffoldOptions {
     visibility: 'private' | 'public';
   };
   brainstormTranscript?: string;
+  brief?: ProjectBrief;
 }
 
 export interface ScaffoldResult {
@@ -88,9 +90,11 @@ export async function scaffoldProject(
   // Step 2 — CLAUDE.md
   if (options.helpers.claudeMd) {
     try {
-      const content = options.context
-        ? `## Project Context\n\n${options.context}\n`
-        : `## Project Context\n\n_No context provided._\n`;
+      const content = options.brief
+        ? renderClaudeMdContext(options.brief)
+        : options.context
+          ? `## Project Context\n\n${options.context}\n`
+          : `## Project Context\n\n_No context provided._\n`;
       fs.writeFileSync(path.join(resolved, 'CLAUDE.md'), content, 'utf8');
     } catch (e: any) {
       warnings.push(`CLAUDE.md: ${e.message}`);
@@ -119,7 +123,7 @@ export async function scaffoldProject(
         '*.log',
         '.superpowers',
       ];
-      if (options.brainstormTranscript) ignores.push('.sai/');
+      if (options.brainstormTranscript || options.brief) ignores.push('.sai/');
       const content = ignores.join('\n') + '\n';
       fs.writeFileSync(path.join(resolved, '.gitignore'), content, 'utf8');
     } catch (e: any) {
@@ -198,14 +202,16 @@ export async function scaffoldProject(
   }
 
   // Step 8 — brainstorm seed file
-  if (options.brainstormTranscript) {
+  if (options.brainstormTranscript || options.brief) {
     try {
       const saiDir = path.join(resolved, '.sai');
       fs.mkdirSync(saiDir, { recursive: true });
-      // Seed = the synthesized context only. This becomes the first user
-      // message in the new project's chat, so it should read naturally —
-      // no headers, no transcript dump.
-      const seed = (options.context || '').trim() + '\n';
+      // The seed is auto-sent as the new project's first chat message
+      // (ChatPanel one-shot consumption) — it opens with the kickoff
+      // instruction so the first session starts planning immediately.
+      const seed = options.brief
+        ? renderSeedMarkdown(options.brief, options.brainstormTranscript ?? '')
+        : (options.context || '').trim() + '\n';
       fs.writeFileSync(path.join(saiDir, 'brainstorm-seed.md'), seed, 'utf8');
 
       // If .gitignore exists but does not include .sai/, append it
