@@ -1056,7 +1056,7 @@ function createWindow() {
       const h = (await win.webContents.executeJavaScript(
         'Math.ceil(Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)) || 200',
       )) as number;
-      const height = Math.min(Math.max(Math.round(h), 40), 4000);
+      const height = Math.min(Math.max(Math.round(h), initialHeight), 4000);
       win.setContentSize(width, height);
       await new Promise((r) => setTimeout(r, 60));
       const image = await win.webContents.capturePage({ x: 0, y: 0, width, height });
