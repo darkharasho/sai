@@ -1,6 +1,7 @@
 // tests/unit/NewProjectTakeover.test.tsx
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import NewProjectTakeover from '../../src/components/NewProjectTakeover/NewProjectTakeover';
 import BriefPane, { type SetupState } from '../../src/components/NewProjectTakeover/BriefPane';
 import { EMPTY_BRIEF } from '../../src/components/NewProjectTakeover/useBrainstormBrief';
 
@@ -97,5 +98,85 @@ describe('BriefPane', () => {
     fireEvent.blur(input);
     await new Promise(r => setTimeout(r, 0));
     expect(props.onEditBrief).not.toHaveBeenCalled();
+  });
+});
+
+function mockSai(overrides: Record<string, any> = {}) {
+  const listeners: Record<string, (p: any) => void> = {};
+  (window as any).sai = {
+    brainstormStart: vi.fn().mockResolvedValue({ sessionId: 'sid-1' }),
+    brainstormSend: vi.fn().mockResolvedValue({ ok: true }),
+    brainstormEditBrief: vi.fn().mockResolvedValue({ ok: true }),
+    brainstormEnd: vi.fn().mockResolvedValue({ ok: true }),
+    brainstormOnChunk: vi.fn((sid: string, cb: any) => { listeners[`chunk`] = cb; return () => {}; }),
+    brainstormOnDone: vi.fn((sid: string, cb: any) => { listeners[`done`] = cb; return () => {}; }),
+    brainstormOnError: vi.fn((sid: string, cb: any) => { listeners[`error`] = cb; return () => {}; }),
+    brainstormOnBrief: vi.fn((sid: string, cb: any) => { listeners[`brief`] = cb; return () => {}; }),
+    scaffoldProject: vi.fn().mockResolvedValue({ ok: true, warnings: [] }),
+    selectFolder: vi.fn(), settingsGet: vi.fn().mockResolvedValue('/tmp/projects'),
+    githubGetUser: vi.fn().mockResolvedValue(null),
+    githubStartAuth: vi.fn(), githubOnAuthComplete: vi.fn(() => () => {}),
+    ...overrides,
+  };
+  return { listeners };
+}
+
+describe('NewProjectTakeover', () => {
+  it('sends a message and fills the brief live from the brief event', async () => {
+    const { listeners } = mockSai();
+    render(<NewProjectTakeover onClose={() => {}} onCreated={() => {}} />);
+    fireEvent.change(screen.getByTestId('brainstorm-composer'), { target: { value: 'a folder sorter' } });
+    fireEvent.click(screen.getByTestId('brainstorm-send-btn'));
+    await waitFor(() => expect((window as any).sai.brainstormSend).toHaveBeenCalled());
+    await waitFor(() => expect((window as any).sai.brainstormOnBrief).toHaveBeenCalled());
+    act(() => listeners['brief']({ ...EMPTY_BRIEF, projectName: 'folder-janitor', summary: 'Sorts.', ready: true }));
+    act(() => listeners['done']('Draft is ready.'));
+    expect(screen.getByTestId('brief-name')).toHaveTextContent('folder-janitor');
+    expect(screen.getByTestId('brief-ready-pill')).toBeInTheDocument();
+    expect(screen.getByTestId('brainstorm-status-line')).toHaveTextContent(/brief ready/i);
+  });
+
+  it('Create passes the brief and transcript to scaffoldProject and calls onCreated', async () => {
+    const { listeners } = mockSai();
+    const onCreated = vi.fn();
+    render(<NewProjectTakeover onClose={() => {}} onCreated={onCreated} />);
+    fireEvent.change(screen.getByTestId('brainstorm-composer'), { target: { value: 'hi' } });
+    fireEvent.click(screen.getByTestId('brainstorm-send-btn'));
+    await waitFor(() => expect((window as any).sai.brainstormOnBrief).toHaveBeenCalled());
+    act(() => listeners['brief']({ ...EMPTY_BRIEF, projectName: 'toy', summary: 'A toy.' }));
+    act(() => listeners['done']('ok'));
+    await waitFor(() => expect(screen.getByTestId('create-project-btn')).toBeEnabled());
+    fireEvent.click(screen.getByTestId('create-project-btn'));
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('/tmp/projects/toy'));
+    const call = (window as any).sai.scaffoldProject.mock.calls[0][0];
+    expect(call.brief.projectName).toBe('toy');
+    expect(call.brainstormTranscript).toContain('**User:** hi');
+  });
+
+  it('confirms before closing a dirty brainstorm', async () => {
+    mockSai();
+    const onClose = vi.fn();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    render(<NewProjectTakeover onClose={onClose} onCreated={() => {}} />);
+    fireEvent.change(screen.getByTestId('brainstorm-composer'), { target: { value: 'hi' } });
+    fireEvent.click(screen.getByTestId('brainstorm-send-btn'));
+    await waitFor(() => expect((window as any).sai.brainstormSend).toHaveBeenCalled());
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it('shows scaffold errors inline and keeps the surface open', async () => {
+    const { listeners } = mockSai({ scaffoldProject: vi.fn().mockResolvedValue({ ok: false, error: 'Could not create directory: EACCES' }) });
+    render(<NewProjectTakeover onClose={() => {}} onCreated={() => {}} />);
+    fireEvent.change(screen.getByTestId('brainstorm-composer'), { target: { value: 'hi' } });
+    fireEvent.click(screen.getByTestId('brainstorm-send-btn'));
+    await waitFor(() => expect((window as any).sai.brainstormOnBrief).toHaveBeenCalled());
+    act(() => listeners['brief']({ ...EMPTY_BRIEF, projectName: 'toy', summary: 'A toy.' }));
+    act(() => listeners['done']('ok'));
+    fireEvent.click(screen.getByTestId('create-project-btn'));
+    await waitFor(() => expect(screen.getByText(/EACCES/)).toBeInTheDocument());
+    expect(screen.getByTestId('brief-pane')).toBeInTheDocument();
   });
 });

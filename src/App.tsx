@@ -17,7 +17,7 @@ import CommandPalette from './components/CommandPalette';
 import { useWhatsNew } from './hooks/useWhatsNew';
 import { useKeybinding } from './hooks/useKeybinding';
 import WhatsNewModal from './components/WhatsNewModal';
-import NewProjectModal from './components/NewProjectModal';
+import NewProjectTakeover from './components/NewProjectTakeover/NewProjectTakeover';
 import { setActiveWorkspace, updateTerminalName } from './terminalBuffer';
 import { basename } from './utils/pathUtils';
 import { createSession, generateSmartTitle } from './sessions';
@@ -5552,7 +5552,7 @@ export default function App() {
       )}
 
       {showNewProject && (
-        <NewProjectModal
+        <NewProjectTakeover
           onClose={() => setShowNewProject(false)}
           onCreated={(path) => {
             setShowNewProject(false);
