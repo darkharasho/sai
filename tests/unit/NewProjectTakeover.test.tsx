@@ -179,4 +179,15 @@ describe('NewProjectTakeover', () => {
     await waitFor(() => expect(screen.getByText(/EACCES/)).toBeInTheDocument());
     expect(screen.getByTestId('brief-pane')).toBeInTheDocument();
   });
+
+  it('hides the status line until the first assistant reply', async () => {
+    const { listeners } = mockSai();
+    render(<NewProjectTakeover onClose={() => {}} onCreated={() => {}} />);
+    fireEvent.change(screen.getByTestId('brainstorm-composer'), { target: { value: 'hi' } });
+    fireEvent.click(screen.getByTestId('brainstorm-send-btn'));
+    await waitFor(() => expect((window as any).sai.brainstormSend).toHaveBeenCalled());
+    expect(screen.queryByTestId('brainstorm-status-line')).toBeNull();
+    act(() => listeners['done']('first reply'));
+    expect(screen.getByTestId('brainstorm-status-line')).toBeInTheDocument();
+  });
 });

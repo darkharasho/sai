@@ -109,7 +109,7 @@ export default function ConversationPane({
         )}
 
         {/* Status line — shown under last assistant message once there is content */}
-        {hasAnyContent && !isStreaming && (
+        {hasAnyContent && !isStreaming && messages.some(m => m.role === 'assistant') && (
           <div
             data-testid="brainstorm-status-line"
             style={{

@@ -47,11 +47,30 @@ export default function NewProjectTakeover({ onClose, onCreated }: NewProjectTak
     });
   }, []);
 
-  // Load GitHub user
+  // Close handler
+  const handleClose = useCallback(() => {
+    if (bs.transcriptDirty && !createdPath) {
+      const confirmed = window.confirm('Discard this brainstorm? The brief and conversation will be lost.');
+      if (!confirmed) return;
+    }
+    onClose();
+  }, [bs.transcriptDirty, createdPath, onClose]);
+
+  // Load GitHub user on mount
   useEffect(() => {
+    let cancelled = false;
     (window.sai as any).githubGetUser().then((u: { login: string } | null) => {
-      setSetup(prev => ({ ...prev, githubUser: u }));
+      if (!cancelled) {
+        setSetup(prev => ({ ...prev, githubUser: u }));
+      }
     });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Subscribe to GitHub auth complete
+  useEffect(() => {
     const unsub = (window.sai as any).githubOnAuthComplete((user: { login: string }) => {
       setSetup(prev => ({ ...prev, githubUser: user }));
     });
@@ -72,15 +91,7 @@ export default function NewProjectTakeover({ onClose, onCreated }: NewProjectTak
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [bs.transcriptDirty, createdPath]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleClose = useCallback(() => {
-    if (bs.transcriptDirty && !createdPath) {
-      const confirmed = window.confirm('Discard this brainstorm? The brief and conversation will be lost.');
-      if (!confirmed) return;
-    }
-    onClose();
-  }, [bs.transcriptDirty, createdPath, onClose]);
+  }, [handleClose]);
 
   const handleSetupChange = useCallback((next: Partial<SetupState>) => {
     if ('repoName' in next) {
