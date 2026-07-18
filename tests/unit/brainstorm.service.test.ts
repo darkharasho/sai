@@ -90,6 +90,25 @@ describe('runTurn', () => {
     expect(getSession(sessionId)!.transcript).toEqual([]);
   });
 
+  it('restores brief and pending edits when the stream fails mid-turn', async () => {
+    const failingAfterPatch = ({ options }: { prompt: string; options: any }) =>
+      (async function* () {
+        const handler = options.mcpServers.brief.__handlersForTest.get('update_brief');
+        await handler({ projectName: 'partial' });
+        throw new Error('mid-stream');
+      })();
+    __setQueryFnForTest(failingAfterPatch as any);
+    const { sessionId } = createSession();
+    const s = getSession(sessionId)!;
+    s.pendingEdits.push('summary → "user text"');
+    const briefs: ProjectBrief[] = [];
+    const r = await runTurn({ sessionId, userMessage: 'x', onChunk: () => {}, onBrief: b => briefs.push(b) });
+    expect(r.ok).toBe(false);
+    expect(s.brief.projectName).toBeNull();
+    expect(s.pendingEdits).toEqual(['summary → "user text"']);
+    expect(briefs[briefs.length - 1].projectName).toBeNull();
+  });
+
   it('returns an error for unknown sessions', async () => {
     const r = await runTurn({ sessionId: 'nope', userMessage: 'x', onChunk: () => {}, onBrief: () => {} });
     expect(r.ok).toBe(false);

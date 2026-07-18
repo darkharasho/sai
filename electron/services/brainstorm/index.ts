@@ -47,6 +47,7 @@ export function __resetSessions(): void {
 // Stateless transcript replay (same rationale as the old CLI flow: no reliance
 // on cross-process session resume). Pending UI edits are drained into the
 // prompt so the model builds on them instead of reverting them.
+// NOTE: NOT idempotent — drains session.pendingEdits as a side effect.
 export function composeTurnPrompt(session: BrainstormSession, userMessage: string): string {
   const edits = session.pendingEdits.splice(0);
   if (session.transcript.length === 0 && edits.length === 0) return userMessage;
@@ -99,6 +100,10 @@ export async function runTurn(args: RunTurnArgs): Promise<RunTurnResult> {
     setBrief: (b) => { session.brief = b; args.onBrief(b); },
   });
 
+  // Capture state before draining in composeTurnPrompt.
+  const drainedEdits = session.pendingEdits.slice();
+  const briefSnapshot = session.brief;
+
   const prompt = composeTurnPrompt(session, args.userMessage);
   const options = {
     // Full-replacement system prompt: brainstorming is a conversation, not a
@@ -130,6 +135,13 @@ export async function runTurn(args: RunTurnArgs): Promise<RunTurnResult> {
     }
   } catch (e: any) {
     console.error('[brainstorm] SDK turn failed:', e);
+    // Restore pending edits that were drained by composeTurnPrompt.
+    session.pendingEdits.unshift(...drainedEdits);
+    // Restore brief if it was partially mutated during the stream.
+    if (session.brief !== briefSnapshot) {
+      session.brief = briefSnapshot;
+      args.onBrief(briefSnapshot);
+    }
     return { ok: false, error: e?.message || 'brainstorm turn failed' };
   }
 
