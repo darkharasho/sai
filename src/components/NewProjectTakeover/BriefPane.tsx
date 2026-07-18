@@ -1,5 +1,5 @@
 // src/components/NewProjectTakeover/BriefPane.tsx
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Sparkles, FolderPlus, ChevronRight, ChevronDown } from 'lucide-react';
 import type { ProjectBriefView } from './useBrainstormBrief';
 
@@ -73,13 +73,17 @@ function EditableText({ testId, value, placeholder, mono, multiline, commit }: E
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [err, setErr] = useState('');
+  const settled = useRef(false);
 
-  const start = () => { setDraft(value); setErr(''); setEditing(true); };
+  const start = () => { settled.current = false; setDraft(value); setErr(''); setEditing(true); };
   const doCommit = async () => {
+    if (settled.current) return;
+    settled.current = true;
     const r = await commit(draft);
     if (r.ok) setEditing(false);
-    else setErr(r.error ?? 'Invalid value');
+    else { settled.current = false; setErr(r.error ?? 'Invalid value'); }
   };
+  const cancel = () => { settled.current = true; setEditing(false); };
 
   if (!editing) {
     return (
@@ -104,7 +108,7 @@ function EditableText({ testId, value, placeholder, mono, multiline, commit }: E
     onBlur: doCommit,
     onKeyDown: (e: React.KeyboardEvent) => {
       if (e.key === 'Enter' && !multiline) { e.preventDefault(); void doCommit(); }
-      if (e.key === 'Escape') setEditing(false);
+      if (e.key === 'Escape') cancel();
     },
     style: {
       ...cardBase,
@@ -141,14 +145,18 @@ function EditableList({ testId, items, placeholder, dashed, commit }: EditableLi
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [err, setErr] = useState('');
+  const settled = useRef(false);
 
-  const start = () => { setDraft(items.join('\n')); setErr(''); setEditing(true); };
+  const start = () => { settled.current = false; setDraft(items.join('\n')); setErr(''); setEditing(true); };
   const doCommit = async () => {
+    if (settled.current) return;
+    settled.current = true;
     const lines = draft.split('\n').filter(Boolean);
     const r = await commit(lines);
     if (r.ok) setEditing(false);
-    else setErr(r.error ?? 'Invalid value');
+    else { settled.current = false; setErr(r.error ?? 'Invalid value'); }
   };
+  const cancel = () => { settled.current = true; setEditing(false); };
 
   if (!editing) {
     return (
@@ -179,7 +187,7 @@ function EditableList({ testId, items, placeholder, dashed, commit }: EditableLi
         onChange={e => setDraft(e.target.value)}
         onBlur={doCommit}
         onKeyDown={e => {
-          if (e.key === 'Escape') setEditing(false);
+          if (e.key === 'Escape') cancel();
         }}
         style={{
           ...cardBase,

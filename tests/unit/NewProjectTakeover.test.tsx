@@ -75,4 +75,27 @@ describe('BriefPane', () => {
     expect(screen.getByDisplayValue('/tmp/projects')).toBeInTheDocument();
     expect(screen.getByLabelText('CLAUDE.md')).toBeChecked();
   });
+
+  it('does not double-commit when blur follows Enter', async () => {
+    const props = baseProps();
+    render(<BriefPane {...props} />);
+    fireEvent.click(screen.getByTestId('brief-name'));
+    const input = screen.getByDisplayValue('toy');
+    fireEvent.change(input, { target: { value: 'toy-two' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.blur(input);
+    await waitFor(() => expect(props.onEditBrief).toHaveBeenCalledTimes(1));
+  });
+
+  it('does not commit on blur after Escape cancels', async () => {
+    const props = baseProps();
+    render(<BriefPane {...props} />);
+    fireEvent.click(screen.getByTestId('brief-name'));
+    const input = screen.getByDisplayValue('toy');
+    fireEvent.change(input, { target: { value: 'toy-two' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+    fireEvent.blur(input);
+    await new Promise(r => setTimeout(r, 0));
+    expect(props.onEditBrief).not.toHaveBeenCalled();
+  });
 });
