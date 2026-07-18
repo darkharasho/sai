@@ -92,3 +92,38 @@ describe('RenderRegion wrapper background sanitization', () => {
     expect(region.style.background).toContain('rgb(10, 12, 14)');
   });
 });
+
+describe('RenderRegion auto-height via sizer', () => {
+  const mountRegion = (overrides: Record<string, unknown> = {}) => {
+    const { container } = render(<RenderRegion entry={htmlEntry(overrides)} />);
+    const iframe = container.querySelector('iframe')!;
+    return {
+      iframe,
+      postSize: (size: { height?: number; width?: number }) => postSize(iframe, size),
+    };
+  };
+
+  it('seeds the iframe height from entry.height', () => {
+    const { iframe } = mountRegion({ height: 800 });
+    expect(iframe.style.height).toBe('800px');
+  });
+
+  it('defaults the iframe height to 480 when entry.height is absent', () => {
+    const { iframe } = mountRegion({});
+    expect(iframe.style.height).toBe('480px');
+  });
+
+  it('grows past the old 2000 cap up to 4000', async () => {
+    const { iframe, postSize } = mountRegion({});
+    await postSize({ height: 3200 });
+    expect(iframe.style.height).toBe('3200px');
+    await postSize({ height: 9000 });
+    expect(iframe.style.height).toBe('4000px');
+  });
+
+  it('does not shrink when a smaller height is reported', async () => {
+    const { iframe, postSize } = mountRegion({ height: 800 });
+    await postSize({ height: 600 });
+    expect(iframe.style.height).toBe('800px');
+  });
+});
