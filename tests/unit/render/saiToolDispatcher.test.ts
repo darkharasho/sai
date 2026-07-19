@@ -145,4 +145,22 @@ describe('dispatchSaiRenderTool', () => {
     dispatchSaiRenderTool('render_theme', { vars: { '--a': '1' }, components: ['WorkspaceSquircle'], props: { state: 'busy-done' } }, 'rid-thp');
     expect((renderStore.get('rid-thp')?.payload as { props?: unknown }).props).toEqual({ state: 'busy-done' });
   });
+
+  it('stores a positive height on the entry for inline html', () => {
+    dispatchSaiRenderTool('render_html', { html: '<p>hi</p>', height: 800 }, 'rid-h1');
+    expect(renderStore.get('rid-h1')?.height).toBe(800);
+  });
+
+  it('leaves entry.height undefined when absent or invalid', () => {
+    dispatchSaiRenderTool('render_html', { html: '<p>hi</p>' }, 'rid-h2');
+    expect(renderStore.get('rid-h2')?.height).toBeUndefined();
+    dispatchSaiRenderTool('render_html', { html: '<p>hi</p>', height: -5 }, 'rid-h3');
+    expect(renderStore.get('rid-h3')?.height).toBeUndefined();
+  });
+
+  it('file-backed renders keep height in the payload as before', () => {
+    dispatchSaiRenderTool('render_html', { path: 'index.html', cwd: '/x', height: 700 }, 'rid-h4');
+    const e = renderStore.get('rid-h4');
+    expect((e?.payload as any).height).toBe(700);
+  });
 });

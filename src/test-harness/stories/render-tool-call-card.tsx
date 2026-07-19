@@ -3,9 +3,25 @@ import { RenderToolCallCard } from '../../components/Chat/RenderToolCallCard';
 import { registerPendingForm, type FormResult } from '../../render/formBridge';
 import type { ToolCall } from '../../types';
 
-type Kind = 'html' | 'chart' | 'diff' | 'mermaid' | 'theme' | 'form' | 'confirm' | 'choose';
+type Kind = 'html' | 'chart' | 'diff' | 'mermaid' | 'theme' | 'form' | 'confirm' | 'choose' | 'tall-html' | 'vh-html';
 
 function makeTc(width: number, kind: Kind): ToolCall {
+  if (kind === 'tall-html') {
+    return {
+      id: `tc-tall-html-${width}`,
+      type: 'mcp',
+      name: 'mcp__swarm__sai_render_html',
+      input: JSON.stringify({ title: 'Tall Mock', width, html: '<style>body{margin:0}</style><div style="height:3000px;background:#0a0b0f;color:#fff">tall</div>' }),
+    };
+  }
+  if (kind === 'vh-html') {
+    return {
+      id: `tc-vh-html-${width}`,
+      type: 'mcp',
+      name: 'mcp__swarm__sai_render_html',
+      input: JSON.stringify({ title: 'VH Mock', width, height: 800, html: '<style>body{margin:0}</style><div style="height:100vh;background:#0a0b0f;color:#fff">full</div>' }),
+    };
+  }
   if (kind === 'choose') {
     return {
       id: `tc-choose-${width}`,
@@ -127,7 +143,7 @@ export const renderToolCallCardStory = {
     ),
   parseProps: (params: URLSearchParams) => {
     const k = params.get('kind');
-    const allowed = k === 'chart' || k === 'diff' || k === 'mermaid' || k === 'theme' || k === 'form' || k === 'confirm' || k === 'choose';
+    const allowed = k === 'chart' || k === 'diff' || k === 'mermaid' || k === 'theme' || k === 'form' || k === 'confirm' || k === 'choose' || k === 'tall-html' || k === 'vh-html';
     return {
       w: Number(params.get('w')) || 320,
       kind: (allowed ? k : 'html') as Kind,

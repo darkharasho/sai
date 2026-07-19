@@ -6,7 +6,7 @@ import { getRegisteredComponent } from '../../render/componentRegistry';
 import { renderMermaidToSvg } from '../../render/renderMermaid';
 import { ThemedComponents } from '../../render/ThemedComponents';
 import { submitForm } from '../../render/formBridge';
-import { nextRenderWidth, sanitizeCssColor, resolveThemedSurface } from '../../render/renderSizing';
+import { nextRenderWidth, sanitizeCssColor, resolveThemedSurface, createHeightSizer, nextRenderHeight } from '../../render/renderSizing';
 
 // Policy enforced inside the html-mock iframe (via a <meta> in srcDoc).
 // `script-src 'unsafe-inline'` is intentional: mocks may include JS (a product
@@ -131,7 +131,10 @@ function RenderedHtml({ entry, enableSubmit, onNaturalWidth }: {
   const userHtml = String(payload.html ?? '');
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const submittedRef = useRef(false);
-  const [height, setHeight] = useState(300);
+  const initialViewport = entry.height && entry.height > 0
+    ? entry.height
+    : entry.kind === 'form' ? 120 : 480;
+  const [sizer, setSizer] = useState(() => createHeightSizer(initialViewport));
   // Privileged same-origin access is opt-in (entry.appAccess) AND must be
   // approved here before we hand the render the app's origin. Until granted the
   // iframe stays isolated (allow-scripts only); normal renders never see this.
@@ -160,7 +163,7 @@ function RenderedHtml({ entry, enableSubmit, onNaturalWidth }: {
       if (!data) return;
       if (data.__saiRender) {
         const h = Number(data.height);
-        if (Number.isFinite(h) && h > 0) setHeight(Math.min(2000, Math.max(40, Math.ceil(h))));
+        if (Number.isFinite(h) && h > 0) setSizer((s) => nextRenderHeight(s, h));
         const wRep = Number((data as { width?: number }).width);
         if (Number.isFinite(wRep) && wRep > 0) onNaturalWidth?.(wRep);
       } else if (enableSubmit && data.__saiFormSubmit && !submittedRef.current) {
@@ -201,7 +204,7 @@ function RenderedHtml({ entry, enableSubmit, onNaturalWidth }: {
         ref={iframeRef}
         title={entry.title || 'render'}
         sandbox={sandbox}
-        style={{ width: '100%', height, border: 0, display: 'block' }}
+        style={{ width: '100%', height: sizer.height, border: 0, display: 'block' }}
         srcDoc={doc}
       />
     </>

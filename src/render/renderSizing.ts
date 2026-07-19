@@ -30,3 +30,34 @@ export function resolveThemedSurface(): string {
     return '#1a1a1a';
   }
 }
+
+export const MAX_RENDER_HEIGHT = 4000;
+
+export interface HeightSizerState {
+  height: number;
+  min: number;
+  lastIncrement: number;
+  repeatCount: number;
+  frozen: boolean;
+}
+
+export function createHeightSizer(min: number): HeightSizerState {
+  const floor = Math.min(Math.max(Math.ceil(min), 40), MAX_RENDER_HEIGHT);
+  return { height: floor, min: floor, lastIncrement: 0, repeatCount: 0, frozen: false };
+}
+
+/** Grow-only height for render regions, with a divergence guard: `100vh` plus
+ *  fixed-height extras makes each resize raise scrollHeight by the same delta
+ *  forever — three consecutive equal positive increments freeze the sizer at
+ *  the height already granted. Never shrinks. */
+export function nextRenderHeight(state: HeightSizerState, reported: number): HeightSizerState {
+  if (state.frozen || !Number.isFinite(reported) || reported <= 0) return state;
+  const target = Math.min(Math.max(state.height, state.min, Math.ceil(reported)), MAX_RENDER_HEIGHT);
+  const increment = target - state.height;
+  if (increment <= 0) return state;
+  const repeatCount = increment === state.lastIncrement ? state.repeatCount + 1 : 1;
+  if (repeatCount >= 3) {
+    return { ...state, frozen: true };
+  }
+  return { ...state, height: target, lastIncrement: increment, repeatCount };
+}

@@ -12,6 +12,7 @@ const DEFAULT_WIDTH = 360;
 export function dispatchSaiRenderTool(name: string, input: any, renderId: string): DispatchResult {
   const inp = input ?? {};
   const width = typeof inp.width === 'number' && inp.width > 0 ? inp.width : DEFAULT_WIDTH;
+  const height = typeof inp.height === 'number' && inp.height > 0 ? inp.height : undefined;
   const background = typeof inp.background === 'string' ? inp.background : undefined;
   const title = typeof inp.title === 'string' ? inp.title : '';
 
@@ -20,7 +21,6 @@ export function dispatchSaiRenderTool(name: string, input: any, renderId: string
       const htmlPath = typeof inp.path === 'string' ? inp.path : '';
       const baseDir = typeof inp.baseDir === 'string' ? inp.baseDir : '';
       const html = typeof inp.html === 'string' ? inp.html : '';
-      const height = typeof inp.height === 'number' && inp.height > 0 ? inp.height : undefined;
       const cwd = typeof inp.cwd === 'string' ? inp.cwd : '';
       if (htmlPath || baseDir) {
         renderStore.upsert({
@@ -29,6 +29,7 @@ export function dispatchSaiRenderTool(name: string, input: any, renderId: string
           payload: { mode: 'file', cwd, path: htmlPath || undefined, html: html || undefined, baseDir: baseDir || undefined, height },
           title: title || (htmlPath || 'Site'),
           width,
+          height,
           background,
           status: 'rendering',
         });
@@ -37,7 +38,7 @@ export function dispatchSaiRenderTool(name: string, input: any, renderId: string
       if (html.length === 0) {
         return { ok: false, error: 'render_html requires a non-empty "html" string' };
       }
-      renderStore.upsert({ renderId, kind: 'html', payload: { html }, title, width, background, status: 'rendering', appAccess: inp.appAccess === true });
+      renderStore.upsert({ renderId, kind: 'html', payload: { html }, title, width, height, background, status: 'rendering', appAccess: inp.appAccess === true });
       return { ok: true };
     }
     case 'render_component': {
@@ -48,7 +49,7 @@ export function dispatchSaiRenderTool(name: string, input: any, renderId: string
         return { ok: false, error: `unknown component: ${inp.component}. Available: ${registeredComponentKeys().join(', ')}` };
       }
       const props = inp.props && typeof inp.props === 'object' ? inp.props : {};
-      renderStore.upsert({ renderId, kind: 'component', payload: { component: inp.component, props }, title, width, background, status: 'rendering' });
+      renderStore.upsert({ renderId, kind: 'component', payload: { component: inp.component, props }, title, width, height, background, status: 'rendering' });
       return { ok: true };
     }
     case 'render_chart': {
@@ -58,7 +59,7 @@ export function dispatchSaiRenderTool(name: string, input: any, renderId: string
       } catch (e) {
         return { ok: false, error: e instanceof Error ? e.message : 'invalid chart input' };
       }
-      renderStore.upsert({ renderId, kind: 'html', payload: { html }, title: title || 'Chart', width, background, status: 'rendering' });
+      renderStore.upsert({ renderId, kind: 'html', payload: { html }, title: title || 'Chart', width, height, background, status: 'rendering' });
       return { ok: true };
     }
     case 'render_diff': {
@@ -72,14 +73,14 @@ export function dispatchSaiRenderTool(name: string, input: any, renderId: string
       } catch (e) {
         return { ok: false, error: e instanceof Error ? e.message : 'invalid diff input' };
       }
-      renderStore.upsert({ renderId, kind: 'html', payload: { html }, title: title || 'Diff', width, background, status: 'rendering' });
+      renderStore.upsert({ renderId, kind: 'html', payload: { html }, title: title || 'Diff', width, height, background, status: 'rendering' });
       return { ok: true };
     }
     case 'render_mermaid': {
       if (typeof inp.diagram !== 'string' || inp.diagram.length === 0) {
         return { ok: false, error: 'render_mermaid requires a non-empty "diagram" string' };
       }
-      renderStore.upsert({ renderId, kind: 'mermaid', payload: { diagram: inp.diagram }, title: title || 'Diagram', width, background, status: 'rendering' });
+      renderStore.upsert({ renderId, kind: 'mermaid', payload: { diagram: inp.diagram }, title: title || 'Diagram', width, height, background, status: 'rendering' });
       return { ok: true };
     }
     case 'render_theme': {
@@ -91,7 +92,7 @@ export function dispatchSaiRenderTool(name: string, input: any, renderId: string
         : registeredComponentKeys();
       const payload: Record<string, unknown> = { components, vars: inp.vars };
       if (inp.props && typeof inp.props === 'object' && !Array.isArray(inp.props)) payload.props = inp.props;
-      renderStore.upsert({ renderId, kind: 'theme', payload, title: title || 'Theme', width, background, status: 'rendering' });
+      renderStore.upsert({ renderId, kind: 'theme', payload, title: title || 'Theme', width, height, background, status: 'rendering' });
       return { ok: true };
     }
     default:

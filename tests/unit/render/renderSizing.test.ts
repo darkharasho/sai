@@ -58,3 +58,65 @@ describe('resolveThemedSurface', () => {
     }
   });
 });
+
+import { createHeightSizer, nextRenderHeight, MAX_RENDER_HEIGHT } from '../../../src/render/renderSizing';
+
+describe('nextRenderHeight', () => {
+  it('starts at the minimum viewport', () => {
+    expect(createHeightSizer(480).height).toBe(480);
+  });
+  it('grows to a larger report', () => {
+    const s = nextRenderHeight(createHeightSizer(480), 900);
+    expect(s.height).toBe(900);
+    expect(s.frozen).toBe(false);
+  });
+  it('never shrinks on a smaller report', () => {
+    const grown = nextRenderHeight(createHeightSizer(480), 900);
+    expect(nextRenderHeight(grown, 500).height).toBe(900);
+  });
+  it('never goes below the minimum', () => {
+    expect(nextRenderHeight(createHeightSizer(480), 100).height).toBe(480);
+  });
+  it('caps at MAX_RENDER_HEIGHT', () => {
+    expect(nextRenderHeight(createHeightSizer(480), 99999).height).toBe(MAX_RENDER_HEIGHT);
+  });
+  it('ignores non-finite and non-positive reports', () => {
+    const s0 = createHeightSizer(480);
+    expect(nextRenderHeight(s0, NaN)).toEqual(s0);
+    expect(nextRenderHeight(s0, 0)).toEqual(s0);
+    expect(nextRenderHeight(s0, -10)).toEqual(s0);
+  });
+  it('rounds fractional reports up', () => {
+    expect(nextRenderHeight(createHeightSizer(480), 500.2).height).toBe(501);
+  });
+  it('freezes after three consecutive equal positive increments (vh feedback loop)', () => {
+    let s = createHeightSizer(480);
+    s = nextRenderHeight(s, 530);   // +50 applied
+    expect(s.height).toBe(530);
+    s = nextRenderHeight(s, 580);   // +50 applied (2nd equal)
+    expect(s.height).toBe(580);
+    s = nextRenderHeight(s, 630);   // +50 would be 3rd equal → frozen, NOT applied
+    expect(s.height).toBe(580);
+    expect(s.frozen).toBe(true);
+    s = nextRenderHeight(s, 4000);  // frozen: ignored
+    expect(s.height).toBe(580);
+  });
+  it('does not freeze on unequal increments', () => {
+    let s = createHeightSizer(480);
+    s = nextRenderHeight(s, 530);   // +50
+    s = nextRenderHeight(s, 630);   // +100
+    s = nextRenderHeight(s, 3000);  // +2370
+    expect(s.height).toBe(3000);
+    expect(s.frozen).toBe(false);
+  });
+  it('no-growth reports do not advance the repeat counter', () => {
+    let s = createHeightSizer(480);
+    s = nextRenderHeight(s, 530);   // +50
+    s = nextRenderHeight(s, 530);   // no growth
+    s = nextRenderHeight(s, 530);   // no growth
+    s = nextRenderHeight(s, 580);   // +50 (2nd equal)
+    s = nextRenderHeight(s, 630);   // 3rd equal → frozen at 580
+    expect(s.height).toBe(580);
+    expect(s.frozen).toBe(true);
+  });
+});

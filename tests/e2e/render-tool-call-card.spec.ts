@@ -95,3 +95,38 @@ test('choose card returns the picked option string', async ({ harness }) => {
   await expect(el.locator('[data-testid="form-result"]')).toContainText('"value":"Green"');
   await expect(el.locator('[data-testid="form-result"]')).toContainText('"ok":true');
 });
+
+test('tall html render grows past the old 2000px cap', async ({ harness }) => {
+  const el = await harness.render('render-tool-call-card', { kind: 'tall-html', w: '420' });
+  const card = el.locator('[data-testid="render-tool-call-card"]');
+  await expect(card).toBeVisible();
+
+  const iframe = card.locator('iframe');
+  // The iframe must grow to the full 3000px content height — well past the old 2000px cap.
+  await expect.poll(
+    () => iframe.evaluate((el) => (el as HTMLIFrameElement).style.height),
+    { timeout: 6000 },
+  ).toBe('3000px');
+  // Confirm the old cap is not in effect.
+  const h = await iframe.evaluate((el) => (el as HTMLIFrameElement).style.height);
+  expect(h).not.toBe('2000px');
+});
+
+test('100vh render honors the requested viewport height and stays stable', async ({ harness }) => {
+  const el = await harness.render('render-tool-call-card', { kind: 'vh-html', w: '420' });
+  const card = el.locator('[data-testid="render-tool-call-card"]');
+  await expect(card).toBeVisible();
+
+  const iframe = card.locator('iframe');
+  // With height: 800 in the tool input the viewport is 800px tall, so 100vh = 800px.
+  // The iframe starts at 800px and SIZE_REPORTER reports 800px — no growth beyond that.
+  await expect.poll(
+    () => iframe.evaluate((el) => (el as HTMLIFrameElement).style.height),
+    { timeout: 6000 },
+  ).toBe('800px');
+
+  // Divergence guard: assert stable — same value ~500ms later (no runaway growth).
+  await new Promise((r) => setTimeout(r, 500));
+  const h = await iframe.evaluate((el) => (el as HTMLIFrameElement).style.height);
+  expect(h).toBe('800px');
+});

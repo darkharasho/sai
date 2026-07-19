@@ -8,6 +8,12 @@ const htmlEntry = (over: Record<string, unknown> = {}) => ({
   ...over,
 } as any);
 
+const formEntry = (over: Record<string, unknown> = {}) => ({
+  renderId: 'r2', kind: 'form', status: 'ready', width: 360,
+  payload: { html: '<form><button>Ok</button></form>' },
+  ...over,
+} as any);
+
 function postSize(iframe: HTMLIFrameElement, size: { height?: number; width?: number }) {
   act(() => {
     window.dispatchEvent(new MessageEvent('message', {
@@ -90,5 +96,67 @@ describe('RenderRegion wrapper background sanitization', () => {
     const { container } = render(<RenderRegion entry={htmlEntry({ background: '#0a0c0e' })} />);
     const region = container.querySelector('[data-render-region]') as HTMLElement;
     expect(region.style.background).toContain('rgb(10, 12, 14)');
+  });
+});
+
+describe('RenderRegion auto-height via sizer', () => {
+  const mountRegion = (overrides: Record<string, unknown> = {}) => {
+    const { container } = render(<RenderRegion entry={htmlEntry(overrides)} />);
+    const iframe = container.querySelector('iframe')!;
+    return {
+      iframe,
+      postSize: (size: { height?: number; width?: number }) => postSize(iframe, size),
+    };
+  };
+
+  it('seeds the iframe height from entry.height', () => {
+    const { iframe } = mountRegion({ height: 800 });
+    expect(iframe.style.height).toBe('800px');
+  });
+
+  it('defaults the iframe height to 480 when entry.height is absent', () => {
+    const { iframe } = mountRegion({});
+    expect(iframe.style.height).toBe('480px');
+  });
+
+  it('grows past the old 2000 cap up to 4000', async () => {
+    const { iframe, postSize } = mountRegion({});
+    await postSize({ height: 3200 });
+    expect(iframe.style.height).toBe('3200px');
+    await postSize({ height: 9000 });
+    expect(iframe.style.height).toBe('4000px');
+  });
+
+  it('does not shrink when a smaller height is reported', async () => {
+    const { iframe, postSize } = mountRegion({ height: 800 });
+    await postSize({ height: 600 });
+    expect(iframe.style.height).toBe('800px');
+  });
+});
+
+describe('RenderRegion form-kind height floor', () => {
+  const mountForm = (overrides: Record<string, unknown> = {}) => {
+    const { container } = render(<RenderRegion entry={formEntry(overrides)} />);
+    const iframe = container.querySelector('iframe')!;
+    return {
+      iframe,
+      postSize: (size: { height?: number; width?: number }) => postSize(iframe, size),
+    };
+  };
+
+  it('defaults the iframe height to 120 for form-kind when entry.height is absent', () => {
+    const { iframe } = mountForm({});
+    expect(iframe.style.height).toBe('120px');
+  });
+
+  it('grows to the reported height after a size message', async () => {
+    const { iframe, postSize } = mountForm({});
+    await postSize({ height: 300 });
+    expect(iframe.style.height).toBe('300px');
+  });
+
+  it('uses an explicit entry.height over the 120 floor for form-kind', () => {
+    const { iframe } = mountForm({ height: 500 });
+    expect(iframe.style.height).toBe('500px');
   });
 });
