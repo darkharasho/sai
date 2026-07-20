@@ -32,6 +32,10 @@ contextBridge.exposeInMainWorld('sai', {
   claudeReconcileScope: (projectPath: string, scope?: string) => ipcRenderer.send('claude:reconcileScope', projectPath, scope),
   claudeApprove: (projectPath: string, toolUseId: string, approved: boolean, modifiedCommand?: string, scope?: string) =>
     ipcRenderer.invoke('claude:approve', projectPath, toolUseId, approved, modifiedCommand, scope),
+  claudeSudoReply: (promptId: string, password: string | null) =>
+    ipcRenderer.invoke('claude:sudoReply', promptId, password),
+  claudeSudoLock: () => ipcRenderer.invoke('claude:sudoLock'),
+  claudeSudoState: () => ipcRenderer.invoke('claude:sudoState'),
   claudeAnswerQuestion: (projectPath: string, toolUseId: string, answers: Record<string, string | string[]>, scope?: string) =>
     ipcRenderer.invoke('claude:answer-question', projectPath, toolUseId, answers, scope),
   claudeAnswerPlanReview: (projectPath: string, toolUseId: string, approved: boolean, scope?: string) =>

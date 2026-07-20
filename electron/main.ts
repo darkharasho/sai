@@ -65,7 +65,8 @@ async function _resolveTailnetEndpointWithEnv() {
   });
 }
 import { registerTerminalHandlers, destroyAllTerminals } from './services/pty';
-import { registerClaudeHandlers, destroyClaude, setRemoteCeiling, setRemoteBus, setSubprocessMemoryCapMB } from './services/claude';
+import { registerClaudeHandlers, destroyClaude, setRemoteCeiling, setRemoteBus, setSubprocessMemoryCapMB, emitChatMessage } from './services/claude';
+import { initSudoService, lockSudo } from './services/sudo';
 import { getClaudeBackend, getClaudeBackendSetting } from './services/claudeBackend';
 import { RendererProxy } from './services/remote/renderer-proxy';
 import { registerGitHandlers } from './services/git';
@@ -492,6 +493,7 @@ function createWindow() {
 
   registerTerminalHandlers(mainWindow);
   registerClaudeHandlers(mainWindow);
+  initSudoService(emitChatMessage);
   registerJiraHandlers();
   registerLinearHandlers();
 
@@ -1285,6 +1287,8 @@ app.on('before-quit', (e) => {
   try { swarmMcpHost.stop(); } catch { /* noop */ }
   // Config tmp files carry the swarm-host auth secret — don't leave them behind.
   try { cleanupSwarmMcpConfigs(); } catch { /* noop */ }
+  // The sudo pw file holds the user's password — never leave it behind.
+  try { lockSudo(); } catch { /* noop */ }
   // Synchronously release the remote bridge port before Electron exits.
   if (remote && !_quitInProgress) {
     _quitInProgress = true;

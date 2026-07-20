@@ -26,6 +26,7 @@ import { getClaudeBackend, getClaudeBackendSetting } from './claudeBackend';
 export { touchActivity, getOrCreate as getOrCreateWorkspace } from './workspace';
 import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASKS_NUDGE } from './chatNudges';
 import { classifyTurnEnd, isSchedulingTool, isBackgroundLaunch, isAsyncLaunchResult, WAKEUP_GRACE_MS, type WaitMeta } from './waitClassifier';
+import { getSudoAskpassHelperPath, getSudoBroker, getSudoSession, lockSudo } from './sudo';
 export { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE };
 
 const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
@@ -45,7 +46,13 @@ export function setSubprocessMemoryCapMB(n: number): void {
   subprocessMemoryCapMB = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 export function spawnEnv(): NodeJS.ProcessEnv {
-  return withNodeMemoryCap(enrichedEnv(), subprocessMemoryCapMB);
+  const env = withNodeMemoryCap(enrichedEnv(), subprocessMemoryCapMB);
+  // Stable-path sudo askpass: tty-less `sudo` in agent commands reads the
+  // credential file (present only while unlocked) instead of hanging. Harmless
+  // for tty spawns (terminals) — with a tty, sudo prompts there and ignores it.
+  const sudoAskpass = getSudoAskpassHelperPath();
+  if (sudoAskpass) env.SUDO_ASKPASS = sudoAskpass;
+  return env;
 }
 
 export function readCachedSlashCommands(): string[] {
@@ -1560,6 +1567,17 @@ export function registerClaudeHandlers(win: BrowserWindow) {
   ipcMain.handle('claude:approve', (_event, projectPath: string, toolUseId: string, approved: boolean, modifiedCommand?: string, scope?: string) =>
     getClaudeBackend().approve({ projectPath, toolUseId, approved, modifiedCommand, scope })
   );
+
+  // claude:sudoReply / claude:sudoLock / claude:sudoState — sudo elevation IPC
+  ipcMain.handle('claude:sudoReply', (_event, promptId: string, password: string | null) => {
+    getSudoBroker()?.resolveSudo(promptId, typeof password === 'string' ? password : null);
+  });
+  ipcMain.handle('claude:sudoLock', () => {
+    lockSudo();
+  });
+  ipcMain.handle('claude:sudoState', () => ({
+    unlocked: getSudoSession()?.isUnlocked() ?? false,
+  }));
 
   // claude:answer-question — user answered an AskUserQuestion tool call in the UI.
   // We send the user's answers back to the CLI as a follow-up user message so the

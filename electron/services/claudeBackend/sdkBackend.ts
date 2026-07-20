@@ -38,6 +38,7 @@ import { parseUserMcpConfigPaths } from './userMcpConfig';
 import { loadExternalMcpForSdk } from './externalMcp';
 import { recordMcpRuntimeStatus, getMcpRuntimeStatus } from './mcpRuntimeStatus';
 import { buildSdkOptions } from './sdkOptions';
+import { buildSudoPreToolUseHook, getSudoBroker } from '../sudo';
 import { buildOrchestratorSystemPrompt, resolveOrchestratorPromptContext, type OrchestratorPromptContext } from '../../../src/lib/orchestratorSystemPrompt';
 import { mapSdkMessage, type MapperState } from './sdkMessageMap';
 import { sweepIdleScopes, IDLE_SCOPE_MS, SWEEP_INTERVAL_MS } from '../idleScopeSweep';
@@ -905,6 +906,17 @@ export class SdkBackend implements ClaudeBackend {
       return {};
     };
 
+    // Sudo gate: chat/task only (orchestrator keeps its restricted toolset and
+    // stays out of scope). Null broker = service disabled (Windows/init failure).
+    const sudoBroker = getSudoBroker();
+    const sudoHook = kind !== 'orchestrator' && sudoBroker
+      ? buildSudoPreToolUseHook({
+          projectPath,
+          scope: effectiveScope,
+          ensureUnlocked: (a) => sudoBroker.ensureUnlocked(a),
+        })
+      : undefined;
+
     const options = buildSdkOptions({
       kind,
       permMode: queryArgs.permMode,
@@ -933,6 +945,7 @@ export class SdkBackend implements ClaudeBackend {
       promptSuggestions: kind === 'chat',
       agentProgressSummaries: true,
       stopHook,
+      preToolUseHook: sudoHook,
     });
 
     // Build an async-iterable input channel (push-based queue)
