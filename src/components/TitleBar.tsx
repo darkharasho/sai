@@ -7,7 +7,7 @@ import GitHubCloneModal from './GitHubCloneModal';
 import SettingsModal from './SettingsModal';
 import { CreateMetaWorkspaceModal } from './MetaWorkspace/CreateMetaWorkspaceModal';
 import { ManageMetaWorkspaceModal } from './MetaWorkspace/ManageMetaWorkspaceModal';
-import { LogOut, Settings, ChevronDown, FolderOpen, FolderPlus, Layers, Pencil, Search, X } from 'lucide-react';
+import { LogOut, Settings, ChevronDown, FolderOpen, FolderPlus, Layers, Pencil, Search, X, LockOpen } from 'lucide-react';
 import { basename } from '../utils/pathUtils';
 import SaiLogo from './SaiLogo';
 import { DOT_MASK_URL } from '../lib/assets';
@@ -63,6 +63,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
   const [showSettings, setShowSettings] = useState(false);
   const [showClone, setShowClone] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
+  const [sudoUnlocked, setSudoUnlocked] = useState(false);
   const [framelessRounded, setFramelessRounded] = useState(false);
   const [maximized, setMaximized] = useState(false);
   const ghDropRef = useRef<HTMLDivElement>(null);
@@ -79,6 +80,14 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
     const unsubSync = window.sai.githubOnSyncStatus((data: { status: string }) => {
       setSyncStatus(data.status as any);
     });
+    // Seed + follow the app-wide sudo credential state.
+    let sudoMounted = true;
+    void window.sai.claudeSudoState?.().then((s: { unlocked?: boolean } | undefined) => {
+      if (sudoMounted && s) setSudoUnlocked(!!s.unlocked);
+    });
+    const unsubSudo = window.sai.claudeOnMessage((msg: any) => {
+      if (msg?.type === 'sudo-state') setSudoUnlocked(!!msg.unlocked);
+    });
     window.sai.windowIsFramelessRounded?.().then((v: boolean) => setFramelessRounded(!!v));
     window.sai.windowIsMaximized?.().then((v: boolean) => {
       setMaximized(!!v);
@@ -88,7 +97,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
       setMaximized(m);
       document.documentElement.classList.toggle('window-maximized', m);
     });
-    return () => { unsubSync(); unsubMax?.(); };
+    return () => { unsubSync(); unsubMax?.(); sudoMounted = false; unsubSudo(); };
   }, []);
 
   const projectName = activeMetaRuntime ? activeMetaRuntime.meta.name : (projectPath ? basename(projectPath) : 'No Project');
@@ -634,6 +643,15 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
       </div>
       <UpdateNotification />
       <div className="titlebar-right">
+        {sudoUnlocked && (
+          <button
+            className="titlebar-sudo-chip"
+            title="sudo unlocked — click to lock"
+            onClick={() => void window.sai.claudeSudoLock()}
+          >
+            <LockOpen size={11} /> sudo
+          </button>
+        )}
         {version && (
           version === 'DEV'
             ? <span className="titlebar-dev-pill">DEV</span>
@@ -834,6 +852,21 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           -webkit-app-region: no-drag;
         }
         .titlebar-version:hover { color: var(--accent); }
+        .titlebar-sudo-chip {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          background: var(--surface-3);
+          color: var(--accent);
+          border: 1px solid var(--border-subtle);
+          border-radius: 999px;
+          padding: 2px 8px;
+          font-size: 11px;
+          font-weight: 600;
+          cursor: pointer;
+          -webkit-app-region: no-drag;
+        }
+        .titlebar-sudo-chip:hover { border-color: var(--accent); }
         .titlebar-dev-pill {
           font-size: 9px;
           font-weight: 700;
