@@ -30,6 +30,9 @@ export interface SdkOptionInputs {
    *  runtime's in-flight work ledger — which is the authoritative way to tell
    *  "session done" from "session paused waiting for background work". */
   stopHook?: HookCallback;
+  /** Sudo gate for Bash (chat/task kinds). Fires in every permission mode —
+   *  including bypass — unlike canUseTool, which pre-approved tools skip. */
+  preToolUseHook?: HookCallback;
 }
 
 const VALID_EFFORT = new Set<string>(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -70,6 +73,7 @@ export function buildSdkOptions(input: SdkOptionInputs): Options {
     promptSuggestions,
     agentProgressSummaries,
     stopHook,
+    preToolUseHook,
   } = input;
 
   const permissionMode: Options['permissionMode'] =
@@ -149,8 +153,15 @@ export function buildSdkOptions(input: SdkOptionInputs): Options {
     opts.plugins = plugins;
   }
 
+  const hooks: NonNullable<Options['hooks']> = {};
   if (stopHook) {
-    opts.hooks = { Stop: [{ hooks: [stopHook] }] };
+    hooks.Stop = [{ hooks: [stopHook] }];
+  }
+  if (preToolUseHook) {
+    hooks.PreToolUse = [{ matcher: 'Bash', hooks: [preToolUseHook] }];
+  }
+  if (Object.keys(hooks).length > 0) {
+    opts.hooks = hooks;
   }
 
   if (kind === 'orchestrator') {
