@@ -1578,6 +1578,11 @@ export function registerClaudeHandlers(win: BrowserWindow) {
   ipcMain.handle('claude:sudoState', () => ({
     unlocked: getSudoSession()?.isUnlocked() ?? false,
   }));
+  ipcMain.handle('claude:sudoPending', (_event, projectPath: string, scope: string) => {
+    const p = getSudoBroker()?.getPendingPrompt();
+    if (!p || p.projectPath !== projectPath || p.scope !== scope) return null;
+    return { promptId: p.promptId, toolUseId: p.toolUseId, command: p.command, error: p.error };
+  });
 
   // claude:answer-question — user answered an AskUserQuestion tool call in the UI.
   // We send the user's answers back to the CLI as a follow-up user message so the

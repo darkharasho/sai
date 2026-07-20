@@ -30,6 +30,7 @@ const MAX_ATTEMPTS = 3;
 export class SudoBroker {
   private readonly pending = new Map<string, (password: string | null) => void>();
   private inFlight: Promise<boolean> | null = null;
+  private current: { projectPath: string; scope: string; toolUseId: string; command: string; promptId: string; error?: string } | null = null;
 
   constructor(
     private readonly session: SessionLike,
@@ -47,6 +48,7 @@ export class SudoBroker {
     if (this.inFlight) return this.inFlight;
     const flow = this.promptLoop(args).finally(() => {
       this.inFlight = null;
+      this.current = null;
     });
     this.inFlight = flow;
     return flow;
@@ -58,6 +60,13 @@ export class SudoBroker {
     if (!resolver) return;
     this.pending.delete(promptId);
     resolver(password);
+  }
+
+  /** The prompt currently awaiting a renderer reply, for mount-time re-seeding
+   *  (a chat opened after its sudo-prompt event fired would otherwise never
+   *  see the card). Null when no prompt is outstanding. */
+  getPendingPrompt(): { projectPath: string; scope: string; toolUseId: string; command: string; promptId: string; error?: string } | null {
+    return this.current;
   }
 
   private async promptLoop(args: SudoPromptArgs): Promise<boolean> {
@@ -92,6 +101,15 @@ export class SudoBroker {
         clearTimeout(timer);
         resolve(password);
       });
+
+      this.current = {
+        projectPath: args.projectPath,
+        scope: args.scope,
+        toolUseId: args.toolUseId,
+        command: args.command,
+        promptId,
+        error,
+      };
 
       this.emit({
         type: 'sudo-prompt',

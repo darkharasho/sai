@@ -1354,6 +1354,16 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       }
     });
 
+    // A sudo prompt that fired while this chat was unmounted would otherwise
+    // be lost until its 5-minute timeout — re-seed it from the broker.
+    if (aiProvider === 'claude') {
+      void window.sai.claudeSudoPending?.(projectPath, claudeScope).then(
+        (p: { promptId: string; toolUseId: string; command: string; error?: string } | null) => {
+          if (p) setPendingSudoPrompt(p);
+        },
+      );
+    }
+
     // Drain frames App buffered while no listener was registered for this
     // scope (the select→subscribe mount gap). Reconciled by id so entries the
     // select-time merge already seeded are updated in place, not duplicated.

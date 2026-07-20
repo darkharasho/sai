@@ -100,3 +100,43 @@ describe('SudoBroker.ensureUnlocked', () => {
     expect(await p2).toBe(false);
   });
 });
+
+describe('SudoBroker.getPendingPrompt', () => {
+  it('is null initially, reflects the outstanding prompt while awaiting a reply, and clears once resolved', async () => {
+    const { broker, events } = makeBroker(fakeSession({ unlock: () => ({ ok: true }) }));
+    expect(broker.getPendingPrompt()).toBeNull();
+
+    const p = broker.ensureUnlocked(baseArgs);
+    await vi.waitFor(() => expect(events.some((e) => e.type === 'sudo-prompt')).toBe(true));
+    const evt = events.find((e) => e.type === 'sudo-prompt')!;
+    expect(broker.getPendingPrompt()).toMatchObject({ projectPath: '/proj', scope: 'scope-1', command: 'sudo apt update' });
+    expect(broker.getPendingPrompt()!.promptId).toBe(evt.promptId);
+
+    broker.resolveSudo(evt.promptId as string, null);
+    await p;
+    expect(broker.getPendingPrompt()).toBeNull();
+  });
+
+  it('overwrites with the second promptId and error on a wrong-password retry', async () => {
+    const { broker, events } = makeBroker(fakeSession({ unlock: () => ({ ok: false, error: 'Incorrect password' }) }));
+    const p = broker.ensureUnlocked(baseArgs);
+
+    await vi.waitFor(() => expect(events.filter((e) => e.type === 'sudo-prompt').length).toBe(1));
+    const firstEvt = events.filter((e) => e.type === 'sudo-prompt')[0]!;
+    broker.resolveSudo(firstEvt.promptId as string, 'wrong');
+
+    await vi.waitFor(() => expect(events.filter((e) => e.type === 'sudo-prompt').length).toBe(2));
+    const secondEvt = events.filter((e) => e.type === 'sudo-prompt')[1]!;
+    expect(broker.getPendingPrompt()!.promptId).toBe(secondEvt.promptId);
+    expect(broker.getPendingPrompt()!.promptId).not.toBe(firstEvt.promptId);
+    expect(broker.getPendingPrompt()!.error).toBe('Incorrect password');
+
+    // Drive the remaining attempt to completion so the flow settles cleanly.
+    broker.resolveSudo(secondEvt.promptId as string, 'wrong');
+    await vi.waitFor(() => expect(events.filter((e) => e.type === 'sudo-prompt').length).toBe(3));
+    const thirdEvt = events.filter((e) => e.type === 'sudo-prompt')[2]!;
+    broker.resolveSudo(thirdEvt.promptId as string, 'wrong');
+    expect(await p).toBe(false);
+    expect(broker.getPendingPrompt()).toBeNull();
+  });
+});

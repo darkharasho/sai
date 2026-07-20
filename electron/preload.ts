@@ -36,6 +36,8 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.invoke('claude:sudoReply', promptId, password),
   claudeSudoLock: () => ipcRenderer.invoke('claude:sudoLock'),
   claudeSudoState: () => ipcRenderer.invoke('claude:sudoState'),
+  claudeSudoPending: (projectPath: string, scope: string) =>
+    ipcRenderer.invoke('claude:sudoPending', projectPath, scope),
   claudeAnswerQuestion: (projectPath: string, toolUseId: string, answers: Record<string, string | string[]>, scope?: string) =>
     ipcRenderer.invoke('claude:answer-question', projectPath, toolUseId, answers, scope),
   claudeAnswerPlanReview: (projectPath: string, toolUseId: string, approved: boolean, scope?: string) =>
