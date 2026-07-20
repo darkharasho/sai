@@ -134,11 +134,20 @@ for initial mount.
 - Live smoke: ask a chat to run `sudo true`; verify one prompt, silent
   elevation afterward, indicator appears, manual lock re-prompts.
 
-## Accepted quirk
+## Accepted quirks / risks
 
 In a gated chat where a Bash command is not pre-approved, the password prompt
 (PreToolUse) fires before the approval prompt. Rare in practice (user's
 settings pre-approve Bash); reorder later if it stings.
+
+- **Credential disclosure by the agent itself:** while unlocked, agent-run
+  Bash executes as the user and can read `$SUDO_ASKPASS` / the 0600 pw file,
+  so a misbehaving or prompt-injected agent could echo the password into the
+  tool-result stream (and thus provider logs). This is inherent to any
+  file-based askpass: an unlocked agent already has passwordless root, but
+  disclosure (password reuse elsewhere) is a distinct harm. Accepted for now;
+  cheap hardening if it stings: have the PreToolUse hook deny Bash commands
+  that reference the sudo credential directory.
 
 ## Rejected alternatives
 
