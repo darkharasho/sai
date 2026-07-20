@@ -133,6 +133,14 @@ export interface PendingApproval {
   input: Record<string, any>;
 }
 
+export interface PendingSudoPrompt {
+  promptId: string;
+  toolUseId: string;
+  command: string;
+  /** Reason the previous attempt failed (e.g. "Incorrect password"). */
+  error?: string;
+}
+
 export interface QueuedMessage {
   id: string;
   text: string;
