@@ -76,7 +76,7 @@ import { watchTargetsFromMessage } from './githubRunResolver';
 
 const EMPTY_URL_SET: Set<string> = new Set();
 import ChatInput, { type ContextItem } from './ChatInput';
-import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, QueuedMessage, TerminalTab } from '../../types';
+import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, PendingSudoPrompt, QueuedMessage, TerminalTab } from '../../types';
 import type { MetaWorkspaceRuntime } from '../../types';
 import type { WaitMeta } from '../../../electron/services/waitClassifier';
 import { buildHelpMessage } from './helpText';
@@ -602,6 +602,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const [drainInFlight, setDrainInFlight] = useState(false);
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(initialPendingApproval);
+  const [pendingSudoPrompt, setPendingSudoPrompt] = useState<PendingSudoPrompt | null>(null);
   const [fileContextEnabled, setFileContextEnabled] = useState(true);
   const [contextUsage, setContextUsage] = useState<{ used: number; total: number; inputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; outputTokens: number }>({ used: 0, total: 1000000, inputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, outputTokens: 0 });
   const [sessionUsage, setSessionUsage] = useState<{ inputTokens: number; outputTokens: number }>({ inputTokens: 0, outputTokens: 0 });
@@ -1066,6 +1067,23 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       // the desktop card doesn't sit stale when mobile already decided.
       if (msg.type === 'approval_resolved') {
         setPendingApproval(null);
+        return;
+      }
+
+      // Sudo elevation prompt from the main-process broker. A retry after a
+      // wrong password arrives as a fresh sudo-prompt (new promptId + error)
+      // and replaces the current one.
+      if (msg.type === 'sudo-prompt') {
+        setPendingSudoPrompt({
+          promptId: msg.promptId,
+          toolUseId: msg.toolUseId,
+          command: msg.command,
+          error: msg.error,
+        });
+        return;
+      }
+      if (msg.type === 'sudo-resolved') {
+        setPendingSudoPrompt(null);
         return;
       }
 
@@ -2273,6 +2291,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             onQueue={handleQueue}
             queueCount={messageQueue.length}
             pendingApproval={pendingApproval}
+            pendingSudoPrompt={pendingSudoPrompt}
             onApprove={handleApprove}
             onDeny={handleDeny}
             onAlwaysAllow={handleAlwaysAllow}

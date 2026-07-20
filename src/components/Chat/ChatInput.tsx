@@ -1,9 +1,10 @@
 import { useState, useRef, KeyboardEvent, useEffect, useMemo } from 'react';
-import type { PendingApproval, TerminalTab, ChatMessage as ChatMessageType, QueuedMessage, MetaWorkspaceRuntime, EffortLevel, ModelChoice } from '../../types';
+import type { PendingApproval, PendingSudoPrompt, TerminalTab, ChatMessage as ChatMessageType, QueuedMessage, MetaWorkspaceRuntime, EffortLevel, ModelChoice } from '../../types';
 import TodoProgress from './TodoProgress';
 import MessageQueue from './MessageQueue';
 import { basename } from '../../utils/pathUtils';
 import ApprovalPanel from './ApprovalPanel';
+import { SudoPromptCard } from './SudoPromptCard';
 import {
   SquarePlus, Slash, SquareSlash, AtSign, FileText, GitBranch, Terminal as TerminalIcon, Settings,
   MessageSquare, Zap, Send, Square, ShieldCheck, ShieldOff,
@@ -63,6 +64,7 @@ interface ChatInputProps {
   onFileContextToggle?: () => void;
   aiProvider?: 'claude' | 'codex' | 'gemini';
   pendingApproval?: PendingApproval | null;
+  pendingSudoPrompt?: PendingSudoPrompt | null;
   onApprove?: (modifiedCommand?: string) => void;
   onDeny?: () => void;
   onAlwaysAllow?: () => void;
@@ -265,7 +267,7 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabled, slashCommands = [], isStreaming, waiting, awaitingQuestion, messages = [], onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, contextUsage, sessionUsage, sessionCost, rateLimits, billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, onQueueSendNow, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
+export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabled, slashCommands = [], isStreaming, waiting, awaitingQuestion, messages = [], onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, contextUsage, sessionUsage, sessionCost, rateLimits, billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, pendingSudoPrompt, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, onQueueSendNow, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
   // Live model list (account/org-aware) when available, else the static fallback.
   const modelOptions = useMemo<{ id: ModelChoice; label: string; description: string; color: string; recommended?: boolean }[]>(() => {
     if (availableModels && availableModels.length) {
@@ -922,6 +924,10 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
           onDeny={onDeny}
           onAlwaysAllow={onAlwaysAllow}
         />
+      )}
+
+      {pendingSudoPrompt && (
+        <SudoPromptCard prompt={pendingSudoPrompt} />
       )}
 
       {/* Context pills - tabs poking out above input-box */}
