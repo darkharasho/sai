@@ -175,6 +175,55 @@ describe('SudoSession', () => {
     expect(s.isUnlocked()).toBe(false);
     expect(runner.calls).toEqual(['pw', 'pw']);
   });
+
+  it('a stale in-flight keep-alive validate does not clear a newer credential', async () => {
+    let tick: (() => void) | null = null;
+    const calls: string[] = [];
+    // Deferred validate results, keyed per-call, so the test controls exactly
+    // when each resolves.
+    const pending: Array<{ password: string; resolve: (r: { ok: boolean; stderr: string }) => void }> = [];
+    const runner: SudoRunner = {
+      validate(password: string) {
+        calls.push(password);
+        return new Promise((resolve) => {
+          pending.push({ password, resolve: resolve as never });
+        });
+      },
+    };
+    const s = new SudoSession({
+      askpass: fakeAskpass(),
+      runner,
+      setIntervalFn: ((fn: () => void) => { tick = fn; return 1; }) as never,
+      clearIntervalFn: () => {},
+    });
+
+    // Unlock with 'pw-a' — resolve its initial validate immediately.
+    const unlockA = s.unlock('pw-a');
+    pending.shift()!.resolve({ ok: true, stderr: '' });
+    await unlockA;
+    expect(s.isUnlocked()).toBe(true);
+
+    // Trigger the keep-alive tick for 'pw-a'; its validate stays pending (deferred).
+    tick!();
+    expect(calls).toEqual(['pw-a', 'pw-a']);
+    const staleValidate = pending.shift()!;
+    expect(staleValidate.password).toBe('pw-a');
+
+    // Before the stale validate resolves, the credential is swapped: clear(),
+    // then unlock with 'pw-b' (its own validate resolves immediately).
+    s.clear();
+    const unlockB = s.unlock('pw-b');
+    pending.shift()!.resolve({ ok: true, stderr: '' });
+    await unlockB;
+    expect(s.isUnlocked()).toBe(true);
+
+    // Now resolve the stale 'pw-a' validate as a failure — it must NOT clear
+    // the newer 'pw-b' session.
+    staleValidate.resolve({ ok: false, stderr: 'Sorry, try again.' });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(s.isUnlocked()).toBe(true);
+  });
 });
 
 describe('createFileAskpass', () => {

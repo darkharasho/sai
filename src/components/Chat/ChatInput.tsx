@@ -896,6 +896,7 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
   };
 
   const dropdownItems = showAddMenu ? ADD_MENU_ITEMS : suggestions;
+  const inputBlocked = !!pendingApproval || !!pendingSudoPrompt;
 
   return (
     <div className="input-wrapper" ref={wrapperRef}>
@@ -952,7 +953,7 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
       )}
 
       {/* Main input area */}
-      <div className={`input-box ${tickerDir ? `ticker-${tickerDir}` : ''}`} style={{ opacity: pendingApproval ? 0.4 : 1, pointerEvents: pendingApproval ? 'none' as const : 'auto' as const }}>
+      <div className={`input-box ${tickerDir ? `ticker-${tickerDir}` : ''}`} style={{ opacity: inputBlocked ? 0.4 : 1, pointerEvents: inputBlocked ? 'none' as const : 'auto' as const }}>
         {!value && (
           <div className="chat-placeholder" onClick={() => textareaRef.current?.focus()}>
             {!isStreaming && (

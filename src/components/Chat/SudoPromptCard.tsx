@@ -64,11 +64,12 @@ export function SudoPromptCard({ prompt }: SudoPromptCardProps) {
       </div>
       <pre style={{
         margin: '8px 14px', padding: '8px 10px', borderRadius: 6,
-        background: 'var(--surface-1, rgba(0,0,0,0.25))',
+        background: 'var(--surface-2)',
+        border: '1px solid var(--border-hairline)',
         fontSize: 12, overflowX: 'auto',
       }}>{prompt.command}</pre>
       {prompt.error && (
-        <div style={{ padding: '0 14px 4px', fontSize: 12, color: 'var(--danger, #f87171)' }}>
+        <div style={{ padding: '0 14px 4px', fontSize: 12, color: 'var(--red)' }}>
           {prompt.error}
         </div>
       )}
@@ -86,9 +87,9 @@ export function SudoPromptCard({ prompt }: SudoPromptCardProps) {
           disabled={busy}
           style={{
             flex: 1, minWidth: 0, borderRadius: 6, padding: '6px 10px', fontSize: 12,
-            background: 'var(--surface-1, rgba(0,0,0,0.25))',
-            border: '1px solid var(--border-subtle)',
-            color: 'var(--text-primary)', outline: 'none',
+            background: 'var(--surface-2)',
+            border: '1px solid var(--border-hairline)',
+            color: 'var(--text)', outline: 'none',
           }}
         />
         <button

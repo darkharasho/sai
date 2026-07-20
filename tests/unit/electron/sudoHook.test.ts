@@ -73,6 +73,76 @@ describe('buildSudoPreToolUseHook', () => {
   });
 });
 
+describe('buildSudoPreToolUseHook abort-signal handling', () => {
+  const deps = () => ({
+    projectPath: '/proj',
+    scope: 'scope-1',
+    ensureUnlocked: vi.fn(async () => true),
+  });
+
+  it('denies immediately on an already-aborted signal, without calling ensureUnlocked', async () => {
+    const d = deps();
+    const hook = buildSudoPreToolUseHook(d);
+    const controller = new AbortController();
+    controller.abort();
+    const out = await hook(preToolUseInput('Bash', 'sudo apt update'), 'toolu_x', { signal: controller.signal } as never);
+    expect(out).toEqual({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: SUDO_DENY_REASON,
+      },
+    });
+    expect(d.ensureUnlocked).not.toHaveBeenCalled();
+  });
+
+  it('resolves to deny and cancels the owning scope when aborted while ensureUnlocked is pending', async () => {
+    let releaseEnsureUnlocked: ((v: boolean) => void) | null = null;
+    const cancelPromptForScope = vi.fn();
+    const d = {
+      projectPath: '/proj',
+      scope: 'scope-1',
+      cancelPromptForScope,
+      ensureUnlocked: vi.fn(
+        () => new Promise<boolean>((resolve) => { releaseEnsureUnlocked = resolve; })
+      ),
+    };
+    const hook = buildSudoPreToolUseHook(d);
+    const controller = new AbortController();
+
+    const pending = hook(preToolUseInput('Bash', 'sudo apt update'), 'toolu_x', { signal: controller.signal } as never);
+    controller.abort();
+    const out = await pending;
+
+    expect(out).toEqual({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: SUDO_DENY_REASON,
+      },
+    });
+    expect(cancelPromptForScope).toHaveBeenCalledWith('scope-1');
+
+    // A later ensureUnlocked resolution must not double-settle or throw.
+    releaseEnsureUnlocked!(true);
+    await Promise.resolve();
+  });
+
+  it('unlocks normally with a live (non-aborted) signal', async () => {
+    const d = deps();
+    const hook = buildSudoPreToolUseHook(d);
+    const controller = new AbortController();
+    const out = await hook(preToolUseInput('Bash', 'sudo apt update'), 'toolu_x', { signal: controller.signal } as never);
+    expect(out).toEqual({});
+    expect(d.ensureUnlocked).toHaveBeenCalledWith({
+      projectPath: '/proj',
+      scope: 'scope-1',
+      toolUseId: 'toolu_x',
+      command: 'sudo apt update',
+    });
+  });
+});
+
 describe('buildSdkOptions PreToolUse wiring', () => {
   const base = { kind: 'chat' as const, cwd: '/proj' };
   const fakeHook: HookCallback = async () => ({});

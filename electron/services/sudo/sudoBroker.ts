@@ -69,6 +69,16 @@ export class SudoBroker {
     return this.current;
   }
 
+  /** Cancel the outstanding prompt if it belongs to `scope` (its turn was
+   *  aborted). Resolves the prompt as cancelled, which emits sudo-resolved
+   *  (clearing the card) and settles the coalesced flow. Non-owner scopes
+   *  are unaffected — their hook settles locally without killing the card. */
+  cancelPromptForScope(scope: string): void {
+    if (this.current && this.current.scope === scope) {
+      this.resolveSudo(this.current.promptId, null);
+    }
+  }
+
   private async promptLoop(args: SudoPromptArgs): Promise<boolean> {
     const maxAttempts = this.opts.maxAttempts ?? MAX_ATTEMPTS;
     let error: string | undefined;

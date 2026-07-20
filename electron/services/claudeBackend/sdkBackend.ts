@@ -914,6 +914,7 @@ export class SdkBackend implements ClaudeBackend {
           projectPath,
           scope: effectiveScope,
           ensureUnlocked: (a) => sudoBroker.ensureUnlocked(a),
+          cancelPromptForScope: (s) => sudoBroker.cancelPromptForScope(s),
         })
       : undefined;
 

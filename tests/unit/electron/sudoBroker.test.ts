@@ -140,3 +140,32 @@ describe('SudoBroker.getPendingPrompt', () => {
     expect(broker.getPendingPrompt()).toBeNull();
   });
 });
+
+describe('SudoBroker.cancelPromptForScope', () => {
+  it('resolves the flow false, cancelled, and clears the pending prompt when the owning scope cancels', async () => {
+    const { broker, events } = makeBroker(fakeSession({ unlock: () => ({ ok: true }) }));
+    const p = broker.ensureUnlocked(baseArgs);
+    await vi.waitFor(() => expect(events.some((e) => e.type === 'sudo-prompt')).toBe(true));
+    expect(broker.getPendingPrompt()).not.toBeNull();
+
+    broker.cancelPromptForScope('scope-1');
+
+    expect(await p).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: 'sudo-resolved', status: 'cancelled' });
+    expect(broker.getPendingPrompt()).toBeNull();
+  });
+
+  it('leaves the prompt pending when a non-owner scope cancels; the flow still resolves normally afterward', async () => {
+    const { broker, events } = makeBroker(fakeSession({ unlock: () => ({ ok: true }) }));
+    const p = broker.ensureUnlocked(baseArgs);
+    await vi.waitFor(() => expect(events.some((e) => e.type === 'sudo-prompt')).toBe(true));
+
+    broker.cancelPromptForScope('other-scope');
+    expect(broker.getPendingPrompt()).not.toBeNull();
+
+    const evt = events.find((e) => e.type === 'sudo-prompt')!;
+    broker.resolveSudo(evt.promptId as string, 'goodpw');
+    expect(await p).toBe(true);
+    expect(events.at(-1)).toMatchObject({ type: 'sudo-resolved', status: 'unlocked' });
+  });
+});

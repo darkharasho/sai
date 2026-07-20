@@ -193,6 +193,9 @@ export class SudoSession {
       const pw = this.password;
       if (pw === null) return;
       void this.runner.validate(pw).then((res) => {
+        // A lock/unlock may have swapped the credential while this validate
+        // was in flight — never let a stale result clear the new session.
+        if (this.password !== pw) return;
         if (!res.ok) {
           // Password no longer works (changed, revoked) — drop it so the next
           // elevated command re-prompts rather than silently failing.
