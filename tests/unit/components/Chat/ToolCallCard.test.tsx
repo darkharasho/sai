@@ -11,6 +11,9 @@ vi.mock('shiki', () => ({
 import ToolCallCard, { isMarkdownBody } from '../../../../src/components/Chat/ToolCallCard';
 import { SPRING } from '../../../../src/components/Chat/motion';
 import { TaskRegistryContext } from '../../../../src/components/Chat/taskRegistry';
+import { mapCodexSdkEvent } from '../../../../electron/services/codexBackend/sdkEventMap';
+import { parseToolResultBlocks } from '../../../../src/lib/toolResultContent';
+import type { ThreadEvent } from '@openai/codex-sdk';
 
 describe('ToolCallCard', () => {
   it('renders without crashing', () => {
@@ -52,6 +55,40 @@ describe('ToolCallCard', () => {
     );
     expect(container.querySelector('.tool-call-card--running')).toBeNull();
     expect(container.querySelector('.tool-status-done')).toBeTruthy();
+  });
+
+  it('renders a failed mapped command result with the error status', () => {
+    const event = {
+      type: 'item.completed',
+      item: {
+        id: 'cmd-failed',
+        type: 'command_execution',
+        command: 'exit 2',
+        aggregated_output: 'command failed',
+        exit_code: 2,
+        status: 'failed',
+      },
+    } satisfies ThreadEvent;
+    const [envelope] = mapCodexSdkEvent(event, {
+      projectPath: '/repo',
+      scope: 'chat',
+      turnSeq: 1,
+    });
+    const message = envelope.message as { content: Array<{ content: unknown }> };
+    const { text } = parseToolResultBlocks(message.content[0].content);
+
+    const { container } = render(
+      <ToolCallCard toolCall={{
+        id: 'cmd-failed',
+        type: 'terminal_command',
+        name: 'Bash',
+        input: JSON.stringify({ command: 'exit 2' }),
+        output: text,
+      }} />,
+    );
+
+    expect(container.querySelector('.tool-status-error')).toBeTruthy();
+    expect(container.querySelector('.tool-status-done')).toBeNull();
   });
 
   it('shows duration when durationMs is set', () => {

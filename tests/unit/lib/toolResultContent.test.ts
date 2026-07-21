@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseToolResultBlocks } from '../../../src/lib/toolResultContent';
+import { parseToolError, parseToolResultBlocks } from '../../../src/lib/toolResultContent';
 
 describe('parseToolResultBlocks', () => {
   it('returns string content as text with no images', () => {
@@ -29,6 +29,22 @@ describe('parseToolResultBlocks', () => {
     expect(parseToolResultBlocks(content)).toEqual({
       text: '',
       images: [{ dataUrl: 'data:image/png;base64,AAAA', mimeType: 'image/png' }],
+    });
+  });
+});
+
+describe('parseToolError', () => {
+  it('recognizes and strips the tool error wrapper used by result cards', () => {
+    expect(parseToolError('  <tool_error>command failed</tool_error>  ')).toEqual({
+      isToolError: true,
+      message: 'command failed',
+    });
+  });
+
+  it('leaves successful output unchanged', () => {
+    expect(parseToolError('command output')).toEqual({
+      isToolError: false,
+      message: 'command output',
     });
   });
 });

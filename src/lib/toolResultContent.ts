@@ -26,3 +26,19 @@ export function parseToolResultBlocks(content: unknown): { text: string; images?
   }
   return { text, images: images.length ? images : undefined };
 }
+
+/** Detect and strip the error wrappers understood by tool result cards. */
+export function parseToolError(output: string): { isToolError: boolean; message: string } {
+  const stripped = output.trim();
+  const tagMatch = stripped.match(
+    /^<(?:tool_use_error|tool_error|error)>([\s\S]*?)<\/(?:tool_use_error|tool_error|error)>$/,
+  );
+  if (tagMatch) return { isToolError: true, message: tagMatch[1].trim() };
+  if (/tool_use_error/i.test(stripped)) {
+    return {
+      isToolError: true,
+      message: stripped.replace(/tool_use_error[:\s]*/i, '').trim() || stripped,
+    };
+  }
+  return { isToolError: false, message: output };
+}

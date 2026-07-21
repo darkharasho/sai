@@ -20,6 +20,7 @@ import { CARD_MD_CLASS, CARD_MD_STYLES } from './markdownCardStyles';
 import { parseSearchResults, isSearchTool, highlightMatches, type SearchRow } from './searchResults';
 import { TaskRegistryContext, type TaskInfo } from './taskRegistry';
 import { ToolResultImagePreview } from './ToolResultImagePreview';
+import { parseToolError } from '../../lib/toolResultContent';
 
 function parseMcpName(name: string): { server: string; tool: string } | null {
   if (!name.startsWith('mcp__')) return null;
@@ -895,17 +896,6 @@ function AskUserQuestionView({
       {isAnswered && <div className="askq-answered">Answered</div>}
     </div>
   );
-}
-
-/** Detect and strip <tool_error>, <error>, or tool_use_error wrapper tags from output */
-function parseToolError(output: string): { isToolError: boolean; message: string } {
-  const stripped = output.trim();
-  const tagMatch = stripped.match(/^<(?:tool_use_error|tool_error|error)>([\s\S]*?)<\/(?:tool_use_error|tool_error|error)>$/);
-  if (tagMatch) return { isToolError: true, message: tagMatch[1].trim() };
-  if (/tool_use_error/i.test(stripped)) {
-    return { isToolError: true, message: stripped.replace(/tool_use_error[:\s]*/i, '').trim() || stripped };
-  }
-  return { isToolError: false, message: output };
 }
 
 function ToolErrorDisplay({ message }: { message: string }) {
