@@ -1,6 +1,5 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import type { ModelReasoningEffort } from '@openai/codex-sdk';
 import { buildCodexInput, buildCodexSdkOptions } from '@electron/services/codexBackend/sdkOptions';
 import type { CodexPermission } from '@electron/services/codexBackend/types';
 
@@ -38,7 +37,7 @@ describe('buildCodexSdkOptions', () => {
     });
   });
 
-  it.each(['minimal', 'low', 'medium', 'high', 'xhigh'] as const)(
+  it.each(['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const)(
     'maps valid %s effort unchanged',
     (effort) => {
       expect(buildCodexSdkOptions({ cwd: '/repo', effort }).thread.modelReasoningEffort)
@@ -70,7 +69,7 @@ describe('buildCodexSdkOptions', () => {
   it('omits an invalid runtime effort', () => {
     expect(buildCodexSdkOptions({
       cwd: '/repo',
-      effort: 'max' as unknown as ModelReasoningEffort,
+      effort: 'future' as any,
     }).thread).not.toHaveProperty('modelReasoningEffort');
   });
 

@@ -5,6 +5,7 @@ import { emitChatMessage } from '../claude';
 import { registerWorkspaceBackendHooks } from '../workspace';
 import { CliCodexBackend, fetchCodexModels } from './cliBackend';
 import { SdkCodexBackend } from './sdkBackend';
+import { fetchBundledCodexModels } from './bundledModels';
 import type { CodexBackend, CodexBackendKind } from './types';
 
 export * from './types';
@@ -44,7 +45,7 @@ export function getCodexBackend(): CodexBackend {
   } else {
     active = new SdkCodexBackend({
       emit: emitChatMessage,
-      getModels: fetchCodexModels,
+      getModels: fetchBundledCodexModels,
     });
   }
 

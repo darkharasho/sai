@@ -282,6 +282,20 @@ describe('ChatInput', () => {
   });
 
   describe('capability-gated toolbar controls', () => {
+    it('never refreshes Codex models when opening the Claude model selector', () => {
+      const onCodexModelsRefresh = vi.fn();
+      render(<ChatInput {...defaultProps} aiProvider="claude" onCodexModelsRefresh={onCodexModelsRefresh} />);
+      fireEvent.click(screen.getByText('Sonnet').closest('button')!);
+      expect(onCodexModelsRefresh).not.toHaveBeenCalled();
+    });
+
+    it('refreshes Codex models when opening the Codex model selector', () => {
+      const onCodexModelsRefresh = vi.fn();
+      render(<ChatInput {...defaultProps} aiProvider="codex" codexModel="gpt-5" codexModels={[]} onCodexModelsRefresh={onCodexModelsRefresh} />);
+      fireEvent.click(screen.getByText('gpt-5').closest('button')!);
+      expect(onCodexModelsRefresh).toHaveBeenCalledTimes(1);
+    });
+
     it('renders effort mode button for claude', () => {
       const { container } = render(
         <ChatInput {...defaultProps} aiProvider="claude" />
@@ -296,11 +310,32 @@ describe('ChatInput', () => {
       expect(container.querySelector('.effort-btn')).toBeNull();
     });
 
-    it('hides effort mode button for codex', () => {
-      const { container } = render(
-        <ChatInput {...defaultProps} aiProvider="codex" />
+    it('cycles Codex effort independently through ultra and minimal', () => {
+      const onCodexEffortChange = vi.fn();
+      const { rerender } = render(
+        <ChatInput {...defaultProps} effortLevel="max" aiProvider="codex" codexEffort="ultra" onCodexEffortChange={onCodexEffortChange} />
       );
-      expect(container.querySelector('.effort-btn')).toBeNull();
+      fireEvent.click(screen.getByLabelText('Codex effort: ultra'));
+      expect(onCodexEffortChange).toHaveBeenCalledWith('minimal');
+      rerender(<ChatInput {...defaultProps} effortLevel="max" aiProvider="codex" codexEffort="minimal" onCodexEffortChange={onCodexEffortChange} />);
+      fireEvent.click(screen.getByLabelText('Codex effort: minimal'));
+      expect(onCodexEffortChange).toHaveBeenLastCalledWith('low');
+    });
+
+    it('cycles only efforts supported by the selected Codex model', () => {
+      const onCodexEffortChange = vi.fn();
+      render(<ChatInput {...defaultProps} aiProvider="codex" codexModel="no-min" codexEffort="minimal"
+        codexModels={[{ id: 'no-min', name: 'No Minimal', supportedReasoningEfforts: ['low', 'high', 'xhigh'], defaultReasoningEffort: 'high' }]}
+        onCodexEffortChange={onCodexEffortChange} />);
+      const button = screen.getByLabelText('Codex effort: high');
+      fireEvent.click(button);
+      expect(onCodexEffortChange).toHaveBeenCalledWith('xhigh');
+    });
+
+    it('hides reasoning effort when the selected Codex model explicitly supports none', () => {
+      render(<ChatInput {...defaultProps} aiProvider="codex" codexModel="none"
+        codexModels={[{ id: 'none', name: 'None', supportedReasoningEfforts: [] }]} />);
+      expect(screen.queryByLabelText(/Codex effort:/)).toBeNull();
     });
 
     it('renders conversation mode toggle for gemini', () => {

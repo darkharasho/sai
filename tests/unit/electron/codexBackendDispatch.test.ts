@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => {
     emitChatMessage: vi.fn(),
     readSaiSetting: vi.fn(),
     fetchCodexModels: vi.fn(),
+    fetchBundledCodexModels: vi.fn(),
     sdkConstructor: vi.fn(),
     cliConstructor: vi.fn(),
     registerWorkspaceBackendHooks: vi.fn(),
@@ -97,6 +98,10 @@ vi.mock('@electron/services/codexBackend/sdkBackend', () => ({
   },
 }));
 
+vi.mock('@electron/services/codexBackend/bundledModels', () => ({
+  fetchBundledCodexModels: mocks.fetchBundledCodexModels,
+}));
+
 import {
   __setCodexBackendForTests,
   configureCodexBackendWindow,
@@ -124,6 +129,7 @@ function backendStub(): CodexBackend {
 beforeEach(() => {
   mocks.readFileSync.mockReturnValue('{}');
   mocks.fetchCodexModels.mockResolvedValue({ models: [], defaultModel: '' });
+  mocks.fetchBundledCodexModels.mockResolvedValue({ models: [], defaultModel: '' });
   configureCodexBackendWindow(null);
 });
 
@@ -170,8 +176,9 @@ describe('Codex backend selection', () => {
     expect(mocks.sdkConstructor).toHaveBeenCalledTimes(1);
     expect(mocks.sdkConstructor).toHaveBeenCalledWith({
       emit: mocks.emitChatMessage,
-      getModels: mocks.fetchCodexModels,
+      getModels: mocks.fetchBundledCodexModels,
     });
+    expect(mocks.fetchCodexModels).not.toHaveBeenCalled();
     expect(mocks.registerWorkspaceBackendHooks).toHaveBeenCalledWith('codex', {
       suspend: expect.any(Function),
       isBusy: expect.any(Function),
@@ -271,6 +278,7 @@ describe('Codex IPC dispatch', () => {
       orchestratorContext: undefined,
       scopeCwd: undefined,
       metaPreamble: 'legacy preamble',
+      additionalDirectories: undefined,
     });
     expect(backend.send).toHaveBeenCalledWith({
       projectPath: '/legacy',
@@ -299,6 +307,7 @@ describe('Codex IPC dispatch', () => {
       { taskId: '7' },
       '/project/.worktrees/7',
       'coordinate carefully',
+      ['/repos/a', '', '/repos/a', '/repos/b'],
     );
     mocks.ipcMain.emit(
       'codex:send',
@@ -323,6 +332,7 @@ describe('Codex IPC dispatch', () => {
       orchestratorContext: { taskId: '7' },
       scopeCwd: '/project/.worktrees/7',
       metaPreamble: 'coordinate carefully',
+      additionalDirectories: ['/repos/a', '/repos/b'],
     });
     expect(backend.send).toHaveBeenCalledWith({
       projectPath: '/project',
@@ -337,6 +347,14 @@ describe('Codex IPC dispatch', () => {
     expect(backend.interrupt).toHaveBeenCalledWith('/project', 'task:7');
     expect(backend.setSessionId).toHaveBeenCalledWith('/project', 'thread-7', 'task:7');
     expect(backend.reconcileScope).toHaveBeenCalledWith('/project', 'task:7');
+  });
+
+  it('drops invalid runtime reasoning effort before backend dispatch', () => {
+    const backend = backendStub();
+    __setCodexBackendForTests(backend);
+    registerCodexHandlers({} as any);
+    mocks.ipcMain.emit('codex:send', '/project', 'prompt', [], 'auto', 'future', 'gpt-5', 'chat');
+    expect(backend.send).toHaveBeenCalledWith(expect.objectContaining({ effort: undefined, model: 'gpt-5' }));
   });
 
   it('coerces a missing model refresh flag to false', async () => {

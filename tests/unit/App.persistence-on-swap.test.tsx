@@ -92,6 +92,16 @@ vi.mock('../../src/components/Swarm/OrchestratorView', () => ({
 vi.mock('../../src/components/Swarm/SwarmLogoCluster', () => ({
   default: () => <div data-testid="swarm-logo" />,
 }));
+vi.mock('../../src/hooks/useWhatsNew', () => ({
+  useWhatsNew: () => ({
+    isOpen: false,
+    version: 'test',
+    releases: [],
+    fetchStatus: 'idle',
+    openWhatsNew: vi.fn(),
+    closeWhatsNew: vi.fn(),
+  }),
+}));
 
 // ---------------------------------------------------------------------------
 // Test fixtures
@@ -174,6 +184,7 @@ describe('App: persistence on session swap', () => {
     messagesBySessionId.clear();
     chatPanelPropsLog.length = 0;
     titleBarPropsLog.length = 0;
+    global.fetch = vi.fn();
 
     const msgA = makeMsg();
     sessionA = makeSession({
@@ -214,6 +225,204 @@ describe('App: persistence on session swap', () => {
     mockSai.swarmSetOrchestratorSession = vi.fn();
     mockSai.remoteEmitWorkspaceStatus = vi.fn();
     installMockSai(mockSai as ReturnType<typeof createMockSai>);
+  });
+
+  it('does not activate Codex model discovery on default-Claude startup and fetches after selecting Codex', async () => {
+    render(<App />);
+    await waitFor(() => expect(titleBarPropsLog.at(-1)?.onSettingChange).toBeTypeOf('function'));
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(mockSai.codexModels).not.toHaveBeenCalled();
+    await act(async () => { titleBarPropsLog.at(-1).onSettingChange('aiProvider', 'codex'); });
+    await waitFor(() => expect(mockSai.codexModels).toHaveBeenCalledWith(false));
+  });
+
+  it('loads Codex effort independently and never substitutes Claude max', async () => {
+    mockSai.settingsGet.mockImplementation((key: string, def: unknown) => Promise.resolve(
+      key === 'claude' ? { effort: 'max' } : key === 'codex' ? { effort: 'minimal' } : def ?? null,
+    ));
+    render(<App />);
+    await waitFor(() => expect(chatPanelPropsLog.at(-1)?.codexEffort).toBe('minimal'));
+    expect(chatPanelPropsLog.at(-1)?.effortLevel).toBe('max');
+    await act(async () => { chatPanelPropsLog.at(-1).onCodexEffortChange('xhigh'); });
+    await waitFor(() => expect(mockSai.settingsSet).toHaveBeenCalledWith('codex', expect.objectContaining({ effort: 'xhigh' })));
+  });
+
+  it('merges rapid nested Codex changes without losing sibling fields', async () => {
+    mockSai.settingsGet.mockImplementation((key: string, def: unknown) => Promise.resolve(
+      key === 'codex' ? { model: 'gpt-5', permission: 'auto', effort: 'high' } : def ?? null,
+    ));
+    render(<App />);
+    await waitFor(() => expect(chatPanelPropsLog.at(-1)?.codexModel).toBe('gpt-5'));
+    mockSai.settingsSet.mockClear();
+
+    act(() => {
+      chatPanelPropsLog.at(-1).onCodexModelChange('gpt-5.2');
+      chatPanelPropsLog.at(-1).onCodexPermissionChange('full-access');
+      chatPanelPropsLog.at(-1).onCodexEffortChange('ultra');
+    });
+
+    expect(mockSai.settingsSet).toHaveBeenLastCalledWith('codex', {
+      model: 'gpt-5.2', permission: 'full-access', effort: 'ultra',
+    });
+  });
+
+  it('persists an owner-requested Codex effort deletion through the shadow', async () => {
+    mockSai.settingsGet.mockImplementation((key: string, def: unknown) => Promise.resolve(
+      key === 'codex' ? { model: 'none', permission: 'auto', effort: 'high' } : def ?? null,
+    ));
+    render(<App />);
+    await waitFor(() => expect(chatPanelPropsLog.at(-1)?.codexEffort).toBe('high'));
+    act(() => { titleBarPropsLog.at(-1).onSettingChange('codexEffort', undefined); });
+    expect(mockSai.settingsSet).toHaveBeenLastCalledWith('codex', { model: 'none', permission: 'auto' });
+  });
+
+  it('normalizes persisted Codex effort when selected model metadata arrives', async () => {
+    mockSai.settingsGet.mockImplementation((key: string, def: unknown) => Promise.resolve(
+      key === 'aiProvider' ? 'codex'
+        : key === 'codex' ? { model: 'no-min', permission: 'auto', effort: 'minimal' }
+          : def ?? null,
+    ));
+    mockSai.codexModels.mockResolvedValue({
+      models: [{ id: 'no-min', name: 'No Minimal', supportedReasoningEfforts: ['low', 'high', 'xhigh'], defaultReasoningEffort: 'high' }],
+      defaultModel: 'no-min',
+    });
+    render(<App />);
+
+    await waitFor(() => expect(chatPanelPropsLog.at(-1)?.codexEffort).toBe('high'));
+    expect(mockSai.settingsSet).toHaveBeenCalledWith('codex', {
+      model: 'no-min', permission: 'auto', effort: 'high',
+    });
+  });
+
+  it('keeps catalog normalization when the initial Codex settings read resolves late', async () => {
+    let resolveCodex!: (value: unknown) => void;
+    const delayedCodex = new Promise(resolve => { resolveCodex = resolve; });
+    mockSai.settingsGet.mockImplementation((key: string, def: unknown) => key === 'aiProvider'
+      ? Promise.resolve('codex') : key === 'codex' ? delayedCodex : Promise.resolve(def ?? null));
+    mockSai.codexModels.mockResolvedValue({
+      models: [{ id: 'current', name: 'Current', supportedReasoningEfforts: ['high'], defaultReasoningEffort: 'high' }],
+      defaultModel: 'current',
+    });
+    render(<App />);
+    await waitFor(() => expect(chatPanelPropsLog.at(-1)?.codexModel).toBe('current'));
+    await act(async () => { resolveCodex({ model: 'stale', permission: 'read-only', effort: 'minimal' }); await delayedCodex; });
+    expect(chatPanelPropsLog.at(-1)?.codexModel).toBe('current');
+    expect(chatPanelPropsLog.at(-1)?.codexEffort).toBe('high');
+    expect(chatPanelPropsLog.at(-1)?.codexPermission).toBe('read-only');
+  });
+
+  it('restores a catalog-valid persisted custom model and effort from a late initial read', async () => {
+    let resolveCodex!: (value: unknown) => void;
+    const delayedCodex = new Promise(resolve => { resolveCodex = resolve; });
+    mockSai.settingsGet.mockImplementation((key: string, def: unknown) => key === 'aiProvider'
+      ? Promise.resolve('codex') : key === 'codex' ? delayedCodex : Promise.resolve(def ?? null));
+    mockSai.codexModels.mockResolvedValue({
+      models: [
+        { id: 'default', name: 'Default', supportedReasoningEfforts: ['high'] },
+        { id: 'custom', name: 'Custom', supportedReasoningEfforts: ['low', 'xhigh'] },
+      ],
+      defaultModel: 'default',
+    });
+    render(<App />);
+    await waitFor(() => expect(chatPanelPropsLog.at(-1)?.codexModel).toBe('default'));
+    await act(async () => { resolveCodex({ model: 'custom', permission: 'read-only', effort: 'xhigh' }); await delayedCodex; });
+    expect(chatPanelPropsLog.at(-1)?.codexModel).toBe('custom');
+    expect(chatPanelPropsLog.at(-1)?.codexEffort).toBe('xhigh');
+    expect(chatPanelPropsLog.at(-1)?.codexPermission).toBe('read-only');
+  });
+
+  it('merges nested Codex snapshot, legacy model, and rapid permission through one shadow writer', async () => {
+    let resolveNested!: (value: unknown) => void;
+    const delayedNested = new Promise(resolve => { resolveNested = resolve; });
+    mockSai.settingsGet.mockImplementation((key: string, def: unknown) => {
+      if (key === 'codex') return delayedNested;
+      if (key === 'codexModel') return Promise.resolve('legacy-model');
+      return Promise.resolve(def ?? null);
+    });
+    render(<App />);
+    await waitFor(() => expect(mockSai.settingsGet).toHaveBeenCalledWith('codexModel', null));
+    act(() => { chatPanelPropsLog.at(-1).onCodexPermissionChange('full-access'); });
+    await act(async () => { resolveNested({ permission: 'auto', effort: 'xhigh' }); await delayedNested; });
+    await waitFor(() => expect(mockSai.settingsSet).toHaveBeenLastCalledWith('codex', {
+      model: 'legacy-model', permission: 'full-access', effort: 'xhigh',
+    }));
+  });
+
+  it('rejects an unavailable remote Codex model after catalog load and force-refreshes', async () => {
+    let applyRemote!: (settings: Record<string, unknown>) => void;
+    mockSai.githubOnSettingsApplied = vi.fn((callback: (settings: Record<string, unknown>) => void) => {
+      applyRemote = callback;
+      return vi.fn();
+    });
+    mockSai.settingsGet.mockImplementation((key: string, def: unknown) => Promise.resolve(
+      key === 'aiProvider' ? 'codex'
+        : key === 'codex' ? { model: 'valid', permission: 'auto', effort: 'high' }
+          : def ?? null,
+    ));
+    mockSai.codexModels.mockResolvedValue({ models: [{ id: 'valid', name: 'Valid' }], defaultModel: 'valid' });
+    render(<App />);
+    await waitFor(() => expect(chatPanelPropsLog.at(-1)?.codexModel).toBe('valid'));
+    act(() => applyRemote({ codex: { model: 'unavailable' } }));
+    expect(chatPanelPropsLog.at(-1)?.codexModel).toBe('valid');
+    await waitFor(() => expect(mockSai.codexModels).toHaveBeenCalledWith(true));
+    await act(async () => { titleBarPropsLog.at(-1).onSettingChange('aiProvider', 'claude'); });
+    mockSai.codexModels.mockClear();
+    await act(async () => { titleBarPropsLog.at(-1).onSettingChange('aiProvider', 'codex'); });
+    await waitFor(() => expect(mockSai.codexModels).toHaveBeenCalledWith(false));
+  });
+
+  it('defers an unknown remote model while Claude is active and adopts it after Codex activation validates it', async () => {
+    let applyRemote!: (settings: Record<string, unknown>) => void;
+    mockSai.githubOnSettingsApplied = vi.fn((callback: (settings: Record<string, unknown>) => void) => {
+      applyRemote = callback;
+      return vi.fn();
+    });
+    mockSai.settingsGet.mockImplementation((key: string, def: unknown) => Promise.resolve(
+      key === 'codex' ? { model: 'current', permission: 'auto', effort: 'high' } : def ?? null,
+    ));
+    mockSai.codexModels.mockResolvedValue({
+      models: [{ id: 'current', name: 'Current' }, { id: 'pending', name: 'Pending' }],
+      defaultModel: 'current',
+    });
+    render(<App />);
+    await waitFor(() => expect(chatPanelPropsLog.at(-1)?.codexModel).toBe('current'));
+    expect(mockSai.codexModels).not.toHaveBeenCalled();
+    act(() => applyRemote({ codex: { model: 'pending' } }));
+    expect(chatPanelPropsLog.at(-1)?.codexModel).toBe('current');
+    expect(mockSai.codexModels).not.toHaveBeenCalled();
+    await act(async () => { titleBarPropsLog.at(-1).onSettingChange('aiProvider', 'codex'); });
+    await waitFor(() => expect(mockSai.codexModels).toHaveBeenCalledWith(true));
+    await waitFor(() => expect(chatPanelPropsLog.at(-1)?.codexModel).toBe('pending'));
+    expect(mockSai.settingsSet).toHaveBeenCalledWith('codex', expect.objectContaining({ model: 'pending' }));
+  });
+
+  it('merges a delayed persisted effort after adopting a pending remote model', async () => {
+    let resolveCodex!: (value: unknown) => void;
+    const delayedCodex = new Promise(resolve => { resolveCodex = resolve; });
+    let applyRemote!: (settings: Record<string, unknown>) => void;
+    mockSai.githubOnSettingsApplied = vi.fn((callback: (settings: Record<string, unknown>) => void) => {
+      applyRemote = callback;
+      return vi.fn();
+    });
+    mockSai.settingsGet.mockImplementation((key: string, def: unknown) => key === 'codex'
+      ? delayedCodex : Promise.resolve(key === 'aiProvider' ? 'claude' : def ?? null));
+    mockSai.codexModels.mockResolvedValue({
+      models: [
+        { id: 'current', name: 'Current', supportedReasoningEfforts: ['high'] },
+        { id: 'pending', name: 'Pending', supportedReasoningEfforts: ['high', 'xhigh'] },
+      ],
+      defaultModel: 'current',
+    });
+    render(<App />);
+    await waitFor(() => expect(mockSai.githubOnSettingsApplied).toHaveBeenCalled());
+    act(() => applyRemote({ codex: { model: 'pending' } }));
+    await act(async () => { titleBarPropsLog.at(-1).onSettingChange('aiProvider', 'codex'); });
+    await waitFor(() => expect(chatPanelPropsLog.at(-1)?.codexModel).toBe('pending'));
+
+    await act(async () => { resolveCodex({ permission: 'auto', effort: 'xhigh' }); await delayedCodex; });
+
+    expect(chatPanelPropsLog.at(-1)?.codexModel).toBe('pending');
+    expect(chatPanelPropsLog.at(-1)?.codexEffort).toBe('xhigh');
   });
 
   it('persists the outgoing session before activating the new one', async () => {

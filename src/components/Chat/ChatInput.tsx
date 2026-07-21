@@ -1,5 +1,5 @@
 import { useState, useRef, KeyboardEvent, useEffect, useMemo } from 'react';
-import type { PendingApproval, PendingSudoPrompt, TerminalTab, ChatMessage as ChatMessageType, QueuedMessage, MetaWorkspaceRuntime, EffortLevel, ModelChoice } from '../../types';
+import type { PendingApproval, PendingSudoPrompt, TerminalTab, ChatMessage as ChatMessageType, QueuedMessage, MetaWorkspaceRuntime, EffortLevel, CodexEffort, CodexModelOption, ModelChoice } from '../../types';
 import TodoProgress from './TodoProgress';
 import MessageQueue from './MessageQueue';
 import { basename } from '../../utils/pathUtils';
@@ -17,6 +17,7 @@ import {
   getTerminalLastCommandById, getTerminalLastCommandByIndex,
 } from '../../terminalBuffer';
 import { getCapabilities } from '../../providers/capabilities';
+import { effortsForCodexModel, normalizeCodexEffort } from '../../lib/codexEffort';
 
 type ModelOption = { id: string; label: string; description: string; recommended?: boolean; oneM?: boolean; extra?: boolean };
 
@@ -69,11 +70,13 @@ interface ChatInputProps {
   onDeny?: () => void;
   onAlwaysAllow?: () => void;
   codexModel?: string;
-  codexModels?: { id: string; name: string }[];
+  codexModels?: CodexModelOption[];
   onCodexModelChange?: (model: string) => void;
   onCodexModelsRefresh?: () => void;
   codexPermission?: 'auto' | 'read-only' | 'full-access';
   onCodexPermissionChange?: (perm: 'auto' | 'read-only' | 'full-access') => void;
+  codexEffort?: CodexEffort;
+  onCodexEffortChange?: (effort: CodexEffort) => void;
   geminiModel?: string;
   geminiModels?: { id: string; name: string }[];
   onGeminiModelChange?: (model: string) => void;
@@ -268,7 +271,10 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabled, slashCommands = [], isStreaming, waiting, awaitingQuestion, messages = [], onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, contextUsage, sessionUsage, sessionCost, rateLimits, billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, pendingSudoPrompt, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, onCodexModelsRefresh, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, onQueueSendNow, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
+export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabled, slashCommands = [], isStreaming, waiting, awaitingQuestion, messages = [], onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, contextUsage, sessionUsage, sessionCost, rateLimits, billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, pendingSudoPrompt, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, onCodexModelsRefresh, codexPermission = 'auto', onCodexPermissionChange, codexEffort = 'high', onCodexEffortChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, onQueueSendNow, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
+  const selectedCodexModel = codexModels.find(model => model.id === codexModel);
+  const supportedCodexEfforts = effortsForCodexModel(selectedCodexModel);
+  const effectiveCodexEffort = normalizeCodexEffort(codexEffort, selectedCodexModel);
   // Live model list (account/org-aware) when available, else the static fallback.
   const modelOptions = useMemo<{ id: ModelChoice; label: string; description: string; color: string; recommended?: boolean }[]>(() => {
     if (availableModels && availableModels.length) {
@@ -1173,7 +1179,7 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
           })()}
 
           {/* Effort level — Claude only */}
-          {getCapabilities(aiProvider).hasEffortMode && (() => {
+          {aiProvider === 'claude' && getCapabilities(aiProvider).hasEffortMode && (() => {
             const ov = claudeOverrideState;
             const onDefault = ov ? !ov.effortOverridden : false;
             const cfg = EFFORT_CONFIG[effortLevel];
@@ -1196,15 +1202,24 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
             );
           })()}
 
+          {aiProvider === 'codex' && effectiveCodexEffort && supportedCodexEfforts.length > 0 && (
+            <button
+              aria-label={`Codex effort: ${effectiveCodexEffort}`}
+              className="toolbar-btn effort-btn"
+              onClick={() => onCodexEffortChange?.(supportedCodexEfforts[(supportedCodexEfforts.indexOf(effectiveCodexEffort) + 1) % supportedCodexEfforts.length])}
+              title={`Codex effort: ${effectiveCodexEffort} — Click to cycle`}
+            >
+              <ChevronsUp size={15} />
+              <span className="effort-label">{{ minimal: 'Min', low: 'Lo', medium: 'Med', high: 'Hi', xhigh: 'XHi', max: 'Max', ultra: 'Ultra' }[effectiveCodexEffort]}</span>
+            </button>
+          )}
+
           {/* Model selector — Claude only */}
           {aiProvider === 'claude' && (
           <div className="model-selector" ref={modelMenuRef}>
             <button
               className="toolbar-btn model-btn"
-              onClick={() => {
-                if (!modelMenuOpen) onCodexModelsRefresh?.();
-                setModelMenuOpen(!modelMenuOpen);
-              }}
+              onClick={() => setModelMenuOpen(!modelMenuOpen)}
               style={{ color: modelOptions.find(m => m.id === modelChoice)?.color }}
             >
               <span className="model-label">{modelOptions.find(m => m.id === modelChoice)?.label ?? modelChoice}</span>
@@ -1257,7 +1272,10 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
           <div className="model-selector" ref={modelMenuRef}>
             <button
               className="toolbar-btn model-btn"
-              onClick={() => setModelMenuOpen(!modelMenuOpen)}
+              onClick={() => {
+                if (!modelMenuOpen) onCodexModelsRefresh?.();
+                setModelMenuOpen(!modelMenuOpen);
+              }}
               style={{ color: 'var(--accent)' }}
             >
               <span className="model-label">{codexModel || 'Model'}</span>
@@ -1281,11 +1299,11 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
                   </button>
                 ))}
                 {codexModels.length === 0 && (
-                  <div className="model-dropdown-item" style={{ opacity: 0.5, cursor: 'default' }}>
+                  <button className="model-dropdown-item" onClick={() => onCodexModelsRefresh?.()}>
                     <div className="model-dropdown-item-info">
-                      <span className="model-dropdown-item-name">Loading models...</span>
+                      <span className="model-dropdown-item-name">Retry loading models</span>
                     </div>
-                  </div>
+                  </button>
                 )}
               </div>
             )}

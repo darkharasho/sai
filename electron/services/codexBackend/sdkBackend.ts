@@ -7,9 +7,11 @@ import {
   type ThreadOptions,
   type TurnOptions,
 } from '@openai/codex-sdk';
+import path from 'node:path';
 import { enrichedEnv } from '../shellEnv';
 import { mapCodexSdkEvent, type SaiEnvelope } from './sdkEventMap';
 import { buildCodexInput, buildCodexSdkOptions } from './sdkOptions';
+import { resolveBundledCodex } from './bundledModels';
 import {
   codexScope,
   codexScopeKey,
@@ -43,6 +45,7 @@ interface ScopeMeta {
   cwd: string;
   kind: CodexSessionKind;
   metaPreamble?: string;
+  additionalDirectories?: string[];
 }
 
 interface ActiveTurn {
@@ -94,7 +97,13 @@ export class SdkCodexBackend implements CodexBackend {
   private readonly getEnv: () => NodeJS.ProcessEnv;
 
   constructor(deps: SdkCodexBackendDeps = {}) {
-    this.createClient = deps.createClient ?? ((options) => new Codex(options));
+    this.createClient = deps.createClient ?? ((options) => {
+      const bundled = resolveBundledCodex();
+      const env = { ...(options.env ?? {}) };
+      const pathKey = process.platform === 'win32' ? (Object.keys(env).find(key => key.toLowerCase() === 'path') ?? 'Path') : 'PATH';
+      env[pathKey] = [...bundled.pathDirs, env[pathKey]].filter(Boolean).join(path.delimiter);
+      return new Codex({ ...options, env, codexPathOverride: bundled.executablePath });
+    });
     this.emit = deps.emit ?? (() => undefined);
     this.loadModels = deps.getModels ?? emptyModels;
     this.getEnv = deps.getEnv ?? enrichedEnv;
@@ -109,6 +118,7 @@ export class SdkCodexBackend implements CodexBackend {
       cwd: args.scopeCwd || args.projectPath,
       kind: args.kind ?? 'chat',
       metaPreamble: args.metaPreamble,
+      additionalDirectories: [...new Set((args.additionalDirectories ?? []).filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0))],
     };
     this.metadata.set(key, nextMeta);
 
@@ -117,8 +127,9 @@ export class SdkCodexBackend implements CodexBackend {
       const changed = runtime.cwd !== nextMeta.cwd
         || runtime.kind !== nextMeta.kind
         || runtime.metaPreamble !== nextMeta.metaPreamble;
+      const directoriesChanged = JSON.stringify(runtime.additionalDirectories) !== JSON.stringify(nextMeta.additionalDirectories);
       Object.assign(runtime, nextMeta);
-      if (changed && !runtime.active) this.clearConfiguredSdk(runtime);
+      if ((changed || directoriesChanged) && !runtime.active) this.clearConfiguredSdk(runtime);
     }
 
     this.emit({ type: 'ready', projectPath: args.projectPath, scope });
@@ -145,6 +156,7 @@ export class SdkCodexBackend implements CodexBackend {
       effort: args.effort,
       model: args.model,
       metaPreamble: runtime.metaPreamble,
+      additionalDirectories: runtime.additionalDirectories,
     });
     const configIdentity = JSON.stringify({ thread: built.thread, client: built.clientConfig });
     const active: ActiveTurn = {
@@ -230,6 +242,9 @@ export class SdkCodexBackend implements CodexBackend {
         this.finishTurn(runtime, active);
       }
       this.runtimes.delete(key);
+    }
+    for (const [key, meta] of this.metadata) {
+      if (meta.projectPath === projectPath) this.metadata.delete(key);
     }
   }
 

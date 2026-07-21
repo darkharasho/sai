@@ -33,6 +33,260 @@ describe('SettingsModal', () => {
     expect(screen.getByText('Settings')).toBeTruthy();
   });
 
+  it('does not fetch Codex models until the Codex page is selected', async () => {
+    const mock = createMockSai();
+    mock.settingsGet = makeSettingsGetMock();
+    installMockSai(mock);
+    render(<SettingsModal {...defaultProps} />);
+    await waitFor(() => expect(mock.settingsGet).toHaveBeenCalled());
+    expect(mock.codexModels).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText('Codex'));
+    await waitFor(() => expect(mock.codexModels).toHaveBeenCalledWith(false));
+    fireEvent.click(screen.getByText('Retry models'));
+    await waitFor(() => expect(mock.codexModels).toHaveBeenCalledWith(true));
+  });
+
+  it('delegates Codex effort persistence to the owning App callback without a duplicate write', async () => {
+    const mock = createMockSai();
+    mock.settingsGet = vi.fn((key: string, fallback: unknown) => Promise.resolve(key === 'codex'
+      ? { model: 'gpt-5', permission: 'auto', effort: 'xhigh' }
+      : fallback));
+    installMockSai(mock);
+    const onSettingChange = vi.fn();
+    render(<SettingsModal onClose={vi.fn()} onSettingChange={onSettingChange} />);
+    fireEvent.click(screen.getByText('Codex'));
+    const select = await screen.findByLabelText('Codex effort');
+    expect((select as HTMLSelectElement).value).toBe('xhigh');
+    fireEvent.change(select, { target: { value: 'minimal' } });
+    expect(onSettingChange).toHaveBeenCalledWith('codexEffort', 'minimal');
+    expect(mock.settingsSet).not.toHaveBeenCalledWith('codex', expect.anything());
+  });
+
+  it('persists Codex effort itself when rendered without an owning callback', async () => {
+    const mock = createMockSai();
+    mock.settingsGet = vi.fn((key: string, fallback: unknown) => Promise.resolve(key === 'codex'
+      ? { model: 'gpt-5', permission: 'auto', effort: 'high' }
+      : fallback));
+    installMockSai(mock);
+    render(<SettingsModal onClose={vi.fn()} />);
+    fireEvent.click(screen.getByText('Codex'));
+    fireEvent.change(await screen.findByLabelText('Codex effort'), { target: { value: 'max' } });
+    await waitFor(() => expect(mock.settingsSet).toHaveBeenCalledWith('codex', {
+      model: 'gpt-5', permission: 'auto', effort: 'max',
+    }));
+  });
+
+  it('shows and normalizes only reasoning efforts supported by the selected Codex model', async () => {
+    const mock = createMockSai();
+    mock.settingsGet = vi.fn((key: string, fallback: unknown) => Promise.resolve(key === 'codex'
+      ? { model: 'retired-model', permission: 'auto', effort: 'minimal' }
+      : fallback));
+    mock.codexModels = vi.fn(() => Promise.resolve({
+      models: [{ id: 'no-min', name: 'No Minimal', supportedReasoningEfforts: ['low', 'high', 'ultra'], defaultReasoningEffort: 'high' }],
+      defaultModel: 'no-min',
+    }));
+    installMockSai(mock);
+    const onSettingChange = vi.fn();
+    render(<SettingsModal onClose={vi.fn()} onSettingChange={onSettingChange} />);
+    fireEvent.click(screen.getByText('Codex'));
+    const select = await screen.findByLabelText('Codex effort') as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe('high'));
+    expect(Array.from(select.options).map(option => option.value)).toEqual(['low', 'high', 'ultra']);
+    expect(onSettingChange).toHaveBeenCalledWith('codexModel', 'no-min');
+    expect(onSettingChange).toHaveBeenCalledWith('codexEffort', 'high');
+  });
+
+  it('applies retry model results through the same normalized owner update path', async () => {
+    const mock = createMockSai();
+    mock.settingsGet = vi.fn((key: string, fallback: unknown) => Promise.resolve(key === 'codex'
+      ? { model: 'retired-model', permission: 'auto', effort: 'minimal' }
+      : fallback));
+    mock.codexModels = vi.fn()
+      .mockResolvedValueOnce({ models: [], defaultModel: '' })
+      .mockResolvedValueOnce({
+        models: [{ id: 'retry-model', name: 'Retry Model', supportedReasoningEfforts: ['high', 'ultra'], defaultReasoningEffort: 'high' }],
+        defaultModel: 'retry-model',
+      });
+    installMockSai(mock);
+    const onSettingChange = vi.fn();
+    render(<SettingsModal onClose={vi.fn()} onSettingChange={onSettingChange} />);
+    fireEvent.click(screen.getByText('Codex'));
+    fireEvent.click(await screen.findByText('Retry models'));
+    await waitFor(() => expect(onSettingChange).toHaveBeenCalledWith('codexModel', 'retry-model'));
+    expect(onSettingChange).toHaveBeenCalledWith('codexEffort', 'high');
+    expect((screen.getByLabelText('Codex effort') as HTMLSelectElement).value).toBe('high');
+  });
+
+  it('does not let a delayed initial read overwrite delegated local Codex changes', async () => {
+    let resolveCodex!: (value: unknown) => void;
+    const delayedCodex = new Promise(resolve => { resolveCodex = resolve; });
+    const mock = createMockSai();
+    mock.settingsGet = vi.fn((key: string, fallback: unknown) => key === 'codex' ? delayedCodex : Promise.resolve(fallback));
+    installMockSai(mock);
+    const onSettingChange = vi.fn();
+    render(<SettingsModal onClose={vi.fn()} onSettingChange={onSettingChange} />);
+    fireEvent.click(screen.getByText('Codex'));
+    fireEvent.change(await screen.findByDisplayValue('Auto (sandboxed)'), { target: { value: 'full-access' } });
+    fireEvent.change(screen.getByLabelText('Codex effort'), { target: { value: 'ultra' } });
+    await act(async () => { resolveCodex({ permission: 'read-only', effort: 'minimal' }); await delayedCodex; });
+    expect((screen.getByDisplayValue('Full access') as HTMLSelectElement).value).toBe('full-access');
+    expect((screen.getByLabelText('Codex effort') as HTMLSelectElement).value).toBe('ultra');
+  });
+
+  it('does not let a delayed initial read overwrite model-load normalization', async () => {
+    let resolveCodex!: (value: unknown) => void;
+    const delayedCodex = new Promise(resolve => { resolveCodex = resolve; });
+    const mock = createMockSai();
+    mock.settingsGet = vi.fn((key: string, fallback: unknown) => key === 'codex' ? delayedCodex : Promise.resolve(fallback));
+    mock.codexModels.mockResolvedValue({
+      models: [{ id: 'current', name: 'Current', supportedReasoningEfforts: ['high'], defaultReasoningEffort: 'high' }],
+      defaultModel: 'current',
+    });
+    installMockSai(mock);
+    render(<SettingsModal {...defaultProps} />);
+    fireEvent.click(screen.getByText('Codex'));
+    await screen.findByDisplayValue('Current');
+    await act(async () => { resolveCodex({ model: 'stale', permission: 'read-only', effort: 'minimal' }); await delayedCodex; });
+    expect((screen.getByDisplayValue('Current') as HTMLSelectElement).value).toBe('current');
+    expect((screen.getByLabelText('Codex effort') as HTMLSelectElement).value).toBe('high');
+    expect((screen.getByDisplayValue('Read-only') as HTMLSelectElement).value).toBe('read-only');
+  });
+
+  it('restores a catalog-valid persisted custom model and effort from a delayed initial read', async () => {
+    let resolveCodex!: (value: unknown) => void;
+    const delayedCodex = new Promise(resolve => { resolveCodex = resolve; });
+    const mock = createMockSai();
+    mock.settingsGet = vi.fn((key: string, fallback: unknown) => key === 'codex' ? delayedCodex : Promise.resolve(fallback));
+    mock.codexModels.mockResolvedValue({
+      models: [
+        { id: 'default', name: 'Default', supportedReasoningEfforts: ['high'] },
+        { id: 'custom', name: 'Custom', supportedReasoningEfforts: ['low', 'xhigh'] },
+      ],
+      defaultModel: 'default',
+    });
+    installMockSai(mock);
+    render(<SettingsModal {...defaultProps} />);
+    fireEvent.click(screen.getByText('Codex'));
+    await screen.findByDisplayValue('Default');
+    await act(async () => { resolveCodex({ model: 'custom', permission: 'read-only', effort: 'xhigh' }); await delayedCodex; });
+    expect((screen.getByDisplayValue('Custom') as HTMLSelectElement).value).toBe('custom');
+    expect((screen.getByLabelText('Codex effort') as HTMLSelectElement).value).toBe('xhigh');
+    expect((screen.getByDisplayValue('Read-only') as HTMLSelectElement).value).toBe('read-only');
+  });
+
+  it('rejects unavailable remote Codex models against a loaded catalog and refreshes it', async () => {
+    const mock = createMockSai();
+    mock.settingsGet = vi.fn((key: string, fallback: unknown) => Promise.resolve(key === 'codex'
+      ? { model: 'valid', permission: 'auto', effort: 'high' } : fallback));
+    mock.codexModels.mockResolvedValue({
+      models: [{ id: 'valid', name: 'Valid' }], defaultModel: 'valid',
+    });
+    let applyRemoteSettings: ((settings: Record<string, unknown>) => void) | undefined;
+    mock.githubOnSettingsApplied = vi.fn((callback: (settings: Record<string, unknown>) => void) => {
+      applyRemoteSettings = callback;
+      return vi.fn();
+    });
+    installMockSai(mock);
+    render(<SettingsModal {...defaultProps} />);
+    fireEvent.click(screen.getByText('Codex'));
+    await screen.findByDisplayValue('Valid');
+    act(() => applyRemoteSettings?.({ codex: { model: 'unavailable' } }));
+    expect((screen.getByDisplayValue('Valid') as HTMLSelectElement).value).toBe('valid');
+    await waitFor(() => expect(mock.codexModels).toHaveBeenCalledWith(true));
+    fireEvent.click(screen.getByText('General'));
+    mock.codexModels.mockClear();
+    fireEvent.click(screen.getByText('Codex'));
+    await waitFor(() => expect(mock.codexModels).toHaveBeenCalledWith(false));
+  });
+
+  it('defers an unknown remote model off the Codex page and adopts it after opening validates it', async () => {
+    const mock = createMockSai();
+    mock.settingsGet = vi.fn((key: string, fallback: unknown) => Promise.resolve(key === 'codex'
+      ? { model: 'current', permission: 'auto', effort: 'high' } : fallback));
+    mock.codexModels.mockResolvedValue({
+      models: [{ id: 'current', name: 'Current' }, { id: 'pending', name: 'Pending' }], defaultModel: 'current',
+    });
+    let applyRemoteSettings!: (settings: Record<string, unknown>) => void;
+    mock.githubOnSettingsApplied = vi.fn((callback: (settings: Record<string, unknown>) => void) => {
+      applyRemoteSettings = callback;
+      return vi.fn();
+    });
+    installMockSai(mock);
+    const onSettingChange = vi.fn();
+    render(<SettingsModal onClose={vi.fn()} onSettingChange={onSettingChange} />);
+    await waitFor(() => expect(mock.settingsGet).toHaveBeenCalledWith('codex', {}));
+    act(() => applyRemoteSettings({ codex: { model: 'pending' } }));
+    expect(mock.codexModels).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText('Codex'));
+    await waitFor(() => expect(mock.codexModels).toHaveBeenCalledWith(true));
+    await screen.findByDisplayValue('Pending');
+    expect(onSettingChange).toHaveBeenCalledWith('codexModel', 'pending');
+  });
+
+  it('merges a delayed persisted effort after adopting a pending remote model', async () => {
+    let resolveCodex!: (value: unknown) => void;
+    const delayedCodex = new Promise(resolve => { resolveCodex = resolve; });
+    const mock = createMockSai();
+    mock.settingsGet = vi.fn((key: string, fallback: unknown) => key === 'codex'
+      ? delayedCodex : Promise.resolve(fallback));
+    mock.codexModels.mockResolvedValue({
+      models: [
+        { id: 'current', name: 'Current', supportedReasoningEfforts: ['high'] },
+        { id: 'pending', name: 'Pending', supportedReasoningEfforts: ['high', 'xhigh'] },
+      ],
+      defaultModel: 'current',
+    });
+    let applyRemoteSettings!: (settings: Record<string, unknown>) => void;
+    mock.githubOnSettingsApplied = vi.fn((callback: (settings: Record<string, unknown>) => void) => {
+      applyRemoteSettings = callback;
+      return vi.fn();
+    });
+    installMockSai(mock);
+    render(<SettingsModal {...defaultProps} />);
+    await waitFor(() => expect(mock.githubOnSettingsApplied).toHaveBeenCalled());
+    act(() => applyRemoteSettings({ codex: { model: 'pending' } }));
+    fireEvent.click(screen.getByText('Codex'));
+    await screen.findByDisplayValue('Pending');
+
+    await act(async () => { resolveCodex({ permission: 'auto', effort: 'xhigh' }); await delayedCodex; });
+
+    expect((screen.getByDisplayValue('Pending') as HTMLSelectElement).value).toBe('pending');
+    expect((screen.getByLabelText('Codex effort') as HTMLSelectElement).value).toBe('xhigh');
+  });
+
+  it('hides effort settings for a model with an explicit empty effort set', async () => {
+    const mock = createMockSai();
+    mock.settingsGet = vi.fn((key: string, fallback: unknown) => Promise.resolve(key === 'codex'
+      ? { model: 'none', permission: 'auto', effort: 'high' } : fallback));
+    mock.codexModels.mockResolvedValue({
+      models: [{ id: 'none', name: 'None', supportedReasoningEfforts: [] }], defaultModel: 'none',
+    });
+    installMockSai(mock);
+    render(<SettingsModal {...defaultProps} />);
+    fireEvent.click(screen.getByText('Codex'));
+    await screen.findByDisplayValue('None');
+    expect(screen.queryByLabelText('Codex effort')).toBeNull();
+    expect(defaultProps.onSettingChange).toHaveBeenCalledWith('codexEffort', undefined);
+  });
+
+  it('applies remote Codex model, permission, and effort updates without writing them back', async () => {
+    const mock = createMockSai();
+    mock.settingsGet = makeSettingsGetMock();
+    let applyRemoteSettings: ((settings: Record<string, unknown>) => void) | undefined;
+    mock.githubOnSettingsApplied = vi.fn((callback: (settings: Record<string, unknown>) => void) => {
+      applyRemoteSettings = callback;
+      return vi.fn();
+    });
+    installMockSai(mock);
+    render(<SettingsModal {...defaultProps} />);
+    fireEvent.click(screen.getByText('Codex'));
+    await screen.findByLabelText('Codex effort');
+    act(() => applyRemoteSettings?.({ codex: { model: 'remote-model', permission: 'full-access', effort: 'ultra' } }));
+    await waitFor(() => expect((screen.getByLabelText('Codex effort') as HTMLSelectElement).value).toBe('ultra'));
+    expect((screen.getByDisplayValue('Full access') as HTMLSelectElement).value).toBe('full-access');
+    expect(mock.settingsSet).not.toHaveBeenCalledWith('codex', expect.anything());
+  });
+
   it('renders the settings title', () => {
     render(<SettingsModal {...defaultProps} />);
     expect(screen.getByText('Settings')).toBeTruthy();

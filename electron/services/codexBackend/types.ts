@@ -1,8 +1,7 @@
-import type { ModelReasoningEffort } from '@openai/codex-sdk';
-
 export type CodexBackendKind = 'cli' | 'sdk';
 export type CodexSessionKind = 'chat' | 'task' | 'orchestrator';
 export type CodexPermission = 'auto' | 'read-only' | 'full-access';
+export type CodexReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 
 export interface CodexStartArgs {
   projectPath: string;
@@ -11,6 +10,7 @@ export interface CodexStartArgs {
   orchestratorContext?: Record<string, unknown> | null;
   scopeCwd?: string;
   metaPreamble?: string;
+  additionalDirectories?: string[];
 }
 
 export interface CodexSendArgs {
@@ -18,7 +18,7 @@ export interface CodexSendArgs {
   message: string;
   imagePaths?: string[];
   permission?: CodexPermission;
-  effort?: ModelReasoningEffort;
+  effort?: CodexReasoningEffort;
   model?: string;
   scope?: string;
   origin?: 'desktop' | 'remote';
@@ -27,6 +27,26 @@ export interface CodexSendArgs {
 export interface CodexModelOption {
   id: string;
   name: string;
+  supportedReasoningEfforts?: CodexReasoningEffort[];
+  defaultReasoningEffort?: CodexReasoningEffort;
+}
+
+const CODEX_REASONING_EFFORTS = new Set<CodexReasoningEffort>(['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
+export const isCodexReasoningEffort = (value: unknown): value is CodexReasoningEffort => CODEX_REASONING_EFFORTS.has(value as CodexReasoningEffort);
+
+export function normalizeCodexModelOption(model: any): CodexModelOption {
+  const supported: CodexReasoningEffort[] | undefined = Array.isArray(model.supportedReasoningEfforts)
+    ? model.supportedReasoningEfforts
+      .map((entry: unknown) => typeof entry === 'string' ? entry : (entry as any)?.reasoningEffort)
+      .filter((entry: unknown): entry is CodexReasoningEffort => isCodexReasoningEffort(entry))
+    : undefined;
+  const defaultReasoningEffort = isCodexReasoningEffort(model.defaultReasoningEffort) ? model.defaultReasoningEffort : undefined;
+  return {
+    id: model.model,
+    name: model.displayName || model.model,
+    ...(supported ? { supportedReasoningEfforts: [...new Set(supported)] } : {}),
+    ...(defaultReasoningEffort ? { defaultReasoningEffort } : {}),
+  };
 }
 
 export interface CodexModelResult {

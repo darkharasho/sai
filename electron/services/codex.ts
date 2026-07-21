@@ -3,9 +3,10 @@ import {
   configureCodexBackendWindow,
   getCodexBackend,
   type CodexPermission,
+  type CodexReasoningEffort,
   type CodexSessionKind,
+  isCodexReasoningEffort,
 } from './codexBackend';
-import type { ModelReasoningEffort } from '@openai/codex-sdk';
 
 type StartIpcTail = [
   scope?: string,
@@ -13,6 +14,7 @@ type StartIpcTail = [
   orchestratorContext?: Record<string, unknown> | null,
   scopeCwd?: string,
   metaPreamble?: string,
+  additionalDirectories?: string[],
 ];
 
 type SendIpcTail = [
@@ -23,6 +25,12 @@ type SendIpcTail = [
   scope?: string,
   origin?: 'desktop' | 'remote',
 ];
+
+const normalizeDirectories = (value: unknown): string[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const directories = [...new Set(value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0))];
+  return directories.length ? directories : undefined;
+};
 
 /** Register the Codex IPC surface. Transport behavior lives in codexBackend. */
 export function registerCodexHandlers(win: BrowserWindow): void {
@@ -48,6 +56,7 @@ export function registerCodexHandlers(win: BrowserWindow): void {
         orchestratorContext: legacy ? undefined : tail[2],
         scopeCwd: legacy ? undefined : tail[3],
         metaPreamble: legacy ? tail[0] : tail[4],
+        additionalDirectories: legacy ? undefined : normalizeDirectories(tail[5]),
       });
     },
   );
@@ -68,7 +77,7 @@ export function registerCodexHandlers(win: BrowserWindow): void {
         message,
         imagePaths: tail[0],
         permission: tail[1],
-        effort: legacy ? undefined : tail[2] as ModelReasoningEffort | undefined,
+        effort: legacy || !isCodexReasoningEffort(tail[2]) ? undefined : tail[2] as CodexReasoningEffort,
         model: legacy ? tail[2] : tail[3],
         scope: legacy ? undefined : tail[4],
         origin: legacy ? undefined : tail[5],

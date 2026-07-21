@@ -76,8 +76,8 @@ contextBridge.exposeInMainWorld('sai', {
   claudeModels: () => ipcRenderer.invoke('claude:models'),
   // Codex CLI
   codexModels: (forceRefresh?: boolean) => ipcRenderer.invoke('codex:models', forceRefresh),
-  codexStart: (cwd: string, scope?: string, kind?: string, orchestratorContext?: unknown, scopeCwd?: string, metaPreamble?: string) =>
-    ipcRenderer.invoke('codex:start', cwd, scope, kind, orchestratorContext, scopeCwd, metaPreamble),
+  codexStart: (cwd: string, scope?: string, kind?: string, orchestratorContext?: unknown, scopeCwd?: string, metaPreamble?: string, additionalDirectories?: string[]) =>
+    ipcRenderer.invoke('codex:start', cwd, scope, kind, orchestratorContext, scopeCwd, metaPreamble, additionalDirectories),
   codexSend: (projectPath: string, message: string, imagePaths?: string[], permMode?: string, effort?: string, model?: string, scope?: string, origin?: 'desktop' | 'remote') =>
     ipcRenderer.send('codex:send', projectPath, message, imagePaths, permMode, effort, model, scope, origin),
   codexStop: (projectPath: string, scope?: string) => ipcRenderer.send('codex:stop', projectPath, scope),
@@ -98,14 +98,14 @@ contextBridge.exposeInMainWorld('sai', {
   provider: {
     start(provider: string, cwd: string, opts: {
       scope?: string; kind?: string; orchestratorContext?: unknown;
-      scopeCwd?: string; metaPreamble?: string;
+      scopeCwd?: string; metaPreamble?: string; additionalDirectories?: string[];
     } = {}) {
       if (provider === 'claude') {
         return ipcRenderer.invoke('claude:start', cwd, opts.scope, opts.kind, opts.orchestratorContext, opts.scopeCwd, opts.metaPreamble);
       } else if (provider === 'gemini') {
         return ipcRenderer.invoke('gemini:start', cwd, opts.metaPreamble);
       } else {
-        return ipcRenderer.invoke('codex:start', cwd, opts.scope, opts.kind, opts.orchestratorContext, opts.scopeCwd, opts.metaPreamble);
+        return ipcRenderer.invoke('codex:start', cwd, opts.scope, opts.kind, opts.orchestratorContext, opts.scopeCwd, opts.metaPreamble, opts.additionalDirectories);
       }
     },
     send(provider: string, projectPath: string, message: string, opts: {

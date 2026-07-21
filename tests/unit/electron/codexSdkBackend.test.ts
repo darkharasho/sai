@@ -122,6 +122,30 @@ async function settle(): Promise<void> {
 }
 
 describe('SdkCodexBackend', () => {
+  it('passes normalized additional directories per scope and rebuilds when they change', async () => {
+    const h = harness([streamOf(completedEvents()), streamOf(completedEvents())]);
+    h.backend.start({ projectPath: '/meta', scope: 'chat', additionalDirectories: ['/a', '', '/a', '/b'] });
+    h.backend.send({ projectPath: '/meta', scope: 'chat', message: 'one' });
+    await settle();
+    expect(h.runs[0].threadOptions.additionalDirectories).toEqual(['/a', '/b']);
+    h.backend.start({ projectPath: '/meta', scope: 'chat', additionalDirectories: ['/c'] });
+    h.backend.send({ projectPath: '/meta', scope: 'chat', message: 'two' });
+    await settle();
+    expect(h.runs[1].threadOptions.additionalDirectories).toEqual(['/c']);
+    expect(h.clients).toHaveLength(2);
+  });
+
+  it('removes suspended metadata so stale roots cannot be reused before remount', async () => {
+    const h = harness([streamOf(completedEvents()), streamOf(completedEvents())]);
+    h.backend.start({ projectPath: '/meta', scope: 'chat', scopeCwd: '/synthetic', additionalDirectories: ['/linked'] });
+    h.backend.send({ projectPath: '/meta', message: 'one' });
+    await settle();
+    h.backend.suspendWorkspace('/meta');
+    h.backend.send({ projectPath: '/meta', message: 'two' });
+    await settle();
+    expect(h.runs[1].threadOptions.workingDirectory).toBe('/meta');
+    expect(h.runs[1].threadOptions.additionalDirectories).toBeUndefined();
+  });
   it('isolates scopes and workspaces and uses each scoped cwd', async () => {
     const h = harness([streamOf(completedEvents()), streamOf(completedEvents()), streamOf(completedEvents())]);
     await h.backend.start({ projectPath: '/a', scope: 'chat', scopeCwd: '/a/chat' });

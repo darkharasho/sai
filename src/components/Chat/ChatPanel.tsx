@@ -77,12 +77,13 @@ import { watchTargetsFromMessage } from './githubRunResolver';
 const EMPTY_URL_SET: Set<string> = new Set();
 import ChatInput, { type ContextItem } from './ChatInput';
 import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, PendingSudoPrompt, QueuedMessage, TerminalTab } from '../../types';
-import type { MetaWorkspaceRuntime } from '../../types';
+import type { MetaWorkspaceRuntime, CodexEffort, CodexModelOption } from '../../types';
 import type { WaitMeta } from '../../../electron/services/waitClassifier';
 import { buildHelpMessage } from './helpText';
 import { buildTaskRegistry, TaskRegistryContext } from './taskRegistry';
 import { parseAiError, looksLikeApiError } from './parseAiError';
 import { buildMetaPreamble } from '../../lib/metaSystemPrompt';
+import { normalizeCodexEffort } from '../../lib/codexEffort';
 
 type CodexPermission = 'auto' | 'read-only' | 'full-access';
 
@@ -109,10 +110,12 @@ interface ChatPanelProps {
   aiProvider: 'claude' | 'codex' | 'gemini';
   codexModel: string;
   onCodexModelChange: (model: string) => void;
-  codexModels: { id: string; name: string }[];
+  codexModels: CodexModelOption[];
   onCodexModelsRefresh?: () => void;
   codexPermission: CodexPermission;
   onCodexPermissionChange: (perm: CodexPermission) => void;
+  codexEffort?: CodexEffort;
+  onCodexEffortChange?: (effort: CodexEffort) => void;
   geminiModel: string;
   onGeminiModelChange: (model: string) => void;
   geminiModels: { id: string; name: string }[];
@@ -428,7 +431,7 @@ const THINKING_ROW_MOTION = {
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
 
-export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission, onCodexPermissionChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp, waiting = null }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission, onCodexPermissionChange, codexEffort, onCodexEffortChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp, waiting = null }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(() => {
     const initial = initialMessages || [];
     // Anything present at mount is history, not a fresh arrival — a workspace/
@@ -704,7 +707,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       projects: activeMetaRuntime.projects,
     } : null);
     const startArgs: any[] = aiProvider === 'claude' || aiProvider === 'codex'
-      ? [projectPath || '', claudeScope, claudeKind, claudeOrchestratorContext, undefined /* scopeCwd */, metaPreamble]
+      ? [projectPath || '', claudeScope, claudeKind, claudeOrchestratorContext, undefined /* scopeCwd */, metaPreamble, aiProvider === 'codex' && activeMetaRuntime
+        ? [...new Set(activeMetaRuntime.projects.filter(project => project.status === 'ok' && project.path.trim()).map(project => project.path))]
+        : undefined]
       : [projectPath || '', metaPreamble];
     startFn(...startArgs).then((result: any) => {
       setReady(true);
@@ -1944,7 +1949,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     if (aiProvider === 'gemini') {
       (window.sai as any).geminiSend(projectPath, prompt, imagePaths, geminiApprovalMode, geminiConversationMode, geminiModel, 'chat');
     } else if (aiProvider === 'codex') {
-      window.sai.codexSend(projectPath, prompt, imagePaths, codexPermission, effortLevel, codexModel, claudeScope, undefined);
+      const selectedCodexModel = codexModels.find(model => model.id === codexModel);
+      const sendEffort = normalizeCodexEffort(codexEffort ?? 'high', selectedCodexModel);
+      window.sai.codexSend(projectPath, prompt, imagePaths, codexPermission, sendEffort, codexModel, claudeScope, undefined);
     } else {
       window.sai.claudeSend(projectPath, prompt, imagePaths, permissionMode, effortLevel, modelChoice, claudeScope);
     }
@@ -2335,6 +2342,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             onCodexModelsRefresh={onCodexModelsRefresh}
             codexPermission={codexPermission}
             onCodexPermissionChange={onCodexPermissionChange}
+            codexEffort={codexEffort ?? 'high'}
+            onCodexEffortChange={onCodexEffortChange}
             geminiModel={geminiModel}
             geminiModels={geminiModels}
             onGeminiModelChange={onGeminiModelChange}

@@ -419,7 +419,18 @@ describe('ChatPanel', () => {
       claudeOrchestratorContext: orchestratorContext,
       codexPermission: 'read-only' as const,
       codexModel: 'gpt-5.2-codex',
-      effortLevel: 'xhigh' as const,
+      effortLevel: 'max' as const,
+      codexEffort: 'xhigh' as const,
+      activeMetaRuntime: {
+        meta: { id: 'meta', name: 'SAI', projects: [], createdAt: 1, lastActivity: 1 },
+        syntheticRoot: '/project',
+        projects: [
+          { path: '/repos/a', linkName: 'a', status: 'ok' as const },
+          { path: '/repos/b', linkName: 'b', status: 'ok' as const },
+          { path: '/repos/b', linkName: 'b-again', status: 'ok' as const },
+          { path: '/repos/missing', linkName: 'missing', status: 'unavailable' as const },
+        ],
+      },
     };
 
     render(<ChatPanel {...props} />);
@@ -432,6 +443,7 @@ describe('ChatPanel', () => {
       orchestratorContext,
       undefined,
       expect.any(String),
+      ['/repos/a', '/repos/b'],
     );
 
     await act(async () => {
@@ -450,6 +462,39 @@ describe('ChatPanel', () => {
 
     latestChatInputProps.onStop();
     expect(mockSai.codexStop).toHaveBeenCalledWith('/project', 'scope-a');
+  });
+
+  it('normalizes an unsupported persisted Codex effort before sending', async () => {
+    render(<ChatPanel
+      {...baseProps()}
+      aiProvider="codex"
+      codexModel="no-min"
+      codexModels={[{
+        id: 'no-min',
+        name: 'No Minimal',
+        supportedReasoningEfforts: ['low', 'high', 'xhigh'],
+        defaultReasoningEffort: 'high',
+      }]}
+      codexEffort="minimal"
+    />);
+
+    await act(async () => {
+      await latestChatInputProps.onSend('normalized prompt');
+    });
+
+    expect(mockSai.codexSend).toHaveBeenCalledWith(
+      '/project', 'normalized prompt', undefined, 'auto', 'high', 'no-min', 'chat', undefined,
+    );
+  });
+
+  it('omits reasoning effort when the selected Codex model explicitly supports none', async () => {
+    render(<ChatPanel {...baseProps()} aiProvider="codex" codexModel="none"
+      codexModels={[{ id: 'none', name: 'None', supportedReasoningEfforts: [] }]}
+      codexEffort="high" />);
+    await act(async () => { await latestChatInputProps.onSend('no effort'); });
+    expect(mockSai.codexSend).toHaveBeenCalledWith(
+      '/project', 'no effort', undefined, 'auto', undefined, 'none', 'chat', undefined,
+    );
   });
 
   it('accepts owning-scope Codex events and ignores explicitly wrong scopes', async () => {

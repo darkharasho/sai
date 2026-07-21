@@ -7,6 +7,7 @@ import type {
   ThreadOptions,
 } from '@openai/codex-sdk';
 import type { CodexPermission } from './types';
+import type { CodexReasoningEffort } from './types';
 
 const EFFORTS: ReadonlySet<unknown> = new Set<ModelReasoningEffort>([
   'minimal',
@@ -14,12 +15,14 @@ const EFFORTS: ReadonlySet<unknown> = new Set<ModelReasoningEffort>([
   'medium',
   'high',
   'xhigh',
+  'max' as ModelReasoningEffort,
+  'ultra' as ModelReasoningEffort,
 ]);
 
 export interface CodexSdkOptionInput {
   cwd: string;
   permission?: CodexPermission;
-  effort?: ModelReasoningEffort;
+  effort?: CodexReasoningEffort;
   model?: string;
   metaPreamble?: string;
   additionalDirectories?: readonly string[];
@@ -47,7 +50,7 @@ function permissionOptions(permission: CodexPermission | undefined): {
   }
 }
 
-function isModelReasoningEffort(effort: unknown): effort is ModelReasoningEffort {
+function isModelReasoningEffort(effort: unknown): effort is CodexReasoningEffort {
   return EFFORTS.has(effort);
 }
 
@@ -58,7 +61,10 @@ export function buildCodexSdkOptions(input: CodexSdkOptionInput): BuiltCodexSdkO
   };
 
   if (input.model) thread.model = input.model;
-  if (isModelReasoningEffort(input.effort)) thread.modelReasoningEffort = input.effort;
+  // The bundled native CLI advertises newer dynamic values (currently max and
+  // ultra) before the SDK's TypeScript union catches up; the runtime forwards
+  // this field as model_reasoning_effort config without narrowing it.
+  if (isModelReasoningEffort(input.effort)) thread.modelReasoningEffort = input.effort as ModelReasoningEffort;
   if (input.additionalDirectories?.length) {
     thread.additionalDirectories = [...input.additionalDirectories];
   }

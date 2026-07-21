@@ -41,7 +41,7 @@ const CAPABILITIES: Record<AIProvider, ProviderCapabilities> = {
   codex: {
     hasOrchestrator: false,
     hasSlashCommands: false,
-    hasEffortMode: false,
+    hasEffortMode: true,
     hasConversationMode: false,
     hasApprovalMode: true,
     supportsImages: true,

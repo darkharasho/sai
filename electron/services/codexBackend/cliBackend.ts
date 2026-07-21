@@ -11,6 +11,8 @@ import {
   type CodexModelResult,
   type CodexSendArgs,
   type CodexStartArgs,
+  normalizeCodexModelOption,
+  isCodexReasoningEffort,
 } from './types';
 
 type LegacyEvent = Record<string, any>;
@@ -167,7 +169,7 @@ export function fetchCodexModels(forceRefresh = false): Promise<CodexModelResult
           const data = msg.result.data || [];
           const models = data
             .filter((model: any) => !model.hidden)
-            .map((model: any) => ({ id: model.model, name: model.displayName || model.model }));
+            .map(normalizeCodexModelOption);
           const defaultModel = data.find((model: any) => model.isDefault)?.model || models[0]?.id || '';
           clearTimeout(timeout);
           finish({ models, defaultModel });
@@ -216,6 +218,7 @@ export class CliCodexBackend implements CodexBackend {
     const ws = getOrCreate(args.projectPath);
     ws.codex.cwd = args.scopeCwd || args.projectPath;
     ws.codex.metaPreamble = args.metaPreamble || '';
+    ws.codex.additionalDirectories = [...new Set((args.additionalDirectories ?? []).filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0))];
     const scope = codexScope(args.scope);
     this.runtime(args.projectPath, scope).selectedScope = scope;
     this.emit({ type: 'ready', projectPath: ws.projectPath }, scope);
@@ -227,21 +230,18 @@ export class CliCodexBackend implements CodexBackend {
     touchActivity(args.projectPath);
     const runtime = this.runtime(args.projectPath, args.scope);
     const scope = codexScope(args.scope);
-    runtime.selectedScope = scope;
 
     if (runtime.active) this.retireTurn(args.projectPath, runtime, runtime.active, true);
 
-    const spawnArgs: string[] = ws.codex.sessionId
-      ? ['exec', 'resume', '--json', ws.codex.sessionId]
-      : ['exec', '--json'];
+    const spawnArgs: string[] = ['exec'];
+    if (isCodexReasoningEffort(args.effort)) spawnArgs.push('--config', `model_reasoning_effort="${args.effort}"`);
+    if (args.permission === 'read-only') spawnArgs.push('--sandbox', 'read-only');
+    for (const directory of ws.codex.additionalDirectories || []) spawnArgs.push('--add-dir', directory);
     if (args.model) spawnArgs.push('-m', args.model);
-    if (args.permission === 'full-access') {
-      spawnArgs.push('--dangerously-bypass-approvals-and-sandbox');
-    } else if (args.permission === 'read-only') {
-      spawnArgs.push('--sandbox', 'read-only');
-    } else {
-      spawnArgs.push('--full-auto');
-    }
+    if (args.permission === 'full-access') spawnArgs.push('--dangerously-bypass-approvals-and-sandbox');
+    else if (args.permission !== 'read-only') spawnArgs.push('--full-auto');
+    if (ws.codex.sessionId) spawnArgs.push('resume', '--json', ws.codex.sessionId);
+    else spawnArgs.push('--json');
     for (const imagePath of args.imagePaths || []) spawnArgs.push('-i', imagePath);
     spawnArgs.push(args.message);
 

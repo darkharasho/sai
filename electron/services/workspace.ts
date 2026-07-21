@@ -88,6 +88,7 @@ export interface WorkspaceCodex {
   turnSeq: number;
   /** Meta-workspace preamble — stashed for future injection if codex gains a system-prompt hook. */
   metaPreamble?: string;
+  additionalDirectories?: string[];
 }
 
 export interface WorkspaceGemini {

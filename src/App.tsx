@@ -27,7 +27,7 @@ import { toolCallDetail } from './lib/toolCallDetail';
 import { findLatestTodos } from './components/Chat/TodoProgress';
 import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbPatchSessionMeta, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
 import { queueSaveSession } from './lib/sessionSaveQueue';
-import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval, EffortLevel, ModelChoice, ClaudeModelOption } from './types';
+import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval, EffortLevel, CodexEffort, CodexModelOption, ModelChoice, ClaudeModelOption } from './types';
 import type { MetaWorkspaceListItem, MetaWorkspaceRuntime } from './types';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, setActiveHighlightTheme, type HighlightThemeId } from './themes';
 import ApprovalBanner from './components/ApprovalBanner';
@@ -90,6 +90,7 @@ import { getMonacoEditorFor } from './utils/monacoEditorRegistry';
 import * as monaco from 'monaco-editor';
 import { motion, AnimatePresence } from 'motion/react';
 import { getCapabilities } from './providers/capabilities';
+import { normalizeCodexEffort } from './lib/codexEffort';
 
 interface ScopeReconcileBridge {
   claudeReconcileScope?: (projectPath: string, scope?: string) => void;
@@ -168,6 +169,7 @@ type PermissionMode = 'default' | 'bypass';
 // the CLI validates it, so accept any non-empty string here.
 const isModelChoice = (v: unknown): v is ModelChoice => typeof v === 'string' && v.length > 0;
 const isEffortLevel = (v: unknown): v is EffortLevel => v === 'low' || v === 'medium' || v === 'high' || v === 'xhigh' || v === 'max';
+const isCodexEffort = (v: unknown): v is CodexEffort => v === 'minimal' || v === 'low' || v === 'medium' || v === 'high' || v === 'xhigh' || v === 'max' || v === 'ultra';
 
 // Cap the in-memory active-session message window. Older messages stay in
 // IndexedDB and are paginated in via ChatPanel's startReached callback.
@@ -254,9 +256,17 @@ export default function App() {
   const [titleGeneratingIds, setTitleGeneratingIds] = useState<Set<string>>(new Set());
   const [commitMessageProvider, setCommitMessageProvider] = useState<AIProvider>('claude');
   const [codexModel, setCodexModel] = useState('');
-  const [codexModels, setCodexModels] = useState<{ id: string; name: string }[]>([]);
+  const [codexModels, setCodexModels] = useState<CodexModelOption[]>([]);
+  const codexModelsRef = useRef<CodexModelOption[]>([]);
+  const codexDefaultModelRef = useRef('');
+  const refreshCodexModelsRef = useRef<((forceRefresh?: boolean) => Promise<void> | undefined) | null>(null);
+  const pendingRemoteCodexModelRef = useRef<string | null>(null);
+  const codexSettingsRef = useRef<{ model?: string; permission?: CodexPermission; effort?: CodexEffort }>({});
+  const codexSettingsRevisionRef = useRef(0);
+  const codexSettingsTouchedRef = useRef<Set<'model' | 'permission' | 'effort'>>(new Set());
   const [claudeModels, setClaudeModels] = useState<ClaudeModelOption[]>([]);
   const [codexPermission, setCodexPermission] = useState<CodexPermission>('auto');
+  const [codexEffort, setCodexEffort] = useState<CodexEffort>('high');
   const [geminiModel, setGeminiModel] = useState('auto-gemini-3');
   const [geminiModels, setGeminiModels] = useState<{ id: string; name: string }[]>([]);
   const [geminiApprovalMode, setGeminiApprovalMode] = useState<GeminiApprovalMode>('default');
@@ -2121,9 +2131,28 @@ export default function App() {
       if (c.permission === 'default' || c.permission === 'bypass') setPermissionMode(c.permission);
       setClaudeWsOverrides(sanitizeOverrideMap(c.workspaceOverrides, isModelChoice, isEffortLevel));
     }));
-    window.sai.settingsGet('codex', {}).then(guard((c: any) => {
-      if (c.model) setCodexModel(c.model);
-      if (c.permission === 'auto' || c.permission === 'read-only' || c.permission === 'full-access') setCodexPermission(c.permission);
+    const initialCodexSettingsPromise: Promise<{ model?: string; permission?: CodexPermission; effort?: CodexEffort }> = window.sai.settingsGet('codex', {}).then((c: any) => ({
+      ...(typeof c?.model === 'string' && c.model ? { model: c.model } : {}),
+      ...(c?.permission === 'auto' || c?.permission === 'read-only' || c?.permission === 'full-access' ? { permission: c.permission as CodexPermission } : {}),
+      ...(isCodexEffort(c?.effort) ? { effort: c.effort } : {}),
+    }));
+    initialCodexSettingsPromise.then(guard((next: { model?: string; permission?: CodexPermission; effort?: CodexEffort }) => {
+      const merged = { ...codexSettingsRef.current };
+      if (!codexSettingsTouchedRef.current.has('model') && next.model) {
+        const models = codexModelsRef.current;
+        if (models.length === 0 || models.some(model => model.id === next.model)) merged.model = next.model;
+      }
+      if (!codexSettingsTouchedRef.current.has('permission') && next.permission) merged.permission = next.permission;
+      if (!codexSettingsTouchedRef.current.has('effort') && next.effort) {
+        const selectedModel = codexModelsRef.current.find(model => model.id === merged.model);
+        const normalizedEffort = normalizeCodexEffort(next.effort, selectedModel);
+        if (normalizedEffort) merged.effort = normalizedEffort;
+        else delete merged.effort;
+      }
+      codexSettingsRef.current = merged;
+      if (merged.model) setCodexModel(merged.model);
+      if (merged.permission) setCodexPermission(merged.permission);
+      if (merged.effort) setCodexEffort(merged.effort);
     }));
     window.sai.settingsGet('gemini', {}).then(guard((g: any) => {
       if (g.model) setGeminiModel(g.model);
@@ -2137,7 +2166,8 @@ export default function App() {
       window.sai.settingsGet('permissionMode', null),
       window.sai.settingsGet('codexModel', null),
       window.sai.settingsGet('codexPermission', null),
-    ]).then(([mc, el, pm, cm, cp]) => {
+      initialCodexSettingsPromise,
+    ]).then(([mc, el, pm, cm, cp, existingCodex]) => {
       if (mc || el || pm) {
         window.sai.settingsGet('claude', {}).then((existing: any) => {
           const claude = { ...existing };
@@ -2148,12 +2178,17 @@ export default function App() {
         });
       }
       if (cm || cp) {
-        window.sai.settingsGet('codex', {}).then((existing: any) => {
-          const codex = { ...existing };
-          if (cm && !codex.model) codex.model = cm;
-          if (cp && !codex.permission) codex.permission = cp;
-          window.sai.settingsSet('codex', codex);
-        });
+        codexSettingsRevisionRef.current += 1;
+        const codex = { ...existingCodex, ...codexSettingsRef.current };
+        if (cm && !codex.model) codex.model = cm;
+        if ((cp === 'auto' || cp === 'read-only' || cp === 'full-access') && !codex.permission) codex.permission = cp;
+        if (cm && !existingCodex.model && !codexSettingsRef.current.model) codexSettingsTouchedRef.current.add('model');
+        if (cp && !existingCodex.permission && !codexSettingsRef.current.permission) codexSettingsTouchedRef.current.add('permission');
+        codexSettingsRef.current = codex;
+        if (codex.model) setCodexModel(codex.model);
+        if (codex.permission) setCodexPermission(codex.permission);
+        if (codex.effort) setCodexEffort(codex.effort);
+        window.sai.settingsSet('codex', codex);
       }
     });
 
@@ -2176,8 +2211,39 @@ export default function App() {
       }
       if ('codex' in remote && typeof remote.codex === 'object') {
         const c = remote.codex;
-        if (c.model) setCodexModel(c.model);
-        if (c.permission === 'auto' || c.permission === 'read-only' || c.permission === 'full-access') setCodexPermission(c.permission);
+        codexSettingsRevisionRef.current += 1;
+        const models = codexModelsRef.current;
+        const requestedModel = typeof c.model === 'string' && c.model ? c.model : undefined;
+        const requestedModelValid = !!requestedModel && models.some(model => model.id === requestedModel);
+        if (requestedModelValid) pendingRemoteCodexModelRef.current = null;
+        if (requestedModel && !requestedModelValid) {
+          pendingRemoteCodexModelRef.current = requestedModel;
+          if (aiProviderRef.current === 'codex') refreshCodexModelsRef.current?.(true);
+        }
+        const fallbackModel = models.some(model => model.id === codexSettingsRef.current.model)
+          ? codexSettingsRef.current.model
+          : models.some(model => model.id === codexDefaultModelRef.current)
+            ? codexDefaultModelRef.current
+            : models[0]?.id;
+        const next = {
+          ...codexSettingsRef.current,
+          ...(requestedModelValid ? { model: requestedModel } : fallbackModel ? { model: fallbackModel } : {}),
+          ...(c.permission === 'auto' || c.permission === 'read-only' || c.permission === 'full-access' ? { permission: c.permission } : {}),
+          ...(isCodexEffort(c.effort) ? { effort: c.effort } : {}),
+        };
+        const selectedModel = codexModelsRef.current.find(model => model.id === next.model);
+        const normalizedEffort = normalizeCodexEffort(next.effort ?? 'high', selectedModel);
+        if (normalizedEffort) next.effort = normalizedEffort;
+        else delete next.effort;
+        codexSettingsRef.current = next;
+        if (requestedModelValid) {
+          codexSettingsTouchedRef.current.add('model');
+        }
+        if (c.permission === 'auto' || c.permission === 'read-only' || c.permission === 'full-access') codexSettingsTouchedRef.current.add('permission');
+        if (isCodexEffort(c.effort)) codexSettingsTouchedRef.current.add('effort');
+        if (next.model) setCodexModel(next.model);
+        if (next.permission) setCodexPermission(next.permission);
+        if (next.effort) setCodexEffort(next.effort);
       }
       if ('gemini' in remote && typeof remote.gemini === 'object') {
         const g = remote.gemini;
@@ -2190,24 +2256,52 @@ export default function App() {
   }, []);
 
   const refreshCodexModels = useCallback((forceRefresh = false) => {
-    return (window.sai as any).codexModels?.(forceRefresh).then((result: { models: { id: string; name: string }[]; defaultModel: string } | undefined) => {
+    return (window.sai as any).codexModels?.(forceRefresh).then((result: { models: CodexModelOption[]; defaultModel: string } | undefined) => {
       if (!result) return;
       if (result.models?.length) {
+        codexSettingsRevisionRef.current += 1;
+        codexModelsRef.current = result.models;
+        codexDefaultModelRef.current = result.defaultModel;
         setCodexModels(result.models);
-        setCodexModel(prev => {
-          if (prev && result.models.some(m => m.id === prev)) return prev;
-          return result.defaultModel || result.models[0]?.id || prev;
-        });
+        const current = codexSettingsRef.current;
+        const pendingModel = pendingRemoteCodexModelRef.current;
+        const pendingSupported = !!pendingModel && result.models.some(option => option.id === pendingModel);
+        if (pendingSupported) {
+          codexSettingsTouchedRef.current.add('model');
+        }
+        const model = pendingSupported
+          ? pendingModel
+          : current.model && result.models.some(option => option.id === current.model)
+            ? current.model
+            : result.models.some(option => option.id === result.defaultModel) ? result.defaultModel : result.models[0]?.id || '';
+        if (pendingSupported || (forceRefresh && pendingModel)) pendingRemoteCodexModelRef.current = null;
+        const effort = normalizeCodexEffort(current.effort ?? 'high', result.models.find(option => option.id === model));
+        const next = { ...current, model };
+        if (effort) next.effort = effort;
+        else delete next.effort;
+        codexSettingsRef.current = next;
+        setCodexModel(model);
+        if (effort) setCodexEffort(effort);
+        if (model !== current.model || effort !== current.effort) window.sai.settingsSet('codex', next);
       } else if (result.defaultModel) {
-        setCodexModel(prev => prev || result.defaultModel);
+        codexSettingsRevisionRef.current += 1;
+        codexDefaultModelRef.current = result.defaultModel;
+        const model = codexSettingsRef.current.model || result.defaultModel;
+        codexSettingsRef.current = { ...codexSettingsRef.current, model };
+        setCodexModel(model);
+      } else if (forceRefresh) {
+        pendingRemoteCodexModelRef.current = null;
       }
     }).catch(() => {});
   }, []);
+  refreshCodexModelsRef.current = refreshCodexModels;
 
-  // Prefetch Codex models once at startup so they're ready when user switches.
+  // Activate Codex model discovery only when Codex is selected. Claude remains
+  // the default and must not construct the Codex backend during startup.
   useEffect(() => {
-    refreshCodexModels();
-  }, [refreshCodexModels]);
+    if (aiProvider !== 'codex') return;
+    refreshCodexModels(Boolean(pendingRemoteCodexModelRef.current));
+  }, [aiProvider, refreshCodexModels]);
 
   // Prefetch the Claude models this account/org can actually use. Orgs can
   // restrict models and 1M context is gated per-org, so we don't assume every
@@ -4149,10 +4243,13 @@ export default function App() {
     });
   };
 
-  const saveCodexSetting = (key: string, value: any) => {
-    window.sai.settingsGet('codex', {}).then((existing: any) => {
-      window.sai.settingsSet('codex', { ...existing, [key]: value });
-    });
+  const saveCodexSettings = (patch: Partial<{ model: string; permission: CodexPermission; effort: CodexEffort | undefined }>) => {
+    codexSettingsRevisionRef.current += 1;
+    for (const key of Object.keys(patch) as Array<'model' | 'permission' | 'effort'>) codexSettingsTouchedRef.current.add(key);
+    const next = { ...codexSettingsRef.current, ...patch };
+    if ('effort' in patch && !patch.effort) delete next.effort;
+    codexSettingsRef.current = next;
+    window.sai.settingsSet('codex', next);
   };
 
   const handlePermissionChange = (mode: PermissionMode) => {
@@ -4184,13 +4281,26 @@ export default function App() {
   };
 
   const handleCodexModelChange = (model: string) => {
+    const effort = normalizeCodexEffort(codexSettingsRef.current.effort ?? codexEffort, codexModelsRef.current.find(option => option.id === model));
     setCodexModel(model);
-    saveCodexSetting('model', model);
+    if (effort) setCodexEffort(effort);
+    saveCodexSettings({ model, effort });
   };
 
   const handleCodexPermissionChange = (perm: CodexPermission) => {
     setCodexPermission(perm);
-    saveCodexSetting('permission', perm);
+    saveCodexSettings({ permission: perm });
+  };
+
+  const handleCodexEffortChange = (effort: CodexEffort | undefined) => {
+    if (effort === undefined) {
+      saveCodexSettings({ effort: undefined });
+      return;
+    }
+    const normalized = normalizeCodexEffort(effort, codexModelsRef.current.find(option => option.id === codexSettingsRef.current.model));
+    if (!normalized) return;
+    setCodexEffort(normalized);
+    saveCodexSettings({ effort: normalized });
   };
 
   const saveGeminiSetting = (key: string, value: any) => {
@@ -4455,6 +4565,8 @@ export default function App() {
                       onCodexModelsRefresh={() => { void refreshCodexModels(true); }}
                       codexPermission={codexPermission}
                       onCodexPermissionChange={handleCodexPermissionChange}
+                      codexEffort={codexEffort}
+                      onCodexEffortChange={handleCodexEffortChange}
                       geminiModel={geminiModel}
                       onGeminiModelChange={handleGeminiModelChange}
                       geminiModels={geminiModels}
@@ -4799,6 +4911,8 @@ export default function App() {
                   onCodexModelsRefresh={() => { void refreshCodexModels(true); }}
                   codexPermission={codexPermission}
                   onCodexPermissionChange={handleCodexPermissionChange}
+                  codexEffort={codexEffort}
+                  onCodexEffortChange={handleCodexEffortChange}
                   geminiModel={geminiModel}
                   onGeminiModelChange={handleGeminiModelChange}
                   geminiModels={geminiModels}
@@ -5405,6 +5519,7 @@ export default function App() {
           if (key === 'geminiConversationMode') handleGeminiConversationModeChange(value);
           if (key === 'codexModel') handleCodexModelChange(value);
           if (key === 'codexPermission') handleCodexPermissionChange(value);
+          if (key === 'codexEffort' && (value === undefined || isCodexEffort(value))) handleCodexEffortChange(value);
           if (key === 'focusedChat') { setFocusedChat(value); if (value) { setExpanded(['chat', 'terminal']); setSplitRatio(0.66); } }
           if (key === 'overlayEnabled') setOverlayEnabled(!!value);
           if (key === 'defaultView') { /* persisted only, applies on next launch */ }

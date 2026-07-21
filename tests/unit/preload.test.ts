@@ -78,9 +78,9 @@ describe('characterization: existing IPC routing', () => {
 
   it('codexStart forwards the complete scoped tuple to codex:start', () => {
     const context = { workspaceName: 'SAI' };
-    exposed.codexStart('/proj', 'scope-a', 'orchestrator', context, '/proj/worktree', 'meta');
+    exposed.codexStart('/proj', 'scope-a', 'orchestrator', context, '/proj/worktree', 'meta', ['/repos/a']);
     expect(invoke).toHaveBeenCalledWith(
-      'codex:start', '/proj', 'scope-a', 'orchestrator', context, '/proj/worktree', 'meta'
+      'codex:start', '/proj', 'scope-a', 'orchestrator', context, '/proj/worktree', 'meta', ['/repos/a']
     );
   });
 
@@ -169,10 +169,10 @@ describe('window.sai.provider routing', () => {
       const orchestratorContext = { workspaceName: 'SAI' };
       exposed.provider.start('codex', '/proj', {
         scope: 'scope-a', kind: 'orchestrator', orchestratorContext,
-        scopeCwd: '/proj/worktree', metaPreamble: 'meta',
+        scopeCwd: '/proj/worktree', metaPreamble: 'meta', additionalDirectories: ['/repos/a'],
       });
       expect(invoke).toHaveBeenCalledWith(
-        'codex:start', '/proj', 'scope-a', 'orchestrator', orchestratorContext, '/proj/worktree', 'meta'
+        'codex:start', '/proj', 'scope-a', 'orchestrator', orchestratorContext, '/proj/worktree', 'meta', ['/repos/a']
       );
     });
   });

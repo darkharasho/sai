@@ -857,9 +857,40 @@ describe('Codex service', () => {
       });
 
       expect(getSpawnArgs()).toEqual([
-        'exec', '--json', '-m', 'o4-mini', '--full-auto',
+        'exec', '-m', 'o4-mini', '--full-auto', '--json',
         '-i', '/tmp/a.png', '-i', '/tmp/b.png', 'describe',
       ]);
+    });
+
+    it('places meta-workspace add-dir options before the prompt without changing CLI executable selection', () => {
+      backend.start({ projectPath: PROJECT, additionalDirectories: ['/repos/a', '', '/repos/a', '/repos/b'] });
+      backend.send({ projectPath: PROJECT, message: 'work across repos', permission: 'auto' });
+      expect(mockSpawnFn.mock.calls.at(-1)?.[0]).toBe('codex');
+      expect(getSpawnArgs()).toEqual([
+        'exec', '--add-dir', '/repos/a', '--add-dir', '/repos/b', '--full-auto', '--json', 'work across repos',
+      ]);
+    });
+
+    it.each([
+      ['read-only', ['exec', '--config', 'model_reasoning_effort="max"', '--sandbox', 'read-only', '--add-dir', '/repos/a', '-m', 'gpt-5', 'resume', '--json', 'thread-1', '-i', '/tmp/a.png', 'continue']],
+      ['auto', ['exec', '--config', 'model_reasoning_effort="max"', '--add-dir', '/repos/a', '-m', 'gpt-5', '--full-auto', 'resume', '--json', 'thread-1', '-i', '/tmp/a.png', 'continue']],
+      ['full-access', ['exec', '--config', 'model_reasoning_effort="max"', '--add-dir', '/repos/a', '-m', 'gpt-5', '--dangerously-bypass-approvals-and-sandbox', 'resume', '--json', 'thread-1', '-i', '/tmp/a.png', 'continue']],
+    ] as const)('uses valid resumed %s argument grammar', (permission, expected) => {
+      backend.start({ projectPath: PROJECT, additionalDirectories: ['/repos/a'] });
+      backend.setSessionId(PROJECT, 'thread-1');
+      backend.send({ projectPath: PROJECT, message: 'continue', permission, effort: 'max', model: 'gpt-5', imagePaths: ['/tmp/a.png'] });
+      expect(getSpawnArgs()).toEqual(expected);
+    });
+
+    it('passes dynamic ultra effort as an exec-level config on a fresh turn', () => {
+      backend.start({ projectPath: PROJECT, additionalDirectories: [] });
+      backend.send({ projectPath: PROJECT, message: 'think', effort: 'ultra' });
+      expect(getSpawnArgs()).toEqual(['exec', '--config', 'model_reasoning_effort="ultra"', '--full-auto', '--json', 'think']);
+    });
+
+    it('omits an invalid runtime effort from CLI config', () => {
+      backend.send({ projectPath: PROJECT, message: 'think', effort: 'future' as any });
+      expect(getSpawnArgs()).toEqual(['exec', '--full-auto', '--json', 'think']);
     });
 
     it('uses an enriched environment, platform-appropriate shell, and closes stdin cleanly', () => {
