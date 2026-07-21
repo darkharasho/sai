@@ -138,8 +138,9 @@ vi.mock('node-pty', () => ({ spawn: vi.fn() }));
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import { registerCodexHandlers } from '@electron/services/codex';
+import { CliCodexBackend } from '@electron/services/codexBackend/cliBackend';
 import { getOrCreate, get } from '@electron/services/workspace';
+import { notifyCompletion } from '@electron/services/notify';
 import { createMockBrowserWindow } from '../../helpers/electron-mock';
 
 // ---------------------------------------------------------------------------
@@ -165,6 +166,7 @@ function collectSentEvents(win: ReturnType<typeof createMockBrowserWindow>) {
 
 describe('Codex service', () => {
   let mockWin: ReturnType<typeof createMockBrowserWindow>;
+  let backend: CliCodexBackend;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -173,7 +175,24 @@ describe('Codex service', () => {
     spawnProcesses.length = 0;
 
     mockWin = createMockBrowserWindow();
-    registerCodexHandlers(mockWin as unknown as import('electron').BrowserWindow);
+    backend = new CliCodexBackend(mockWin as unknown as import('electron').BrowserWindow);
+    mockHandlers.set('codex:models', (_event, forceRefresh?: unknown) => backend.getModels(!!forceRefresh));
+    mockListeners.set('codex:start', [(_event, projectPath, metaPreamble) => {
+      backend.start({ projectPath: projectPath as string, metaPreamble: metaPreamble as string | undefined });
+    }]);
+    mockListeners.set('codex:send', [(_event, projectPath, message, imagePaths, permission, model) => {
+      backend.send({
+        projectPath: projectPath as string,
+        message: message as string,
+        imagePaths: imagePaths as string[] | undefined,
+        permission: permission as 'auto' | 'read-only' | 'full-access' | undefined,
+        model: model as string | undefined,
+      });
+    }]);
+    mockListeners.set('codex:stop', [(_event, projectPath) => backend.interrupt(projectPath as string)]);
+    mockListeners.set('codex:setSessionId', [(_event, projectPath, sessionId) => {
+      backend.setSessionId(projectPath as string, sessionId as string | undefined);
+    }]);
 
     // Seed the real workspace module with a fresh workspace for PROJECT
     getOrCreate(PROJECT);
@@ -190,7 +209,161 @@ describe('Codex service', () => {
   });
 
   afterEach(() => {
+    backend.destroy();
     vi.restoreAllMocks();
+  });
+
+  describe('CodexBackend contract', () => {
+    it('start is synchronous and returns undefined', () => {
+      expect(backend.start({ projectPath: PROJECT, scope: 'task:1' })).toBeUndefined();
+    });
+
+    it('send builds exec --json --full-auto with the selected model', () => {
+      backend.send({ projectPath: PROJECT, message: 'hello', permission: 'auto', model: 'o4-mini' });
+
+      expect(mockSpawnFn).toHaveBeenCalledWith(
+        'codex',
+        expect.arrayContaining(['exec', '--json', '--full-auto', '-m', 'o4-mini']),
+        expect.any(Object),
+      );
+    });
+
+    it('a scoped interrupt kills the workspace process', () => {
+      backend.send({ projectPath: PROJECT, scope: 'task:1', message: 'hello' });
+      const proc = mockIpcMain.getLatestProcess();
+
+      backend.interrupt(PROJECT, 'task:1');
+
+      expect(proc.kill).toHaveBeenCalled();
+    });
+
+    it('stamps events with the latest normalized scope when a second scope replaces a process', async () => {
+      backend.send({ projectPath: PROJECT, scope: 'task:first', message: 'first' });
+      const staleProc = mockIpcMain.getLatestProcess();
+      backend.send({ projectPath: PROJECT, scope: 'task:second', message: 'second' });
+      const activeProc = mockIpcMain.getLatestProcess();
+      (mockWin.webContents.send as ReturnType<typeof vi.fn>).mockClear();
+
+      staleProc.pushStdout(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'stale' } }) + '\n');
+      activeProc.pushStdout(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'current' } }) + '\n');
+      await tick();
+
+      expect(staleProc.kill).toHaveBeenCalled();
+      expect(collectSentEvents(mockWin)).toEqual([
+        expect.objectContaining({ type: 'assistant', scope: 'task:second' }),
+      ]);
+    });
+
+    it('keeps an active turn owned by its immutable scope when start selects another scope', async () => {
+      backend.send({ projectPath: PROJECT, scope: 'task:first', message: 'first' });
+      const proc = mockIpcMain.getLatestProcess();
+      (mockWin.webContents.send as ReturnType<typeof vi.fn>).mockClear();
+
+      backend.start({ projectPath: PROJECT, scope: 'task:second' });
+      proc.pushStdout(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'first output' } }) + '\n');
+      proc.pushStdout(JSON.stringify({ type: 'turn.completed' }) + '\n');
+      await tick();
+
+      const events = collectSentEvents(mockWin) as Array<{ type: string; scope: string }>;
+      expect(events.find(event => event.type === 'ready')?.scope).toBe('task:second');
+      expect(events.find(event => event.type === 'assistant')?.scope).toBe('task:first');
+      expect(events.find(event => event.type === 'done')?.scope).toBe('task:first');
+    });
+
+    it('settles the prior owner exactly once before a replacement scope starts', () => {
+      backend.send({ projectPath: PROJECT, scope: 'task:first', message: 'first' });
+      const firstProc = mockIpcMain.getLatestProcess();
+      (mockWin.webContents.send as ReturnType<typeof vi.fn>).mockClear();
+
+      backend.send({ projectPath: PROJECT, scope: 'task:second', message: 'second' });
+
+      const events = collectSentEvents(mockWin) as Array<{ type: string; scope: string; turnSeq: number }>;
+      expect(firstProc.kill).toHaveBeenCalledOnce();
+      expect(events.slice(0, 2)).toEqual([
+        expect.objectContaining({ type: 'done', scope: 'task:first', turnSeq: expect.any(Number) }),
+        expect.objectContaining({ type: 'streaming_start', scope: 'task:second', turnSeq: expect.any(Number) }),
+      ]);
+      expect(events.filter(event => event.type === 'done' && event.scope === 'task:first')).toHaveLength(1);
+    });
+
+    it('ignores lifecycle requests from a scope that does not own the active turn', async () => {
+      backend.send({ projectPath: PROJECT, scope: 'task:first', message: 'first' });
+      const proc = mockIpcMain.getLatestProcess();
+      (mockWin.webContents.send as ReturnType<typeof vi.fn>).mockClear();
+
+      backend.interrupt(PROJECT, 'task:second');
+      backend.setSessionId(PROJECT, 'other-session', 'task:second');
+      proc.pushStdout(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'still first' } }) + '\n');
+      await tick();
+
+      expect(proc.kill).not.toHaveBeenCalled();
+      expect(get(PROJECT)?.codex.sessionId).not.toBe('other-session');
+      expect(collectSentEvents(mockWin)).toContainEqual(expect.objectContaining({
+        type: 'assistant', scope: 'task:first',
+      }));
+    });
+
+    it('keeps active same-scope ownership when setSessionId selects a different conversation', async () => {
+      backend.setSessionId(PROJECT, 'original-session', 'task:first');
+      backend.send({ projectPath: PROJECT, scope: 'task:first', message: 'first' });
+      const proc = mockIpcMain.getLatestProcess();
+      (mockWin.webContents.send as ReturnType<typeof vi.fn>).mockClear();
+
+      backend.setSessionId(PROJECT, 'different-session', 'task:first');
+      proc.pushStdout(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'still active' } }) + '\n');
+      await tick();
+
+      expect(proc.kill).not.toHaveBeenCalled();
+      expect(get(PROJECT)?.codex.process).toBe(proc);
+      expect(get(PROJECT)?.codex.busy).toBe(true);
+      expect(get(PROJECT)?.codex.sessionId).toBe('original-session');
+      expect(collectSentEvents(mockWin)).toContainEqual(expect.objectContaining({
+        type: 'assistant', scope: 'task:first',
+      }));
+    });
+
+    it('rejects all stale callbacks without borrowing a newer turn sequence', async () => {
+      backend.send({ projectPath: PROJECT, scope: 'task:first', message: 'first' });
+      const firstProc = mockIpcMain.getLatestProcess();
+      backend.send({ projectPath: PROJECT, scope: 'task:second', message: 'second' });
+      const secondProc = mockIpcMain.getLatestProcess();
+      const secondStart = (collectSentEvents(mockWin) as any[]).findLast(event => event.type === 'streaming_start');
+      (mockWin.webContents.send as ReturnType<typeof vi.fn>).mockClear();
+
+      firstProc.pushStdout(JSON.stringify({ type: 'turn.completed' }) + '\n');
+      firstProc.emit('error', new Error('stale error'));
+      firstProc.emitExit(1);
+      secondProc.pushStdout(JSON.stringify({ type: 'turn.completed' }) + '\n');
+      await flush();
+
+      const events = collectSentEvents(mockWin) as Array<{ type: string; scope: string; turnSeq?: number }>;
+      expect(events.some(event => event.scope === 'task:first')).toBe(false);
+      expect(events.find(event => event.type === 'done')).toEqual(expect.objectContaining({
+        scope: 'task:second', turnSeq: secondStart.turnSeq,
+      }));
+    });
+
+    it('reconciles an idle scope with a null-turn done envelope', () => {
+      (mockWin.webContents.send as ReturnType<typeof vi.fn>).mockClear();
+
+      backend.reconcileScope(PROJECT, 'task:idle');
+
+      expect(collectSentEvents(mockWin)).toContainEqual({
+        type: 'done', projectPath: PROJECT, scope: 'task:idle', turnSeq: null,
+      });
+    });
+
+    it('reports and suspends legacy workspace busy state', () => {
+      backend.send({ projectPath: PROJECT, message: 'hello' });
+      const proc = mockIpcMain.getLatestProcess();
+      expect(backend.isWorkspaceBusy(PROJECT)).toBe(true);
+
+      backend.suspendWorkspace(PROJECT);
+
+      expect(proc.kill).toHaveBeenCalled();
+      expect(backend.isWorkspaceBusy(PROJECT)).toBe(false);
+      expect(get(PROJECT)?.codex.process).toBeNull();
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -632,6 +805,30 @@ describe('Codex service', () => {
       const opts = mockSpawnFn.mock.calls[0][2] as { cwd: string };
       expect(opts.cwd).toBe(PROJECT);
     });
+
+    it('preserves model, permission, image, and prompt ordering', () => {
+      backend.send({
+        projectPath: PROJECT,
+        message: 'describe',
+        imagePaths: ['/tmp/a.png', '/tmp/b.png'],
+        permission: 'auto',
+        model: 'o4-mini',
+      });
+
+      expect(getSpawnArgs()).toEqual([
+        'exec', '--json', '-m', 'o4-mini', '--full-auto',
+        '-i', '/tmp/a.png', '-i', '/tmp/b.png', 'describe',
+      ]);
+    });
+
+    it('uses an enriched environment, platform-appropriate shell, and closes stdin cleanly', () => {
+      backend.send({ projectPath: PROJECT, message: 'test' });
+
+      const opts = mockSpawnFn.mock.calls[0][2] as { env: NodeJS.ProcessEnv; shell: boolean };
+      expect(opts.env.PATH).toContain(process.env.PATH || '');
+      expect(opts.shell).toBe(process.platform === 'win32');
+      expect(mockIpcMain.getLatestProcess().stdin.writableEnded).toBe(true);
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -761,6 +958,29 @@ describe('Codex service', () => {
       const result = await resultPromise as { models: Array<{ id: string }>; defaultModel: string };
       expect(result.models).toEqual([expect.objectContaining({ id: 'gpt-5.6-sol' })]);
       expect(result.defaultModel).toBe('gpt-5.6-sol');
+    });
+
+    it('returns fallback when app-server spawn throws synchronously', async () => {
+      mockSpawnFn.mockImplementationOnce(() => { throw new Error('spawn failed'); });
+
+      await expect(backend.getModels(true)).resolves.toEqual({ models: [], defaultModel: '' });
+    });
+
+    it('flushes a valid final model response on exit without a trailing newline', async () => {
+      const resultPromise = backend.getModels(true);
+      const proc = mockIpcMain.getLatestProcess();
+      proc.pushStdout(JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        result: { data: [{ model: 'o3', displayName: 'O3', isDefault: true, hidden: false }] },
+      }));
+
+      proc.emitExit(0);
+
+      await expect(resultPromise).resolves.toEqual({
+        models: [{ id: 'o3', name: 'O3' }],
+        defaultModel: 'o3',
+      });
     });
 
     it('filters out hidden models', async () => {
@@ -944,6 +1164,17 @@ describe('Codex service', () => {
       const types = collectSentEvents(mockWin).map((e: unknown) => (e as { type: string }).type);
       expect(types).not.toContain('error');
     });
+
+    it('suppresses the informational additional-input warning', async () => {
+      backend.send({ projectPath: PROJECT, message: 'test' });
+      const proc = mockIpcMain.getLatestProcess();
+      (mockWin.webContents.send as ReturnType<typeof vi.fn>).mockClear();
+
+      proc.pushStderr('Reading additional input from stdin...\n');
+      await tick();
+
+      expect(collectSentEvents(mockWin)).toHaveLength(0);
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -966,6 +1197,68 @@ describe('Codex service', () => {
       expect(types).toContain('done');
       const err = events.find(e => e.type === 'error');
       expect(err?.text).toContain('Codex process error');
+    });
+
+    it('emits done exactly once when a terminal error is followed by process exit', async () => {
+      backend.send({ projectPath: PROJECT, message: 'test' });
+      const proc = mockIpcMain.getLatestProcess();
+      (mockWin.webContents.send as ReturnType<typeof vi.fn>).mockClear();
+
+      proc.pushStdout(JSON.stringify({ type: 'error', message: 'failed' }) + '\n');
+      await tick();
+      proc.emitExit(1);
+      await flush();
+
+      expect(collectSentEvents(mockWin).filter((event: any) => event.type === 'done')).toHaveLength(1);
+    });
+
+    it('turns a synchronous spawn failure into one scoped terminal sequence', () => {
+      mockSpawnFn.mockImplementationOnce(() => { throw new Error('spawn failed'); });
+
+      expect(() => backend.send({ projectPath: PROJECT, scope: 'task:one', message: 'test' })).not.toThrow();
+
+      expect(collectSentEvents(mockWin)).toEqual([
+        expect.objectContaining({ type: 'streaming_start', scope: 'task:one', turnSeq: expect.any(Number) }),
+        expect.objectContaining({ type: 'error', scope: 'task:one', turnSeq: expect.any(Number), text: expect.stringContaining('spawn failed') }),
+        expect.objectContaining({ type: 'done', scope: 'task:one', turnSeq: expect.any(Number) }),
+      ]);
+      expect(backend.isWorkspaceBusy(PROJECT)).toBe(false);
+      expect(get(PROJECT)?.codex.process).toBeNull();
+    });
+
+    it('settles a prior owner before a replacement launch fails synchronously', () => {
+      backend.send({ projectPath: PROJECT, scope: 'task:first', message: 'first' });
+      const firstProc = mockIpcMain.getLatestProcess();
+      (mockWin.webContents.send as ReturnType<typeof vi.fn>).mockClear();
+      mockSpawnFn.mockImplementationOnce(() => { throw new Error('replacement failed'); });
+
+      backend.send({ projectPath: PROJECT, scope: 'task:second', message: 'second' });
+
+      const events = collectSentEvents(mockWin) as Array<{ type: string; scope: string }>;
+      expect(firstProc.kill).toHaveBeenCalledOnce();
+      expect(events.map(event => [event.type, event.scope])).toEqual([
+        ['done', 'task:first'],
+        ['streaming_start', 'task:second'],
+        ['error', 'task:second'],
+        ['done', 'task:second'],
+      ]);
+      expect(backend.isWorkspaceBusy(PROJECT)).toBe(false);
+    });
+
+    it('delays successful completion notification by 500ms', async () => {
+      vi.useFakeTimers();
+      try {
+        backend.send({ projectPath: PROJECT, message: 'test' });
+        const proc = mockIpcMain.getLatestProcess();
+        proc.pushStdout(JSON.stringify({ type: 'turn.completed' }) + '\n');
+        await vi.advanceTimersByTimeAsync(499);
+        expect(notifyCompletion).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(1);
+        expect(notifyCompletion).toHaveBeenCalledWith(mockWin, PROJECT, { provider: 'Codex' });
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });
