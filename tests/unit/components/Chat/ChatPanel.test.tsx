@@ -409,6 +409,70 @@ describe('ChatPanel', () => {
     onSlashCommandsUpdate: vi.fn(),
   });
 
+  it('preserves Codex scope and Claude-equivalent metadata across start, send, and stop', async () => {
+    const orchestratorContext = { workspaceName: 'SAI' };
+    const props = {
+      ...baseProps(),
+      aiProvider: 'codex' as const,
+      claudeScope: 'scope-a',
+      claudeKind: 'orchestrator' as const,
+      claudeOrchestratorContext: orchestratorContext,
+      codexPermission: 'read-only' as const,
+      codexModel: 'gpt-5.2-codex',
+      effortLevel: 'xhigh' as const,
+    };
+
+    render(<ChatPanel {...props} />);
+
+    await waitFor(() => expect(mockSai.codexStart).toHaveBeenCalled());
+    expect(mockSai.codexStart).toHaveBeenCalledWith(
+      '/project',
+      'scope-a',
+      'orchestrator',
+      orchestratorContext,
+      undefined,
+      expect.any(String),
+    );
+
+    await act(async () => {
+      await latestChatInputProps.onSend('new prompt');
+    });
+    expect(mockSai.codexSend).toHaveBeenCalledWith(
+      '/project',
+      'new prompt',
+      undefined,
+      'read-only',
+      'xhigh',
+      'gpt-5.2-codex',
+      'scope-a',
+      undefined,
+    );
+
+    latestChatInputProps.onStop();
+    expect(mockSai.codexStop).toHaveBeenCalledWith('/project', 'scope-a');
+  });
+
+  it('accepts owning-scope Codex events and ignores explicitly wrong scopes', async () => {
+    const onCodexSessionId = vi.fn();
+    render(<ChatPanel
+      {...baseProps()}
+      aiProvider="codex"
+      claudeScope="scope-a"
+      onCodexSessionId={onCodexSessionId}
+    />);
+
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    act(() => {
+      for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+        (handler as (msg: any) => void)({ type: 'session_id', sessionId: 'wrong', projectPath: '/project', scope: 'scope-b' });
+        (handler as (msg: any) => void)({ type: 'session_id', sessionId: 'right', projectPath: '/project', scope: 'scope-a' });
+      }
+    });
+
+    expect(onCodexSessionId).toHaveBeenCalledTimes(1);
+    expect(onCodexSessionId).toHaveBeenCalledWith('right');
+  });
+
   it('pinned bar is always mounted (zero-height when no pinned message)', async () => {
     const props = baseProps();
     const { container } = render(<ChatPanel {...props} />);

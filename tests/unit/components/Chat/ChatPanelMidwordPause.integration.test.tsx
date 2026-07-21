@@ -190,4 +190,29 @@ describe('mid-sentence pause past the settle debounce', () => {
       expect(text).toContain('buffered while unmounted');
     });
   });
+
+  it('gives a focused scoped Codex chat ownership of its frame gate buffer', async () => {
+    scopeMessageBuffer.set('codex-scope', [
+      { id: 'codex-gap', role: 'assistant', content: 'scoped codex buffer', timestamp: Date.now() },
+    ] as any);
+
+    const props = {
+      ...baseProps(),
+      aiProvider: 'codex' as const,
+      claudeScope: 'codex-scope',
+      sessionId: 'codex-scope',
+    } as ChatPanelProps;
+    const { container, unmount } = render(<ChatPanel {...props} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+    expect(hasChatListener('codex-scope')).toBe(true);
+    expect(scopeMessageBuffer.has('codex-scope')).toBe(false);
+    await waitFor(() => {
+      const text = container.textContent?.replace(/[▋▊▍]/g, '') ?? '';
+      expect(text).toContain('scoped codex buffer');
+    });
+
+    unmount();
+    expect(hasChatListener('codex-scope')).toBe(false);
+  });
 });

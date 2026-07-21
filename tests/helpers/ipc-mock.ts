@@ -36,6 +36,7 @@ export interface MockSai {
   codexStart: ReturnType<typeof vi.fn>;
   codexSend: ReturnType<typeof vi.fn>;
   codexStop: ReturnType<typeof vi.fn>;
+  codexReconcileScope: ReturnType<typeof vi.fn>;
 
   // Gemini
   geminiModels: ReturnType<typeof vi.fn>;
@@ -178,6 +179,7 @@ export function createMockSai(): MockSai {
     codexStart: vi.fn().mockResolvedValue(undefined),
     codexSend: vi.fn(),
     codexStop: vi.fn(),
+    codexReconcileScope: vi.fn(),
 
     // Gemini
     geminiModels: vi.fn().mockResolvedValue([]),

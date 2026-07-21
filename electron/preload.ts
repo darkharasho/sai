@@ -76,10 +76,13 @@ contextBridge.exposeInMainWorld('sai', {
   claudeModels: () => ipcRenderer.invoke('claude:models'),
   // Codex CLI
   codexModels: (forceRefresh?: boolean) => ipcRenderer.invoke('codex:models', forceRefresh),
-  codexStart: (cwd: string, metaPreamble?: string) => ipcRenderer.invoke('codex:start', cwd, metaPreamble),
-  codexSend: (projectPath: string, message: string, imagePaths?: string[], permMode?: string, model?: string) => ipcRenderer.send('codex:send', projectPath, message, imagePaths, permMode, model),
-  codexStop: (projectPath: string) => ipcRenderer.send('codex:stop', projectPath),
-  codexSetSessionId: (projectPath: string, sessionId: string | undefined) => ipcRenderer.send('codex:setSessionId', projectPath, sessionId),
+  codexStart: (cwd: string, scope?: string, kind?: string, orchestratorContext?: unknown, scopeCwd?: string, metaPreamble?: string) =>
+    ipcRenderer.invoke('codex:start', cwd, scope, kind, orchestratorContext, scopeCwd, metaPreamble),
+  codexSend: (projectPath: string, message: string, imagePaths?: string[], permMode?: string, effort?: string, model?: string, scope?: string, origin?: 'desktop' | 'remote') =>
+    ipcRenderer.send('codex:send', projectPath, message, imagePaths, permMode, effort, model, scope, origin),
+  codexStop: (projectPath: string, scope?: string) => ipcRenderer.send('codex:stop', projectPath, scope),
+  codexSetSessionId: (projectPath: string, sessionId: string | undefined, scope?: string) => ipcRenderer.send('codex:setSessionId', projectPath, sessionId, scope),
+  codexReconcileScope: (projectPath: string, scope?: string) => ipcRenderer.send('codex:reconcileScope', projectPath, scope),
   // Gemini CLI
   geminiModels: () => ipcRenderer.invoke('gemini:models'),
   geminiStart: (cwd: string, metaPreamble?: string) => ipcRenderer.invoke('gemini:start', cwd, metaPreamble),
@@ -102,13 +105,14 @@ contextBridge.exposeInMainWorld('sai', {
       } else if (provider === 'gemini') {
         return ipcRenderer.invoke('gemini:start', cwd, opts.metaPreamble);
       } else {
-        return ipcRenderer.invoke('codex:start', cwd, opts.metaPreamble);
+        return ipcRenderer.invoke('codex:start', cwd, opts.scope, opts.kind, opts.orchestratorContext, opts.scopeCwd, opts.metaPreamble);
       }
     },
     send(provider: string, projectPath: string, message: string, opts: {
       imagePaths?: string[]; model?: string; scope?: string;
       effortLevel?: string; permMode?: string;
       approvalMode?: string; conversationMode?: string;
+      origin?: 'desktop' | 'remote';
     } = {}) {
       const images = opts.imagePaths ?? [];
       if (provider === 'claude') {
@@ -116,7 +120,7 @@ contextBridge.exposeInMainWorld('sai', {
       } else if (provider === 'gemini') {
         ipcRenderer.send('gemini:send', projectPath, message, images, opts.approvalMode, opts.conversationMode, opts.model, opts.scope);
       } else {
-        ipcRenderer.send('codex:send', projectPath, message, images, opts.permMode, opts.model);
+        ipcRenderer.send('codex:send', projectPath, message, images, opts.permMode, opts.effortLevel, opts.model, opts.scope, opts.origin);
       }
     },
     stop(provider: string, projectPath: string, scope?: string) {
@@ -125,7 +129,7 @@ contextBridge.exposeInMainWorld('sai', {
       } else if (provider === 'gemini') {
         ipcRenderer.send('gemini:stop', projectPath, scope);
       } else {
-        ipcRenderer.send('codex:stop', projectPath);
+        ipcRenderer.send('codex:stop', projectPath, scope);
       }
     },
     setSessionId(provider: string, projectPath: string, sessionId: string | undefined, scope?: string) {
@@ -134,7 +138,7 @@ contextBridge.exposeInMainWorld('sai', {
       } else if (provider === 'gemini') {
         ipcRenderer.send('gemini:setSessionId', projectPath, sessionId, scope);
       } else {
-        ipcRenderer.send('codex:setSessionId', projectPath, sessionId);
+        ipcRenderer.send('codex:setSessionId', projectPath, sessionId, scope);
       }
     },
   },

@@ -703,7 +703,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       syntheticRoot: activeMetaRuntime.syntheticRoot,
       projects: activeMetaRuntime.projects,
     } : null);
-    const startArgs: any[] = aiProvider === 'claude'
+    const startArgs: any[] = aiProvider === 'claude' || aiProvider === 'codex'
       ? [projectPath || '', claudeScope, claudeKind, claudeOrchestratorContext, undefined /* scopeCwd */, metaPreamble]
       : [projectPath || '', metaPreamble];
     startFn(...startArgs).then((result: any) => {
@@ -746,18 +746,19 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     // Gap-closing gate (chatFrameGate.ts): register BEFORE subscribing so App
     // stops buffering for this scope, then drain what accumulated in the mount
     // gap right after subscribing. All synchronous — no frame can interleave
-    // between these statements. Only regular claude chats participate: task
-    // scopes keep the always-buffer behavior (orchestrator taskOutput reads
-    // the live buffer), and gemini/codex use the never-buffered 'chat' scope.
-    const gateScope = aiProvider === 'claude' && claudeKind === 'chat' && claudeScope !== 'chat'
+    // between these statements. Regular Claude and Codex chats participate;
+    // task scopes keep the always-buffer behavior (orchestrator taskOutput
+    // reads the live buffer), while Gemini uses the fixed `chat` scope.
+    const gateScope = (aiProvider === 'claude' || aiProvider === 'codex') && claudeKind === 'chat' && claudeScope !== 'chat'
       ? claudeScope : null;
     if (gateScope) registerChatListener(gateScope);
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
       // Only process messages for this workspace and chat scope.
       // Claude uses session UUIDs as scopes for multi-scope isolation.
-      // Gemini and Codex use 'chat' as a fixed scope — match on projectPath only.
+      // Gemini uses a fixed chat scope. Claude and Codex preserve the panel's
+      // scope so parallel sessions cannot consume each other's events.
       if (msg.projectPath && msg.projectPath !== projectPath) return;
-      const expectedScope = aiProvider === 'claude' ? claudeScope : 'chat';
+      const expectedScope = aiProvider === 'gemini' ? 'chat' : claudeScope;
       if (msg.scope && msg.scope !== expectedScope) return;
 
       // Flush any buffered streaming text before processing a non-delta event,
@@ -1384,7 +1385,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       if (gateScope) unregisterChatListener(gateScope);
       cleanup();
     };
-  }, [projectPath, aiProvider, activeMetaRuntime, flushStreamingText]);
+  }, [projectPath, aiProvider, activeMetaRuntime, claudeScope, claudeKind, flushStreamingText]);
 
   // Real utilization percentages arrive on usage:update from two sources:
   // the main-process OAuth poller (60s) and the SDK backend's post-turn
@@ -1914,7 +1915,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       // item. Suppress that one drain so only the user's new message runs.
       suppressNextDrainRef.current = true;
       if (aiProvider === 'gemini') (window.sai as any).geminiStop?.(projectPath);
-      else if (aiProvider === 'codex') window.sai.codexStop?.(projectPath);
+      else if (aiProvider === 'codex') window.sai.codexStop?.(projectPath, claudeScope);
       else window.sai.claudeStop?.(projectPath, claudeScope);
     }
 
@@ -1943,7 +1944,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     if (aiProvider === 'gemini') {
       (window.sai as any).geminiSend(projectPath, prompt, imagePaths, geminiApprovalMode, geminiConversationMode, geminiModel, 'chat');
     } else if (aiProvider === 'codex') {
-      window.sai.codexSend(projectPath, prompt, imagePaths, codexPermission, codexModel);
+      window.sai.codexSend(projectPath, prompt, imagePaths, codexPermission, effortLevel, codexModel, claudeScope, undefined);
     } else {
       window.sai.claudeSend(projectPath, prompt, imagePaths, permissionMode, effortLevel, modelChoice, claudeScope);
     }
@@ -1997,7 +1998,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     if (isStreaming) {
       suppressNextDrainRef.current = true;
       if (aiProvider === 'gemini') (window.sai as any).geminiStop?.(projectPath);
-      else if (aiProvider === 'codex') window.sai.codexStop?.(projectPath);
+      else if (aiProvider === 'codex') window.sai.codexStop?.(projectPath, claudeScope);
       else window.sai.claudeStop?.(projectPath, claudeScope);
     }
     handleSend(item.fullText, item.images);
@@ -2310,7 +2311,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             waiting={isWaiting}
             awaitingQuestion={awaitingQuestion}
             messages={messages}
-            onStop={() => aiProvider === 'gemini' ? (window.sai as any).geminiStop(projectPath) : aiProvider === 'codex' ? window.sai.codexStop(projectPath) : window.sai.claudeStop?.(projectPath, claudeScope)}
+            onStop={() => aiProvider === 'gemini' ? (window.sai as any).geminiStop(projectPath) : aiProvider === 'codex' ? window.sai.codexStop(projectPath, claudeScope) : window.sai.claudeStop?.(projectPath, claudeScope)}
             permissionMode={permissionMode}
             onPermissionChange={onPermissionChange}
             effortLevel={effortLevel}

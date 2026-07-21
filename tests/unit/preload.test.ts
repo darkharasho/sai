@@ -76,11 +76,29 @@ describe('characterization: existing IPC routing', () => {
     );
   });
 
-  it('codexSend forwards to codex:send with all positional args', () => {
-    exposed.codexSend('/proj', 'hi', [], 'auto', 'codex-mini');
-    expect(send).toHaveBeenCalledWith(
-      'codex:send', '/proj', 'hi', [], 'auto', 'codex-mini'
+  it('codexStart forwards the complete scoped tuple to codex:start', () => {
+    const context = { workspaceName: 'SAI' };
+    exposed.codexStart('/proj', 'scope-a', 'orchestrator', context, '/proj/worktree', 'meta');
+    expect(invoke).toHaveBeenCalledWith(
+      'codex:start', '/proj', 'scope-a', 'orchestrator', context, '/proj/worktree', 'meta'
     );
+  });
+
+  it('codexSend forwards the complete tuple, including an undefined origin', () => {
+    exposed.codexSend('/proj', 'hi', [], 'auto', 'high', 'codex-mini', 'scope-a');
+    expect(send).toHaveBeenCalledWith(
+      'codex:send', '/proj', 'hi', [], 'auto', 'high', 'codex-mini', 'scope-a', undefined
+    );
+  });
+
+  it('codex stop, session, and reconcile methods preserve scope', () => {
+    exposed.codexStop('/proj', 'scope-a');
+    exposed.codexSetSessionId('/proj', 'sess-1', 'scope-a');
+    exposed.codexReconcileScope('/proj', 'scope-a');
+
+    expect(send).toHaveBeenNthCalledWith(1, 'codex:stop', '/proj', 'scope-a');
+    expect(send).toHaveBeenNthCalledWith(2, 'codex:setSessionId', '/proj', 'sess-1', 'scope-a');
+    expect(send).toHaveBeenNthCalledWith(3, 'codex:reconcileScope', '/proj', 'scope-a');
   });
 
   it('geminiStart forwards to gemini:start', () => {
@@ -125,10 +143,11 @@ describe('window.sai.provider routing', () => {
 
     it('routes codex to codex:send with mapped args', () => {
       exposed.provider.send('codex', '/proj', 'hello', {
-        imagePaths: [], permMode: 'auto', model: 'codex-mini',
+        imagePaths: [], permMode: 'auto', effortLevel: 'xhigh', model: 'codex-mini',
+        scope: 'scope-a', origin: 'remote',
       });
       expect(send).toHaveBeenCalledWith(
-        'codex:send', '/proj', 'hello', [], 'auto', 'codex-mini'
+        'codex:send', '/proj', 'hello', [], 'auto', 'xhigh', 'codex-mini', 'scope-a', 'remote'
       );
     });
   });
@@ -147,8 +166,14 @@ describe('window.sai.provider routing', () => {
     });
 
     it('routes codex to codex:start', () => {
-      exposed.provider.start('codex', '/proj', { metaPreamble: 'meta' });
-      expect(invoke).toHaveBeenCalledWith('codex:start', '/proj', 'meta');
+      const orchestratorContext = { workspaceName: 'SAI' };
+      exposed.provider.start('codex', '/proj', {
+        scope: 'scope-a', kind: 'orchestrator', orchestratorContext,
+        scopeCwd: '/proj/worktree', metaPreamble: 'meta',
+      });
+      expect(invoke).toHaveBeenCalledWith(
+        'codex:start', '/proj', 'scope-a', 'orchestrator', orchestratorContext, '/proj/worktree', 'meta'
+      );
     });
   });
 
@@ -164,8 +189,8 @@ describe('window.sai.provider routing', () => {
     });
 
     it('routes codex to codex:stop', () => {
-      exposed.provider.stop('codex', '/proj');
-      expect(send).toHaveBeenCalledWith('codex:stop', '/proj');
+      exposed.provider.stop('codex', '/proj', 'scope-a');
+      expect(send).toHaveBeenCalledWith('codex:stop', '/proj', 'scope-a');
     });
   });
 
@@ -180,9 +205,9 @@ describe('window.sai.provider routing', () => {
       expect(send).toHaveBeenCalledWith('gemini:setSessionId', '/proj', 'sess-2', 'chat');
     });
 
-    it('routes codex to codex:setSessionId without scope', () => {
-      (exposed as any).provider.setSessionId('codex', '/proj', 'sess-3');
-      expect(send).toHaveBeenCalledWith('codex:setSessionId', '/proj', 'sess-3');
+    it('routes codex to codex:setSessionId with scope', () => {
+      (exposed as any).provider.setSessionId('codex', '/proj', 'sess-3', 'scope-a');
+      expect(send).toHaveBeenCalledWith('codex:setSessionId', '/proj', 'sess-3', 'scope-a');
     });
   });
 

@@ -91,6 +91,52 @@ import * as monaco from 'monaco-editor';
 import { motion, AnimatePresence } from 'motion/react';
 import { getCapabilities } from './providers/capabilities';
 
+interface ScopeReconcileBridge {
+  claudeReconcileScope?: (projectPath: string, scope?: string) => void;
+  codexReconcileScope?: (projectPath: string, scope?: string) => void;
+}
+
+function resolveScopedProvider(
+  projectPath: string,
+  scope: string,
+  workspaces: ReadonlyMap<string, Pick<WorkspaceContext, 'activeSession' | 'sessions'>>,
+  swarmTasksByWorkspace: ReadonlyMap<string, SwarmTask[]>,
+  activeProvider?: AIProvider,
+): AIProvider | undefined {
+  const task = (swarmTasksByWorkspace.get(projectPath) ?? [])
+    .find(candidate => candidate.sessionId === scope);
+  const workspace = workspaces.get(projectPath);
+  const isActiveScope = workspace?.activeSession.id === scope;
+  const session = isActiveScope
+    ? workspace.activeSession
+    : workspace?.sessions.find(candidate => candidate.id === scope);
+  return task?.provider
+    ?? session?.aiProvider
+    ?? (isActiveScope && activeProvider ? activeProvider : session ? 'claude' : undefined);
+}
+
+export function reconcileOwnedStreamingScope(
+  projectPath: string,
+  scope: string,
+  workspaces: ReadonlyMap<string, Pick<WorkspaceContext, 'activeSession' | 'sessions'>>,
+  swarmTasksByWorkspace: ReadonlyMap<string, SwarmTask[]>,
+  sai: ScopeReconcileBridge,
+  activeProvider?: AIProvider,
+): void {
+  const provider = resolveScopedProvider(
+    projectPath,
+    scope,
+    workspaces,
+    swarmTasksByWorkspace,
+    activeProvider,
+  );
+  if (provider === 'codex') {
+    sai.codexReconcileScope?.(projectPath, scope);
+  } else if (provider === 'claude') {
+    sai.claudeReconcileScope?.(projectPath, scope);
+  }
+}
+
 declare global {
   interface Window {
     __saiTest?: {
@@ -349,7 +395,9 @@ export default function App() {
     busy: new Set(), streaming: new Set(), completed: new Set(), approval: new Set(), awaitingQuestion: new Set(),
   });
   const activeProjectPathRef = useRef(activeProjectPath);
+  const aiProviderRef = useRef(aiProvider);
   const swarmTasksByWsRef = useRef(swarmTasksByWs);
+  const codexSessionIdByScopeRef = useRef<Map<string, string>>(new Map());
   const swarmDiffStatsRef = useRef(swarmDiffStats);
   // Dedupe synthetic completion/failure card emissions. claude.ts emits both
   // 'result' and 'done' at end of turn — both hit the status mirror before
@@ -544,6 +592,7 @@ export default function App() {
   }, [metaWorkspaces]);
 
   useEffect(() => { workspacesRef.current = workspaces; }, [workspaces]);
+  aiProviderRef.current = aiProvider;
   useEffect(() => {
     workspaceStatusRef.current = {
       busy: new Set(busyWorkspaces),
@@ -2607,6 +2656,35 @@ export default function App() {
       if (msg.type === 'session_id' && (msg.scope || 'chat') === 'chat' && msg.sessionId) {
         chatStreamingSessionRef.current.set(msg.projectPath, msg.sessionId);
       }
+      if (msg.type === 'session_id' && msg.scope && msg.scope !== 'chat' && msg.sessionId) {
+        const provider = resolveScopedProvider(
+          msg.projectPath,
+          msg.scope,
+          workspacesRef.current,
+          swarmTasksByWsRef.current,
+          activeProjectPathRef.current === msg.projectPath ? aiProviderRef.current : undefined,
+        );
+        if (provider === 'codex') {
+          const scopedKey = `${msg.projectPath}:${msg.scope}`;
+          codexSessionIdByScopeRef.current.set(scopedKey, msg.sessionId);
+          updateWorkspace(msg.projectPath, workspace => {
+            const patch = (session: ChatSession): ChatSession => session.id === msg.scope
+              ? { ...session, aiProvider: 'codex', codexSessionId: msg.sessionId }
+              : session;
+            const activeSession = patch(workspace.activeSession);
+            const sessions = workspace.sessions.map(patch);
+            if (activeSession === workspace.activeSession
+                && sessions.every((session, index) => session === workspace.sessions[index])) {
+              return workspace;
+            }
+            return { ...workspace, activeSession, sessions };
+          });
+          void dbPatchSessionMeta(msg.projectPath, msg.scope, {
+            aiProvider: 'codex',
+            codexSessionId: msg.sessionId,
+          }).catch(() => { /* the first-user save retries after creating the row */ });
+        }
+      }
       if (msg.type === 'assistant') {
         for (const { id } of extractEditToolUses(msg.message?.content, msg.projectPath)) {
           pendingEditsRef.current.add(id);
@@ -3157,8 +3235,12 @@ export default function App() {
                   const sessions = await dbGetSessions(wsPath);
                   const targetSession = sessions.find(s => s.id === scope);
                   if (!targetSession) return;
+                  const scopedCodexSessionId = codexSessionIdByScopeRef.current.get(`${wsPath}:${scope}`);
                   await queueSaveSession(wsPath, {
                     ...targetSession,
+                    ...(scopedCodexSessionId
+                      ? { aiProvider: 'codex' as const, codexSessionId: scopedCodexSessionId }
+                      : {}),
                     messages: merged,
                     messageCount: merged.length,
                     updatedAt: Date.now(),
@@ -3180,8 +3262,12 @@ export default function App() {
                   const sessions = await dbGetSessions(wsPath);
                   const targetSession = sessions.find(s => s.id === scope);
                   if (!targetSession) return;
+                  const scopedCodexSessionId = codexSessionIdByScopeRef.current.get(`${wsPath}:${scope}`);
                   await queueSaveSession(wsPath, {
                     ...targetSession,
+                    ...(scopedCodexSessionId
+                      ? { aiProvider: 'codex' as const, codexSessionId: scopedCodexSessionId }
+                      : {}),
                     updatedAt: Date.now(),
                     lastTurnErrored: true,
                   }, 0);
@@ -3764,16 +3850,27 @@ export default function App() {
     }
   }, [updateWorkspace, refreshWorkspaceSessions]);
 
-  const handleNewChat = () => {
+  const handleNewChat = (providerOverride?: unknown) => {
     if (!activeProjectPath) return;
+    // Runtime validation keeps callbacks safe if a UI ever passes its click
+    // event through while still allowing provider switches to avoid a stale
+    // closure during setAiProvider + new-chat in the same tick.
+    const freshProvider: AIProvider = providerOverride === 'claude'
+      || providerOverride === 'codex'
+      || providerOverride === 'gemini'
+      ? providerOverride
+      : aiProvider;
+    const outgoingScope = workspacesRef.current.get(activeProjectPath)?.activeSession.id;
     // Invalidate any in-flight session tail load so it can't resolve late and
     // swap the panel back off the fresh chat.
     sessionLoadSeqRef.current++;
     flushAndPersist(activeProjectPath);
     // Clear backend sessions so next message starts fresh
-    (window.sai as any).codexSetSessionId(activeProjectPath, undefined);
+    if (outgoingScope) {
+      (window.sai as any).codexSetSessionId(activeProjectPath, undefined, outgoingScope);
+    }
     window.sai.geminiSetSessionId?.(activeProjectPath, undefined, 'chat');
-    const fresh = { ...createSession(), lastViewedAt: Date.now() };
+    const fresh = { ...createSession(), lastViewedAt: Date.now(), aiProvider: freshProvider };
     // Surface the new session in the sidebar immediately. It won't be persisted
     // until the user sends their first message (see onMessagesChange below),
     // but having it in the in-memory `sessions` list lets the sidebar render
@@ -3781,15 +3878,20 @@ export default function App() {
     updateWorkspace(activeProjectPath, ws => ({
       ...ws,
       activeSession: fresh,
-      sessions: [{ ...fresh, aiProvider }, ...ws.sessions.filter(s => s.id !== fresh.id)],
+      sessions: [fresh, ...ws.sessions.filter(s => s.id !== fresh.id)],
     }));
   };
 
   const handleSelectSession = (id: string) => {
     if (!activeProjectPath) return;
     flushAndPersist(activeProjectPath);
-    const selected = sessions.find(s => s.id === id);
-    if (!selected) return;
+    const storedSelected = sessions.find(s => s.id === id);
+    if (!storedSelected) return;
+    const authoritativeCodexSessionId = codexSessionIdByScopeRef.current
+      .get(`${activeProjectPath}:${storedSelected.id}`);
+    const selected = authoritativeCodexSessionId
+      ? { ...storedSelected, aiProvider: 'codex' as const, codexSessionId: authoritativeCodexSessionId }
+      : storedSelected;
     // Guard the async tail load against rapid re-selection: two quick clicks
     // raced their dbGetMessagesTail promises and whichever resolved LAST won,
     // even when it was the first click — leaving the panel on the wrong chat.
@@ -3799,7 +3901,7 @@ export default function App() {
     // and empty after an app restart, so without this the CLI starts a fresh
     // conversation with no history.
     window.sai.claudeSetSessionId(activeProjectPath, selected.claudeSessionId, selected.id);
-    (window.sai as any).codexSetSessionId(activeProjectPath, selected.codexSessionId);
+    (window.sai as any).codexSetSessionId(activeProjectPath, selected.codexSessionId, selected.id);
     window.sai.geminiSetSessionId?.(activeProjectPath, selected.geminiSessionId, 'chat');
     const viewedAt = Date.now();
     // Persist lastViewedAt so a subsequent dbGetSessions refresh (triggered by
@@ -3866,10 +3968,15 @@ export default function App() {
       // Refresh sessions from db, then select.
       dbGetSessions(activeProjectPath).then(fresh => {
         updateWorkspace(activeProjectPath, ws => ({ ...ws, sessions: fresh }));
-        const selected = fresh.find(s => s.id === task.sessionId);
-        if (!selected) return;
+        const storedSelected = fresh.find(s => s.id === task.sessionId);
+        if (!storedSelected) return;
+        const authoritativeCodexSessionId = codexSessionIdByScopeRef.current
+          .get(`${activeProjectPath}:${storedSelected.id}`);
+        const selected = authoritativeCodexSessionId
+          ? { ...storedSelected, aiProvider: 'codex' as const, codexSessionId: authoritativeCodexSessionId }
+          : storedSelected;
         window.sai.claudeSetSessionId(activeProjectPath, selected.claudeSessionId, selected.id);
-        (window.sai as any).codexSetSessionId(activeProjectPath, selected.codexSessionId);
+        (window.sai as any).codexSetSessionId(activeProjectPath, selected.codexSessionId, selected.id);
         window.sai.geminiSetSessionId?.(activeProjectPath, selected.geminiSessionId, 'chat');
         dbGetMessagesTail(selected.id, MESSAGE_TAIL_LIMIT).then(({ messages, totalCount }) => {
           const buffered = taskMessagesBufferRef.current.get(selected.id);
@@ -3998,6 +4105,7 @@ export default function App() {
         prevStreamingRef.current.delete(id);
         prevAwaitingRef.current.delete(id);
         prevQuestionRef.current.delete(id);
+        codexSessionIdByScopeRef.current.delete(`${wsPath}:${id}`);
       }
     }
     // Deleting the chat you're looking at swaps in a fresh one — keeping the
@@ -4006,15 +4114,15 @@ export default function App() {
     const activeDeleted = !!prevWs && removedIds.includes(prevWs.activeSession.id);
     if (activeDeleted) {
       sessionLoadSeqRef.current++; // cancel any in-flight tail load for the deleted chat
-      (window.sai as any).codexSetSessionId?.(wsPath, undefined);
+      (window.sai as any).codexSetSessionId?.(wsPath, undefined, prevWs!.activeSession.id);
       window.sai.geminiSetSessionId?.(wsPath, undefined, 'chat');
       wsMessagesRef.current.delete(wsPath);
       wsFirstLoadedIdxRef.current.delete(wsPath);
-      const fresh = { ...createSession(), lastViewedAt: Date.now() };
+      const fresh = { ...createSession(), lastViewedAt: Date.now(), aiProvider };
       updateWorkspace(wsPath, ws => ({
         ...ws,
         activeSession: fresh,
-        sessions: [{ ...fresh, aiProvider }, ...updated],
+        sessions: [fresh, ...updated],
       }));
       return;
     }
@@ -4704,19 +4812,14 @@ export default function App() {
                   onFileOpen={handleFileOpen}
                   isActive={wsPath === activeProjectPath}
                   isStreaming={
-                    aiProvider === 'claude'
+                    aiProvider === 'claude' || aiProvider === 'codex'
                       ? streamingScopes.has(`${wsPath}:${ws.activeSession.id}`)
                       // Gemini uses a long-lived ACP — multiple sessions can stream
                       // concurrently (New Chat keeps the background turn running).
                       // Only show the animation when the streaming ACP session matches
                       // this session's own geminiSessionId.
-                      : aiProvider === 'gemini'
-                        ? streamingScopes.has(`${wsPath}:chat`) &&
-                          chatStreamingSessionRef.current.get(wsPath) === (ws.activeSession.geminiSessionId ?? null)
-                        // Codex spawns a new process per turn and kills the previous one
-                        // on each new send — only one stream is ever active per workspace.
-                        // No session-ID matching needed.
-                        : streamingScopes.has(`${wsPath}:chat`)
+                      : streamingScopes.has(`${wsPath}:chat`) &&
+                        chatStreamingSessionRef.current.get(wsPath) === (ws.activeSession.geminiSessionId ?? null)
                   }
                   waiting={
                     // waits are claude-only: waitingScopes never holds gemini/codex entries
@@ -4753,13 +4856,49 @@ export default function App() {
                     if (!firstUserPersistRef.current.has(sid) && messages.some(m => m.role === 'user')) {
                       firstUserPersistRef.current.add(sid);
                       const now = Date.now();
-                      const session = { ...ws.activeSession, messages, updatedAt: now, lastViewedAt: now, aiProvider, messageCount: messages.length };
+                      const codexSessionId = codexSessionIdByScopeRef.current.get(`${wsPath}:${sid}`);
+                      const session = {
+                        ...ws.activeSession,
+                        messages,
+                        updatedAt: now,
+                        lastViewedAt: now,
+                        aiProvider,
+                        messageCount: messages.length,
+                        ...(codexSessionId ? { codexSessionId } : {}),
+                      };
                       if (!session.title) {
                         const firstUserMsg = messages.find(m => m.role === 'user');
                         if (firstUserMsg) session.title = generateSmartTitle(firstUserMsg.content);
                       }
-                      queueSaveSession(wsPath, session, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).then(() => {
-                        void refreshWorkspaceSessions(wsPath);
+                      // Stamp provider identity in memory before a long-running
+                      // first turn reaches the backend reconciler.
+                      updateWorkspace(wsPath, workspace => {
+                        if (workspace.activeSession.id !== sid) return workspace;
+                        const tagged = {
+                          ...workspace.activeSession,
+                          aiProvider,
+                          ...(codexSessionId ? { codexSessionId } : {}),
+                        };
+                        return {
+                          ...workspace,
+                          activeSession: tagged,
+                          sessions: workspace.sessions.map(item => item.id === sid
+                            ? { ...item, aiProvider, ...(codexSessionId ? { codexSessionId } : {}) }
+                            : item),
+                        };
+                      });
+                      queueSaveSession(wsPath, session, wsFirstLoadedIdxRef.current.get(wsPath) ?? 0).then(async () => {
+                        // thread.started can beat creation of the first DB row.
+                        // Re-read the authoritative scoped id after creation and
+                        // patch it so restart resume never loses the thread.
+                        const latestCodexSessionId = codexSessionIdByScopeRef.current.get(`${wsPath}:${sid}`);
+                        if (latestCodexSessionId) {
+                          await dbPatchSessionMeta(wsPath, sid, {
+                            aiProvider: 'codex',
+                            codexSessionId: latestCodexSessionId,
+                          });
+                        }
+                        await refreshWorkspaceSessions(wsPath);
                       }).catch(() => {});
                     }
                   }}
@@ -5012,8 +5151,8 @@ export default function App() {
   // the wait done for waiting scopes, and answers a stuck scope with an
   // unconditional-unstick done (turnSeq null — never stale-droppable), which
   // flows the normal turn-end path and clears all derived state consistently.
-  // Claude session scopes only: gemini/codex ride the shared 'chat' scope,
-  // which the claude backend would always (wrongly) report idle.
+  // Scoped Claude and Codex sessions are reconciled only by their owning
+  // backend. Gemini remains on its fixed `chat` scope and is skipped here.
   useEffect(() => {
     const hasStreaming = streamingScopes.size > 0;
     if (!hasStreaming) return;
@@ -5022,7 +5161,14 @@ export default function App() {
         const projectPath = scopeKeyProjectPath(key);
         const scope = key.slice(projectPath.length + 1);
         if (!projectPath || !scope || scope === 'chat') continue;
-        window.sai.claudeReconcileScope?.(projectPath, scope);
+        reconcileOwnedStreamingScope(
+          projectPath,
+          scope,
+          workspacesRef.current,
+          swarmTasksByWsRef.current,
+          window.sai as ScopeReconcileBridge,
+          activeProjectPathRef.current === projectPath ? aiProviderRef.current : undefined,
+        );
       }
     }, 20_000);
     return () => clearInterval(id);
@@ -5247,7 +5393,11 @@ export default function App() {
         onSettingChange={(key, value) => {
           if (key === 'editorFontSize') setEditorFontSize(value);
           if (key === 'editorMinimap') setEditorMinimap(value);
-          if (key === 'aiProvider') { setAiProvider(value); handleNewChat(); }
+          if (key === 'aiProvider'
+              && (value === 'claude' || value === 'codex' || value === 'gemini')) {
+            setAiProvider(value);
+            handleNewChat(value);
+          }
           if (key === 'commitMessageProvider') setCommitMessageProvider(value);
           if (key === 'aiTitleGeneration') setAiTitleGeneration(value);
           if (key === 'geminiModel') handleGeminiModelChange(value);

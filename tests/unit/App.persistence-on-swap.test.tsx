@@ -19,9 +19,14 @@
 import 'fake-indexeddb/auto';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import App from '../../src/App';
+import App, { reconcileOwnedStreamingScope } from '../../src/App';
 import { installMockSai, createMockSai } from '../helpers/ipc-mock';
 import type { ChatSession, ChatMessage } from '../../src/types';
+
+const { chatPanelPropsLog, titleBarPropsLog } = vi.hoisted(() => ({
+  chatPanelPropsLog: [] as any[],
+  titleBarPropsLog: [] as any[],
+}));
 
 // ---------------------------------------------------------------------------
 // Stub Monaco editor — imported directly in App.tsx
@@ -43,7 +48,16 @@ vi.mock('monaco-editor', () => ({
 // Stub heavy child components that bring in Monaco, xterm, etc.
 // ---------------------------------------------------------------------------
 vi.mock('../../src/components/Chat/ChatPanel', () => ({
-  default: () => <div data-testid="chat-panel" />,
+  default: (props: any) => {
+    chatPanelPropsLog.push(props);
+    return <div data-testid="chat-panel" />;
+  },
+}));
+vi.mock('../../src/components/TitleBar', () => ({
+  default: (props: any) => {
+    titleBarPropsLog.push(props);
+    return <div data-testid="title-bar" />;
+  },
 }));
 vi.mock('../../src/components/Terminal/TerminalPanel', () => ({
   default: () => <div data-testid="terminal-panel" />,
@@ -111,6 +125,7 @@ function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
 // chatDb mock — tracks which session ids were passed to dbSaveSession in order
 // ---------------------------------------------------------------------------
 const saveOrder: string[] = [];
+const savedSessions: ChatSession[] = [];
 
 // messagesBySessionId is populated in beforeEach so dbGetMessagesTail can
 // return the correct messages for each session.
@@ -126,6 +141,7 @@ vi.mock('../../src/chatDb', () => ({
   }),
   dbSaveSession: vi.fn((_path: string, session: ChatSession) => {
     saveOrder.push(session.id);
+    savedSessions.push(session);
     return Promise.resolve();
   }),
   dbPatchSessionMeta: vi.fn().mockResolvedValue(undefined),
@@ -137,6 +153,8 @@ vi.mock('../../src/chatDb', () => ({
 // Also stub out swarmDb so it doesn't try to open its own IndexedDB
 vi.mock('../../src/swarmDb', () => ({
   swarmInit: vi.fn().mockResolvedValue(undefined),
+  swarmGetTasks: vi.fn().mockResolvedValue([]),
+  swarmUpdateTask: vi.fn().mockResolvedValue(undefined),
   swarmGetApprovals: vi.fn().mockResolvedValue([]),
   swarmResolveApproval: vi.fn().mockResolvedValue(undefined),
   swarmCreateApproval: vi.fn().mockResolvedValue(undefined),
@@ -148,10 +166,14 @@ vi.mock('../../src/swarmDb', () => ({
 describe('App: persistence on session swap', () => {
   let sessionA: ChatSession;
   let sessionB: ChatSession;
+  let mockSai: ReturnType<typeof createMockSai> & Record<string, any>;
 
   beforeEach(async () => {
     saveOrder.length = 0;
+    savedSessions.length = 0;
     messagesBySessionId.clear();
+    chatPanelPropsLog.length = 0;
+    titleBarPropsLog.length = 0;
 
     const msgA = makeMsg();
     sessionA = makeSession({
@@ -178,18 +200,20 @@ describe('App: persistence on session swap', () => {
     vi.mocked(dbGetSessions).mockResolvedValue([sessionA, sessionB]);
 
     // Install window.sai with getCwd pointing at our project
-    const mock = createMockSai() as ReturnType<typeof createMockSai> & Record<string, unknown>;
-    mock.getCwd = vi.fn().mockResolvedValue(PROJECT_PATH);
+    mockSai = createMockSai() as ReturnType<typeof createMockSai> & Record<string, any>;
+    mockSai.getCwd = vi.fn().mockResolvedValue(PROJECT_PATH);
     // settingsGet must resolve to avoid unhandled-promise errors
-    mock.settingsGet = vi.fn().mockImplementation((_key: string, def: unknown) =>
+    mockSai.settingsGet = vi.fn().mockImplementation((_key: string, def: unknown) =>
       Promise.resolve(def ?? null)
     );
+    mockSai.claudeOnMessage = vi.fn(() => () => {});
     // Methods present in the app but not yet in the MockSai interface
-    mock.setBadgeCount = vi.fn();
-    mock.metaWorkspaceList = vi.fn().mockResolvedValue([]);
-    mock.fsWalkFiles = vi.fn().mockResolvedValue([]);
-    mock.swarmSetOrchestratorSession = vi.fn();
-    installMockSai(mock as ReturnType<typeof createMockSai>);
+    mockSai.setBadgeCount = vi.fn();
+    mockSai.metaWorkspaceList = vi.fn().mockResolvedValue([]);
+    mockSai.fsWalkFiles = vi.fn().mockResolvedValue([]);
+    mockSai.swarmSetOrchestratorSession = vi.fn();
+    mockSai.remoteEmitWorkspaceStatus = vi.fn();
+    installMockSai(mockSai as ReturnType<typeof createMockSai>);
   });
 
   it('persists the outgoing session before activating the new one', async () => {
@@ -261,5 +285,242 @@ describe('App: persistence on session swap', () => {
     const [, , patch] = swapCall!;
     expect(typeof patch.lastViewedAt).toBe('number');
     expect(patch.lastViewedAt).toBeGreaterThan(0);
+  });
+
+  it('binds a persisted Codex session id to the selected owning scope', async () => {
+    sessionB.codexSessionId = 'codex-thread-B';
+    render(<App />);
+
+    const chatsBtn = await waitFor(() => screen.getByTitle('Chats'));
+    await act(async () => { fireEvent.click(chatsBtn); });
+    await waitFor(() => expect(screen.getByText('Chat B')).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByText('Chat B')); });
+
+    expect(mockSai.codexSetSessionId).toHaveBeenCalledWith(
+      PROJECT_PATH,
+      'codex-thread-B',
+      'session-B',
+    );
+  });
+
+  it('clears a Codex binding on the outgoing session scope when starting a new chat', async () => {
+    render(<App />);
+
+    const chatsBtn = await waitFor(() => screen.getByTitle('Chats'));
+    await act(async () => { fireEvent.click(chatsBtn); });
+    await waitFor(() => expect(screen.getByText('Chat A')).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByText('Chat A')); });
+    mockSai.codexSetSessionId.mockClear();
+
+    await act(async () => { fireEvent.click(screen.getByText('New Chat')); });
+
+    expect(mockSai.codexSetSessionId).toHaveBeenCalledWith(
+      PROJECT_PATH,
+      undefined,
+      'session-A',
+    );
+  });
+
+  it('reconciles each non-chat streaming scope only through its owning provider', async () => {
+    sessionA.aiProvider = 'claude';
+    sessionB.aiProvider = 'codex';
+    const workspace = {
+      sessions: [sessionA, sessionB],
+      activeSession: sessionA,
+    };
+    vi.useFakeTimers();
+    try {
+      const id = setInterval(() => {
+        reconcileOwnedStreamingScope(
+          PROJECT_PATH,
+          'session-A',
+          new Map([[PROJECT_PATH, workspace]]),
+          new Map(),
+          mockSai,
+        );
+        reconcileOwnedStreamingScope(
+          PROJECT_PATH,
+          'session-B',
+          new Map([[PROJECT_PATH, workspace]]),
+          new Map(),
+          mockSai,
+        );
+      }, 20_000);
+      vi.advanceTimersByTime(20_000);
+      clearInterval(id);
+
+      expect(mockSai.claudeReconcileScope).toHaveBeenCalledTimes(1);
+      expect(mockSai.claudeReconcileScope).toHaveBeenCalledWith(PROJECT_PATH, 'session-A');
+      expect(mockSai.codexReconcileScope).toHaveBeenCalledTimes(1);
+      expect(mockSai.codexReconcileScope).toHaveBeenCalledWith(PROJECT_PATH, 'session-B');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reconciles an untagged fresh active session through the selected Codex provider', () => {
+    delete sessionA.aiProvider;
+    reconcileOwnedStreamingScope(
+      PROJECT_PATH,
+      'session-A',
+      new Map([[PROJECT_PATH, { sessions: [sessionA], activeSession: sessionA }]]),
+      new Map(),
+      mockSai,
+      'codex',
+    );
+
+    expect(mockSai.codexReconcileScope).toHaveBeenCalledWith(PROJECT_PATH, 'session-A');
+    expect(mockSai.claudeReconcileScope).not.toHaveBeenCalled();
+  });
+
+  it('keeps an untagged persisted session on the legacy Claude default', () => {
+    delete sessionA.aiProvider;
+    reconcileOwnedStreamingScope(
+      PROJECT_PATH,
+      'session-A',
+      new Map([[PROJECT_PATH, { sessions: [sessionA], activeSession: sessionA }]]),
+      new Map(),
+      mockSai,
+    );
+
+    expect(mockSai.claudeReconcileScope).toHaveBeenCalledWith(PROJECT_PATH, 'session-A');
+    expect(mockSai.codexReconcileScope).not.toHaveBeenCalled();
+  });
+
+  it('marks only the active scoped Codex session as streaming', async () => {
+    mockSai.settingsGet.mockImplementation((key: string, def: unknown) =>
+      Promise.resolve(key === 'aiProvider' ? 'codex' : (def ?? null))
+    );
+    sessionA.aiProvider = 'codex';
+    sessionB.aiProvider = 'codex';
+    render(<App />);
+
+    const chatsBtn = await waitFor(() => screen.getByTitle('Chats'));
+    await act(async () => { fireEvent.click(chatsBtn); });
+    await waitFor(() => expect(screen.getByText('Chat A')).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByText('Chat A')); });
+    await waitFor(() => {
+      const props = chatPanelPropsLog.at(-1);
+      expect(props?.aiProvider).toBe('codex');
+      expect(props?.claudeScope).toBe('session-A');
+    });
+
+    const onMessage = mockSai.claudeOnMessage.mock.calls.at(-1)?.[0] as (msg: any) => void;
+    await act(async () => {
+      onMessage({ type: 'streaming_start', projectPath: PROJECT_PATH, scope: 'session-B', turnSeq: 1 });
+    });
+    expect(chatPanelPropsLog.at(-1)?.isStreaming).toBe(false);
+
+    await act(async () => {
+      onMessage({ type: 'streaming_start', projectPath: PROJECT_PATH, scope: 'chat', turnSeq: 1 });
+    });
+    expect(chatPanelPropsLog.at(-1)?.isStreaming).toBe(false);
+
+    await act(async () => {
+      onMessage({ type: 'streaming_start', projectPath: PROJECT_PATH, scope: 'session-A', turnSeq: 1 });
+    });
+    expect(chatPanelPropsLog.at(-1)?.isStreaming).toBe(true);
+  });
+
+  it('persists a background scoped Codex session id and rebinds it on selection', async () => {
+    const { dbPatchSessionMeta } = await import('../../src/chatDb');
+    vi.mocked(dbPatchSessionMeta).mockImplementation(async (_path, sessionId, patch) => {
+      const target = sessionId === sessionA.id ? sessionA : sessionId === sessionB.id ? sessionB : undefined;
+      if (target) Object.assign(target, patch);
+    });
+    mockSai.settingsGet.mockImplementation((key: string, def: unknown) =>
+      Promise.resolve(key === 'aiProvider' ? 'codex' : (def ?? null))
+    );
+    sessionA.aiProvider = 'codex';
+    sessionB.aiProvider = 'codex';
+    render(<App />);
+
+    const chatsBtn = await waitFor(() => screen.getByTitle('Chats'));
+    await act(async () => { fireEvent.click(chatsBtn); });
+    await waitFor(() => expect(screen.getByText('Chat B')).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByText('Chat B')); });
+    await waitFor(() => expect(chatPanelPropsLog.at(-1)?.claudeScope).toBe('session-B'));
+
+    const onMessage = mockSai.claudeOnMessage.mock.calls.at(-1)?.[0] as (msg: any) => void;
+    await act(async () => {
+      onMessage({ type: 'session_id', projectPath: PROJECT_PATH, scope: 'session-A', sessionId: 'codex-thread-A' });
+      onMessage({
+        type: 'assistant', projectPath: PROJECT_PATH, scope: 'session-A',
+        message: { content: [{ type: 'text', text: 'background reply' }] },
+      });
+      onMessage({ type: 'done', projectPath: PROJECT_PATH, scope: 'session-A' });
+    });
+
+    await waitFor(() => expect(dbPatchSessionMeta).toHaveBeenCalledWith(
+      PROJECT_PATH,
+      'session-A',
+      expect.objectContaining({ codexSessionId: 'codex-thread-A' }),
+    ));
+    await waitFor(() => expect(savedSessions.some(
+      session => session.id === 'session-A' && session.codexSessionId === 'codex-thread-A'
+    )).toBe(true));
+
+    mockSai.codexSetSessionId.mockClear();
+    await act(async () => { fireEvent.click(screen.getByText('Chat A')); });
+    expect(mockSai.codexSetSessionId).toHaveBeenCalledWith(
+      PROJECT_PATH,
+      'codex-thread-A',
+      'session-A',
+    );
+  });
+
+  it('does not treat a scoped Claude session id as a Codex thread id', async () => {
+    sessionA.aiProvider = 'claude';
+    render(<App />);
+    const chatsBtn = await waitFor(() => screen.getByTitle('Chats'));
+    await act(async () => { fireEvent.click(chatsBtn); });
+    await waitFor(() => expect(screen.getByText('Chat A')).toBeInTheDocument());
+
+    const { dbPatchSessionMeta } = await import('../../src/chatDb');
+    vi.mocked(dbPatchSessionMeta).mockClear();
+    const onMessage = mockSai.claudeOnMessage.mock.calls.at(-1)?.[0] as (msg: any) => void;
+    await act(async () => {
+      onMessage({ type: 'session_id', projectPath: PROJECT_PATH, scope: 'session-A', sessionId: 'claude-session-A' });
+    });
+
+    expect(vi.mocked(dbPatchSessionMeta).mock.calls.some(
+      ([, , patch]) => patch.codexSessionId === 'claude-session-A'
+    )).toBe(false);
+  });
+
+  it('tags a fresh session with the newly selected Codex provider before thread.started', async () => {
+    render(<App />);
+    await waitFor(() => expect(titleBarPropsLog.at(-1)?.onSettingChange).toBeTypeOf('function'));
+
+    await act(async () => {
+      titleBarPropsLog.at(-1).onSettingChange('aiProvider', 'codex');
+    });
+    await waitFor(() => expect(chatPanelPropsLog.at(-1)?.aiProvider).toBe('codex'));
+    const freshScope = chatPanelPropsLog.at(-1).claudeScope as string;
+
+    const { dbPatchSessionMeta } = await import('../../src/chatDb');
+    vi.mocked(dbPatchSessionMeta).mockClear();
+    const onMessage = mockSai.claudeOnMessage.mock.calls.at(-1)?.[0] as (msg: any) => void;
+    await act(async () => {
+      onMessage({
+        type: 'session_id', projectPath: PROJECT_PATH, scope: freshScope,
+        sessionId: 'fresh-codex-thread',
+      });
+    });
+    await act(async () => {
+      chatPanelPropsLog.at(-1).onMessagesChange([makeMsg({ content: 'first codex message' })]);
+    });
+
+    await waitFor(() => expect(dbPatchSessionMeta).toHaveBeenCalledWith(
+      PROJECT_PATH,
+      freshScope,
+      expect.objectContaining({ aiProvider: 'codex', codexSessionId: 'fresh-codex-thread' }),
+    ));
+    await waitFor(() => expect(savedSessions.some(session =>
+      session.id === freshScope
+      && session.aiProvider === 'codex'
+      && session.codexSessionId === 'fresh-codex-thread'
+    )).toBe(true));
+    expect(mockSai.claudeReconcileScope).not.toHaveBeenCalledWith(PROJECT_PATH, freshScope);
   });
 });
