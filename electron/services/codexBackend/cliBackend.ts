@@ -347,10 +347,25 @@ export class CliCodexBackend implements CodexBackend {
   }
 
   suspendWorkspace(projectPath: string): void {
+    this.cleanupWorkspace(projectPath, true);
+  }
+
+  isWorkspaceBusy(projectPath: string): boolean {
+    return get(projectPath)?.codex.busy ?? false;
+  }
+
+  destroy(): void {
+    // App shutdown must retire processes silently; there is no renderer turn
+    // left to settle once teardown has begun.
+    for (const projectPath of this.runtimes.keys()) this.cleanupWorkspace(projectPath, false);
+    this.runtimes.clear();
+  }
+
+  private cleanupWorkspace(projectPath: string, emitDone: boolean): void {
     const ws = get(projectPath);
     if (!ws) return;
     const runtime = this.runtimes.get(projectPath);
-    if (runtime?.active) this.retireTurn(projectPath, runtime, runtime.active, false);
+    if (runtime?.active) this.retireTurn(projectPath, runtime, runtime.active, emitDone);
     else {
       if (ws.codex.process) {
         const proc = ws.codex.process;
@@ -359,15 +374,6 @@ export class CliCodexBackend implements CodexBackend {
       }
       ws.codex.busy = false;
     }
-  }
-
-  isWorkspaceBusy(projectPath: string): boolean {
-    return get(projectPath)?.codex.busy ?? false;
-  }
-
-  destroy(): void {
-    for (const projectPath of this.runtimes.keys()) this.suspendWorkspace(projectPath);
-    this.runtimes.clear();
   }
 
   private runtime(projectPath: string, scope?: string): CliRuntime {

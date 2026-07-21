@@ -182,6 +182,86 @@ describe('touchActivity', () => {
 // ===========================================================================
 
 describe('suspend', () => {
+  it('notifies every registered provider backend', async () => {
+    const { getOrCreate, registerWorkspaceBackendHooks, suspend } = await loadService();
+    const claudeSuspend = vi.fn();
+    const codexSuspend = vi.fn();
+    registerWorkspaceBackendHooks('claude', { suspend: claudeSuspend });
+    registerWorkspaceBackendHooks('codex', { suspend: codexSuspend });
+    getOrCreate('/suspend/providers');
+
+    suspend('/suspend/providers', createWin() as never);
+
+    expect(claudeSuspend).toHaveBeenCalledWith('/suspend/providers');
+    expect(codexSuspend).toHaveBeenCalledWith('/suspend/providers');
+  });
+
+  it('lets an external backend settle its runtime before legacy fallback cleanup', async () => {
+    const { getOrCreate, registerWorkspaceBackendHooks, suspend } = await loadService();
+    const ws = getOrCreate('/suspend/owned');
+    const proc = createMockProcess();
+    const win = createWin();
+    ws.codex.busy = true;
+    ws.codex.process = proc as never;
+    registerWorkspaceBackendHooks('codex', {
+      suspend: () => {
+        expect(proc.kill).not.toHaveBeenCalled();
+        proc.kill();
+        win.webContents.send('claude:message', {
+          type: 'done',
+          projectPath: '/suspend/owned',
+          scope: 'task:owner',
+          turnSeq: 7,
+        });
+        ws.codex.busy = false;
+        ws.codex.process = null;
+      },
+    });
+
+    suspend('/suspend/owned', win as never);
+
+    expect(proc.kill).toHaveBeenCalledOnce();
+    const doneEvents = win.webContents.send.mock.calls
+      .filter(([channel, event]) => channel === 'claude:message' && event.type === 'done')
+      .map(([, event]) => event);
+    expect(doneEvents).toEqual([{
+      type: 'done',
+      projectPath: '/suspend/owned',
+      scope: 'task:owner',
+      turnSeq: 7,
+    }]);
+    expect(ws.status).toBe('suspended');
+  });
+
+  it('isolates provider hook failures during suspension', async () => {
+    const { getOrCreate, registerWorkspaceBackendHooks, suspend } = await loadService();
+    const healthySuspend = vi.fn();
+    registerWorkspaceBackendHooks('broken', { suspend: () => { throw new Error('down'); } });
+    registerWorkspaceBackendHooks('healthy', { suspend: healthySuspend });
+    const ws = getOrCreate('/suspend/failure-isolation');
+
+    expect(() => suspend('/suspend/failure-isolation', createWin() as never)).not.toThrow();
+    expect(healthySuspend).toHaveBeenCalledWith('/suspend/failure-isolation');
+    expect(ws.status).toBe('suspended');
+  });
+
+  it('replaces hooks only for the provider registered again', async () => {
+    const { getOrCreate, registerWorkspaceBackendHooks, suspend } = await loadService();
+    const oldClaudeSuspend = vi.fn();
+    const newClaudeSuspend = vi.fn();
+    const codexSuspend = vi.fn();
+    registerWorkspaceBackendHooks('claude', { suspend: oldClaudeSuspend });
+    registerWorkspaceBackendHooks('codex', { suspend: codexSuspend });
+    registerWorkspaceBackendHooks('claude', { suspend: newClaudeSuspend });
+    getOrCreate('/suspend/replaced');
+
+    suspend('/suspend/replaced', createWin() as never);
+
+    expect(oldClaudeSuspend).not.toHaveBeenCalled();
+    expect(newClaudeSuspend).toHaveBeenCalledOnce();
+    expect(codexSuspend).toHaveBeenCalledOnce();
+  });
+
   it('kills Claude process and nullifies it', async () => {
     const { getOrCreate, getClaude, suspend } = await loadService();
     const ws = getOrCreate('/suspend/proj');
@@ -444,6 +524,32 @@ describe('startSuspendTimer / stopSuspendTimer', () => {
 // ===========================================================================
 
 describe('isWorkspaceQuiescent', () => {
+  it('does not let a later idle provider mask an earlier busy provider', async () => {
+    const { getOrCreate, isWorkspaceQuiescent, registerWorkspaceBackendHooks } = await loadService();
+    const ws = getOrCreate('/q/provider-busy');
+    registerWorkspaceBackendHooks('busy-provider', { isBusy: () => true });
+    registerWorkspaceBackendHooks('idle-provider', { isBusy: () => false });
+
+    expect(isWorkspaceQuiescent(ws)).toBe(false);
+  });
+
+  it('isolates provider busy-hook failures and still checks the other providers', async () => {
+    const { getOrCreate, isWorkspaceQuiescent, registerWorkspaceBackendHooks } = await loadService();
+    const ws = getOrCreate('/q/provider-failure');
+    registerWorkspaceBackendHooks('broken', { isBusy: () => { throw new Error('down'); } });
+    registerWorkspaceBackendHooks('busy', { isBusy: () => true });
+
+    expect(isWorkspaceQuiescent(ws)).toBe(false);
+  });
+
+  it('fails closed when a provider busy hook throws', async () => {
+    const { getOrCreate, isWorkspaceQuiescent, registerWorkspaceBackendHooks } = await loadService();
+    const ws = getOrCreate('/q/provider-unknown');
+    registerWorkspaceBackendHooks('broken', { isBusy: () => { throw new Error('down'); } });
+
+    expect(isWorkspaceQuiescent(ws)).toBe(false);
+  });
+
   it('is true for a freshly created workspace', async () => {
     const { getOrCreate, isWorkspaceQuiescent } = await loadService();
     const ws = getOrCreate('/q/idle');

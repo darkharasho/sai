@@ -3,7 +3,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 // ---------------------------------------------------------------------------
 // vi.hoisted — shared state for the IPC routing test harness
 // ---------------------------------------------------------------------------
-const { readSaiSetting, sendImpl: mockSendImpl, mockIpcMain } = vi.hoisted(() => {
+const { readSaiSetting, sendImpl: mockSendImpl, mockIpcMain, registerWorkspaceBackendHooks } = vi.hoisted(() => {
   const readSaiSetting = vi.fn();
   const sendImpl = vi.fn();
 
@@ -35,7 +35,7 @@ const { readSaiSetting, sendImpl: mockSendImpl, mockIpcMain } = vi.hoisted(() =>
     },
   };
 
-  return { readSaiSetting, sendImpl, mockIpcMain };
+  return { readSaiSetting, sendImpl, mockIpcMain, registerWorkspaceBackendHooks: vi.fn() };
 });
 
 // ---------------------------------------------------------------------------
@@ -58,7 +58,7 @@ vi.mock('@electron/services/workspace', () => ({
   getClaude: vi.fn(),
   touchActivity: vi.fn(),
   listAllWorkspaces: vi.fn().mockReturnValue([]),
-  registerWorkspaceBackendHooks: vi.fn(),
+  registerWorkspaceBackendHooks,
 }));
 
 vi.mock('@electron/services/notify', () => ({
@@ -188,6 +188,10 @@ describe('getClaudeBackend', () => {
     expect(be).toBeInstanceOf(SdkBackend);
     // destroy is optional on the interface but present on SdkBackend
     expect(typeof (be as any).destroy).toBe('function');
+    expect(registerWorkspaceBackendHooks).toHaveBeenCalledWith('claude', {
+      suspend: expect.any(Function),
+      isBusy: expect.any(Function),
+    });
   });
 });
 

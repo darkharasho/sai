@@ -2,6 +2,7 @@ import { app, type BrowserWindow } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { emitChatMessage } from '../claude';
+import { registerWorkspaceBackendHooks } from '../workspace';
 import { CliCodexBackend, fetchCodexModels } from './cliBackend';
 import { SdkCodexBackend } from './sdkBackend';
 import type { CodexBackend, CodexBackendKind } from './types';
@@ -40,18 +41,17 @@ export function getCodexBackend(): CodexBackend {
       throw new Error('The Codex CLI backend requires a configured BrowserWindow');
     }
     active = new CliCodexBackend(cliWindow);
-    return active;
+  } else {
+    active = new SdkCodexBackend({
+      emit: emitChatMessage,
+      getModels: fetchCodexModels,
+    });
   }
 
-  const sdk = new SdkCodexBackend({
-    emit: emitChatMessage,
-    getModels: fetchCodexModels,
+  registerWorkspaceBackendHooks('codex', {
+    suspend: (projectPath) => active?.suspendWorkspace(projectPath),
+    isBusy: (projectPath) => active?.isWorkspaceBusy(projectPath) ?? false,
   });
-
-  // Task 7 replaces the singleton workspace hook with a provider-keyed
-  // registry. Registering here today would overwrite Claude's lifecycle hooks,
-  // so Codex registration deliberately waits for that safe registry.
-  active = sdk;
   return active;
 }
 

@@ -364,6 +364,47 @@ describe('Codex service', () => {
       expect(backend.isWorkspaceBusy(PROJECT)).toBe(false);
       expect(get(PROJECT)?.codex.process).toBeNull();
     });
+
+    it('settles an active scoped turn exactly once when its workspace is suspended', async () => {
+      backend.send({ projectPath: PROJECT, scope: 'task:owner', message: 'hello' });
+      const proc = mockIpcMain.getLatestProcess();
+      const start = (collectSentEvents(mockWin) as Array<{ type: string; turnSeq: number }>)
+        .find(event => event.type === 'streaming_start')!;
+      (mockWin.webContents.send as ReturnType<typeof vi.fn>).mockClear();
+
+      backend.suspendWorkspace(PROJECT);
+
+      expect(proc.kill).toHaveBeenCalledOnce();
+      expect(backend.isWorkspaceBusy(PROJECT)).toBe(false);
+      expect(get(PROJECT)?.codex.process).toBeNull();
+      expect(collectSentEvents(mockWin)).toEqual([{
+        type: 'done',
+        projectPath: PROJECT,
+        scope: 'task:owner',
+        turnSeq: start.turnSeq,
+      }]);
+
+      proc.pushStdout(JSON.stringify({ type: 'turn.completed' }) + '\n');
+      proc.emit('error', new Error('stale error'));
+      proc.emitExit(0);
+      await flush();
+
+      expect(collectSentEvents(mockWin)).toHaveLength(1);
+      expect(proc.kill).toHaveBeenCalledOnce();
+    });
+
+    it('destroys an active CLI process without emitting renderer settlement during app shutdown', () => {
+      backend.send({ projectPath: PROJECT, scope: 'task:owner', message: 'hello' });
+      const proc = mockIpcMain.getLatestProcess();
+      (mockWin.webContents.send as ReturnType<typeof vi.fn>).mockClear();
+
+      backend.destroy();
+
+      expect(proc.kill).toHaveBeenCalledOnce();
+      expect(backend.isWorkspaceBusy(PROJECT)).toBe(false);
+      expect(get(PROJECT)?.codex.process).toBeNull();
+      expect(collectSentEvents(mockWin)).toEqual([]);
+    });
   });
 
   // -------------------------------------------------------------------------

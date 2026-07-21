@@ -79,6 +79,7 @@ import { OverlayManager } from './services/overlay';
 import { registerGithubAuthHandlers } from './services/github-auth';
 import { initialSync, schedulePush } from './services/github-sync';
 import { registerCodexHandlers } from './services/codex';
+import { destroyCodexBackendIfActive } from './services/codexBackend';
 import { registerGeminiHandlers } from './services/gemini';
 import { registerPluginHandlers } from './services/plugins';
 import { registerMcpHandlers } from './services/mcp';
@@ -478,6 +479,7 @@ function createWindow() {
     if (mainWindow) writeSetting('windowBounds', mainWindow.getBounds());
     stopSuspendTimer();
     destroyClaude();
+    try { destroyCodexBackendIfActive(); } catch { /* backend already down */ }
     overlayManager?.destroy();
     overlayManager = null;
     destroyAllTerminals();
@@ -1284,6 +1286,9 @@ app.whenReady().then(() => {
 });
 let _quitInProgress = false;
 app.on('before-quit', (e) => {
+  // Process-level fallback for exit paths that bypass the window close handler.
+  // Idempotent with the close-path cleanup above.
+  try { destroyCodexBackendIfActive(); } catch { /* backend already down */ }
   try { swarmMcpHost.stop(); } catch { /* noop */ }
   // Config tmp files carry the swarm-host auth secret — don't leave them behind.
   try { cleanupSwarmMcpConfigs(); } catch { /* noop */ }

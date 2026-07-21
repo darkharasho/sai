@@ -34,11 +34,17 @@ export function getClaudeBackend(): ClaudeBackend {
     });
     // SDK sessions live outside the workspace registry — wire suspend/quiescence
     // through so the dropdown's Suspend/Close and the auto-suspend timer see them.
-    registerWorkspaceBackendHooks({
-      suspend: (projectPath) => sdk.suspendWorkspace(projectPath),
-      isBusy: (projectPath) => sdk.isWorkspaceBusy(projectPath),
-    });
     active = sdk;
+    registerWorkspaceBackendHooks('claude', {
+      suspend: (projectPath) => {
+        const current = active as (ClaudeBackend & { suspendWorkspace?: (path: string) => void }) | null;
+        current?.suspendWorkspace?.(projectPath);
+      },
+      isBusy: (projectPath) => {
+        const current = active as (ClaudeBackend & { isWorkspaceBusy?: (path: string) => boolean }) | null;
+        return current?.isWorkspaceBusy?.(projectPath) ?? false;
+      },
+    });
   } else {
     active = new CliBackend();
   }

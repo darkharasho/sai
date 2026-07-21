@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => {
     fetchCodexModels: vi.fn(),
     sdkConstructor: vi.fn(),
     cliConstructor: vi.fn(),
+    registerWorkspaceBackendHooks: vi.fn(),
   };
 });
 
@@ -53,6 +54,10 @@ vi.mock('node:fs', () => ({
 vi.mock('@electron/services/claude', () => ({
   emitChatMessage: mocks.emitChatMessage,
   readSaiSetting: mocks.readSaiSetting,
+}));
+
+vi.mock('@electron/services/workspace', () => ({
+  registerWorkspaceBackendHooks: mocks.registerWorkspaceBackendHooks,
 }));
 
 vi.mock('@electron/services/codexBackend/cliBackend', () => ({
@@ -167,6 +172,34 @@ describe('Codex backend selection', () => {
       emit: mocks.emitChatMessage,
       getModels: mocks.fetchCodexModels,
     });
+    expect(mocks.registerWorkspaceBackendHooks).toHaveBeenCalledWith('codex', {
+      suspend: expect.any(Function),
+      isBusy: expect.any(Function),
+    });
+  });
+
+  it('registers CLI lifecycle hooks and neutralizes them after destroy', () => {
+    const win = { isDestroyed: () => false, webContents: { send: vi.fn() } } as any;
+    mocks.readFileSync.mockReturnValue(JSON.stringify({ codexBackend: 'cli' }));
+    configureCodexBackendWindow(win);
+    const backend = getCodexBackend();
+    const registration = mocks.registerWorkspaceBackendHooks.mock.calls.at(-1);
+
+    expect(registration?.[0]).toBe('codex');
+    const hooks = registration?.[1] as {
+      suspend(projectPath: string): void;
+      isBusy(projectPath: string): boolean;
+    };
+    hooks.suspend('/project');
+    hooks.isBusy('/project');
+    expect(backend.suspendWorkspace).toHaveBeenCalledWith('/project');
+    expect(backend.isWorkspaceBusy).toHaveBeenCalledWith('/project');
+
+    destroyCodexBackendIfActive();
+    expect(() => hooks.suspend('/project')).not.toThrow();
+    expect(hooks.isBusy('/project')).toBe(false);
+    expect(backend.suspendWorkspace).toHaveBeenCalledTimes(1);
+    expect(backend.isWorkspaceBusy).toHaveBeenCalledTimes(1);
   });
 
   it('never constructs the CLI without a configured BrowserWindow', () => {
@@ -202,6 +235,16 @@ describe('Codex backend selection', () => {
     destroyCodexBackendIfActive();
     destroyCodexBackendIfActive();
     expect(third.destroy).toHaveBeenCalledOnce();
+  });
+
+  it('clears the active backend even when destroy throws so shutdown retries are safe', () => {
+    const backend = backendStub();
+    vi.mocked(backend.destroy).mockImplementation(() => { throw new Error('already down'); });
+    __setCodexBackendForTests(backend);
+
+    expect(() => destroyCodexBackendIfActive()).toThrow('already down');
+    expect(() => destroyCodexBackendIfActive()).not.toThrow();
+    expect(backend.destroy).toHaveBeenCalledOnce();
   });
 });
 

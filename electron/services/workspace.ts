@@ -188,18 +188,18 @@ export function getClaude(
 const workspaces = new Map<string, Workspace>();
 
 /**
- * Seam for the SDK backend: its sessions live outside this registry, so
+ * Seam for backends whose sessions live outside this registry, so
  * suspend() can't kill them and isWorkspaceQuiescent() can't see them.
- * Registered by claudeBackend/index.ts when the SDK backend is constructed;
- * no-ops under the CLI backend, whose processes live in ws.claudeScopes.
+ * Registered by each external backend when it is constructed. Provider keys
+ * keep one backend from replacing another backend's lifecycle visibility.
  */
 export interface WorkspaceBackendHooks {
   suspend?: (projectPath: string) => void;
   isBusy?: (projectPath: string) => boolean;
 }
-let backendHooks: WorkspaceBackendHooks = {};
-export function registerWorkspaceBackendHooks(hooks: WorkspaceBackendHooks): void {
-  backendHooks = hooks;
+const backendHooks = new Map<string, WorkspaceBackendHooks>();
+export function registerWorkspaceBackendHooks(provider: string, hooks: WorkspaceBackendHooks): void {
+  backendHooks.set(provider, hooks);
 }
 
 export function getOrCreate(projectPath: string): Workspace {
@@ -267,6 +267,12 @@ export function suspend(projectPath: string, win: BrowserWindow): void {
     try { if (!win.isDestroyed() && win.webContents) win.webContents.send(channel, ...args); } catch { /* destroyed */ }
   };
 
+  // Give each selected backend first ownership of its runtime settlement. The
+  // built-in workspace cleanup below remains a fallback if a hook fails/no-ops.
+  for (const hooks of backendHooks.values()) {
+    try { hooks.suspend?.(projectPath); } catch { /* backend already down */ }
+  }
+
   // Kill all Claude scoped processes
   for (const [scope, claude] of ws.claudeScopes) {
     if (claude.busy) {
@@ -326,9 +332,6 @@ export function suspend(projectPath: string, win: BrowserWindow): void {
   }
   ws.terminals.clear();
 
-  // Close SDK-backend sessions, which live outside this registry.
-  try { backendHooks.suspend?.(projectPath); } catch { /* backend already down */ }
-
   ws.status = 'suspended';
 
   try {
@@ -380,7 +383,14 @@ export function isWorkspaceQuiescent(ws: Workspace): boolean {
   }
   if (ws.codex.busy) return false;
   if (ws.gemini.busy) return false;
-  try { if (backendHooks.isBusy?.(ws.projectPath)) return false; } catch { /* backend unavailable */ }
+  for (const hooks of backendHooks.values()) {
+    try {
+      if (hooks.isBusy?.(ws.projectPath)) return false;
+    } catch {
+      // Unknown backend state must not allow the idle timer to reap live work.
+      return false;
+    }
+  }
   return true;
 }
 
