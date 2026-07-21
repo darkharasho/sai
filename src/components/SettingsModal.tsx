@@ -113,6 +113,8 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [geminiDefaultModel, setGeminiDefaultModel] = useState('auto-gemini-3');
   const [geminiDefaultApprovalMode, setGeminiDefaultApprovalMode] = useState<'default' | 'auto_edit' | 'yolo' | 'plan'>('default');
   const [geminiDefaultConversationMode, setGeminiDefaultConversationMode] = useState<'planning' | 'fast'>('planning');
+  const [codexBackend, setCodexBackend] = useState<'sdk' | 'cli'>('sdk');
+  const codexBackendRevision = useRef(0);
   const [codexDefaultModel, setCodexDefaultModel] = useState('');
   const [codexDefaultPermission, setCodexDefaultPermission] = useState<'auto' | 'read-only' | 'full-access'>('auto');
   const [codexAvailableModels, setCodexAvailableModels] = useState<{ id: string; name: string }[]>([]);
@@ -140,6 +142,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [activePage, setActivePage] = useState<SettingsPage>('general');
 
   useEffect(() => {
+    let mounted = true;
     window.sai.settingsGet('suspendTimeout', DEFAULT_TIMEOUT).then((v: number) => setSuspendTimeout(v));
     window.sai.settingsGet('editorFontSize', 13).then((v: number) => setEditorFontSize(v));
     window.sai.settingsGet('editorMinimap', true).then((v: boolean) => setEditorMinimap(v));
@@ -151,6 +154,12 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.settingsGet('codex', {}).then((c: any) => {
       if (c.model) setCodexDefaultModel(c.model);
       if (c.permission === 'auto' || c.permission === 'read-only' || c.permission === 'full-access') setCodexDefaultPermission(c.permission);
+    });
+    const initialCodexBackendRevision = codexBackendRevision.current;
+    window.sai.settingsGet('codexBackend', 'sdk').then((v: string) => {
+      if (mounted && codexBackendRevision.current === initialCodexBackendRevision) {
+        setCodexBackend(v === 'cli' ? 'cli' : 'sdk');
+      }
     });
     (window.sai as any).codexModels?.(true).then((result: { models: { id: string; name: string }[]; defaultModel: string } | undefined) => {
       if (result?.models?.length) {
@@ -210,6 +219,10 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if ('editorFontSize' in remote) setEditorFontSize(remote.editorFontSize);
       if ('editorMinimap' in remote) setEditorMinimap(remote.editorMinimap);
       if ('aiProvider' in remote && (remote.aiProvider === 'claude' || remote.aiProvider === 'codex' || remote.aiProvider === 'gemini')) setAiProvider(remote.aiProvider);
+      if ('codexBackend' in remote) {
+        codexBackendRevision.current += 1;
+        setCodexBackend(remote.codexBackend === 'cli' ? 'cli' : 'sdk');
+      }
       if ('commitMessageProvider' in remote && (remote.commitMessageProvider === 'claude' || remote.commitMessageProvider === 'codex' || remote.commitMessageProvider === 'gemini')) setCommitMessageProvider(remote.commitMessageProvider);
       if ('lockCommitProvider' in remote) setLockCommitProvider(remote.lockCommitProvider);
       if ('systemNotifications' in remote) setSystemNotifications(remote.systemNotifications);
@@ -234,7 +247,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if ('historyRetention' in remote) setHistoryRetention(remote.historyRetention);
     });
 
-    return () => { unsubSync(); unsubApplied(); };
+    return () => { mounted = false; unsubSync(); unsubApplied(); };
   }, []);
 
   // Render code preview for highlight theme
@@ -415,6 +428,13 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       window.sai.settingsSet('codex', { ...existing, model });
     });
     onSettingChange?.('codexModel', model);
+  };
+
+  const handleCodexBackendChange = (value: string) => {
+    if (value !== 'sdk' && value !== 'cli') return;
+    codexBackendRevision.current += 1;
+    setCodexBackend(value);
+    window.sai.settingsSet('codexBackend', value);
   };
 
   const handleCodexDefaultPermissionChange = (permission: 'auto' | 'read-only' | 'full-access') => {
@@ -1090,6 +1110,21 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const renderCodexPage = () => (
     <section className="settings-section">
       <div className="settings-section-label">Codex</div>
+      <div className="settings-row">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Backend</div>
+          <div className="settings-row-desc">The SDK is the default Codex integration. The CLI is a temporary rollback option. Restart SAI after changing.</div>
+        </div>
+        <select
+          aria-label="Codex backend"
+          className="settings-select"
+          value={codexBackend}
+          onChange={e => handleCodexBackendChange(e.target.value)}
+        >
+          <option value="sdk">SDK (default)</option>
+          <option value="cli">CLI (legacy rollback)</option>
+        </select>
+      </div>
       {codexAvailableModels.length > 0 && (
         <div className="settings-row">
           <div className="settings-row-info">
