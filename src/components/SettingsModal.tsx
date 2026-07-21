@@ -152,7 +152,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if (c.model) setCodexDefaultModel(c.model);
       if (c.permission === 'auto' || c.permission === 'read-only' || c.permission === 'full-access') setCodexDefaultPermission(c.permission);
     });
-    (window.sai as any).codexModels?.().then((result: { models: { id: string; name: string }[]; defaultModel: string } | undefined) => {
+    (window.sai as any).codexModels?.(true).then((result: { models: { id: string; name: string }[]; defaultModel: string } | undefined) => {
       if (result?.models?.length) {
         setCodexAvailableModels(result.models);
         setCodexDefaultModel(prev => prev || result.defaultModel || '');

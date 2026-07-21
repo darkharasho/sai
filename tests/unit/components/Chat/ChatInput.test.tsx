@@ -323,6 +323,7 @@ describe('ChatInput', () => {
       );
       expect(screen.queryByTitle(/Conversation mode/)).toBeNull();
     });
+
   });
 
   it('calls onBeforeSend with a DOMRect immediately before onSend on Enter', () => {

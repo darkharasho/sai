@@ -71,6 +71,7 @@ interface ChatInputProps {
   codexModel?: string;
   codexModels?: { id: string; name: string }[];
   onCodexModelChange?: (model: string) => void;
+  onCodexModelsRefresh?: () => void;
   codexPermission?: 'auto' | 'read-only' | 'full-access';
   onCodexPermissionChange?: (perm: 'auto' | 'read-only' | 'full-access') => void;
   geminiModel?: string;
@@ -267,7 +268,7 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabled, slashCommands = [], isStreaming, waiting, awaitingQuestion, messages = [], onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, contextUsage, sessionUsage, sessionCost, rateLimits, billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, pendingSudoPrompt, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, onQueueSendNow, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
+export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabled, slashCommands = [], isStreaming, waiting, awaitingQuestion, messages = [], onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, contextUsage, sessionUsage, sessionCost, rateLimits, billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, pendingSudoPrompt, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, onCodexModelsRefresh, codexPermission = 'auto', onCodexPermissionChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, onQueueSendNow, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
   // Live model list (account/org-aware) when available, else the static fallback.
   const modelOptions = useMemo<{ id: ModelChoice; label: string; description: string; color: string; recommended?: boolean }[]>(() => {
     if (availableModels && availableModels.length) {
@@ -1200,7 +1201,10 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
           <div className="model-selector" ref={modelMenuRef}>
             <button
               className="toolbar-btn model-btn"
-              onClick={() => setModelMenuOpen(!modelMenuOpen)}
+              onClick={() => {
+                if (!modelMenuOpen) onCodexModelsRefresh?.();
+                setModelMenuOpen(!modelMenuOpen);
+              }}
               style={{ color: modelOptions.find(m => m.id === modelChoice)?.color }}
             >
               <span className="model-label">{modelOptions.find(m => m.id === modelChoice)?.label ?? modelChoice}</span>

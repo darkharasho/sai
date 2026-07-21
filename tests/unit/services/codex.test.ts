@@ -736,6 +736,33 @@ describe('Codex service', () => {
       expect(result.models.length).toBeGreaterThan(0);
     });
 
+    it('bypasses the cache when forceRefresh is true', async () => {
+      const before = spawnProcesses.length;
+      const resultPromise = mockIpcMain._invoke('codex:models', true);
+
+      await tick();
+      expect(spawnProcesses.length).toBe(before + 1);
+      const proc = mockIpcMain.getLatestProcess();
+
+      proc.pushStdout(JSON.stringify({ jsonrpc: '2.0', id: 0, result: {} }) + '\n');
+      await flush(3);
+      proc.pushStdout(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          result: {
+            data: [
+              { model: 'gpt-5.6-sol', displayName: 'GPT-5.6-Sol', isDefault: true, hidden: false },
+            ],
+          },
+        }) + '\n',
+      );
+
+      const result = await resultPromise as { models: Array<{ id: string }>; defaultModel: string };
+      expect(result.models).toEqual([expect.objectContaining({ id: 'gpt-5.6-sol' })]);
+      expect(result.defaultModel).toBe('gpt-5.6-sol');
+    });
+
     it('filters out hidden models', async () => {
       // This test may use cached results if run after a successful test.
       // To test the filter logic independently, we assert based on what was

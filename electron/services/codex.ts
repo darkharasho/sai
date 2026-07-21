@@ -180,8 +180,8 @@ let cachedModels: { models: { id: string; name: string }[]; defaultModel: string
  * Fetch available models from the Codex app-server via JSON-RPC.
  * Spawns `codex app-server`, sends initialize + model/list, then kills the process.
  */
-function fetchCodexModels(): Promise<{ models: { id: string; name: string }[]; defaultModel: string }> {
-  if (cachedModels) return Promise.resolve(cachedModels);
+function fetchCodexModels(forceRefresh = false): Promise<{ models: { id: string; name: string }[]; defaultModel: string }> {
+  if (!forceRefresh && cachedModels) return Promise.resolve(cachedModels);
 
   return new Promise((resolve) => {
     const env = getEnrichedEnv();
@@ -248,7 +248,7 @@ function fetchCodexModels(): Promise<{ models: { id: string; name: string }[]; d
 }
 
 export function registerCodexHandlers(win: BrowserWindow) {
-  ipcMain.handle('codex:models', () => fetchCodexModels());
+  ipcMain.handle('codex:models', (_event, forceRefresh?: boolean) => fetchCodexModels(!!forceRefresh));
 
   ipcMain.handle('codex:start', (_event, cwd: string, metaPreamble?: string) => {
     if (!cwd) return;

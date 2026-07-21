@@ -467,6 +467,16 @@ describe('ChatPanel', () => {
     expect(container.querySelector('.codex-working-wave')).toBeFalsy();
   });
 
+  it('passes the Codex model refresh callback through to ChatInput', async () => {
+    const onCodexModelsRefresh = vi.fn();
+    const props = { ...baseProps(), aiProvider: 'codex' as const, onCodexModelsRefresh };
+
+    render(<ChatPanel {...props} />);
+    await waitFor(() => expect(latestChatInputProps).toBeTruthy());
+
+    expect(latestChatInputProps.onCodexModelsRefresh).toBe(onCodexModelsRefresh);
+  });
+
   it('Gemini thinking uses SAI animation system (no provider-specific hint)', async () => {
     const props = { ...baseProps(), aiProvider: 'gemini' as const };
     const { container, rerender } = render(<ChatPanel {...props} />);

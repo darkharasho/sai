@@ -2140,13 +2140,25 @@ export default function App() {
     return () => { cancelled = true; unsubApplied(); };
   }, []);
 
-  // Prefetch Codex models once at startup so they're ready when user switches
-  useEffect(() => {
-    (window.sai as any).codexModels?.().then((result: { models: { id: string; name: string }[]; defaultModel: string }) => {
-      if (result?.models?.length) setCodexModels(result.models);
-      if (result?.defaultModel) setCodexModel(prev => prev || result.defaultModel);
-    });
+  const refreshCodexModels = useCallback((forceRefresh = false) => {
+    return (window.sai as any).codexModels?.(forceRefresh).then((result: { models: { id: string; name: string }[]; defaultModel: string } | undefined) => {
+      if (!result) return;
+      if (result.models?.length) {
+        setCodexModels(result.models);
+        setCodexModel(prev => {
+          if (prev && result.models.some(m => m.id === prev)) return prev;
+          return result.defaultModel || result.models[0]?.id || prev;
+        });
+      } else if (result.defaultModel) {
+        setCodexModel(prev => prev || result.defaultModel);
+      }
+    }).catch(() => {});
   }, []);
+
+  // Prefetch Codex models once at startup so they're ready when user switches.
+  useEffect(() => {
+    refreshCodexModels();
+  }, [refreshCodexModels]);
 
   // Prefetch the Claude models this account/org can actually use. Orgs can
   // restrict models and 1M context is gated per-org, so we don't assume every
@@ -4332,6 +4344,7 @@ export default function App() {
                       codexModel={codexModel}
                       onCodexModelChange={handleCodexModelChange}
                       codexModels={codexModels}
+                      onCodexModelsRefresh={() => { void refreshCodexModels(true); }}
                       codexPermission={codexPermission}
                       onCodexPermissionChange={handleCodexPermissionChange}
                       geminiModel={geminiModel}
@@ -4675,6 +4688,7 @@ export default function App() {
                   codexModel={codexModel}
                   onCodexModelChange={handleCodexModelChange}
                   codexModels={codexModels}
+                  onCodexModelsRefresh={() => { void refreshCodexModels(true); }}
                   codexPermission={codexPermission}
                   onCodexPermissionChange={handleCodexPermissionChange}
                   geminiModel={geminiModel}

@@ -75,7 +75,7 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.invoke('claude:alwaysAllow', projectPath, toolPattern),
   claudeModels: () => ipcRenderer.invoke('claude:models'),
   // Codex CLI
-  codexModels: () => ipcRenderer.invoke('codex:models'),
+  codexModels: (forceRefresh?: boolean) => ipcRenderer.invoke('codex:models', forceRefresh),
   codexStart: (cwd: string, metaPreamble?: string) => ipcRenderer.invoke('codex:start', cwd, metaPreamble),
   codexSend: (projectPath: string, message: string, imagePaths?: string[], permMode?: string, model?: string) => ipcRenderer.send('codex:send', projectPath, message, imagePaths, permMode, model),
   codexStop: (projectPath: string) => ipcRenderer.send('codex:stop', projectPath),
