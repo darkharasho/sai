@@ -1,424 +1,90 @@
-import { spawn, ChildProcess } from 'node:child_process';
-import { BrowserWindow, ipcMain } from 'electron';
-import os from 'node:os';
-import path from 'node:path';
-import fs from 'node:fs';
-import { getOrCreate, get, touchActivity } from './workspace';
-import { notifyCompletion } from './notify';
+import { type BrowserWindow, ipcMain } from 'electron';
+import {
+  configureCodexBackendWindow,
+  getCodexBackend,
+  type CodexPermission,
+  type CodexSessionKind,
+} from './codexBackend';
+import type { ModelReasoningEffort } from '@openai/codex-sdk';
 
-/**
- * Build an enriched PATH that includes common locations for nvm/fnm/volta-installed binaries.
- * Electron apps launched from desktop entries don't inherit the user's shell PATH.
- */
-function getEnrichedEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  if (process.platform === 'win32') {
-    // Windows PATH is managed via the installer/registry; Unix-style prefixes
-    // would corrupt it (different separator, non-existent directories).
-    return env;
-  }
-  const home = os.homedir();
-  const extraPaths: string[] = [];
+type StartIpcTail = [
+  scope?: string,
+  kind?: CodexSessionKind,
+  orchestratorContext?: Record<string, unknown> | null,
+  scopeCwd?: string,
+  metaPreamble?: string,
+];
 
-  // nvm: scan all installed versions
-  const nvmDir = path.join(home, '.nvm', 'versions', 'node');
-  if (fs.existsSync(nvmDir)) {
-    try {
-      const versions = fs.readdirSync(nvmDir);
-      for (const v of versions) {
-        extraPaths.push(path.join(nvmDir, v, 'bin'));
-      }
-    } catch { /* ignore */ }
-  }
+type SendIpcTail = [
+  imagePaths?: string[],
+  permission?: CodexPermission,
+  effortOrLegacyModel?: string,
+  model?: string,
+  scope?: string,
+  origin?: 'desktop' | 'remote',
+];
 
-  // Common global bin locations
-  extraPaths.push(
-    path.join(home, '.local', 'bin'),
-    '/usr/local/bin',
+/** Register the Codex IPC surface. Transport behavior lives in codexBackend. */
+export function registerCodexHandlers(win: BrowserWindow): void {
+  configureCodexBackendWindow(win);
+
+  ipcMain.handle('codex:models', (_event, forceRefresh?: boolean) =>
+    getCodexBackend().getModels(Boolean(forceRefresh)));
+
+  ipcMain.handle(
+    'codex:start',
+    (
+      _event,
+      projectPath: string,
+      ...tail: StartIpcTail
+    ) => {
+      // Temporary bridge for the pre-Task-8 preload shape:
+      // codex:start(projectPath, metaPreamble).
+      const legacy = tail.length === 1;
+      return getCodexBackend().start({
+        projectPath,
+        scope: legacy ? undefined : tail[0],
+        kind: legacy ? undefined : tail[1],
+        orchestratorContext: legacy ? undefined : tail[2],
+        scopeCwd: legacy ? undefined : tail[3],
+        metaPreamble: legacy ? tail[0] : tail[4],
+      });
+    },
   );
 
-  const currentPath = env.PATH || '';
-  const pathSet = new Set(currentPath.split(path.delimiter));
-  const additions = extraPaths.filter(p => !pathSet.has(p));
-  if (additions.length > 0) {
-    env.PATH = currentPath + path.delimiter + additions.join(path.delimiter);
-  }
-  return env;
-}
-
-function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
-  try {
-    if (!win.isDestroyed()) win.webContents.send(channel, ...args);
-  } catch { /* window destroyed */ }
-}
-
-/**
- * Translate a Codex exec --json event into one or more claude:message events.
- * This lets the frontend handle both providers with minimal differences.
- */
-function translateEvent(msg: any, projectPath: string): any[] {
-  const events: any[] = [];
-
-  switch (msg.type) {
-    case 'thread.started':
-      if (msg.thread_id) {
-        events.push({ type: 'session_id', sessionId: msg.thread_id, projectPath });
-      }
-      break;
-
-    case 'turn.started':
-      // streaming_start is already sent by the IPC handler
-      break;
-
-    case 'item.started': {
-      const item = msg.item;
-      if (item?.type === 'command_execution') {
-        events.push({
-          type: 'assistant',
-          projectPath,
-          message: {
-            content: [{
-              id: item.id,
-              type: 'tool_use',
-              name: 'Bash',
-              input: { command: item.command || '' },
-            }],
-          },
-        });
-      } else if (item?.type === 'file_change') {
-        events.push({
-          type: 'assistant',
-          projectPath,
-          message: {
-            content: [{
-              id: item.id,
-              type: 'tool_use',
-              name: 'Edit',
-              input: { file_path: item.file_path || item.path || '' },
-            }],
-          },
-        });
-      }
-      break;
-    }
-
-    case 'item.completed': {
-      const item = msg.item;
-      if (item?.type === 'agent_message' && item?.text) {
-        events.push({
-          type: 'assistant',
-          projectPath,
-          message: {
-            content: [{ type: 'text', text: item.text }],
-          },
-        });
-      } else if (item?.type === 'command_execution' && item?.id) {
-        events.push({
-          type: 'user',
-          projectPath,
-          message: {
-            content: [{
-              type: 'tool_result',
-              tool_use_id: item.id,
-              content: item.aggregated_output || '',
-              is_error: (item.exit_code || 0) !== 0,
-            }],
-          },
-        });
-      } else if (item?.type === 'reasoning' && item?.text) {
-        // Show reasoning as a system message
-        events.push({
-          type: 'assistant',
-          projectPath,
-          message: {
-            content: [{ type: 'text', text: item.text }],
-          },
-        });
-      }
-      break;
-    }
-
-    case 'turn.completed': {
-      const usage = msg.usage;
-      events.push({
-        type: 'result',
+  ipcMain.on(
+    'codex:send',
+    (
+      _event,
+      projectPath: string,
+      message: string,
+      ...tail: SendIpcTail
+    ) => {
+      // Temporary bridge for the pre-Task-8 preload shape:
+      // codex:send(projectPath, message, images, permission, model).
+      const legacy = tail.length === 3;
+      return getCodexBackend().send({
         projectPath,
-        ...(usage ? {
-          usage: {
-            input_tokens: usage.input_tokens || 0,
-            cache_read_input_tokens: usage.cached_input_tokens || 0,
-            cache_creation_input_tokens: 0,
-            output_tokens: usage.output_tokens || 0,
-          },
-        } : {}),
+        message,
+        imagePaths: tail[0],
+        permission: tail[1],
+        effort: legacy ? undefined : tail[2] as ModelReasoningEffort | undefined,
+        model: legacy ? tail[2] : tail[3],
+        scope: legacy ? undefined : tail[4],
+        origin: legacy ? undefined : tail[5],
       });
-      events.push({ type: 'done', projectPath });
-      break;
-    }
+    },
+  );
 
-    case 'turn.failed':
-    case 'error':
-      events.push({
-        type: 'error',
-        projectPath,
-        text: msg.message || msg.error || 'Codex error',
-      });
-      events.push({ type: 'done', projectPath });
-      break;
+  ipcMain.on('codex:stop', (_event, projectPath: string, scope?: string) =>
+    getCodexBackend().interrupt(projectPath, scope));
 
-    default:
-      break;
-  }
+  ipcMain.on(
+    'codex:setSessionId',
+    (_event, projectPath: string, sessionId: string | undefined, scope?: string) =>
+      getCodexBackend().setSessionId(projectPath, sessionId, scope),
+  );
 
-  return events;
-}
-
-/** Cached model list — fetched once per app session */
-let cachedModels: { models: { id: string; name: string }[]; defaultModel: string } | null = null;
-
-/**
- * Fetch available models from the Codex app-server via JSON-RPC.
- * Spawns `codex app-server`, sends initialize + model/list, then kills the process.
- */
-function fetchCodexModels(forceRefresh = false): Promise<{ models: { id: string; name: string }[]; defaultModel: string }> {
-  if (!forceRefresh && cachedModels) return Promise.resolve(cachedModels);
-
-  return new Promise((resolve) => {
-    const env = getEnrichedEnv();
-    const proc = spawn('codex', ['app-server'], {
-      env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      shell: process.platform === 'win32',
-    });
-
-    let buf = '';
-    let resolved = false;
-    const fallback = { models: [], defaultModel: '' };
-
-    const finish = (result: typeof fallback) => {
-      if (resolved) return;
-      resolved = true;
-      if (result.models.length > 0) cachedModels = result;
-      try { proc.kill(); } catch { /* already dead */ }
-      resolve(result);
-    };
-
-    const timeout = setTimeout(() => finish(fallback), 10000);
-
-    proc.stdout?.on('data', (data: Buffer) => {
-      buf += data.toString();
-      const lines = buf.split('\n');
-      buf = lines.pop() || '';
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const msg = JSON.parse(line);
-          if (msg.id === 0 && !msg.error) {
-            // Init succeeded — request model list
-            proc.stdin?.write(JSON.stringify({ jsonrpc: '2.0', method: 'model/list', id: 1, params: {} }) + '\n');
-          }
-          if (msg.id === 1 && msg.result) {
-            const data = msg.result.data || [];
-            const models = data
-              .filter((m: any) => !m.hidden)
-              .map((m: any) => ({ id: m.model, name: m.displayName || m.model }));
-            const defaultModel = data.find((m: any) => m.isDefault)?.model || models[0]?.id || '';
-            clearTimeout(timeout);
-            finish({ models, defaultModel });
-          }
-          if (msg.error) {
-            clearTimeout(timeout);
-            finish(fallback);
-          }
-        } catch { /* malformed JSON */ }
-      }
-    });
-
-    proc.on('error', () => { clearTimeout(timeout); finish(fallback); });
-    proc.on('exit', () => { clearTimeout(timeout); if (!resolved) finish(fallback); });
-
-    // Send initialize
-    proc.stdin?.write(JSON.stringify({
-      jsonrpc: '2.0',
-      method: 'initialize',
-      id: 0,
-      params: { clientInfo: { name: 'sai', version: '1.0' } },
-    }) + '\n');
-  });
-}
-
-export function registerCodexHandlers(win: BrowserWindow) {
-  ipcMain.handle('codex:models', (_event, forceRefresh?: boolean) => fetchCodexModels(!!forceRefresh));
-
-  ipcMain.handle('codex:start', (_event, cwd: string, metaPreamble?: string) => {
-    if (!cwd) return;
-    const ws = getOrCreate(cwd);
-    ws.codex.cwd = cwd;
-    // Stash the meta-workspace preamble. Codex communicates via JSON-RPC clientInfo
-    // and does not expose a system-prompt field at startup; the preamble is stored
-    // here for future use if a clean injection point becomes available.
-    ws.codex.metaPreamble = metaPreamble || '';
-    safeSend(win, 'claude:message', { type: 'ready', projectPath: ws.projectPath });
-  });
-
-  ipcMain.on('codex:stop', (_event, projectPath: string) => {
-    const ws = get(projectPath);
-    if (!ws) return;
-    if (ws.codex.process) {
-      const proc = ws.codex.process;
-      ws.codex.process = null;
-      ws.codex.busy = false;
-      proc.kill();
-      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.codex.turnSeq });
-    }
-  });
-
-  ipcMain.on('codex:setSessionId', (_event, projectPath: string, sessionId: string | undefined) => {
-    const ws = get(projectPath);
-    if (!ws) return;
-    if (ws.codex.process) {
-      ws.codex.process.kill();
-      ws.codex.process = null;
-      ws.codex.busy = false;
-    }
-    ws.codex.sessionId = sessionId;
-  });
-
-  ipcMain.on('codex:send', (_event, projectPath: string, message: string, imagePaths?: string[], permMode?: string, model?: string) => {
-    const ws = get(projectPath);
-    if (!ws) return;
-    touchActivity(projectPath);
-    const effectiveScope = 'chat';
-
-    // Kill previous codex process if still running
-    if (ws.codex.process) {
-      ws.codex.process.kill();
-      ws.codex.process = null;
-    }
-
-    // Use 'exec resume <sessionId> <prompt>' for subsequent turns, 'exec <prompt>' for first turn
-    const args: string[] = [];
-    if (ws.codex.sessionId) {
-      args.push('exec', 'resume', '--json', ws.codex.sessionId);
-    } else {
-      args.push('exec', '--json');
-    }
-
-    if (model) {
-      args.push('-m', model);
-    }
-
-    if (permMode === 'full-access') {
-      args.push('--dangerously-bypass-approvals-and-sandbox');
-    } else if (permMode === 'read-only') {
-      args.push('--sandbox', 'read-only');
-    } else {
-      // 'auto' (default)
-      args.push('--full-auto');
-    }
-
-    if (imagePaths && imagePaths.length > 0) {
-      for (const imagePath of imagePaths) {
-        args.push('-i', imagePath);
-      }
-    }
-
-    // Prompt goes last
-    args.push(message);
-
-    const proc = spawn('codex', args, {
-      cwd: ws.codex.cwd || projectPath,
-      env: getEnrichedEnv(),
-      // Use 'pipe' for stdin and close it immediately so Codex sees a clean
-      // EOF rather than /dev/null — 'ignore' can trigger "Reading additional
-      // input from stdin..." warnings on some Codex CLI versions.
-      stdio: ['pipe', 'pipe', 'pipe'],
-      shell: process.platform === 'win32',
-    });
-    proc.stdin?.end();
-
-    ws.codex.process = proc;
-    ws.codex.turnSeq++;
-    ws.codex.busy = true;
-    ws.codex.buffer = '';
-
-    safeSend(win, 'claude:message', { type: 'streaming_start', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: ws.codex.turnSeq, sessionId: ws.codex.sessionId ?? null });
-
-    proc.stdout?.on('data', (data: Buffer) => {
-      if (ws.codex.process !== proc) return;
-
-      ws.codex.buffer += data.toString();
-      const lines = ws.codex.buffer.split('\n');
-      ws.codex.buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const msg = JSON.parse(line);
-          // Capture thread ID for conversation continuity
-          if (msg.type === 'thread.started' && msg.thread_id && !ws.codex.sessionId) {
-            ws.codex.sessionId = msg.thread_id;
-          }
-          const events = translateEvent(msg, ws.projectPath);
-          for (const ev of events) {
-            ev.scope = effectiveScope;
-            if (ev.type === 'streaming_start' || ev.type === 'done') ev.turnSeq = ws.codex.turnSeq;
-            safeSend(win, 'claude:message', ev);
-          }
-          // Mark not busy on turn completion
-          if (msg.type === 'turn.completed' || msg.type === 'turn.failed') {
-            const wasBusy = ws.codex.busy;
-            ws.codex.busy = false;
-            // Delay notification so renderer has time to process the result/done IPC
-            if (wasBusy) setTimeout(() => notifyCompletion(win, ws.projectPath, {
-              provider: 'Codex',
-            }), 500);
-          }
-        } catch { /* malformed JSON */ }
-      }
-    });
-
-    proc.stderr?.on('data', (data: Buffer) => {
-      if (ws.codex.process !== proc) return;
-      const text = data.toString().trim();
-      // Codex CLI prints this to stderr when stdin is a pipe (non-TTY). It
-      // is informational — the CLI continues normally — so we suppress it.
-      if (!text || text.toLowerCase().includes('reading additional input from stdin')) return;
-      safeSend(win, 'claude:message', { type: 'error', text, projectPath: ws.projectPath, scope: effectiveScope });
-    });
-
-    proc.on('exit', () => {
-      if (ws.codex.process !== proc) return;
-      // Flush remaining buffer
-      if (ws.codex.buffer.trim()) {
-        try {
-          const msg = JSON.parse(ws.codex.buffer);
-          const events = translateEvent(msg, ws.projectPath);
-          for (const ev of events) {
-            ev.scope = effectiveScope;
-            if (ev.type === 'streaming_start' || ev.type === 'done') ev.turnSeq = ws.codex.turnSeq;
-            safeSend(win, 'claude:message', ev);
-          }
-        } catch { /* ignore */ }
-      }
-      const wasBusy = ws.codex.busy;
-      ws.codex.buffer = '';
-      ws.codex.process = null;
-      ws.codex.busy = false;
-      // Only send done if the turn didn't already complete normally via turn.completed
-      if (wasBusy) {
-        safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: ws.codex.turnSeq });
-      }
-    });
-
-    proc.on('error', (err) => {
-      if (ws.codex.process !== proc) return;
-      ws.codex.process = null;
-      ws.codex.busy = false;
-      safeSend(win, 'claude:message', {
-        type: 'error', text: `Codex process error: ${err.message}`, projectPath: ws.projectPath, scope: effectiveScope
-      });
-      safeSend(win, 'claude:message', { type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: ws.codex.turnSeq });
-    });
-  });
+  ipcMain.on('codex:reconcileScope', (_event, projectPath: string, scope?: string) =>
+    getCodexBackend().reconcileScope(projectPath, scope));
 }
