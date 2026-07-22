@@ -84,6 +84,7 @@ import { buildTaskRegistry, TaskRegistryContext } from './taskRegistry';
 import { parseAiError, looksLikeApiError } from './parseAiError';
 import { buildMetaPreamble } from '../../lib/metaSystemPrompt';
 import { normalizeCodexEffort } from '../../lib/codexEffort';
+import { claudeRateLimitsToViews } from '../../lib/composerTelemetry';
 
 type CodexPermission = 'auto' | 'read-only' | 'full-access';
 
@@ -2327,10 +2328,17 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             onModelChange={onModelChange}
             availableModels={availableModels}
             claudeOverrideState={claudeOverrideState}
-            contextUsage={contextUsage}
+            contextUsage={{
+              used: contextUsage.used,
+              total: contextUsage.total,
+              inputTokens: contextUsage.inputTokens,
+              cachedInputTokens: contextUsage.cacheReadTokens,
+              cacheCreationTokens: contextUsage.cacheCreationTokens,
+              outputTokens: contextUsage.outputTokens,
+            }}
             sessionUsage={sessionUsage}
             sessionCost={sessionCost}
-            rateLimits={rateLimits}
+            usageLimits={claudeRateLimitsToViews(rateLimits)}
             billingMode={billingMode}
             activeFilePath={activeFilePath}
             fileContextEnabled={fileContextEnabled}
