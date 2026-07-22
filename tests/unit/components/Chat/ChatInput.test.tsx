@@ -414,6 +414,13 @@ describe('ChatInput', () => {
       await userEvent.click(screen.getByRole('button', { name: /Click to compact/i }));
       expect(onSend).toHaveBeenCalledWith('/compact');
     });
+
+    it('renders no context ring and no usage popover when telemetry is entirely absent (e.g. Gemini)', () => {
+      const { container } = render(<ChatInput {...baseProps()} aiProvider="gemini" />);
+      expect(container.querySelector('.toolbar-usage')).toBeNull();
+      expect(screen.queryByRole('button', { name: /Context \d+%/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Click to compact/i })).not.toBeInTheDocument();
+    });
   });
 
   describe('shared usage popover', () => {

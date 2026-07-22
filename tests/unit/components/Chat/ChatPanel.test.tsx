@@ -1468,4 +1468,242 @@ describe('ChatPanel', () => {
       expect(latestChatInputProps.isStreaming).toBe(false);
     });
   });
+
+  describe('Codex composer telemetry', () => {
+    const emitOnAllHandlers = async (msg: any) => {
+      await act(async () => {
+        for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+          (handler as (m: any) => void)(msg);
+        }
+      });
+    };
+
+    it('accounts Codex context usage from result usage, additive not double-counted, using the catalog context window', async () => {
+      const props = {
+        ...baseProps(),
+        aiProvider: 'codex' as const,
+        codexModel: 'gpt-5-codex',
+        codexModels: [{ id: 'gpt-5-codex', name: 'GPT-5 Codex', effectiveContextWindow: 10_000 }],
+      };
+      render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+      await emitOnAllHandlers({
+        type: 'result',
+        projectPath: '/project',
+        scope: 'chat',
+        usage: {
+          input_tokens: 1_000,
+          cached_input_tokens: 600,
+          output_tokens: 200,
+          reasoning_output_tokens: 80,
+        },
+      });
+
+      expect(latestChatInputProps.contextUsage.used).toBe(1_200);
+      expect(latestChatInputProps.contextUsage.total).toBe(10_000);
+      expect(latestChatInputProps.contextUsage.cachedInputTokens).toBe(600);
+      expect(latestChatInputProps.contextUsage.reasoningOutputTokens).toBe(80);
+    });
+
+    it('never fakes a 1M context window for Codex — total is null with no catalog or runtime window', async () => {
+      const props = {
+        ...baseProps(),
+        aiProvider: 'codex' as const,
+        codexModel: 'unknown-model',
+        codexModels: [{ id: 'unknown-model', name: 'Unknown model' }],
+      };
+      render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+      await emitOnAllHandlers({
+        type: 'result',
+        projectPath: '/project',
+        scope: 'chat',
+        usage: { input_tokens: 500, cached_input_tokens: 0, output_tokens: 100 },
+      });
+
+      expect(latestChatInputProps.contextUsage.total).toBeNull();
+    });
+
+    it('prefers an explicit smaller runtime-reported context window over the catalog window', async () => {
+      const props = {
+        ...baseProps(),
+        aiProvider: 'codex' as const,
+        codexModel: 'gpt-5-codex',
+        codexModels: [{ id: 'gpt-5-codex', name: 'GPT-5 Codex', effectiveContextWindow: 10_000 }],
+      };
+      render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+      await emitOnAllHandlers({
+        type: 'result',
+        projectPath: '/project',
+        scope: 'chat',
+        usage: { input_tokens: 500, cached_input_tokens: 0, output_tokens: 100 },
+        modelUsage: { 'gpt-5-codex': { contextWindow: 8_000 } },
+      });
+
+      expect(latestChatInputProps.contextUsage.total).toBe(8_000);
+    });
+
+    it('polls Codex usage on mount and every 60s, and forces a refresh after a completed turn', async () => {
+      vi.useFakeTimers();
+      try {
+        const props = {
+          ...baseProps(),
+          aiProvider: 'codex' as const,
+          codexModel: 'gpt-5-codex',
+          codexModels: [{ id: 'gpt-5-codex', name: 'GPT-5 Codex', effectiveContextWindow: 10_000 }],
+        };
+        render(<ChatPanel {...props} />);
+
+        expect(mockSai.codexUsageFetch).toHaveBeenCalledWith(false);
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(60_000);
+        });
+        expect(mockSai.codexUsageFetch).toHaveBeenCalledTimes(2);
+
+        await emitOnAllHandlers({
+          type: 'result',
+          projectPath: '/project',
+          scope: 'chat',
+          usage: { input_tokens: 500, cached_input_tokens: 0, output_tokens: 100 },
+        });
+
+        expect(mockSai.codexUsageFetch).toHaveBeenLastCalledWith(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('never calls codexUsageFetch for a Claude chat', async () => {
+      const props = { ...baseProps(), aiProvider: 'claude' as const };
+      render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+      expect(mockSai.codexUsageFetch).not.toHaveBeenCalled();
+    });
+
+    it('never subscribes to Claude usage telemetry (onUsageUpdate/usageFetch/usageMode) for a Codex chat', async () => {
+      const props = {
+        ...baseProps(),
+        aiProvider: 'codex' as const,
+        codexModel: 'gpt-5-codex',
+        codexModels: [],
+      };
+      render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+      expect(mockSai.onUsageUpdate).not.toHaveBeenCalled();
+      expect(mockSai.usageFetch).not.toHaveBeenCalled();
+      expect(mockSai.usageMode).not.toHaveBeenCalled();
+    });
+
+    it('ignores a Codex usage snapshot tagged with an unexpected provider', async () => {
+      mockSai.codexUsageFetch.mockResolvedValue({
+        provider: 'bogus',
+        fetchedAt: Date.now(),
+        stale: false,
+        primary: { usedPercent: 50, windowDurationMins: 300, resetsAt: null },
+        secondary: null,
+      });
+      const props = {
+        ...baseProps(),
+        aiProvider: 'codex' as const,
+        codexModel: 'gpt-5-codex',
+        codexModels: [],
+      };
+      render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.codexUsageFetch).toHaveBeenCalled());
+      await act(async () => { await Promise.resolve(); });
+
+      expect(latestChatInputProps.usageLimits).toEqual([]);
+    });
+
+    it('drops Claude rate limits immediately when the panel switches from Claude to Codex', async () => {
+      const props = { ...baseProps(), aiProvider: 'claude' as const };
+      const { rerender } = render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+      await emitOnAllHandlers({
+        type: 'rate_limit_event',
+        projectPath: '/project',
+        scope: 'chat',
+        rate_limit_info: { rateLimitType: 'five_hour', utilization: 42, resetsAt: 123 },
+      });
+      expect(latestChatInputProps.usageLimits.length).toBeGreaterThan(0);
+
+      rerender(<ChatPanel {...{ ...props, aiProvider: 'codex' as const, codexModel: 'gpt-5-codex', codexModels: [] }} />);
+      expect(latestChatInputProps.usageLimits).toEqual([]);
+    });
+
+    it('resets context/session token totals on sessionId change but keeps Codex account limits', async () => {
+      mockSai.codexUsageFetch.mockResolvedValue({
+        provider: 'codex',
+        fetchedAt: Date.now(),
+        stale: false,
+        primary: { usedPercent: 20, windowDurationMins: 300, resetsAt: 1_000 },
+        secondary: null,
+      });
+      const props = {
+        ...baseProps(),
+        aiProvider: 'codex' as const,
+        codexModel: 'gpt-5-codex',
+        codexModels: [{ id: 'gpt-5-codex', name: 'GPT-5 Codex', effectiveContextWindow: 10_000 }],
+        sessionId: 'session-1',
+      };
+      const { rerender } = render(<ChatPanel {...props} />);
+      await waitFor(() => expect(latestChatInputProps.usageLimits.length).toBeGreaterThan(0));
+
+      await emitOnAllHandlers({
+        type: 'result',
+        projectPath: '/project',
+        scope: 'chat',
+        usage: { input_tokens: 1_000, cached_input_tokens: 0, output_tokens: 200 },
+      });
+      expect(latestChatInputProps.contextUsage).toBeTruthy();
+      expect(latestChatInputProps.sessionUsage).toBeTruthy();
+
+      rerender(<ChatPanel {...{ ...props, sessionId: 'session-2' }} />);
+
+      expect(latestChatInputProps.contextUsage).toBeUndefined();
+      expect(latestChatInputProps.sessionUsage).toBeUndefined();
+      expect(latestChatInputProps.usageLimits.length).toBeGreaterThan(0);
+    });
+
+    // Mandatory carry-over fix from Task 9's review: ChatPanel must never feed
+    // Claude-shaped defaults/limits to a non-Claude provider. Gemini gets no
+    // context ring and no usage popover — and Gemini's backend actually does
+    // send Claude-shaped `usage` fields on 'result' (see
+    // electron/services/gemini.ts), so this must be provider-gated, not just
+    // a null initial state.
+    it('never renders context/usage telemetry for Gemini, even when a Claude-shaped usage payload arrives', async () => {
+      const props = { ...baseProps(), aiProvider: 'gemini' as const };
+      render(<ChatPanel {...props} />);
+      await waitFor(() => expect(latestChatInputProps).toBeTruthy());
+
+      expect(latestChatInputProps.contextUsage).toBeUndefined();
+      expect(latestChatInputProps.sessionUsage).toBeUndefined();
+      expect(latestChatInputProps.usageLimits).toEqual([]);
+      expect(mockSai.codexUsageFetch).not.toHaveBeenCalled();
+
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+      await emitOnAllHandlers({
+        type: 'result',
+        projectPath: '/project',
+        scope: 'chat',
+        usage: {
+          input_tokens: 100,
+          cache_read_input_tokens: 50,
+          cache_creation_input_tokens: 0,
+          output_tokens: 20,
+        },
+      });
+
+      expect(latestChatInputProps.contextUsage).toBeUndefined();
+      expect(latestChatInputProps.sessionUsage).toBeUndefined();
+      expect(latestChatInputProps.usageLimits).toEqual([]);
+      expect(mockSai.codexUsageFetch).not.toHaveBeenCalled();
+    });
+  });
 });
