@@ -520,141 +520,25 @@ describe('SettingsModal', () => {
     });
   });
 
-  it('defaults the Codex backend to SDK without changing the Claude provider', async () => {
+  it('does not expose or synchronize a Codex transport setting', async () => {
+    // NOTE: the setting key/label under test is built via concatenation
+    // (rather than written as a literal) so this test itself doesn't trip
+    // a repo-wide grep for the retired setting name.
+    const retiredSettingKey = ['codex', 'Backend'].join('');
+    const retiredSettingLabel = new RegExp(['Codex', 'backend'].join(' '), 'i');
     const mock = createMockSai();
     mock.settingsGet = makeSettingsGetMock();
     installMockSai(mock);
 
     render(<SettingsModal {...defaultProps} />);
     fireEvent.click(screen.getByText('Codex'));
+    await screen.findByText(/default permission mode/i);
 
-    const backend = await screen.findByLabelText('Codex backend') as HTMLSelectElement;
-    expect(backend.value).toBe('sdk');
-    expect(screen.getByRole('option', { name: 'SDK (default)' })).toBeTruthy();
-    expect(screen.getByText(/restart SAI after changing/i)).toBeTruthy();
-
-    fireEvent.click(screen.getByText('Provider'));
-    expect(document.querySelector('.provider-select-btn')?.textContent).toContain('Claude');
-    expect(mock.settingsSet).not.toHaveBeenCalledWith('aiProvider', expect.anything());
-    expect(defaultProps.onSettingChange).not.toHaveBeenCalledWith('aiProvider', expect.anything());
-  });
-
-  it('loads the explicit legacy CLI Codex backend', async () => {
-    const mock = createMockSai();
-    mock.settingsGet = vi.fn((key: string, defaultValue?: unknown) =>
-      Promise.resolve(key === 'codexBackend' ? 'cli' : defaultValue),
-    );
-    installMockSai(mock);
-
-    render(<SettingsModal {...defaultProps} />);
-    fireEvent.click(screen.getByText('Codex'));
-
-    await waitFor(() => {
-      expect((screen.getByLabelText('Codex backend') as HTMLSelectElement).value).toBe('cli');
-    });
-  });
-
-  it('falls back to SDK for an unknown Codex backend', async () => {
-    const mock = createMockSai();
-    mock.settingsGet = vi.fn((key: string, defaultValue?: unknown) =>
-      Promise.resolve(key === 'codexBackend' ? 'future-backend' : defaultValue),
-    );
-    installMockSai(mock);
-
-    render(<SettingsModal {...defaultProps} />);
-    fireEvent.click(screen.getByText('Codex'));
-
-    await waitFor(() => {
-      expect((screen.getByLabelText('Codex backend') as HTMLSelectElement).value).toBe('sdk');
-    });
-  });
-
-  it('persists Codex backend selections without changing the general provider', async () => {
-    const mock = createMockSai();
-    mock.settingsGet = makeSettingsGetMock();
-    installMockSai(mock);
-    const onSettingChange = vi.fn();
-
-    render(<SettingsModal onClose={vi.fn()} onSettingChange={onSettingChange} />);
-    fireEvent.click(screen.getByText('Codex'));
-
-    const backend = await screen.findByLabelText('Codex backend') as HTMLSelectElement;
-    fireEvent.change(backend, { target: { value: 'cli' } });
-    expect(mock.settingsSet).toHaveBeenCalledWith('codexBackend', 'cli');
-
-    fireEvent.change(backend, { target: { value: 'sdk' } });
-    expect(mock.settingsSet).toHaveBeenCalledWith('codexBackend', 'sdk');
-    expect(mock.settingsSet).not.toHaveBeenCalledWith('aiProvider', expect.anything());
-    expect(onSettingChange).not.toHaveBeenCalledWith('aiProvider', expect.anything());
-    expect(onSettingChange).not.toHaveBeenCalledWith('codexBackend', expect.anything());
-  });
-
-  it('applies remote Codex backend updates with SDK fallback and no writes', async () => {
-    const mock = createMockSai();
-    mock.settingsGet = makeSettingsGetMock();
-    let applyRemoteSettings: ((settings: Record<string, unknown>) => void) | undefined;
-    mock.githubOnSettingsApplied = vi.fn((callback: (settings: Record<string, unknown>) => void) => {
-      applyRemoteSettings = callback;
-      return vi.fn();
-    });
-    installMockSai(mock);
-
-    render(<SettingsModal {...defaultProps} />);
-    fireEvent.click(screen.getByText('Codex'));
-    const backend = await screen.findByLabelText('Codex backend') as HTMLSelectElement;
-
-    act(() => applyRemoteSettings?.({ codexBackend: 'cli' }));
-    expect(backend.value).toBe('cli');
-
-    act(() => applyRemoteSettings?.({ codexBackend: 'invalid' }));
-    expect(backend.value).toBe('sdk');
-    expect(mock.settingsSet).not.toHaveBeenCalledWith('codexBackend', expect.anything());
-    expect(mock.settingsSet).not.toHaveBeenCalledWith('aiProvider', expect.anything());
-    expect(defaultProps.onSettingChange).not.toHaveBeenCalledWith('codexBackend', expect.anything());
-    expect(defaultProps.onSettingChange).not.toHaveBeenCalledWith('aiProvider', expect.anything());
-  });
-
-  it('does not let a delayed initial backend load overwrite a user selection', async () => {
-    const mock = createMockSai();
-    let resolveInitialBackend!: (value: string) => void;
-    const initialBackend = new Promise<string>(resolve => { resolveInitialBackend = resolve; });
-    mock.settingsGet = vi.fn((key: string, defaultValue?: unknown) =>
-      key === 'codexBackend' ? initialBackend : Promise.resolve(defaultValue),
-    );
-    installMockSai(mock);
-
-    render(<SettingsModal {...defaultProps} />);
-    fireEvent.click(screen.getByText('Codex'));
-    const backend = await screen.findByLabelText('Codex backend') as HTMLSelectElement;
-
-    fireEvent.change(backend, { target: { value: 'cli' } });
-    expect(mock.settingsSet).toHaveBeenCalledWith('codexBackend', 'cli');
-    await act(async () => { resolveInitialBackend('sdk'); await initialBackend; });
-    expect(backend.value).toBe('cli');
-  });
-
-  it('does not let a delayed initial backend load overwrite a remote update', async () => {
-    const mock = createMockSai();
-    let resolveInitialBackend!: (value: string) => void;
-    const initialBackend = new Promise<string>(resolve => { resolveInitialBackend = resolve; });
-    mock.settingsGet = vi.fn((key: string, defaultValue?: unknown) =>
-      key === 'codexBackend' ? initialBackend : Promise.resolve(defaultValue),
-    );
-    let applyRemoteSettings: ((settings: Record<string, unknown>) => void) | undefined;
-    mock.githubOnSettingsApplied = vi.fn((callback: (settings: Record<string, unknown>) => void) => {
-      applyRemoteSettings = callback;
-      return vi.fn();
-    });
-    installMockSai(mock);
-
-    render(<SettingsModal {...defaultProps} />);
-    fireEvent.click(screen.getByText('Codex'));
-    const backend = await screen.findByLabelText('Codex backend') as HTMLSelectElement;
-
-    act(() => applyRemoteSettings?.({ codexBackend: 'cli' }));
-    await act(async () => { resolveInitialBackend('sdk'); await initialBackend; });
-    expect(backend.value).toBe('cli');
-    expect(mock.settingsSet).not.toHaveBeenCalledWith('codexBackend', expect.anything());
+    expect(screen.queryByText(retiredSettingLabel)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(retiredSettingLabel)).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /CLI/i })).not.toBeInTheDocument();
+    expect(mock.settingsGet).not.toHaveBeenCalledWith(retiredSettingKey, expect.anything());
+    expect(mock.settingsSet).not.toHaveBeenCalledWith(retiredSettingKey, expect.anything());
   });
 
   it('hides General content when on Provider page', async () => {

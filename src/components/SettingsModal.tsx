@@ -114,8 +114,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [geminiDefaultModel, setGeminiDefaultModel] = useState('auto-gemini-3');
   const [geminiDefaultApprovalMode, setGeminiDefaultApprovalMode] = useState<'default' | 'auto_edit' | 'yolo' | 'plan'>('default');
   const [geminiDefaultConversationMode, setGeminiDefaultConversationMode] = useState<'planning' | 'fast'>('planning');
-  const [codexBackend, setCodexBackend] = useState<'sdk' | 'cli'>('sdk');
-  const codexBackendRevision = useRef(0);
   const [codexDefaultModel, setCodexDefaultModel] = useState('');
   const [codexDefaultPermission, setCodexDefaultPermission] = useState<'auto' | 'read-only' | 'full-access'>('auto');
   const [codexDefaultEffort, setCodexDefaultEffort] = useState<CodexEffort>('high');
@@ -224,12 +222,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if (merged.permission) setCodexDefaultPermission(merged.permission);
       if (merged.effort) setCodexDefaultEffort(merged.effort);
     });
-    const initialCodexBackendRevision = codexBackendRevision.current;
-    window.sai.settingsGet('codexBackend', 'sdk').then((v: string) => {
-      if (mounted && codexBackendRevision.current === initialCodexBackendRevision) {
-        setCodexBackend(v === 'cli' ? 'cli' : 'sdk');
-      }
-    });
     (window.sai as any).geminiModels?.().then((result: { models: { id: string; name: string }[]; defaultModel: string } | undefined) => {
       if (result?.models?.length) {
         setGeminiAvailableModels(result.models);
@@ -282,10 +274,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if ('editorFontSize' in remote) setEditorFontSize(remote.editorFontSize);
       if ('editorMinimap' in remote) setEditorMinimap(remote.editorMinimap);
       if ('aiProvider' in remote && (remote.aiProvider === 'claude' || remote.aiProvider === 'codex' || remote.aiProvider === 'gemini')) setAiProvider(remote.aiProvider);
-      if ('codexBackend' in remote) {
-        codexBackendRevision.current += 1;
-        setCodexBackend(remote.codexBackend === 'cli' ? 'cli' : 'sdk');
-      }
       if ('codex' in remote && remote.codex && typeof remote.codex === 'object') {
         codexSettingsRevision.current += 1;
         const c = remote.codex;
@@ -542,13 +530,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     } else {
       window.sai.settingsSet('codex', codexSettingsRef.current);
     }
-  };
-
-  const handleCodexBackendChange = (value: string) => {
-    if (value !== 'sdk' && value !== 'cli') return;
-    codexBackendRevision.current += 1;
-    setCodexBackend(value);
-    window.sai.settingsSet('codexBackend', value);
   };
 
   const handleCodexDefaultPermissionChange = (permission: 'auto' | 'read-only' | 'full-access') => {
@@ -1240,21 +1221,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     return (
     <section className="settings-section">
       <div className="settings-section-label">Codex</div>
-      <div className="settings-row">
-        <div className="settings-row-info">
-          <div className="settings-row-name">Backend</div>
-          <div className="settings-row-desc">The SDK is the default Codex integration. The CLI is a temporary rollback option. Restart SAI after changing.</div>
-        </div>
-        <select
-          aria-label="Codex backend"
-          className="settings-select"
-          value={codexBackend}
-          onChange={e => handleCodexBackendChange(e.target.value)}
-        >
-          <option value="sdk">SDK (default)</option>
-          <option value="cli">CLI (legacy rollback)</option>
-        </select>
-      </div>
       {codexAvailableModels.length > 0 && (
         <div className="settings-row">
           <div className="settings-row-info">
