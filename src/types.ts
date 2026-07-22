@@ -68,6 +68,7 @@ export interface CodexModelOption {
   name: string;
   supportedReasoningEfforts?: CodexEffort[];
   defaultReasoningEffort?: CodexEffort;
+  effectiveContextWindow?: number;
 }
 // Known CLI aliases plus any account-specific model id (e.g. 'claude-fable-5[1m]')
 // surfaced via claude:models — the CLI accepts arbitrary model strings.

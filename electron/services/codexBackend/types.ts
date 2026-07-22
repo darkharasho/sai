@@ -29,6 +29,7 @@ export interface CodexModelOption {
   name: string;
   supportedReasoningEfforts?: CodexReasoningEffort[];
   defaultReasoningEffort?: CodexReasoningEffort;
+  effectiveContextWindow?: number;
 }
 
 const CODEX_REASONING_EFFORTS = new Set<CodexReasoningEffort>(['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);

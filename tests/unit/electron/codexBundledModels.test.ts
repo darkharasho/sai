@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { resolveBundledCodex } from '../../../electron/services/codexBackend/bundledModels';
+import {
+  resolveBundledCodex,
+  parseCodexModelContextWindows,
+  enrichCodexModelsWithContext,
+} from '../../../electron/services/codexBackend/bundledModels';
 import { normalizeCodexModelOption } from '../../../electron/services/codexBackend/types';
 
 describe('bundled Codex resolver', () => {
@@ -48,5 +52,24 @@ describe('bundled Codex resolver', () => {
   it('reports unsupported targets and missing optional dependencies', () => {
     expect(() => resolveBundledCodex({ platform: 'freebsd', arch: 'x64' })).toThrow(/Unsupported/);
     expect(() => resolveBundledCodex({ platform: 'darwin', arch: 'arm64', resolve: () => { throw new Error('missing'); } })).toThrow(/optional dependency/);
+  });
+
+  it('calculates the effective context window from the local model catalog', () => {
+    const windows = parseCodexModelContextWindows(JSON.stringify([
+      { slug: 'gpt-5-codex', context_window: 272_000, effective_context_window_percent: 95 },
+      { slug: 'broken', context_window: -1, effective_context_window_percent: 95 },
+    ]));
+    expect(windows.get('gpt-5-codex')).toBe(258_400);
+    expect(windows.has('broken')).toBe(false);
+  });
+
+  it('enriches known models and leaves unknown models unset', () => {
+    expect(enrichCodexModelsWithContext([
+      { id: 'gpt-5-codex', name: 'GPT-5 Codex' },
+      { id: 'unknown', name: 'Unknown' },
+    ], new Map([['gpt-5-codex', 258_400]]))).toEqual([
+      { id: 'gpt-5-codex', name: 'GPT-5 Codex', effectiveContextWindow: 258_400 },
+      { id: 'unknown', name: 'Unknown' },
+    ]);
   });
 });

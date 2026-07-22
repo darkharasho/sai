@@ -1,9 +1,10 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { enrichedEnv } from '../shellEnv';
-import { normalizeCodexModelOption, type CodexModelResult } from './types';
+import { normalizeCodexModelOption, type CodexModelOption, type CodexModelResult } from './types';
 
 const TARGETS: Record<string, { triple: string; packageName: string }> = {
   'linux:x64': { triple: 'x86_64-unknown-linux-musl', packageName: '@openai/codex-linux-x64' },
@@ -49,6 +50,49 @@ export function resolveBundledCodex(deps: BundledCodexPathDeps = {}): { executab
 
 let cachedModels: CodexModelResult | null = null;
 
+/** Parses Codex's local model catalog into a map of model slug -> effective context window. */
+export function parseCodexModelContextWindows(raw: string): Map<string, number> {
+  const result = new Map<string, number>();
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { return result; }
+  if (!Array.isArray(parsed)) return result;
+  for (const entry of parsed) {
+    if (!entry || typeof entry !== 'object') continue;
+    const model = entry as Record<string, unknown>;
+    const slug = typeof model.slug === 'string' ? model.slug : '';
+    const window = typeof model.context_window === 'number' ? model.context_window : 0;
+    const percent = typeof model.effective_context_window_percent === 'number'
+      ? model.effective_context_window_percent : 100;
+    if (!slug || window <= 0 || percent <= 0 || percent > 100) continue;
+    result.set(slug, Math.floor(window * percent / 100));
+  }
+  return result;
+}
+
+/** Enriches Codex model options with the effective context window from the local catalog, when known. */
+export function enrichCodexModelsWithContext(
+  models: CodexModelOption[],
+  catalog: Map<string, number>,
+): CodexModelOption[] {
+  return models.map((model) => {
+    const effectiveContextWindow = catalog.get(model.id);
+    return effectiveContextWindow
+      ? { ...model, effectiveContextWindow }
+      : model;
+  });
+}
+
+/** Reads Codex's local model catalog ($CODEX_HOME/models_cache.json), tolerating any read/parse failure. */
+function readCodexModelCatalog(): Map<string, number> {
+  try {
+    const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+    const raw = fs.readFileSync(path.join(codexHome, 'models_cache.json'), 'utf8');
+    return parseCodexModelContextWindows(raw);
+  } catch {
+    return new Map<string, number>();
+  }
+}
+
 /** Model discovery for the SDK backend using the SDK's bundled native CLI. */
 export function fetchBundledCodexModels(forceRefresh = false): Promise<CodexModelResult> {
   if (!forceRefresh && cachedModels) return Promise.resolve(cachedModels);
@@ -78,7 +122,8 @@ export function fetchBundledCodexModels(forceRefresh = false): Promise<CodexMode
         if (msg.id === 0 && !msg.error) proc.stdin?.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'model/list', id: 1, params: {} })}\n`);
         if (msg.id === 1 && msg.result) {
           const data = msg.result.data ?? [];
-          const models = data.filter((m: any) => !m.hidden).map(normalizeCodexModelOption);
+          const normalized = data.filter((m: any) => !m.hidden).map(normalizeCodexModelOption);
+          const models = enrichCodexModelsWithContext(normalized, readCodexModelCatalog());
           clearTimeout(timeout);
           finish({ models, defaultModel: data.find((m: any) => m.isDefault)?.model || models[0]?.id || '' });
         } else if (msg.error) { clearTimeout(timeout); finish(fallback); }
