@@ -1,6 +1,5 @@
 import { type BrowserWindow, ipcMain } from 'electron';
 import {
-  configureCodexBackendWindow,
   getCodexBackend,
   type CodexPermission,
   type CodexReasoningEffort,
@@ -49,9 +48,7 @@ export function __setCodexTelemetryForTests(service: CodexTelemetryService): voi
 }
 
 /** Register the Codex IPC surface. Transport behavior lives in codexBackend. */
-export function registerCodexHandlers(win: BrowserWindow): void {
-  configureCodexBackendWindow(win);
-
+export function registerCodexHandlers(_win: BrowserWindow): void {
   ipcMain.handle('codex:models', (_event, forceRefresh?: boolean) =>
     getCodexBackend().getModels(Boolean(forceRefresh)));
 

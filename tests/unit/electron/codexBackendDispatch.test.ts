@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import path from 'node:path';
+import fs from 'node:fs';
 
 const mocks = vi.hoisted(() => {
   type IpcCallback = (...args: any[]) => unknown;
@@ -27,14 +29,9 @@ const mocks = vi.hoisted(() => {
 
   return {
     ipcMain,
-    readFileSync: vi.fn(),
-    writeFileSync: vi.fn(),
     emitChatMessage: vi.fn(),
-    readSaiSetting: vi.fn(),
-    fetchCodexModels: vi.fn(),
     fetchBundledCodexModels: vi.fn(),
     sdkConstructor: vi.fn(),
-    cliConstructor: vi.fn(),
     registerWorkspaceBackendHooks: vi.fn(),
   };
 });
@@ -45,57 +42,29 @@ vi.mock('electron', () => ({
   BrowserWindow: vi.fn(),
 }));
 
-vi.mock('node:fs', () => ({
-  default: {
-    readFileSync: mocks.readFileSync,
-    writeFileSync: mocks.writeFileSync,
-  },
-}));
-
 vi.mock('@electron/services/claude', () => ({
   emitChatMessage: mocks.emitChatMessage,
-  readSaiSetting: mocks.readSaiSetting,
 }));
 
 vi.mock('@electron/services/workspace', () => ({
   registerWorkspaceBackendHooks: mocks.registerWorkspaceBackendHooks,
 }));
 
-vi.mock('@electron/services/codexBackend/cliBackend', () => ({
-  fetchCodexModels: mocks.fetchCodexModels,
-  CliCodexBackend: class MockCliCodexBackend {
-    start = vi.fn();
-    send = vi.fn();
-    interrupt = vi.fn();
-    reconcileScope = vi.fn();
-    setSessionId = vi.fn();
-    getModels = vi.fn();
-    suspendWorkspace = vi.fn();
-    isWorkspaceBusy = vi.fn();
-    destroy = vi.fn();
-
-    constructor(win: unknown) {
-      mocks.cliConstructor(win);
-    }
-  },
-}));
-
 vi.mock('@electron/services/codexBackend/sdkBackend', () => ({
-  SdkCodexBackend: class MockSdkCodexBackend {
-    start = vi.fn();
-    send = vi.fn();
-    interrupt = vi.fn();
-    reconcileScope = vi.fn();
-    setSessionId = vi.fn();
-    getModels = vi.fn();
-    suspendWorkspace = vi.fn();
-    isWorkspaceBusy = vi.fn();
-    destroy = vi.fn();
-
-    constructor(deps: unknown) {
-      mocks.sdkConstructor(deps);
-    }
-  },
+  SdkCodexBackend: vi.fn().mockImplementation(function (deps: unknown) {
+    mocks.sdkConstructor(deps);
+    return {
+      start: vi.fn(),
+      send: vi.fn(),
+      interrupt: vi.fn(),
+      reconcileScope: vi.fn(),
+      setSessionId: vi.fn(),
+      getModels: vi.fn(),
+      suspendWorkspace: vi.fn(),
+      isWorkspaceBusy: vi.fn(),
+      destroy: vi.fn(),
+    };
+  }),
 }));
 
 vi.mock('@electron/services/codexBackend/bundledModels', () => ({
@@ -104,12 +73,12 @@ vi.mock('@electron/services/codexBackend/bundledModels', () => ({
 
 import {
   __setCodexBackendForTests,
-  configureCodexBackendWindow,
   destroyCodexBackendIfActive,
   getCodexBackend,
-  getCodexBackendSetting,
 } from '@electron/services/codexBackend';
 import type { CodexBackend } from '@electron/services/codexBackend';
+import { SdkCodexBackend } from '@electron/services/codexBackend/sdkBackend';
+import { registerWorkspaceBackendHooks } from '@electron/services/workspace';
 import { __setCodexTelemetryForTests, registerCodexHandlers } from '@electron/services/codex';
 import type { CodexTelemetryService } from '@electron/services/codexTelemetry';
 
@@ -128,68 +97,38 @@ function backendStub(): CodexBackend {
 }
 
 beforeEach(() => {
-  mocks.readFileSync.mockReturnValue('{}');
-  mocks.fetchCodexModels.mockResolvedValue({ models: [], defaultModel: '' });
   mocks.fetchBundledCodexModels.mockResolvedValue({ models: [], defaultModel: '' });
-  configureCodexBackendWindow(null);
 });
 
 afterEach(() => {
   destroyCodexBackendIfActive();
-  configureCodexBackendWindow(null);
   mocks.ipcMain.reset();
   vi.clearAllMocks();
 });
 
 describe('Codex backend selection', () => {
-  it("defaults to the SDK when settings.json is absent or unreadable", () => {
-    mocks.readFileSync.mockImplementation(() => { throw new Error('ENOENT'); });
-
-    expect(getCodexBackendSetting()).toBe('sdk');
-    expect(mocks.readFileSync).toHaveBeenCalledWith('/sai-user-data/settings.json', 'utf-8');
-  });
-
-  it("selects the CLI only for the explicit rollback setting", () => {
-    mocks.readFileSync.mockReturnValue(JSON.stringify({ codexBackend: 'cli' }));
-    expect(getCodexBackendSetting()).toBe('cli');
-  });
-
-  it("uses the SDK for unset, sdk, and unknown values without consulting or changing the default provider", () => {
-    for (const value of [undefined, 'sdk', 'future-backend']) {
-      mocks.readFileSync.mockReturnValue(JSON.stringify({
-        aiProvider: 'claude',
-        ...(value === undefined ? {} : { codexBackend: value }),
-      }));
-      expect(getCodexBackendSetting()).toBe('sdk');
-    }
-
-    expect(mocks.readSaiSetting).not.toHaveBeenCalled();
-    expect(mocks.writeFileSync).not.toHaveBeenCalled();
-  });
-
-  it('constructs and caches the SDK lazily with the chat emitter and model loader', () => {
-    expect(mocks.sdkConstructor).not.toHaveBeenCalled();
-
+  it('constructs and caches one SDK backend', () => {
     const first = getCodexBackend();
     const second = getCodexBackend();
 
     expect(first).toBe(second);
-    expect(mocks.sdkConstructor).toHaveBeenCalledTimes(1);
+    expect(SdkCodexBackend).toHaveBeenCalledOnce();
     expect(mocks.sdkConstructor).toHaveBeenCalledWith({
       emit: mocks.emitChatMessage,
       getModels: mocks.fetchBundledCodexModels,
     });
-    expect(mocks.fetchCodexModels).not.toHaveBeenCalled();
-    expect(mocks.registerWorkspaceBackendHooks).toHaveBeenCalledWith('codex', {
+  });
+
+  it('registers Codex workspace hooks against the SDK singleton', () => {
+    getCodexBackend();
+
+    expect(registerWorkspaceBackendHooks).toHaveBeenCalledWith('codex', {
       suspend: expect.any(Function),
       isBusy: expect.any(Function),
     });
   });
 
-  it('registers CLI lifecycle hooks and neutralizes them after destroy', () => {
-    const win = { isDestroyed: () => false, webContents: { send: vi.fn() } } as any;
-    mocks.readFileSync.mockReturnValue(JSON.stringify({ codexBackend: 'cli' }));
-    configureCodexBackendWindow(win);
+  it('wires workspace hooks to the active backend and neutralizes them after destroy', () => {
     const backend = getCodexBackend();
     const registration = mocks.registerWorkspaceBackendHooks.mock.calls.at(-1);
 
@@ -208,23 +147,6 @@ describe('Codex backend selection', () => {
     expect(hooks.isBusy('/project')).toBe(false);
     expect(backend.suspendWorkspace).toHaveBeenCalledTimes(1);
     expect(backend.isWorkspaceBusy).toHaveBeenCalledTimes(1);
-  });
-
-  it('never constructs the CLI without a configured BrowserWindow', () => {
-    mocks.readFileSync.mockReturnValue(JSON.stringify({ codexBackend: 'cli' }));
-
-    expect(() => getCodexBackend()).toThrow(/BrowserWindow/i);
-    expect(mocks.cliConstructor).not.toHaveBeenCalled();
-  });
-
-  it('constructs the CLI with the BrowserWindow configured by IPC registration', () => {
-    const win = { isDestroyed: () => false, webContents: { send: vi.fn() } } as any;
-    mocks.readFileSync.mockReturnValue(JSON.stringify({ codexBackend: 'cli' }));
-
-    registerCodexHandlers(win);
-    getCodexBackend();
-
-    expect(mocks.cliConstructor).toHaveBeenCalledWith(win);
   });
 
   it('destroys replaced, reset, and active injected backends exactly once', () => {
@@ -253,6 +175,18 @@ describe('Codex backend selection', () => {
     expect(() => destroyCodexBackendIfActive()).toThrow('already down');
     expect(() => destroyCodexBackendIfActive()).not.toThrow();
     expect(backend.destroy).toHaveBeenCalledOnce();
+  });
+});
+
+describe('Codex backend source regression', () => {
+  it('never reads the codexBackend setting or imports the CLI backend', () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, '../../../electron/services/codexBackend/index.ts'),
+      'utf-8',
+    );
+
+    expect(source).not.toMatch(/codexBackend\s*(setting|===|:)/i);
+    expect(source).not.toMatch(/CliCodexBackend/);
   });
 });
 
