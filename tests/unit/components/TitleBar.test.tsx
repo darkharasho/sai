@@ -165,6 +165,54 @@ describe('TitleBar', () => {
     expect(suspendedRow.querySelector('.ws-sq-inactive')).toBeNull();
   });
 
+  it('renders an active, a suspended, and a recent-history-only registry row under their existing section headings (codex registration characterization)', async () => {
+    // Task 6 registers live Codex scopes with the same workspace registry Claude
+    // uses (getOrCreateWorkspace), so a Codex-driven project should show up as an
+    // ordinary Active/Suspended row here — no Codex-specific TitleBar branch
+    // exists or should be added. This fixture just characterizes that the
+    // existing Active/Suspended/Recent sections already handle any row shape
+    // workspaceGetAll can return, including a recent/history-only entry.
+    const mock = createMockSai();
+    mock.workspaceGetAll = vi.fn().mockResolvedValue([
+      { projectPath: '/home/user/codex-active', status: 'active', lastActivity: Date.now() },
+      { projectPath: '/home/user/codex-suspended', status: 'suspended', lastActivity: Date.now() - 60000 },
+      { projectPath: '/home/user/codex-recent-only', status: 'recent', lastActivity: 0 },
+    ]);
+    installMockSai(mock);
+
+    const { container } = render(<TitleBar {...defaultProps} />);
+    fireEvent.click(container.querySelector('.project-selector') as HTMLElement);
+
+    await waitFor(() => {
+      expect(screen.getByText('codex-active')).toBeTruthy();
+      expect(screen.getByText('codex-suspended')).toBeTruthy();
+      expect(screen.getByText('codex-recent-only')).toBeTruthy();
+    });
+
+    const labels = Array.from(container.querySelectorAll('.dropdown-label')).map((el) => el.textContent);
+    expect(labels).toContain('Active');
+    expect(labels).toContain('Suspended');
+    expect(labels).toContain('Recent');
+
+    // Each row must fall after its own section heading and before the next
+    // one, proving the rows are grouped under the correct heading rather than
+    // merely present somewhere in the dropdown.
+    const text = container.textContent || '';
+    const activeHeadingIdx = text.indexOf('Active');
+    const activeRowIdx = text.indexOf('codex-active');
+    const suspendedHeadingIdx = text.indexOf('Suspended');
+    const suspendedRowIdx = text.indexOf('codex-suspended');
+    const recentHeadingIdx = text.indexOf('Recent');
+    const recentRowIdx = text.indexOf('codex-recent-only');
+
+    expect(activeHeadingIdx).toBeGreaterThanOrEqual(0);
+    expect(activeHeadingIdx).toBeLessThan(activeRowIdx);
+    expect(activeRowIdx).toBeLessThan(suspendedHeadingIdx);
+    expect(suspendedHeadingIdx).toBeLessThan(suspendedRowIdx);
+    expect(suspendedRowIdx).toBeLessThan(recentHeadingIdx);
+    expect(recentHeadingIdx).toBeLessThan(recentRowIdx);
+  });
+
   it('calls onProjectChange when a workspace is selected', async () => {
     const onProjectChange = vi.fn();
     const mock = createMockSai();

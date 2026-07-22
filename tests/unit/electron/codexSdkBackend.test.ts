@@ -74,6 +74,7 @@ interface FakeHarness {
   clients: Array<{ options: CodexOptions; start: ReturnType<typeof vi.fn>; resume: ReturnType<typeof vi.fn> }>;
   runs: Array<{ input: Input; options?: TurnOptions; threadOptions: ThreadOptions; resumeId?: string }>;
   streams: Array<AsyncGenerator<ThreadEvent> | Error>;
+  registerWorkspace: ReturnType<typeof vi.fn>;
 }
 
 function harness(streams: Array<AsyncGenerator<ThreadEvent> | Error> = []): FakeHarness {
@@ -102,17 +103,21 @@ function harness(streams: Array<AsyncGenerator<ThreadEvent> | Error> = []): Fake
     return { startThread: client.start, resumeThread: client.resume };
   });
 
+  const registerWorkspace = vi.fn();
+
   return {
     backend: new SdkCodexBackend({
       createClient,
       emit: (event) => emitted.push(event),
       getModels: vi.fn(async () => ({ models: [{ id: 'gpt-5', name: 'GPT-5' }], defaultModel: 'gpt-5' })),
       getEnv: () => ({ PATH: '/bin', EMPTY: undefined, TOKEN: 'secret' }),
+      registerWorkspace,
     }),
     emitted,
     clients,
     runs,
     streams: queue,
+    registerWorkspace,
   };
 }
 
@@ -122,6 +127,28 @@ async function settle(): Promise<void> {
 }
 
 describe('SdkCodexBackend', () => {
+  it('registers a workspace when a scope starts', () => {
+    const h = harness();
+    h.backend.start({ projectPath: '/repo', scope: 'chat' });
+    expect(h.registerWorkspace).toHaveBeenCalledWith('/repo');
+  });
+
+  it('reactivates a workspace again before every send', () => {
+    const h = harness();
+    h.backend.start({ projectPath: '/repo', scope: 'chat' });
+    h.backend.send({ projectPath: '/repo', scope: 'chat', message: 'continue' });
+    expect(h.registerWorkspace).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not register or disturb another project', () => {
+    const h = harness();
+    h.backend.start({ projectPath: '/one' });
+    h.backend.start({ projectPath: '/two' });
+    h.backend.suspendWorkspace('/one');
+    expect(h.registerWorkspace.mock.calls).toEqual([['/one'], ['/two']]);
+    expect(h.backend.isWorkspaceBusy('/two')).toBe(false);
+  });
+
   it('passes normalized additional directories per scope and rebuilds when they change', async () => {
     const h = harness([streamOf(completedEvents()), streamOf(completedEvents())]);
     h.backend.start({ projectPath: '/meta', scope: 'chat', additionalDirectories: ['/a', '', '/a', '/b'] });
