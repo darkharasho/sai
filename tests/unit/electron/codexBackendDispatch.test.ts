@@ -110,7 +110,8 @@ import {
   getCodexBackendSetting,
 } from '@electron/services/codexBackend';
 import type { CodexBackend } from '@electron/services/codexBackend';
-import { registerCodexHandlers } from '@electron/services/codex';
+import { __setCodexTelemetryForTests, registerCodexHandlers } from '@electron/services/codex';
+import type { CodexTelemetryService } from '@electron/services/codexTelemetry';
 
 function backendStub(): CodexBackend {
   return {
@@ -365,5 +366,19 @@ describe('Codex IPC dispatch', () => {
     await mocks.ipcMain.invoke('codex:models');
 
     expect(backend.getModels).toHaveBeenCalledWith(false);
+  });
+
+  it('routes codex:usage to the injected telemetry singleton with a forced refresh', async () => {
+    const telemetry = {
+      readRateLimits: vi.fn().mockResolvedValue({ provider: 'codex', fetchedAt: 0, stale: false, primary: null, secondary: null }),
+      destroy: vi.fn(),
+    } as unknown as CodexTelemetryService;
+    __setCodexTelemetryForTests(telemetry);
+    registerCodexHandlers({} as any);
+
+    const result = await mocks.ipcMain.invoke('codex:usage', { force: true });
+
+    expect(telemetry.readRateLimits).toHaveBeenCalledWith({ force: true });
+    expect(result.provider).toBe('codex');
   });
 });

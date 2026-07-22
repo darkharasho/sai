@@ -7,6 +7,7 @@ import {
   type CodexSessionKind,
   isCodexReasoningEffort,
 } from './codexBackend';
+import { CodexTelemetryService } from './codexTelemetry';
 
 type StartIpcTail = [
   scope?: string,
@@ -31,6 +32,21 @@ const normalizeDirectories = (value: unknown): string[] | undefined => {
   const directories = [...new Set(value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0))];
   return directories.length ? directories : undefined;
 };
+
+/** Module-owned singleton — renderer polling shares one cache/backoff instance. */
+let codexTelemetry: CodexTelemetryService = new CodexTelemetryService();
+
+/** Kill any active telemetry child process and drop cached state. Safe to call repeatedly. */
+export function destroyCodexTelemetry(): void {
+  codexTelemetry.destroy();
+}
+
+/** Test seam that replaces the singleton without leaking its lifecycle. */
+export function __setCodexTelemetryForTests(service: CodexTelemetryService): void {
+  if (codexTelemetry === service) return;
+  codexTelemetry.destroy();
+  codexTelemetry = service;
+}
 
 /** Register the Codex IPC surface. Transport behavior lives in codexBackend. */
 export function registerCodexHandlers(win: BrowserWindow): void {
@@ -96,4 +112,7 @@ export function registerCodexHandlers(win: BrowserWindow): void {
 
   ipcMain.on('codex:reconcileScope', (_event, projectPath: string, scope?: string) =>
     getCodexBackend().reconcileScope(projectPath, scope));
+
+  ipcMain.handle('codex:usage', (_event, options?: { force?: boolean }) =>
+    codexTelemetry.readRateLimits({ force: options?.force === true }));
 }

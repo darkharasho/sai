@@ -101,6 +101,12 @@ describe('characterization: existing IPC routing', () => {
     expect(send).toHaveBeenNthCalledWith(3, 'codex:reconcileScope', '/proj', 'scope-a');
   });
 
+  it('reads provider-tagged Codex usage with an optional forced refresh', async () => {
+    invoke.mockResolvedValue({ provider: 'codex', primary: null, secondary: null });
+    await exposed.codexUsageFetch(true);
+    expect(invoke).toHaveBeenCalledWith('codex:usage', { force: true });
+  });
+
   it('geminiStart forwards to gemini:start', () => {
     exposed.geminiStart('/proj', 'meta');
     expect(invoke).toHaveBeenCalledWith('gemini:start', '/proj', 'meta');
