@@ -18,6 +18,7 @@ import {
 } from '../../terminalBuffer';
 import { getCapabilities } from '../../providers/capabilities';
 import { effortsForCodexModel, normalizeCodexEffort } from '../../lib/codexEffort';
+import type { ContextUsageView, UsageLimitView } from '../../lib/composerTelemetry';
 
 type ModelOption = { id: string; label: string; description: string; recommended?: boolean; oneM?: boolean; extra?: boolean };
 
@@ -55,10 +56,10 @@ interface ChatInputProps {
     globalEffort: EffortLevel;
   };
   availableModels?: ModelOption[];
-  contextUsage?: { used: number; total: number; inputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; outputTokens: number };
+  contextUsage?: ContextUsageView;
   sessionUsage?: { inputTokens: number; outputTokens: number };
   sessionCost?: number;
-  rateLimits?: Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number; utilization?: number; lastUpdated: number }>;
+  usageLimits?: UsageLimitView[];
   billingMode?: 'subscription' | 'api';
   activeFilePath?: string | null;
   fileContextEnabled?: boolean;
@@ -169,18 +170,23 @@ function formatTokens(n: number): string {
   return `${n}`;
 }
 
-function ContextRing({ used, total, onClick }: { used: number; total: number; onClick?: () => void }) {
+function ContextRing({ used, total, compactable, onClick }: { used: number; total: number; compactable: boolean; onClick?: () => void }) {
   const pct = Math.min((used / total) * 100, 100);
   const radius = 9;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (pct / 100) * circumference;
   const color = pct > 80 ? 'var(--red)' : pct > 50 ? 'var(--orange)' : 'var(--accent)';
+  const label = compactable
+    ? `Context ${Math.round(pct)}% — Click to compact`
+    : `Context ${Math.round(pct)}% — ${formatTokens(used)} / ${formatTokens(total)} tokens`;
 
   return (
     <button
       className="context-ring"
-      title={`Context: ${Math.round(pct)}% — Click to compact`}
-      onClick={onClick}
+      title={label}
+      aria-label={label}
+      aria-disabled={compactable ? undefined : 'true'}
+      onClick={compactable ? onClick : undefined}
     >
       <svg width="24" height="24" viewBox="0 0 24 24">
         <circle cx="12" cy="12" r={radius} fill="none" stroke="var(--bg-hover)" strokeWidth="2.5" />
@@ -217,14 +223,6 @@ function formatResetTime(resetsAt: number, style: 'relative' | 'absolute' = 'rel
   return `${diffM} min`;
 }
 
-// Use the CLI's utilization field (0.0–1.0) when available for accurate usage %.
-// Falls back to 0 if not provided (better than hiding the bar entirely).
-function getRateLimitProgress(rl: { rateLimitType: string; resetsAt: number; status: string; utilization?: number }): number {
-  if (rl.status === 'rejected') return 1;
-  if (rl.utilization !== undefined) return Math.min(Math.max(rl.utilization, 0), 1);
-  return 0;
-}
-
 function UsageBar({ pct, color, label, sublabel, tag }: { pct: number; color: string; label: string; sublabel: string; tag?: string }) {
   const isUnknown = pct < 0;
   return (
@@ -246,24 +244,6 @@ function UsageBar({ pct, color, label, sublabel, tag }: { pct: number; color: st
   );
 }
 
-function getRateLimitLabel(type: string): string {
-  if (type === 'five_hour') return 'Current session';
-  if (type === 'seven_day' || type === 'weekly') return 'All models';
-  if (type === 'daily') return 'Daily';
-  if (type === 'monthly') return 'Monthly';
-  // e.g. "weekly_sonnet" → "Sonnet only"
-  if (type.startsWith('weekly_') || type.startsWith('seven_day_')) {
-    const model = type.replace(/^(weekly_|seven_day_)/, '');
-    return `${model.charAt(0).toUpperCase() + model.slice(1)} only`;
-  }
-  return type.replace(/_/g, ' ');
-}
-
-function isWeeklyLimit(type: string): boolean {
-  return type === 'weekly' || type === 'seven_day' || type === 'monthly' ||
-    type.startsWith('weekly_') || type.startsWith('seven_day_');
-}
-
 function getBarColor(pct: number, isOverage: boolean): string {
   if (isOverage) return 'var(--orange)';
   if (pct > 80) return 'var(--red)';
@@ -271,7 +251,7 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabled, slashCommands = [], isStreaming, waiting, awaitingQuestion, messages = [], onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, contextUsage, sessionUsage, sessionCost, rateLimits, billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, pendingSudoPrompt, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, onCodexModelsRefresh, codexPermission = 'auto', onCodexPermissionChange, codexEffort = 'high', onCodexEffortChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, onQueueSendNow, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
+export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabled, slashCommands = [], isStreaming, waiting, awaitingQuestion, messages = [], onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, contextUsage, sessionUsage, sessionCost, usageLimits = [], billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, pendingSudoPrompt, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, onCodexModelsRefresh, codexPermission = 'auto', onCodexPermissionChange, codexEffort = 'high', onCodexEffortChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, onQueueSendNow, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
   const selectedCodexModel = codexModels.find(model => model.id === codexModel);
   const supportedCodexEfforts = effortsForCodexModel(selectedCodexModel);
   const effectiveCodexEffort = normalizeCodexEffort(codexEffort, selectedCodexModel);
@@ -1009,7 +989,14 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
               </button>
             );
           })()}
-          {aiProvider === 'claude' && contextUsage && <ContextRing used={contextUsage.used} total={contextUsage.total} onClick={() => onSend('/compact')} />}
+          {contextUsage && contextUsage.total != null && contextUsage.total > 0 && (
+            <ContextRing
+              used={contextUsage.used}
+              total={contextUsage.total}
+              compactable={aiProvider === 'claude'}
+              onClick={aiProvider === 'claude' ? () => onSend('/compact') : undefined}
+            />
+          )}
           <TodoProgress messages={messages} isStreaming={!!isStreaming} />
           <MessageQueue
             queue={messageQueue}
@@ -1040,29 +1027,23 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
         </div>
 
         <div className="toolbar-right">
-          {/* Usage & rate limit */}
-          {aiProvider === 'claude' && (sessionUsage || (rateLimits && rateLimits.size > 0)) && (() => {
-            const limits = rateLimits ? Array.from(rateLimits.values()) : [];
-            const anyOverage = limits.some(rl => rl.isUsingOverage);
+          {/* Usage & rate limit — availability-gated, not provider-gated */}
+          {(usageLimits.length > 0 || !!sessionUsage || !!contextUsage) && (() => {
+            const anyOverage = usageLimits.some(l => !!l.isUsingOverage);
+            const sessionLimits = usageLimits.filter(l => l.group === 'session');
+            const weeklyLimits = usageLimits.filter(l => l.group === 'weekly');
+            const overageSource = usageLimits.find(l => (l.overageResetsAt ?? 0) > 0);
 
-            // Split limits into session-level (5-hour, daily) and weekly-level
-            const sessionLimits = limits.filter(rl => !isWeeklyLimit(rl.rateLimitType));
-            const weeklyLimits = limits.filter(rl => isWeeklyLimit(rl.rateLimitType));
-            const overageSource = limits.find(rl => rl.overageResetsAt > 0);
-
-            // Inline text — pick the limit with the highest utilization
-            const primary = [...sessionLimits].sort((a, b) => (b.utilization ?? 0) - (a.utilization ?? 0))[0] || limits[0];
+            // Inline text — pick the limit with the highest usedPercent across all groups.
             let inlineText = '';
             if (anyOverage) {
               inlineText = 'Overage';
+            } else if (usageLimits.length > 0) {
+              const highest = usageLimits.reduce((max, l) => (l.usedPercent > max.usedPercent ? l : max), usageLimits[0]);
+              inlineText = `${Math.round(highest.usedPercent)}% used`;
             } else if (billingMode === 'subscription') {
-              // Show session utilization % for subscription users
-              const sessionUtil = primary?.utilization;
-              if (sessionUtil !== undefined) {
-                inlineText = `${Math.round(sessionUtil * 100)}% used`;
-              } else {
-                inlineText = 'Usage';
-              }
+              // No limits known yet — avoid rendering a misleading 0% used.
+              inlineText = 'Usage';
             } else {
               // API mode: show cost or token count
               const costStr = (sessionCost ?? 0) > 0 ? `$${sessionCost!.toFixed(2)}` : '';
@@ -1072,6 +1053,25 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
                 inlineText = formatTokens(sessionUsage.inputTokens + sessionUsage.outputTokens);
               }
             }
+
+            // Provider-correct input accounting (Codex reports raw vs. cached input
+            // tokens directly; Claude reports input + cache-read + cache-creation).
+            const totalInput = contextUsage
+              ? (aiProvider === 'codex'
+                ? contextUsage.inputTokens
+                : contextUsage.inputTokens + contextUsage.cachedInputTokens + contextUsage.cacheCreationTokens)
+              : 0;
+            const newInputTokens = contextUsage
+              ? (aiProvider === 'codex'
+                ? Math.max(0, contextUsage.inputTokens - contextUsage.cachedInputTokens)
+                : contextUsage.inputTokens + contextUsage.cacheCreationTokens)
+              : 0;
+            const cacheHitPct = contextUsage && totalInput > 0
+              ? Math.round((contextUsage.cachedInputTokens / totalInput) * 100)
+              : 0;
+            const contextPct = contextUsage && contextUsage.total != null && contextUsage.total > 0
+              ? Math.min((contextUsage.used / contextUsage.total) * 100, 100)
+              : null;
 
             return (
               <div className="usage-wrapper">
@@ -1085,29 +1085,24 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
                   {billingMode === 'subscription' && (sessionLimits.length > 0 || overageSource) && (
                     <div className="usage-tooltip-section">
                       <div className="usage-tooltip-heading">Plan usage limits</div>
-                      {sessionLimits.map(rl => {
-                        const pct = getRateLimitProgress(rl) * 100;
-                        const isStale = rl.lastUpdated && (Date.now() - rl.lastUpdated) > 120_000;
-                        return (
-                          <div key={rl.rateLimitType} style={isStale ? { opacity: 0.5 } : undefined}>
-                            <UsageBar
-                              pct={pct}
-                              color={pct >= 0 ? getBarColor(pct, false) : 'var(--text-muted)'}
-                              label={getRateLimitLabel(rl.rateLimitType)}
-                              sublabel={isStale ? 'Data may be stale' : `Resets in ${formatResetTime(rl.resetsAt)}`}
-                            />
-                          </div>
-                        );
-                      })}
+                      {sessionLimits.map(limit => (
+                        <div key={limit.id} style={limit.stale ? { opacity: 0.5 } : undefined}>
+                          <UsageBar
+                            pct={limit.usedPercent}
+                            color={getBarColor(limit.usedPercent, false)}
+                            label={limit.label}
+                            sublabel={limit.stale ? 'Data may be stale' : (limit.resetsAt ? `Resets in ${formatResetTime(limit.resetsAt)}` : '')}
+                          />
+                        </div>
+                      ))}
                       {overageSource && (() => {
-                        const active = overageSource.isUsingOverage;
-                        const pct = active ? getRateLimitProgress({ rateLimitType: overageSource.rateLimitType, resetsAt: overageSource.overageResetsAt, status: overageSource.status }) * 100 : 0;
+                        const active = !!overageSource.isUsingOverage;
                         return (
                           <UsageBar
-                            pct={active ? pct : 0}
+                            pct={active ? 100 : 0}
                             color={active ? 'var(--orange)' : 'var(--text-muted)'}
                             label="Overage"
-                            sublabel={active ? `Resets in ${formatResetTime(overageSource.overageResetsAt)}` : 'Not active'}
+                            sublabel={active && overageSource.overageResetsAt ? `Resets in ${formatResetTime(overageSource.overageResetsAt)}` : 'Not active'}
                             tag={active ? 'ACTIVE' : undefined}
                           />
                         );
@@ -1118,52 +1113,68 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
                   {billingMode === 'subscription' && weeklyLimits.length > 0 && (
                     <div className="usage-tooltip-section">
                       <div className="usage-tooltip-heading">Weekly limits</div>
-                      {weeklyLimits.map(rl => {
-                        const pct = getRateLimitProgress(rl) * 100;
-                        const isStale = rl.lastUpdated && (Date.now() - rl.lastUpdated) > 120_000;
-                        return (
-                          <div key={rl.rateLimitType} style={isStale ? { opacity: 0.5 } : undefined}>
-                            <UsageBar
-                              pct={pct}
-                              color={pct >= 0 ? getBarColor(pct, false) : 'var(--text-muted)'}
-                              label={getRateLimitLabel(rl.rateLimitType)}
-                              sublabel={isStale ? 'Data may be stale' : `Resets ${formatResetTime(rl.resetsAt, 'absolute')}`}
-                            />
-                          </div>
-                        );
-                      })}
+                      {weeklyLimits.map(limit => (
+                        <div key={limit.id} style={limit.stale ? { opacity: 0.5 } : undefined}>
+                          <UsageBar
+                            pct={limit.usedPercent}
+                            color={getBarColor(limit.usedPercent, false)}
+                            label={limit.label}
+                            sublabel={limit.stale ? 'Data may be stale' : (limit.resetsAt ? `Resets ${formatResetTime(limit.resetsAt, 'absolute')}` : '')}
+                          />
+                        </div>
+                      ))}
                     </div>
                   )}
                   {/* Context */}
                   {contextUsage && (
                     <div className="usage-tooltip-section">
-                      <UsageBar
-                        pct={Math.min((contextUsage.used / contextUsage.total) * 100, 100)}
-                        color={getBarColor(Math.min((contextUsage.used / contextUsage.total) * 100, 100), false)}
-                        label="Context"
-                        sublabel={`${formatTokens(contextUsage.used)} / ${formatTokens(contextUsage.total)}`}
-                      />
-                      {contextUsage.used > 0 && (() => {
-                        const totalInput = contextUsage.inputTokens + contextUsage.cacheReadTokens + contextUsage.cacheCreationTokens;
-                        const cacheHitPct = totalInput > 0 ? Math.round((contextUsage.cacheReadTokens / totalInput) * 100) : 0;
-                        return (
-                          <div className="context-breakdown">
-                            <div className="context-breakdown-row">
-                              <span className="context-breakdown-label">Cache hit</span>
-                              <span className="context-breakdown-value">{formatTokens(contextUsage.cacheReadTokens)}</span>
-                              <span className="context-breakdown-pct">({cacheHitPct}%)</span>
-                            </div>
-                            <div className="context-breakdown-row">
-                              <span className="context-breakdown-label">New input</span>
-                              <span className="context-breakdown-value">{formatTokens(contextUsage.inputTokens + contextUsage.cacheCreationTokens)}</span>
-                            </div>
-                            <div className="context-breakdown-row">
-                              <span className="context-breakdown-label">Output</span>
-                              <span className="context-breakdown-value">{formatTokens(contextUsage.outputTokens)}</span>
-                            </div>
+                      {contextPct != null && (
+                        <UsageBar
+                          pct={contextPct}
+                          color={getBarColor(contextPct, false)}
+                          label="Context"
+                          sublabel={`${formatTokens(contextUsage.used)} / ${formatTokens(contextUsage.total ?? 0)}`}
+                        />
+                      )}
+                      {contextUsage.used > 0 && (
+                        <div className="context-breakdown">
+                          <div className="context-breakdown-row">
+                            <span className="context-breakdown-label">Cache hit</span>
+                            <span className="context-breakdown-value">{formatTokens(contextUsage.cachedInputTokens)}</span>
+                            <span className="context-breakdown-pct">({cacheHitPct}%)</span>
                           </div>
-                        );
-                      })()}
+                          <div className="context-breakdown-row">
+                            <span className="context-breakdown-label">New input</span>
+                            <span className="context-breakdown-value">{formatTokens(newInputTokens)}</span>
+                          </div>
+                          <div className="context-breakdown-row">
+                            <span className="context-breakdown-label">Output</span>
+                            <span className="context-breakdown-value">{formatTokens(contextUsage.outputTokens)}</span>
+                          </div>
+                          {!!contextUsage.reasoningOutputTokens && contextUsage.reasoningOutputTokens > 0 && (
+                            <div className="context-breakdown-row">
+                              <span className="context-breakdown-label">Reasoning output</span>
+                              <span className="context-breakdown-value">{formatTokens(contextUsage.reasoningOutputTokens)}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {/* Session totals */}
+                  {sessionUsage && (
+                    <div className="usage-tooltip-section">
+                      <div className="usage-tooltip-heading">Session totals</div>
+                      <div className="context-breakdown">
+                        <div className="context-breakdown-row">
+                          <span className="context-breakdown-label">Input</span>
+                          <span className="context-breakdown-value">{formatTokens(sessionUsage.inputTokens)}</span>
+                        </div>
+                        <div className="context-breakdown-row">
+                          <span className="context-breakdown-label">Output</span>
+                          <span className="context-breakdown-value">{formatTokens(sessionUsage.outputTokens)}</span>
+                        </div>
+                      </div>
                     </div>
                   )}
                   {/* Session cost */}

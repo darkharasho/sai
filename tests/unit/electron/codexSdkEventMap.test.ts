@@ -101,12 +101,83 @@ describe('mapCodexSdkEvent', () => {
           items: [{ text: 'write tests', completed: false }],
         } satisfies ThreadItem,
         expected: toolUse('todo-1', 'TodoWrite', {
-          todos: [{ text: 'write tests', completed: false }],
+          todos: [{ id: 'todo-1:0', content: 'write tests', status: 'in_progress' }],
         }),
       },
     ])('maps $label to a tool use', ({ item, expected }) => {
       expect(mapCodexSdkEvent({ type: 'item.started', item } satisfies ThreadEvent, ctx))
         .toEqual([expected]);
+    });
+
+    it('normalizes a multi-item todo list, marking the first incomplete item in progress', () => {
+      const event = {
+        type: 'item.started',
+        item: {
+          id: 'todo-1',
+          type: 'todo_list',
+          items: [
+            { text: 'Inspect', completed: true },
+            { text: 'Implement', completed: false },
+            { text: 'Verify', completed: false },
+          ],
+        },
+      } satisfies ThreadEvent;
+
+      expect(mapCodexSdkEvent(event, ctx)).toEqual([expect.objectContaining({
+        type: 'assistant',
+        message: { content: [expect.objectContaining({
+          type: 'tool_use',
+          id: 'todo-1',
+          name: 'TodoWrite',
+          input: { todos: [
+            { id: 'todo-1:0', content: 'Inspect', status: 'completed' },
+            { id: 'todo-1:1', content: 'Implement', status: 'in_progress' },
+            { id: 'todo-1:2', content: 'Verify', status: 'pending' },
+          ] },
+        })] },
+      })]);
+    });
+
+    it('drops malformed todo entries individually without throwing', () => {
+      const event = {
+        type: 'item.started',
+        item: {
+          id: 'todo-1',
+          type: 'todo_list',
+          items: [
+            null,
+            { text: '   ', completed: false },
+            { text: 'bad completed', completed: 'yes' },
+            { text: 'Valid', completed: false },
+          ],
+        },
+      } as unknown as ThreadEvent;
+
+      expect(() => mapCodexSdkEvent(event, ctx)).not.toThrow();
+      expect(mapCodexSdkEvent(event, ctx)).toEqual([toolUse('todo-1', 'TodoWrite', {
+        todos: [{ id: 'todo-1:0', content: 'Valid', status: 'in_progress' }],
+      })]);
+    });
+
+    it('marks every item completed when the whole todo list is done', () => {
+      const event = {
+        type: 'item.started',
+        item: {
+          id: 'todo-1',
+          type: 'todo_list',
+          items: [
+            { text: 'Inspect', completed: true },
+            { text: 'Implement', completed: true },
+          ],
+        },
+      } satisfies ThreadEvent;
+
+      expect(mapCodexSdkEvent(event, ctx)).toEqual([toolUse('todo-1', 'TodoWrite', {
+        todos: [
+          { id: 'todo-1:0', content: 'Inspect', status: 'completed' },
+          { id: 'todo-1:1', content: 'Implement', status: 'completed' },
+        ],
+      })]);
     });
 
     it.each([
@@ -145,13 +216,60 @@ describe('mapCodexSdkEvent', () => {
         status: 'in_progress',
       },
       { id: 'web-1', type: 'web_search', query: 'Codex SDK' },
-      { id: 'todo-1', type: 'todo_list', items: [{ text: 'test', completed: true }] },
       { id: 'error-1', type: 'error', message: 'non-fatal' },
     ] satisfies ThreadItem[];
 
     it.each(updatedItems)('defers $type progress updates in compatibility mode', (item) => {
       expect(mapCodexSdkEvent({ type: 'item.updated', item } satisfies ThreadEvent, ctx))
         .toEqual([]);
+    });
+
+    it('re-emits the same TodoWrite tool-use id with advanced statuses', () => {
+      const startedEvent = {
+        type: 'item.started',
+        item: {
+          id: 'todo-1',
+          type: 'todo_list',
+          items: [
+            { text: 'Inspect', completed: true },
+            { text: 'Implement', completed: false },
+            { text: 'Verify', completed: false },
+          ],
+        },
+      } satisfies ThreadEvent;
+      const updatedEvent = {
+        type: 'item.updated',
+        item: {
+          id: 'todo-1',
+          type: 'todo_list',
+          items: [
+            { text: 'Inspect', completed: true },
+            { text: 'Implement', completed: true },
+            { text: 'Verify', completed: false },
+          ],
+        },
+      } satisfies ThreadEvent;
+
+      const started = mapCodexSdkEvent(startedEvent, ctx);
+      const updated = mapCodexSdkEvent(updatedEvent, ctx);
+
+      expect(started).toEqual([toolUse('todo-1', 'TodoWrite', {
+        todos: [
+          { id: 'todo-1:0', content: 'Inspect', status: 'completed' },
+          { id: 'todo-1:1', content: 'Implement', status: 'in_progress' },
+          { id: 'todo-1:2', content: 'Verify', status: 'pending' },
+        ],
+      })]);
+      expect(updated).toEqual([toolUse('todo-1', 'TodoWrite', {
+        todos: [
+          { id: 'todo-1:0', content: 'Inspect', status: 'completed' },
+          { id: 'todo-1:1', content: 'Implement', status: 'completed' },
+          { id: 'todo-1:2', content: 'Verify', status: 'in_progress' },
+        ],
+      })]);
+      const startedId = (started[0].message as { content: Array<{ id: string }> }).content[0].id;
+      const updatedId = (updated[0].message as { content: Array<{ id: string }> }).content[0].id;
+      expect(updatedId).toBe(startedId);
     });
   });
 

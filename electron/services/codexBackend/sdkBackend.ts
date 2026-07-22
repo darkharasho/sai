@@ -9,6 +9,7 @@ import {
 } from '@openai/codex-sdk';
 import path from 'node:path';
 import { enrichedEnv } from '../shellEnv';
+import { getOrCreate as getOrCreateWorkspace } from '../workspace';
 import { mapCodexSdkEvent, type SaiEnvelope } from './sdkEventMap';
 import { buildCodexInput, buildCodexSdkOptions } from './sdkOptions';
 import { resolveBundledCodex } from './bundledModels';
@@ -37,6 +38,7 @@ export interface SdkCodexBackendDeps {
   emit?: (event: SaiEnvelope) => void;
   getModels?: (forceRefresh?: boolean) => Promise<CodexModelResult>;
   getEnv?: () => NodeJS.ProcessEnv;
+  registerWorkspace?: (projectPath: string) => void;
 }
 
 interface ScopeMeta {
@@ -95,6 +97,7 @@ export class SdkCodexBackend implements CodexBackend {
   private readonly emit: (event: SaiEnvelope) => void;
   private readonly loadModels: (forceRefresh?: boolean) => Promise<CodexModelResult>;
   private readonly getEnv: () => NodeJS.ProcessEnv;
+  private readonly registerWorkspace: (projectPath: string) => void;
 
   constructor(deps: SdkCodexBackendDeps = {}) {
     this.createClient = deps.createClient ?? ((options) => {
@@ -107,9 +110,13 @@ export class SdkCodexBackend implements CodexBackend {
     this.emit = deps.emit ?? (() => undefined);
     this.loadModels = deps.getModels ?? emptyModels;
     this.getEnv = deps.getEnv ?? enrichedEnv;
+    this.registerWorkspace = deps.registerWorkspace ?? ((projectPath) => {
+      try { getOrCreateWorkspace(projectPath); } catch { /* isolated tests or shutdown */ }
+    });
   }
 
   start(args: CodexStartArgs): void {
+    this.registerWorkspace(args.projectPath);
     const scope = codexScope(args.scope);
     const key = codexScopeKey(args.projectPath, scope);
     const nextMeta: ScopeMeta = {
@@ -136,6 +143,7 @@ export class SdkCodexBackend implements CodexBackend {
   }
 
   send(args: CodexSendArgs): void {
+    this.registerWorkspace(args.projectPath);
     const scope = codexScope(args.scope);
     const key = codexScopeKey(args.projectPath, scope);
     const runtime = this.runtimeFor(args.projectPath, scope);

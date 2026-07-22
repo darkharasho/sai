@@ -74,7 +74,7 @@ contextBridge.exposeInMainWorld('sai', {
   claudeAlwaysAllow: (projectPath: string, toolPattern: string) =>
     ipcRenderer.invoke('claude:alwaysAllow', projectPath, toolPattern),
   claudeModels: () => ipcRenderer.invoke('claude:models'),
-  // Codex CLI
+  // Codex SDK
   codexModels: (forceRefresh?: boolean) => ipcRenderer.invoke('codex:models', forceRefresh),
   codexStart: (cwd: string, scope?: string, kind?: string, orchestratorContext?: unknown, scopeCwd?: string, metaPreamble?: string, additionalDirectories?: string[]) =>
     ipcRenderer.invoke('codex:start', cwd, scope, kind, orchestratorContext, scopeCwd, metaPreamble, additionalDirectories),
@@ -83,6 +83,8 @@ contextBridge.exposeInMainWorld('sai', {
   codexStop: (projectPath: string, scope?: string) => ipcRenderer.send('codex:stop', projectPath, scope),
   codexSetSessionId: (projectPath: string, sessionId: string | undefined, scope?: string) => ipcRenderer.send('codex:setSessionId', projectPath, sessionId, scope),
   codexReconcileScope: (projectPath: string, scope?: string) => ipcRenderer.send('codex:reconcileScope', projectPath, scope),
+  codexUsageFetch: (force = false) =>
+    ipcRenderer.invoke('codex:usage', { force }) as Promise<import('../src/lib/composerTelemetry').CodexRateLimitsSnapshot | null>,
   // Gemini CLI
   geminiModels: () => ipcRenderer.invoke('gemini:models'),
   geminiStart: (cwd: string, metaPreamble?: string) => ipcRenderer.invoke('gemini:start', cwd, metaPreamble),

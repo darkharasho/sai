@@ -1,53 +1,21 @@
-import { app, type BrowserWindow } from 'electron';
-import fs from 'node:fs';
-import path from 'node:path';
 import { emitChatMessage } from '../claude';
 import { registerWorkspaceBackendHooks } from '../workspace';
-import { CliCodexBackend, fetchCodexModels } from './cliBackend';
-import { SdkCodexBackend } from './sdkBackend';
 import { fetchBundledCodexModels } from './bundledModels';
-import type { CodexBackend, CodexBackendKind } from './types';
+import { SdkCodexBackend } from './sdkBackend';
+import type { CodexBackend } from './types';
 
 export * from './types';
 
-/**
- * Read the Codex transport escape hatch directly from SAI settings.
- * This intentionally does not share Claude's setting accessor: selecting a
- * Codex transport must not read or mutate SAI's default AI provider.
- */
-export function getCodexBackendSetting(): CodexBackendKind {
-  try {
-    const settingsPath = path.join(app.getPath('userData'), 'settings.json');
-    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')) as Record<string, unknown>;
-    return settings.codexBackend === 'cli' ? 'cli' : 'sdk';
-  } catch {
-    return 'sdk';
-  }
-}
-
 let active: CodexBackend | null = null;
-let cliWindow: BrowserWindow | null = null;
 
-/** Configure the window needed by the legacy CLI transport without creating it. */
-export function configureCodexBackendWindow(win: BrowserWindow | null): void {
-  cliWindow = win;
-}
-
-/** Return the selected backend, constructing it only on first use. */
+/** Return the SDK-backed Codex backend, constructing it only on first use. */
 export function getCodexBackend(): CodexBackend {
   if (active) return active;
 
-  if (getCodexBackendSetting() === 'cli') {
-    if (!cliWindow) {
-      throw new Error('The Codex CLI backend requires a configured BrowserWindow');
-    }
-    active = new CliCodexBackend(cliWindow);
-  } else {
-    active = new SdkCodexBackend({
-      emit: emitChatMessage,
-      getModels: fetchBundledCodexModels,
-    });
-  }
+  active = new SdkCodexBackend({
+    emit: emitChatMessage,
+    getModels: fetchBundledCodexModels,
+  });
 
   registerWorkspaceBackendHooks('codex', {
     suspend: (projectPath) => active?.suspendWorkspace(projectPath),

@@ -144,6 +144,27 @@ function toolErrorContent(content: ToolResultContent): ToolResultContent {
   ];
 }
 
+function normalizeTodos(item: Extract<ThreadItem, { type: 'todo_list' }>) {
+  const valid = (Array.isArray(item.items) ? item.items : []).filter(
+    (todo): todo is { text: string; completed: boolean } =>
+      !!todo && typeof todo.text === 'string' && todo.text.trim().length > 0
+      && typeof todo.completed === 'boolean',
+  );
+  const firstIncomplete = valid.findIndex((todo) => !todo.completed);
+  return valid.map((todo, index) => ({
+    id: `${item.id}:${index}`,
+    content: todo.text,
+    status: todo.completed ? 'completed' : index === firstIncomplete ? 'in_progress' : 'pending',
+  }));
+}
+
+function todoSnapshot(
+  item: Extract<ThreadItem, { type: 'todo_list' }>,
+  ctx: CodexMapContext,
+): SaiEnvelope[] {
+  return [toolUse(item.id, 'TodoWrite', { todos: normalizeTodos(item) }, ctx)];
+}
+
 function startedItem(item: ThreadItem, ctx: CodexMapContext): SaiEnvelope[] {
   switch (item.type) {
     case 'command_execution':
@@ -155,7 +176,7 @@ function startedItem(item: ThreadItem, ctx: CodexMapContext): SaiEnvelope[] {
     case 'web_search':
       return [toolUse(item.id, 'WebSearch', { query: item.query }, ctx)];
     case 'todo_list':
-      return [toolUse(item.id, 'TodoWrite', { todos: item.items }, ctx)];
+      return todoSnapshot(item, ctx);
     case 'agent_message':
     case 'reasoning':
     case 'error':
@@ -163,15 +184,16 @@ function startedItem(item: ThreadItem, ctx: CodexMapContext): SaiEnvelope[] {
   }
 }
 
-function updatedItem(item: ThreadItem): SaiEnvelope[] {
+function updatedItem(item: ThreadItem, ctx: CodexMapContext): SaiEnvelope[] {
   switch (item.type) {
+    case 'todo_list':
+      return todoSnapshot(item, ctx);
     case 'agent_message':
     case 'reasoning':
     case 'command_execution':
     case 'file_change':
     case 'mcp_tool_call':
     case 'web_search':
-    case 'todo_list':
     case 'error':
       return [];
   }
@@ -238,7 +260,7 @@ export function mapCodexSdkEvent(
     case 'item.started':
       return startedItem(event.item, ctx);
     case 'item.updated':
-      return updatedItem(event.item);
+      return updatedItem(event.item, ctx);
     case 'item.completed':
       return completedItem(event.item, ctx);
     case 'turn.completed':

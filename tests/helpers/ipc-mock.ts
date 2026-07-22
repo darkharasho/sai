@@ -37,6 +37,7 @@ export interface MockSai {
   codexSend: ReturnType<typeof vi.fn>;
   codexStop: ReturnType<typeof vi.fn>;
   codexReconcileScope: ReturnType<typeof vi.fn>;
+  codexUsageFetch: ReturnType<typeof vi.fn>;
 
   // Gemini
   geminiModels: ReturnType<typeof vi.fn>;
@@ -145,7 +146,11 @@ export interface MockSai {
  * no-op unsubscribe function).
  */
 export function createMockSai(): MockSai {
-  const noopUnsubscribe = vi.fn(() => () => {});
+  // Each listener-registration channel gets its OWN vi.fn() (never a shared
+  // instance) — sharing one mock across unrelated channels (e.g. claudeOnMessage
+  // and onUsageUpdate) makes "not.toHaveBeenCalled()" assertions on one channel
+  // pass or fail based on unrelated calls to a different channel.
+  const noopUnsubscribe = () => vi.fn(() => () => {});
 
   return {
     platform: 'linux',
@@ -160,8 +165,8 @@ export function createMockSai(): MockSai {
     terminalGetCwd: vi.fn().mockResolvedValue('/home/user/project'),
     terminalIsAwaitingInput: vi.fn().mockResolvedValue(false),
     terminalTabComplete: vi.fn().mockResolvedValue([]),
-    terminalOnData: noopUnsubscribe,
-    terminalOnCtrlC: noopUnsubscribe,
+    terminalOnData: noopUnsubscribe(),
+    terminalOnCtrlC: noopUnsubscribe(),
 
     // Claude
     claudeStart: vi.fn().mockResolvedValue(undefined),
@@ -172,7 +177,7 @@ export function createMockSai(): MockSai {
     claudeReconcileScope: vi.fn(),
     claudeApprove: vi.fn().mockResolvedValue(undefined),
     claudeAlwaysAllow: vi.fn().mockResolvedValue(undefined),
-    claudeOnMessage: noopUnsubscribe,
+    claudeOnMessage: noopUnsubscribe(),
 
     // Codex
     codexModels: vi.fn().mockResolvedValue([]),
@@ -180,6 +185,7 @@ export function createMockSai(): MockSai {
     codexSend: vi.fn(),
     codexStop: vi.fn(),
     codexReconcileScope: vi.fn(),
+    codexUsageFetch: vi.fn().mockResolvedValue(null),
 
     // Gemini
     geminiModels: vi.fn().mockResolvedValue([]),
@@ -244,7 +250,7 @@ export function createMockSai(): MockSai {
     workspaceGetAll: vi.fn().mockResolvedValue([]),
     workspaceClose: vi.fn().mockResolvedValue(undefined),
     workspaceSuspend: vi.fn().mockResolvedValue(undefined),
-    onWorkspaceSuspended: noopUnsubscribe,
+    onWorkspaceSuspended: noopUnsubscribe(),
 
     // Navigation / project
     saveImage: vi.fn().mockResolvedValue(''),
@@ -258,28 +264,28 @@ export function createMockSai(): MockSai {
     // Usage
     usageFetch: vi.fn().mockResolvedValue(null),
     usageMode: vi.fn().mockResolvedValue(''),
-    onUsageUpdate: noopUnsubscribe,
+    onUsageUpdate: noopUnsubscribe(),
 
     // Updater
     updateCheck: vi.fn(),
     updateInstall: vi.fn(),
     updateGetVersion: vi.fn().mockResolvedValue('0.0.0'),
-    onUpdateStatus: noopUnsubscribe,
-    onUpdateAvailable: noopUnsubscribe,
-    onUpdateProgress: noopUnsubscribe,
-    onUpdateDownloaded: noopUnsubscribe,
-    onUpdateError: noopUnsubscribe,
+    onUpdateStatus: noopUnsubscribe(),
+    onUpdateAvailable: noopUnsubscribe(),
+    onUpdateProgress: noopUnsubscribe(),
+    onUpdateDownloaded: noopUnsubscribe(),
+    onUpdateError: noopUnsubscribe(),
 
     // GitHub
     githubGetUser: vi.fn().mockResolvedValue(null),
     githubStartAuth: vi.fn().mockResolvedValue(undefined),
     githubCancelAuth: vi.fn().mockResolvedValue(undefined),
     githubLogout: vi.fn().mockResolvedValue(undefined),
-    githubOnAuthComplete: noopUnsubscribe,
-    githubOnAuthError: noopUnsubscribe,
+    githubOnAuthComplete: noopUnsubscribe(),
+    githubOnAuthError: noopUnsubscribe(),
     githubSyncNow: vi.fn().mockResolvedValue(undefined),
-    githubOnSyncStatus: noopUnsubscribe,
-    githubOnSettingsApplied: noopUnsubscribe,
+    githubOnSyncStatus: noopUnsubscribe(),
+    githubOnSettingsApplied: noopUnsubscribe(),
   };
 }
 

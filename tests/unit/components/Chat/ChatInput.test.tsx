@@ -9,7 +9,9 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { installMockSai } from '../../../helpers/ipc-mock';
+import type { UsageLimitView } from '../../../../src/lib/composerTelemetry';
 
 // Must be hoisted before the component import
 vi.mock('../../../../src/terminalBuffer', () => ({
@@ -38,6 +40,9 @@ const defaultProps = {
   // dependency doesn't change every render.
   slashCommands: STABLE_SLASH_COMMANDS,
 };
+
+/** Stable base props for the shared-telemetry ring/popover tests below. */
+const baseProps = () => ({ ...defaultProps });
 
 describe('ChatInput', () => {
   beforeEach(() => {
@@ -385,5 +390,93 @@ describe('ChatInput', () => {
     expect(onBeforeSend).toHaveBeenCalledTimes(1);
     expect(onSend).toHaveBeenCalledTimes(1);
     expect(order).toEqual(['before', 'send']);
+  });
+
+  describe('provider-neutral context ring', () => {
+    it('renders a read-only Codex context ring only when a total is known', async () => {
+      const onSend = vi.fn();
+      const { rerender } = render(<ChatInput {...baseProps()} aiProvider="codex" onSend={onSend}
+        contextUsage={{ used: 2_000, total: 10_000, inputTokens: 1_700, cachedInputTokens: 500, cacheCreationTokens: 0, outputTokens: 300, reasoningOutputTokens: 100 }} />);
+      const ring = screen.getByRole('button', { name: /Context 20%/i });
+      expect(ring).toHaveAttribute('aria-disabled', 'true');
+      await userEvent.click(ring);
+      expect(onSend).not.toHaveBeenCalledWith('/compact');
+
+      rerender(<ChatInput {...baseProps()} aiProvider="codex" onSend={onSend}
+        contextUsage={{ used: 2_000, total: null, inputTokens: 1_700, cachedInputTokens: 500, cacheCreationTokens: 0, outputTokens: 300 }} />);
+      expect(screen.queryByRole('button', { name: /Context \d+%/i })).not.toBeInTheDocument();
+    });
+
+    it('keeps the Claude ring clickable', async () => {
+      const onSend = vi.fn();
+      render(<ChatInput {...baseProps()} aiProvider="claude" onSend={onSend}
+        contextUsage={{ used: 20, total: 100, inputTokens: 10, cachedInputTokens: 0, cacheCreationTokens: 0, outputTokens: 10 }} />);
+      await userEvent.click(screen.getByRole('button', { name: /Click to compact/i }));
+      expect(onSend).toHaveBeenCalledWith('/compact');
+    });
+
+    it('renders no context ring and no usage popover when telemetry is entirely absent (e.g. Gemini)', () => {
+      const { container } = render(<ChatInput {...baseProps()} aiProvider="gemini" />);
+      expect(container.querySelector('.toolbar-usage')).toBeNull();
+      expect(screen.queryByRole('button', { name: /Context \d+%/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Click to compact/i })).not.toBeInTheDocument();
+    });
+  });
+
+  describe('shared usage popover', () => {
+    const now = Math.floor(Date.now() / 1000);
+    const usageLimits: UsageLimitView[] = [
+      {
+        id: 'codex-primary', label: 'Current session', group: 'session',
+        usedPercent: 42, resetsAt: now + 3_600, windowDurationMins: 300,
+        updatedAt: Date.now(), stale: false,
+      },
+      {
+        id: 'codex-secondary', label: 'All models', group: 'weekly',
+        usedPercent: 73, resetsAt: now + 86_400, windowDurationMins: 10_080,
+        updatedAt: Date.now(), stale: false,
+      },
+    ];
+
+    it('renders inline usage from the highest usedPercent limit and the full breakdown', () => {
+      const { container } = render(<ChatInput {...baseProps()} aiProvider="codex"
+        usageLimits={usageLimits}
+        sessionUsage={{ inputTokens: 5_000, outputTokens: 1_200 }}
+        contextUsage={{ used: 2_000, total: 10_000, inputTokens: 1_700, cachedInputTokens: 500, cacheCreationTokens: 0, outputTokens: 300, reasoningOutputTokens: 100 }}
+      />);
+
+      // Inline label picks the highest usedPercent across all limits (73%, not the 42% primary).
+      const inline = container.querySelector('.toolbar-usage');
+      expect(inline?.textContent).toContain('73% used');
+
+      // Both limit groups render with their shared labels and reset sublabels.
+      expect(screen.getByText('Current session')).toBeTruthy();
+      expect(screen.getByText('All models')).toBeTruthy();
+      expect(screen.getAllByText(/Resets/i).length).toBeGreaterThanOrEqual(2);
+
+      // Context totals.
+      expect(screen.getByText('2.0K / 10.0K')).toBeTruthy();
+      // Cached / new input / output / reasoning-output rows.
+      expect(screen.getByText('Cache hit')).toBeTruthy();
+      expect(screen.getByText('New input')).toBeTruthy();
+      expect(screen.getAllByText('Output').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText('Reasoning output')).toBeTruthy();
+      // Session totals.
+      expect(screen.getByText('Session totals')).toBeTruthy();
+    });
+
+    it('marks a stale limit with the stale sublabel', () => {
+      const staleLimits: UsageLimitView[] = [
+        { ...usageLimits[0], stale: true },
+        usageLimits[1],
+      ];
+      render(<ChatInput {...baseProps()} aiProvider="codex" usageLimits={staleLimits} />);
+      expect(screen.getByText('Data may be stale')).toBeTruthy();
+    });
+
+    it('never renders a misleading 0% used label for an empty limits list', () => {
+      render(<ChatInput {...baseProps()} aiProvider="codex" sessionUsage={{ inputTokens: 0, outputTokens: 0 }} usageLimits={[]} />);
+      expect(screen.queryByText('0% used')).toBeNull();
+    });
   });
 });

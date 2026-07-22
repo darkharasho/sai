@@ -286,6 +286,58 @@ describe('TodoProgress (ring + popover)', () => {
     expect(active?.querySelector('.todo-ring-subtext')?.textContent).toContain('Running the suite');
   });
 
+  it('renders a normalized Codex TodoWrite snapshot and hides once all items complete', () => {
+    // Locks the Codex sdkEventMap normalization contract: normalizeTodos emits
+    // { id: '<itemId>:<index>', content, status } from item.started/updated,
+    // and TodoProgress must treat that exactly like Claude's native TodoWrite
+    // shape - active label while incomplete, ring gone once fully done.
+    const inProgressMessage = {
+      id: 'a1',
+      role: 'assistant' as const,
+      content: '',
+      timestamp: 0,
+      toolCalls: [{
+        id: 'todo-1',
+        name: 'TodoWrite',
+        input: JSON.stringify({
+          todos: [
+            { id: 'todo-1:0', content: 'Inspect', status: 'completed' },
+            { id: 'todo-1:1', content: 'Implement', status: 'in_progress' },
+            { id: 'todo-1:2', content: 'Verify', status: 'pending' },
+          ],
+        }),
+      }],
+    };
+    const { container, rerender } = render(
+      <TodoProgress messages={[inProgressMessage] as any} isStreaming={true} />,
+    );
+
+    const ring = container.querySelector('[data-testid="todo-ring"]') as HTMLElement;
+    expect(ring).toBeTruthy();
+    expect(ring.getAttribute('title')).toBe('1/3 · Implement');
+    fireEvent.click(ring);
+    const active = container.querySelector('.todo-ring-item--active');
+    expect(active?.querySelector('.todo-ring-text')?.textContent).toBe('Implement');
+
+    const completedMessage = {
+      ...inProgressMessage,
+      toolCalls: [{
+        id: 'todo-1',
+        name: 'TodoWrite',
+        input: JSON.stringify({
+          todos: [
+            { id: 'todo-1:0', content: 'Inspect', status: 'completed' },
+            { id: 'todo-1:1', content: 'Implement', status: 'completed' },
+            { id: 'todo-1:2', content: 'Verify', status: 'completed' },
+          ],
+        }),
+      }],
+    };
+    rerender(<TodoProgress messages={[completedMessage] as any} isStreaming={true} />);
+
+    expect(container.querySelector('[data-testid="todo-ring"]')).toBeNull();
+  });
+
   it('renders status indicators with correct classes', () => {
     const messages = [buildTodosMsg([
       { content: 'done one', status: 'completed' },

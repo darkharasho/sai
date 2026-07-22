@@ -1,4 +1,3 @@
-export type CodexBackendKind = 'cli' | 'sdk';
 export type CodexSessionKind = 'chat' | 'task' | 'orchestrator';
 export type CodexPermission = 'auto' | 'read-only' | 'full-access';
 export type CodexReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
@@ -29,6 +28,7 @@ export interface CodexModelOption {
   name: string;
   supportedReasoningEfforts?: CodexReasoningEffort[];
   defaultReasoningEffort?: CodexReasoningEffort;
+  effectiveContextWindow?: number;
 }
 
 const CODEX_REASONING_EFFORTS = new Set<CodexReasoningEffort>(['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
@@ -52,25 +52,6 @@ export function normalizeCodexModelOption(model: any): CodexModelOption {
 export interface CodexModelResult {
   models: CodexModelOption[];
   defaultModel: string;
-}
-
-export type CodexCapability =
-  | 'compact'
-  | 'interactive-approval'
-  | 'answer-question'
-  | 'answer-plan-review';
-
-export class CodexCapabilityError extends Error {
-  readonly code = 'CODEX_CAPABILITY_UNAVAILABLE';
-
-  constructor(
-    readonly capability: CodexCapability,
-    readonly requiredBackend: CodexBackendKind | null,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'CodexCapabilityError';
-  }
 }
 
 export interface CodexBackend {

@@ -84,6 +84,16 @@ import { buildTaskRegistry, TaskRegistryContext } from './taskRegistry';
 import { parseAiError, looksLikeApiError } from './parseAiError';
 import { buildMetaPreamble } from '../../lib/metaSystemPrompt';
 import { normalizeCodexEffort } from '../../lib/codexEffort';
+import {
+  claudeRateLimitsToViews,
+  codexRateLimitsToViews,
+  contextUsageFromCodex,
+  resolveEffectiveContextWindow,
+  type ContextUsageView,
+  type UsageLimitView,
+  type ClaudeRateLimitRecord,
+  type CodexRateLimitsSnapshot,
+} from '../../lib/composerTelemetry';
 
 type CodexPermission = 'auto' | 'read-only' | 'full-access';
 
@@ -608,13 +618,21 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(initialPendingApproval);
   const [pendingSudoPrompt, setPendingSudoPrompt] = useState<PendingSudoPrompt | null>(null);
   const [fileContextEnabled, setFileContextEnabled] = useState(true);
-  const [contextUsage, setContextUsage] = useState<{ used: number; total: number; inputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; outputTokens: number }>({ used: 0, total: 1000000, inputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, outputTokens: 0 });
-  const [sessionUsage, setSessionUsage] = useState<{ inputTokens: number; outputTokens: number }>({ inputTokens: 0, outputTokens: 0 });
+  // Provider-neutral telemetry state. Null/empty until a provider actually
+  // reports real numbers — never seed Claude-shaped defaults for Codex/Gemini,
+  // and never let one provider's data leak into another provider's chat.
+  const [contextUsage, setContextUsage] = useState<ContextUsageView | null>(null);
+  const [sessionUsage, setSessionUsage] = useState<{ inputTokens: number; outputTokens: number } | null>(null);
   const [sessionCost, setSessionCost] = useState(0);
   const [autoCompactThreshold, setAutoCompactThreshold] = useState(0); // 0 = off
   const [toolCallsExpanded, setToolCallsExpanded] = useState(true);
   const autoCompactCooldownRef = useRef(0); // timestamp — don't re-compact until after this
-  const [rateLimits, setRateLimits] = useState<Map<string, { rateLimitType: string; resetsAt: number; status: string; isUsingOverage: boolean; overageResetsAt: number; utilization?: number; lastUpdated: number }>>(new Map());
+  const [claudeRateLimits, setClaudeRateLimits] = useState<Map<string, ClaudeRateLimitRecord>>(new Map());
+  const [codexUsageLimits, setCodexUsageLimits] = useState<UsageLimitView[]>([]);
+  const usageLimits = useMemo(
+    () => aiProvider === 'claude' ? claudeRateLimitsToViews(claudeRateLimits) : codexUsageLimits,
+    [aiProvider, claudeRateLimits, codexUsageLimits],
+  );
   const [billingMode, setBillingMode] = useState<'subscription' | 'api'>('subscription');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -687,7 +705,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
   // Auto-compact when context exceeds threshold
   useEffect(() => {
-    if (aiProvider !== 'claude' || !autoCompactThreshold || !contextUsage.used || !contextUsage.total) return;
+    if (aiProvider !== 'claude' || !autoCompactThreshold || !contextUsage?.used || !contextUsage.total) return;
     if (isStreaming) return; // don't compact mid-turn
     const pct = contextUsage.used / contextUsage.total;
     if (pct < autoCompactThreshold / 100) return;
@@ -697,6 +715,28 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     window.sai.claudeCompact(projectPath, permissionMode, effortLevel, modelChoice, claudeScope);
   }, [contextUsage, isStreaming]);
 
+  // Refs mirroring the latest Codex model selection so the long-lived message
+  // handler effect below can read the current catalog entry without needing
+  // to resubscribe (and potentially drop buffered frames) every time the
+  // model list or selection changes.
+  const codexModelRef = useRef(codexModel);
+  useEffect(() => { codexModelRef.current = codexModel; }, [codexModel]);
+  const codexModelsRef = useRef(codexModels);
+  useEffect(() => { codexModelsRef.current = codexModels; }, [codexModels]);
+
+  // Last applied snapshot's fetchedAt — guards against the forced post-turn
+  // codexUsageFetch(true) racing the 60s poll and letting a late-resolving
+  // OLDER snapshot clobber fresher data already applied.
+  const lastAppliedCodexFetchedAtRef = useRef(0);
+  // Applies a Codex rate-limit snapshot to isolated Codex-only state. Never
+  // touches claudeRateLimits — Codex and Claude limits are never shared.
+  const applyCodexLimits = useCallback((snapshot: CodexRateLimitsSnapshot | null) => {
+    if (snapshot?.provider === 'codex') {
+      if (snapshot.fetchedAt < lastAppliedCodexFetchedAtRef.current) return;
+      lastAppliedCodexFetchedAtRef.current = snapshot.fetchedAt;
+      setCodexUsageLimits(codexRateLimitsToViews(snapshot));
+    }
+  }, []);
 
   useEffect(() => {
     setReady(false);
@@ -945,9 +985,11 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
       // Authoritative context accounting from the runtime (getContextUsage) —
       // replaces the usage-sum estimate computed from result frames.
-      if (msg.type === 'context_usage') {
+      if (aiProvider === 'claude' && msg.type === 'context_usage') {
         if (typeof msg.totalTokens === 'number' && typeof msg.maxTokens === 'number' && msg.maxTokens > 0) {
-          setContextUsage(prev => ({ ...prev, used: msg.totalTokens, total: msg.maxTokens }));
+          setContextUsage(prev => prev
+            ? { ...prev, used: msg.totalTokens, total: msg.maxTokens }
+            : { used: msg.totalTokens, total: msg.maxTokens, inputTokens: 0, cachedInputTokens: 0, cacheCreationTokens: 0, outputTokens: 0 });
         }
         return;
       }
@@ -973,10 +1015,10 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       // Capture rate limit info (may receive multiple: daily, weekly, etc.)
       // CLI events are supplementary — only update utilization when the
       // authoritative OAuth API data is stale (>60 s) or absent.
-      if (msg.type === 'rate_limit_event' && msg.rate_limit_info) {
+      if (aiProvider === 'claude' && msg.type === 'rate_limit_event' && msg.rate_limit_info) {
         const info = msg.rate_limit_info;
         const key = info.rateLimitType || 'unknown';
-        setRateLimits(prev => {
+        setClaudeRateLimits(prev => {
           const next = new Map(prev);
           const existing = next.get(key);
           const now = Date.now();
@@ -1251,51 +1293,79 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             markStreamingActive();
             return;
           }
-          setMessages(prev => {
-            const last = prev[prev.length - 1];
-            // Merge into the last assistant message only when it's a pure text
-            // bubble (no tool calls, not a reasoning row):
-            //  - delta text APPENDS, unless a turn boundary demands a new bubble
-            //    (streaming_start / wait-resume re-arm — merging a resumed
-            //    turn's text into the previous segment overwrote/absorbed it);
-            //  - non-delta full text REPLACES only for snapshot transports
-            //    (gemini). Claude full frames are distinct segments — a resumed
-            //    turn or subagent message must never clobber the previous reply.
-            const shouldAppend = msg.message.content.some((block: any) => block.type === 'text' && block.delta);
-            const lastIsMergeableText = last?.role === 'assistant' && !last.toolCalls && !last.reasoning && !last.reasoningLive;
-            // Claude full frames never merge (distinct segments) — EXCEPT the
-            // final-tagged reconcile frame, whose text replaces the delta
-            // accumulation on the same bubble.
-            if (lastIsMergeableText && text && !tools.length
-                && (shouldAppend ? !forceNewBubbleRef.current : (aiProvider !== 'claude' || isFinalText))) {
-              const updated = [...prev];
-              const newContent = shouldAppend ? last.content + text : text;
-              updated[updated.length - 1] = { ...last, content: newContent };
-              return updated;
-            }
-            // Before pushing a new assistant message, stamp durationMs on the most recent
-            // unstamped assistant text bubble so each bubble records its own duration.
-            const turnStart = turnStartedAtRef.current ?? Date.now();
-            const stamped = [...prev];
-            for (let i = stamped.length - 1; i >= 0; i--) {
-              const m = stamped[i];
-              if (m.role === 'assistant' && m.content && m.content.length > 0 && typeof m.durationMs !== 'number') {
-                stamped[i] = { ...m, durationMs: Date.now() - turnStart };
-                break;
+          // Codex re-emits TodoWrite (and, in principle, any tool) with the SAME
+          // tool-use id on every item.updated frame so its card updates in place
+          // instead of piling up duplicate transcript entries — see
+          // codexSdkEventMap's todoSnapshot(), which reuses item.id verbatim
+          // across item.started/item.updated. Claude's tool-use ids are unique
+          // per call, so this split is always a no-op for Claude (all tools land
+          // in newTools below, exactly as before).
+          const existingToolIds = new Set<string>();
+          for (const m of messagesRef.current) {
+            if (m.toolCalls) for (const tc of m.toolCalls) if (tc.id) existingToolIds.add(tc.id);
+          }
+          const updateTools = tools.filter(t => t.id && existingToolIds.has(t.id));
+          const newTools = tools.filter(t => !t.id || !existingToolIds.has(t.id));
+          if (updateTools.length > 0) {
+            setMessages(prev => prev.map(m => {
+              if (m.role !== 'assistant' || !m.toolCalls) return m;
+              let touched = false;
+              const nextToolCalls = m.toolCalls.map(tc => {
+                const update = updateTools.find(u => u.id === tc.id);
+                if (!update) return tc;
+                touched = true;
+                return { ...tc, input: update.input };
+              });
+              return touched ? { ...m, toolCalls: nextToolCalls } : m;
+            }));
+          }
+          if (text || newTools.length > 0) {
+            setMessages(prev => {
+              const last = prev[prev.length - 1];
+              // Merge into the last assistant message only when it's a pure text
+              // bubble (no tool calls, not a reasoning row):
+              //  - delta text APPENDS, unless a turn boundary demands a new bubble
+              //    (streaming_start / wait-resume re-arm — merging a resumed
+              //    turn's text into the previous segment overwrote/absorbed it);
+              //  - non-delta full text REPLACES only for snapshot transports
+              //    (gemini). Claude full frames are distinct segments — a resumed
+              //    turn or subagent message must never clobber the previous reply.
+              const shouldAppend = msg.message.content.some((block: any) => block.type === 'text' && block.delta);
+              const lastIsMergeableText = last?.role === 'assistant' && !last.toolCalls && !last.reasoning && !last.reasoningLive;
+              // Claude full frames never merge (distinct segments) — EXCEPT the
+              // final-tagged reconcile frame, whose text replaces the delta
+              // accumulation on the same bubble.
+              if (lastIsMergeableText && text && !tools.length
+                  && (shouldAppend ? !forceNewBubbleRef.current : (aiProvider !== 'claude' || isFinalText))) {
+                const updated = [...prev];
+                const newContent = shouldAppend ? last.content + text : text;
+                updated[updated.length - 1] = { ...last, content: newContent };
+                return updated;
               }
-            }
-            const startedAt = nextSegmentStartRef.current ?? Date.now();
-            nextSegmentStartRef.current = null;
-            forceNewBubbleRef.current = false;
-            return [...stamped, {
-              id: `${Date.now()}-${Math.random()}`,
-              role: 'assistant',
-              content: text,
-              timestamp: Date.now(),
-              startedAt,
-              toolCalls: tools.length > 0 ? tools : undefined,
-            }];
-          });
+              // Before pushing a new assistant message, stamp durationMs on the most recent
+              // unstamped assistant text bubble so each bubble records its own duration.
+              const turnStart = turnStartedAtRef.current ?? Date.now();
+              const stamped = [...prev];
+              for (let i = stamped.length - 1; i >= 0; i--) {
+                const m = stamped[i];
+                if (m.role === 'assistant' && m.content && m.content.length > 0 && typeof m.durationMs !== 'number') {
+                  stamped[i] = { ...m, durationMs: Date.now() - turnStart };
+                  break;
+                }
+              }
+              const startedAt = nextSegmentStartRef.current ?? Date.now();
+              nextSegmentStartRef.current = null;
+              forceNewBubbleRef.current = false;
+              return [...stamped, {
+                id: `${Date.now()}-${Math.random()}`,
+                role: 'assistant',
+                content: text,
+                timestamp: Date.now(),
+                startedAt,
+                toolCalls: newTools.length > 0 ? newTools : undefined,
+              }];
+            });
+          }
           // A text segment created/updated via the slow path (e.g. the first delta of a
           // turn, or follow-up text after a tool) must also flip streamSettled=false so
           // its head stays in the thinking phase — otherwise the head reveals the first
@@ -1308,13 +1378,35 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
       // Result — usage data processing (isStreaming already cleared at top of handler)
       if (msg.type === 'result') {
-        // Update context usage
-        if (msg.usage) {
+        if (msg.usage && aiProvider === 'codex') {
+          // Codex: prefer the static catalog's context window (from the model
+          // picker's metadata) but let an explicit, smaller runtime-reported
+          // window win — the SDK sometimes narrows the effective window mid
+          // session. Never fall back to a fake 1M default: absent both a
+          // catalog entry and a runtime value, total stays null so ChatInput
+          // renders no ring rather than a bogus one.
+          const catalogWindow = codexModelsRef.current.find((model) => model.id === codexModelRef.current)?.effectiveContextWindow;
+          const runtimeWindow = Object.values(msg.modelUsage ?? {})
+            .map((value: any) => value?.contextWindow)
+            .find((value): value is number => typeof value === 'number' && value > 0);
+          const view = contextUsageFromCodex(
+            msg.usage,
+            resolveEffectiveContextWindow(catalogWindow, runtimeWindow),
+          );
+          setContextUsage(view);
+          setSessionUsage(previous => ({
+            inputTokens: (previous?.inputTokens ?? 0) + view.inputTokens,
+            outputTokens: (previous?.outputTokens ?? 0) + view.outputTokens,
+          }));
+          // A completed Codex turn is the most reliable moment to refresh the
+          // account-level rate limits — force past the service's cache.
+          void window.sai.codexUsageFetch?.(true).then(applyCodexLimits).catch(() => {});
+        } else if (aiProvider === 'claude' && msg.usage) {
           const inputTokens = msg.usage.input_tokens || 0;
-          const cacheReadTokens = msg.usage.cache_read_input_tokens || 0;
+          const cachedInputTokens = msg.usage.cache_read_input_tokens || 0;
           const cacheCreationTokens = msg.usage.cache_creation_input_tokens || 0;
           const outputTokens = msg.usage.output_tokens || 0;
-          const used = inputTokens + cacheReadTokens + cacheCreationTokens + outputTokens;
+          const used = inputTokens + cachedInputTokens + cacheCreationTokens + outputTokens;
           // Use the CLI-reported context window, but fall back to known model sizes
           // since the CLI may report incorrect values (e.g., 200K for 1M-context models)
           const modelUsage = msg.modelUsage || {};
@@ -1324,13 +1416,10 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           if (!total || used > total) {
             total = 1000000; // Default to 1M for extended context models
           }
-          setContextUsage({ used, total, inputTokens, cacheReadTokens, cacheCreationTokens, outputTokens });
-        }
-        // Accumulate session usage
-        if (msg.usage) {
+          setContextUsage({ used, total, inputTokens, cachedInputTokens, cacheCreationTokens, outputTokens });
           setSessionUsage(prev => ({
-            inputTokens: prev.inputTokens + (msg.usage.input_tokens || 0) + (msg.usage.cache_read_input_tokens || 0) + (msg.usage.cache_creation_input_tokens || 0),
-            outputTokens: prev.outputTokens + (msg.usage.output_tokens || 0),
+            inputTokens: (prev?.inputTokens ?? 0) + inputTokens + cachedInputTokens + cacheCreationTokens,
+            outputTokens: (prev?.outputTokens ?? 0) + outputTokens,
           }));
         }
         // Track session cost from CLI-reported total (cumulative per session)
@@ -1390,18 +1479,23 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       if (gateScope) unregisterChatListener(gateScope);
       cleanup();
     };
-  }, [projectPath, aiProvider, activeMetaRuntime, claudeScope, claudeKind, flushStreamingText]);
+  }, [projectPath, aiProvider, activeMetaRuntime, claudeScope, claudeKind, flushStreamingText, applyCodexLimits]);
 
   // Real utilization percentages arrive on usage:update from two sources:
   // the main-process OAuth poller (60s) and the SDK backend's post-turn
   // get_usage fetch. Both send per-window { utilization: 0-100, resets_at: ISO }.
   useEffect(() => {
+    // This is Claude account telemetry (Anthropic OAuth usage), never Codex's
+    // — Codex has its own isolated polling effect below. Gate strictly so a
+    // Codex or Gemini chat can never pick up Claude's rate limits, even
+    // though the underlying IPC channel is process-global.
+    if (aiProvider !== 'claude') return;
     // five_hour → Current session; seven_day → All models; seven_day_* →
     // per-model weekly buckets (labeled "<Model> only" by ChatInput).
     const WINDOW_KEYS = ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet', 'seven_day_oauth_apps'];
     const handleUsage = (data: any) => {
       if (!data) return;
-      setRateLimits(prev => {
+      setClaudeRateLimits(prev => {
         const next = new Map(prev);
         for (const key of WINDOW_KEYS) {
           const w = data[key];
@@ -1430,15 +1524,40 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     // Also do an initial fetch
     (window.sai as any).usageFetch?.().then(handleUsage);
     return () => cleanup?.();
-  }, []);
+  }, [aiProvider]);
 
   useEffect(() => {
+    if (aiProvider !== 'claude') return;
     (window.sai as any).usageMode?.().then((mode: string) => {
       if (mode === 'subscription' || mode === 'api') {
         setBillingMode(mode);
       }
     });
-  }, []);
+  }, [aiProvider]);
+
+  // Codex rate-limit telemetry: provider-scoped 60s polling of the account's
+  // Codex usage windows (primary/secondary), independent of Claude's
+  // onUsageUpdate subscription above. Only mounts/polls while this is a
+  // Codex chat and the workspace is the active one.
+  useEffect(() => {
+    if (aiProvider !== 'codex' || !isActive) return;
+    let cancelled = false;
+    const refresh = (force = false) => window.sai.codexUsageFetch?.(force).then((snapshot: CodexRateLimitsSnapshot | null) => {
+      if (!cancelled) applyCodexLimits(snapshot ?? null);
+    }).catch(() => {});
+    void refresh(false);
+    const timer = window.setInterval(() => void refresh(false), 60_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [aiProvider, isActive, applyCodexLimits]);
+
+  // On a session switch, clear the per-conversation context/session token
+  // counters (they belong to the old conversation) but keep any already
+  // fetched Codex account-level rate limits — those are account-wide, not
+  // tied to a specific chat session.
+  useEffect(() => {
+    setContextUsage(null);
+    setSessionUsage(null);
+  }, [sessionId]);
 
   // Wheel events are never fired by programmatic scrolls — use them to detect user scrolling up
   useEffect(() => {
@@ -2327,11 +2446,11 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             onModelChange={onModelChange}
             availableModels={availableModels}
             claudeOverrideState={claudeOverrideState}
-            contextUsage={contextUsage}
-            sessionUsage={sessionUsage}
+            contextUsage={contextUsage ?? undefined}
+            sessionUsage={sessionUsage ?? undefined}
             sessionCost={sessionCost}
-            rateLimits={rateLimits}
-            billingMode={billingMode}
+            usageLimits={usageLimits}
+            billingMode={aiProvider === 'codex' ? 'subscription' : billingMode}
             activeFilePath={activeFilePath}
             fileContextEnabled={fileContextEnabled}
             onFileContextToggle={() => setFileContextEnabled(prev => !prev)}

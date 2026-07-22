@@ -78,7 +78,7 @@ import { initFocusTracking, setActiveWorkspace } from './services/notify';
 import { OverlayManager } from './services/overlay';
 import { registerGithubAuthHandlers } from './services/github-auth';
 import { initialSync, schedulePush } from './services/github-sync';
-import { registerCodexHandlers } from './services/codex';
+import { registerCodexHandlers, destroyCodexTelemetry } from './services/codex';
 import { destroyCodexBackendIfActive } from './services/codexBackend';
 import { registerGeminiHandlers } from './services/gemini';
 import { registerPluginHandlers } from './services/plugins';
@@ -508,7 +508,7 @@ function createWindow() {
       }
     }
   })();
-  registerCodexHandlers(mainWindow);
+  registerCodexHandlers();
   registerGeminiHandlers(mainWindow);
   registerGitHandlers();
   registerFsHandlers(mainWindow!);
@@ -1289,6 +1289,7 @@ app.on('before-quit', (e) => {
   // Process-level fallback for exit paths that bypass the window close handler.
   // Idempotent with the close-path cleanup above.
   try { destroyCodexBackendIfActive(); } catch { /* backend already down */ }
+  try { destroyCodexTelemetry(); } catch { /* telemetry already down */ }
   try { swarmMcpHost.stop(); } catch { /* noop */ }
   // Config tmp files carry the swarm-host auth secret — don't leave them behind.
   try { cleanupSwarmMcpConfigs(); } catch { /* noop */ }
@@ -1306,6 +1307,7 @@ app.on('before-quit', (e) => {
 app.on('window-all-closed', () => {
   stopSuspendTimer();
   destroyUsagePolling();
+  try { destroyCodexTelemetry(); } catch { /* telemetry already down */ }
   destroyAllTerminals();
   terminalStore.destroyAll();
   if (mainWindow) destroyAll(mainWindow);
