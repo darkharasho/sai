@@ -140,13 +140,27 @@ describe('SdkCodexBackend', () => {
     expect(h.registerWorkspace).toHaveBeenCalledTimes(2);
   });
 
-  it('does not register or disturb another project', () => {
-    const h = harness();
+  it('does not register or disturb another project', async () => {
+    const one = pendingStream();
+    const two = pendingStream();
+    const h = harness([one.events, two.events]);
     h.backend.start({ projectPath: '/one' });
     h.backend.start({ projectPath: '/two' });
-    h.backend.suspendWorkspace('/one');
     expect(h.registerWorkspace.mock.calls).toEqual([['/one'], ['/two']]);
-    expect(h.backend.isWorkspaceBusy('/two')).toBe(false);
+
+    // Give '/two' a still-pending turn so suspending '/one' has something to
+    // wrongly disturb if suspendWorkspace ever stopped scoping its cleanup by
+    // projectPath (e.g. wiped every runtime instead of only '/one''s).
+    h.backend.send({ projectPath: '/one', message: 'one' });
+    h.backend.send({ projectPath: '/two', message: 'two' });
+    await settle();
+    expect(h.backend.isWorkspaceBusy('/one')).toBe(true);
+    expect(h.backend.isWorkspaceBusy('/two')).toBe(true);
+
+    h.backend.suspendWorkspace('/one');
+    await settle();
+    expect(h.backend.isWorkspaceBusy('/one')).toBe(false);
+    expect(h.backend.isWorkspaceBusy('/two')).toBe(true);
   });
 
   it('passes normalized additional directories per scope and rebuilds when they change', async () => {
