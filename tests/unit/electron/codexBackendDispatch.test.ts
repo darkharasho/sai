@@ -194,7 +194,7 @@ describe('Codex IPC dispatch', () => {
   it('adapts the legacy preload argument shapes without shifting preamble or model fields', async () => {
     const backend = backendStub();
     __setCodexBackendForTests(backend);
-    registerCodexHandlers({} as any);
+    registerCodexHandlers();
 
     await mocks.ipcMain.invoke('codex:start', '/legacy', 'legacy preamble');
     mocks.ipcMain.emit(
@@ -229,9 +229,8 @@ describe('Codex IPC dispatch', () => {
 
   it('delegates every channel and positional field to the active backend contract', async () => {
     const backend = backendStub();
-    const win = { isDestroyed: () => false, webContents: { send: vi.fn() } } as any;
     __setCodexBackendForTests(backend);
-    registerCodexHandlers(win);
+    registerCodexHandlers();
 
     await mocks.ipcMain.invoke('codex:models', 1);
     await mocks.ipcMain.invoke(
@@ -287,7 +286,7 @@ describe('Codex IPC dispatch', () => {
   it('drops invalid runtime reasoning effort before backend dispatch', () => {
     const backend = backendStub();
     __setCodexBackendForTests(backend);
-    registerCodexHandlers({} as any);
+    registerCodexHandlers();
     mocks.ipcMain.emit('codex:send', '/project', 'prompt', [], 'auto', 'future', 'gpt-5', 'chat');
     expect(backend.send).toHaveBeenCalledWith(expect.objectContaining({ effort: undefined, model: 'gpt-5' }));
   });
@@ -295,7 +294,7 @@ describe('Codex IPC dispatch', () => {
   it('coerces a missing model refresh flag to false', async () => {
     const backend = backendStub();
     __setCodexBackendForTests(backend);
-    registerCodexHandlers({} as any);
+    registerCodexHandlers();
 
     await mocks.ipcMain.invoke('codex:models');
 
@@ -308,11 +307,22 @@ describe('Codex IPC dispatch', () => {
       destroy: vi.fn(),
     } as unknown as CodexTelemetryService;
     __setCodexTelemetryForTests(telemetry);
-    registerCodexHandlers({} as any);
+    registerCodexHandlers();
 
     const result = await mocks.ipcMain.invoke('codex:usage', { force: true });
 
     expect(telemetry.readRateLimits).toHaveBeenCalledWith({ force: true });
     expect(result.provider).toBe('codex');
+  });
+
+  it('destroys the previously injected telemetry singleton when replaced', () => {
+    const a = { readRateLimits: vi.fn(), destroy: vi.fn() } as unknown as CodexTelemetryService;
+    const b = { readRateLimits: vi.fn(), destroy: vi.fn() } as unknown as CodexTelemetryService;
+
+    __setCodexTelemetryForTests(a);
+    __setCodexTelemetryForTests(b);
+
+    expect(a.destroy).toHaveBeenCalledOnce();
+    expect(b.destroy).not.toHaveBeenCalled();
   });
 });

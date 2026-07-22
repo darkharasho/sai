@@ -724,10 +724,16 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const codexModelsRef = useRef(codexModels);
   useEffect(() => { codexModelsRef.current = codexModels; }, [codexModels]);
 
+  // Last applied snapshot's fetchedAt — guards against the forced post-turn
+  // codexUsageFetch(true) racing the 60s poll and letting a late-resolving
+  // OLDER snapshot clobber fresher data already applied.
+  const lastAppliedCodexFetchedAtRef = useRef(0);
   // Applies a Codex rate-limit snapshot to isolated Codex-only state. Never
   // touches claudeRateLimits — Codex and Claude limits are never shared.
   const applyCodexLimits = useCallback((snapshot: CodexRateLimitsSnapshot | null) => {
     if (snapshot?.provider === 'codex') {
+      if (snapshot.fetchedAt < lastAppliedCodexFetchedAtRef.current) return;
+      lastAppliedCodexFetchedAtRef.current = snapshot.fetchedAt;
       setCodexUsageLimits(codexRateLimitsToViews(snapshot));
     }
   }, []);
@@ -1287,51 +1293,79 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             markStreamingActive();
             return;
           }
-          setMessages(prev => {
-            const last = prev[prev.length - 1];
-            // Merge into the last assistant message only when it's a pure text
-            // bubble (no tool calls, not a reasoning row):
-            //  - delta text APPENDS, unless a turn boundary demands a new bubble
-            //    (streaming_start / wait-resume re-arm — merging a resumed
-            //    turn's text into the previous segment overwrote/absorbed it);
-            //  - non-delta full text REPLACES only for snapshot transports
-            //    (gemini). Claude full frames are distinct segments — a resumed
-            //    turn or subagent message must never clobber the previous reply.
-            const shouldAppend = msg.message.content.some((block: any) => block.type === 'text' && block.delta);
-            const lastIsMergeableText = last?.role === 'assistant' && !last.toolCalls && !last.reasoning && !last.reasoningLive;
-            // Claude full frames never merge (distinct segments) — EXCEPT the
-            // final-tagged reconcile frame, whose text replaces the delta
-            // accumulation on the same bubble.
-            if (lastIsMergeableText && text && !tools.length
-                && (shouldAppend ? !forceNewBubbleRef.current : (aiProvider !== 'claude' || isFinalText))) {
-              const updated = [...prev];
-              const newContent = shouldAppend ? last.content + text : text;
-              updated[updated.length - 1] = { ...last, content: newContent };
-              return updated;
-            }
-            // Before pushing a new assistant message, stamp durationMs on the most recent
-            // unstamped assistant text bubble so each bubble records its own duration.
-            const turnStart = turnStartedAtRef.current ?? Date.now();
-            const stamped = [...prev];
-            for (let i = stamped.length - 1; i >= 0; i--) {
-              const m = stamped[i];
-              if (m.role === 'assistant' && m.content && m.content.length > 0 && typeof m.durationMs !== 'number') {
-                stamped[i] = { ...m, durationMs: Date.now() - turnStart };
-                break;
+          // Codex re-emits TodoWrite (and, in principle, any tool) with the SAME
+          // tool-use id on every item.updated frame so its card updates in place
+          // instead of piling up duplicate transcript entries — see
+          // codexSdkEventMap's todoSnapshot(), which reuses item.id verbatim
+          // across item.started/item.updated. Claude's tool-use ids are unique
+          // per call, so this split is always a no-op for Claude (all tools land
+          // in newTools below, exactly as before).
+          const existingToolIds = new Set<string>();
+          for (const m of messagesRef.current) {
+            if (m.toolCalls) for (const tc of m.toolCalls) if (tc.id) existingToolIds.add(tc.id);
+          }
+          const updateTools = tools.filter(t => t.id && existingToolIds.has(t.id));
+          const newTools = tools.filter(t => !t.id || !existingToolIds.has(t.id));
+          if (updateTools.length > 0) {
+            setMessages(prev => prev.map(m => {
+              if (m.role !== 'assistant' || !m.toolCalls) return m;
+              let touched = false;
+              const nextToolCalls = m.toolCalls.map(tc => {
+                const update = updateTools.find(u => u.id === tc.id);
+                if (!update) return tc;
+                touched = true;
+                return { ...tc, input: update.input };
+              });
+              return touched ? { ...m, toolCalls: nextToolCalls } : m;
+            }));
+          }
+          if (text || newTools.length > 0) {
+            setMessages(prev => {
+              const last = prev[prev.length - 1];
+              // Merge into the last assistant message only when it's a pure text
+              // bubble (no tool calls, not a reasoning row):
+              //  - delta text APPENDS, unless a turn boundary demands a new bubble
+              //    (streaming_start / wait-resume re-arm — merging a resumed
+              //    turn's text into the previous segment overwrote/absorbed it);
+              //  - non-delta full text REPLACES only for snapshot transports
+              //    (gemini). Claude full frames are distinct segments — a resumed
+              //    turn or subagent message must never clobber the previous reply.
+              const shouldAppend = msg.message.content.some((block: any) => block.type === 'text' && block.delta);
+              const lastIsMergeableText = last?.role === 'assistant' && !last.toolCalls && !last.reasoning && !last.reasoningLive;
+              // Claude full frames never merge (distinct segments) — EXCEPT the
+              // final-tagged reconcile frame, whose text replaces the delta
+              // accumulation on the same bubble.
+              if (lastIsMergeableText && text && !tools.length
+                  && (shouldAppend ? !forceNewBubbleRef.current : (aiProvider !== 'claude' || isFinalText))) {
+                const updated = [...prev];
+                const newContent = shouldAppend ? last.content + text : text;
+                updated[updated.length - 1] = { ...last, content: newContent };
+                return updated;
               }
-            }
-            const startedAt = nextSegmentStartRef.current ?? Date.now();
-            nextSegmentStartRef.current = null;
-            forceNewBubbleRef.current = false;
-            return [...stamped, {
-              id: `${Date.now()}-${Math.random()}`,
-              role: 'assistant',
-              content: text,
-              timestamp: Date.now(),
-              startedAt,
-              toolCalls: tools.length > 0 ? tools : undefined,
-            }];
-          });
+              // Before pushing a new assistant message, stamp durationMs on the most recent
+              // unstamped assistant text bubble so each bubble records its own duration.
+              const turnStart = turnStartedAtRef.current ?? Date.now();
+              const stamped = [...prev];
+              for (let i = stamped.length - 1; i >= 0; i--) {
+                const m = stamped[i];
+                if (m.role === 'assistant' && m.content && m.content.length > 0 && typeof m.durationMs !== 'number') {
+                  stamped[i] = { ...m, durationMs: Date.now() - turnStart };
+                  break;
+                }
+              }
+              const startedAt = nextSegmentStartRef.current ?? Date.now();
+              nextSegmentStartRef.current = null;
+              forceNewBubbleRef.current = false;
+              return [...stamped, {
+                id: `${Date.now()}-${Math.random()}`,
+                role: 'assistant',
+                content: text,
+                timestamp: Date.now(),
+                startedAt,
+                toolCalls: newTools.length > 0 ? newTools : undefined,
+              }];
+            });
+          }
           // A text segment created/updated via the slow path (e.g. the first delta of a
           // turn, or follow-up text after a tool) must also flip streamSettled=false so
           // its head stays in the thinking phase — otherwise the head reveals the first
@@ -1366,7 +1400,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           }));
           // A completed Codex turn is the most reliable moment to refresh the
           // account-level rate limits — force past the service's cache.
-          void window.sai.codexUsageFetch?.(true).then(applyCodexLimits);
+          void window.sai.codexUsageFetch?.(true).then(applyCodexLimits).catch(() => {});
         } else if (aiProvider === 'claude' && msg.usage) {
           const inputTokens = msg.usage.input_tokens || 0;
           const cachedInputTokens = msg.usage.cache_read_input_tokens || 0;
@@ -1510,7 +1544,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     let cancelled = false;
     const refresh = (force = false) => window.sai.codexUsageFetch?.(force).then((snapshot: CodexRateLimitsSnapshot | null) => {
       if (!cancelled) applyCodexLimits(snapshot ?? null);
-    });
+    }).catch(() => {});
     void refresh(false);
     const timer = window.setInterval(() => void refresh(false), 60_000);
     return () => { cancelled = true; window.clearInterval(timer); };

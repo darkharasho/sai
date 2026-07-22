@@ -100,7 +100,10 @@ export function requestCodexRateLimits(deps: RequestCodexRateLimitsDeps = {}): P
         ? (Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'Path')
         : 'PATH';
       env[pathKey] = [...bundled.pathDirs, env[pathKey]].filter(Boolean).join(path.delimiter);
-      proc = spawnFn(bundled.executablePath, ['app-server'], { env, stdio: ['pipe', 'pipe', 'pipe'], shell: false });
+      // stderr is ignored, not piped: nothing ever consumes it here, and a
+      // piped-but-unread stream can fill its OS pipe buffer and block the
+      // child if it writes enough diagnostics.
+      proc = spawnFn(bundled.executablePath, ['app-server'], { env, stdio: ['pipe', 'pipe', 'ignore'], shell: false });
     } catch {
       reject(new Error(ERRORS.spawn));
       return;
@@ -153,6 +156,12 @@ export function requestCodexRateLimits(deps: RequestCodexRateLimitsDeps = {}): P
       for (const rawLine of lines) handleLine(rawLine);
     };
     const onError = () => finish({ ok: false, message: ERRORS.processError });
+    // Unlike bundledModels' resolveBundledCodex flow, which flushes buffered
+    // stdout on 'exit' because the child is expected to run-and-terminate,
+    // this app-server session is long-lived for the whole handshake — it
+    // should still be alive when the rate-limit response arrives. An 'exit'
+    // here always means the process died before responding, so it's treated
+    // as a failure rather than a flush point.
     const onExit = () => finish({ ok: false, message: ERRORS.processExit });
 
     timer = setTimeoutFn(() => finish({ ok: false, message: ERRORS.timeout }), timeoutMs);
@@ -219,6 +228,10 @@ export class CodexTelemetryService {
       return Promise.resolve(this.withStale(this.lastSuccess, now));
     }
 
+    // `force` deliberately does NOT bypass failure backoff (only the success
+    // cache above) — a failing Codex binary should not be re-spawned on every
+    // forced post-turn refresh; backoff exists specifically to protect against
+    // that hammering.
     if (now < this.nextRetryAt) {
       return Promise.resolve(this.lastSuccess ? this.withStale(this.lastSuccess, now) : null);
     }

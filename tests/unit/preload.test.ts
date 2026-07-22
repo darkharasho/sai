@@ -107,6 +107,12 @@ describe('characterization: existing IPC routing', () => {
     expect(invoke).toHaveBeenCalledWith('codex:usage', { force: true });
   });
 
+  it('codexUsageFetch defaults to a non-forced refresh when called with no argument', async () => {
+    invoke.mockResolvedValue({ provider: 'codex', primary: null, secondary: null });
+    await exposed.codexUsageFetch();
+    expect(invoke).toHaveBeenCalledWith('codex:usage', { force: false });
+  });
+
   it('geminiStart forwards to gemini:start', () => {
     exposed.geminiStart('/proj', 'meta');
     expect(invoke).toHaveBeenCalledWith('gemini:start', '/proj', 'meta');

@@ -261,6 +261,23 @@ describe('CodexTelemetryService', () => {
     service.destroy();
   });
 
+  it('does not bypass failure backoff with force:true — only the success cache', async () => {
+    let now = 0;
+    const load = vi.fn().mockRejectedValueOnce(new Error('boom'));
+    const service = new CodexTelemetryService({ load, now: () => now });
+
+    await service.readRateLimits();
+    expect(load).toHaveBeenCalledOnce();
+
+    // Still inside the first backoff window (5_000ms after the failure at t=0).
+    now = 1_000;
+    const forced = await service.readRateLimits({ force: true });
+    expect(load).toHaveBeenCalledOnce();
+    expect(forced).toBeNull();
+
+    service.destroy();
+  });
+
   it('returns null once a failure occurs with no prior success', async () => {
     let now = 0;
     const load = vi.fn().mockRejectedValue(new Error('boom'));

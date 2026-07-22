@@ -30,7 +30,9 @@ describe('contextUsageFromCodex', () => {
       total: null,
     });
   });
+});
 
+describe('resolveEffectiveContextWindow', () => {
   it('prefers an explicit smaller runtime context limit', () => {
     expect(resolveEffectiveContextWindow(258_400, 200_000)).toBe(200_000);
     expect(resolveEffectiveContextWindow(258_400, 300_000)).toBe(258_400);

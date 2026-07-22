@@ -508,7 +508,7 @@ function createWindow() {
       }
     }
   })();
-  registerCodexHandlers(mainWindow);
+  registerCodexHandlers();
   registerGeminiHandlers(mainWindow);
   registerGitHandlers();
   registerFsHandlers(mainWindow!);
