@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ipcMain, BrowserWindow } from 'electron';
 import { enrichedEnv } from '../shellEnv';
+import { resolveClaudePath } from '../claudeBackend/sdkBackend';
 import { createEmptyBrief, applyBriefUpdate, type ProjectBrief } from './brief';
 import { buildBriefMcpServer, BRIEF_MCP_SERVER_NAME } from './briefMcpServer';
 import { BRAINSTORM_SYSTEM_PROMPT } from './prompts';
@@ -118,6 +119,11 @@ export async function runTurn(args: RunTurnArgs): Promise<RunTurnResult> {
     maxTurns: 8,                            // text + a few update_brief calls
     cwd: os.tmpdir(),
     env: enrichedEnv(),
+    // Packaged builds: the SDK's default executable resolution points inside
+    // app.asar (a file, not a directory), so an unpatched spawn throws
+    // `spawn ENOTDIR` synchronously. resolveClaudePath() finds the user's
+    // real `claude` binary (same fix sdkBackend/sdkOptions use for chat).
+    pathToClaudeCodeExecutable: resolveClaudePath(),
   };
 
   let fullText = '';

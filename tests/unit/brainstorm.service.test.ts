@@ -1,11 +1,21 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
+// vi.hoisted is required so the mock fn is available when vi.mock's factory runs.
+const { mockResolveClaudePath } = vi.hoisted(() => ({
+  mockResolveClaudePath: vi.fn().mockReturnValue('/enriched/bin/claude'),
+}));
+
+vi.mock('../../electron/services/claudeBackend/sdkBackend', () => ({
+  resolveClaudePath: mockResolveClaudePath,
+}));
+
 import {
   __resetSessions, __setQueryFnForTest, createSession, getSession, deleteSession,
   composeTurnPrompt, runTurn, serializeTranscript,
 } from '../../electron/services/brainstorm';
 import { type ProjectBrief } from '../../electron/services/brainstorm/brief';
 
-afterEach(() => { __setQueryFnForTest(null); __resetSessions(); });
+afterEach(() => { __setQueryFnForTest(null); __resetSessions(); mockResolveClaudePath.mockClear(); });
 beforeEach(() => __resetSessions());
 
 describe('session store', () => {
@@ -119,6 +129,20 @@ describe('runTurn', () => {
     expect(s.brief.projectName).toBeNull();
     expect(s.pendingEdits).toEqual(['summary → "user text"']);
     expect(briefs[briefs.length - 1].projectName).toBeNull();
+  });
+
+  it('passes the resolved bundled claude executable to the SDK options (packaged-app spawn ENOTDIR fix)', async () => {
+    let capturedOptions: any = null;
+    __setQueryFnForTest((({ options }: { prompt: string; options: any }) => {
+      capturedOptions = options;
+      return (async function* () {
+        yield { type: 'result', subtype: 'success' };
+      })();
+    }) as any);
+    const { sessionId } = createSession();
+    await runTurn({ sessionId, userMessage: 'go', onChunk: () => {}, onBrief: () => {} });
+    expect(mockResolveClaudePath).toHaveBeenCalled();
+    expect(capturedOptions.pathToClaudeCodeExecutable).toBe('/enriched/bin/claude');
   });
 
   it('returns an error for unknown sessions', async () => {
