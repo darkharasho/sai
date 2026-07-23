@@ -81,6 +81,7 @@ import { initialSync, schedulePush } from './services/github-sync';
 import { registerCodexHandlers, destroyCodexTelemetry } from './services/codex';
 import { destroyCodexBackendIfActive } from './services/codexBackend';
 import { registerGeminiHandlers } from './services/gemini';
+import { registerKimiHandlers } from './services/kimi';
 import { registerPluginHandlers } from './services/plugins';
 import { registerMcpHandlers } from './services/mcp';
 import { registerScaffoldHandler } from './services/scaffold';
@@ -510,6 +511,7 @@ function createWindow() {
   })();
   registerCodexHandlers();
   registerGeminiHandlers(mainWindow);
+  registerKimiHandlers(mainWindow);
   registerGitHandlers();
   registerFsHandlers(mainWindow!);
   registerPluginHandlers(readSettings);
