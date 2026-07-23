@@ -1511,6 +1511,29 @@ export async function generateTitleImpl(cwd: string, userMessage: string, aiProv
 
   const env = spawnEnv();
 
+  if (aiProvider === 'kimi') {
+    // Kimi has no one-shot CLI flag mode (it only speaks ACP, `kimi acp`), so
+    // unlike gemini/codex/claude above it can't be spawned directly here.
+    // Reuse the same persistent commit-scoped ACP session as commit-message
+    // generation (generateCommitMessageImpl above) for this one-off prompt.
+    try {
+      const kimiWs = getOrCreate(effectiveCwd);
+      kimiWs.kimi.cwd = effectiveCwd;
+      await ensureKimiTransport(mainWin!, kimiWs);
+      const sessionId = await ensureKimiCommitSession(mainWin!, kimiWs);
+      const result = await promptKimiText(mainWin!, kimiWs, {
+        sessionId,
+        scope: 'commit',
+        prompt: titlePrompt,
+        approvalMode: 'plan',
+        model: 'kimi-k3',
+      });
+      return result.trim().replace(/^["']|["']$/g, '').trim();
+    } catch {
+      return '';
+    }
+  }
+
   let cmd: string;
   let args: string[];
   if (aiProvider === 'codex') {
