@@ -95,6 +95,16 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.send('gemini:approve', projectPath, toolUseId, approved, modifiedCommand, scope),
   geminiSetSessionId: (projectPath: string, sessionId: string | undefined, scope?: string) =>
     ipcRenderer.send('gemini:setSessionId', projectPath, sessionId, scope),
+  // Kimi CLI (ACP)
+  kimiModels: () => ipcRenderer.invoke('kimi:models'),
+  kimiStart: (cwd: string, metaPreamble?: string) => ipcRenderer.invoke('kimi:start', cwd, metaPreamble),
+  kimiSend: (projectPath: string, message: string, imagePaths?: string[], approvalMode?: string, model?: string, scope?: string) =>
+    ipcRenderer.send('kimi:send', projectPath, message, imagePaths, approvalMode, undefined /* conversationMode */, model, scope),
+  kimiStop: (projectPath: string, scope?: string) => ipcRenderer.send('kimi:stop', projectPath, scope),
+  kimiApprove: (projectPath: string, toolUseId: string, approved: boolean, modifiedCommand?: string, scope?: string) =>
+    ipcRenderer.send('kimi:approve', projectPath, toolUseId, approved, modifiedCommand, scope),
+  kimiSetSessionId: (projectPath: string, sessionId: string | undefined, scope?: string) =>
+    ipcRenderer.send('kimi:setSessionId', projectPath, sessionId, scope),
   // Unified provider routing — dispatches to the correct per-provider channel.
   // Existing window.sai.claudeSend / geminiSend / codexSend remain for backward compat.
   provider: {
@@ -106,6 +116,8 @@ contextBridge.exposeInMainWorld('sai', {
         return ipcRenderer.invoke('claude:start', cwd, opts.scope, opts.kind, opts.orchestratorContext, opts.scopeCwd, opts.metaPreamble);
       } else if (provider === 'gemini') {
         return ipcRenderer.invoke('gemini:start', cwd, opts.metaPreamble);
+      } else if (provider === 'kimi') {
+        return ipcRenderer.invoke('kimi:start', cwd, opts.metaPreamble);
       } else {
         return ipcRenderer.invoke('codex:start', cwd, opts.scope, opts.kind, opts.orchestratorContext, opts.scopeCwd, opts.metaPreamble, opts.additionalDirectories);
       }
@@ -121,6 +133,8 @@ contextBridge.exposeInMainWorld('sai', {
         ipcRenderer.send('claude:send', projectPath, message, images, opts.permMode, opts.effortLevel, opts.model, opts.scope);
       } else if (provider === 'gemini') {
         ipcRenderer.send('gemini:send', projectPath, message, images, opts.approvalMode, opts.conversationMode, opts.model, opts.scope);
+      } else if (provider === 'kimi') {
+        ipcRenderer.send('kimi:send', projectPath, message, images, opts.approvalMode, undefined, opts.model, opts.scope);
       } else {
         ipcRenderer.send('codex:send', projectPath, message, images, opts.permMode, opts.effortLevel, opts.model, opts.scope, opts.origin);
       }
@@ -130,6 +144,8 @@ contextBridge.exposeInMainWorld('sai', {
         ipcRenderer.send('claude:stop', projectPath, scope);
       } else if (provider === 'gemini') {
         ipcRenderer.send('gemini:stop', projectPath, scope);
+      } else if (provider === 'kimi') {
+        ipcRenderer.send('kimi:stop', projectPath, scope);
       } else {
         ipcRenderer.send('codex:stop', projectPath, scope);
       }
@@ -139,6 +155,8 @@ contextBridge.exposeInMainWorld('sai', {
         ipcRenderer.send('claude:setSessionId', projectPath, sessionId, scope);
       } else if (provider === 'gemini') {
         ipcRenderer.send('gemini:setSessionId', projectPath, sessionId, scope);
+      } else if (provider === 'kimi') {
+        ipcRenderer.send('kimi:setSessionId', projectPath, sessionId, scope);
       } else {
         ipcRenderer.send('codex:setSessionId', projectPath, sessionId, scope);
       }
