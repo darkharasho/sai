@@ -6,7 +6,7 @@ const {
   mockHandlers,
   mockListeners,
   acpListeners,
-  mockCreateGeminiAcpClient,
+  mockCreateAcpClient,
   mockAcpClient,
 } = vi.hoisted(() => {
   const mockHandlers = new Map<string, (...args: unknown[]) => unknown>();
@@ -27,7 +27,7 @@ const {
     dispose: vi.fn(),
   };
 
-  const mockCreateGeminiAcpClient = vi.fn(() => mockAcpClient);
+  const mockCreateAcpClient = vi.fn(() => mockAcpClient);
 
   const mockIpcMain = {
     handle: vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => {
@@ -53,7 +53,7 @@ const {
     mockHandlers,
     mockListeners,
     acpListeners,
-    mockCreateGeminiAcpClient,
+    mockCreateAcpClient,
     mockAcpClient,
   };
 });
@@ -66,8 +66,8 @@ vi.mock('electron', () => ({
   BrowserWindow: vi.fn(),
 }));
 
-vi.mock('@electron/services/gemini-acp', () => ({
-  createGeminiAcpClient: mockCreateGeminiAcpClient,
+vi.mock('@electron/services/acp', () => ({
+  createAcpClient: mockCreateAcpClient,
 }));
 
 vi.mock('@electron/services/notify', () => ({
@@ -153,7 +153,7 @@ describe('gemini service', () => {
   it('creates the ACP transport on gemini:start and emits ready', async () => {
     await mockIpcMain._invoke('gemini:start', PROJECT);
 
-    expect(mockCreateGeminiAcpClient).toHaveBeenCalledTimes(1);
+    expect(mockCreateAcpClient).toHaveBeenCalledTimes(1);
     expect(mockAcpClient.start).toHaveBeenCalledTimes(1);
     expect(collectSentEvents(mockWin)).toContainEqual(
       expect.objectContaining({ type: 'ready', projectPath: PROJECT }),
@@ -353,7 +353,7 @@ describe('gemini service', () => {
     expect(ws.gemini.availability).toBe('disabled');
     expect(ws.gemini.lastError).toBe('Gemini ACP transport exited');
     expect(events).toContainEqual(
-      expect.objectContaining({ type: 'error', text: 'Gemini unavailable: Gemini ACP transport exited' }),
+      expect.objectContaining({ type: 'error', text: 'Gemini unavailable: Gemini ACP transport exited.' }),
     );
     expect(events).toContainEqual(expect.objectContaining({ type: 'done', projectPath: PROJECT }));
   });
