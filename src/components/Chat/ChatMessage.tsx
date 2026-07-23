@@ -13,7 +13,7 @@ import Stagger from './Stagger';
 import { readFlipRect, hasFlipRect } from './flipRegistry';
 import { SPRING, DISTANCE, FADE_IN, useReducedMotionTransition, prefersReducedMotion } from './motion';
 import { revealWords } from './wordReveal';
-import type { ChatMessage as ChatMessageType, MetaWorkspaceRuntime } from '../../types';
+import type { ChatMessage as ChatMessageType, MetaWorkspaceRuntime, AIProvider } from '../../types';
 import { getActiveTerminalId } from '../../terminalBuffer';
 import SaiLogo from '../SaiLogo';
 import { matchLinkPreview } from './linkPreview';
@@ -306,7 +306,7 @@ function ChatMessage({
   message: ChatMessageType;
   projectPath?: string;
   onFileOpen?: (path: string, line?: number) => void;
-  aiProvider?: 'claude' | 'codex' | 'gemini';
+  aiProvider?: AIProvider;
   toolCallsExpanded?: boolean;
   onRetry?: () => void;
   onClearContext?: () => void;

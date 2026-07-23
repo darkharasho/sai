@@ -1,9 +1,10 @@
-type AIProvider = 'claude' | 'codex' | 'gemini';
+import type { AIProvider } from '../../types';
 
 const COMMAND_LABELS: Record<AIProvider, string> = {
   claude: 'Claude Skills',
   codex: 'Codex Commands',
   gemini: 'Gemini Commands',
+  kimi: 'Kimi Commands',
 };
 
 export function buildHelpMessage(aiProvider: AIProvider, slashCommands: string[]): string {

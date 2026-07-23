@@ -2036,9 +2036,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       setMessages(prev => [...prev,
         { id: newMessageId, role: 'user', content: text, timestamp: Date.now() },
         { id: `help-${Date.now()}`, role: 'system', content:
-          // helpText.ts's AIProvider type predates the kimi addition and is out of
-          // scope for this change; cast to keep this call site type-checking.
-          buildHelpMessage(aiProvider as any, slashCommands),
+          buildHelpMessage(aiProvider, slashCommands),
           timestamp: Date.now() },
       ]);
       return;
@@ -2340,7 +2338,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
                       message={msg}
                       projectPath={projectPath}
                       onFileOpen={onFileOpen}
-                      aiProvider={aiProvider as any /* ChatMessage's AIProvider type predates kimi; out of scope here */}
+                      aiProvider={aiProvider}
                       toolCallsExpanded={toolCallsExpanded}
                       pinnedLayoutId={`pinned-${msg.id}`}
                       isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId}
@@ -2352,7 +2350,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
                     />
                   </div>
                 )
-                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider as any /* ChatMessage's AIProvider type predates kimi; out of scope here */} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} seedGrow={msg.id === seedGrowMsgId} renderToolCall={renderToolCall} renderMessage={renderMessage} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} watcherUrlAllowlist={watcherUrlsByMessageId.get(msg.id) ?? EMPTY_URL_SET} />
+                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} seedGrow={msg.id === seedGrowMsgId} renderToolCall={renderToolCall} renderMessage={renderMessage} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} watcherUrlAllowlist={watcherUrlsByMessageId.get(msg.id) ?? EMPTY_URL_SET} />
               )}
             </TaskRegistryContext.Provider>
             {isWaiting && waiting && (
