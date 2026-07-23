@@ -385,7 +385,7 @@ export const DEFAULT_SUSPEND_TIMEOUT = 60 * 60 * 1000; // 1 hour
 /**
  * True when no agent in the workspace is doing or waiting on anything:
  * no Claude scope busy/streaming or blocked on user input (question,
- * approval, plan review), and Codex/Gemini idle. lastActivity only tracks
+ * approval, plan review), and Codex/Gemini/Kimi idle. lastActivity only tracks
  * *user* actions, so the auto-suspend timer must check this too — a long
  * agentic run (or a pending question while the user is away) looks "inactive"
  * by timestamp while a process is very much alive. Mirrors the guards in
@@ -397,7 +397,7 @@ export function isWorkspaceQuiescent(ws: Workspace): boolean {
     if (claude.awaitingQuestionAnswer || claude.awaitingApproval || claude.awaitingPlanReview) return false;
   }
   if (ws.codex.busy) return false;
-  if (ws.gemini.busy) return false;
+  if (ws.gemini.busy || ws.kimi.busy) return false;
   for (const hooks of backendHooks.values()) {
     try {
       if (hooks.isBusy?.(ws.projectPath)) return false;
