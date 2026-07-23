@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Run tests with `npx vitest run --maxWorkers=2` (machine-wide memory rule; never unbounded workers).
-- `npx tsc --noEmit` must pass at the end of every task.
+- `npx tsc --noEmit` must pass at the end of every task (sole exception: Task 6 widens the `AIProvider` union before the renderer catches up — its gate is explicitly narrower, see Task 6 Step 4; Tasks 7–8 burn the remaining errors down to zero).
 - The existing test `tests/unit/electron/geminiAcpImages.test.ts` must stay green through every task (it imports from `electron/services/gemini.ts` — keep that module's exports stable via re-exports).
 - No credentials stored in SAI. Kimi auth is owned by kimi-cli (`kimi /login`).
 - Follow the symlinked-home rule: never compare paths by string equality (`/home/mstephens` vs `/var/home/mstephens`).
