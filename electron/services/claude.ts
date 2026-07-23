@@ -1414,6 +1414,38 @@ function enqueueKimiCommitPrompt<T>(key: string, fn: () => Promise<T>): Promise<
   return next;
 }
 
+const KIMI_ONE_SHOT_TIMEOUT_MS = 2 * 60 * 1000;
+
+/** Run a one-off prompt on Kimi's shared commit-scoped ACP session.
+ *  Serialized per-cwd (concurrent streams on one session interleave), and
+ *  raced against a timeout so a hung prompt can't wedge the chain — the
+ *  ACP request itself stays pending, but the chain link resolves ''. */
+async function promptKimiOneShot(effectiveCwd: string, prompt: string): Promise<string> {
+  return enqueueKimiCommitPrompt(effectiveCwd, async () => {
+    try {
+      const kimiWs = getOrCreate(effectiveCwd);
+      kimiWs.kimi.cwd = effectiveCwd;
+      await ensureKimiTransport(mainWin!, kimiWs);
+      const sessionId = await ensureKimiCommitSession(mainWin!, kimiWs);
+      const result = await Promise.race([
+        // Swallow a post-timeout rejection so the losing race arm can't
+        // surface as an unhandled rejection once the chain has moved on.
+        promptKimiText(mainWin!, kimiWs, {
+          sessionId,
+          scope: 'commit',
+          prompt,
+          approvalMode: 'plan',
+          model: 'kimi-k3',
+        }).catch(() => ''),
+        new Promise<string>(resolve => setTimeout(() => resolve(''), KIMI_ONE_SHOT_TIMEOUT_MS)),
+      ]);
+      return result.trim();
+    } catch {
+      return '';
+    }
+  });
+}
+
 export async function generateCommitMessageImpl(cwd: string, aiProvider?: string): Promise<string> {
   const ws = get(cwd);
   const effectiveCwd = cwd || (ws && getClaude(ws).cwd) || process.env.HOME || '/';
@@ -1464,24 +1496,7 @@ export async function generateCommitMessageImpl(cwd: string, aiProvider?: string
   }
 
   if (aiProvider === 'kimi') {
-    return enqueueKimiCommitPrompt(effectiveCwd, async () => {
-      try {
-        const kimiWs = getOrCreate(effectiveCwd);
-        kimiWs.kimi.cwd = effectiveCwd;
-        await ensureKimiTransport(mainWin!, kimiWs);
-        const sessionId = await ensureKimiCommitSession(mainWin!, kimiWs);
-        const result = await promptKimiText(mainWin!, kimiWs, {
-          sessionId,
-          scope: 'commit',
-          prompt: commitPrompt,
-          approvalMode: 'plan',
-          model: 'kimi-k3',
-        });
-        return result.trim();
-      } catch {
-        return '';
-      }
-    });
+    return promptKimiOneShot(effectiveCwd, commitPrompt);
   }
 
   // Spawn the appropriate CLI with its fast model
@@ -1532,24 +1547,8 @@ export async function generateTitleImpl(cwd: string, userMessage: string, aiProv
     // message + title generation can't interleave their streamed text into
     // each other (promptAcpText's listener filters by scope only, and both
     // uses share the 'commit' scope on one session).
-    return enqueueKimiCommitPrompt(effectiveCwd, async () => {
-      try {
-        const kimiWs = getOrCreate(effectiveCwd);
-        kimiWs.kimi.cwd = effectiveCwd;
-        await ensureKimiTransport(mainWin!, kimiWs);
-        const sessionId = await ensureKimiCommitSession(mainWin!, kimiWs);
-        const result = await promptKimiText(mainWin!, kimiWs, {
-          sessionId,
-          scope: 'commit',
-          prompt: titlePrompt,
-          approvalMode: 'plan',
-          model: 'kimi-k3',
-        });
-        return result.trim().replace(/^["']|["']$/g, '').trim();
-      } catch {
-        return '';
-      }
-    });
+    const t = await promptKimiOneShot(effectiveCwd, titlePrompt);
+    return t.replace(/^["']|["']$/g, '').trim();
   }
 
   let cmd: string;

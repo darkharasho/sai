@@ -1407,6 +1407,58 @@ describe('claude:generateTitle', () => {
     expect(commitResult).toBe('kimi commit message');
     expect(titleResult).toBe('kimi title');
   });
+
+  it('does not wedge the serialization chain when a Kimi prompt hangs (times out to empty)', async () => {
+    // Regression test: promptAcpText has no timeout, so a hung prompt on the
+    // shared commit-scoped ACP session used to wedge enqueueKimiCommitPrompt
+    // forever — silently killing all future commit/title generation for that
+    // workspace. promptKimiOneShot now races each prompt against a 2-minute
+    // timeout that resolves '' so the chain link always settles.
+    const KIMI_ONE_SHOT_TIMEOUT_MS = 2 * 60 * 1000;
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      mockPromptKimiText.mockImplementation((_win: unknown, _ws: unknown, _opts: any) => {
+        calls++;
+        // Call 1 never resolves; later calls resolve normally.
+        return calls === 1 ? new Promise<string>(() => {}) : Promise.resolve('kimi commit message');
+      });
+      // generateCommitMessageImpl needs a non-empty `git diff` before it ever
+      // reaches the kimi branch — stub just enough spawn behavior for that.
+      vi.mocked(spawn).mockImplementation((_cmd: string, _args?: any) => {
+        const proc = new MockChildProcess();
+        const cmd = _cmd as string;
+        const args = (_args as string[]) || [];
+        if (cmd === 'git' && args.includes('--staged')) {
+          setImmediate(() => {
+            proc.pushStdout('diff --git a/f b/f\n+change\n');
+            proc.emitExit(0);
+          });
+        } else {
+          setImmediate(() => proc.emitExit(0));
+        }
+        return proc as any;
+      });
+
+      // Call 1: prompt hangs. Let git diff + the kimi branch reach the pending
+      // promptKimiText, then advance past the one-shot timeout.
+      const p1 = mockIpcMain._invoke('claude:generateCommitMessage', '/my/project', 'kimi');
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(KIMI_ONE_SHOT_TIMEOUT_MS + 1);
+      const commitResult = await p1;
+      expect(commitResult).toBe('');
+      expect(calls).toBe(1);
+
+      // The chain is not wedged: a subsequent prompt still executes + resolves.
+      const p2 = mockIpcMain._invoke('claude:generateTitle', '/my/project', 'hello world', 'kimi');
+      await vi.advanceTimersByTimeAsync(0);
+      const titleResult = await p2;
+      expect(titleResult).toBe('kimi commit message');
+      expect(calls).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 // ===========================================================================
