@@ -2,7 +2,7 @@
 import { ChildProcess } from 'node:child_process';
 import type * as pty from 'node-pty';
 import { BrowserWindow } from 'electron';
-import type { GeminiAcpClient } from './gemini-acp';
+import type { AcpClient } from './acp';
 
 export interface PendingToolUse {
   toolName: string;
@@ -91,13 +91,13 @@ export interface WorkspaceCodex {
   additionalDirectories?: string[];
 }
 
-export interface WorkspaceGemini {
+export interface AcpWorkspaceState {
   process: ChildProcess | null;
   buffer: string;
   cwd: string;
   busy: boolean;
   turnSeq: number;
-  transport: GeminiAcpClient | null;
+  transport: AcpClient | null;
   loadedSessionIds: Set<string>;
   bootstrappedSessionIds: Set<string>;
   suppressedScopes: Set<string>;
@@ -114,15 +114,19 @@ export interface WorkspaceGemini {
     description?: string;
     scope: string;
   } | null;
-  /** Meta-workspace preamble — stashed for future injection if gemini gains a system-prompt hook. */
+  /** Meta-workspace preamble — stashed for future injection if the provider gains a system-prompt hook. */
   metaPreamble?: string;
 }
+
+/** Back-compat alias — the Gemini state shape is now the shared ACP provider state. */
+export type WorkspaceGemini = AcpWorkspaceState;
 
 export interface Workspace {
   projectPath: string;
   claudeScopes: Map<string, WorkspaceClaude>;
   codex: WorkspaceCodex;
-  gemini: WorkspaceGemini;
+  gemini: AcpWorkspaceState;
+  kimi: AcpWorkspaceState;
   terminals: Map<number, pty.IPty>;
   lastActivity: number;
   status: 'active' | 'suspended';
@@ -203,6 +207,27 @@ export function registerWorkspaceBackendHooks(provider: string, hooks: Workspace
   backendHooks.set(provider, hooks);
 }
 
+function newAcpState(projectPath: string): AcpWorkspaceState {
+  return {
+    process: null,
+    buffer: '',
+    cwd: projectPath,
+    busy: false,
+    turnSeq: 0,
+    transport: null,
+    loadedSessionIds: new Set(),
+    bootstrappedSessionIds: new Set(),
+    suppressedScopes: new Set(),
+    chatSessionId: undefined,
+    commitSessionId: undefined,
+    terminalSessions: new Map(),
+    activeRequestId: undefined,
+    availability: 'available',
+    lastError: undefined,
+    pendingApproval: null,
+  };
+}
+
 export function getOrCreate(projectPath: string): Workspace {
   const existing = workspaces.get(projectPath);
   if (existing) {
@@ -221,24 +246,8 @@ export function getOrCreate(projectPath: string): Workspace {
       busy: false,
       turnSeq: 0,
     },
-    gemini: {
-      process: null,
-      buffer: '',
-      cwd: projectPath,
-      busy: false,
-      turnSeq: 0,
-      transport: null,
-      loadedSessionIds: new Set(),
-      bootstrappedSessionIds: new Set(),
-      suppressedScopes: new Set(),
-      chatSessionId: undefined,
-      commitSessionId: undefined,
-      terminalSessions: new Map(),
-      activeRequestId: undefined,
-      availability: 'available',
-      lastError: undefined,
-      pendingApproval: null,
-    },
+    gemini: newAcpState(projectPath),
+    kimi: newAcpState(projectPath),
     terminals: new Map(),
     lastActivity: Date.now(),
     status: 'active',
@@ -258,6 +267,29 @@ export function listAllWorkspaces(): Workspace[] {
 export function touchActivity(projectPath: string): void {
   const ws = workspaces.get(projectPath);
   if (ws) ws.lastActivity = Date.now();
+}
+
+function resetAcpState(state: AcpWorkspaceState, safeSend: (channel: string, ...args: any[]) => void, projectPath: string) {
+  if (state.busy) {
+    safeSend('claude:message', { type: 'done', projectPath, turnSeq: state.turnSeq });
+  }
+  if (state.process) {
+    state.process.kill();
+    state.process = null;
+  }
+  state.transport?.dispose();
+  state.transport = null;
+  state.loadedSessionIds.clear();
+  state.bootstrappedSessionIds.clear();
+  state.suppressedScopes.clear();
+  state.busy = false;
+  state.chatSessionId = undefined;
+  state.commitSessionId = undefined;
+  state.terminalSessions.clear();
+  state.activeRequestId = undefined;
+  state.availability = 'available';
+  state.lastError = undefined;
+  state.pendingApproval = null;
 }
 
 export function suspend(projectPath: string, win: BrowserWindow): void {
@@ -305,27 +337,9 @@ export function suspend(projectPath: string, win: BrowserWindow): void {
   }
   ws.codex.busy = false;
 
-  // Kill Gemini process
-  if (ws.gemini.busy) {
-    safeSend('claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.gemini.turnSeq });
-  }
-  if (ws.gemini.process) {
-    ws.gemini.process.kill();
-    ws.gemini.process = null;
-  }
-  ws.gemini.transport?.dispose();
-  ws.gemini.transport = null;
-  ws.gemini.loadedSessionIds.clear();
-  ws.gemini.bootstrappedSessionIds.clear();
-  ws.gemini.suppressedScopes.clear();
-  ws.gemini.busy = false;
-  ws.gemini.chatSessionId = undefined;
-  ws.gemini.commitSessionId = undefined;
-  ws.gemini.terminalSessions.clear();
-  ws.gemini.activeRequestId = undefined;
-  ws.gemini.availability = 'available';
-  ws.gemini.lastError = undefined;
-  ws.gemini.pendingApproval = null;
+  // Reset ACP providers (Gemini, Kimi)
+  resetAcpState(ws.gemini, safeSend, ws.projectPath);
+  resetAcpState(ws.kimi, safeSend, ws.projectPath);
 
   // Kill all terminals
   for (const term of ws.terminals.values()) {
