@@ -117,7 +117,7 @@ interface ChatPanelProps {
     globalModel: 'default' | 'best' | 'sonnet' | 'opus' | 'haiku' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan' | (string & {});
     globalEffort: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   };
-  aiProvider: 'claude' | 'codex' | 'gemini';
+  aiProvider: 'claude' | 'codex' | 'gemini' | 'kimi';
   codexModel: string;
   onCodexModelChange: (model: string) => void;
   codexModels: CodexModelOption[];
@@ -133,11 +133,17 @@ interface ChatPanelProps {
   onGeminiApprovalModeChange: (mode: 'default' | 'auto_edit' | 'yolo' | 'plan') => void;
   geminiConversationMode: 'planning' | 'fast';
   onGeminiConversationModeChange: (mode: 'planning' | 'fast') => void;
+  kimiModel: string;
+  onKimiModelChange: (m: string) => void;
+  kimiModels: { id: string; name: string }[];
+  kimiApprovalMode: 'default' | 'auto_edit' | 'yolo' | 'plan';
+  onKimiApprovalModeChange: (m: 'default' | 'auto_edit' | 'yolo' | 'plan') => void;
   initialMessages?: ChatMessageType[];
   onMessagesChange?: (messages: ChatMessageType[]) => void;
   onTurnComplete?: () => void;
   onClaudeSessionId?: (sessionId: string) => void;
   onGeminiSessionId?: (sessionId: string) => void;
+  onKimiSessionId?: (sessionId: string) => void;
   onCodexSessionId?: (sessionId: string) => void;
   activeFilePath?: string | null;
   onFileOpen?: (path: string, line?: number) => void;
@@ -441,7 +447,7 @@ const THINKING_ROW_MOTION = {
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
 
-export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission, onCodexPermissionChange, codexEffort, onCodexEffortChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp, waiting = null }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission, onCodexPermissionChange, codexEffort, onCodexEffortChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, kimiModel, onKimiModelChange, kimiModels, kimiApprovalMode, onKimiApprovalModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onKimiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp, waiting = null }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(() => {
     const initial = initialMessages || [];
     // Anything present at mount is history, not a fresh arrival — a workspace/
@@ -740,7 +746,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
   useEffect(() => {
     setReady(false);
-    const startFn = aiProvider === 'gemini' ? (window.sai as any).geminiStart : aiProvider === 'codex' ? window.sai.codexStart : window.sai.claudeStart;
+    const startFn = aiProvider === 'gemini' ? (window.sai as any).geminiStart
+      : aiProvider === 'kimi' ? (window.sai as any).kimiStart
+      : aiProvider === 'codex' ? window.sai.codexStart : window.sai.claudeStart;
     const metaPreamble = buildMetaPreamble(activeMetaRuntime ? {
       name: activeMetaRuntime.meta.name,
       syntheticRoot: activeMetaRuntime.syntheticRoot,
@@ -803,7 +811,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       // Gemini uses a fixed chat scope. Claude and Codex preserve the panel's
       // scope so parallel sessions cannot consume each other's events.
       if (msg.projectPath && msg.projectPath !== projectPath) return;
-      const expectedScope = aiProvider === 'gemini' ? 'chat' : claudeScope;
+      const expectedScope = (aiProvider === 'gemini' || aiProvider === 'kimi') ? 'chat' : claudeScope;
       if (msg.scope && msg.scope !== expectedScope) return;
 
       // Flush any buffered streaming text before processing a non-delta event,
@@ -826,6 +834,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           onClaudeSessionId?.(msg.sessionId);
         } else if (aiProvider === 'gemini') {
           onGeminiSessionId?.(msg.sessionId);
+        } else if (aiProvider === 'kimi') {
+          onKimiSessionId?.(msg.sessionId);
         }
         return;
       }
@@ -1886,8 +1896,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
   const handleApprove = (modifiedCommand?: string) => {
     if (!pendingApproval) return;
-    if (aiProvider === 'gemini') {
-      (window.sai as any).geminiApprove?.(projectPath, pendingApproval.toolUseId, true, modifiedCommand, 'chat');
+    if (aiProvider === 'gemini' || aiProvider === 'kimi') {
+      const approve = aiProvider === 'kimi' ? (window.sai as any).kimiApprove : (window.sai as any).geminiApprove;
+      approve?.(projectPath, pendingApproval.toolUseId, true, modifiedCommand, 'chat');
     } else {
       window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, true, modifiedCommand, claudeScope);
     }
@@ -1896,8 +1907,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
   const handleDeny = () => {
     if (!pendingApproval) return;
-    if (aiProvider === 'gemini') {
-      (window.sai as any).geminiApprove?.(projectPath, pendingApproval.toolUseId, false, undefined, 'chat');
+    if (aiProvider === 'gemini' || aiProvider === 'kimi') {
+      const approve = aiProvider === 'kimi' ? (window.sai as any).kimiApprove : (window.sai as any).geminiApprove;
+      approve?.(projectPath, pendingApproval.toolUseId, false, undefined, 'chat');
     } else {
       window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, false, undefined, claudeScope);
     }
@@ -1906,9 +1918,10 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
   const handleAlwaysAllow = async () => {
     if (!pendingApproval) return;
-    if (aiProvider === 'gemini') {
-      // Gemini doesn't support always-allow patterns — just approve this instance
-      (window.sai as any).geminiApprove?.(projectPath, pendingApproval.toolUseId, true, undefined, 'chat');
+    if (aiProvider === 'gemini' || aiProvider === 'kimi') {
+      // ACP providers don't support always-allow patterns — just approve this instance
+      const approve = aiProvider === 'kimi' ? (window.sai as any).kimiApprove : (window.sai as any).geminiApprove;
+      approve?.(projectPath, pendingApproval.toolUseId, true, undefined, 'chat');
     } else {
       const pattern = `${pendingApproval.toolName}(*)`;
       await window.sai.claudeAlwaysAllow(projectPath, pattern);
@@ -2023,7 +2036,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       setMessages(prev => [...prev,
         { id: newMessageId, role: 'user', content: text, timestamp: Date.now() },
         { id: `help-${Date.now()}`, role: 'system', content:
-          buildHelpMessage(aiProvider, slashCommands),
+          // helpText.ts's AIProvider type predates the kimi addition and is out of
+          // scope for this change; cast to keep this call site type-checking.
+          buildHelpMessage(aiProvider as any, slashCommands),
           timestamp: Date.now() },
       ]);
       return;
@@ -2039,6 +2054,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       // item. Suppress that one drain so only the user's new message runs.
       suppressNextDrainRef.current = true;
       if (aiProvider === 'gemini') (window.sai as any).geminiStop?.(projectPath);
+      else if (aiProvider === 'kimi') (window.sai as any).kimiStop?.(projectPath);
       else if (aiProvider === 'codex') window.sai.codexStop?.(projectPath, claudeScope);
       else window.sai.claudeStop?.(projectPath, claudeScope);
     }
@@ -2067,6 +2083,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     const prompt = activeFilePath && fileContextEnabled ? `[File: ${activeFilePath}]\n\n${text}` : text;
     if (aiProvider === 'gemini') {
       (window.sai as any).geminiSend(projectPath, prompt, imagePaths, geminiApprovalMode, geminiConversationMode, geminiModel, 'chat');
+    } else if (aiProvider === 'kimi') {
+      (window.sai as any).kimiSend(projectPath, prompt, imagePaths, kimiApprovalMode, kimiModel, 'chat');
     } else if (aiProvider === 'codex') {
       const selectedCodexModel = codexModels.find(model => model.id === codexModel);
       const sendEffort = normalizeCodexEffort(codexEffort ?? 'high', selectedCodexModel);
@@ -2124,6 +2142,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     if (isStreaming) {
       suppressNextDrainRef.current = true;
       if (aiProvider === 'gemini') (window.sai as any).geminiStop?.(projectPath);
+      else if (aiProvider === 'kimi') (window.sai as any).kimiStop?.(projectPath);
       else if (aiProvider === 'codex') window.sai.codexStop?.(projectPath, claudeScope);
       else window.sai.claudeStop?.(projectPath, claudeScope);
     }
@@ -2321,7 +2340,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
                       message={msg}
                       projectPath={projectPath}
                       onFileOpen={onFileOpen}
-                      aiProvider={aiProvider}
+                      aiProvider={aiProvider as any /* ChatMessage's AIProvider type predates kimi; out of scope here */}
                       toolCallsExpanded={toolCallsExpanded}
                       pinnedLayoutId={`pinned-${msg.id}`}
                       isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId}
@@ -2333,7 +2352,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
                     />
                   </div>
                 )
-                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} seedGrow={msg.id === seedGrowMsgId} renderToolCall={renderToolCall} renderMessage={renderMessage} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} watcherUrlAllowlist={watcherUrlsByMessageId.get(msg.id) ?? EMPTY_URL_SET} />
+                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider as any /* ChatMessage's AIProvider type predates kimi; out of scope here */} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} seedGrow={msg.id === seedGrowMsgId} renderToolCall={renderToolCall} renderMessage={renderMessage} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} watcherUrlAllowlist={watcherUrlsByMessageId.get(msg.id) ?? EMPTY_URL_SET} />
               )}
             </TaskRegistryContext.Provider>
             {isWaiting && waiting && (
@@ -2437,7 +2456,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             waiting={isWaiting}
             awaitingQuestion={awaitingQuestion}
             messages={messages}
-            onStop={() => aiProvider === 'gemini' ? (window.sai as any).geminiStop(projectPath) : aiProvider === 'codex' ? window.sai.codexStop(projectPath, claudeScope) : window.sai.claudeStop?.(projectPath, claudeScope)}
+            onStop={() => aiProvider === 'gemini' ? (window.sai as any).geminiStop(projectPath) : aiProvider === 'kimi' ? (window.sai as any).kimiStop(projectPath) : aiProvider === 'codex' ? window.sai.codexStop(projectPath, claudeScope) : window.sai.claudeStop?.(projectPath, claudeScope)}
             permissionMode={permissionMode}
             onPermissionChange={onPermissionChange}
             effortLevel={effortLevel}
@@ -2470,6 +2489,11 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             onGeminiApprovalModeChange={onGeminiApprovalModeChange}
             geminiConversationMode={geminiConversationMode}
             onGeminiConversationModeChange={onGeminiConversationModeChange}
+            kimiModel={kimiModel}
+            kimiModels={kimiModels}
+            onKimiModelChange={onKimiModelChange}
+            kimiApprovalMode={kimiApprovalMode}
+            onKimiApprovalModeChange={onKimiApprovalModeChange}
             terminalTabs={terminalTabs}
             messageQueue={messageQueue}
             onQueueRemove={(id) => sessionId && onQueueRemove?.(sessionId, id)}

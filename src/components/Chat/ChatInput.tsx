@@ -1,5 +1,5 @@
 import { useState, useRef, KeyboardEvent, useEffect, useMemo } from 'react';
-import type { PendingApproval, PendingSudoPrompt, TerminalTab, ChatMessage as ChatMessageType, QueuedMessage, MetaWorkspaceRuntime, EffortLevel, CodexEffort, CodexModelOption, ModelChoice } from '../../types';
+import type { PendingApproval, PendingSudoPrompt, TerminalTab, ChatMessage as ChatMessageType, QueuedMessage, MetaWorkspaceRuntime, EffortLevel, CodexEffort, CodexModelOption, ModelChoice, AIProvider } from '../../types';
 import TodoProgress from './TodoProgress';
 import MessageQueue from './MessageQueue';
 import { basename } from '../../utils/pathUtils';
@@ -64,7 +64,7 @@ interface ChatInputProps {
   activeFilePath?: string | null;
   fileContextEnabled?: boolean;
   onFileContextToggle?: () => void;
-  aiProvider?: 'claude' | 'codex' | 'gemini';
+  aiProvider?: AIProvider;
   pendingApproval?: PendingApproval | null;
   pendingSudoPrompt?: PendingSudoPrompt | null;
   onApprove?: (modifiedCommand?: string) => void;
@@ -85,6 +85,11 @@ interface ChatInputProps {
   onGeminiApprovalModeChange?: (mode: 'default' | 'auto_edit' | 'yolo' | 'plan') => void;
   geminiConversationMode?: 'planning' | 'fast';
   onGeminiConversationModeChange?: (mode: 'planning' | 'fast') => void;
+  kimiModel?: string;
+  kimiModels?: { id: string; name: string }[];
+  onKimiModelChange?: (model: string) => void;
+  kimiApprovalMode?: 'default' | 'auto_edit' | 'yolo' | 'plan';
+  onKimiApprovalModeChange?: (mode: 'default' | 'auto_edit' | 'yolo' | 'plan') => void;
   terminalTabs?: TerminalTab[];
   messageQueue?: QueuedMessage[];
   onQueueRemove?: (id: string) => void;
@@ -251,7 +256,7 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabled, slashCommands = [], isStreaming, waiting, awaitingQuestion, messages = [], onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, contextUsage, sessionUsage, sessionCost, usageLimits = [], billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, pendingSudoPrompt, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, onCodexModelsRefresh, codexPermission = 'auto', onCodexPermissionChange, codexEffort = 'high', onCodexEffortChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, onQueueSendNow, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
+export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabled, slashCommands = [], isStreaming, waiting, awaitingQuestion, messages = [], onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, contextUsage, sessionUsage, sessionCost, usageLimits = [], billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, pendingSudoPrompt, onApprove, onDeny, onAlwaysAllow, codexModel = 'o3', codexModels = [], onCodexModelChange, onCodexModelsRefresh, codexPermission = 'auto', onCodexPermissionChange, codexEffort = 'high', onCodexEffortChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, kimiModel = 'kimi-k3', kimiModels = [], onKimiModelChange, kimiApprovalMode = 'default', onKimiApprovalModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, onQueueSendNow, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
   const selectedCodexModel = codexModels.find(model => model.id === codexModel);
   const supportedCodexEfforts = effortsForCodexModel(selectedCodexModel);
   const effectiveCodexEffort = normalizeCodexEffort(codexEffort, selectedCodexModel);
@@ -945,12 +950,12 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
           <div className="chat-placeholder" onClick={() => textareaRef.current?.focus()}>
             {!isStreaming && (
               <span className="chat-placeholder-icon" style={{
-                maskImage: `url('${aiProvider === 'codex' ? 'svg/codex.svg' : aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : 'svg/claude.svg'}')`,
-                WebkitMaskImage: `url('${aiProvider === 'codex' ? 'svg/codex.svg' : aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : 'svg/claude.svg'}')`,
+                maskImage: `url('${aiProvider === 'codex' ? 'svg/codex.svg' : aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : aiProvider === 'kimi' ? 'svg/kimi.svg' : 'svg/claude.svg'}')`,
+                WebkitMaskImage: `url('${aiProvider === 'codex' ? 'svg/codex.svg' : aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : aiProvider === 'kimi' ? 'svg/kimi.svg' : 'svg/claude.svg'}')`,
                 backgroundColor: 'var(--text-muted)',
               }} />
             )}
-            <span>{awaitingQuestion && aiProvider === 'claude' ? 'Type to answer, or use the buttons above…' : isStreaming ? 'Queue another message...' : `Message ${aiProvider === 'codex' ? 'Codex' : aiProvider === 'gemini' ? 'Gemini' : 'Claude'}...`}</span>
+            <span>{awaitingQuestion && aiProvider === 'claude' ? 'Type to answer, or use the buttons above…' : isStreaming ? 'Queue another message...' : `Message ${aiProvider === 'codex' ? 'Codex' : aiProvider === 'gemini' ? 'Gemini' : aiProvider === 'kimi' ? 'Kimi' : 'Claude'}...`}</span>
           </div>
         )}
         <textarea
@@ -1354,6 +1359,39 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
           </div>
           )}
 
+          {/* Model selector — Kimi */}
+          {aiProvider === 'kimi' && kimiModels.length > 0 && (
+          <div className="model-selector" ref={modelMenuRef}>
+            <button
+              className="toolbar-btn model-btn"
+              onClick={() => setModelMenuOpen(!modelMenuOpen)}
+              style={{ color: 'var(--text)' }}
+            >
+              <span className="model-label">{kimiModels.find(m => m.id === kimiModel)?.name || kimiModel}</span>
+              <ChevronDown size={11} style={{ opacity: 0.5 }} />
+            </button>
+            {modelMenuOpen && (
+              <div className="model-dropdown">
+                <div className="model-dropdown-header">Select a model</div>
+                {kimiModels.map(m => (
+                  <button
+                    key={m.id}
+                    className={`model-dropdown-item ${m.id === kimiModel ? 'active' : ''}`}
+                    onClick={() => { onKimiModelChange?.(m.id); setModelMenuOpen(false); }}
+                  >
+                    <div className="model-dropdown-item-info">
+                      <span className="model-dropdown-item-name" style={{ color: m.id === kimiModel ? 'var(--text)' : undefined }}>
+                        {m.name}
+                      </span>
+                    </div>
+                    {m.id === kimiModel && <Check size={14} style={{ color: 'var(--text)', flexShrink: 0 }} />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          )}
+
           {/* Conversation mode — Gemini */}
           {getCapabilities(aiProvider).hasConversationMode && (
           <button
@@ -1398,6 +1436,25 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
               : geminiApprovalMode === 'auto_edit'
               ? <><ShieldCheck size={14} /> <span className="permission-label">Auto Edit</span></>
               : geminiApprovalMode === 'yolo'
+              ? <><ShieldOff size={14} /> <span className="permission-label">Yolo</span></>
+              : <><ShieldCheck size={14} /> <span className="permission-label">Plan</span></>
+            }
+          </button>
+          ) : aiProvider === 'kimi' ? (
+          <button
+            className={`toolbar-btn permission-btn ${kimiApprovalMode === 'yolo' ? 'bypass-active' : ''}`}
+            onClick={() => {
+              const modes: Array<'default' | 'auto_edit' | 'yolo' | 'plan'> = ['default', 'auto_edit', 'yolo', 'plan'];
+              const idx = modes.indexOf(kimiApprovalMode);
+              onKimiApprovalModeChange?.(modes[(idx + 1) % modes.length]);
+            }}
+            title={`Approval: ${kimiApprovalMode}`}
+          >
+            {kimiApprovalMode === 'default'
+              ? <><ShieldCheck size={14} /> <span className="permission-label">Default</span></>
+              : kimiApprovalMode === 'auto_edit'
+              ? <><ShieldCheck size={14} /> <span className="permission-label">Auto Edit</span></>
+              : kimiApprovalMode === 'yolo'
               ? <><ShieldOff size={14} /> <span className="permission-label">Yolo</span></>
               : <><ShieldCheck size={14} /> <span className="permission-label">Plan</span></>
             }
