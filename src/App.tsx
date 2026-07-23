@@ -4983,12 +4983,12 @@ export default function App() {
                   isStreaming={
                     aiProvider === 'claude' || aiProvider === 'codex'
                       ? streamingScopes.has(`${wsPath}:${ws.activeSession.id}`)
-                      // Gemini uses a long-lived ACP — multiple sessions can stream
+                      // Gemini/Kimi use a long-lived ACP — multiple sessions can stream
                       // concurrently (New Chat keeps the background turn running).
                       // Only show the animation when the streaming ACP session matches
                       // this session's own geminiSessionId.
                       : streamingScopes.has(`${wsPath}:chat`) &&
-                        chatStreamingSessionRef.current.get(wsPath) === (ws.activeSession.geminiSessionId ?? null)
+                        chatStreamingSessionRef.current.get(wsPath) === ((aiProvider === 'kimi' ? ws.activeSession.kimiSessionId : ws.activeSession.geminiSessionId) ?? null)
                   }
                   waiting={
                     // waits are claude-only: waitingScopes never holds gemini/codex entries
