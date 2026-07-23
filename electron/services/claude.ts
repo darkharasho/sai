@@ -10,6 +10,7 @@ import { enrichedEnv, withNodeMemoryCap } from './shellEnv';
 import { notifyCompletion, notifyApproval, notifyQuestion, notifyPlanReview } from './notify';
 import { extractCodexCommitMessage } from './commit-message-parser';
 import { ensureGeminiCommitSession, ensureGeminiTransport, promptGeminiText } from './gemini';
+import { ensureKimiTransport, ensureKimiCommitSession, promptKimiText } from './kimi';
 import * as swarmMcpHost from './swarmMcpHost';
 import { writeSwarmMcpConfig } from './swarmMcpConfig';
 import {
@@ -1445,6 +1446,25 @@ export async function generateCommitMessageImpl(cwd: string, aiProvider?: string
         prompt: commitPrompt,
         approvalMode: 'plan',
         model: 'gemini-2.5-flash',
+      });
+      return result.trim();
+    } catch {
+      return '';
+    }
+  }
+
+  if (aiProvider === 'kimi') {
+    try {
+      const kimiWs = getOrCreate(effectiveCwd);
+      kimiWs.kimi.cwd = effectiveCwd;
+      await ensureKimiTransport(mainWin!, kimiWs);
+      const sessionId = await ensureKimiCommitSession(mainWin!, kimiWs);
+      const result = await promptKimiText(mainWin!, kimiWs, {
+        sessionId,
+        scope: 'commit',
+        prompt: commitPrompt,
+        approvalMode: 'plan',
+        model: 'kimi-k3',
       });
       return result.trim();
     } catch {
