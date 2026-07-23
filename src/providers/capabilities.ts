@@ -50,6 +50,18 @@ const CAPABILITIES: Record<AIProvider, ProviderCapabilities> = {
     hasMcp: false,
     hasPlugins: false,
   },
+  kimi: {
+    hasOrchestrator: false,
+    hasSlashCommands: false,
+    hasEffortMode: false,
+    hasConversationMode: false,
+    hasApprovalMode: true,
+    supportsImages: true,
+    supportsTerminalScope: true,
+    supportsMultiScope: true,
+    hasMcp: false,
+    hasPlugins: false,
+  },
 };
 
 export function getCapabilities(provider: AIProvider): ProviderCapabilities {

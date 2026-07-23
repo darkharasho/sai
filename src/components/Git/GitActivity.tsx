@@ -10,6 +10,7 @@ const PROVIDER_LABELS = {
   claude: 'Claude',
   codex: 'Codex',
   gemini: 'Gemini',
+  kimi: 'Kimi',
 } as const;
 
 export default function GitActivity({ commits }: GitActivityProps) {

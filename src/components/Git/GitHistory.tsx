@@ -34,6 +34,7 @@ const PROVIDER_LABELS = {
   claude: 'Claude',
   codex: 'Codex',
   gemini: 'Gemini',
+  kimi: 'Kimi',
 } as const;
 
 const PAGE_SIZE = 50;

@@ -59,7 +59,11 @@ export interface ApprovalChatMeta {
   resolved?: 'approved' | 'denied';
 }
 
-export type AIProvider = 'claude' | 'codex' | 'gemini';
+export const AI_PROVIDERS = ['claude', 'codex', 'gemini', 'kimi'] as const;
+export type AIProvider = (typeof AI_PROVIDERS)[number];
+export function isAIProvider(v: unknown): v is AIProvider {
+  return typeof v === 'string' && (AI_PROVIDERS as readonly string[]).includes(v);
+}
 
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export type CodexEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
@@ -86,6 +90,7 @@ export interface ChatSession {
   claudeSessionId?: string;
   codexSessionId?: string;
   geminiSessionId?: string;
+  kimiSessionId?: string;
   pinned?: boolean;
   lastViewedAt?: number;
   /** Stamped when a background turn ends with is_error/error_during_execution.
@@ -185,7 +190,7 @@ export interface GitCommit {
   date: string;
   parents?: string[];
   files: string[];
-  aiProvider?: 'claude' | 'codex' | 'gemini';
+  aiProvider?: AIProvider;
 }
 
 export interface DirEntry {

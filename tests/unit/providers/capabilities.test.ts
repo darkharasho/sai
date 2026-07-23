@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { getCapabilities } from '../../../src/providers/capabilities';
+import { isAIProvider, AI_PROVIDERS } from '../../../src/types';
 
 describe('getCapabilities', () => {
   describe('claude', () => {
@@ -30,5 +31,29 @@ describe('getCapabilities', () => {
     it('has approval mode', () => expect(getCapabilities('codex').hasApprovalMode).toBe(true));
     it('does not support terminal scope', () => expect(getCapabilities('codex').supportsTerminalScope).toBe(false));
     it('does not support multi-scope', () => expect(getCapabilities('codex').supportsMultiScope).toBe(false));
+  });
+});
+
+describe('kimi provider plumbing', () => {
+  it('kimi capabilities: gemini-level minus conversation mode', () => {
+    expect(getCapabilities('kimi')).toEqual({
+      hasOrchestrator: false,
+      hasSlashCommands: false,
+      hasEffortMode: false,
+      hasConversationMode: false,
+      hasApprovalMode: true,
+      supportsImages: true,
+      supportsTerminalScope: true,
+      supportsMultiScope: true,
+      hasMcp: false,
+      hasPlugins: false,
+    });
+  });
+
+  it('isAIProvider accepts all four providers and rejects junk', () => {
+    expect(AI_PROVIDERS).toEqual(['claude', 'codex', 'gemini', 'kimi']);
+    expect(isAIProvider('kimi')).toBe(true);
+    expect(isAIProvider('grok')).toBe(false);
+    expect(isAIProvider(undefined)).toBe(false);
   });
 });
