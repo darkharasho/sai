@@ -1404,6 +1404,16 @@ export async function alwaysAllowImpl(projectPath: string, toolPattern: string):
   return true;
 }
 
+// Kimi title/commit prompts share one ACP commit session; serialize them so
+// concurrent streams can't interleave into each other's text accumulators.
+const kimiCommitPromptChain = new Map<string, Promise<unknown>>();
+function enqueueKimiCommitPrompt<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = kimiCommitPromptChain.get(key) ?? Promise.resolve();
+  const next = prev.then(fn, fn);
+  kimiCommitPromptChain.set(key, next.then(() => undefined, () => undefined));
+  return next;
+}
+
 export async function generateCommitMessageImpl(cwd: string, aiProvider?: string): Promise<string> {
   const ws = get(cwd);
   const effectiveCwd = cwd || (ws && getClaude(ws).cwd) || process.env.HOME || '/';
@@ -1454,22 +1464,24 @@ export async function generateCommitMessageImpl(cwd: string, aiProvider?: string
   }
 
   if (aiProvider === 'kimi') {
-    try {
-      const kimiWs = getOrCreate(effectiveCwd);
-      kimiWs.kimi.cwd = effectiveCwd;
-      await ensureKimiTransport(mainWin!, kimiWs);
-      const sessionId = await ensureKimiCommitSession(mainWin!, kimiWs);
-      const result = await promptKimiText(mainWin!, kimiWs, {
-        sessionId,
-        scope: 'commit',
-        prompt: commitPrompt,
-        approvalMode: 'plan',
-        model: 'kimi-k3',
-      });
-      return result.trim();
-    } catch {
-      return '';
-    }
+    return enqueueKimiCommitPrompt(effectiveCwd, async () => {
+      try {
+        const kimiWs = getOrCreate(effectiveCwd);
+        kimiWs.kimi.cwd = effectiveCwd;
+        await ensureKimiTransport(mainWin!, kimiWs);
+        const sessionId = await ensureKimiCommitSession(mainWin!, kimiWs);
+        const result = await promptKimiText(mainWin!, kimiWs, {
+          sessionId,
+          scope: 'commit',
+          prompt: commitPrompt,
+          approvalMode: 'plan',
+          model: 'kimi-k3',
+        });
+        return result.trim();
+      } catch {
+        return '';
+      }
+    });
   }
 
   // Spawn the appropriate CLI with its fast model
@@ -1515,23 +1527,29 @@ export async function generateTitleImpl(cwd: string, userMessage: string, aiProv
     // Kimi has no one-shot CLI flag mode (it only speaks ACP, `kimi acp`), so
     // unlike gemini/codex/claude above it can't be spawned directly here.
     // Reuse the same persistent commit-scoped ACP session as commit-message
-    // generation (generateCommitMessageImpl above) for this one-off prompt.
-    try {
-      const kimiWs = getOrCreate(effectiveCwd);
-      kimiWs.kimi.cwd = effectiveCwd;
-      await ensureKimiTransport(mainWin!, kimiWs);
-      const sessionId = await ensureKimiCommitSession(mainWin!, kimiWs);
-      const result = await promptKimiText(mainWin!, kimiWs, {
-        sessionId,
-        scope: 'commit',
-        prompt: titlePrompt,
-        approvalMode: 'plan',
-        model: 'kimi-k3',
-      });
-      return result.trim().replace(/^["']|["']$/g, '').trim();
-    } catch {
-      return '';
-    }
+    // generation (generateCommitMessageImpl above) for this one-off prompt —
+    // serialized through the same per-workspace chain so a concurrent commit
+    // message + title generation can't interleave their streamed text into
+    // each other (promptAcpText's listener filters by scope only, and both
+    // uses share the 'commit' scope on one session).
+    return enqueueKimiCommitPrompt(effectiveCwd, async () => {
+      try {
+        const kimiWs = getOrCreate(effectiveCwd);
+        kimiWs.kimi.cwd = effectiveCwd;
+        await ensureKimiTransport(mainWin!, kimiWs);
+        const sessionId = await ensureKimiCommitSession(mainWin!, kimiWs);
+        const result = await promptKimiText(mainWin!, kimiWs, {
+          sessionId,
+          scope: 'commit',
+          prompt: titlePrompt,
+          approvalMode: 'plan',
+          model: 'kimi-k3',
+        });
+        return result.trim().replace(/^["']|["']$/g, '').trim();
+      } catch {
+        return '';
+      }
+    });
   }
 
   let cmd: string;

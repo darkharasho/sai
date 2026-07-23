@@ -25,6 +25,9 @@ const {
   mockEnsureGeminiTransport,
   mockEnsureGeminiCommitSession,
   mockPromptGeminiText,
+  mockEnsureKimiTransport,
+  mockEnsureKimiCommitSession,
+  mockPromptKimiText,
 } = vi.hoisted(() => {
   // ---- Minimal IPC main mock ----
   type IpcHandler = (...args: unknown[]) => unknown;
@@ -118,6 +121,7 @@ const {
           projectPath,
           claudeScopes: new Map([['chat', makeClaude()]]),
           gemini: { cwd: projectPath },
+          kimi: { cwd: projectPath },
         });
       }
       return map.get(projectPath)!;
@@ -138,6 +142,9 @@ const {
     mockEnsureGeminiTransport: vi.fn().mockResolvedValue(undefined),
     mockEnsureGeminiCommitSession: vi.fn().mockResolvedValue('gemini-commit-session'),
     mockPromptGeminiText: vi.fn().mockResolvedValue('gemini commit message'),
+    mockEnsureKimiTransport: vi.fn().mockResolvedValue(undefined),
+    mockEnsureKimiCommitSession: vi.fn().mockResolvedValue('kimi-commit-session'),
+    mockPromptKimiText: vi.fn().mockResolvedValue('kimi commit message'),
   };
 });
 
@@ -168,6 +175,12 @@ vi.mock('@electron/services/gemini', () => ({
   ensureGeminiTransport: mockEnsureGeminiTransport,
   ensureGeminiCommitSession: mockEnsureGeminiCommitSession,
   promptGeminiText: mockPromptGeminiText,
+}));
+
+vi.mock('@electron/services/kimi', () => ({
+  ensureKimiTransport: mockEnsureKimiTransport,
+  ensureKimiCommitSession: mockEnsureKimiCommitSession,
+  promptKimiText: mockPromptKimiText,
 }));
 
 // This suite tests the CLI backend path end-to-end; the app default is now
@@ -1302,6 +1315,97 @@ describe('claude:generateCommitMessage', () => {
         scope: 'commit',
       }),
     );
+  });
+
+  it('uses a hidden Kimi ACP session for commit generation', async () => {
+    mockSpawnForCommit({});
+    const result = await mockIpcMain._invoke('claude:generateCommitMessage', '/my/project', 'kimi');
+
+    expect(result).toBe('kimi commit message');
+    expect(mockEnsureKimiTransport).toHaveBeenCalled();
+    expect(mockEnsureKimiCommitSession).toHaveBeenCalled();
+    expect(mockPromptKimiText).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        scope: 'commit',
+        prompt: expect.stringContaining('Generate a concise commit message for this diff'),
+        model: 'kimi-k3',
+        approvalMode: 'plan',
+      }),
+    );
+  });
+});
+
+// ===========================================================================
+// claude:generateTitle handler
+// ===========================================================================
+
+describe('claude:generateTitle', () => {
+  it('uses the shared Kimi ACP commit session for title generation', async () => {
+    const result = await mockIpcMain._invoke('claude:generateTitle', '/my/project', 'hello world', 'kimi');
+
+    expect(result).toBe('kimi commit message');
+    expect(mockEnsureKimiTransport).toHaveBeenCalled();
+    expect(mockEnsureKimiCommitSession).toHaveBeenCalled();
+    expect(mockPromptKimiText).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        scope: 'commit',
+        prompt: expect.stringContaining('Summarize this conversation'),
+        model: 'kimi-k3',
+        approvalMode: 'plan',
+      }),
+    );
+  });
+
+  it('serializes concurrent Kimi commit-message + title-generation prompts so they never overlap', async () => {
+    // Regression test: generateCommitMessageImpl and generateTitleImpl share one
+    // ACP "commit"-scoped session for Kimi, and promptAcpText's event listener
+    // filters incoming chunks by scope only — two concurrent prompts on that
+    // session would interleave their streamed text into each other's
+    // accumulators. enqueueKimiCommitPrompt (electron/services/claude.ts) must
+    // serialize them per workspace so only one is ever in flight at a time.
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const seenPrompts: string[] = [];
+    mockPromptKimiText.mockImplementation(async (_win: unknown, _ws: unknown, opts: any) => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      seenPrompts.push(opts.prompt);
+      // Yield a macrotask so a broken (non-serialized) implementation would have
+      // a real chance to start the second prompt before this one resolves.
+      await new Promise(resolve => setTimeout(resolve, 10));
+      inFlight--;
+      return opts.prompt.includes('Summarize this conversation') ? 'kimi title' : 'kimi commit message';
+    });
+    // generateCommitMessageImpl needs a non-empty `git diff` before it ever
+    // reaches the kimi branch — stub just enough spawn behavior for that.
+    vi.mocked(spawn).mockImplementation((_cmd: string, _args?: any) => {
+      const proc = new MockChildProcess();
+      const cmd = _cmd as string;
+      const args = (_args as string[]) || [];
+      if (cmd === 'git' && args.includes('--staged')) {
+        setImmediate(() => {
+          proc.pushStdout('diff --git a/f b/f\n+change\n');
+          proc.emitExit(0);
+        });
+      } else {
+        setImmediate(() => proc.emitExit(0));
+      }
+      return proc as any;
+    });
+
+    const [commitResult, titleResult] = await Promise.all([
+      mockIpcMain._invoke('claude:generateCommitMessage', '/my/project', 'kimi'),
+      mockIpcMain._invoke('claude:generateTitle', '/my/project', 'hello world', 'kimi'),
+    ]);
+
+    expect(maxInFlight).toBe(1);
+    expect(seenPrompts).toHaveLength(2);
+    expect(commitResult).toBe('kimi commit message');
+    expect(titleResult).toBe('kimi title');
   });
 });
 
