@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import type { ModelChoice, EffortLevel, CodexEffort, CodexModelOption, ClaudeModelOption } from '../types';
+import type { ModelChoice, EffortLevel, CodexEffort, CodexModelOption, ClaudeModelOption, AIProvider } from '../types';
+import { isAIProvider } from '../types';
 import { X, Check, ChevronDown, Settings as SettingsIcon, Monitor, Type, PanelLeft, Palette, HardDrive, Keyboard, Zap, Smartphone, Link } from 'lucide-react';
 import KeybindingsPage from './Settings/KeybindingsPage';
 import SwarmSettings from './Settings/SwarmSettings';
@@ -75,7 +76,7 @@ const RETENTION_OPTIONS: { label: string; value: number | null }[] = [
 ];
 
 type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error';
-type SettingsPage = 'general' | 'editor' | 'layout' | 'style' | 'storage' | 'provider' | 'claude' | 'codex' | 'gemini' | 'swarm' | 'remote' | 'keybindings' | 'integrations';
+type SettingsPage = 'general' | 'editor' | 'layout' | 'style' | 'storage' | 'provider' | 'claude' | 'codex' | 'gemini' | 'kimi' | 'swarm' | 'remote' | 'keybindings' | 'integrations';
 
 function formatRelative(ts: number): string {
   const secs = Math.floor((Date.now() - ts) / 1000);
@@ -86,24 +87,25 @@ function formatRelative(ts: number): string {
   return `${Math.floor(mins / 60)}h ago`;
 }
 
-const PROVIDER_OPTIONS: { id: 'claude' | 'codex' | 'gemini'; label: string; svg: string; color: string }[] = [
+const PROVIDER_OPTIONS: { id: AIProvider; label: string; svg: string; color: string }[] = [
   { id: 'claude', label: 'Claude', svg: 'svg/claude.svg', color: '#e27b4a' },
   { id: 'codex', label: 'Codex', svg: 'svg/codex.svg', color: '#fff' },
   { id: 'gemini', label: 'Gemini CLI', svg: 'svg/Google-gemini-icon.svg', color: '#4285f4' },
+  { id: 'kimi', label: 'Kimi CLI', svg: 'svg/kimi.svg', color: '#fff' },
 ];
 
 export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew, onHistoryRetentionChange, claudeModel, onClaudeModelChange, claudeEffort, onClaudeEffortChange, claudeModels = [] }: Props) {
   const [suspendTimeout, setSuspendTimeout] = useState<number>(DEFAULT_TIMEOUT);
   const [editorFontSize, setEditorFontSize] = useState(13);
   const [editorMinimap, setEditorMinimap] = useState(true);
-  const [aiProvider, setAiProvider] = useState<'claude' | 'codex' | 'gemini'>('claude');
+  const [aiProvider, setAiProvider] = useState<AIProvider>('claude');
   const [claudeBackend, setClaudeBackend] = useState<'cli' | 'sdk'>('sdk');
   const [claudeShowReasoning, setClaudeShowReasoning] = useState(false);
   const [claudeMaxBudgetUsd, setClaudeMaxBudgetUsd] = useState(0);
   const [claude1MContext, setClaude1MContext] = useState(false);
   const [providerOpen, setProviderOpen] = useState(false);
   const providerRef = useRef<HTMLDivElement>(null);
-  const [commitMessageProvider, setCommitMessageProvider] = useState<'claude' | 'codex' | 'gemini'>('claude');
+  const [commitMessageProvider, setCommitMessageProvider] = useState<AIProvider>('claude');
   const [lockCommitProvider, setLockCommitProvider] = useState(false);
   const [commitProviderOpen, setCommitProviderOpen] = useState(false);
   const commitProviderRef = useRef<HTMLDivElement>(null);
@@ -114,6 +116,8 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [geminiDefaultModel, setGeminiDefaultModel] = useState('auto-gemini-3');
   const [geminiDefaultApprovalMode, setGeminiDefaultApprovalMode] = useState<'default' | 'auto_edit' | 'yolo' | 'plan'>('default');
   const [geminiDefaultConversationMode, setGeminiDefaultConversationMode] = useState<'planning' | 'fast'>('planning');
+  const [kimiDefaultModel, setKimiDefaultModel] = useState('kimi-k3');
+  const [kimiDefaultApprovalMode, setKimiDefaultApprovalMode] = useState<'default' | 'auto_edit' | 'yolo' | 'plan'>('default');
   const [codexDefaultModel, setCodexDefaultModel] = useState('');
   const [codexDefaultPermission, setCodexDefaultPermission] = useState<'auto' | 'read-only' | 'full-access'>('auto');
   const [codexDefaultEffort, setCodexDefaultEffort] = useState<CodexEffort>('high');
@@ -198,6 +202,10 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if (g.approvalMode === 'default' || g.approvalMode === 'auto_edit' || g.approvalMode === 'yolo' || g.approvalMode === 'plan') setGeminiDefaultApprovalMode(g.approvalMode);
       if (g.conversationMode === 'planning' || g.conversationMode === 'fast') setGeminiDefaultConversationMode(g.conversationMode);
     });
+    window.sai.settingsGet('kimi', {}).then((k: any) => {
+      if (k.model) setKimiDefaultModel(k.model);
+      if (k.approvalMode === 'default' || k.approvalMode === 'auto_edit' || k.approvalMode === 'yolo' || k.approvalMode === 'plan') setKimiDefaultApprovalMode(k.approvalMode);
+    });
     window.sai.settingsGet('codex', {}).then((c: any) => {
       if (!mounted) return;
       const next = {
@@ -248,7 +256,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.settingsGet('roundedCorners', false).then((v: boolean) => setRoundedCorners(!!v));
     window.sai.settingsGet('overlayEnabled', false).then((v: boolean) => setOverlayEnabled(!!v));
     window.sai.settingsGet('aiProvider', 'claude').then((v: string) => {
-      if (v === 'claude' || v === 'codex' || v === 'gemini') setAiProvider(v as 'claude' | 'codex' | 'gemini');
+      if (isAIProvider(v)) setAiProvider(v);
     });
     window.sai.settingsGet('claudeBackend', 'sdk').then((v: string) => {
       if (v === 'cli' || v === 'sdk') setClaudeBackend(v);
@@ -257,7 +265,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.settingsGet('claudeMaxBudgetUsd', 0).then((v: number) => setClaudeMaxBudgetUsd(Number(v) || 0));
     window.sai.settingsGet('claude1MContext', false).then((v: boolean) => setClaude1MContext(!!v));
     window.sai.settingsGet('commitMessageProvider', 'claude').then((v: string) => {
-      if (v === 'claude' || v === 'codex' || v === 'gemini') setCommitMessageProvider(v as 'claude' | 'codex' | 'gemini');
+      if (isAIProvider(v)) setCommitMessageProvider(v);
     });
     window.sai.settingsGet('lockCommitProvider', false).then((v: boolean) => setLockCommitProvider(!!v));
     window.sai.settingsGet('historyRetention', 14).then((v: number | null) => setHistoryRetention(v));
@@ -273,7 +281,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if ('suspendTimeout' in remote) setSuspendTimeout(remote.suspendTimeout);
       if ('editorFontSize' in remote) setEditorFontSize(remote.editorFontSize);
       if ('editorMinimap' in remote) setEditorMinimap(remote.editorMinimap);
-      if ('aiProvider' in remote && (remote.aiProvider === 'claude' || remote.aiProvider === 'codex' || remote.aiProvider === 'gemini')) setAiProvider(remote.aiProvider);
+      if ('aiProvider' in remote && isAIProvider(remote.aiProvider)) setAiProvider(remote.aiProvider);
       if ('codex' in remote && remote.codex && typeof remote.codex === 'object') {
         codexSettingsRevision.current += 1;
         const c = remote.codex;
@@ -308,7 +316,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
         if (next.permission) setCodexDefaultPermission(next.permission);
         if (next.effort) setCodexDefaultEffort(next.effort);
       }
-      if ('commitMessageProvider' in remote && (remote.commitMessageProvider === 'claude' || remote.commitMessageProvider === 'codex' || remote.commitMessageProvider === 'gemini')) setCommitMessageProvider(remote.commitMessageProvider);
+      if ('commitMessageProvider' in remote && isAIProvider(remote.commitMessageProvider)) setCommitMessageProvider(remote.commitMessageProvider);
       if ('lockCommitProvider' in remote) setLockCommitProvider(remote.lockCommitProvider);
       if ('systemNotifications' in remote) setSystemNotifications(remote.systemNotifications);
       if ('toolCallsExpanded' in remote) setToolCallsExpanded(remote.toolCallsExpanded);
@@ -431,7 +439,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     onSettingChange?.('editorMinimap', value);
   };
 
-  const handleProviderChange = (value: 'claude' | 'codex' | 'gemini') => {
+  const handleProviderChange = (value: AIProvider) => {
     setAiProvider(value);
     window.sai.settingsSet('aiProvider', value);
     onSettingChange?.('aiProvider', value);
@@ -467,7 +475,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     onSettingChange?.('claude1MContext', value);
   };
 
-  const handleCommitProviderChange = (value: 'claude' | 'codex' | 'gemini') => {
+  const handleCommitProviderChange = (value: AIProvider) => {
     if (lockCommitProvider) return;
     setCommitMessageProvider(value);
     window.sai.settingsSet('commitMessageProvider', value);
@@ -510,6 +518,22 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       window.sai.settingsSet('gemini', { ...existing, conversationMode: mode });
     });
     onSettingChange?.('geminiConversationMode', mode);
+  };
+
+  const handleKimiDefaultModelChange = (model: string) => {
+    setKimiDefaultModel(model);
+    window.sai.settingsGet('kimi', {}).then((existing: any) => {
+      window.sai.settingsSet('kimi', { ...existing, model });
+    });
+    onSettingChange?.('kimiModel', model);
+  };
+
+  const handleKimiDefaultApprovalModeChange = (mode: 'default' | 'auto_edit' | 'yolo' | 'plan') => {
+    setKimiDefaultApprovalMode(mode);
+    window.sai.settingsGet('kimi', {}).then((existing: any) => {
+      window.sai.settingsSet('kimi', { ...existing, approvalMode: mode });
+    });
+    onSettingChange?.('kimiApprovalMode', mode);
   };
 
   const handleCodexDefaultModelChange = (model: string) => {
@@ -1329,6 +1353,44 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     </section>
   );
 
+  const renderKimiPage = () => (
+    <section className="settings-section">
+      <div className="settings-section-label">Kimi</div>
+      <div className="settings-row">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Default model</div>
+          <div className="settings-row-desc">Pre-selected model when starting a new Kimi session</div>
+        </div>
+        <select
+          className="settings-select"
+          value={kimiDefaultModel}
+          onChange={e => handleKimiDefaultModelChange(e.target.value)}
+        >
+          {[{ id: 'kimi-k3', name: 'Kimi K3' }].map(m => (
+            <option key={m.id} value={m.id}>{m.name || m.id}</option>
+          ))}
+        </select>
+      </div>
+      <div className="settings-row">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Default approval mode</div>
+          <div className="settings-row-desc">How Kimi handles file edits and tool calls</div>
+        </div>
+        <select
+          className="settings-select"
+          value={kimiDefaultApprovalMode}
+          onChange={e => handleKimiDefaultApprovalModeChange(e.target.value as any)}
+        >
+          <option value="default">Default</option>
+          <option value="auto_edit">Auto Edit</option>
+          <option value="yolo">Yolo</option>
+          <option value="plan">Plan</option>
+        </select>
+      </div>
+      <p className="settings-hint">Kimi runs through kimi-cli's ACP mode. Install kimi-cli and run <code>kimi</code> once in a terminal to <code>/login</code> before first use.</p>
+    </section>
+  );
+
   const renderStoragePage = () => (
     <div className="settings-section">
       <h3>Data & Storage</h3>
@@ -1364,6 +1426,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       case 'claude': return renderClaudePage();
       case 'codex': return renderCodexPage();
       case 'gemini': return renderGeminiPage();
+      case 'kimi': return renderKimiPage();
       case 'swarm': return <SwarmSettings onSettingChange={onSettingChange} />;
       case 'remote': return <RemoteSettings />;
       case 'keybindings': return <KeybindingsPage />;

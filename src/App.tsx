@@ -27,8 +27,9 @@ import { toolCallDetail } from './lib/toolCallDetail';
 import { findLatestTodos } from './components/Chat/TodoProgress';
 import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbPatchSessionMeta, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
 import { queueSaveSession } from './lib/sessionSaveQueue';
-import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval, EffortLevel, CodexEffort, CodexModelOption, ModelChoice, ClaudeModelOption } from './types';
+import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval, EffortLevel, CodexEffort, CodexModelOption, ModelChoice, ClaudeModelOption, AIProvider } from './types';
 import type { MetaWorkspaceListItem, MetaWorkspaceRuntime } from './types';
+import { isAIProvider } from './types';
 import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, setActiveHighlightTheme, type HighlightThemeId } from './themes';
 import ApprovalBanner from './components/ApprovalBanner';
 import { MessageSquare, TerminalSquare, Code2, ChevronRight, MessageCirclePlus } from 'lucide-react';
@@ -175,7 +176,6 @@ const isCodexEffort = (v: unknown): v is CodexEffort => v === 'minimal' || v ===
 // IndexedDB and are paginated in via ChatPanel's startReached callback.
 const MESSAGE_TAIL_LIMIT = 100;
 const MESSAGE_PAGE_SIZE = 100;
-type AIProvider = 'claude' | 'codex' | 'gemini';
 type GeminiApprovalMode = 'default' | 'auto_edit' | 'yolo' | 'plan';
 type GeminiConversationMode = 'planning' | 'fast';
 type CodexPermission = 'auto' | 'read-only' | 'full-access';
@@ -271,6 +271,9 @@ export default function App() {
   const [geminiModels, setGeminiModels] = useState<{ id: string; name: string }[]>([]);
   const [geminiApprovalMode, setGeminiApprovalMode] = useState<GeminiApprovalMode>('default');
   const [geminiConversationMode, setGeminiConversationMode] = useState<GeminiConversationMode>('planning');
+  const [kimiModel, setKimiModel] = useState('kimi-k3');
+  const [kimiModels, setKimiModels] = useState<{ id: string; name: string }[]>([]);
+  const [kimiApprovalMode, setKimiApprovalMode] = useState<GeminiApprovalMode>('default');
   const [workspaces, setWorkspaces] = useState<Map<string, WorkspaceContext>>(new Map());
   const [swarmTasksByWs, setSwarmTasksByWs] = useState<Map<string, SwarmTask[]>>(new Map());
   const [swarmApprovalsByWs, setSwarmApprovalsByWs] = useState<Map<string, SwarmApproval[]>>(new Map());
@@ -1049,9 +1052,9 @@ export default function App() {
       swarmSettingsRef.current = {
         concurrencyCap: typeof cap === 'number' && cap > 0 ? cap : SWARM_DEFAULT_CAP,
         defaultApprovalPolicy: (policy === 'auto' || policy === 'auto-read' || policy === 'always-ask') ? policy : 'auto-read',
-        defaultTaskProvider: (provider === 'claude' || provider === 'codex' || provider === 'gemini') ? provider : null,
+        defaultTaskProvider: isAIProvider(provider) ? provider : null,
         defaultTaskModel: typeof model === 'string' ? model : '',
-        orchestratorProvider: (orchProvider === 'claude' || orchProvider === 'codex' || orchProvider === 'gemini') ? orchProvider : null,
+        orchestratorProvider: isAIProvider(orchProvider) ? orchProvider : null,
         orchestratorModel: typeof orchModel === 'string' && orchModel ? orchModel : null,
         worktreeRoot: typeof root === 'string' ? root : '',
         notifyOnComplete: !!notifyComplete,
@@ -1322,6 +1325,7 @@ export default function App() {
       const p = task.provider;
       if (p === 'codex') return (window.sai as any).codexStop?.(ws);
       if (p === 'gemini') return (window.sai as any).geminiStop?.(ws);
+      if (p === 'kimi') return (window.sai as any).kimiStop?.(ws);
       return (window.sai as any).claudeStop?.(ws);
     }
 
@@ -1368,6 +1372,7 @@ export default function App() {
           const p = task.provider;
           if (p === 'codex') (window.sai as any).codexApprove?.(workspaceId, toolUseId, approved, undefined, scope);
           else if (p === 'gemini') (window.sai as any).geminiApprove?.(workspaceId, toolUseId, approved, undefined, scope);
+          else if (p === 'kimi') (window.sai as any).kimiApprove?.(workspaceId, toolUseId, approved, undefined, scope);
           else (window.sai as any).claudeApprove?.(workspaceId, toolUseId, approved, undefined, scope);
         }
         await swarmResolveApproval(a.id);
@@ -2116,10 +2121,10 @@ export default function App() {
       if (v !== 'monokai' && HIGHLIGHT_THEMES.some(t => t.id === v)) setActiveHighlightTheme(v as HighlightThemeId);
     }));
     window.sai.settingsGet('aiProvider', 'claude').then(guard((v: string) => {
-      if (v === 'claude' || v === 'codex' || v === 'gemini') setAiProvider(v as AIProvider);
+      if (isAIProvider(v)) setAiProvider(v);
     }));
     window.sai.settingsGet('commitMessageProvider', 'claude').then(guard((v: string) => {
-      if (v === 'claude' || v === 'codex' || v === 'gemini') setCommitMessageProvider(v as AIProvider);
+      if (isAIProvider(v)) setCommitMessageProvider(v);
     }));
     window.sai.settingsGet('aiTitleGeneration', false).then(guard((v: boolean) => {
       setAiTitleGeneration(!!v);
@@ -2158,6 +2163,10 @@ export default function App() {
       if (g.model) setGeminiModel(g.model);
       if (g.approvalMode === 'default' || g.approvalMode === 'auto_edit' || g.approvalMode === 'yolo' || g.approvalMode === 'plan') setGeminiApprovalMode(g.approvalMode);
       if (g.conversationMode === 'planning' || g.conversationMode === 'fast') setGeminiConversationMode(g.conversationMode);
+    }));
+    window.sai.settingsGet('kimi', {}).then(guard((k: any) => {
+      if (k.model) setKimiModel(k.model);
+      if (k.approvalMode === 'default' || k.approvalMode === 'auto_edit' || k.approvalMode === 'yolo' || k.approvalMode === 'plan') setKimiApprovalMode(k.approvalMode);
     }));
     // Migrate flat keys to nested (one-time)
     Promise.all([
@@ -2200,8 +2209,8 @@ export default function App() {
       if ('theme' in remote && THEMES.some(t => t.id === remote.theme)) applyTheme(remote.theme as ThemeId);
       if ('roundedCorners' in remote) document.documentElement.classList.toggle('rounded-corners', !!remote.roundedCorners);
       if ('highlightTheme' in remote && HIGHLIGHT_THEMES.some(t => t.id === remote.highlightTheme)) setActiveHighlightTheme(remote.highlightTheme as HighlightThemeId);
-      if ('aiProvider' in remote && (remote.aiProvider === 'claude' || remote.aiProvider === 'codex' || remote.aiProvider === 'gemini')) setAiProvider(remote.aiProvider);
-      if ('commitMessageProvider' in remote && (remote.commitMessageProvider === 'claude' || remote.commitMessageProvider === 'codex' || remote.commitMessageProvider === 'gemini')) setCommitMessageProvider(remote.commitMessageProvider);
+      if ('aiProvider' in remote && isAIProvider(remote.aiProvider)) setAiProvider(remote.aiProvider);
+      if ('commitMessageProvider' in remote && isAIProvider(remote.commitMessageProvider)) setCommitMessageProvider(remote.commitMessageProvider);
       if ('aiTitleGeneration' in remote) setAiTitleGeneration(!!remote.aiTitleGeneration);
       if ('claude' in remote && typeof remote.claude === 'object') {
         const c = remote.claude;
@@ -2250,6 +2259,11 @@ export default function App() {
         if (g.model) setGeminiModel(g.model);
         if (g.approvalMode === 'default' || g.approvalMode === 'auto_edit' || g.approvalMode === 'yolo' || g.approvalMode === 'plan') setGeminiApprovalMode(g.approvalMode);
         if (g.conversationMode === 'planning' || g.conversationMode === 'fast') setGeminiConversationMode(g.conversationMode);
+      }
+      if ('kimi' in remote && typeof remote.kimi === 'object') {
+        const k = remote.kimi;
+        if (k.model) setKimiModel(k.model);
+        if (k.approvalMode === 'default' || k.approvalMode === 'auto_edit' || k.approvalMode === 'yolo' || k.approvalMode === 'plan') setKimiApprovalMode(k.approvalMode);
       }
     });
     return () => { cancelled = true; unsubApplied(); };
@@ -2327,6 +2341,10 @@ export default function App() {
     (window.sai as any).geminiModels?.().then((result: { models: { id: string; name: string }[]; defaultModel: string }) => {
       if (result?.models?.length) setGeminiModels(result.models);
       if (result?.defaultModel) setGeminiModel(prev => prev || result.defaultModel);
+    });
+    (window.sai as any).kimiModels?.().then((result: { models: { id: string; name: string }[]; defaultModel: string }) => {
+      if (result?.models?.length) setKimiModels(result.models);
+      if (result?.defaultModel) setKimiModel(prev => prev || result.defaultModel);
     });
   }, []);
 
@@ -3952,6 +3970,7 @@ export default function App() {
     const freshProvider: AIProvider = providerOverride === 'claude'
       || providerOverride === 'codex'
       || providerOverride === 'gemini'
+      || providerOverride === 'kimi'
       ? providerOverride
       : aiProvider;
     const outgoingScope = workspacesRef.current.get(activeProjectPath)?.activeSession.id;
@@ -3964,6 +3983,7 @@ export default function App() {
       (window.sai as any).codexSetSessionId(activeProjectPath, undefined, outgoingScope);
     }
     window.sai.geminiSetSessionId?.(activeProjectPath, undefined, 'chat');
+    (window.sai as any).kimiSetSessionId?.(activeProjectPath, undefined, 'chat');
     const fresh = { ...createSession(), lastViewedAt: Date.now(), aiProvider: freshProvider };
     // Surface the new session in the sidebar immediately. It won't be persisted
     // until the user sends their first message (see onMessagesChange below),
@@ -3997,6 +4017,7 @@ export default function App() {
     window.sai.claudeSetSessionId(activeProjectPath, selected.claudeSessionId, selected.id);
     (window.sai as any).codexSetSessionId(activeProjectPath, selected.codexSessionId, selected.id);
     window.sai.geminiSetSessionId?.(activeProjectPath, selected.geminiSessionId, 'chat');
+    (window.sai as any).kimiSetSessionId?.(activeProjectPath, selected.kimiSessionId, 'chat');
     const viewedAt = Date.now();
     // Persist lastViewedAt so a subsequent dbGetSessions refresh (triggered by
     // background-chat persistence) doesn't roll it back to undefined, leaving
@@ -4072,6 +4093,7 @@ export default function App() {
         window.sai.claudeSetSessionId(activeProjectPath, selected.claudeSessionId, selected.id);
         (window.sai as any).codexSetSessionId(activeProjectPath, selected.codexSessionId, selected.id);
         window.sai.geminiSetSessionId?.(activeProjectPath, selected.geminiSessionId, 'chat');
+        (window.sai as any).kimiSetSessionId?.(activeProjectPath, selected.kimiSessionId, 'chat');
         dbGetMessagesTail(selected.id, MESSAGE_TAIL_LIMIT).then(({ messages, totalCount }) => {
           const buffered = taskMessagesBufferRef.current.get(selected.id);
           const merged = buffered && buffered.length > 0
@@ -4210,6 +4232,7 @@ export default function App() {
       sessionLoadSeqRef.current++; // cancel any in-flight tail load for the deleted chat
       (window.sai as any).codexSetSessionId?.(wsPath, undefined, prevWs!.activeSession.id);
       window.sai.geminiSetSessionId?.(wsPath, undefined, 'chat');
+      (window.sai as any).kimiSetSessionId?.(wsPath, undefined, 'chat');
       wsMessagesRef.current.delete(wsPath);
       wsFirstLoadedIdxRef.current.delete(wsPath);
       const fresh = { ...createSession(), lastViewedAt: Date.now(), aiProvider };
@@ -4324,6 +4347,22 @@ export default function App() {
     saveGeminiSetting('conversationMode', mode);
   };
 
+  const saveKimiSetting = (key: string, value: any) => {
+    window.sai.settingsGet('kimi', {}).then((existing: any) => {
+      window.sai.settingsSet('kimi', { ...existing, [key]: value });
+    });
+  };
+
+  const handleKimiModelChange = (model: string) => {
+    setKimiModel(model);
+    saveKimiSetting('model', model);
+  };
+
+  const handleKimiApprovalModeChange = (mode: GeminiApprovalMode) => {
+    setKimiApprovalMode(mode);
+    saveKimiSetting('approvalMode', mode);
+  };
+
 
   const chatOpen = expanded.includes('chat');
   const editorOpen = expanded.includes('editor');
@@ -4346,8 +4385,8 @@ export default function App() {
 
   const renderPanel = (panel: PanelId) => {
     const isOpen = expanded.includes(panel);
-    const providerSvg = aiProvider === 'codex' ? 'svg/codex.svg' : aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : 'svg/claude.svg';
-    const providerColor = aiProvider === 'codex' ? 'var(--text)' : aiProvider === 'gemini' ? '#4285f4' : '#e27b4a';
+    const providerSvg = aiProvider === 'codex' ? 'svg/codex.svg' : aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : aiProvider === 'kimi' ? 'svg/kimi.svg' : 'svg/claude.svg';
+    const providerColor = aiProvider === 'codex' ? 'var(--text)' : aiProvider === 'gemini' ? '#4285f4' : aiProvider === 'kimi' ? 'var(--text)' : '#e27b4a';
     const icon = panel === 'chat'
       ? <span className="accordion-provider-icon" style={{
           maskImage: `url('${providerSvg}')`,
@@ -4572,6 +4611,11 @@ export default function App() {
                       geminiModels={geminiModels}
                       geminiApprovalMode={geminiApprovalMode}
                       onGeminiApprovalModeChange={handleGeminiApprovalModeChange}
+                      kimiModel={kimiModel}
+                      onKimiModelChange={handleKimiModelChange}
+                      kimiModels={kimiModels}
+                      kimiApprovalMode={kimiApprovalMode}
+                      onKimiApprovalModeChange={handleKimiApprovalModeChange}
                       geminiConversationMode={geminiConversationMode}
                       onGeminiConversationModeChange={handleGeminiConversationModeChange}
                                             initialMessages={orchMessages}
@@ -4633,6 +4677,12 @@ export default function App() {
                         updateWorkspace(wsPath, w => ({
                           ...w,
                           sessions: w.sessions.map(s => s.id === orchSessionId ? { ...s, geminiSessionId: sessionId } : s),
+                        }));
+                      }}
+                      onKimiSessionId={(sessionId: string) => {
+                        updateWorkspace(wsPath, w => ({
+                          ...w,
+                          sessions: w.sessions.map(s => s.id === orchSessionId ? { ...s, kimiSessionId: sessionId } : s),
                         }));
                       }}
                       onCodexSessionId={(sessionId: string) => {
@@ -4918,6 +4968,11 @@ export default function App() {
                   geminiModels={geminiModels}
                   geminiApprovalMode={geminiApprovalMode}
                   onGeminiApprovalModeChange={handleGeminiApprovalModeChange}
+                  kimiModel={kimiModel}
+                  onKimiModelChange={handleKimiModelChange}
+                  kimiModels={kimiModels}
+                  kimiApprovalMode={kimiApprovalMode}
+                  onKimiApprovalModeChange={handleKimiApprovalModeChange}
                   geminiConversationMode={geminiConversationMode}
                   onGeminiConversationModeChange={handleGeminiConversationModeChange}
                                     initialMessages={ws.activeSession.messages}
@@ -5026,6 +5081,12 @@ export default function App() {
                     updateWorkspace(wsPath, w => ({
                       ...w,
                       activeSession: { ...w.activeSession, geminiSessionId: sessionId },
+                    }));
+                  }}
+                  onKimiSessionId={(sessionId: string) => {
+                    updateWorkspace(wsPath, w => ({
+                      ...w,
+                      activeSession: { ...w.activeSession, kimiSessionId: sessionId },
                     }));
                   }}
                   onCodexSessionId={(sessionId: string) => {
@@ -5508,7 +5569,7 @@ export default function App() {
           if (key === 'editorFontSize') setEditorFontSize(value);
           if (key === 'editorMinimap') setEditorMinimap(value);
           if (key === 'aiProvider'
-              && (value === 'claude' || value === 'codex' || value === 'gemini')) {
+              && isAIProvider(value)) {
             setAiProvider(value);
             handleNewChat(value);
           }
@@ -5517,6 +5578,8 @@ export default function App() {
           if (key === 'geminiModel') handleGeminiModelChange(value);
           if (key === 'geminiApprovalMode') handleGeminiApprovalModeChange(value);
           if (key === 'geminiConversationMode') handleGeminiConversationModeChange(value);
+          if (key === 'kimiModel') handleKimiModelChange(value);
+          if (key === 'kimiApprovalMode') handleKimiApprovalModeChange(value);
           if (key === 'codexModel') handleCodexModelChange(value);
           if (key === 'codexPermission') handleCodexPermissionChange(value);
           if (key === 'codexEffort' && (value === undefined || isCodexEffort(value))) handleCodexEffortChange(value);
@@ -5533,7 +5596,7 @@ export default function App() {
             } else if (key === 'swarm.defaultApprovalPolicy') {
               if (value === 'auto' || value === 'auto-read' || value === 'always-ask') cfg.defaultApprovalPolicy = value;
             } else if (key === 'swarm.defaultTaskProvider') {
-              if (value === 'claude' || value === 'codex' || value === 'gemini') cfg.defaultTaskProvider = value;
+              if (isAIProvider(value)) cfg.defaultTaskProvider = value;
               else if (value == null || value === '') cfg.defaultTaskProvider = null;
             } else if (key === 'swarm.defaultTaskModel') {
               cfg.defaultTaskModel = typeof value === 'string' ? value : '';
@@ -5550,7 +5613,7 @@ export default function App() {
                 try { Notification.requestPermission().catch(() => {}); } catch {}
               }
             } else if (key === 'swarm.orchestratorProvider') {
-              if (value === 'claude' || value === 'codex' || value === 'gemini') cfg.orchestratorProvider = value;
+              if (isAIProvider(value)) cfg.orchestratorProvider = value;
               else if (value == null || value === '') cfg.orchestratorProvider = null;
             } else if (key === 'swarm.orchestratorModel') {
               cfg.orchestratorModel = typeof value === 'string' && value ? value : null;

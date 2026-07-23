@@ -5,13 +5,13 @@ import SaiLogo from '../SaiLogo';
 import { formatSessionDate, formatSessionTime, exportSessionAsMarkdown } from '../../sessions';
 import { dbGetMessages, dbDeleteSession, dbPatchSessionMeta } from '../../chatDb';
 import ChatHistoryContextMenu from './ChatHistoryContextMenu';
-import type { ChatSession } from '../../types';
+import type { ChatSession, AIProvider } from '../../types';
 import { inferSessionProvider } from '../../lib/sessionProvider';
 
 interface ChatHistorySidebarProps {
   sessions: ChatSession[];
   activeSessionId: string;
-  aiProvider: 'claude' | 'codex' | 'gemini';
+  aiProvider: AIProvider;
   onSelectSession: (id: string) => void;
   onNewChat: () => void;
   onUpdateSessions: (sessions: ChatSession[]) => void;

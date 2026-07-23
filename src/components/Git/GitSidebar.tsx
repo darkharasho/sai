@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { AlertTriangle, Ban, CheckCircle2, History, GitBranch } from 'lucide-react';
 import { GitFile, GitCommit } from '../../types';
-import type { RebaseStatus } from '../../types';
+import type { RebaseStatus, AIProvider } from '../../types';
 import ChangedFiles from './ChangedFiles';
 import CommitBox from './CommitBox';
 import GitActivity from './GitActivity';
@@ -30,7 +30,7 @@ interface GitStatus {
 interface GitSidebarProps {
   projectPath: string;
   onFileClick: (file: GitFile) => void;
-  commitMessageProvider?: 'claude' | 'codex' | 'gemini';
+  commitMessageProvider?: AIProvider;
   embedded?: boolean;
 }
 
