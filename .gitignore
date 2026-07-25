@@ -14,3 +14,4 @@ test-results/
 .claude/settings.local.json
 graphify-out/
 GRAPH_REPORT.md
+.codex
