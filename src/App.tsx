@@ -12,7 +12,8 @@ import { extractEditToolUses, successfulToolResultIds } from './components/CodeP
 import UnsavedChangesModal from './components/UnsavedChangesModal';
 import WorkspaceToast, { type ToastTone } from './components/WorkspaceToast';
 import { computeChatToasts } from './lib/chatToasts';
-import { computeChatNotificationCount, computeCompletedWorkspaces, isTurnErrored } from './lib/chatActivity';
+import { computeChatNotificationCount, computeCompletedWorkspaces, isTurnErrored, workspaceSwitchViewStamps } from './lib/chatActivity';
+import { inferSessionProvider } from './lib/sessionProvider';
 import CommandPalette from './components/CommandPalette';
 import { useWhatsNew } from './hooks/useWhatsNew';
 import { useKeybinding } from './hooks/useKeybinding';
@@ -3734,7 +3735,12 @@ export default function App() {
     });
     // Tie the green-squircle clear to the unread "!" mechanism: visiting marks the
     // workspace's active session viewed so it isn't re-flagged after you switch away.
-    markActiveSessionViewed(newPath);
+    // The OUTGOING workspace is stamped too — its content was on screen until this
+    // moment, so the periodic flush bumping updatedAt after we leave must not
+    // re-flag messages the user already watched arrive.
+    for (const path of workspaceSwitchViewStamps(activeProjectPath ?? undefined, newPath)) {
+      markActiveSessionViewed(path);
+    }
   }, [activeProjectPath, workspaces, markActiveSessionViewed]);
 
   const handleMetaWorkspaceActivate = useCallback(async (id: string) => {
@@ -5375,6 +5381,21 @@ export default function App() {
     return ids;
   }, [sessions]);
 
+  // Ids the chats panel can actually display: the sidebar filters by provider
+  // (and task sessions belong to swarm). The badge must count within the same
+  // universe, or it points at sessions the user can't find or clear — e.g. a
+  // flagged codex chat while the claude filter is active, or a swarm task
+  // scope with a pending approval (already badged on the Swarm button).
+  const visibleSessionIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const s of sessions) {
+      if ((s as any).kind === 'task') continue;
+      if (inferSessionProvider(s) !== aiProvider) continue;
+      ids.add(s.id);
+    }
+    return ids;
+  }, [sessions, aiProvider]);
+
   // Badge total for the NavBar Chats button: unread + awaiting approval +
   // question-blocked + errored sessions other than the focused one. Mirrors
   // the "needs-attention-elsewhere" pattern from the workspace dropdown badge.
@@ -5385,8 +5406,9 @@ export default function App() {
       question: questionSessionIds,
       error: errorSessionIds,
       activeSessionId: activeSession?.id,
+      visibleIds: visibleSessionIds,
     }),
-    [unreadSessionIds, awaitingSessionIds, questionSessionIds, errorSessionIds, activeSession?.id],
+    [unreadSessionIds, awaitingSessionIds, questionSessionIds, errorSessionIds, activeSession?.id, visibleSessionIds],
   );
 
 

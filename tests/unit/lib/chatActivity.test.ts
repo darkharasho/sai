@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeChatNotificationCount, computeCompletedWorkspaces, isTurnErrored } from '../../../src/lib/chatActivity';
+import { computeChatNotificationCount, computeCompletedWorkspaces, isTurnErrored, workspaceSwitchViewStamps } from '../../../src/lib/chatActivity';
 
 describe('isTurnErrored', () => {
   it('returns false for non-result envelopes', () => {
@@ -76,6 +76,49 @@ describe('computeChatNotificationCount', () => {
       awaiting: new Set(['b']),
       error: new Set(['c']),
     })).toBe(3);
+  });
+
+  it('counts only sessions the chats panel can display when visibleIds is given', () => {
+    // 'hidden' is flagged but filtered out of the panel (other provider /
+    // task kind) — a badge pointing at it would be unfindable.
+    expect(computeChatNotificationCount({
+      unread: new Set(['visible', 'hidden']),
+      awaiting: new Set(['hidden-swarm-scope']),
+      error: new Set(['hidden-errored']),
+      visibleIds: new Set(['visible']),
+    })).toBe(1);
+  });
+
+  it('applies visibleIds to every input set including question', () => {
+    expect(computeChatNotificationCount({
+      unread: new Set(),
+      awaiting: new Set(['a']),
+      question: new Set(['b']),
+      error: new Set(['c']),
+      visibleIds: new Set(['b', 'c']),
+    })).toBe(2);
+  });
+
+  it('omitting visibleIds preserves the count-everything behavior', () => {
+    expect(computeChatNotificationCount({
+      unread: new Set(['a']),
+      awaiting: new Set(['b']),
+      error: new Set(['c']),
+    })).toBe(3);
+  });
+});
+
+describe('workspaceSwitchViewStamps', () => {
+  it('stamps the outgoing workspace before the incoming one', () => {
+    expect(workspaceSwitchViewStamps('/old', '/new')).toEqual(['/old', '/new']);
+  });
+
+  it('stamps only the incoming workspace when there is no outgoing one', () => {
+    expect(workspaceSwitchViewStamps(undefined, '/new')).toEqual(['/new']);
+  });
+
+  it('stamps once when switching to the same workspace', () => {
+    expect(workspaceSwitchViewStamps('/same', '/same')).toEqual(['/same']);
   });
 });
 

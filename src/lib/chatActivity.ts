@@ -94,12 +94,38 @@ export function computeChatNotificationCount(opts: {
   question?: ReadonlySet<string>;
   error: ReadonlySet<string>;
   activeSessionId?: string;
+  /**
+   * Ids the chats panel can actually display (provider + kind filtered).
+   * When given, flagged sessions outside it are skipped — the badge must
+   * never point at a chat the user cannot find and clear. Omit to count
+   * every session (legacy behavior, used by callers with no panel filter).
+   */
+  visibleIds?: ReadonlySet<string>;
 }): number {
-  const { unread, awaiting, question, error, activeSessionId } = opts;
+  const { unread, awaiting, question, error, activeSessionId, visibleIds } = opts;
+  const counts = (id: string): boolean =>
+    id !== activeSessionId && (visibleIds === undefined || visibleIds.has(id));
   const ids = new Set<string>();
-  for (const id of unread) if (id !== activeSessionId) ids.add(id);
-  for (const id of awaiting) if (id !== activeSessionId) ids.add(id);
-  for (const id of question ?? []) if (id !== activeSessionId) ids.add(id);
-  for (const id of error) if (id !== activeSessionId) ids.add(id);
+  for (const id of unread) if (counts(id)) ids.add(id);
+  for (const id of awaiting) if (counts(id)) ids.add(id);
+  for (const id of question ?? []) if (counts(id)) ids.add(id);
+  for (const id of error) if (counts(id)) ids.add(id);
   return ids.size;
+}
+
+/**
+ * Workspace paths whose active session should get a lastViewedAt stamp when
+ * the user switches workspaces, in stamp order. The OUTGOING workspace is
+ * stamped too: the user watched its content up to the moment they left, so
+ * the periodic flush bumping updatedAt afterwards must not re-flag what they
+ * already read. (Chat switches within a workspace are covered separately by
+ * flushAndPersist, which stamps both fields.)
+ */
+export function workspaceSwitchViewStamps(
+  outgoingProjectPath: string | undefined,
+  nextProjectPath: string,
+): string[] {
+  return outgoingProjectPath && outgoingProjectPath !== nextProjectPath
+    ? [outgoingProjectPath, nextProjectPath]
+    : [nextProjectPath];
 }
