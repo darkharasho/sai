@@ -146,12 +146,34 @@ describe('computeCompletedWorkspaces', () => {
     expect(out.has('/p')).toBe(true);
   });
 
-  it('adds a workspace whose session has lastTurnErrored', () => {
+  it('adds a workspace whose session errored and has not been viewed since', () => {
     const out = computeCompletedWorkspaces({
       completedWorkspaces: new Set(),
-      workspaces: [ws('/p', [{ id: 's', updatedAt: 1000, lastViewedAt: 1000, lastTurnErrored: true }])],
+      workspaces: [ws('/p', [{ id: 's', updatedAt: 2000, lastViewedAt: 1000, lastTurnErrored: true }])],
     });
     expect(out.has('/p')).toBe(true);
+  });
+
+  it('adds a workspace whose errored session was never viewed at all', () => {
+    // Unlike the unread rule (never-viewed counts as viewed), an error the
+    // user has never looked at must light up until they visit the session.
+    const out = computeCompletedWorkspaces({
+      completedWorkspaces: new Set(),
+      workspaces: [ws('/p', [{ id: 's', updatedAt: 1000, lastTurnErrored: true }])],
+    });
+    expect(out.has('/p')).toBe(true);
+  });
+
+  it('does NOT add a workspace whose errored session was viewed after the error', () => {
+    // lastTurnErrored is only reset by the next completed turn in that same
+    // session — which may never come (dead orchestrator scopes, one-off codex
+    // runs). If viewing didn't clear the roll-up, the titlebar would carry a
+    // white done marker forever with nothing findable to clear.
+    const out = computeCompletedWorkspaces({
+      completedWorkspaces: new Set(),
+      workspaces: [ws('/p', [{ id: 's', updatedAt: 1000, lastViewedAt: 1500, lastTurnErrored: true }])],
+    });
+    expect(out.has('/p')).toBe(false);
   });
 
   it('does NOT add the focused workspace, even when a session needs attention', () => {
@@ -218,7 +240,7 @@ describe('computeCompletedWorkspaces', () => {
       workspaces: [
         ws('/a', [{ id: '1', updatedAt: 2000, lastViewedAt: 1000 }]),     // unread → in
         ws('/b', [{ id: '2', updatedAt: 1000, lastViewedAt: 1000 }]),     // viewed → out
-        ws('/c', [{ id: '3', updatedAt: 1000, lastViewedAt: 1000, lastTurnErrored: true }]), // errored → in
+        ws('/c', [{ id: '3', updatedAt: 2000, lastViewedAt: 1000, lastTurnErrored: true }]), // errored, unviewed → in
       ],
     });
     expect([...out].sort()).toEqual(['/a', '/c']);

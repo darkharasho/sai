@@ -71,7 +71,14 @@ export function computeCompletedWorkspaces(opts: {
   for (const ws of workspaces) {
     if (ws.projectPath === focusedProjectPath) continue;
     for (const s of ws.sessions) {
-      if (s.lastTurnErrored) { next.add(ws.projectPath); break; }
+      // An error flags the workspace only until the session is viewed.
+      // lastTurnErrored itself is reset by the NEXT completed turn in that
+      // session — which may never come (dead orchestrator scopes, one-off
+      // runs) — so viewing must be able to retire the notice, or the marker
+      // sticks forever. Unlike the unread rule below, a never-viewed errored
+      // session (lastViewedAt undefined) still counts: the user hasn't seen
+      // the failure yet.
+      if (s.lastTurnErrored && s.updatedAt > (s.lastViewedAt ?? 0)) { next.add(ws.projectPath); break; }
       if (s.updatedAt > (s.lastViewedAt ?? s.updatedAt)) { next.add(ws.projectPath); break; }
     }
   }
