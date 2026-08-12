@@ -502,6 +502,16 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // soon as real output flows or the turn ends.
   const [streamHint, setStreamHint] = useState<string | null>(null);
   const clearStreamHint = useCallback(() => setStreamHint(prev => (prev == null ? prev : null)), []);
+  // Collaboration items are transient runtime state, not transcript content:
+  // Codex can finish the parent turn before a delegated child reports its
+  // terminal status. Keep each child here so the UI remains visibly active
+  // until every child has actually stopped.
+  const [activeSubagents, setActiveSubagents] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    // Activity belongs to the live backend session only. A session/workspace
+    // replacement must never inherit a stale child and look permanently busy.
+    setActiveSubagents(prev => (prev.size === 0 ? prev : new Map()));
+  }, [sessionId, projectPath, claudeScope]);
   // Summarized reasoning ("Show reasoning" setting; SDK backend streams it as
   // reasoning_delta). Rendered as a REAL transcript row: while the model thinks
   // it streams in-place as italic text (reasoningLive), then collapses into an
@@ -854,6 +864,23 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           turnStartedAtRef.current = Date.now();
         }
         nextSegmentStartRef.current = Date.now();
+        return;
+      }
+
+      if (msg.type === 'subagent_activity' && typeof msg.agentId === 'string') {
+        const terminal = msg.status === 'completed' || msg.status === 'failed' || msg.status === 'cancelled';
+        setActiveSubagents(prev => {
+          const next = new Map(prev);
+          if (terminal) {
+            next.delete(msg.agentId);
+          } else {
+            const summary = typeof msg.summary === 'string' && msg.summary.trim()
+              ? msg.summary.trim()
+              : 'Working';
+            next.set(msg.agentId, summary);
+          }
+          return next;
+        });
         return;
       }
 
@@ -1814,7 +1841,15 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // Stop button and thinking animation don't flicker to "idle" when the user sends
   // a follow-up right as the current turn finishes. The real `isStreaming` prop
   // still drives the turn/drain logic — only presentation uses this.
-  const streamingForDisplay = isStreaming || drainInFlight || messageQueue.length > 0;
+  const subagentThinking = activeSubagents.size > 0;
+  const subagentHint = useMemo(() => {
+    const entries = [...activeSubagents.values()];
+    if (entries.length === 0) return null;
+    const more = entries.length > 1 ? ` (+${entries.length - 1} more)` : '';
+    return `agent · ${entries[0]}${more}`;
+  }, [activeSubagents]);
+  const thinkingHint = subagentHint ?? streamHint;
+  const streamingForDisplay = isStreaming || drainInFlight || messageQueue.length > 0 || subagentThinking;
   const isWaiting = !!waiting && waiting.wait.kind !== 'none';
   // While waiting we are NOT thinking — suppress the thinking indicator.
   const showThinking = streamingForDisplay && !awaitingQuestion && !isWaiting;
@@ -1841,7 +1876,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // end-of-turn wrap-up (result frame in flight) doesn't flash a thinking row
   // under a reply the user just watched finish.
   const showPendingSaiThinking = showThinking && saiMorphActive && !hasStreamingAssistantSegment
-    && !hasLiveReasoning && !hasRunningTailTool && !postSettleHold;
+    && !hasLiveReasoning && !hasRunningTailTool && (!postSettleHold || subagentThinking);
   // Detached banner: non-SAI providers, OR SAI with the animation pref off (today's
   // fallback). No grow-in here, so it only yields to the reasoning card, keeping the
   // legacy always-on banner during tool runs.
@@ -2372,7 +2407,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
               className="thinking-row-wrap"
               transition={rowTransition}
             >
-              <ThinkingAnimation hint={streamHint} />
+              <ThinkingAnimation hint={thinkingHint} />
             </motion.div>
           )}
           {showPendingSaiThinking && (
@@ -2382,7 +2417,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
               className="thinking-row-wrap"
               transition={rowTransition}
             >
-              <ThinkingAnimation hint={streamHint} />
+              <ThinkingAnimation hint={thinkingHint} />
             </motion.div>
           )}
         </AnimatePresence>
