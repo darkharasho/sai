@@ -564,8 +564,12 @@ export class AppServerBackend implements CodexBackend {
     if (!client) {
       client = this.createClient({ experimentalApi: kind === 'orchestrator' });
       this.clients.set(kind, client);
-      this.clientUnsubscribers.push(client.onNotification((event) => this.handleNotification(event)));
-      this.clientUnsubscribers.push(client.onServerRequest((request) => this.handleServerRequest(client!, request)));
+      // Thread and turn IDs are only unique within one App Server connection.
+      // Keep the source client attached to every inbound event before routing it
+      // to a scoped runtime.
+      const owningClient = client;
+      this.clientUnsubscribers.push(owningClient.onNotification((event) => this.handleNotification(owningClient, event)));
+      this.clientUnsubscribers.push(owningClient.onServerRequest((request) => this.handleServerRequest(owningClient, request)));
       this.clientUnsubscribers.push(client.onFailure((error) => this.handleFailure(kind, error)));
       this.clientStarts.set(kind, client.start().catch((error) => {
         this.handleFailure(kind, error instanceof AppServerUnavailableError ? error : new AppServerUnavailableError(errorText(error)));
@@ -635,9 +639,13 @@ export class AppServerBackend implements CodexBackend {
     this.finishTurn(runtime, active, { subagentsAborted: true });
   }
 
-  private handleNotification(event: AppServerNotification): void {
+  private ownsRuntime(client: AppServerClientTransport, runtime: ScopeRuntime): boolean {
+    return this.clients.get(this.clientKind(runtime)) === client;
+  }
+
+  private handleNotification(client: AppServerClientTransport, event: AppServerNotification): void {
     if (event.method === 'serverRequest/resolved') {
-      this.resolveServerRequest(event);
+      this.resolveServerRequest(client, event);
       return;
     }
     const ids = eventIds(event);
@@ -645,7 +653,7 @@ export class AppServerBackend implements CodexBackend {
       if (!ids.turnId) return;
       const candidates = [...this.runtimes.values()].filter((runtime) => {
         const active = runtime.active;
-        return Boolean(active && !active.retired && active.id === ids.turnId);
+        return Boolean(this.ownsRuntime(client, runtime) && active && !active.retired && active.id === ids.turnId);
       });
       // App Server's documented turn/completed shape omits threadId. Route it
       // only when a bound active turn identifies one scope unambiguously.
@@ -656,7 +664,7 @@ export class AppServerBackend implements CodexBackend {
       return;
     }
     for (const [key, runtime] of this.runtimes) {
-      if (runtime.threadId !== ids.threadId || this.runtimes.get(key) !== runtime) continue;
+      if (!this.ownsRuntime(client, runtime) || runtime.threadId !== ids.threadId || this.runtimes.get(key) !== runtime) continue;
       const active = runtime.active;
       if (!active || active.retired) continue;
       if (!active.id) {
@@ -698,7 +706,7 @@ export class AppServerBackend implements CodexBackend {
     }
     const ids = eventIds(request);
     const runtime = ids.threadId
-      ? [...this.runtimes.values()].find((candidate) => candidate.threadId === ids.threadId)
+      ? [...this.runtimes.values()].find((candidate) => this.ownsRuntime(client, candidate) && candidate.threadId === ids.threadId)
       : undefined;
     const active = runtime?.active;
     if (!runtime || !active || active.retired || !active.id || active.id !== ids.turnId || active.threadId !== ids.threadId) {
@@ -722,7 +730,9 @@ export class AppServerBackend implements CodexBackend {
     let responder: AppServerServerRequestResponder;
     try { responder = client.claimServerRequest(request.id); } catch { return undefined; }
     const ids = eventIds(request);
-    const candidates = ids.threadId ? [...this.runtimes.values()].filter((candidate) => candidate.threadId === ids.threadId) : [];
+    const candidates = ids.threadId
+      ? [...this.runtimes.values()].filter((candidate) => this.ownsRuntime(client, candidate) && candidate.threadId === ids.threadId)
+      : [];
     // A request without turnId can only be scoped by thread. Never guess when
     // a stale/reused App Server thread is owned by more than one SAI scope.
     const runtime = candidates.length === 1 ? candidates[0] : undefined;
@@ -809,12 +819,13 @@ export class AppServerBackend implements CodexBackend {
     try { pending.responder.respond(response); } catch { /* resolved */ }
   }
 
-  private resolveServerRequest(event: AppServerNotification): void {
+  private resolveServerRequest(client: AppServerClientTransport, event: AppServerNotification): void {
     const params = record(event.params);
     const id = params?.requestId ?? params?.id;
     if (typeof id !== 'string' && typeof id !== 'number') return;
     const pending = this.pendingApprovals.get(id) ?? this.pendingUserInputs.get(id) ?? this.pendingMcpElicitations.get(id);
     if (!pending) return;
+    if (!this.ownsRuntime(client, pending.runtime)) return;
     const ids = eventIds(event);
     if ((ids.threadId && ids.threadId !== pending.active.threadId) || (ids.turnId && ids.turnId !== pending.active.id)) return;
     const input = this.pendingUserInputs.get(id);

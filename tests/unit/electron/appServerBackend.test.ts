@@ -81,6 +81,72 @@ async function settle(): Promise<void> {
 }
 
 describe('AppServerBackend', () => {
+  it('rejects a standard-client dynamic request and notification that impersonate an orchestrator turn', async () => {
+    const makeClient = (threadId: string, turnId: string) => {
+      const notifications = new Set<(notification: AppServerNotification) => void>();
+      const serverRequests = new Set<(request: AppServerServerRequest) => void>();
+      const responders = new Map<string | number, AppServerServerRequestResponder>();
+      const client: AppServerClientTransport = {
+        failureReason: undefined,
+        start: vi.fn(async () => undefined),
+        request: vi.fn(async (method: string) => method === 'thread/start'
+          ? { thread: { id: threadId } }
+          : { turn: { id: turnId } }),
+        notify: vi.fn(),
+        onNotification: vi.fn((listener) => { notifications.add(listener); return () => notifications.delete(listener); }),
+        onServerRequest: vi.fn((listener) => { serverRequests.add(listener); return () => serverRequests.delete(listener); }),
+        claimServerRequest: vi.fn((id) => {
+          const responder = responders.get(id);
+          if (!responder) throw new Error('No server request is pending');
+          responders.delete(id);
+          return responder;
+        }),
+        onFailure: vi.fn(() => () => undefined),
+        destroy: vi.fn(),
+      };
+      return {
+        client,
+        notify: (method: string, params: unknown) => notifications.forEach((listener) => listener({ jsonrpc: '2.0', method, params })),
+        serverRequest: (id: string | number, method: string, params: unknown) => {
+          const responder: AppServerServerRequestResponder = { request: { id, method, params }, respond: vi.fn(), reject: vi.fn() };
+          responders.set(id, responder);
+          serverRequests.forEach((listener) => listener(responder.request));
+          return responder;
+        },
+      };
+    };
+    const standard = makeClient('thread-standard', 'turn-standard');
+    const orchestrator = makeClient('thread-orchestrator', 'turn-orchestrator');
+    const emitted: Array<Record<string, unknown>> = [];
+    const dispatchDynamicTool = vi.fn(async () => ({ ok: true }));
+    const backend = new AppServerBackend({
+      createClient: ({ experimentalApi }) => experimentalApi ? orchestrator.client : standard.client,
+      emit: (event) => emitted.push(event),
+      registerWorkspace: vi.fn(),
+      dynamicToolDispatch: dispatchDynamicTool,
+    });
+
+    await backend.start({ projectPath: '/repo', scope: 'chat' });
+    await backend.start({ projectPath: '/repo', scope: 'orchestrator:run-1', kind: 'orchestrator' });
+    backend.send({ projectPath: '/repo', scope: 'chat', message: 'chat' });
+    backend.send({ projectPath: '/repo', scope: 'orchestrator:run-1', message: 'delegate' });
+    await settle();
+
+    standard.notify('item/agentMessage/delta', {
+      threadId: 'thread-orchestrator', turnId: 'turn-orchestrator', delta: 'forged',
+    });
+    const responder = standard.serverRequest('forged-dynamic', 'item/tool/call', {
+      threadId: 'thread-orchestrator', turnId: 'turn-orchestrator', tool: 'sai_swarm_query_status', arguments: {},
+    });
+    await settle();
+
+    expect(emitted).not.toContainEqual(expect.objectContaining({
+      type: 'assistant', scope: 'orchestrator:run-1', message: { content: [{ type: 'text', text: 'forged' }] },
+    }));
+    expect(dispatchDynamicTool).not.toHaveBeenCalled();
+    expect(responder.respond).toHaveBeenCalledWith(expect.objectContaining({ success: false }));
+  });
+
   it('executes an active orchestrator Dynamic Tool through the scoped Swarm bridge', async () => {
     const h = harness();
     h.responses.set('thread/start', { thread: { id: 'thread-orchestrator' } });
