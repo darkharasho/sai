@@ -99,6 +99,19 @@ interface ScopeReconcileBridge {
   codexReconcileScope?: (projectPath: string, scope?: string) => void;
 }
 
+function stopSwarmTaskProvider(task: SwarmTask): void {
+  const { workspaceId, sessionId, provider } = task;
+  if (provider === 'codex') {
+    window.sai.codexStop?.(workspaceId, sessionId);
+  } else if (provider === 'gemini') {
+    window.sai.geminiStop?.(workspaceId, sessionId);
+  } else if (provider === 'kimi') {
+    window.sai.kimiStop?.(workspaceId, sessionId);
+  } else {
+    window.sai.claudeStop?.(workspaceId, sessionId);
+  }
+}
+
 function resolveScopedProvider(
   projectPath: string,
   scope: string,
@@ -1114,14 +1127,15 @@ export default function App() {
       }
     }
     // Kick off the provider runner for the task's session.
-    // Today only Claude is supported (codex/gemini IPC don't yet thread scope/kind through start).
     try {
-      const sai = window.sai as any;
+      const sai = window.sai;
       const dispatched = await runSwarmTask(
         { ...task, worktreePath: effectiveWorktreePath },
         {
           claudeStart: sai.claudeStart,
           claudeSend: sai.claudeSend,
+          codexStart: sai.codexStart,
+          codexSend: sai.codexSend,
         },
       );
       if (!dispatched) {
@@ -1132,7 +1146,7 @@ export default function App() {
             title: task.title,
             branch: task.branch,
             prompt: task.prompt,
-            reason: 'Task runner currently supports Claude only. Codex / Gemini support is a planned follow-up.',
+            reason: `Task runner does not support provider: ${task.provider}.`,
           });
         } catch { /* best-effort */ }
         removeFromList();
@@ -1323,11 +1337,7 @@ export default function App() {
     }
 
     function stopProvider(task: SwarmTask) {
-      const p = task.provider;
-      if (p === 'codex') return (window.sai as any).codexStop?.(ws);
-      if (p === 'gemini') return (window.sai as any).geminiStop?.(ws);
-      if (p === 'kimi') return (window.sai as any).kimiStop?.(ws);
-      return (window.sai as any).claudeStop?.(ws);
+      return stopSwarmTaskProvider(task);
     }
 
     const spawnTask = async (i: { prompt: string; title?: string; provider?: string; model?: string; approvalPolicy?: string; project?: string }) => {
@@ -4473,9 +4483,9 @@ export default function App() {
                     onPause={() => {
                       const id = focusedSwarmTask.id;
                       const task = focusedSwarmTask;
-                      // Stop the task's Claude scope so streaming actually halts.
+                      // Stop the task's provider scope so streaming actually halts.
                       try {
-                        (window.sai as any).claudeStop?.(task.workspaceId, task.sessionId);
+                        stopSwarmTaskProvider(task);
                       } catch { /* noop */ }
                       setSwarmTasksByWs(prev => {
                         const m = new Map(prev);
