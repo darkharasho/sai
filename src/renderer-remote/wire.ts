@@ -205,12 +205,15 @@ export function connect(token: string): WireClient {
 
   const open = () => {
     notifyState('opening');
-    ws = new WebSocket(wsUrl);
-    ws.onopen = () => {
-      try { ws!.send(JSON.stringify({ type: 'auth', token })); }
+    const socket = new WebSocket(wsUrl);
+    ws = socket;
+    socket.onopen = () => {
+      if (ws !== socket) return;
+      try { socket.send(JSON.stringify({ type: 'auth', token })); }
       catch { /* socket died between open and send; onclose will follow */ }
     };
-    ws.onmessage = (ev) => {
+    socket.onmessage = (ev) => {
+      if (ws !== socket) return;
       lastActivityTs = Date.now();
       let msg: WireMsg;
       try { msg = JSON.parse(ev.data); } catch { return; }
@@ -221,24 +224,25 @@ export function connect(token: string): WireClient {
         // Order matters: workspace.set before attach so the active-workspace
         // hint lands first, mirroring the original setup sequence.
         if (replayWorkspaceStatus) {
-          try { ws!.send(JSON.stringify({ type: 'workspace.status.subscribe' })); } catch { /* ignore */ }
+          try { socket.send(JSON.stringify({ type: 'workspace.status.subscribe' })); } catch { /* ignore */ }
         }
         if (replayGithubWatcher) {
-          try { ws!.send(JSON.stringify({ type: 'github.watcher.subscribe' })); } catch { /* ignore */ }
+          try { socket.send(JSON.stringify({ type: 'github.watcher.subscribe' })); } catch { /* ignore */ }
         }
         if (replayActiveWorkspace) {
-          try { ws!.send(JSON.stringify({ type: 'workspace.set', projectPath: replayActiveWorkspace })); } catch { /* ignore */ }
+          try { socket.send(JSON.stringify({ type: 'workspace.set', projectPath: replayActiveWorkspace })); } catch { /* ignore */ }
         }
         if (replayFollow !== null) {
-          try { ws!.send(JSON.stringify({ type: 'session.follow', enabled: replayFollow })); } catch { /* ignore */ }
+          try { socket.send(JSON.stringify({ type: 'session.follow', enabled: replayFollow })); } catch { /* ignore */ }
         }
         if (replayAttach) {
-          try { ws!.send(JSON.stringify({ type: 'session.attach', ...replayAttach })); } catch { /* ignore */ }
+          try { socket.send(JSON.stringify({ type: 'session.attach', ...replayAttach })); } catch { /* ignore */ }
         }
         // Heartbeat: ping every 25s; expect any traffic within 10s of each
         // ping (server replies with at least a pong / ack), else reconnect.
         pingTimer = setInterval(() => {
-          try { ws?.send(JSON.stringify({ type: 'ping' })); }
+          if (ws !== socket) return;
+          try { socket.send(JSON.stringify({ type: 'ping' })); }
           catch { killSocket(); return; }
           if (pongDeadline) return;
           const sentAt = Date.now();
@@ -253,7 +257,10 @@ export function connect(token: string): WireClient {
       if (probeDeadline) { clearTimeout(probeDeadline); probeDeadline = null; }
       for (const h of handlers) try { h(msg); } catch { /* isolate */ }
     };
-    ws.onclose = () => {
+    socket.onclose = () => {
+      // A delayed callback from a superseded socket must not tear down the
+      // replacement's timers or correlated requests.
+      if (ws !== socket) return;
       clearTimers();
       notifyState('closed');
       // Fail every in-flight request now so UI moves on instead of waiting

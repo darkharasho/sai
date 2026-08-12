@@ -7,13 +7,17 @@ class MockWebSocket {
   static readonly CLOSING = 2;
   static readonly CLOSED = 3;
   static latest: MockWebSocket | null = null;
+  static instances: MockWebSocket[] = [];
   readyState = MockWebSocket.CONNECTING;
   onopen: (() => void) | null = null;
   onmessage: ((event: { data: string }) => void) | null = null;
   onclose: (() => void) | null = null;
   sent: unknown[] = [];
 
-  constructor(_url: string) { MockWebSocket.latest = this; }
+  constructor(_url: string) {
+    MockWebSocket.latest = this;
+    MockWebSocket.instances.push(this);
+  }
   send(data: string): void { this.sent.push(JSON.parse(data)); }
   close(): void { this.readyState = MockWebSocket.CLOSED; this.onclose?.(); }
   open(): void { this.readyState = MockWebSocket.OPEN; this.onopen?.(); }
@@ -21,8 +25,10 @@ class MockWebSocket {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   MockWebSocket.latest = null;
+  MockWebSocket.instances = [];
 });
 
 describe('PWA wire helpers', () => {
@@ -71,6 +77,35 @@ describe('PWA wire helpers', () => {
     // A late response cannot revive the cleared waiter.
     socket.receive({ type: 'claude_models', requestId, models: [{ id: 'fable' }] });
     await expect(pending).rejects.toThrow('connection lost');
+    wire.close();
+  });
+
+  it('ignores a delayed close from a replaced socket while a model request is pending', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(1);
+    vi.stubGlobal('WebSocket', MockWebSocket);
+    vi.stubGlobal('crypto', { randomUUID: vi.fn(() => 'replacement-model-request') });
+    const wire = connect('token');
+    const states: string[] = [];
+    wire.onState((state) => states.push(state));
+    const first = MockWebSocket.latest!;
+    first.open();
+    first.receive({ type: 'auth_ok' });
+    first.close();
+    await vi.advanceTimersByTimeAsync(1_200);
+
+    const second = MockWebSocket.latest!;
+    expect(second).not.toBe(first);
+    second.open();
+    second.receive({ type: 'auth_ok' });
+    states.length = 0;
+    const requestId = wire.requestClaudeModels();
+    const pending = wire.waitForClaudeModels();
+
+    first.onclose?.(); // delayed callback after the replacement is live
+    expect(states).not.toContain('closed');
+    second.receive({ type: 'claude_models', requestId, models: [{ id: 'fable' }] });
+    await expect(pending).resolves.toEqual([{ id: 'fable' }]);
     wire.close();
   });
 });
