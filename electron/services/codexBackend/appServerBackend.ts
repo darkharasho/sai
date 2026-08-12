@@ -18,6 +18,8 @@ interface ScopeMeta {
 
 interface ActiveTurn {
   id?: string;
+  /** Thread that accepted turn/start; it must not follow later session changes. */
+  threadId?: string;
   seq: number;
   done: boolean;
   /** The renderer has moved on, but turn/start may still yield an ID. */
@@ -247,6 +249,7 @@ export class AppServerBackend implements CodexBackend {
     this.emit({ type: 'streaming_start', projectPath: runtime.projectPath, scope: runtime.scope, turnSeq: active.seq, sessionId: runtime.sessionId ?? null });
     try {
       await this.ensureThread(runtime);
+      active.threadId ??= runtime.threadId;
       const client = await this.ensureClient();
       const result = await client.request('turn/start', this.turnStartParams(runtime, args));
       const turnId = idFrom(result, 'turn');
@@ -264,11 +267,11 @@ export class AppServerBackend implements CodexBackend {
   }
 
   private async requestInterrupt(runtime: ScopeRuntime, active: ActiveTurn): Promise<void> {
-    if (active.interruptSent || !active.id || !runtime.threadId) return;
+    if (active.interruptSent || !active.id || !active.threadId) return;
     active.interruptSent = true;
     try {
       const client = await this.ensureClient();
-      await client.request('turn/interrupt', { threadId: runtime.threadId, turnId: active.id });
+      await client.request('turn/interrupt', { threadId: active.threadId, turnId: active.id });
     } catch (error) {
       this.markUnavailable(errorText(error));
     }
@@ -283,9 +286,20 @@ export class AppServerBackend implements CodexBackend {
 
   private handleNotification(event: AppServerNotification): void {
     const ids = eventIds(event);
-    // A notification without enough identity cannot be safely attributed to a
-    // SAI scope; ignoring it is safer than leaking it into a newer chat.
-    if (!ids.threadId) return;
+    if (!ids.threadId) {
+      if (!ids.turnId) return;
+      const candidates = [...this.runtimes.values()].filter((runtime) => {
+        const active = runtime.active;
+        return Boolean(active && !active.retired && active.id === ids.turnId);
+      });
+      // App Server's documented turn/completed shape omits threadId. Route it
+      // only when a bound active turn identifies one scope unambiguously.
+      if (candidates.length !== 1) return;
+      const runtime = candidates[0];
+      const active = runtime.active;
+      if (active) this.emitNotification(runtime, active, event);
+      return;
+    }
     for (const [key, runtime] of this.runtimes) {
       if (runtime.threadId !== ids.threadId || this.runtimes.get(key) !== runtime) continue;
       const active = runtime.active;
@@ -332,7 +346,14 @@ export class AppServerBackend implements CodexBackend {
   }
 
   private newTurn(runtime: ScopeRuntime): ActiveTurn {
-    return { seq: ++runtime.turnSeq, done: false, retired: false, interruptSent: false, pendingNotifications: [] };
+    return {
+      seq: ++runtime.turnSeq,
+      threadId: runtime.threadId,
+      done: false,
+      retired: false,
+      interruptSent: false,
+      pendingNotifications: [],
+    };
   }
 
   private turnStartParams(runtime: ScopeRuntime, args: Pick<CodexSendArgs, 'message' | 'model' | 'effort' | 'permission'>): Record<string, unknown> {
@@ -371,7 +392,7 @@ export class AppServerBackend implements CodexBackend {
   }
 
   private emitNotification(runtime: ScopeRuntime, active: ActiveTurn, event: AppServerNotification): void {
-    const context = { projectPath: runtime.projectPath, scope: runtime.scope, turnSeq: active.seq, threadId: runtime.threadId, turnId: active.id };
+    const context = { projectPath: runtime.projectPath, scope: runtime.scope, turnSeq: active.seq, threadId: active.threadId, turnId: active.id };
     const envelopes = mapAppServerEvent(event, context);
     const terminal = envelopes.some((envelope) => envelope.type === 'done');
     // The mapper exposes `done` for standalone consumers, while this backend

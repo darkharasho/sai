@@ -201,6 +201,42 @@ describe('AppServerBackend', () => {
     expect(h.backend.isWorkspaceBusy('/repo')).toBe(false);
   });
 
+  it('settles a docs-shaped completed turn without a thread ID when its bound turn ID is unique', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-a' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-a' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
+    await settle();
+
+    h.notify('turn/completed', { turn: { id: 'turn-a', status: 'completed' } });
+
+    expect(h.emitted.filter((event) => event.type === 'result')).toHaveLength(1);
+    expect(h.emitted.filter((event) => event.type === 'done')).toHaveLength(1);
+    expect(h.backend.isWorkspaceBusy('/repo')).toBe(false);
+  });
+
+  it('interrupts a delayed retired turn in its original thread after the scope resumes another', async () => {
+    const h = harness();
+    const delayedTurn = deferred<unknown>();
+    h.responses.set('thread/start', { thread: { id: 'thread-old' } });
+    h.responses.set('thread/resume', { thread: { id: 'thread-new' } });
+    h.responses.set('turn/start', delayedTurn.promise);
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'first' });
+    await settle();
+
+    h.backend.interrupt('/repo', 'a');
+    h.backend.setSessionId('/repo', 'thread-new', 'a');
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    delayedTurn.resolve({ turn: { id: 'turn-old' } });
+    await settle();
+
+    expect(h.requests.filter((request) => request.method === 'turn/interrupt')).toEqual([
+      { method: 'turn/interrupt', params: { threadId: 'thread-old', turnId: 'turn-old' } },
+    ]);
+  });
+
   it('settles active work when the App Server fails and exposes an unavailable preview', async () => {
     const h = harness();
     h.responses.set('thread/start', { thread: { id: 'thread-a' } });
