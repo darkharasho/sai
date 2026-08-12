@@ -1879,16 +1879,15 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // own elapsed timer) — a thinking row below it would be a duplicate spinner.
   const hasLiveReasoning = lastMsg?.role === 'assistant' && !!lastMsg.reasoningLive;
   // Same rule for a running tool: its card shimmers with a pulsing badge, so the
-  // tail row yields to it. The row exits in the same commit the card mounts, and
-  // the card mounts with the grow-in entry (seedGrow) — the row visibly becomes
-  // the card instead of a card popping in above a stationary spinner.
+  // tail row yields to it. An active native subagent is separate concurrent work,
+  // however, so keep the row visible with its agent hint in that case.
   const hasRunningTailTool = lastMsg?.role === 'assistant' && !!lastMsg.toolCalls?.some(tc => tc.output == null);
   // SAI morph path: only a pending tail row when no segment head is actively thinking.
   // postSettleHold keeps it hidden for a beat right after text settles, so the
   // end-of-turn wrap-up (result frame in flight) doesn't flash a thinking row
   // under a reply the user just watched finish.
   const showPendingSaiThinking = showThinking && saiMorphActive && !hasStreamingAssistantSegment
-    && !hasLiveReasoning && !hasRunningTailTool && (!postSettleHold || subagentThinking);
+    && !hasLiveReasoning && (!hasRunningTailTool || subagentThinking) && (!postSettleHold || subagentThinking);
   // Detached banner: non-SAI providers, OR SAI with the animation pref off (today's
   // fallback). No grow-in here, so it only yields to the reasoning card, keeping the
   // legacy always-on banner during tool runs.
