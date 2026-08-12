@@ -214,6 +214,21 @@ describe('AppServerClient', () => {
     expect(() => client.claimServerRequest('missing')).toThrow(/unknown or already claimed/i);
   });
 
+  it('serializes an undefined server request result as JSON-RPC null', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+    let responder: { respond(result?: unknown): void } | undefined;
+    client.onServerRequest((request) => {
+      responder = client.claimServerRequest(request.id);
+    });
+
+    reply(child, { id: 73, method: 'item/permissions/requestApproval', params: {} });
+    responder?.respond();
+
+    expect(JSON.parse(child.stdin.write.mock.calls.at(-1)[0])).toEqual({ id: 73, result: null });
+  });
+
   it('invalidates a claimed server request when the transport fails', async () => {
     const child = fakeChild();
     const { client } = createClient(child);

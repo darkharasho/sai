@@ -207,7 +207,7 @@ export class AppServerClient implements AppServerClientTransport {
     pending.claimed = true;
     return {
       request: pending.request,
-      respond: (result?: unknown) => this.settleServerRequest(pending, { result }),
+      respond: (result?: unknown) => this.settleServerRequest(pending, { result: result === undefined ? null : result }),
       reject: (error: JsonRpcError) => this.settleServerRequest(pending, { error }),
     };
   }
