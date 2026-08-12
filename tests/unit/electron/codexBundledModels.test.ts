@@ -10,7 +10,7 @@ import {
 import { normalizeCodexModelOption } from '../../../electron/services/codexBackend/types';
 
 describe('bundled Codex resolver', () => {
-  it('uses headerless JSONL for the App Server model catalog handshake', async () => {
+  it('uses the initialize/initialized/model-list headerless JSONL handshake', async () => {
     const proc = new EventEmitter() as EventEmitter & {
       stdin: { write: (line: string) => boolean };
       stdout: EventEmitter;
@@ -33,7 +33,15 @@ describe('bundled Codex resolver', () => {
       params: { clientInfo: { name: 'sai', version: '1.0' } },
     });
     proc.stdout.emit('data', Buffer.from(`${JSON.stringify({ id: 0, result: {} })}\n`));
-    expect(JSON.parse(writes[1])).toEqual({ id: 1, method: 'model/list', params: {} });
+    expect(writes.map((line) => JSON.parse(line))).toEqual([
+      {
+        id: 0,
+        method: 'initialize',
+        params: { clientInfo: { name: 'sai', version: '1.0' } },
+      },
+      { method: 'initialized' },
+      { id: 1, method: 'model/list', params: {} },
+    ]);
     expect(writes.map((line) => JSON.parse(line)).every((message) => !Object.hasOwn(message, 'jsonrpc'))).toBe(true);
 
     proc.stdout.emit('data', Buffer.from(`${JSON.stringify({ id: 1, result: { data: [] } })}\n`));

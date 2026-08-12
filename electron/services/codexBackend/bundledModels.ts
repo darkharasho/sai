@@ -128,7 +128,10 @@ export function fetchBundledCodexModels(
     const line = (raw: string) => {
       try {
         const msg = JSON.parse(raw);
-        if (msg.id === 0 && !msg.error) proc.stdin?.write(`${JSON.stringify({ method: 'model/list', id: 1, params: {} })}\n`);
+        if (msg.id === 0 && !msg.error) {
+          proc.stdin?.write(`${JSON.stringify({ method: 'initialized' })}\n`);
+          proc.stdin?.write(`${JSON.stringify({ method: 'model/list', id: 1, params: {} })}\n`);
+        }
         if (msg.id === 1 && msg.result) {
           const data = msg.result.data ?? [];
           const normalized = data.filter((m: any) => !m.hidden).map(normalizeCodexModelOption);
