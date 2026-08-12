@@ -22,6 +22,8 @@ function harness() {
     }),
     notify: vi.fn(),
     onNotification: vi.fn((listener) => { notifications.add(listener); return () => notifications.delete(listener); }),
+    onServerRequest: vi.fn(() => () => undefined),
+    claimServerRequest: vi.fn(() => { throw new Error('No server request is pending'); }),
     onFailure: vi.fn((listener) => { failures.add(listener); return () => failures.delete(listener); }),
     destroy: vi.fn(),
   };

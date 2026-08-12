@@ -158,6 +158,125 @@ describe('AppServerClient', () => {
     expect(() => client.request('thread/start', {})).toThrow(/Unsupported App Server request in preview/);
   });
 
+  it('lets a subscriber claim and settle a server request exactly once with headerless JSONL', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+    const received: Array<{ id: string | number; method: string; params?: unknown }> = [];
+    let responder: { respond(result?: unknown): void } | undefined;
+
+    client.onServerRequest((request) => {
+      received.push(request);
+      responder = client.claimServerRequest(request.id);
+    });
+
+    reply(child, {
+      id: 'approval-1',
+      method: 'item/commandExecution/requestApproval',
+      params: { command: 'git status' },
+    });
+
+    expect(received).toEqual([{
+      id: 'approval-1',
+      method: 'item/commandExecution/requestApproval',
+      params: { command: 'git status' },
+    }]);
+    expect(responder).toBeDefined();
+    responder?.respond({ decision: 'accept' });
+
+    const outgoing = child.stdin.write.mock.calls.map(([line]) => ({ line, body: JSON.parse(line) }));
+    expect(outgoing.at(-1)).toEqual({
+      line: `${JSON.stringify({ id: 'approval-1', result: { decision: 'accept' } })}\n`,
+      body: { id: 'approval-1', result: { decision: 'accept' } },
+    });
+    expect(outgoing.at(-1)?.body).not.toHaveProperty('jsonrpc');
+    expect(() => responder?.respond({ decision: 'accept' })).toThrow(/already resolved/i);
+    expect(() => client.claimServerRequest('approval-1')).toThrow(/unknown or already claimed/i);
+  });
+
+  it('rejects duplicate and unknown server request settlement attempts', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+    let responder: { reject(error: { code: number; message: string }): void } | undefined;
+
+    client.onServerRequest((request) => {
+      responder = client.claimServerRequest(request.id);
+    });
+    reply(child, { id: 72, method: 'item/fileChange/requestApproval', params: {} });
+
+    responder?.reject({ code: 4001, message: 'Denied' });
+    expect(JSON.parse(child.stdin.write.mock.calls.at(-1)[0])).toEqual({
+      id: 72,
+      error: { code: 4001, message: 'Denied' },
+    });
+    expect(() => responder?.reject({ code: 4001, message: 'Denied' })).toThrow(/already resolved/i);
+    expect(() => client.claimServerRequest('missing')).toThrow(/unknown or already claimed/i);
+  });
+
+  it('invalidates a claimed server request when the transport fails', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+    let responder: { respond(result?: unknown): void } | undefined;
+    client.onServerRequest((request) => {
+      responder = client.claimServerRequest(request.id);
+    });
+    reply(child, { id: 73, method: 'item/permissions/requestApproval', params: {} });
+
+    child.emit('exit', 1);
+
+    expect(() => responder?.respond({ decision: 'accept' })).toThrow(/no longer active/i);
+    expect(child.stdin.write).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails closed and invalidates the original responder when the server reuses a pending request ID', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+    let responder: { respond(result?: unknown): void } | undefined;
+    client.onServerRequest((request) => {
+      responder = client.claimServerRequest(request.id);
+    });
+    reply(child, { id: 74, method: 'item/permissions/requestApproval', params: {} });
+
+    expect(() => reply(child, { id: 74, method: 'item/permissions/requestApproval', params: {} })).not.toThrow();
+
+    expect(client.failureReason).toMatch(/duplicate server request ID: 74/i);
+    expect(() => responder?.respond({ decision: 'accept' })).toThrow(/no longer active/i);
+    expect(child.kill).toHaveBeenCalledOnce();
+  });
+
+  it('invalidates a claimed server request when destroyed', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+    let responder: { respond(result?: unknown): void } | undefined;
+    client.onServerRequest((request) => {
+      responder = client.claimServerRequest(request.id);
+    });
+    reply(child, { id: 75, method: 'item/permissions/requestApproval', params: {} });
+
+    client.destroy();
+
+    expect(() => responder?.respond({ decision: 'accept' })).toThrow(/no longer active/i);
+    expect(child.stdin.write).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails closed when a server request subscriber cannot claim the request', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+    client.onServerRequest(() => {
+      throw new Error('backend registry failed');
+    });
+
+    expect(() => reply(child, { id: 76, method: 'item/permissions/requestApproval', params: {} })).not.toThrow();
+
+    expect(client.failureReason).toMatch(/server request handler failed: backend registry failed/i);
+    expect(child.kill).toHaveBeenCalledOnce();
+  });
+
   it('fails closed rather than throwing from a server request when its error response cannot be written', async () => {
     const child = fakeChild();
     const { client } = createClient(child);

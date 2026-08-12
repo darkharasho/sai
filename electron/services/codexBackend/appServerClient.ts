@@ -9,6 +9,18 @@ export interface AppServerNotification {
   params?: unknown;
 }
 
+export interface AppServerServerRequest {
+  id: string | number;
+  method: string;
+  params?: unknown;
+}
+
+export interface AppServerServerRequestResponder {
+  readonly request: AppServerServerRequest;
+  respond(result?: unknown): void;
+  reject(error: JsonRpcError): void;
+}
+
 interface JsonRpcError {
   code: number;
   message: string;
@@ -35,6 +47,8 @@ export interface AppServerClientTransport {
   request<T = unknown>(method: string, params?: unknown): Promise<T>;
   notify(method: string, params?: unknown): void;
   onNotification(listener: (message: AppServerNotification) => void): () => void;
+  onServerRequest(listener: (request: AppServerServerRequest) => void): () => void;
+  claimServerRequest(id: string | number): AppServerServerRequestResponder;
   onFailure(listener: (error: AppServerUnavailableError) => void): () => void;
   destroy(): void;
 }
@@ -59,6 +73,13 @@ interface PendingRequest {
   failOnResponseError: boolean;
 }
 
+interface PendingServerRequest {
+  request: AppServerServerRequest;
+  claimed: boolean;
+  resolved: boolean;
+  active: boolean;
+}
+
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 10_000;
 
 function messageText(error: JsonRpcError): string {
@@ -79,8 +100,8 @@ function isRequestId(value: unknown): value is number | string {
 
 /**
  * Minimal, lifecycle-safe transport for the Codex App Server preview.
- * Its protocol boundary is deliberately limited: server initiated requests are
- * rejected until a UI is available to handle them safely.
+ * Its protocol boundary leaves server-initiated requests inert until the
+ * backend synchronously claims them; unclaimed requests fail closed.
  */
 export class AppServerClient implements AppServerClientTransport {
   private readonly spawnImpl: AppServerSpawn;
@@ -90,6 +111,8 @@ export class AppServerClient implements AppServerClientTransport {
   private readonly initializationTimeoutMs: number;
   private readonly pending = new Map<number, PendingRequest>();
   private readonly listeners = new Set<(message: AppServerNotification) => void>();
+  private readonly serverRequestListeners = new Set<(request: AppServerServerRequest) => void>();
+  private readonly pendingServerRequests = new Map<string | number, PendingServerRequest>();
   private readonly failureListeners = new Set<(error: AppServerUnavailableError) => void>();
   private child: ChildProcess | undefined;
   private startPromise: Promise<void> | undefined;
@@ -171,6 +194,24 @@ export class AppServerClient implements AppServerClientTransport {
     return () => this.listeners.delete(listener);
   }
 
+  onServerRequest(listener: (request: AppServerServerRequest) => void): () => void {
+    this.serverRequestListeners.add(listener);
+    return () => this.serverRequestListeners.delete(listener);
+  }
+
+  claimServerRequest(id: string | number): AppServerServerRequestResponder {
+    const pending = this.pendingServerRequests.get(id);
+    if (!pending || pending.claimed || pending.resolved || !pending.active) {
+      throw new AppServerProtocolError(`App Server request is unknown or already claimed: ${String(id)}`);
+    }
+    pending.claimed = true;
+    return {
+      request: pending.request,
+      respond: (result?: unknown) => this.settleServerRequest(pending, { result }),
+      reject: (error: JsonRpcError) => this.settleServerRequest(pending, { error }),
+    };
+  }
+
   onFailure(listener: (error: AppServerUnavailableError) => void): () => void {
     this.failureListeners.add(listener);
     if (this.failure) listener(this.failure);
@@ -226,15 +267,26 @@ export class AppServerClient implements AppServerClientTransport {
         this.fail(new AppServerProtocolError('Codex App Server sent an invalid JSON-RPC request ID'));
         return;
       }
-      try {
-        this.write({
-          id: message.id,
-          error: { code: -32601, message: 'Unsupported App Server request in preview' },
-        });
-      } catch {
+      const request: AppServerServerRequest = {
+        id: message.id,
+        method: message.method,
+        ...(Object.prototype.hasOwnProperty.call(message, 'params') ? { params: message.params } : {}),
+      };
+      if (this.pendingServerRequests.has(request.id)) {
+        this.fail(new AppServerProtocolError(`Codex App Server sent a duplicate server request ID: ${String(request.id)}`));
         return;
       }
-      this.fail(new AppServerUnavailableError('Unsupported App Server request in preview'));
+      const pending: PendingServerRequest = { request, claimed: false, resolved: false, active: true };
+      this.pendingServerRequests.set(request.id, pending);
+      for (const listener of this.serverRequestListeners) {
+        try {
+          listener(request);
+        } catch (error) {
+          this.rejectUnclaimedServerRequest(pending, `App Server server request handler failed: ${errorText(error)}`);
+          return;
+        }
+      }
+      if (!pending.claimed) this.rejectUnclaimedServerRequest(pending);
       return;
     }
     const notification: AppServerNotification = {
@@ -242,6 +294,36 @@ export class AppServerClient implements AppServerClientTransport {
       ...(Object.prototype.hasOwnProperty.call(message, 'params') ? { params: message.params } : {}),
     };
     for (const listener of this.listeners) listener(notification);
+  }
+
+  private rejectUnclaimedServerRequest(pending: PendingServerRequest, failureReason = 'Unsupported App Server request in preview'): void {
+    if (!pending.active || pending.claimed) return;
+    pending.active = false;
+    pending.resolved = true;
+    this.pendingServerRequests.delete(pending.request.id);
+    try {
+      this.write({
+        id: pending.request.id,
+        error: { code: -32601, message: 'Unsupported App Server request in preview' },
+      });
+    } catch {
+      return;
+    }
+    this.fail(new AppServerUnavailableError(failureReason));
+  }
+
+  private settleServerRequest(
+    pending: PendingServerRequest,
+    response: { result: unknown } | { error: JsonRpcError },
+  ): void {
+    if (pending.resolved) throw new AppServerProtocolError(`App Server request is already resolved: ${String(pending.request.id)}`);
+    if (!pending.active || this.pendingServerRequests.get(pending.request.id) !== pending) {
+      throw new AppServerUnavailableError(`App Server request is no longer active: ${String(pending.request.id)}`);
+    }
+    pending.active = false;
+    pending.resolved = true;
+    this.pendingServerRequests.delete(pending.request.id);
+    this.write({ id: pending.request.id, ...response });
   }
 
   private handleResponse(message: Record<string, unknown>): void {
@@ -308,6 +390,8 @@ export class AppServerClient implements AppServerClientTransport {
     this.clearInitializationTimeout();
     for (const pending of this.pending.values()) pending.reject(unavailable);
     this.pending.clear();
+    for (const pending of this.pendingServerRequests.values()) pending.active = false;
+    this.pendingServerRequests.clear();
     for (const listener of this.failureListeners) listener(unavailable);
     const child = this.child;
     this.child = undefined;
