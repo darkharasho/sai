@@ -39,6 +39,7 @@ export interface SdkCodexBackendDeps {
   getModels?: (forceRefresh?: boolean) => Promise<CodexModelResult>;
   getEnv?: () => NodeJS.ProcessEnv;
   registerWorkspace?: (projectPath: string) => void;
+  notifyCompletion?: (projectPath: string, info: { provider: string; summary?: string }) => void;
 }
 
 interface ScopeMeta {
@@ -54,6 +55,7 @@ interface ActiveTurn {
   controller: AbortController;
   seq: number;
   done: boolean;
+  summary?: string;
 }
 
 interface ScopeRuntime extends ScopeMeta {
@@ -98,6 +100,7 @@ export class SdkCodexBackend implements CodexBackend {
   private readonly loadModels: (forceRefresh?: boolean) => Promise<CodexModelResult>;
   private readonly getEnv: () => NodeJS.ProcessEnv;
   private readonly registerWorkspace: (projectPath: string) => void;
+  private readonly notifyCompletion: (projectPath: string, info: { provider: string; summary?: string }) => void;
 
   constructor(deps: SdkCodexBackendDeps = {}) {
     this.createClient = deps.createClient ?? ((options) => {
@@ -113,6 +116,7 @@ export class SdkCodexBackend implements CodexBackend {
     this.registerWorkspace = deps.registerWorkspace ?? ((projectPath) => {
       try { getOrCreateWorkspace(projectPath); } catch { /* isolated tests or shutdown */ }
     });
+    this.notifyCompletion = deps.notifyCompletion ?? (() => undefined);
   }
 
   start(args: CodexStartArgs): void {
@@ -324,6 +328,12 @@ export class SdkCodexBackend implements CodexBackend {
       for await (const event of streamed.events) {
         if (!this.isCurrent(runtime, active) || this.runtimes.get(key) !== runtime) return;
         if (event.type === 'thread.started') runtime.sessionId = event.thread_id;
+        if (event.type === 'item.completed' && event.item.type === 'agent_message') {
+          active.summary = event.item.text || undefined;
+        }
+        if (event.type === 'turn.completed' && runtime.kind === 'chat') {
+          this.notifyCompletion(runtime.projectPath, { provider: 'Codex', summary: active.summary });
+        }
         const envelopes = mapCodexSdkEvent(event, {
           projectPath: runtime.projectPath,
           scope: runtime.scope,

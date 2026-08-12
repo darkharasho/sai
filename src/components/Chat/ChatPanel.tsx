@@ -1152,7 +1152,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       }
 
       // Tool results come back as user messages with tool_result content blocks
-      if (msg.type === 'user' && msg.message?.content) {
+      if (msg.type === 'user' && Array.isArray(msg.message?.content)) {
         const results: Array<{ tool_use_id: string; output: string; images?: import('../../types').ToolResultImage[] }> = [];
         for (const block of msg.message.content) {
           if (block.type === 'tool_result' && block.tool_use_id) {
@@ -1196,7 +1196,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       if (msg.type === 'user') return;
 
       // Assistant message — streaming content + tool calls
-      if (msg.type === 'assistant' && msg.message?.content) {
+      if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
         const textParts: string[] = [];
         const tools: ToolCall[] = [];
 

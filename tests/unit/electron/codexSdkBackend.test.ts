@@ -75,6 +75,7 @@ interface FakeHarness {
   runs: Array<{ input: Input; options?: TurnOptions; threadOptions: ThreadOptions; resumeId?: string }>;
   streams: Array<AsyncGenerator<ThreadEvent> | Error>;
   registerWorkspace: ReturnType<typeof vi.fn>;
+  notifyCompletion: ReturnType<typeof vi.fn>;
 }
 
 function harness(streams: Array<AsyncGenerator<ThreadEvent> | Error> = []): FakeHarness {
@@ -104,6 +105,7 @@ function harness(streams: Array<AsyncGenerator<ThreadEvent> | Error> = []): Fake
   });
 
   const registerWorkspace = vi.fn();
+  const notifyCompletion = vi.fn();
 
   return {
     backend: new SdkCodexBackend({
@@ -112,12 +114,14 @@ function harness(streams: Array<AsyncGenerator<ThreadEvent> | Error> = []): Fake
       getModels: vi.fn(async () => ({ models: [{ id: 'gpt-5', name: 'GPT-5' }], defaultModel: 'gpt-5' })),
       getEnv: () => ({ PATH: '/bin', EMPTY: undefined, TOKEN: 'secret' }),
       registerWorkspace,
+      notifyCompletion,
     }),
     emitted,
     clients,
     runs,
     streams: queue,
     registerWorkspace,
+    notifyCompletion,
   };
 }
 
@@ -232,6 +236,47 @@ describe('SdkCodexBackend', () => {
       if (event.type !== 'session_id') expect(event.turnSeq).toBe(1);
     }
     expect(forwarded.map((e) => e.type)).toEqual(['session_id', 'assistant', 'result', 'done']);
+  });
+
+  it('notifies exactly once when a chat turn completes', async () => {
+    const h = harness([streamOf(completedEvents('finished'))]);
+    h.backend.start({ projectPath: '/a', scope: 'chat' });
+    h.backend.send({ projectPath: '/a', scope: 'chat', message: 'go' });
+    await settle();
+
+    expect(h.notifyCompletion).toHaveBeenCalledTimes(1);
+    expect(h.notifyCompletion).toHaveBeenCalledWith('/a', { provider: 'Codex', summary: 'finished' });
+  });
+
+  it.each([
+    {
+      label: 'a task turn',
+      scope: 'task:1',
+      events: completedEvents(),
+      interrupt: false,
+    },
+    {
+      label: 'a failed chat turn',
+      scope: 'chat',
+      events: [{ type: 'turn.failed', error: { message: 'boom' } }] satisfies ThreadEvent[],
+      interrupt: false,
+    },
+    {
+      label: 'an interrupted chat turn',
+      scope: 'chat',
+      events: [],
+      interrupt: true,
+    },
+  ])('does not notify for $label', async ({ scope, events, interrupt }) => {
+    const stream = pendingStream();
+    const h = harness([interrupt ? stream.events : streamOf(events)]);
+    h.backend.start({ projectPath: '/a', scope: scope as string, kind: scope === 'chat' ? 'chat' : 'task' });
+    h.backend.send({ projectPath: '/a', scope: scope as string, message: 'go' });
+    await settle();
+    if (interrupt) h.backend.interrupt('/a', scope as string);
+    await settle();
+
+    expect(h.notifyCompletion).not.toHaveBeenCalled();
   });
 
   it('passes structured images, meta preamble, and a string-only enriched environment', async () => {

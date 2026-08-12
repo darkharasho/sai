@@ -409,6 +409,24 @@ describe('ChatPanel', () => {
     onSlashCommandsUpdate: vi.fn(),
   });
 
+  it('ignores malformed provider content instead of crashing while handling tool events', async () => {
+    render(<ChatPanel {...baseProps()} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+    expect(() => {
+      for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+        (handler as (msg: any) => void)({
+          type: 'user', projectPath: '/project', scope: 'chat',
+          message: { content: { unexpected: 'MCP result' } },
+        });
+        (handler as (msg: any) => void)({
+          type: 'assistant', projectPath: '/project', scope: 'chat',
+          message: { content: { unexpected: 'MCP tool call' } },
+        });
+      }
+    }).not.toThrow();
+  });
+
   it('preserves Codex scope and Claude-equivalent metadata across start, send, and stop', async () => {
     const orchestratorContext = { workspaceName: 'SAI' };
     const props = {
