@@ -84,6 +84,18 @@ contextBridge.exposeInMainWorld('sai', {
     requestHandle: string,
     decision: import('./services/codexBackend').CodexApprovalDecision,
   ) => ipcRenderer.invoke('codex:appServerApprove', projectPath, scope, requestHandle, decision),
+  codexAppServerAnswerUserInput: (
+    projectPath: string,
+    scope: string | undefined,
+    requestHandle: string,
+    answers: import('./services/codexBackend').CodexUserInputAnswers,
+  ) => ipcRenderer.invoke('codex:appServerAnswerUserInput', projectPath, scope, requestHandle, answers),
+  codexAppServerResolveMcpElicitation: (
+    projectPath: string,
+    scope: string | undefined,
+    requestHandle: string,
+    decision: import('./services/codexBackend').CodexMcpElicitationDecision,
+  ) => ipcRenderer.invoke('codex:appServerResolveMcpElicitation', projectPath, scope, requestHandle, decision),
   codexModels: (forceRefresh?: boolean) => ipcRenderer.invoke('codex:models', forceRefresh),
   codexStart: (cwd: string, scope?: string, kind?: string, orchestratorContext?: unknown, scopeCwd?: string, metaPreamble?: string, additionalDirectories?: string[]) =>
     ipcRenderer.invoke('codex:start', cwd, scope, kind, orchestratorContext, scopeCwd, metaPreamble, additionalDirectories),

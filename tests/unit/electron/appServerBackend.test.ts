@@ -508,6 +508,24 @@ describe('AppServerBackend', () => {
     expect(responder.respond).toHaveBeenCalledWith({ answers: { format: ['YAML'] } });
   });
 
+  it('keeps a user-input request pending when its protocol response fails, then retires it only after success', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-a' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-a' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
+    await settle();
+    const responder = h.serverRequest('retry-input', 'item/tool/requestUserInput', {
+      threadId: 'thread-a', turnId: 'turn-a', questions: [{ id: 'format', question: 'Choose', options: [{ label: 'JSON' }] }],
+    });
+    vi.mocked(responder.respond).mockImplementationOnce(() => { throw new Error('closed'); });
+
+    expect(h.backend.answerUserInput('/repo', 'a', 'retry-input', { format: ['JSON'] }))
+      .toEqual({ ok: false, code: 'not-pending' });
+    expect(h.backend.answerUserInput('/repo', 'a', 'retry-input', { format: ['JSON'] }))
+      .toEqual({ ok: true });
+  });
+
   it('declines stale user-input requests without exposing renderer data', async () => {
     const h = harness();
     h.responses.set('thread/start', { thread: { id: 'thread-a' } });
@@ -569,6 +587,25 @@ describe('AppServerBackend', () => {
     expect(h.backend.resolveMcpElicitation('/repo', 'a', 'mcp-form', { action: 'accept', content: { date: '2026-08-12' } }))
       .toEqual({ ok: true });
     expect(responder.respond).toHaveBeenCalledWith({ action: 'accept', content: { date: '2026-08-12' } });
+  });
+
+  it('keeps an MCP elicitation pending when its protocol response fails', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-a' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-a' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
+    await settle();
+    const responder = h.serverRequest('retry-mcp', 'mcpServer/elicitation/request', {
+      threadId: 'thread-a', turnId: 'turn-a', serverName: 'calendar', mode: 'form', message: 'Choose',
+      requestedSchema: { type: 'object', properties: { date: { type: 'string' } }, required: ['date'] },
+    });
+    vi.mocked(responder.respond).mockImplementationOnce(() => { throw new Error('closed'); });
+
+    const decision = { action: 'accept' as const, content: { date: '2026-08-12' } };
+    expect(h.backend.resolveMcpElicitation('/repo', 'a', 'retry-mcp', decision))
+      .toEqual({ ok: false, code: 'not-pending' });
+    expect(h.backend.resolveMcpElicitation('/repo', 'a', 'retry-mcp', decision)).toEqual({ ok: true });
   });
 
   it('cancels an optional-turn MCP request when its thread belongs to multiple active scopes', async () => {

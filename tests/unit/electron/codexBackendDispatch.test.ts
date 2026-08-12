@@ -109,6 +109,8 @@ function backendStub(): CodexBackend {
     setSessionId: vi.fn(),
     getModels: vi.fn().mockResolvedValue({ models: [], defaultModel: '' }),
     approve: vi.fn().mockReturnValue({ ok: false, code: 'unsupported' }),
+    answerUserInput: vi.fn().mockReturnValue({ ok: false, code: 'unsupported' }),
+    resolveMcpElicitation: vi.fn().mockReturnValue({ ok: false, code: 'unsupported' }),
     suspendWorkspace: vi.fn(),
     isWorkspaceBusy: vi.fn().mockReturnValue(false),
     destroy: vi.fn(),
@@ -500,6 +502,64 @@ describe('Codex IPC dispatch', () => {
       type: 'permissions', scope: 'everywhere', permissions: [],
     })).resolves.toEqual({ ok: false, code: 'invalid-decision' });
     expect(backend.approve).toHaveBeenCalledTimes(2);
+  });
+
+  it('routes only bounded App Server input and MCP-elicitation responses through dedicated IPC channels', async () => {
+    const backend = backendStub();
+    backend.answerUserInput = vi.fn().mockReturnValue({ ok: true });
+    backend.resolveMcpElicitation = vi.fn().mockReturnValue({ ok: true });
+    __setCodexBackendForTests(backend);
+    registerCodexHandlers();
+
+    await expect(mocks.ipcMain.invoke('codex:appServerAnswerUserInput', '/project', 'task:7', 'question-7', {
+      format: ['json'], target: ['other'],
+    })).resolves.toEqual({ ok: true });
+    expect(backend.answerUserInput).toHaveBeenCalledWith('/project', 'task:7', 'question-7', {
+      format: ['json'], target: ['other'],
+    });
+
+    await expect(mocks.ipcMain.invoke('codex:appServerResolveMcpElicitation', '/project', 'task:7', 'mcp-7', {
+      action: 'accept', content: { calendar: 'primary' },
+    })).resolves.toEqual({ ok: true });
+    expect(backend.resolveMcpElicitation).toHaveBeenCalledWith('/project', 'task:7', 'mcp-7', {
+      action: 'accept', content: { calendar: 'primary' },
+    });
+
+    await expect(mocks.ipcMain.invoke('codex:appServerAnswerUserInput', '/project', 'task:7', 'question-7', {
+      format: ['json', 1],
+    })).resolves.toEqual({ ok: false, code: 'invalid-decision' });
+    await expect(mocks.ipcMain.invoke('codex:appServerResolveMcpElicitation', '/project', 'task:7', 'mcp-7', {
+      action: 'accept', content: { redirect: 'https://untrusted.test' }, navigate: true,
+    })).resolves.toEqual({ ok: false, code: 'invalid-decision' });
+    await expect(mocks.ipcMain.invoke('codex:appServerResolveMcpElicitation', '/project', 'task:7', 'mcp-7', {
+      action: 'accept', content: null,
+    })).resolves.toEqual({ ok: true });
+    expect(backend.answerUserInput).toHaveBeenCalledTimes(1);
+    expect(backend.resolveMcpElicitation).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps App Server input replies with the transport that owns the scoped conversation', async () => {
+    const sdk = backendStub();
+    const appServer = backendStub();
+    appServer.answerUserInput = vi.fn().mockReturnValue({ ok: true });
+    appServer.resolveMcpElicitation = vi.fn().mockReturnValue({ ok: true });
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
+    setCodexBackendMode('app-server');
+    const dispatcher = getCodexBackend();
+    await dispatcher.start({ projectPath: '/project', scope: 'task:7' });
+    registerCodexHandlers();
+
+    await expect(mocks.ipcMain.invoke('codex:appServerAnswerUserInput', '/project', 'task:7', 'question-7', {
+      answer: ['yes'],
+    })).resolves.toEqual({ ok: true });
+    expect(appServer.answerUserInput).toHaveBeenCalledOnce();
+
+    setCodexBackendMode('sdk');
+    await expect(mocks.ipcMain.invoke('codex:appServerResolveMcpElicitation', '/project', 'task:7', 'mcp-7', {
+      action: 'cancel',
+    })).resolves.toEqual({ ok: true });
+    expect(appServer.resolveMcpElicitation).toHaveBeenCalledOnce();
+    expect(sdk.resolveMcpElicitation).not.toHaveBeenCalled();
   });
 
   it('routes codex:usage to the injected telemetry singleton with a forced refresh', async () => {

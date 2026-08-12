@@ -458,10 +458,10 @@ export class AppServerBackend implements CodexBackend {
     const pending = this.pendingFor(this.pendingUserInputs, projectPath, scope, requestHandle);
     if (!pending) return { ok: false, code: 'not-pending' };
     if (!this.userInputResponse(pending.questions, answers)) return { ok: false, code: 'invalid-decision' };
-    this.pendingUserInputs.delete(pending.id);
-    if (pending.timeout) clearTimeout(pending.timeout);
     try {
       pending.responder.respond({ answers });
+      this.pendingUserInputs.delete(pending.id);
+      if (pending.timeout) clearTimeout(pending.timeout);
       return { ok: true };
     } catch { return { ok: false, code: 'not-pending' }; }
   }
@@ -471,9 +471,9 @@ export class AppServerBackend implements CodexBackend {
     if (!pending) return { ok: false, code: 'not-pending' };
     const response = this.mcpElicitationResponse(pending.elicitation, decision);
     if (!response) return { ok: false, code: 'invalid-decision' };
-    this.pendingMcpElicitations.delete(pending.id);
     try {
       pending.responder.respond(response);
+      this.pendingMcpElicitations.delete(pending.id);
       return { ok: true };
     } catch { return { ok: false, code: 'not-pending' }; }
   }

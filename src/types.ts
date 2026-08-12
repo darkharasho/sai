@@ -383,6 +383,18 @@ declare global {
       requestHandle: string,
       decision: import('../electron/services/codexBackend').CodexApprovalDecision,
     ) => Promise<import('../electron/services/codexBackend').CodexApprovalResult>;
+    codexAppServerAnswerUserInput?: (
+      projectPath: string,
+      scope: string | undefined,
+      requestHandle: string,
+      answers: import('../electron/services/codexBackend').CodexUserInputAnswers,
+    ) => Promise<import('../electron/services/codexBackend').CodexApprovalResult>;
+    codexAppServerResolveMcpElicitation?: (
+      projectPath: string,
+      scope: string | undefined,
+      requestHandle: string,
+      decision: import('../electron/services/codexBackend').CodexMcpElicitationDecision,
+    ) => Promise<import('../electron/services/codexBackend').CodexApprovalResult>;
     searchRun?: SaiSearchApi['searchRun'];
     searchReplaceFile?: SaiSearchApi['searchReplaceFile'];
     swarm?: {

@@ -137,6 +137,15 @@ async function settle(): Promise<void> {
 }
 
 describe('SdkCodexBackend', () => {
+  it('returns typed unsupported results for App Server-only input requests', () => {
+    const h = harness();
+
+    expect(h.backend.answerUserInput('/repo', 'chat', 'request', { answer: ['yes'] }))
+      .toEqual({ ok: false, code: 'unsupported' });
+    expect(h.backend.resolveMcpElicitation('/repo', 'chat', 'request', { action: 'cancel' }))
+      .toEqual({ ok: false, code: 'unsupported' });
+  });
+
   it('registers a workspace when a scope starts', () => {
     const h = harness();
     h.backend.start({ projectPath: '/repo', scope: 'chat' });

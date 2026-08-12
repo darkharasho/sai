@@ -11,6 +11,8 @@ import {
   type CodexSessionKind,
   isCodexReasoningEffort,
   isCodexApprovalDecision,
+  isCodexMcpElicitationDecision,
+  isCodexUserInputAnswers,
 } from './codexBackend';
 import { CodexTelemetryService } from './codexTelemetry';
 
@@ -72,6 +74,32 @@ export function registerCodexHandlers(): void {
         return { ok: false, code: 'invalid-decision' };
       }
       return getCodexBackend().approve(projectPath, scope, requestHandle, decision);
+    },
+  );
+
+  ipcMain.handle(
+    'codex:appServerAnswerUserInput',
+    (_event, projectPath: unknown, scope: unknown, requestHandle: unknown, answers: unknown): CodexApprovalResult => {
+      if (typeof projectPath !== 'string' || projectPath.length === 0
+        || (scope !== undefined && typeof scope !== 'string')
+        || typeof requestHandle !== 'string' || requestHandle.length === 0
+        || !isCodexUserInputAnswers(answers)) {
+        return { ok: false, code: 'invalid-decision' };
+      }
+      return getCodexBackend().answerUserInput(projectPath, scope, requestHandle, answers);
+    },
+  );
+
+  ipcMain.handle(
+    'codex:appServerResolveMcpElicitation',
+    (_event, projectPath: unknown, scope: unknown, requestHandle: unknown, decision: unknown): CodexApprovalResult => {
+      if (typeof projectPath !== 'string' || projectPath.length === 0
+        || (scope !== undefined && typeof scope !== 'string')
+        || typeof requestHandle !== 'string' || requestHandle.length === 0
+        || !isCodexMcpElicitationDecision(decision)) {
+        return { ok: false, code: 'invalid-decision' };
+      }
+      return getCodexBackend().resolveMcpElicitation(projectPath, scope, requestHandle, decision);
     },
   );
 

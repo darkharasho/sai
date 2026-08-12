@@ -68,6 +68,53 @@ export type CodexMcpElicitationDecision =
   | { action: 'accept'; content: Record<string, unknown> | null }
   | { action: 'decline' | 'cancel'; content?: null };
 
+const CODEX_INPUT_MAX_FIELDS = 20;
+const CODEX_INPUT_MAX_OPTIONS = 20;
+const CODEX_INPUT_MAX_TEXT = 2_000;
+
+/**
+ * Narrow the renderer payload before it crosses into a pending App Server
+ * request. The backend then validates selected option IDs against the exact
+ * question and form content against the exact, server-provided safe schema.
+ */
+export function isCodexUserInputAnswers(value: unknown): value is CodexUserInputAnswers {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const entries = Object.entries(value as Record<string, unknown>);
+  return entries.length <= CODEX_INPUT_MAX_FIELDS && entries.every(([id, selections]) =>
+    id.length > 0 && id.length <= 128 && Array.isArray(selections)
+    && selections.length > 0 && selections.length <= CODEX_INPUT_MAX_OPTIONS
+    && selections.every((selection) => typeof selection === 'string' && selection.length > 0 && selection.length <= CODEX_INPUT_MAX_TEXT),
+  );
+}
+
+function isSafeMcpContent(value: unknown, depth = 0): boolean {
+  if (depth > 4 || value === null || typeof value === 'string' || typeof value === 'boolean') {
+    return value === null || typeof value === 'boolean' || (typeof value === 'string' && value.length <= CODEX_INPUT_MAX_TEXT);
+  }
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (Array.isArray(value)) return value.length <= CODEX_INPUT_MAX_OPTIONS && value.every((entry) => isSafeMcpContent(entry, depth + 1));
+  if (!value || typeof value !== 'object') return false;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  const entries = Object.entries(value as Record<string, unknown>);
+  return entries.length <= CODEX_INPUT_MAX_FIELDS
+    && entries.every(([key, entry]) => key.length > 0 && key.length <= 128 && isSafeMcpContent(entry, depth + 1));
+}
+
+/** Does not authorize a URL action; the pending elicitation mode does that. */
+export function isCodexMcpElicitationDecision(value: unknown): value is CodexMcpElicitationDecision {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const input = value as Record<string, unknown>;
+  if (input.action === 'decline' || input.action === 'cancel') {
+    return Object.keys(input).every((key) => key === 'action' || key === 'content')
+      && (input.content === undefined || input.content === null);
+  }
+  return input.action === 'accept'
+    && Object.keys(input).every((key) => key === 'action' || key === 'content')
+    && Object.prototype.hasOwnProperty.call(input, 'content')
+    && (input.content === null || isSafeMcpContent(input.content));
+}
+
 export function isCodexApprovalDecision(value: unknown): value is CodexApprovalDecision {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const input = value as Record<string, unknown>;
@@ -145,8 +192,10 @@ export interface CodexBackend {
   setSessionId(projectPath: string, sessionId: string | undefined, scope?: string): void;
   getModels(forceRefresh?: boolean): Promise<CodexModelResult>;
   approve(projectPath: string, scope: string | undefined, requestHandle: string, decision: CodexApprovalDecision): CodexApprovalResult;
-  answerUserInput?(projectPath: string, scope: string | undefined, requestHandle: string, answers: CodexUserInputAnswers): CodexApprovalResult;
-  resolveMcpElicitation?(projectPath: string, scope: string | undefined, requestHandle: string, decision: CodexMcpElicitationDecision): CodexApprovalResult;
+  /** SDK returns a typed unsupported result; App Server validates a pending request. */
+  answerUserInput(projectPath: string, scope: string | undefined, requestHandle: string, answers: CodexUserInputAnswers): CodexApprovalResult;
+  /** SDK returns a typed unsupported result; App Server validates a pending request. */
+  resolveMcpElicitation(projectPath: string, scope: string | undefined, requestHandle: string, decision: CodexMcpElicitationDecision): CodexApprovalResult;
   suspendWorkspace(projectPath: string): void;
   isWorkspaceBusy(projectPath: string): boolean;
   /** Optional finer-grained busy check used when routing concurrent scopes. */
