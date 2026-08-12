@@ -948,7 +948,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
           </div>
         </div>
 
-        {claudeModel !== undefined && onClaudeModelChange && (
+        {aiProvider === 'claude' && claudeModel !== undefined && onClaudeModelChange && (
           <div className="settings-row">
             <div className="settings-row-info">
               <div className="settings-row-name">Claude model</div>

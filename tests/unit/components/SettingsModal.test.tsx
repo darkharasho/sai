@@ -402,6 +402,19 @@ describe('SettingsModal', () => {
     }
   });
 
+  it('hides Claude model controls after selecting a non-Claude chat provider', async () => {
+    render(<SettingsModal {...defaultProps} claudeModel="sonnet" onClaudeModelChange={vi.fn()} />);
+    fireEvent.click(screen.getByText('Provider'));
+    expect(screen.getByText('Claude model')).toBeTruthy();
+
+    fireEvent.click(document.querySelectorAll('.provider-select-btn')[0]);
+    fireEvent.click(Array.from(document.querySelectorAll('.provider-dropdown-item')).find(
+      button => button.textContent?.includes('Codex'),
+    )!);
+
+    await waitFor(() => expect(screen.queryByText('Claude model')).toBeNull());
+  });
+
   it('renders font size controls on Editor page', async () => {
     render(<SettingsModal {...defaultProps} />);
     fireEvent.click(screen.getByText('Editor'));
