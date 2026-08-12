@@ -34,10 +34,11 @@ vi.mock('../../../../src/components/Chat/MessageQueue', () => ({
 }));
 
 vi.mock('../../../../src/components/ThinkingAnimation', () => ({
-  default: () => (
+  default: ({ hint }: { hint?: string | null }) => (
     <div data-testid="thinking-animation">
       <span className="thinking-clock">[00:00.0]</span>
       <span className="thinking-cursor thinking-cursor-block" />
+      {hint && <span data-testid="thinking-hint">{hint}</span>}
     </div>
   ),
 }));
@@ -592,6 +593,35 @@ describe('ChatPanel', () => {
 
     // Provider-specific animations removed — Codex no longer gets its own "Working" wave
     expect(container.querySelector('.codex-working-wave')).toBeFalsy();
+  });
+
+  it('keeps Codex thinking visible for active native subagents after the parent becomes idle', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const };
+    const { container, rerender } = render(<ChatPanel {...props} isStreaming />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'subagent_activity', agentId: 'agent-1', status: 'running', summary: 'Inspect renderer', projectPath: '/project', scope: 'chat' });
+      handler({ type: 'subagent_activity', agentId: 'agent-2', status: 'running', summary: 'Check tests', projectPath: '/project', scope: 'chat' });
+    });
+    rerender(<ChatPanel {...props} isStreaming={false} />);
+
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+    expect(container.textContent).toContain('Inspect renderer');
+
+    await act(async () => {
+      handler({ type: 'subagent_activity', agentId: 'agent-1', status: 'completed', projectPath: '/project', scope: 'chat' });
+    });
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+    expect(container.textContent).toContain('Check tests');
+
+    await act(async () => {
+      handler({ type: 'subagent_activity', agentId: 'agent-2', status: 'completed', projectPath: '/project', scope: 'chat' });
+    });
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
+    });
   });
 
   it('passes the Codex model refresh callback through to ChatInput', async () => {

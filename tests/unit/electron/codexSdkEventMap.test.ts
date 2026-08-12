@@ -52,7 +52,7 @@ describe('mapCodexSdkEvent', () => {
   });
 
   describe('item.started', () => {
-    it('ignores an unsupported legacy collaboration item', () => {
+    it('maps a legacy collaboration start to running agent activity', () => {
       const event = {
         type: 'item.started',
         item: {
@@ -60,10 +60,17 @@ describe('mapCodexSdkEvent', () => {
           type: 'collab_tool_call',
           tool: 'spawn_agent',
           status: 'in_progress',
+          description: 'Inspect the renderer state',
         },
       } as unknown as ThreadEvent;
 
-      expect(mapCodexSdkEvent(event, ctx)).toEqual([]);
+      expect(mapCodexSdkEvent(event, ctx)).toEqual([{
+        type: 'subagent_activity',
+        agentId: 'agent-1',
+        status: 'running',
+        summary: 'Inspect the renderer state',
+        ...metadata,
+      }]);
     });
 
     it.each([
@@ -238,13 +245,22 @@ describe('mapCodexSdkEvent', () => {
         .toEqual([]);
     });
 
-    it('ignores an unsupported item update', () => {
+    it('maps a legacy collaboration update to running agent activity with a bounded prompt fallback', () => {
       const event = {
         type: 'item.updated',
-        item: { id: 'agent-1', type: 'collab_tool_call', tool: 'spawn_agent' },
+        item: {
+          id: 'agent-1', type: 'collab_tool_call', status: 'in_progress',
+          prompt: 'Investigate why the thinking animation stalls while an agent is running.',
+        },
       } as unknown as ThreadEvent;
 
-      expect(mapCodexSdkEvent(event, ctx)).toEqual([]);
+      expect(mapCodexSdkEvent(event, ctx)).toEqual([{
+        type: 'subagent_activity',
+        agentId: 'agent-1',
+        status: 'running',
+        summary: 'Investigate why the thinking animation stalls while an agent is running.',
+        ...metadata,
+      }]);
     });
 
     it('re-emits the same TodoWrite tool-use id with advanced statuses', () => {
@@ -297,13 +313,36 @@ describe('mapCodexSdkEvent', () => {
   });
 
   describe('item.completed', () => {
-    it('ignores an unsupported item completion', () => {
+    it.each([
+      ['completed', 'completed'],
+      ['failed', 'failed'],
+      ['cancelled', 'cancelled'],
+    ])('maps a legacy collaboration completion with %s status', (itemStatus, status) => {
       const event = {
         type: 'item.completed',
-        item: { id: 'agent-1', type: 'collab_tool_call', tool: 'spawn_agent' },
+        item: { id: 'agent-1', type: 'collab_tool_call', status: itemStatus },
       } as unknown as ThreadEvent;
 
-      expect(mapCodexSdkEvent(event, ctx)).toEqual([]);
+      expect(mapCodexSdkEvent(event, ctx)).toEqual([{
+        type: 'subagent_activity',
+        agentId: 'agent-1',
+        status,
+        ...metadata,
+      }]);
+    });
+
+    it('treats a completion without a status as completed activity', () => {
+      const event = {
+        type: 'item.completed',
+        item: { id: 'agent-1', type: 'collab_tool_call' },
+      } as unknown as ThreadEvent;
+
+      expect(mapCodexSdkEvent(event, ctx)).toEqual([{
+        type: 'subagent_activity',
+        agentId: 'agent-1',
+        status: 'completed',
+        ...metadata,
+      }]);
     });
 
     it('maps a nonempty agent message to assistant text', () => {
