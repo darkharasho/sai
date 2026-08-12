@@ -115,6 +115,55 @@ describe('mapAppServerEvent', () => {
     }]);
   });
 
+  it('normalizes MCP completion content into renderer-safe text and image blocks', () => {
+    expect(mapAppServerEvent({
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1', turnId: 'turn-1',
+        item: {
+          id: 'mcp-1', type: 'mcpToolCall', status: 'completed',
+          result: {
+            content: [
+              { type: 'text', text: 'Screenshot attached.' },
+              { type: 'image', mimeType: 'image/png', data: 'aW1hZ2U=' },
+              { type: 'resource_link', uri: 'file:///report.json', name: 'report.json' },
+            ],
+            structuredContent: { findings: ['clean'], count: 1 },
+          },
+        },
+      },
+    }, ctx)).toEqual([{
+      type: 'user', ...metadata,
+      message: { content: [{
+        type: 'tool_result', tool_use_id: 'mcp-1', is_error: false,
+        content: [
+          { type: 'text', text: 'Screenshot attached.' },
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'aW1hZ2U=' } },
+          { type: 'text', text: '{"name":"report.json","type":"resource_link","uri":"file:///report.json"}' },
+          { type: 'text', text: '\n{"count":1,"findings":["clean"]}' },
+        ],
+      }] },
+    }]);
+  });
+
+  it.each([
+    { type: 'commandExecution', item: { aggregatedOutput: 'declined', exitCode: 0, status: 'declined' } },
+    { type: 'fileChange', item: { changes: [], status: 'cancelled' } },
+  ])('marks non-completed $type completions as errors', ({ type, item }) => {
+    expect(mapAppServerEvent({
+      method: 'item/completed',
+      params: { threadId: 'thread-1', turnId: 'turn-1', item: { id: 'tool-1', type, ...item } },
+    }, ctx)).toEqual([{
+      type: 'user', ...metadata,
+      message: { content: [{
+        type: 'tool_result', tool_use_id: 'tool-1', is_error: true,
+        content: type === 'commandExecution'
+          ? '<tool_error>declined</tool_error>'
+          : '<tool_error>[]</tool_error>',
+      }] },
+    }]);
+  });
+
   it.each([
     { agentStatus: 'completed', expected: 'completed' },
     { agentStatus: 'cancelled', expected: 'cancelled' },

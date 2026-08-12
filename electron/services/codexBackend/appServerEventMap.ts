@@ -13,6 +13,12 @@ export interface AppServerMapContext {
 
 type RecordValue = Record<string, unknown>;
 
+type RendererContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
+
+type ToolResultContent = string | RendererContentBlock[];
+
 const base = (ctx: AppServerMapContext) => ({
   projectPath: ctx.projectPath,
   scope: ctx.scope,
@@ -53,7 +59,7 @@ function toolUse(id: string, name: string, input: unknown, ctx: AppServerMapCont
 
 function toolResult(
   id: string,
-  content: unknown,
+  content: ToolResultContent,
   isError: boolean,
   ctx: AppServerMapContext,
 ): SaiEnvelope {
@@ -66,6 +72,62 @@ function toolResult(
       }],
     },
   };
+}
+
+function stableJson(value: unknown): string {
+  const seen = new WeakSet<object>();
+
+  const normalize = (current: unknown): unknown => {
+    if (current === null || typeof current === 'string' || typeof current === 'boolean' || typeof current === 'number') {
+      return current;
+    }
+    if (typeof current === 'bigint') return current.toString();
+    if (typeof current !== 'object') return String(current);
+    if (seen.has(current)) return '[Circular]';
+
+    seen.add(current);
+    if (Array.isArray(current)) {
+      const normalized = current.map(normalize);
+      seen.delete(current);
+      return normalized;
+    }
+
+    const normalized: Record<string, unknown> = Object.create(null);
+    for (const key of Object.keys(current as RecordValue).sort()) {
+      normalized[key] = normalize((current as RecordValue)[key]);
+    }
+    seen.delete(current);
+    return normalized;
+  };
+
+  return JSON.stringify(normalize(value));
+}
+
+function rendererMcpContent(result: unknown): RendererContentBlock[] {
+  if (!isRecord(result)) return [];
+
+  const content: RendererContentBlock[] = (Array.isArray(result.content) ? result.content : [])
+    .filter(isRecord)
+    .map((block) => {
+      if (block.type === 'text' && typeof block.text === 'string') {
+        return { type: 'text', text: block.text };
+      }
+      if (block.type === 'image' && typeof block.mimeType === 'string' && typeof block.data === 'string') {
+        return {
+          type: 'image',
+          source: { type: 'base64', media_type: block.mimeType, data: block.data },
+        };
+      }
+      return { type: 'text', text: stableJson(block) };
+    });
+  const structuredContent = result.structuredContent ?? result.structured_content;
+  if (structuredContent !== undefined && structuredContent !== null) {
+    content.push({
+      type: 'text',
+      text: `${content.length > 0 ? '\n' : ''}${stableJson(structuredContent)}`,
+    });
+  }
+  return content;
 }
 
 function todoSnapshot(item: RecordValue, ctx: AppServerMapContext): SaiEnvelope[] {
@@ -153,13 +215,13 @@ function completedItem(item: RecordValue, ctx: AppServerMapContext): SaiEnvelope
     case 'commandExecution': {
       const status = text(item.status);
       const exitCode = typeof item.exitCode === 'number' ? item.exitCode : 0;
-      return [toolResult(id, text(item.aggregatedOutput) ?? '', status === 'failed' || exitCode !== 0, ctx)];
+      return [toolResult(id, text(item.aggregatedOutput) ?? '', status !== 'completed' || exitCode !== 0, ctx)];
     }
     case 'fileChange':
-      return [toolResult(id, JSON.stringify(Array.isArray(item.changes) ? item.changes : []), text(item.status) === 'failed', ctx)];
+      return [toolResult(id, JSON.stringify(Array.isArray(item.changes) ? item.changes : []), text(item.status) !== 'completed', ctx)];
     case 'mcpToolCall': {
       const error = isRecord(item.error) ? text(item.error.message) : undefined;
-      return [toolResult(id, error ?? item.result ?? [], text(item.status) === 'failed', ctx)];
+      return [toolResult(id, error ?? rendererMcpContent(item.result), text(item.status) === 'failed', ctx)];
     }
     case 'webSearch':
       return [toolResult(id, text(item.query) ?? '', false, ctx)];
