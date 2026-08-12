@@ -83,6 +83,21 @@ describe('mapCodexSdkEvent', () => {
       }]);
     });
 
+    it('prefers a collaboration description over its prompt for the activity summary', () => {
+      const event = {
+        type: 'item.started',
+        item: {
+          id: 'agent-1', type: 'collab_tool_call', status: 'in_progress',
+          description: 'Review the event mapper', prompt: 'This longer prompt must not be shown.',
+        },
+      } as unknown as ThreadEvent;
+
+      expect(mapCodexSdkEvent(event, ctx)).toEqual([{
+        type: 'subagent_activity', agentId: 'agent-1', status: 'running',
+        summary: 'Review the event mapper', ...metadata,
+      }]);
+    });
+
     it.each([
       {
         label: 'command execution',
@@ -271,6 +286,21 @@ describe('mapCodexSdkEvent', () => {
         summary: 'Investigate why the thinking animation stalls while an agent is running.',
         ...metadata,
       }]);
+    });
+
+    it('truncates a prompt-only collaboration summary to 160 characters plus an ellipsis', () => {
+      const prompt = 'x'.repeat(161);
+      const event = {
+        type: 'item.updated',
+        item: { id: 'agent-1', type: 'collab_tool_call', status: 'in_progress', prompt },
+      } as unknown as ThreadEvent;
+
+      const [activity] = mapCodexSdkEvent(event, ctx);
+      expect(activity).toMatchObject({
+        type: 'subagent_activity', agentId: 'agent-1', status: 'running',
+        summary: `${'x'.repeat(160)}…`, ...metadata,
+      });
+      expect((activity.summary as string)).toHaveLength(161);
     });
 
     it('re-emits the same TodoWrite tool-use id with advanced statuses', () => {
