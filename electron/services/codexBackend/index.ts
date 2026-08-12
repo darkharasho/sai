@@ -4,7 +4,7 @@ import { registerWorkspaceBackendHooks } from '../workspace';
 import { fetchBundledCodexModels } from './bundledModels';
 import { AppServerBackend } from './appServerBackend';
 import { SdkCodexBackend } from './sdkBackend';
-import { codexScopeKey, type CodexAppServerPreviewStatus, type CodexBackend, type CodexBackendMode, type CodexModelResult, type CodexSendArgs, type CodexStartArgs } from './types';
+import { codexScopeKey, type CodexAppServerPreviewStatus, type CodexApprovalDecision, type CodexApprovalResult, type CodexBackend, type CodexBackendMode, type CodexModelResult, type CodexSendArgs, type CodexStartArgs } from './types';
 
 export * from './types';
 
@@ -35,7 +35,7 @@ function makeAppServerBackend(): CodexBackend {
   return new AppServerBackend({ emit: emitChatMessage });
 }
 
-function isAppServerPreviewBackend(backend: CodexBackend | undefined): backend is AppServerPreviewBackend {
+function isAppServerPreviewBackend(backend: CodexBackend | null | undefined): backend is AppServerPreviewBackend {
   return Boolean(backend && 'previewStatus' in backend);
 }
 
@@ -105,6 +105,14 @@ class ScopedCodexBackend implements CodexBackend {
 
   getModels(forceRefresh?: boolean): Promise<CodexModelResult> {
     return this.backendFor(requestedMode).getModels(forceRefresh);
+  }
+
+  approve(projectPath: string, scope: string | undefined, requestHandle: string, decision: CodexApprovalDecision): CodexApprovalResult {
+    const mode = this.assignments.get(codexScopeKey(projectPath, scope));
+    // Never route a decision to a newly selected backend: a request is valid
+    // only for the transport that owns the already-started scope.
+    if (!mode) return { ok: false, code: 'not-pending' };
+    return this.backendFor(mode).approve(projectPath, scope, requestHandle, decision);
   }
 
   suspendWorkspace(projectPath: string): void {

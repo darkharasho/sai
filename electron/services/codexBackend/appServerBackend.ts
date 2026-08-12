@@ -7,7 +7,7 @@ import {
   type AppServerServerRequestResponder,
 } from './appServerClient';
 import { mapAppServerEvent } from './appServerEventMap';
-import { normalizeCodexModelOption, codexScope, codexScopeKey, type CodexAppServerPreviewStatus, type CodexApprovalMetadata, type CodexBackend, type CodexModelResult, type CodexSendArgs, type CodexSessionKind, type CodexStartArgs } from './types';
+import { normalizeCodexModelOption, codexScope, codexScopeKey, type CodexAppServerPreviewStatus, type CodexApprovalDecision, type CodexApprovalMetadata, type CodexApprovalResult, type CodexBackend, type CodexModelResult, type CodexSendArgs, type CodexSessionKind, type CodexStartArgs } from './types';
 import type { SaiEnvelope } from './sdkEventMap';
 import { getOrCreate as getOrCreateWorkspace } from '../workspace';
 
@@ -43,6 +43,8 @@ interface PendingApproval {
   readonly active: ActiveTurn;
   readonly responder: AppServerServerRequestResponder;
   readonly kind: CodexApprovalMetadata['kind'];
+  /** Raw request is deliberately retained only in main process for validation. */
+  readonly params: Record<string, unknown>;
 }
 
 const APPROVAL_METHODS = {
@@ -97,6 +99,26 @@ function asText(value: unknown): string | undefined {
 
 function stringList(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0) : [];
+}
+
+/** Canonical JSON identity for checking a granted permission is requested. */
+function jsonIdentity(value: unknown): string | undefined {
+  const seen = new WeakSet<object>();
+  const normalize = (current: unknown): unknown => {
+    if (current === null || typeof current === 'string' || typeof current === 'boolean' || typeof current === 'number') return current;
+    if (!current || typeof current !== 'object' || seen.has(current)) return undefined;
+    seen.add(current);
+    if (Array.isArray(current)) {
+      const result = current.map(normalize);
+      seen.delete(current);
+      return result;
+    }
+    const result: Record<string, unknown> = {};
+    for (const key of Object.keys(current as Record<string, unknown>).sort()) result[key] = normalize((current as Record<string, unknown>)[key]);
+    seen.delete(current);
+    return result;
+  };
+  try { return JSON.stringify(normalize(value)); } catch { return undefined; }
 }
 
 function approvalMetadata(request: AppServerServerRequest): CodexApprovalMetadata | undefined {
@@ -243,6 +265,28 @@ export class AppServerBackend implements CodexBackend {
     } catch (error) {
       this.markUnavailable(errorText(error));
       return { models: [], defaultModel: '' };
+    }
+  }
+
+  approve(projectPath: string, scope: string | undefined, requestHandle: string, decision: CodexApprovalDecision): CodexApprovalResult {
+    const normalizedScope = codexScope(scope);
+    const matches = [...this.pendingApprovals.values()].filter((pending) => String(pending.id) === requestHandle);
+    // Treat a string/number request-id collision as invalid rather than
+    // guessing which wire request a renderer intended to answer.
+    if (matches.length !== 1) return { ok: false, code: 'not-pending' };
+    const pending = matches[0];
+    if (pending.runtime.projectPath !== projectPath || pending.runtime.scope !== normalizedScope
+      || pending.runtime.active !== pending.active || pending.active.retired || pending.active.done) {
+      return { ok: false, code: 'not-pending' };
+    }
+    const response = this.approvalResponse(pending, decision);
+    if (!response) return { ok: false, code: 'invalid-decision' };
+    this.pendingApprovals.delete(pending.id);
+    try {
+      pending.responder.respond(response);
+      return { ok: true };
+    } catch {
+      return { ok: false, code: 'not-pending' };
     }
   }
 
@@ -407,6 +451,8 @@ export class AppServerBackend implements CodexBackend {
     // Leave unsupported methods unclaimed so the transport sends its fail-closed
     // JSON-RPC error and retires the preview process.
     if (!metadata) return;
+    const params = record(request.params);
+    if (!params) return;
     let responder: AppServerServerRequestResponder;
     try {
       responder = this.client?.claimServerRequest(request.id)!;
@@ -422,7 +468,7 @@ export class AppServerBackend implements CodexBackend {
       this.declineResponder(responder, metadata.kind);
       return;
     }
-    const pending: PendingApproval = { id: request.id, runtime, active, responder, kind: metadata.kind };
+    const pending: PendingApproval = { id: request.id, runtime, active, responder, kind: metadata.kind, params };
     this.pendingApprovals.set(request.id, pending);
     this.emit({
       type: 'approval_needed',
@@ -450,6 +496,34 @@ export class AppServerBackend implements CodexBackend {
     try {
       responder.respond(kind === 'permissions' ? { permissions: [] } : { decision: 'decline' });
     } catch { /* already resolved or unavailable */ }
+  }
+
+  private approvalResponse(pending: PendingApproval, decision: CodexApprovalDecision): Record<string, unknown> | undefined {
+    if (decision.type === 'decision') {
+      if (pending.kind === 'permissions' || !stringList(pending.params.availableDecisions).includes(decision.value)) return undefined;
+      return { decision: decision.value };
+    }
+    if (decision.type === 'command-amendment') {
+      if (pending.kind !== 'command' || !stringList(pending.params.availableDecisions).includes('acceptWithExecpolicyAmendment')) return undefined;
+      const proposed = pending.params.proposedExecpolicyAmendment;
+      if (!Array.isArray(proposed) || proposed.length === 0 || proposed.some((entry) => typeof entry !== 'string')
+        || jsonIdentity(proposed) !== jsonIdentity(decision.execpolicyAmendment)) return undefined;
+      return { acceptWithExecpolicyAmendment: { execpolicy_amendment: decision.execpolicyAmendment } };
+    }
+    if (pending.kind !== 'permissions') return undefined;
+    const requested = Array.isArray(pending.params.permissions) ? pending.params.permissions : [];
+    const counts = new Map<string, number>();
+    for (const permission of requested) {
+      const identity = jsonIdentity(permission);
+      if (identity) counts.set(identity, (counts.get(identity) ?? 0) + 1);
+    }
+    for (const permission of decision.permissions) {
+      const identity = jsonIdentity(permission);
+      const count = identity ? counts.get(identity) ?? 0 : 0;
+      if (!identity || count < 1) return undefined;
+      counts.set(identity, count - 1);
+    }
+    return { permissions: decision.permissions, scope: decision.scope };
   }
 
   private clearPendingApprovals(runtime: ScopeRuntime, active?: ActiveTurn, respond = true): void {

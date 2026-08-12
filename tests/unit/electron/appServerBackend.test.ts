@@ -418,4 +418,65 @@ describe('AppServerBackend', () => {
 
     expect(responder.respond).not.toHaveBeenCalled();
   });
+
+  it('accepts only an offered command decision for the request in its own scope', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-a' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-a' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
+    await settle();
+    const responder = h.serverRequest('command', 'item/commandExecution/requestApproval', {
+      threadId: 'thread-a', turnId: 'turn-a', command: 'npm test', cwd: '/repo',
+      availableDecisions: ['accept', 'decline'],
+    });
+
+    expect(h.backend.approve('/repo', 'other', 'command', { type: 'decision', value: 'accept' }))
+      .toEqual({ ok: false, code: 'not-pending' });
+    expect(h.backend.approve('/repo', 'a', 'command', { type: 'decision', value: 'acceptForSession' }))
+      .toEqual({ ok: false, code: 'invalid-decision' });
+    expect(h.backend.approve('/repo', 'a', 'command', { type: 'decision', value: 'accept' }))
+      .toEqual({ ok: true });
+    expect(responder.respond).toHaveBeenCalledWith({ decision: 'accept' });
+    expect(h.backend.approve('/repo', 'a', 'command', { type: 'decision', value: 'accept' }))
+      .toEqual({ ok: false, code: 'not-pending' });
+  });
+
+  it('allows only the offered proposed command amendment', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-a' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-a' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
+    await settle();
+    const responder = h.serverRequest('amend', 'item/commandExecution/requestApproval', {
+      threadId: 'thread-a', turnId: 'turn-a', availableDecisions: ['acceptWithExecpolicyAmendment'],
+      proposedExecpolicyAmendment: ['npm', 'test'],
+    });
+
+    expect(h.backend.approve('/repo', 'a', 'amend', { type: 'command-amendment', execpolicyAmendment: ['rm', '-rf', '/'] }))
+      .toEqual({ ok: false, code: 'invalid-decision' });
+    expect(h.backend.approve('/repo', 'a', 'amend', { type: 'command-amendment', execpolicyAmendment: ['npm', 'test'] }))
+      .toEqual({ ok: true });
+    expect(responder.respond).toHaveBeenCalledWith({ acceptWithExecpolicyAmendment: { execpolicy_amendment: ['npm', 'test'] } });
+  });
+
+  it('grants permission requests only as a requested subset and explicit scope', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-a' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-a' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
+    await settle();
+    const requested = [{ kind: 'network', host: 'api.openai.com' }, { kind: 'filesystem', path: '/repo/tmp' }];
+    const responder = h.serverRequest('permissions', 'item/permissions/requestApproval', {
+      threadId: 'thread-a', turnId: 'turn-a', permissions: requested,
+    });
+
+    expect(h.backend.approve('/repo', 'a', 'permissions', { type: 'permissions', scope: 'session', permissions: [{ kind: 'network', host: '*' }] }))
+      .toEqual({ ok: false, code: 'invalid-decision' });
+    expect(h.backend.approve('/repo', 'a', 'permissions', { type: 'permissions', scope: 'turn', permissions: [requested[0]] }))
+      .toEqual({ ok: true });
+    expect(responder.respond).toHaveBeenCalledWith({ permissions: [requested[0]], scope: 'turn' });
+  });
 });

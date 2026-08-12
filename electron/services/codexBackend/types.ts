@@ -23,6 +23,36 @@ export interface CodexApprovalMetadata {
   permissionsSummary?: string[];
 }
 
+/**
+ * Renderer-to-main approval input. The App Server backend validates this
+ * against the exact pending request before it ever reaches the protocol.
+ */
+export type CodexApprovalDecision =
+  | { type: 'decision'; value: 'accept' | 'acceptForSession' | 'decline' | 'cancel' }
+  | { type: 'command-amendment'; execpolicyAmendment: string[] }
+  | { type: 'permissions'; permissions: unknown[]; scope: 'turn' | 'session' };
+
+export type CodexApprovalResult =
+  | { ok: true }
+  | { ok: false; code: 'unsupported' | 'not-pending' | 'invalid-decision' };
+
+export function isCodexApprovalDecision(value: unknown): value is CodexApprovalDecision {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const input = value as Record<string, unknown>;
+  if (input.type === 'decision') {
+    return Object.keys(input).every((key) => key === 'type' || key === 'value')
+      && (input.value === 'accept' || input.value === 'acceptForSession' || input.value === 'decline' || input.value === 'cancel');
+  }
+  if (input.type === 'command-amendment') {
+    return Object.keys(input).every((key) => key === 'type' || key === 'execpolicyAmendment')
+      && Array.isArray(input.execpolicyAmendment) && input.execpolicyAmendment.length > 0
+      && input.execpolicyAmendment.every((entry) => typeof entry === 'string' && entry.length > 0);
+  }
+  return input.type === 'permissions' && Object.keys(input).every((key) => key === 'type' || key === 'permissions' || key === 'scope')
+    && (input.scope === 'turn' || input.scope === 'session')
+    && Array.isArray(input.permissions);
+}
+
 export interface CodexStartArgs {
   projectPath: string;
   scope?: string;
@@ -82,6 +112,7 @@ export interface CodexBackend {
   reconcileScope(projectPath: string, scope?: string): void;
   setSessionId(projectPath: string, sessionId: string | undefined, scope?: string): void;
   getModels(forceRefresh?: boolean): Promise<CodexModelResult>;
+  approve(projectPath: string, scope: string | undefined, requestHandle: string, decision: CodexApprovalDecision): CodexApprovalResult;
   suspendWorkspace(projectPath: string): void;
   isWorkspaceBusy(projectPath: string): boolean;
   /** Optional finer-grained busy check used when routing concurrent scopes. */

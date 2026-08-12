@@ -364,6 +364,12 @@ declare global {
     codexBackendModeGet?: () => Promise<'sdk' | 'app-server'>;
     codexBackendModeSet?: (mode: 'sdk' | 'app-server') => Promise<'sdk' | 'app-server'>;
     codexAppServerPreviewStatus?: () => Promise<{ available: boolean; reason?: string }>;
+    codexApprove?: (
+      projectPath: string,
+      scope: string | undefined,
+      requestHandle: string,
+      decision: import('../electron/services/codexBackend').CodexApprovalDecision,
+    ) => Promise<import('../electron/services/codexBackend').CodexApprovalResult>;
     searchRun?: SaiSearchApi['searchRun'];
     searchReplaceFile?: SaiSearchApi['searchReplaceFile'];
     swarm?: {

@@ -61,6 +61,7 @@ vi.mock('@electron/services/codexBackend/sdkBackend', () => ({
       reconcileScope: vi.fn(),
       setSessionId: vi.fn(),
       getModels: vi.fn(),
+      approve: vi.fn().mockReturnValue({ ok: false, code: 'unsupported' }),
       suspendWorkspace: vi.fn(),
       isWorkspaceBusy: vi.fn(),
       destroy: vi.fn(),
@@ -107,6 +108,7 @@ function backendStub(): CodexBackend {
     reconcileScope: vi.fn(),
     setSessionId: vi.fn(),
     getModels: vi.fn().mockResolvedValue({ models: [], defaultModel: '' }),
+    approve: vi.fn().mockReturnValue({ ok: false, code: 'unsupported' }),
     suspendWorkspace: vi.fn(),
     isWorkspaceBusy: vi.fn().mockReturnValue(false),
     destroy: vi.fn(),
@@ -474,6 +476,23 @@ describe('Codex IPC dispatch', () => {
     await mocks.ipcMain.invoke('codex:models');
 
     expect(backend.getModels).toHaveBeenCalledWith(false);
+  });
+
+  it('accepts only the narrow typed Codex approval payload and delegates it with scope', async () => {
+    const backend = backendStub();
+    vi.mocked(backend.approve).mockReturnValue({ ok: true });
+    __setCodexBackendForTests(backend);
+    registerCodexHandlers();
+
+    await expect(mocks.ipcMain.invoke('codex:approve', '/project', 'task:7', 'request-7', {
+      type: 'decision', value: 'accept',
+    })).resolves.toEqual({ ok: true });
+    expect(backend.approve).toHaveBeenCalledWith('/project', 'task:7', 'request-7', { type: 'decision', value: 'accept' });
+
+    await expect(mocks.ipcMain.invoke('codex:approve', '/project', 'task:7', 'request-7', {
+      type: 'permissions', scope: 'everywhere', permissions: [],
+    })).resolves.toEqual({ ok: false, code: 'invalid-decision' });
+    expect(backend.approve).toHaveBeenCalledOnce();
   });
 
   it('routes codex:usage to the injected telemetry singleton with a forced refresh', async () => {

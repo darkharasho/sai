@@ -17,6 +17,8 @@ import {
   codexScope,
   codexScopeKey,
   type CodexBackend,
+  type CodexApprovalDecision,
+  type CodexApprovalResult,
   type CodexModelResult,
   type CodexSendArgs,
   type CodexSessionKind,
@@ -243,6 +245,10 @@ export class SdkCodexBackend implements CodexBackend {
 
   getModels(forceRefresh?: boolean): Promise<CodexModelResult> {
     return this.loadModels(forceRefresh);
+  }
+
+  approve(_projectPath: string, _scope: string | undefined, _requestHandle: string, _decision: CodexApprovalDecision): CodexApprovalResult {
+    return { ok: false, code: 'unsupported' };
   }
 
   suspendWorkspace(projectPath: string): void {

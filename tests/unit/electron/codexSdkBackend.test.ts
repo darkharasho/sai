@@ -724,6 +724,12 @@ describe('SdkCodexBackend', () => {
     await expect(empty.getModels()).resolves.toEqual({ models: [], defaultModel: '' });
   });
 
+  it('returns a typed unsupported result for approval decisions', () => {
+    const h = harness();
+    expect(h.backend.approve('/a', 'chat', 'request-1', { type: 'decision', value: 'accept' }))
+      .toEqual({ ok: false, code: 'unsupported' });
+  });
+
   it('destroy aborts every active scope and leaves no workspace busy', async () => {
     const a = pendingStream();
     const b = pendingStream();

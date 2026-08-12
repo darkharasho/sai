@@ -5,10 +5,12 @@ import {
   getCodexBackendMode,
   setCodexBackendMode,
   type CodexBackendMode,
+  type CodexApprovalResult,
   type CodexPermission,
   type CodexReasoningEffort,
   type CodexSessionKind,
   isCodexReasoningEffort,
+  isCodexApprovalDecision,
 } from './codexBackend';
 import { CodexTelemetryService } from './codexTelemetry';
 
@@ -59,6 +61,19 @@ export function registerCodexHandlers(): void {
     return setCodexBackendMode(normalized);
   });
   ipcMain.handle('codex:appServerPreviewStatus', () => getCodexAppServerPreviewStatus());
+
+  ipcMain.handle(
+    'codex:approve',
+    (_event, projectPath: unknown, scope: unknown, requestHandle: unknown, decision: unknown): CodexApprovalResult => {
+      if (typeof projectPath !== 'string' || projectPath.length === 0
+        || (scope !== undefined && typeof scope !== 'string')
+        || typeof requestHandle !== 'string' || requestHandle.length === 0
+        || !isCodexApprovalDecision(decision)) {
+        return { ok: false, code: 'invalid-decision' };
+      }
+      return getCodexBackend().approve(projectPath, scope, requestHandle, decision);
+    },
+  );
 
   ipcMain.handle('codex:models', (_event, forceRefresh?: boolean) =>
     getCodexBackend().getModels(Boolean(forceRefresh)));
