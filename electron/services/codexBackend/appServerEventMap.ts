@@ -84,7 +84,37 @@ function todoSnapshot(item: RecordValue, ctx: AppServerMapContext): SaiEnvelope[
   }, ctx)];
 }
 
+type SubagentStatus = 'running' | 'completed' | 'failed' | 'cancelled';
+
+function collaborationActivity(
+  item: RecordValue,
+  ctx: AppServerMapContext,
+  completed = false,
+): SaiEnvelope[] | undefined {
+  if (item.type !== 'collabToolCall') return undefined;
+  const id = text(item.id);
+  if (!id) return [];
+  const rawStatus = text(item.agentStatus) ?? text(item.status) ?? '';
+  const status: SubagentStatus = rawStatus === 'completed'
+    ? 'completed'
+    : rawStatus === 'failed'
+      ? 'failed'
+      : rawStatus === 'cancelled' || rawStatus === 'canceled'
+        ? 'cancelled'
+        : completed
+          ? 'completed'
+          : 'running';
+  const source = text(item.prompt)?.trim() || text(item.tool)?.trim();
+  const summary = source ? source.slice(0, 160) + (source.length > 160 ? '…' : '') : undefined;
+  return [{
+    type: 'subagent_activity', agentId: id, status,
+    ...(summary ? { summary } : {}), ...base(ctx),
+  }];
+}
+
 function startedItem(item: RecordValue, ctx: AppServerMapContext): SaiEnvelope[] {
+  const collaboration = collaborationActivity(item, ctx);
+  if (collaboration) return collaboration;
   const id = text(item.id);
   if (!id) return [];
   switch (item.type) {
@@ -110,6 +140,8 @@ function startedItem(item: RecordValue, ctx: AppServerMapContext): SaiEnvelope[]
 }
 
 function completedItem(item: RecordValue, ctx: AppServerMapContext): SaiEnvelope[] {
+  const collaboration = collaborationActivity(item, ctx, true);
+  if (collaboration) return collaboration;
   const id = text(item.id);
   if (!id) return [];
   switch (item.type) {

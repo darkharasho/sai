@@ -81,6 +81,22 @@ describe('mapAppServerEvent', () => {
     }]);
   });
 
+  it('maps a collabToolCall start to scoped running subagent activity', () => {
+    expect(mapAppServerEvent({
+      method: 'item/started',
+      params: {
+        threadId: 'thread-1', turnId: 'turn-1',
+        item: {
+          id: 'child-1', type: 'collabToolCall', tool: 'spawn_agent',
+          status: 'inProgress', prompt: 'Review the event mapper', agentStatus: 'running',
+        },
+      },
+    }, ctx)).toEqual([{
+      type: 'subagent_activity', agentId: 'child-1', status: 'running',
+      summary: 'Review the event mapper', ...metadata,
+    }]);
+  });
+
   it('maps known item completion to a matching tool result', () => {
     expect(mapAppServerEvent({
       method: 'item/completed',
@@ -96,6 +112,25 @@ describe('mapAppServerEvent', () => {
       message: { content: [{
         type: 'tool_result', tool_use_id: 'cmd-1', content: 'all green', is_error: false,
       }] },
+    }]);
+  });
+
+  it.each([
+    { agentStatus: 'completed', expected: 'completed' },
+    { agentStatus: 'cancelled', expected: 'cancelled' },
+  ])('maps collabToolCall completion agentStatus $agentStatus', ({ agentStatus, expected }) => {
+    expect(mapAppServerEvent({
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1', turnId: 'turn-1',
+        item: {
+          id: 'child-1', type: 'collabToolCall', tool: 'spawn_agent',
+          status: 'completed', agentStatus,
+        },
+      },
+    }, ctx)).toEqual([{
+      type: 'subagent_activity', agentId: 'child-1', status: expected,
+      summary: 'spawn_agent', ...metadata,
     }]);
   });
 
