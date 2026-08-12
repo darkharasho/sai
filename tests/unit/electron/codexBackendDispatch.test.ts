@@ -113,10 +113,11 @@ describe('Codex backend selection', () => {
 
     expect(first).toBe(second);
     expect(SdkCodexBackend).toHaveBeenCalledOnce();
-    expect(mocks.sdkConstructor).toHaveBeenCalledWith({
+    expect(mocks.sdkConstructor).toHaveBeenCalledWith(expect.objectContaining({
       emit: mocks.emitChatMessage,
       getModels: mocks.fetchBundledCodexModels,
-    });
+      notifyCompletion: expect.any(Function),
+    }));
   });
 
   it('registers Codex workspace hooks against the SDK singleton', () => {
