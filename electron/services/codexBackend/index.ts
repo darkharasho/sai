@@ -51,6 +51,7 @@ function isScopeBusy(backend: CodexBackend, projectPath: string, scope?: string)
 class ScopedCodexBackend implements CodexBackend {
   private readonly backends: BackendByMode = {};
   private readonly assignments = new Map<string, CodexBackendMode>();
+  private readonly previewFallbackScopes = new Set<string>();
   private fallbackReason: string | undefined;
 
   constructor() {
@@ -99,7 +100,11 @@ class ScopedCodexBackend implements CodexBackend {
 
   suspendWorkspace(projectPath: string): void {
     for (const backend of Object.values(this.backends)) backend?.suspendWorkspace(projectPath);
-    for (const key of this.assignments.keys()) if (key.startsWith(`${projectPath}\u0000`)) this.assignments.delete(key);
+    for (const key of this.assignments.keys()) {
+      if (!key.startsWith(`${projectPath}\u0000`)) continue;
+      this.assignments.delete(key);
+      this.previewFallbackScopes.delete(key);
+    }
   }
 
   isWorkspaceBusy(projectPath: string): boolean {
@@ -115,6 +120,7 @@ class ScopedCodexBackend implements CodexBackend {
   destroy(): void {
     for (const backend of Object.values(this.backends)) backend?.destroy();
     this.assignments.clear();
+    this.previewFallbackScopes.clear();
     this.backends.sdk = undefined;
     this.backends['app-server'] = undefined;
   }
@@ -124,8 +130,22 @@ class ScopedCodexBackend implements CodexBackend {
     const assigned = this.assignments.get(key);
     if (assigned) {
       const backend = this.backendFor(assigned);
-      if (assigned === requestedMode || isScopeBusy(backend, projectPath, scope)) return backend;
-      this.assignments.delete(key);
+      // A settled preview scope that falls back to SDK must take ownership of
+      // that fallback. Otherwise a later status recovery can silently move the
+      // same conversation back to App Server. An active preview turn remains
+      // pinned to its original transport until it settles.
+      if (assigned === 'app-server' && backend !== this.backends['app-server']) {
+        const preview = this.backends['app-server'];
+        if (preview && isScopeBusy(preview, projectPath, scope)) return preview;
+        this.assignments.set(key, 'sdk');
+        this.previewFallbackScopes.add(key);
+        return backend;
+      }
+      if (this.previewFallbackScopes.has(key)) {
+        return backend;
+      } else if (assigned === requestedMode || isScopeBusy(backend, projectPath, scope)) {
+        return backend;
+      }
     }
     const backend = this.backendFor(requestedMode);
     if (assign) this.assignments.set(key, backend === this.backends['app-server'] ? 'app-server' : 'sdk');

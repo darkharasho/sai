@@ -199,6 +199,45 @@ describe('Codex backend selection', () => {
     expect(getCodexAppServerPreviewStatus()).toEqual({ available: false, reason: 'Handshake failed' });
   });
 
+  it('keeps a settled App Server scope on SDK after preview fallback', () => {
+    let available = true;
+    const appServer = { ...backendStub(), get previewStatus() { return available ? { available: true } : { available: false, reason: 'Handshake failed' }; } };
+    const sdk = backendStub();
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
+    setCodexBackendMode('app-server');
+    const backend = getCodexBackend();
+
+    backend.start({ projectPath: '/project', scope: 'preview' });
+    available = false;
+    backend.start({ projectPath: '/project', scope: 'preview' });
+    available = true;
+    backend.send({ projectPath: '/project', scope: 'preview', message: 'continue' });
+
+    expect(sdk.start).toHaveBeenCalledWith(expect.objectContaining({ scope: 'preview' }));
+    expect(sdk.send).toHaveBeenCalledWith(expect.objectContaining({ scope: 'preview' }));
+    expect(appServer.send).not.toHaveBeenCalled();
+  });
+
+  it('does not move a busy App Server scope to SDK after preview fallback', () => {
+    let available = true;
+    const appServer = {
+      ...backendStub(),
+      isScopeBusy: vi.fn().mockReturnValue(true),
+      get previewStatus() { return available ? { available: true } : { available: false, reason: 'Handshake failed' }; },
+    };
+    const sdk = backendStub();
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
+    setCodexBackendMode('app-server');
+    const backend = getCodexBackend();
+
+    backend.start({ projectPath: '/project', scope: 'preview' });
+    available = false;
+    backend.send({ projectPath: '/project', scope: 'preview', message: 'continue' });
+
+    expect(appServer.send).toHaveBeenCalledWith(expect.objectContaining({ scope: 'preview' }));
+    expect(sdk.send).not.toHaveBeenCalled();
+  });
+
   it('retries App Server for a fresh scope when preview mode is selected again', () => {
     let available = false;
     const firstAppServer = { ...backendStub(), get previewStatus() { return available ? { available: true } : { available: false, reason: 'Handshake failed' }; } };
