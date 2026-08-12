@@ -75,6 +75,9 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.invoke('claude:alwaysAllow', projectPath, toolPattern),
   claudeModels: () => ipcRenderer.invoke('claude:models'),
   // Codex SDK
+  codexBackendModeGet: () => ipcRenderer.invoke('codex:backendMode:get'),
+  codexBackendModeSet: (mode: 'sdk' | 'app-server') => ipcRenderer.invoke('codex:backendMode:set', mode),
+  codexAppServerPreviewStatus: () => ipcRenderer.invoke('codex:appServerPreviewStatus'),
   codexModels: (forceRefresh?: boolean) => ipcRenderer.invoke('codex:models', forceRefresh),
   codexStart: (cwd: string, scope?: string, kind?: string, orchestratorContext?: unknown, scopeCwd?: string, metaPreamble?: string, additionalDirectories?: string[]) =>
     ipcRenderer.invoke('codex:start', cwd, scope, kind, orchestratorContext, scopeCwd, metaPreamble, additionalDirectories),

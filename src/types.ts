@@ -361,6 +361,9 @@ declare global {
     metaWorkspaceActivate?: (id: string) => Promise<any>;
     metaWorkspaceDelete?: (id: string) => Promise<boolean>;
     geminiSetSessionId?: (projectPath: string, sessionId: string | undefined, scope?: string) => void;
+    codexBackendModeGet?: () => Promise<'sdk' | 'app-server'>;
+    codexBackendModeSet?: (mode: 'sdk' | 'app-server') => Promise<'sdk' | 'app-server'>;
+    codexAppServerPreviewStatus?: () => Promise<{ available: boolean; reason?: string }>;
     searchRun?: SaiSearchApi['searchRun'];
     searchReplaceFile?: SaiSearchApi['searchReplaceFile'];
     swarm?: {

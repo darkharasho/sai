@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => {
     emitChatMessage: vi.fn(),
     fetchBundledCodexModels: vi.fn(),
     sdkConstructor: vi.fn(),
+    appServerConstructor: vi.fn(),
     registerWorkspaceBackendHooks: vi.fn(),
   };
 });
@@ -67,14 +68,30 @@ vi.mock('@electron/services/codexBackend/sdkBackend', () => ({
   }),
 }));
 
+vi.mock('@electron/services/codexBackend/appServerBackend', () => ({
+  AppServerBackend: vi.fn().mockImplementation(function (deps: unknown) {
+    mocks.appServerConstructor(deps);
+    return {
+      previewStatus: { available: true },
+      start: vi.fn(), send: vi.fn(), interrupt: vi.fn(), reconcileScope: vi.fn(),
+      setSessionId: vi.fn(), getModels: vi.fn(), suspendWorkspace: vi.fn(),
+      isWorkspaceBusy: vi.fn().mockReturnValue(false), destroy: vi.fn(),
+    };
+  }),
+}));
+
 vi.mock('@electron/services/codexBackend/bundledModels', () => ({
   fetchBundledCodexModels: mocks.fetchBundledCodexModels,
 }));
 
 import {
   __setCodexBackendForTests,
+  __setCodexBackendFactoriesForTests,
   destroyCodexBackendIfActive,
+  getCodexAppServerPreviewStatus,
   getCodexBackend,
+  getCodexBackendMode,
+  setCodexBackendMode,
 } from '@electron/services/codexBackend';
 import type { CodexBackend } from '@electron/services/codexBackend';
 import { SdkCodexBackend } from '@electron/services/codexBackend/sdkBackend';
@@ -98,10 +115,13 @@ function backendStub(): CodexBackend {
 
 beforeEach(() => {
   mocks.fetchBundledCodexModels.mockResolvedValue({ models: [], defaultModel: '' });
+  __setCodexBackendFactoriesForTests();
+  setCodexBackendMode('sdk');
 });
 
 afterEach(() => {
   destroyCodexBackendIfActive();
+  __setCodexBackendFactoriesForTests();
   mocks.ipcMain.reset();
   vi.clearAllMocks();
 });
@@ -127,6 +147,37 @@ describe('Codex backend selection', () => {
       suspend: expect.any(Function),
       isBusy: expect.any(Function),
     });
+  });
+
+  it('defaults to SDK and defers an App Server mode change until an active backend settles', () => {
+    const sdk = backendStub();
+    (sdk as CodexBackend & { isAnyWorkspaceBusy: ReturnType<typeof vi.fn> }).isAnyWorkspaceBusy = vi.fn().mockReturnValue(true);
+    const appServer = backendStub();
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
+
+    expect(getCodexBackend()).toBe(sdk);
+    setCodexBackendMode('app-server');
+    expect(getCodexBackend()).toBe(sdk);
+    expect(getCodexBackendMode()).toBe('app-server');
+    expect(sdk.destroy).not.toHaveBeenCalled();
+
+    (sdk as CodexBackend & { isAnyWorkspaceBusy: ReturnType<typeof vi.fn> }).isAnyWorkspaceBusy.mockReturnValue(false);
+    expect(getCodexBackend()).toBe(appServer);
+    expect(sdk.destroy).toHaveBeenCalledOnce();
+  });
+
+  it('falls back to SDK for new work after App Server becomes unavailable', () => {
+    let available = true;
+    const appServer = { ...backendStub(), get previewStatus() { return available ? { available: true } : { available: false, reason: 'Handshake failed' }; } };
+    const sdk = backendStub();
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
+    setCodexBackendMode('app-server');
+
+    expect(getCodexBackend()).toBe(appServer);
+    available = false;
+    expect(getCodexAppServerPreviewStatus()).toEqual({ available: false, reason: 'Handshake failed' });
+    expect(getCodexBackend()).toBe(sdk);
+    expect(getCodexAppServerPreviewStatus()).toEqual({ available: false, reason: 'Handshake failed' });
   });
 
   it('wires workspace hooks to the active backend and neutralizes them after destroy', () => {
@@ -180,13 +231,12 @@ describe('Codex backend selection', () => {
 });
 
 describe('Codex backend source regression', () => {
-  it('never reads the codexBackend setting or imports the CLI backend', () => {
+  it('never imports the CLI backend', () => {
     const source = fs.readFileSync(
       path.join(__dirname, '../../../electron/services/codexBackend/index.ts'),
       'utf-8',
     );
 
-    expect(source).not.toMatch(/codexBackend\s*(setting|===|:)/i);
     expect(source).not.toMatch(/CliCodexBackend/);
   });
 });

@@ -192,6 +192,11 @@ export class AppServerBackend implements CodexBackend {
     return [...this.runtimes.values()].some((runtime) => runtime.projectPath === projectPath && Boolean(runtime.active));
   }
 
+  /** Selector-only aggregate used to avoid replacing an active transport. */
+  isAnyWorkspaceBusy(): boolean {
+    return [...this.runtimes.values()].some((runtime) => Boolean(runtime.active));
+  }
+
   destroy(): void {
     for (const runtime of this.runtimes.values()) if (runtime.active) this.retireTurn(runtime, runtime.active);
     this.runtimes.clear();

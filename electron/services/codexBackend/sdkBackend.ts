@@ -267,6 +267,11 @@ export class SdkCodexBackend implements CodexBackend {
     return false;
   }
 
+  /** Selector-only aggregate used to avoid replacing an active transport. */
+  isAnyWorkspaceBusy(): boolean {
+    return [...this.runtimes.values()].some((runtime) => Boolean(runtime.active));
+  }
+
   destroy(): void {
     for (const runtime of this.runtimes.values()) {
       if (!runtime.active) continue;

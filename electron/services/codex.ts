@@ -1,6 +1,10 @@
 import { ipcMain } from 'electron';
 import {
   getCodexBackend,
+  getCodexAppServerPreviewStatus,
+  getCodexBackendMode,
+  setCodexBackendMode,
+  type CodexBackendMode,
   type CodexPermission,
   type CodexReasoningEffort,
   type CodexSessionKind,
@@ -49,6 +53,13 @@ export function __setCodexTelemetryForTests(service: CodexTelemetryService): voi
 
 /** Register the Codex IPC surface. Transport behavior lives in codexBackend. */
 export function registerCodexHandlers(): void {
+  ipcMain.handle('codex:backendMode:get', () => getCodexBackendMode());
+  ipcMain.handle('codex:backendMode:set', (_event, mode: unknown) => {
+    const normalized: CodexBackendMode = mode === 'app-server' ? 'app-server' : 'sdk';
+    return setCodexBackendMode(normalized);
+  });
+  ipcMain.handle('codex:appServerPreviewStatus', () => getCodexAppServerPreviewStatus());
+
   ipcMain.handle('codex:models', (_event, forceRefresh?: boolean) =>
     getCodexBackend().getModels(Boolean(forceRefresh)));
 

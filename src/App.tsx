@@ -2170,6 +2170,9 @@ export default function App() {
       if (merged.permission) setCodexPermission(merged.permission);
       if (merged.effort) setCodexEffort(merged.effort);
     }));
+    window.sai.settingsGet('codexBackendMode', 'sdk').then(guard((mode: unknown) => {
+      void window.sai.codexBackendModeSet?.(mode === 'app-server' ? 'app-server' : 'sdk');
+    }));
     window.sai.settingsGet('gemini', {}).then(guard((g: any) => {
       if (g.model) setGeminiModel(g.model);
       if (g.approvalMode === 'default' || g.approvalMode === 'auto_edit' || g.approvalMode === 'yolo' || g.approvalMode === 'plan') setGeminiApprovalMode(g.approvalMode);
