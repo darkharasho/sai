@@ -149,21 +149,38 @@ describe('Codex backend selection', () => {
     });
   });
 
-  it('defaults to SDK and defers an App Server mode change until an active backend settles', () => {
+  it('keeps an active scope on SDK after selecting App Server', () => {
+    const sdk = backendStub();
+    sdk.isScopeBusy = vi.fn().mockReturnValue(true);
+    (sdk as CodexBackend & { isAnyWorkspaceBusy: ReturnType<typeof vi.fn> }).isAnyWorkspaceBusy = vi.fn().mockReturnValue(true);
+    const appServer = backendStub();
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
+
+    const backend = getCodexBackend();
+    backend.start({ projectPath: '/project', scope: 'active' });
+    setCodexBackendMode('app-server');
+    backend.send({ projectPath: '/project', scope: 'active', message: 'continue' });
+    expect(getCodexBackendMode()).toBe('app-server');
+    expect(sdk.destroy).not.toHaveBeenCalled();
+    expect(sdk.send).toHaveBeenCalledWith(expect.objectContaining({ scope: 'active' }));
+    expect(appServer.send).not.toHaveBeenCalled();
+  });
+
+  it('routes a fresh scope to the selected backend while another SDK scope is active', () => {
     const sdk = backendStub();
     (sdk as CodexBackend & { isAnyWorkspaceBusy: ReturnType<typeof vi.fn> }).isAnyWorkspaceBusy = vi.fn().mockReturnValue(true);
     const appServer = backendStub();
     __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
 
-    expect(getCodexBackend()).toBe(sdk);
+    getCodexBackend().start({ projectPath: '/project', scope: 'scope-a' });
+    getCodexBackend().send({ projectPath: '/project', scope: 'scope-a', message: 'keep working' });
     setCodexBackendMode('app-server');
-    expect(getCodexBackend()).toBe(sdk);
-    expect(getCodexBackendMode()).toBe('app-server');
-    expect(sdk.destroy).not.toHaveBeenCalled();
+    getCodexBackend().start({ projectPath: '/project', scope: 'scope-b' });
 
-    (sdk as CodexBackend & { isAnyWorkspaceBusy: ReturnType<typeof vi.fn> }).isAnyWorkspaceBusy.mockReturnValue(false);
-    expect(getCodexBackend()).toBe(appServer);
-    expect(sdk.destroy).toHaveBeenCalledOnce();
+    expect(sdk.start).toHaveBeenCalledWith(expect.objectContaining({ scope: 'scope-a' }));
+    expect(sdk.send).toHaveBeenCalledWith(expect.objectContaining({ scope: 'scope-a' }));
+    expect(appServer.start).toHaveBeenCalledWith(expect.objectContaining({ scope: 'scope-b' }));
+    expect(sdk.destroy).not.toHaveBeenCalled();
   });
 
   it('falls back to SDK for new work after App Server becomes unavailable', () => {
@@ -173,14 +190,38 @@ describe('Codex backend selection', () => {
     __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
     setCodexBackendMode('app-server');
 
-    expect(getCodexBackend()).toBe(appServer);
+    getCodexBackend().start({ projectPath: '/project', scope: 'preview' });
+    expect(appServer.start).toHaveBeenCalledOnce();
     available = false;
     expect(getCodexAppServerPreviewStatus()).toEqual({ available: false, reason: 'Handshake failed' });
-    expect(getCodexBackend()).toBe(sdk);
+    getCodexBackend().start({ projectPath: '/project', scope: 'fallback' });
+    expect(sdk.start).toHaveBeenCalledWith(expect.objectContaining({ scope: 'fallback' }));
     expect(getCodexAppServerPreviewStatus()).toEqual({ available: false, reason: 'Handshake failed' });
   });
 
+  it('retries App Server for a fresh scope when preview mode is selected again', () => {
+    let available = false;
+    const firstAppServer = { ...backendStub(), get previewStatus() { return available ? { available: true } : { available: false, reason: 'Handshake failed' }; } };
+    const retryAppServer = { ...backendStub(), previewStatus: { available: true } };
+    const sdk = backendStub();
+    const makeAppServer = vi.fn()
+      .mockReturnValueOnce(firstAppServer)
+      .mockReturnValueOnce(retryAppServer);
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: makeAppServer });
+
+    setCodexBackendMode('app-server');
+    getCodexBackend().start({ projectPath: '/project', scope: 'failed' });
+    expect(getCodexAppServerPreviewStatus()).toEqual({ available: false, reason: 'Handshake failed' });
+
+    setCodexBackendMode('app-server');
+    getCodexBackend().start({ projectPath: '/project', scope: 'retry' });
+
+    expect(retryAppServer.start).toHaveBeenCalledWith(expect.objectContaining({ scope: 'retry' }));
+  });
+
   it('wires workspace hooks to the active backend and neutralizes them after destroy', () => {
+    const sdk = backendStub();
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk });
     const backend = getCodexBackend();
     const registration = mocks.registerWorkspaceBackendHooks.mock.calls.at(-1);
 
@@ -191,14 +232,14 @@ describe('Codex backend selection', () => {
     };
     hooks.suspend('/project');
     hooks.isBusy('/project');
-    expect(backend.suspendWorkspace).toHaveBeenCalledWith('/project');
-    expect(backend.isWorkspaceBusy).toHaveBeenCalledWith('/project');
+    expect(sdk.suspendWorkspace).toHaveBeenCalledWith('/project');
+    expect(sdk.isWorkspaceBusy).toHaveBeenCalledWith('/project');
 
     destroyCodexBackendIfActive();
     expect(() => hooks.suspend('/project')).not.toThrow();
     expect(hooks.isBusy('/project')).toBe(false);
-    expect(backend.suspendWorkspace).toHaveBeenCalledTimes(1);
-    expect(backend.isWorkspaceBusy).toHaveBeenCalledTimes(1);
+    expect(sdk.suspendWorkspace).toHaveBeenCalledTimes(1);
+    expect(sdk.isWorkspaceBusy).toHaveBeenCalledTimes(1);
   });
 
   it('destroys replaced, reset, and active injected backends exactly once', () => {

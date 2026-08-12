@@ -60,7 +60,23 @@ describe('SettingsModal', () => {
 
     expect(mock.settingsSet).toHaveBeenCalledWith('codexBackendMode', 'app-server');
     expect(mock.codexBackendModeSet).toHaveBeenCalledWith('app-server');
-    expect(await screen.findByText('Handshake failed')).toBeTruthy();
+    expect(await screen.findByText(/Handshake failed/)).toBeTruthy();
+  });
+
+  it('offers an explicit App Server retry after preview fallback', async () => {
+    const mock = createMockSai();
+    mock.settingsGet = makeSettingsGetMock();
+    mock.codexAppServerPreviewStatus.mockResolvedValue({ available: false, reason: 'Handshake failed' });
+    installMockSai(mock);
+    render(<SettingsModal {...defaultProps} />);
+
+    fireEvent.click(screen.getByText('Codex'));
+    fireEvent.change(await screen.findByLabelText('Codex backend'), { target: { value: 'app-server' } });
+    const callsBeforeRetry = mock.codexBackendModeSet.mock.calls.length;
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry App Server' }));
+
+    expect(mock.codexBackendModeSet).toHaveBeenLastCalledWith('app-server');
+    expect(mock.codexBackendModeSet).toHaveBeenCalledTimes(callsBeforeRetry + 1);
   });
 
   it('delegates Codex effort persistence to the owning App callback without a duplicate write', async () => {

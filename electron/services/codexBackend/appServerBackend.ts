@@ -192,6 +192,10 @@ export class AppServerBackend implements CodexBackend {
     return [...this.runtimes.values()].some((runtime) => runtime.projectPath === projectPath && Boolean(runtime.active));
   }
 
+  isScopeBusy(projectPath: string, scope?: string): boolean {
+    return Boolean(this.runtimes.get(codexScopeKey(projectPath, codexScope(scope)))?.active);
+  }
+
   /** Selector-only aggregate used to avoid replacing an active transport. */
   isAnyWorkspaceBusy(): boolean {
     return [...this.runtimes.values()].some((runtime) => Boolean(runtime.active));

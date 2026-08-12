@@ -70,6 +70,8 @@ export interface CodexBackend {
   getModels(forceRefresh?: boolean): Promise<CodexModelResult>;
   suspendWorkspace(projectPath: string): void;
   isWorkspaceBusy(projectPath: string): boolean;
+  /** Optional finer-grained busy check used when routing concurrent scopes. */
+  isScopeBusy?(projectPath: string, scope?: string): boolean;
   destroy(): void;
 }
 

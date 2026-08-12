@@ -598,6 +598,12 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.codexBackendModeSet?.(mode).finally(() => refreshCodexAppServerStatus());
   };
 
+  const retryCodexAppServer = () => {
+    // Re-submit the selected preview mode so the main-process selector clears
+    // its scoped fallback and creates a fresh transport on the next scope.
+    window.sai.codexBackendModeSet?.('app-server').finally(() => refreshCodexAppServerStatus());
+  };
+
   const handleFocusedChatChange = (value: boolean) => {
     setFocusedChat(value);
     window.sai.settingsSet('focusedChat', value);
@@ -1273,7 +1279,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             {codexBackendMode === 'app-server'
               ? codexAppServerStatus.available
                 ? 'App Server is a preview transport. Active turns keep their current backend.'
-                : codexAppServerStatus.reason || 'App Server preview is unavailable; new work uses the SDK backend.'
+                : `${codexAppServerStatus.reason || 'App Server preview is unavailable; new work uses the SDK backend.'} You can retry it for new work.`
               : 'SDK is the stable default backend.'}
           </div>
         </div>
@@ -1281,6 +1287,9 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
           <option value="sdk">SDK (default)</option>
           <option value="app-server">App Server (preview)</option>
         </select>
+        {codexBackendMode === 'app-server' && !codexAppServerStatus.available && (
+          <button className="settings-button" onClick={retryCodexAppServer}>Retry App Server</button>
+        )}
       </div>
       {codexAvailableModels.length > 0 && (
         <div className="settings-row">

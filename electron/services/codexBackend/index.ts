@@ -4,16 +4,15 @@ import { registerWorkspaceBackendHooks } from '../workspace';
 import { fetchBundledCodexModels } from './bundledModels';
 import { AppServerBackend } from './appServerBackend';
 import { SdkCodexBackend } from './sdkBackend';
-import type { CodexAppServerPreviewStatus, CodexBackend, CodexBackendMode } from './types';
+import { codexScopeKey, type CodexAppServerPreviewStatus, type CodexBackend, type CodexBackendMode, type CodexModelResult, type CodexSendArgs, type CodexStartArgs } from './types';
 
 export * from './types';
 
-let active: CodexBackend | null = null;
-let activeMode: CodexBackendMode | null = null;
-let requestedMode: CodexBackendMode = 'sdk';
-let fallbackReason: string | undefined;
-
 type BackendFactory = () => CodexBackend;
+type BackendByMode = Partial<Record<CodexBackendMode, CodexBackend>>;
+
+let active: CodexBackend | null = null;
+let requestedMode: CodexBackendMode = 'sdk';
 let createSdkBackend: BackendFactory = makeSdkBackend;
 let createAppServerBackend: BackendFactory = makeAppServerBackend;
 
@@ -36,38 +35,121 @@ function makeAppServerBackend(): CodexBackend {
   return new AppServerBackend({ emit: emitChatMessage });
 }
 
-function isAppServerPreviewBackend(backend: CodexBackend): backend is AppServerPreviewBackend {
-  return 'previewStatus' in backend;
+function isAppServerPreviewBackend(backend: CodexBackend | undefined): backend is AppServerPreviewBackend {
+  return Boolean(backend && 'previewStatus' in backend);
 }
 
-function isAnyWorkspaceBusy(backend: CodexBackend): boolean {
-  return (backend as CodexBackend & { isAnyWorkspaceBusy?: () => boolean }).isAnyWorkspaceBusy?.() ?? false;
+function isScopeBusy(backend: CodexBackend, projectPath: string, scope?: string): boolean {
+  return backend.isScopeBusy?.(projectPath, scope) ?? backend.isWorkspaceBusy(projectPath);
 }
 
-function appServerStatus(): CodexAppServerPreviewStatus {
-  if (activeMode === 'app-server' && active && isAppServerPreviewBackend(active)) {
-    return active.previewStatus;
+/**
+ * Keeps transport ownership at the same granularity as a Codex conversation.
+ * A settings change may select a different transport for new scopes, but an
+ * in-flight scope remains with the backend that owns its thread and turn.
+ */
+class ScopedCodexBackend implements CodexBackend {
+  private readonly backends: BackendByMode = {};
+  private readonly assignments = new Map<string, CodexBackendMode>();
+  private fallbackReason: string | undefined;
+
+  constructor() {
+    // Preserve SDK's inexpensive, stable default and model catalogue behavior.
+    this.backends.sdk = createSdkBackend();
   }
-  return fallbackReason ? { available: false, reason: fallbackReason } : { available: true };
+
+  get previewStatus(): CodexAppServerPreviewStatus {
+    const preview = this.backends['app-server'];
+    if (isAppServerPreviewBackend(preview)) return preview.previewStatus;
+    return this.fallbackReason ? { available: false, reason: this.fallbackReason } : { available: true };
+  }
+
+  retryAppServer(): void {
+    this.fallbackReason = undefined;
+    const preview = this.backends['app-server'];
+    if (!preview || !isAppServerPreviewBackend(preview) || preview.previewStatus.available) return;
+    if ([...this.assignments.entries()].some(([key, mode]) => mode === 'app-server' && this.scopeKeyBusy(preview, key))) return;
+    preview.destroy();
+    delete this.backends['app-server'];
+  }
+
+  start(args: CodexStartArgs): Promise<void> | void {
+    return this.route(args.projectPath, args.scope, true).start(args);
+  }
+
+  send(args: CodexSendArgs): void {
+    this.route(args.projectPath, args.scope, true).send(args);
+  }
+
+  interrupt(projectPath: string, scope?: string): void {
+    this.route(projectPath, scope, false).interrupt(projectPath, scope);
+  }
+
+  reconcileScope(projectPath: string, scope?: string): void {
+    this.route(projectPath, scope, false).reconcileScope(projectPath, scope);
+  }
+
+  setSessionId(projectPath: string, sessionId: string | undefined, scope?: string): void {
+    this.route(projectPath, scope, true).setSessionId(projectPath, sessionId, scope);
+  }
+
+  getModels(forceRefresh?: boolean): Promise<CodexModelResult> {
+    return this.backendFor(requestedMode).getModels(forceRefresh);
+  }
+
+  suspendWorkspace(projectPath: string): void {
+    for (const backend of Object.values(this.backends)) backend?.suspendWorkspace(projectPath);
+    for (const key of this.assignments.keys()) if (key.startsWith(`${projectPath}\u0000`)) this.assignments.delete(key);
+  }
+
+  isWorkspaceBusy(projectPath: string): boolean {
+    return Object.values(this.backends).some((backend) => backend?.isWorkspaceBusy(projectPath));
+  }
+
+  isScopeBusy(projectPath: string, scope?: string): boolean {
+    const key = codexScopeKey(projectPath, scope);
+    const mode = this.assignments.get(key);
+    return mode ? isScopeBusy(this.backendFor(mode), projectPath, scope) : false;
+  }
+
+  destroy(): void {
+    for (const backend of Object.values(this.backends)) backend?.destroy();
+    this.assignments.clear();
+    this.backends.sdk = undefined;
+    this.backends['app-server'] = undefined;
+  }
+
+  private route(projectPath: string, scope: string | undefined, assign: boolean): CodexBackend {
+    const key = codexScopeKey(projectPath, scope);
+    const assigned = this.assignments.get(key);
+    if (assigned) {
+      const backend = this.backendFor(assigned);
+      if (assigned === requestedMode || isScopeBusy(backend, projectPath, scope)) return backend;
+      this.assignments.delete(key);
+    }
+    const backend = this.backendFor(requestedMode);
+    if (assign) this.assignments.set(key, backend === this.backends['app-server'] ? 'app-server' : 'sdk');
+    return backend;
+  }
+
+  private backendFor(mode: CodexBackendMode): CodexBackend {
+    if (mode === 'sdk') return this.backends.sdk ?? (this.backends.sdk = createSdkBackend());
+    const preview = this.backends['app-server'] ?? (this.backends['app-server'] = createAppServerBackend());
+    if (!isAppServerPreviewBackend(preview) || preview.previewStatus.available) return preview;
+    this.fallbackReason = preview.previewStatus.reason ?? 'Codex App Server preview is unavailable';
+    return this.backends.sdk ?? (this.backends.sdk = createSdkBackend());
+  }
+
+  private scopeKeyBusy(backend: CodexBackend, key: string): boolean {
+    const [projectPath, scope] = key.split('\u0000');
+    return isScopeBusy(backend, projectPath, scope);
+  }
 }
 
-function replaceActiveIfSafe(): void {
-  if (!active) return;
-  const status = appServerStatus();
-  if (activeMode === 'app-server' && !status.available) fallbackReason = status.reason ?? 'Codex App Server preview is unavailable';
-  const shouldReplace = activeMode !== requestedMode || (activeMode === 'app-server' && !status.available);
-  if (!shouldReplace || isAnyWorkspaceBusy(active)) return;
-  const previous = active;
-  active = null;
-  activeMode = null;
-  previous.destroy();
-}
-
-/** Select a backend for new work.  Active turns always stay on their current transport. */
+/** Select a backend for new work; existing active scopes retain their transport. */
 export function setCodexBackendMode(mode: CodexBackendMode): CodexBackendMode {
   requestedMode = mode;
-  if (mode === 'sdk') fallbackReason = undefined;
-  replaceActiveIfSafe();
+  if (mode === 'app-server' && active instanceof ScopedCodexBackend) active.retryAppServer();
   return requestedMode;
 }
 
@@ -76,46 +158,36 @@ export function getCodexBackendMode(): CodexBackendMode {
 }
 
 export function getCodexAppServerPreviewStatus(): CodexAppServerPreviewStatus {
-  const status = appServerStatus();
-  if (!status.available) fallbackReason = status.reason;
-  return status;
+  if (active instanceof ScopedCodexBackend) return active.previewStatus;
+  if (isAppServerPreviewBackend(active)) return active.previewStatus;
+  return { available: true };
 }
 
-/** Return the SDK-backed Codex backend, constructing it only on first use. */
+/** Return the scoped dispatcher, constructing the stable SDK transport first. */
 export function getCodexBackend(): CodexBackend {
-  replaceActiveIfSafe();
-  if (active) return active;
-
-  const useAppServer = requestedMode === 'app-server' && !fallbackReason;
-  active = useAppServer ? createAppServerBackend() : createSdkBackend();
-  activeMode = useAppServer ? 'app-server' : 'sdk';
-
-  registerWorkspaceBackendHooks('codex', {
-    suspend: (projectPath) => active?.suspendWorkspace(projectPath),
-    isBusy: (projectPath) => active?.isWorkspaceBusy(projectPath) ?? false,
-  });
+  if (!active) {
+    active = new ScopedCodexBackend();
+    registerWorkspaceBackendHooks('codex', {
+      suspend: (projectPath) => active?.suspendWorkspace(projectPath),
+      isBusy: (projectPath) => active?.isWorkspaceBusy(projectPath) ?? false,
+    });
+  }
   return active;
 }
 
-/** Destroy and forget the active backend, if one has been selected. */
 export function destroyCodexBackendIfActive(): void {
   const backend = active;
   active = null;
-  activeMode = null;
   backend?.destroy();
 }
 
-/** Test seam that replaces the singleton without leaking its lifecycle. */
 export function __setCodexBackendForTests(backend: CodexBackend | null): void {
   if (active === backend) return;
   destroyCodexBackendIfActive();
   active = backend;
-  activeMode = backend ? requestedMode : null;
 }
 
-/** Test seam for backend-selection behavior without starting real CLI processes. */
 export function __setCodexBackendFactoriesForTests(factories: { sdk?: BackendFactory; appServer?: BackendFactory } = {}): void {
   createSdkBackend = factories.sdk ?? makeSdkBackend;
   createAppServerBackend = factories.appServer ?? makeAppServerBackend;
-  fallbackReason = undefined;
 }
