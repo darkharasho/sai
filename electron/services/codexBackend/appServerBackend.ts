@@ -9,7 +9,7 @@ import {
 import { mapAppServerEvent } from './appServerEventMap';
 import { SAI_SWARM_CAPABILITY_PROBE, SAI_SWARM_DYNAMIC_TOOLS } from './appServerDynamicTools';
 import { dispatchSaiSwarmDynamicTool, dynamicToolResponse, validateSaiSwarmDynamicToolCall } from './dynamicToolBridge';
-import { isCodexUserInputResponse, normalizeCodexModelOption, codexScope, codexScopeKey, type CodexAppServerPreviewStatus, type CodexApprovalDecision, type CodexApprovalMetadata, type CodexApprovalResult, type CodexBackend, type CodexMcpElicitationDecision, type CodexMcpElicitationForm, type CodexMcpElicitationUrl, type CodexModelResult, type CodexSendArgs, type CodexSessionKind, type CodexStartArgs, type CodexUserInputAnswers, type CodexUserInputQuestion, type CodexUserInputResponse } from './types';
+import { isCodexUserInputResponse, normalizeCodexModelOption, codexScope, codexScopeKey, type CodexAppServerPreviewStatus, type CodexApprovalDecision, type CodexApprovalMetadata, type CodexApprovalResult, type CodexBackend, type CodexMcpElicitationDecision, type CodexMcpElicitationForm, type CodexMcpElicitationUrl, type CodexMcpRuntimeStatus, type CodexModelResult, type CodexSendArgs, type CodexSessionKind, type CodexStartArgs, type CodexUserInputAnswers, type CodexUserInputQuestion, type CodexUserInputResponse } from './types';
 import type { SaiEnvelope } from './sdkEventMap';
 import { getOrCreate as getOrCreateWorkspace } from '../workspace';
 import type { SaiToolDispatch } from '../saiToolBridge';
@@ -476,6 +476,25 @@ export class AppServerBackend implements CodexBackend {
     } catch (error) {
       this.markUnavailable(errorText(error));
       return { models: [], defaultModel: '' };
+    }
+  }
+
+  /**
+   * MCP runtime state belongs to the physical App Server connection, not a
+   * shared workspace cache. This preserves isolation between standard chat
+   * and the experimental orchestrator client even when their thread IDs match.
+   */
+  async getMcpRuntimeStatus(projectPath?: string, scope?: string): Promise<CodexMcpRuntimeStatus> {
+    const runtime = projectPath === undefined
+      ? undefined
+      : this.runtimes.get(codexScopeKey(projectPath, codexScope(scope)));
+    try {
+      const client = await this.ensureClient(runtime);
+      return await client.refreshMcpRuntimeStatus();
+    } catch (error) {
+      const reason = errorText(error);
+      if (this.clientKind(runtime) === 'standard') this.markUnavailable(reason);
+      return { available: false, reason, servers: [] };
     }
   }
 

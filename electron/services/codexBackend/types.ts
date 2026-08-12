@@ -13,6 +13,25 @@ export interface CodexAppServerPreviewStatus {
   available: boolean;
   reason?: string;
 }
+
+/** Read-only, deliberately coarse MCP runtime state from Codex App Server. */
+export type CodexMcpServerLifecycle = 'starting' | 'running' | 'failed' | 'disabled';
+export type CodexMcpServerAuthentication = 'authenticated' | 'unauthenticated' | 'not-required' | 'unknown';
+
+export interface CodexMcpRuntimeServerStatus {
+  name: string;
+  lifecycle: CodexMcpServerLifecycle;
+  authentication: CodexMcpServerAuthentication;
+  toolCount: number;
+  /** Bounded plain text only; raw protocol errors never leave the backend. */
+  failureReason?: string;
+}
+
+export interface CodexMcpRuntimeStatus {
+  available: boolean;
+  reason?: string;
+  servers: CodexMcpRuntimeServerStatus[];
+}
 export type CodexPermission = 'auto' | 'read-only' | 'full-access';
 export type CodexReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 
@@ -226,6 +245,8 @@ export interface CodexBackend {
   reconcileScope(projectPath: string, scope?: string): void;
   setSessionId(projectPath: string, sessionId: string | undefined, scope?: string): void;
   getModels(forceRefresh?: boolean): Promise<CodexModelResult>;
+  /** Read-only App Server MCP runtime state; SDK support is added by its bridge slice. */
+  getMcpRuntimeStatus?(projectPath?: string, scope?: string): Promise<CodexMcpRuntimeStatus>;
   /** App Server exposes this only after its experimental Swarm bridge probes cleanly. */
   getSwarmStatus?(): Promise<CodexAppServerPreviewStatus>;
   approve(projectPath: string, scope: string | undefined, requestHandle: string, decision: CodexApprovalDecision): CodexApprovalResult;

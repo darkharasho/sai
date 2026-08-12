@@ -342,6 +342,64 @@ describe('AppServerClient', () => {
     expect(events).toEqual([{ jsonrpc: '2.0', method: 'turn/started', params: { turn: { id: 'turn-1' } } }]);
   });
 
+  it('queries bounded MCP status pages only after the handshake and retains a sanitized snapshot', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    const pending = client.start();
+    expect(child.stdin.write).toHaveBeenCalledTimes(1);
+    reply(child, { id: 0, result: {} });
+    await pending;
+    expect(child.stdin.write).toHaveBeenCalledTimes(2);
+
+    const refreshed = client.refreshMcpRuntimeStatus();
+    expect(JSON.parse(child.stdin.write.mock.calls.at(-1)[0])).toEqual({
+      id: 1, method: 'mcpServerStatus/list', params: { detail: 'toolsAndAuthOnly', limit: 100 },
+    });
+    reply(child, { id: 1, result: {
+      data: [
+        { name: 'safe', status: 'connected', authStatus: 'authenticated', tools: [{ name: 'search' }], token: 'never expose' },
+        { name: 'invalid', status: 'mystery', tools: [] },
+      ],
+      nextCursor: 'page-2',
+    } });
+    await Promise.resolve();
+    expect(JSON.parse(child.stdin.write.mock.calls.at(-1)[0])).toEqual({
+      id: 2, method: 'mcpServerStatus/list', params: { detail: 'toolsAndAuthOnly', limit: 100, cursor: 'page-2' },
+    });
+    reply(child, { id: 2, result: { data: [{
+      name: 'failed', status: 'failed', authentication: 'unauthenticated', toolCount: 2,
+      error: { message: 'x'.repeat(600), stack: 'drop me' },
+    }] } });
+
+    await expect(refreshed).resolves.toEqual({ available: true, servers: [
+      { name: 'failed', lifecycle: 'failed', authentication: 'unauthenticated', toolCount: 2, failureReason: 'x'.repeat(512) },
+      { name: 'safe', lifecycle: 'running', authentication: 'authenticated', toolCount: 1 },
+    ] });
+  });
+
+  it('applies startup-status updates to this client snapshot and clears them on failure', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+    const refresh = client.refreshMcpRuntimeStatus();
+    reply(child, { id: 1, result: { data: [{ name: 'one', status: 'starting', tools: [] }] } });
+    await refresh;
+
+    reply(child, { method: 'mcpServer/startupStatus/updated', params: {
+      server: { name: 'one', status: 'ready', authStatus: 'not-required', tools: [{}, {}], config: { secret: 'drop' } },
+    } });
+    reply(child, { method: 'mcpServer/startupStatus/updated', params: {
+      threadId: 'thread-only-for-routing', name: 'one', status: 'failed', failureReason: 'reauthenticationRequired', rawConfig: { token: 'drop' },
+    } });
+    reply(child, { method: 'mcpServer/startupStatus/updated', params: { name: 'bad', status: 'ready', tools: 'not an array' } });
+    expect(client.getMcpRuntimeStatus()).toEqual({ available: true, servers: [
+      { name: 'one', lifecycle: 'failed', authentication: 'not-required', toolCount: 2, failureReason: 'reauthenticationRequired' },
+    ] });
+
+    child.emit('exit', 1);
+    expect(client.getMcpRuntimeStatus()).toEqual(expect.objectContaining({ available: false, servers: [] }));
+  });
+
   it('rejects pending requests after malformed protocol data', async () => {
     const child = fakeChild();
     const { client } = createClient(child);

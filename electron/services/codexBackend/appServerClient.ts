@@ -2,6 +2,7 @@ import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import path from 'node:path';
 import { enrichedEnv } from '../shellEnv';
 import { resolveBundledCodex } from './bundledModels';
+import type { CodexMcpRuntimeServerStatus, CodexMcpRuntimeStatus } from './types';
 
 export interface AppServerNotification {
   jsonrpc: '2.0';
@@ -50,6 +51,10 @@ export interface AppServerClientTransport {
   onServerRequest(listener: (request: AppServerServerRequest) => void): () => void;
   claimServerRequest(id: string | number): AppServerServerRequestResponder;
   onFailure(listener: (error: AppServerUnavailableError) => void): () => void;
+  /** A read-only, sanitized snapshot; it never contains Codex MCP config. */
+  getMcpRuntimeStatus(): CodexMcpRuntimeStatus;
+  /** Refreshes the snapshot through App Server after its handshake completes. */
+  refreshMcpRuntimeStatus(): Promise<CodexMcpRuntimeStatus>;
   destroy(): void;
 }
 
@@ -83,6 +88,11 @@ interface PendingServerRequest {
 }
 
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 10_000;
+const MCP_STATUS_MAX_PAGES = 8;
+const MCP_STATUS_MAX_SERVERS = 100;
+const MCP_STATUS_MAX_CURSOR_LENGTH = 512;
+const MCP_STATUS_MAX_TEXT_LENGTH = 512;
+const MCP_STATUS_MAX_TOOLS = 10_000;
 
 function messageText(error: JsonRpcError): string {
   return `${error.message} (${error.code})`;
@@ -98,6 +108,54 @@ function isJsonRpcError(value: unknown): value is JsonRpcError {
 
 function isRequestId(value: unknown): value is number | string {
   return typeof value === 'number' || typeof value === 'string';
+}
+
+function boundedText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const text = value.trim();
+  return text.length > 0 ? text.slice(0, MCP_STATUS_MAX_TEXT_LENGTH) : undefined;
+}
+
+function lifecycle(value: unknown): CodexMcpRuntimeServerStatus['lifecycle'] | undefined {
+  switch (value) {
+    case 'starting':
+    case 'connecting': return 'starting';
+    case 'running':
+    case 'connected':
+    case 'ready': return 'running';
+    case 'failed':
+    case 'error': return 'failed';
+    case 'disabled': return 'disabled';
+    default: return undefined;
+  }
+}
+
+function authentication(value: unknown): CodexMcpRuntimeServerStatus['authentication'] | undefined {
+  switch (value) {
+    case 'authenticated': return 'authenticated';
+    case 'unauthenticated': return 'unauthenticated';
+    case 'not-required':
+    case 'notRequired': return 'not-required';
+    case 'unknown': return 'unknown';
+    default: return undefined;
+  }
+}
+
+/** Keep App Server's evolving status payload strictly on the main-process side. */
+export function normalizeMcpRuntimeServerStatus(value: unknown): CodexMcpRuntimeServerStatus | undefined {
+  if (!isRecord(value)) return undefined;
+  const name = boundedText(value.name);
+  const status = lifecycle(value.status);
+  const auth = authentication(value.authStatus ?? value.authentication) ?? 'unknown';
+  const toolCount = Array.isArray(value.tools)
+    ? value.tools.length
+    : typeof value.toolCount === 'number' && Number.isSafeInteger(value.toolCount) && value.toolCount >= 0 && value.toolCount <= MCP_STATUS_MAX_TOOLS
+      ? value.toolCount
+      : undefined;
+  if (!name || !status || toolCount === undefined || toolCount > MCP_STATUS_MAX_TOOLS) return undefined;
+  const rawError = typeof value.error === 'string' ? value.error : isRecord(value.error) ? value.error.message : value.failureReason;
+  const failureReason = boundedText(rawError);
+  return { name, lifecycle: status, authentication: auth, toolCount, ...(failureReason ? { failureReason } : {}) };
 }
 
 /**
@@ -117,6 +175,7 @@ export class AppServerClient implements AppServerClientTransport {
   private readonly serverRequestListeners = new Set<(request: AppServerServerRequest) => void>();
   private readonly pendingServerRequests = new Map<string | number, PendingServerRequest>();
   private readonly failureListeners = new Set<(error: AppServerUnavailableError) => void>();
+  private readonly mcpRuntimeStatuses = new Map<string, CodexMcpRuntimeServerStatus>();
   private child: ChildProcess | undefined;
   private startPromise: Promise<void> | undefined;
   private nextId = 0;
@@ -225,6 +284,43 @@ export class AppServerClient implements AppServerClientTransport {
     return () => this.failureListeners.delete(listener);
   }
 
+  getMcpRuntimeStatus(): CodexMcpRuntimeStatus {
+    if (this.failure) return { available: false, reason: this.failure.message, servers: [] };
+    if (!this.initialized) return { available: false, reason: 'Codex App Server transport is not initialized', servers: [] };
+    return { available: true, servers: [...this.mcpRuntimeStatuses.values()].sort((a, b) => a.name.localeCompare(b.name)) };
+  }
+
+  async refreshMcpRuntimeStatus(): Promise<CodexMcpRuntimeStatus> {
+    if (this.failure) throw this.failure;
+    if (!this.initialized) throw new AppServerUnavailableError('Codex App Server transport is not initialized');
+    const statuses = new Map<string, CodexMcpRuntimeServerStatus>();
+    const cursors = new Set<string>();
+    let cursor: string | undefined;
+    for (let page = 0; page < MCP_STATUS_MAX_PAGES && statuses.size < MCP_STATUS_MAX_SERVERS; page += 1) {
+      const result = await this.request<unknown>('mcpServerStatus/list', {
+        detail: 'toolsAndAuthOnly',
+        limit: MCP_STATUS_MAX_SERVERS,
+        ...(cursor ? { cursor } : {}),
+      });
+      const body = isRecord(result) ? result : undefined;
+      const data = Array.isArray(body?.data) ? body.data : [];
+      for (const entry of data) {
+        const normalized = normalizeMcpRuntimeServerStatus(entry);
+        if (normalized) statuses.set(normalized.name, normalized);
+        if (statuses.size >= MCP_STATUS_MAX_SERVERS) break;
+      }
+      const nextCursor = typeof body?.nextCursor === 'string' && body.nextCursor.length > 0 && body.nextCursor.length <= MCP_STATUS_MAX_CURSOR_LENGTH
+        ? body.nextCursor
+        : undefined;
+      if (!nextCursor || cursors.has(nextCursor)) break;
+      cursors.add(nextCursor);
+      cursor = nextCursor;
+    }
+    this.mcpRuntimeStatuses.clear();
+    for (const [name, status] of statuses) this.mcpRuntimeStatuses.set(name, status);
+    return this.getMcpRuntimeStatus();
+  }
+
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
@@ -300,7 +396,34 @@ export class AppServerClient implements AppServerClientTransport {
       jsonrpc: '2.0', method: message.method,
       ...(Object.prototype.hasOwnProperty.call(message, 'params') ? { params: message.params } : {}),
     };
+    this.applyMcpRuntimeStatusUpdate(notification);
     for (const listener of this.listeners) listener(notification);
+  }
+
+  private applyMcpRuntimeStatusUpdate(notification: AppServerNotification): void {
+    if (notification.method !== 'mcpServer/startupStatus/updated') return;
+    const params = isRecord(notification.params) ? notification.params : undefined;
+    const raw = params?.server ?? params;
+    const normalized = normalizeMcpRuntimeServerStatus(raw);
+    if (normalized) {
+      this.mcpRuntimeStatuses.set(normalized.name, normalized);
+      return;
+    }
+    // The documented notification only carries startup fields. Merge those
+    // into an existing, already-sanitized list entry; never synthesize a new
+    // server from partial protocol data.
+    if (!isRecord(raw)) return;
+    const name = boundedText(raw.name);
+    const status = lifecycle(raw.status);
+    const previous = name ? this.mcpRuntimeStatuses.get(name) : undefined;
+    if (!name || !status || !previous) return;
+    const rawError = typeof raw.error === 'string' ? raw.error : isRecord(raw.error) ? raw.error.message : raw.failureReason;
+    const failureReason = boundedText(rawError);
+    this.mcpRuntimeStatuses.set(name, {
+      ...previous,
+      lifecycle: status,
+      ...(failureReason ? { failureReason } : {}),
+    });
   }
 
   private rejectUnclaimedServerRequest(pending: PendingServerRequest, failureReason = 'Unsupported App Server request in preview'): void {
@@ -393,6 +516,7 @@ export class AppServerClient implements AppServerClientTransport {
       ? error
       : new AppServerUnavailableError(error.message);
     this.failure = unavailable;
+    this.mcpRuntimeStatuses.clear();
     this.initialized = false;
     this.clearInitializationTimeout();
     for (const pending of this.pending.values()) pending.reject(unavailable);

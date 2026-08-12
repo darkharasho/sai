@@ -33,6 +33,8 @@ function harness() {
       return responder;
     }),
     onFailure: vi.fn((listener) => { failures.add(listener); return () => failures.delete(listener); }),
+    getMcpRuntimeStatus: vi.fn(() => ({ available: true, servers: [] })),
+    refreshMcpRuntimeStatus: vi.fn(async () => ({ available: true, servers: [] })),
     destroy: vi.fn(),
   };
   const emitted: Array<Record<string, unknown>> = [];
@@ -81,6 +83,43 @@ async function settle(): Promise<void> {
 }
 
 describe('AppServerBackend', () => {
+  it('refreshes MCP runtime state from the client that owns the requested scope', async () => {
+    const makeClient = (name: string): AppServerClientTransport => ({
+      failureReason: undefined,
+      start: vi.fn(async () => undefined),
+      request: vi.fn(async (method: string) => method === 'thread/start'
+        ? { thread: { id: `${name}-thread` } }
+        : {}),
+      notify: vi.fn(),
+      onNotification: vi.fn(() => () => undefined),
+      onServerRequest: vi.fn(() => () => undefined),
+      claimServerRequest: vi.fn(),
+      onFailure: vi.fn(() => () => undefined),
+      getMcpRuntimeStatus: vi.fn(() => ({ available: true, servers: [] })),
+      refreshMcpRuntimeStatus: vi.fn(async () => ({ available: true, servers: [{
+        name, lifecycle: 'running' as const, authentication: 'unknown' as const, toolCount: 1,
+      }] })),
+      destroy: vi.fn(),
+    });
+    const standard = makeClient('standard');
+    const orchestrator = makeClient('orchestrator');
+    const backend = new AppServerBackend({
+      createClient: ({ experimentalApi }) => experimentalApi ? orchestrator : standard,
+      registerWorkspace: vi.fn(),
+    });
+    await backend.start({ projectPath: '/repo', scope: 'chat' });
+    await backend.start({ projectPath: '/repo', scope: 'orchestrator:one', kind: 'orchestrator' });
+
+    await expect(backend.getMcpRuntimeStatus('/repo', 'chat')).resolves.toEqual(expect.objectContaining({
+      servers: [expect.objectContaining({ name: 'standard' })],
+    }));
+    await expect(backend.getMcpRuntimeStatus('/repo', 'orchestrator:one')).resolves.toEqual(expect.objectContaining({
+      servers: [expect.objectContaining({ name: 'orchestrator' })],
+    }));
+    expect(standard.refreshMcpRuntimeStatus).toHaveBeenCalledOnce();
+    expect(orchestrator.refreshMcpRuntimeStatus).toHaveBeenCalledOnce();
+  });
+
   it('verifies an isolated no-op Dynamic Tool round-trip before enabling Swarm', async () => {
     const h = harness();
     h.responses.set('thread/start', { thread: { id: 'probe-thread' } });
@@ -159,6 +198,8 @@ describe('AppServerBackend', () => {
           return responder;
         }),
         onFailure: vi.fn(() => () => undefined),
+        getMcpRuntimeStatus: vi.fn(() => ({ available: true, servers: [] })),
+        refreshMcpRuntimeStatus: vi.fn(async () => ({ available: true, servers: [] })),
         destroy: vi.fn(),
       };
       return {
