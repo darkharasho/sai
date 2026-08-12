@@ -51,6 +51,16 @@ describe('mapCodexSdkEvent', () => {
     expect(mapCodexSdkEvent({ type: 'turn.started' } satisfies ThreadEvent, ctx)).toEqual([]);
   });
 
+  it.each(['item.started', 'item.updated', 'item.completed'] as const)(
+    'ignores an unknown %s item without throwing',
+    (type) => {
+      expect(mapCodexSdkEvent({
+        type,
+        item: { id: 'future-item', type: 'future_item' },
+      } as unknown as ThreadEvent, ctx)).toEqual([]);
+    },
+  );
+
   describe('item.started', () => {
     it('maps a legacy collaboration start to running agent activity', () => {
       const event = {
