@@ -173,9 +173,11 @@ export interface PendingCodexUserInput {
   requestHandle: string;
   questions: Array<{
     id: string;
+    header: string;
     prompt: string;
     options?: Array<{ id: string; label: string; description?: string }>;
     allowOther?: boolean;
+    isSecret?: boolean;
   }>;
   /** Present only when the server supplied an automatic-resolution deadline. */
   autoResolutionMs?: number;

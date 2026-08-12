@@ -7,7 +7,7 @@ import {
   type AppServerServerRequestResponder,
 } from './appServerClient';
 import { mapAppServerEvent } from './appServerEventMap';
-import { isCodexUserInputResponse, normalizeCodexModelOption, codexScope, codexScopeKey, type CodexAppServerPreviewStatus, type CodexApprovalDecision, type CodexApprovalMetadata, type CodexApprovalResult, type CodexBackend, type CodexMcpElicitationDecision, type CodexMcpElicitationForm, type CodexMcpElicitationUrl, type CodexModelResult, type CodexSendArgs, type CodexSessionKind, type CodexStartArgs, type CodexUserInputQuestion, type CodexUserInputResponse } from './types';
+import { isCodexUserInputResponse, normalizeCodexModelOption, codexScope, codexScopeKey, type CodexAppServerPreviewStatus, type CodexApprovalDecision, type CodexApprovalMetadata, type CodexApprovalResult, type CodexBackend, type CodexMcpElicitationDecision, type CodexMcpElicitationForm, type CodexMcpElicitationUrl, type CodexModelResult, type CodexSendArgs, type CodexSessionKind, type CodexStartArgs, type CodexUserInputAnswers, type CodexUserInputQuestion, type CodexUserInputResponse } from './types';
 import type { SaiEnvelope } from './sdkEventMap';
 import { getOrCreate as getOrCreateWorkspace } from '../workspace';
 
@@ -211,8 +211,9 @@ function userInputQuestions(params: Record<string, unknown>): CodexUserInputQues
   for (const value of params.questions) {
     const question = record(value);
     const id = boundedText(question?.id, 128);
+    const header = boundedText(question?.header, 256);
     const prompt = boundedText(question?.question ?? question?.prompt);
-    if (!id || !prompt || ids.has(id)) return undefined;
+    if (!id || !header || !prompt || ids.has(id)) return undefined;
     ids.add(id);
     let options: CodexUserInputQuestion['options'];
     if (question?.options !== undefined) {
@@ -232,7 +233,7 @@ function userInputQuestions(params: Record<string, unknown>): CodexUserInputQues
         options.push({ id: optionId, label, ...(description ? { description } : {}) });
       }
     }
-    normalized.push({ id, prompt, ...(options ? { options } : {}), ...(question?.isOther === true ? { allowOther: true } : {}) });
+    normalized.push({ id, header, prompt, ...(options ? { options } : {}), ...(question?.isOther === true ? { allowOther: true } : {}), ...(question?.isSecret === true ? { isSecret: true } : {}) });
   }
   return normalized;
 }
@@ -844,14 +845,14 @@ export class AppServerBackend implements CodexBackend {
       : undefined;
   }
 
-  private userInputResponse(questions: CodexUserInputQuestion[], response: CodexUserInputResponse): { answers: Record<string, string[]> } | undefined {
+  private userInputResponse(questions: CodexUserInputQuestion[], response: CodexUserInputResponse): { answers: CodexUserInputAnswers } | undefined {
     if (response.type === 'cancel') return { answers: {} };
     const { answers } = response;
     if (!answers || typeof answers !== 'object' || Array.isArray(answers)) return undefined;
     const ids = questions.map((question) => question.id);
     if (Object.keys(answers).length !== ids.length || Object.keys(answers).some((id) => !ids.includes(id))) return undefined;
     const valid = questions.every((question) => {
-      const values = answers[question.id];
+      const values = answers[question.id]?.answers;
       if (!Array.isArray(values)) return false;
       if (values.length < 1 || values.length > MAX_OPTIONS || values.some((value) => typeof value !== 'string' || value.length < 1 || value.length > MAX_TEXT)) return false;
       if (!question.options) return values.length === 1;

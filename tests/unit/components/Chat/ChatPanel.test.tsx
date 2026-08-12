@@ -253,12 +253,12 @@ describe('ChatPanel', () => {
     const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
 
     await act(async () => {
-      handler({ type: 'user_input_needed', provider: 'codex', requestHandle: 'question-1', projectPath: '/project', scope: 'scope-a', questions: [{ id: 'style', prompt: 'Choose style', options: [{ id: 'brief', label: 'Brief' }] }] });
+      handler({ type: 'user_input_needed', provider: 'codex', requestHandle: 'question-1', projectPath: '/project', scope: 'scope-a', questions: [{ id: 'style', header: 'Response style', prompt: 'Choose style', options: [{ id: 'brief', label: 'Brief' }] }] });
     });
     fireEvent.click(screen.getByLabelText('Brief'));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Submit' })); });
     expect(mockSai.codexAppServerAnswerUserInput).toHaveBeenCalledWith('/project', 'scope-a', 'question-1', {
-      type: 'answers', answers: { style: ['brief'] },
+      type: 'answers', answers: { style: { answers: ['brief'] } },
     });
     expect(screen.getByTestId('codex-user-input-request')).toBeTruthy();
 
@@ -276,7 +276,7 @@ describe('ChatPanel', () => {
     const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
 
     await act(async () => {
-      handler({ type: 'user_input_needed', provider: 'codex', requestHandle: 'cancel-question', projectPath: '/project', scope: 'scope-a', questions: [{ id: 'style', prompt: 'Choose style', options: [{ id: 'brief', label: 'Brief' }] }] });
+      handler({ type: 'user_input_needed', provider: 'codex', requestHandle: 'cancel-question', projectPath: '/project', scope: 'scope-a', questions: [{ id: 'style', header: 'Response style', prompt: 'Choose style', options: [{ id: 'brief', label: 'Brief' }] }] });
     });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Cancel' })); });
 
@@ -291,7 +291,7 @@ describe('ChatPanel', () => {
     const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
 
     await act(async () => {
-      handler({ type: 'user_input_needed', provider: 'codex', requestHandle: 'question-terminal', projectPath: '/project', scope: 'scope-a', questions: [{ id: 'style', prompt: 'Choose style', options: [{ id: 'brief', label: 'Brief' }] }] });
+      handler({ type: 'user_input_needed', provider: 'codex', requestHandle: 'question-terminal', projectPath: '/project', scope: 'scope-a', questions: [{ id: 'style', header: 'Response style', prompt: 'Choose style', options: [{ id: 'brief', label: 'Brief' }] }] });
       handler({ type: 'mcp_elicitation_needed', provider: 'codex', requestHandle: 'mcp-terminal', mode: 'url', serverName: 'Calendar', message: 'Continue login', url: 'https://calendar.test/login', projectPath: '/project', scope: 'scope-a' });
     });
     expect(screen.getByTestId('codex-user-input-request')).toBeTruthy();
@@ -310,7 +310,7 @@ describe('ChatPanel', () => {
     const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
 
     await act(async () => {
-      handler({ type: 'user_input_needed', requestHandle: 'sdk-question', projectPath: '/project', scope: 'scope-a', questions: [{ id: 'style', prompt: 'Choose style' }] });
+      handler({ type: 'user_input_needed', requestHandle: 'sdk-question', projectPath: '/project', scope: 'scope-a', questions: [{ id: 'style', header: 'Response style', prompt: 'Choose style' }] });
       handler({ type: 'mcp_elicitation_needed', requestHandle: 'sdk-mcp', mode: 'url', serverName: 'SDK', message: 'Ignore', url: 'https://example.test' });
     });
 

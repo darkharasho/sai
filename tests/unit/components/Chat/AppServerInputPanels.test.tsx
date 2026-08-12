@@ -8,7 +8,7 @@ describe('UserInputRequestPanel', () => {
     const onSubmit = vi.fn();
     render(
       <UserInputRequestPanel
-        request={{ requestHandle: 'question-1', questions: [{ id: 'style', prompt: 'Choose style', options: [{ id: 'brief', label: 'Brief' }, { id: 'detailed', label: 'Detailed' }] }], autoResolutionMs: 60_000 }}
+        request={{ requestHandle: 'question-1', questions: [{ id: 'style', header: 'Response style', prompt: 'Choose style', options: [{ id: 'brief', label: 'Brief' }, { id: 'detailed', label: 'Detailed' }] }], autoResolutionMs: 60_000 }}
         onSubmit={onSubmit}
         onCancel={vi.fn()}
       />,
@@ -18,7 +18,25 @@ describe('UserInputRequestPanel', () => {
     expect(screen.getByText(/resolves automatically/i)).toBeTruthy();
     fireEvent.click(screen.getByLabelText('Brief'));
     fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
-    expect(onSubmit).toHaveBeenCalledWith({ style: ['brief'] });
+    expect(onSubmit).toHaveBeenCalledWith({ style: { answers: ['brief'] } });
+  });
+
+  it('shows a bounded App Server header and masks secret free-form answers', () => {
+    const onSubmit = vi.fn();
+    render(
+      <UserInputRequestPanel
+        request={{ requestHandle: 'secret-1', questions: [{ id: 'token', header: 'Access token', prompt: 'Paste token', isSecret: true }] }}
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Access token')).toBeTruthy();
+    const input = screen.getByLabelText('Paste token');
+    expect(input).toHaveAttribute('type', 'password');
+    fireEvent.change(input, { target: { value: 'secret-value' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+    expect(onSubmit).toHaveBeenCalledWith({ token: { answers: ['secret-value'] } });
   });
 });
 

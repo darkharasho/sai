@@ -41,13 +41,22 @@ export type CodexApprovalResult =
 /** A bounded, renderer-safe question shape from App Server. */
 export interface CodexUserInputQuestion {
   id: string;
+  /** Short protocol section label, bounded before renderer exposure. */
+  header: string;
   prompt: string;
   options?: Array<{ id: string; label: string; description?: string }>;
   allowOther?: boolean;
+  /** Render free-form answers as a masked password control. */
+  isSecret?: boolean;
 }
 
 /** App Server requires one or more selected option labels for each question. */
-export type CodexUserInputAnswers = Record<string, string[]>;
+export interface CodexUserInputAnswer {
+  answers: string[];
+}
+
+/** Exact `ToolRequestUserInputResponse.answers` wire shape. */
+export type CodexUserInputAnswers = Record<string, CodexUserInputAnswer>;
 
 /**
  * A renderer response to an App Server `tool/requestUserInput` request.
@@ -89,11 +98,14 @@ const CODEX_INPUT_MAX_TEXT = 2_000;
 export function isCodexUserInputAnswers(value: unknown): value is CodexUserInputAnswers {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const entries = Object.entries(value as Record<string, unknown>);
-  return entries.length <= CODEX_INPUT_MAX_FIELDS && entries.every(([id, selections]) =>
-    id.length > 0 && id.length <= 128 && Array.isArray(selections)
-    && selections.length > 0 && selections.length <= CODEX_INPUT_MAX_OPTIONS
-    && selections.every((selection) => typeof selection === 'string' && selection.length > 0 && selection.length <= CODEX_INPUT_MAX_TEXT),
-  );
+  return entries.length <= CODEX_INPUT_MAX_FIELDS && entries.every(([id, answer]) => {
+    if (id.length === 0 || id.length > 128 || !answer || typeof answer !== 'object' || Array.isArray(answer)) return false;
+    const fields = Object.entries(answer as Record<string, unknown>);
+    const selections = (answer as CodexUserInputAnswer).answers;
+    return fields.length === 1 && fields[0][0] === 'answers' && Array.isArray(selections)
+      && selections.length > 0 && selections.length <= CODEX_INPUT_MAX_OPTIONS
+      && selections.every((selection) => typeof selection === 'string' && selection.length > 0 && selection.length <= CODEX_INPUT_MAX_TEXT);
+  });
 }
 
 export function isCodexUserInputResponse(value: unknown): value is CodexUserInputResponse {

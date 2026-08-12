@@ -489,7 +489,7 @@ describe('AppServerBackend', () => {
     await settle();
     const responder = h.serverRequest('input', 'item/tool/requestUserInput', {
       threadId: 'thread-a', turnId: 'turn-a', autoResolutionMs: 1200,
-      questions: [{ id: 'format', question: 'Choose a format', options: [
+      questions: [{ id: 'format', header: 'Output format', isSecret: true, question: 'Choose a format', options: [
         { label: 'JSON' }, { label: 'YAML' },
       ] }],
     });
@@ -497,15 +497,15 @@ describe('AppServerBackend', () => {
     expect(h.emitted).toContainEqual(expect.objectContaining({
       type: 'user_input_needed', provider: 'codex', requestHandle: 'input',
       projectPath: '/repo', scope: 'a', autoResolutionMs: 1200,
-      questions: [{ id: 'format', prompt: 'Choose a format', options: [
+      questions: [{ id: 'format', header: 'Output format', isSecret: true, prompt: 'Choose a format', options: [
         { id: 'JSON', label: 'JSON' }, { id: 'YAML', label: 'YAML' },
       ] }],
     }));
-    expect(h.backend.answerUserInput('/repo', 'a', 'input', { type: 'answers', answers: { format: ['shell'] } }))
+    expect(h.backend.answerUserInput('/repo', 'a', 'input', { type: 'answers', answers: { format: { answers: ['shell'] } } }))
       .toEqual({ ok: false, code: 'invalid-decision' });
-    expect(h.backend.answerUserInput('/repo', 'a', 'input', { type: 'answers', answers: { format: ['YAML'] } }))
+    expect(h.backend.answerUserInput('/repo', 'a', 'input', { type: 'answers', answers: { format: { answers: ['YAML'] } } }))
       .toEqual({ ok: true });
-    expect(responder.respond).toHaveBeenCalledWith({ answers: { format: ['YAML'] } });
+    expect(responder.respond).toHaveBeenCalledWith({ answers: { format: { answers: ['YAML'] } } });
   });
 
   it('maps an explicit user-input cancellation to the protocol empty-answer response', async () => {
@@ -516,12 +516,27 @@ describe('AppServerBackend', () => {
     h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
     await settle();
     const responder = h.serverRequest('cancel-input', 'item/tool/requestUserInput', {
-      threadId: 'thread-a', turnId: 'turn-a', questions: [{ id: 'format', question: 'Choose', options: [{ label: 'JSON' }] }],
+      threadId: 'thread-a', turnId: 'turn-a', questions: [{ id: 'format', header: 'Format', question: 'Choose', options: [{ label: 'JSON' }] }],
     });
 
     expect(h.backend.answerUserInput('/repo', 'a', 'cancel-input', { type: 'cancel' }))
       .toEqual({ ok: true });
     expect(responder.respond).toHaveBeenCalledWith({ answers: {} });
+  });
+
+  it('cancels user-input requests with an unsafe header before they reach the renderer', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-a' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-a' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
+    await settle();
+    const responder = h.serverRequest('unsafe-header', 'item/tool/requestUserInput', {
+      threadId: 'thread-a', turnId: 'turn-a', questions: [{ id: 'token', header: 'x'.repeat(257), question: 'Paste token' }],
+    });
+
+    expect(responder.respond).toHaveBeenCalledWith({ answers: {} });
+    expect(h.emitted.some((event) => event.type === 'user_input_needed')).toBe(false);
   });
 
   it('rejects malformed cancel responses rather than accepting arbitrary answer data', async () => {
@@ -532,7 +547,7 @@ describe('AppServerBackend', () => {
     h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
     await settle();
     const responder = h.serverRequest('malformed-cancel', 'item/tool/requestUserInput', {
-      threadId: 'thread-a', turnId: 'turn-a', questions: [{ id: 'format', question: 'Choose', options: [{ label: 'JSON' }] }],
+      threadId: 'thread-a', turnId: 'turn-a', questions: [{ id: 'format', header: 'Format', question: 'Choose', options: [{ label: 'JSON' }] }],
     });
 
     expect(h.backend.answerUserInput('/repo', 'a', 'malformed-cancel', { type: 'cancel', answers: { format: ['JSON'] } } as any))
@@ -548,13 +563,13 @@ describe('AppServerBackend', () => {
     h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
     await settle();
     const responder = h.serverRequest('retry-input', 'item/tool/requestUserInput', {
-      threadId: 'thread-a', turnId: 'turn-a', questions: [{ id: 'format', question: 'Choose', options: [{ label: 'JSON' }] }],
+      threadId: 'thread-a', turnId: 'turn-a', questions: [{ id: 'format', header: 'Format', question: 'Choose', options: [{ label: 'JSON' }] }],
     });
     vi.mocked(responder.respond).mockImplementationOnce(() => { throw new Error('closed'); });
 
-    expect(h.backend.answerUserInput('/repo', 'a', 'retry-input', { type: 'answers', answers: { format: ['JSON'] } }))
+    expect(h.backend.answerUserInput('/repo', 'a', 'retry-input', { type: 'answers', answers: { format: { answers: ['JSON'] } } }))
       .toEqual({ ok: false, code: 'not-pending' });
-    expect(h.backend.answerUserInput('/repo', 'a', 'retry-input', { type: 'answers', answers: { format: ['JSON'] } }))
+    expect(h.backend.answerUserInput('/repo', 'a', 'retry-input', { type: 'answers', answers: { format: { answers: ['JSON'] } } }))
       .toEqual({ ok: true });
   });
 
@@ -567,7 +582,7 @@ describe('AppServerBackend', () => {
     await settle();
 
     const responder = h.serverRequest('stale-input', 'item/tool/requestUserInput', {
-      threadId: 'other', turnId: 'turn-a', questions: [{ id: 'x', question: 'Wrong' }],
+      threadId: 'other', turnId: 'turn-a', questions: [{ id: 'x', header: 'Question', question: 'Wrong' }],
     });
 
     expect(responder.respond).toHaveBeenCalledWith({ answers: {} });
@@ -585,7 +600,7 @@ describe('AppServerBackend', () => {
       await vi.runAllTimersAsync();
       const responder = h.serverRequest('timed', 'item/tool/requestUserInput', {
         threadId: 'thread-a', turnId: 'turn-a', autoResolutionMs: 100,
-        questions: [{ id: 'format', question: 'Choose', options: [{ label: 'JSON' }] }],
+        questions: [{ id: 'format', header: 'Format', question: 'Choose', options: [{ label: 'JSON' }] }],
       });
 
       await vi.advanceTimersByTimeAsync(100);
@@ -594,7 +609,7 @@ describe('AppServerBackend', () => {
         type: 'user_input_resolved', provider: 'codex', requestHandle: 'timed',
         projectPath: '/repo', scope: 'a',
       }));
-      expect(h.backend.answerUserInput('/repo', 'a', 'timed', { type: 'answers', answers: { format: ['JSON'] } }))
+      expect(h.backend.answerUserInput('/repo', 'a', 'timed', { type: 'answers', answers: { format: { answers: ['JSON'] } } }))
         .toEqual({ ok: false, code: 'not-pending' });
     } finally {
       vi.useRealTimers();
@@ -711,7 +726,7 @@ describe('AppServerBackend', () => {
     h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
     await settle();
     h.serverRequest('input-end', 'item/tool/requestUserInput', {
-      threadId: 'thread-a', turnId: 'turn-a', questions: [{ id: 'format', question: 'Choose', options: [{ label: 'JSON' }] }],
+      threadId: 'thread-a', turnId: 'turn-a', questions: [{ id: 'format', header: 'Format', question: 'Choose', options: [{ label: 'JSON' }] }],
     });
     h.serverRequest('mcp-end', 'mcpServer/elicitation/request', {
       threadId: 'thread-a', turnId: 'turn-a', serverName: 'calendar', mode: 'url', message: 'Sign in', url: 'https://example.test', elicitationId: 'e-1',
