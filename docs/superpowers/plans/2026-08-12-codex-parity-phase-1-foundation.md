@@ -23,6 +23,75 @@
 - `src/renderer-remote/chat/Composer.tsx` — renders account-aware options with rolling-alias fallback.
 - `sai-mobile/components/Composer.tsx` — removes version-pinned fallback model IDs from native mobile.
 - `tests/unit/remote/bridge-server-chat.test.ts`, `tests/unit/remote/pwa-wire.test.ts`, and new Remote composer tests — cover protocol and visible selection behavior.
+- `electron/services/codexBackend/sdkEventMap.ts` — guarantees that newly introduced Codex JSONL event/item variants cannot abort a parent turn.
+- `tests/unit/electron/codexSdkEventMap.test.ts` — covers the legacy `collab_tool_call` event emitted by Codex subagents and other unknown variants.
+
+### Task 0: Keep new Codex subagent events from aborting their parent turn
+
+**Files:**
+- Modify: `tests/unit/electron/codexSdkEventMap.test.ts`
+- Modify: `electron/services/codexBackend/sdkEventMap.ts`
+
+- [ ] **Step 1: Write the failing legacy collaboration-event regression test**
+
+```ts
+it('drops an unsupported legacy collaboration item instead of returning undefined', () => {
+  const event = {
+    type: 'item.started',
+    item: { id: 'agent-1', type: 'collab_tool_call', tool: 'spawn_agent', status: 'in_progress' },
+  } as unknown as ThreadEvent;
+
+  expect(mapCodexSdkEvent(event, ctx)).toEqual([]);
+});
+
+it('returns an empty envelope list for an unknown top-level event', () => {
+  expect(mapCodexSdkEvent({ type: 'future.event' } as unknown as ThreadEvent, ctx)).toEqual([]);
+});
+```
+
+- [ ] **Step 2: Verify the mapper currently returns `undefined`**
+
+Run: `npm test -- --project unit tests/unit/electron/codexSdkEventMap.test.ts`
+
+Expected: FAIL because `mapCodexSdkEvent()` returns `undefined` for both
+variants; `SdkCodexBackend.runTurn()` then throws `TypeError: envelopes is not
+iterable` while evaluating `for (const envelope of envelopes)`.
+
+- [ ] **Step 3: Make all event/item switches total**
+
+```ts
+function startedItem(item: ThreadItem, ctx: CodexMapContext): SaiEnvelope[] {
+  switch (item.type) {
+    // existing handled cases
+    default:
+      return [];
+  }
+}
+```
+
+Apply the same `default: return []` branch to `updatedItem`, `completedItem`,
+and `mapCodexSdkEvent`. Do not invent a fake tool card from an untyped event;
+the App Server phase owns rich native subagent activity. This task guarantees
+the parent turn continues and can still emit its final answer.
+
+**Follow-on:** When the Codex App Server transport is introduced, render each
+subagent's lifecycle and activity in SAI instead of suppressing its stream
+events. That work must preserve the parent-session relationship and show
+spawn, progress, completion, and failure states without treating them as
+ordinary parent tool calls.
+
+- [ ] **Step 4: Verify mapper and backend regression coverage**
+
+Run: `npm test -- --project unit tests/unit/electron/codexSdkEventMap.test.ts tests/unit/electron/codexSdkBackend.test.ts`
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit the crash guard**
+
+```bash
+git add electron/services/codexBackend/sdkEventMap.ts tests/unit/electron/codexSdkEventMap.test.ts
+git commit -m "fix(codex): tolerate collaboration stream events"
+```
 
 ### Task 1: Lock the safe Codex capability contract
 
