@@ -146,6 +146,29 @@ describe('mapAppServerEvent', () => {
     }]);
   });
 
+  it('wraps failed structured MCP completion content for the renderer', () => {
+    expect(mapAppServerEvent({
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1', turnId: 'turn-1',
+        item: {
+          id: 'mcp-failed', type: 'mcpToolCall', status: 'failed',
+          result: { content: [{ type: 'text', text: 'The remote service rejected the request.' }] },
+        },
+      },
+    }, ctx)).toEqual([{
+      type: 'user', ...metadata,
+      message: { content: [{
+        type: 'tool_result', tool_use_id: 'mcp-failed', is_error: true,
+        content: [
+          { type: 'text', text: '<tool_error>' },
+          { type: 'text', text: 'The remote service rejected the request.' },
+          { type: 'text', text: '</tool_error>' },
+        ],
+      }] },
+    }]);
+  });
+
   it.each([
     { type: 'commandExecution', item: { aggregatedOutput: 'declined', exitCode: 0, status: 'declined' } },
     { type: 'fileChange', item: { changes: [], status: 'cancelled' } },

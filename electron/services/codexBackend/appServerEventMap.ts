@@ -63,15 +63,32 @@ function toolResult(
   isError: boolean,
   ctx: AppServerMapContext,
 ): SaiEnvelope {
+  const compatibleContent = isError ? toolErrorContent(content) : content;
   return {
     type: 'user', ...base(ctx), message: {
       content: [{
         type: 'tool_result', tool_use_id: id,
-        content: isError && typeof content === 'string' ? `<tool_error>${content || 'Tool failed'}</tool_error>` : content,
+        content: compatibleContent,
         is_error: isError,
       }],
     },
   };
+}
+
+function toolErrorContent(content: ToolResultContent): ToolResultContent {
+  if (typeof content === 'string') {
+    return `<tool_error>${content || 'Tool failed'}</tool_error>`;
+  }
+
+  const hasMessage = content.some(
+    (block) => block.type === 'text' && block.text.trim().length > 0,
+  );
+  return [
+    { type: 'text', text: '<tool_error>' },
+    ...(!hasMessage ? [{ type: 'text' as const, text: 'Tool failed' }] : []),
+    ...content,
+    { type: 'text', text: '</tool_error>' },
+  ];
 }
 
 function stableJson(value: unknown): string {
