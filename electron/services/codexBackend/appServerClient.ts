@@ -15,17 +15,6 @@ interface JsonRpcError {
   data?: unknown;
 }
 
-interface JsonRpcResponse {
-  jsonrpc?: string;
-  id: number | string | null;
-  result?: unknown;
-  error?: JsonRpcError;
-}
-
-interface JsonRpcRequest extends AppServerNotification {
-  id: number | string;
-}
-
 export class AppServerProtocolError extends Error {
   constructor(message: string) {
     super(message);
@@ -40,7 +29,7 @@ export class AppServerUnavailableError extends AppServerProtocolError {
   }
 }
 
-export interface AppServerClient {
+export interface AppServerClientTransport {
   readonly failureReason: string | undefined;
   start(): Promise<void>;
   request<T = unknown>(method: string, params?: unknown): Promise<T>;
@@ -66,6 +55,7 @@ export interface AppServerClientDeps {
 interface PendingRequest {
   resolve: (result: unknown) => void;
   reject: (error: Error) => void;
+  failOnResponseError: boolean;
 }
 
 function messageText(error: JsonRpcError): string {
@@ -76,12 +66,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+function isJsonRpcError(value: unknown): value is JsonRpcError {
+  return isRecord(value) && typeof value.code === 'number' && typeof value.message === 'string';
+}
+
+function isRequestId(value: unknown): value is number | string {
+  return typeof value === 'number' || typeof value === 'string';
+}
+
 /**
  * Minimal, lifecycle-safe transport for the Codex App Server preview.
  * Its protocol boundary is deliberately limited: server initiated requests are
  * rejected until a UI is available to handle them safely.
  */
-export class AppServerClient implements AppServerClient {
+export class AppServerClient implements AppServerClientTransport {
   private readonly spawnImpl: AppServerSpawn;
   private readonly resolveExecutable: typeof resolveBundledCodex;
   private readonly getEnv: () => NodeJS.ProcessEnv;
@@ -123,10 +121,15 @@ export class AppServerClient implements AppServerClient {
       this.child = this.spawnImpl(bundled.executablePath, ['app-server'], {
         env,
         shell: false,
-        stdio: ['pipe', 'pipe', 'pipe'],
+        // Diagnostics are intentionally ignored. A piped-but-unread stderr can
+        // fill its OS buffer and block this long-lived child process.
+        stdio: ['pipe', 'pipe', 'ignore'],
       });
       this.attach(this.child);
-      this.startPromise = this.sendRequest('initialize', { clientInfo: this.clientInfo }, true)
+      this.startPromise = this.sendRequest('initialize', { clientInfo: this.clientInfo }, {
+        allowBeforeInitialized: true,
+        failOnResponseError: true,
+      })
         .then(() => {
           this.write({ jsonrpc: '2.0', method: 'initialized' });
           this.initialized = true;
@@ -165,8 +168,6 @@ export class AppServerClient implements AppServerClient {
     if (this.destroyed) return;
     this.destroyed = true;
     this.fail(new AppServerUnavailableError('Codex App Server transport was destroyed'));
-    try { this.child?.kill(); } catch { /* process already exited */ }
-    this.child = undefined;
   }
 
   private attach(child: ChildProcess): void {
@@ -198,7 +199,7 @@ export class AppServerClient implements AppServerClient {
       return;
     }
     if ('id' in message && !('method' in message)) {
-      this.handleResponse(message as JsonRpcResponse);
+      this.handleResponse(message);
       return;
     }
     if (typeof message.method !== 'string') {
@@ -206,13 +207,19 @@ export class AppServerClient implements AppServerClient {
       return;
     }
     if ('id' in message) {
-      const request = message as JsonRpcRequest;
-      this.write({
-        jsonrpc: '2.0', id: request.id,
-        error: { code: -32601, message: 'Unsupported App Server request in preview' },
-      });
+      if (!isRequestId(message.id)) {
+        this.fail(new AppServerProtocolError('Codex App Server sent an invalid JSON-RPC request ID'));
+        return;
+      }
+      try {
+        this.write({
+          jsonrpc: '2.0', id: message.id,
+          error: { code: -32601, message: 'Unsupported App Server request in preview' },
+        });
+      } catch {
+        return;
+      }
       this.fail(new AppServerUnavailableError('Unsupported App Server request in preview'));
-      try { this.child?.kill(); } catch { /* process already exited */ }
       return;
     }
     const notification: AppServerNotification = {
@@ -222,7 +229,7 @@ export class AppServerClient implements AppServerClient {
     for (const listener of this.listeners) listener(notification);
   }
 
-  private handleResponse(message: JsonRpcResponse): void {
+  private handleResponse(message: Record<string, unknown>): void {
     if (typeof message.id !== 'number') {
       this.fail(new AppServerProtocolError('Codex App Server returned an unexpected response ID'));
       return;
@@ -233,16 +240,31 @@ export class AppServerClient implements AppServerClient {
       return;
     }
     this.pending.delete(message.id);
-    if (message.error) pending.reject(new AppServerProtocolError(messageText(message.error)));
-    else pending.resolve(message.result);
+    if (message.error !== undefined) {
+      if (!isJsonRpcError(message.error)) {
+        const error = new AppServerProtocolError('Codex App Server returned an invalid JSON-RPC error');
+        if (pending.failOnResponseError) this.fail(error);
+        pending.reject(this.failure ?? error);
+        return;
+      }
+      const error = new AppServerProtocolError(messageText(message.error));
+      if (pending.failOnResponseError) this.fail(error);
+      pending.reject(this.failure ?? error);
+      return;
+    }
+    pending.resolve(message.result);
   }
 
-  private sendRequest(method: string, params?: unknown, allowBeforeInitialized = false): Promise<unknown> {
-    if (!allowBeforeInitialized && !this.initialized) return Promise.reject(new AppServerUnavailableError('Codex App Server transport is not initialized'));
+  private sendRequest(
+    method: string,
+    params?: unknown,
+    options: { allowBeforeInitialized?: boolean; failOnResponseError?: boolean } = {},
+  ): Promise<unknown> {
+    if (!options.allowBeforeInitialized && !this.initialized) return Promise.reject(new AppServerUnavailableError('Codex App Server transport is not initialized'));
     if (this.failure) return Promise.reject(this.failure);
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      this.pending.set(id, { resolve, reject, failOnResponseError: options.failOnResponseError ?? false });
       try { this.write({ jsonrpc: '2.0', id, method, ...(params === undefined ? {} : { params }) }); }
       catch (error) {
         this.pending.delete(id);
@@ -253,7 +275,12 @@ export class AppServerClient implements AppServerClient {
 
   private write(message: Record<string, unknown>): void {
     if (!this.child?.stdin || this.destroyed) throw this.failure ?? new AppServerUnavailableError('Codex App Server transport is unavailable');
-    this.child.stdin.write(`${JSON.stringify(message)}\n`);
+    try {
+      this.child.stdin.write(`${JSON.stringify(message)}\n`);
+    } catch (error) {
+      this.fail(new AppServerUnavailableError(`Codex App Server transport write failed: ${errorText(error)}`));
+      throw this.failure;
+    }
   }
 
   private fail(error: AppServerProtocolError): void {
@@ -266,6 +293,9 @@ export class AppServerClient implements AppServerClient {
     for (const pending of this.pending.values()) pending.reject(unavailable);
     this.pending.clear();
     for (const listener of this.failureListeners) listener(unavailable);
+    const child = this.child;
+    this.child = undefined;
+    try { child?.kill(); } catch { /* process already exited */ }
   }
 }
 

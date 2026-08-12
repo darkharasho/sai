@@ -47,9 +47,42 @@ describe('AppServerClient', () => {
 
     expect(spawn).toHaveBeenCalledWith('/app/codex', ['app-server'], expect.objectContaining({
       shell: false,
-      stdio: ['pipe', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'ignore'],
     }));
     expect(JSON.parse(child.stdin.write.mock.calls[1][0])).toEqual({ jsonrpc: '2.0', method: 'initialized' });
+  });
+
+  it('fails closed when initialize returns a JSON-RPC error', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    const failures: string[] = [];
+    client.onFailure((error) => failures.push(error.message));
+
+    const ready = client.start();
+    reply(child, { jsonrpc: '2.0', id: 0, error: { code: -32000, message: 'initialization rejected' } });
+
+    await expect(ready).rejects.toThrow(/initialization rejected/i);
+    expect(client.failureReason).toMatch(/initialization rejected/i);
+    expect(failures).toHaveLength(1);
+    expect(child.kill).toHaveBeenCalledOnce();
+  });
+
+  it('fails closed when writing initialized fails', async () => {
+    const child = fakeChild();
+    child.stdin.write.mockImplementationOnce(() => true).mockImplementationOnce(() => {
+      throw new Error('stdin closed');
+    });
+    const { client } = createClient(child);
+    const failures: string[] = [];
+    client.onFailure((error) => failures.push(error.message));
+
+    const ready = client.start();
+    reply(child, { jsonrpc: '2.0', id: 0, result: {} });
+
+    await expect(ready).rejects.toThrow(/write failed: stdin closed/i);
+    expect(client.failureReason).toMatch(/write failed: stdin closed/i);
+    expect(failures).toEqual([expect.stringMatching(/write failed: stdin closed/i)]);
+    expect(child.kill).toHaveBeenCalledOnce();
   });
 
   it('serializes requests as newline-delimited JSON and correlates their responses', async () => {
@@ -91,6 +124,22 @@ describe('AppServerClient', () => {
     expect(client.failureReason).toBe('Unsupported App Server request in preview');
     expect(failures).toEqual(['Unsupported App Server request in preview']);
     expect(() => client.request('thread/start', {})).toThrow(/Unsupported App Server request in preview/);
+  });
+
+  it('fails closed rather than throwing from a server request when its error response cannot be written', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+    child.stdin.write.mockImplementationOnce(() => {
+      throw new Error('stdin closed');
+    });
+    const pending = client.request('thread/start', {});
+
+    expect(() => reply(child, { jsonrpc: '2.0', id: 99, method: 'item/commandExecution/requestApproval', params: {} })).not.toThrow();
+
+    await expect(pending).rejects.toThrow(/write failed: stdin closed/i);
+    expect(client.failureReason).toMatch(/write failed: stdin closed/i);
+    expect(child.kill).toHaveBeenCalledOnce();
   });
 
   it('routes notifications to subscribers', async () => {
