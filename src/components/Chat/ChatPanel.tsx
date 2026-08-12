@@ -624,6 +624,11 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const dockTransition = useReducedMotionTransition(SPRING.dock);
   const followBtnTransition = useReducedMotionTransition(SPRING.flick);
   const turnSeqRef = useRef(0); // tracks the active turn's sequence number
+  useEffect(() => {
+    // Incoming events are scoped by project/scope, not session. Retire the
+    // old sequence so late child activity cannot revive a selected new chat.
+    turnSeqRef.current = -1;
+  }, [sessionId, projectPath, claudeScope]);
   const [ready, setReady] = useState(false);
   // True from the moment a queued follow-up is shifted for sending until the new
   // turn's `streaming_start` arrives. Bridges the gap where the prior turn's
@@ -868,6 +873,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       }
 
       if (msg.type === 'subagent_activity' && typeof msg.agentId === 'string') {
+        if (msg.turnSeq != null && msg.turnSeq !== turnSeqRef.current) return;
         const terminal = msg.status === 'completed' || msg.status === 'failed' || msg.status === 'cancelled';
         setActiveSubagents(prev => {
           const next = new Map(prev);

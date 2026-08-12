@@ -683,6 +683,31 @@ describe('ChatPanel', () => {
     });
   });
 
+  it('rejects a late native-subagent event from the previous Codex turn after a session switch', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const, sessionId: 'session-1' };
+    const { container, rerender } = render(<ChatPanel {...props} isStreaming={false} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'streaming_start', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+      handler({ type: 'subagent_activity', agentId: 'child-1', status: 'running', summary: 'Current child', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+    });
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+    expect(latestChatInputProps.isStreaming).toBe(true);
+
+    rerender(<ChatPanel {...props} sessionId="session-2" isStreaming={false} />);
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
+    });
+
+    await act(async () => {
+      handler({ type: 'subagent_activity', agentId: 'child-1', status: 'running', summary: 'Late old child', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+    });
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
+    expect(latestChatInputProps.isStreaming).toBe(false);
+  });
+
   it('does not persist native-subagent activity across an unmount and fresh mount', async () => {
     const props = { ...baseProps(), aiProvider: 'codex' as const };
     const first = render(<ChatPanel {...props} isStreaming={false} />);
