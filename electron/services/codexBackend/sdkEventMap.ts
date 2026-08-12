@@ -181,6 +181,8 @@ function startedItem(item: ThreadItem, ctx: CodexMapContext): SaiEnvelope[] {
     case 'reasoning':
     case 'error':
       return [];
+    default:
+      return [];
   }
 }
 
@@ -195,6 +197,8 @@ function updatedItem(item: ThreadItem, ctx: CodexMapContext): SaiEnvelope[] {
     case 'mcp_tool_call':
     case 'web_search':
     case 'error':
+      return [];
+    default:
       return [];
   }
 }
@@ -240,6 +244,8 @@ function completedItem(item: ThreadItem, ctx: CodexMapContext): SaiEnvelope[] {
       return [toolResult(item.id, JSON.stringify(item.items), false, ctx)];
     case 'error':
       return [{ type: 'error', text: item.message, ...base(ctx) }];
+    default:
+      return [];
   }
 }
 
@@ -288,5 +294,7 @@ export function mapCodexSdkEvent(
         { type: 'error', text: event.message, ...base(ctx) },
         { type: 'done', ...base(ctx) },
       ];
+    default:
+      return [];
   }
 }

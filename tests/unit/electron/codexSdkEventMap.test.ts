@@ -52,6 +52,20 @@ describe('mapCodexSdkEvent', () => {
   });
 
   describe('item.started', () => {
+    it('ignores an unsupported legacy collaboration item', () => {
+      const event = {
+        type: 'item.started',
+        item: {
+          id: 'agent-1',
+          type: 'collab_tool_call',
+          tool: 'spawn_agent',
+          status: 'in_progress',
+        },
+      } as unknown as ThreadEvent;
+
+      expect(mapCodexSdkEvent(event, ctx)).toEqual([]);
+    });
+
     it.each([
       {
         label: 'command execution',
@@ -224,6 +238,15 @@ describe('mapCodexSdkEvent', () => {
         .toEqual([]);
     });
 
+    it('ignores an unsupported item update', () => {
+      const event = {
+        type: 'item.updated',
+        item: { id: 'agent-1', type: 'collab_tool_call', tool: 'spawn_agent' },
+      } as unknown as ThreadEvent;
+
+      expect(mapCodexSdkEvent(event, ctx)).toEqual([]);
+    });
+
     it('re-emits the same TodoWrite tool-use id with advanced statuses', () => {
       const startedEvent = {
         type: 'item.started',
@@ -274,6 +297,15 @@ describe('mapCodexSdkEvent', () => {
   });
 
   describe('item.completed', () => {
+    it('ignores an unsupported item completion', () => {
+      const event = {
+        type: 'item.completed',
+        item: { id: 'agent-1', type: 'collab_tool_call', tool: 'spawn_agent' },
+      } as unknown as ThreadEvent;
+
+      expect(mapCodexSdkEvent(event, ctx)).toEqual([]);
+    });
+
     it('maps a nonempty agent message to assistant text', () => {
       const event = {
         type: 'item.completed',
@@ -687,5 +719,9 @@ describe('mapCodexSdkEvent', () => {
 
     expect(event).toEqual(eventBefore);
     expect(localContext).toEqual(contextBefore);
+  });
+
+  it('ignores an unknown top-level event', () => {
+    expect(mapCodexSdkEvent({ type: 'future.event' } as unknown as ThreadEvent, ctx)).toEqual([]);
   });
 });
