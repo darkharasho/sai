@@ -42,6 +42,7 @@ interface PendingApproval {
   readonly runtime: ScopeRuntime;
   readonly active: ActiveTurn;
   readonly responder: AppServerServerRequestResponder;
+  readonly kind: CodexApprovalMetadata['kind'];
 }
 
 const APPROVAL_METHODS = {
@@ -113,6 +114,8 @@ function approvalMetadata(request: AppServerServerRequest): CodexApprovalMetadat
   if (kind === 'command') {
     metadata.command = asText(params.command);
     metadata.cwd = asText(params.cwd);
+    const network = record(params.networkApprovalContext);
+    if (network) metadata.network = { host: asText(network.host), protocol: asText(network.protocol) };
   }
   if (kind === 'file-change') metadata.grantRoot = asText(params.grantRoot);
   if (kind === 'permissions') {
@@ -416,10 +419,10 @@ export class AppServerBackend implements CodexBackend {
       : undefined;
     const active = runtime?.active;
     if (!runtime || !active || active.retired || !active.id || active.id !== ids.turnId || active.threadId !== ids.threadId) {
-      this.declineResponder(responder);
+      this.declineResponder(responder, metadata.kind);
       return;
     }
-    const pending: PendingApproval = { id: request.id, runtime, active, responder };
+    const pending: PendingApproval = { id: request.id, runtime, active, responder, kind: metadata.kind };
     this.pendingApprovals.set(request.id, pending);
     this.emit({
       type: 'approval_needed',
@@ -443,15 +446,17 @@ export class AppServerBackend implements CodexBackend {
     this.pendingApprovals.delete(id);
   }
 
-  private declineResponder(responder: AppServerServerRequestResponder): void {
-    try { responder.respond({ decision: 'decline' }); } catch { /* already resolved or unavailable */ }
+  private declineResponder(responder: AppServerServerRequestResponder, kind: CodexApprovalMetadata['kind']): void {
+    try {
+      responder.respond(kind === 'permissions' ? { permissions: [] } : { decision: 'decline' });
+    } catch { /* already resolved or unavailable */ }
   }
 
   private clearPendingApprovals(runtime: ScopeRuntime, active?: ActiveTurn, respond = true): void {
     for (const [id, pending] of this.pendingApprovals) {
       if (pending.runtime !== runtime || (active && pending.active !== active)) continue;
       this.pendingApprovals.delete(id);
-      if (respond) this.declineResponder(pending.responder);
+      if (respond) this.declineResponder(pending.responder, pending.kind);
     }
   }
 

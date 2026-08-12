@@ -316,8 +316,9 @@ describe('AppServerBackend', () => {
   it.each([
     ['item/commandExecution/requestApproval', {
       threadId: 'thread-a', turnId: 'turn-a', reason: 'Needs to run tests', command: 'npm test', cwd: '/repo',
+      networkApprovalContext: { host: 'registry.npmjs.org', protocol: 'https' },
       availableDecisions: ['accept', 'decline'],
-    }, { toolName: 'Command approval', command: 'npm test', cwd: '/repo', reason: 'Needs to run tests' }],
+    }, { toolName: 'Command approval', command: 'npm test', cwd: '/repo', reason: 'Needs to run tests', network: { host: 'registry.npmjs.org', protocol: 'https' } }],
     ['item/fileChange/requestApproval', {
       threadId: 'thread-a', turnId: 'turn-a', reason: 'Needs write access', grantRoot: '/repo/src',
       availableDecisions: ['accept', 'decline'],
@@ -357,6 +358,22 @@ describe('AppServerBackend', () => {
     });
 
     expect(responder.respond).toHaveBeenCalledWith({ decision: 'decline' });
+    expect(h.emitted.some((event) => event.type === 'approval_needed')).toBe(false);
+  });
+
+  it('declines stale permission requests with an empty permission grant', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-a' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-a' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
+    await settle();
+
+    const responder = h.serverRequest('stale-permission', 'item/permissions/requestApproval', {
+      threadId: 'wrong-thread', turnId: 'turn-a', permissions: [{ kind: 'network' }],
+    });
+
+    expect(responder.respond).toHaveBeenCalledWith({ permissions: [] });
     expect(h.emitted.some((event) => event.type === 'approval_needed')).toBe(false);
   });
 
