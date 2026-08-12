@@ -81,16 +81,40 @@ async function settle(): Promise<void> {
 }
 
 describe('AppServerBackend', () => {
-  it('probes an isolated thread with SAI dynamic tools and archives it before enabling Swarm', async () => {
+  it('verifies an isolated no-op Dynamic Tool round-trip before enabling Swarm', async () => {
     const h = harness();
     h.responses.set('thread/start', { thread: { id: 'probe-thread' } });
+    h.responses.set('turn/start', { turn: { id: 'probe-turn' } });
 
-    await expect(h.backend.getSwarmStatus()).resolves.toEqual({ available: true });
+    const status = h.backend.getSwarmStatus();
+    await settle();
+    const responder = h.serverRequest('probe-call', 'item/tool/call', {
+      threadId: 'probe-thread', turnId: 'probe-turn',
+      tool: 'sai_swarm_capability_probe', arguments: {},
+    });
+
+    await expect(status).resolves.toEqual({ available: true });
     expect(h.clientOptions).toEqual([{ experimentalApi: true }]);
     expect(h.requests).toEqual([
-      { method: 'thread/start', params: expect.objectContaining({ dynamicTools: expect.any(Array) }) },
+      { method: 'thread/start', params: expect.objectContaining({
+        dynamicTools: expect.arrayContaining([expect.objectContaining({ name: 'sai_swarm_spawn_task' })]),
+      }) },
+      { method: 'thread/archive', params: { threadId: 'probe-thread' } },
+      { method: 'thread/start', params: expect.objectContaining({
+        dynamicTools: [expect.objectContaining({ name: 'sai_swarm_capability_probe' })],
+      }) },
+      { method: 'turn/start', params: expect.objectContaining({
+        threadId: 'probe-thread',
+        input: [expect.objectContaining({ text: expect.stringContaining('sai_swarm_capability_probe') })],
+      }) },
+      { method: 'turn/interrupt', params: { threadId: 'probe-thread', turnId: 'probe-turn' } },
       { method: 'thread/archive', params: { threadId: 'probe-thread' } },
     ]);
+    expect(responder.respond).toHaveBeenCalledWith({
+      success: true,
+      contentItems: [{ type: 'inputText', text: '{"ok":true,"capability":"dynamic-tools"}' }],
+    });
+    expect(h.dispatchDynamicTool).not.toHaveBeenCalled();
   });
 
   it('reports dynamic tool rejection without enabling Swarm', async () => {
@@ -739,6 +763,11 @@ describe('AppServerBackend', () => {
     expect(h.backend.approve('/repo', 'a', 'command', { type: 'decision', value: 'accept' }))
       .toEqual({ ok: true });
     expect(responder.respond).toHaveBeenCalledWith({ decision: 'accept' });
+    expect(h.emitted).toContainEqual({
+      type: 'approval_resolved', provider: 'codex', requestHandle: expect.stringMatching(/^codex-app-server-/),
+      toolUseId: expect.stringMatching(/^codex-app-server-/),
+      projectPath: '/repo', scope: 'a', turnSeq: 1,
+    });
     expect(h.backend.approve('/repo', 'a', 'command', { type: 'decision', value: 'accept' }))
       .toEqual({ ok: false, code: 'not-pending' });
   });

@@ -7,7 +7,7 @@ import {
   type AppServerServerRequestResponder,
 } from './appServerClient';
 import { mapAppServerEvent } from './appServerEventMap';
-import { SAI_SWARM_DYNAMIC_TOOLS } from './appServerDynamicTools';
+import { SAI_SWARM_CAPABILITY_PROBE, SAI_SWARM_DYNAMIC_TOOLS } from './appServerDynamicTools';
 import { dispatchSaiSwarmDynamicTool, dynamicToolResponse, validateSaiSwarmDynamicToolCall } from './dynamicToolBridge';
 import { isCodexUserInputResponse, normalizeCodexModelOption, codexScope, codexScopeKey, type CodexAppServerPreviewStatus, type CodexApprovalDecision, type CodexApprovalMetadata, type CodexApprovalResult, type CodexBackend, type CodexMcpElicitationDecision, type CodexMcpElicitationForm, type CodexMcpElicitationUrl, type CodexModelResult, type CodexSendArgs, type CodexSessionKind, type CodexStartArgs, type CodexUserInputAnswers, type CodexUserInputQuestion, type CodexUserInputResponse } from './types';
 import type { SaiEnvelope } from './sdkEventMap';
@@ -86,6 +86,16 @@ interface PendingDynamicTool {
   resolved: boolean;
 }
 
+interface CapabilityProbe {
+  readonly client: AppServerClientTransport;
+  readonly threadId: string;
+  turnId?: string;
+  readonly promise: Promise<void>;
+  readonly resolve: () => void;
+  readonly reject: (error: Error) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}
+
 const APPROVAL_METHODS = {
   'item/commandExecution/requestApproval': 'command',
   'item/fileChange/requestApproval': 'file-change',
@@ -100,6 +110,7 @@ const MAX_QUESTIONS = 3;
 const MAX_OPTIONS = 20;
 const MAX_TEXT = 2_000;
 const MAX_AUTO_RESOLUTION_MS = 5 * 60_000;
+const DEFAULT_CAPABILITY_PROBE_TIMEOUT_MS = 15_000;
 
 export class AppServerUnsupportedCapabilityError extends Error {
   constructor(capability: string) {
@@ -114,6 +125,8 @@ export interface AppServerBackendDeps {
   registerWorkspace?: (projectPath: string) => void;
   /** Main-process owned renderer bridge for fixed App Server Dynamic Tools. */
   dynamicToolDispatch?: SaiToolDispatch | null;
+  /** Bounded wait for the isolated no-op Dynamic Tool readiness check. */
+  capabilityProbeTimeoutMs?: number;
 }
 
 type AppServerClientKind = 'standard' | 'orchestrator';
@@ -367,6 +380,8 @@ export class AppServerBackend implements CodexBackend {
   private nextClientRequestToken = 0;
   private nextRendererRequestHandle = 0;
   private readonly dynamicToolDispatch: SaiToolDispatch | null | undefined;
+  private readonly capabilityProbeTimeoutMs: number;
+  private capabilityProbe: CapabilityProbe | undefined;
 
   constructor(deps: AppServerBackendDeps = {}) {
     this.createClient = deps.createClient ?? ((options) => new AppServerClient(options));
@@ -375,6 +390,9 @@ export class AppServerBackend implements CodexBackend {
       try { getOrCreateWorkspace(projectPath); } catch { /* isolated tests or shutdown */ }
     });
     this.dynamicToolDispatch = deps.dynamicToolDispatch;
+    this.capabilityProbeTimeoutMs = deps.capabilityProbeTimeoutMs && deps.capabilityProbeTimeoutMs > 0
+      ? deps.capabilityProbeTimeoutMs
+      : DEFAULT_CAPABILITY_PROBE_TIMEOUT_MS;
   }
 
   get previewStatus(): CodexAppServerPreviewStatus {
@@ -471,16 +489,42 @@ export class AppServerBackend implements CodexBackend {
     if (this.orchestratorUnavailableReason) return { available: false, reason: this.orchestratorUnavailableReason };
     try {
       const client = await this.ensureClient({ kind: 'orchestrator' } as ScopeRuntime);
-      const result = await client.request('thread/start', {
+      // First validate the exact fixed Swarm catalogue the real orchestrator
+      // receives. This thread never starts a turn and is immediately archived.
+      const catalogueResult = await client.request('thread/start', {
         cwd: process.cwd(),
         dynamicTools: SAI_SWARM_DYNAMIC_TOOLS,
       });
-      const threadId = idFrom(result, 'thread');
-      if (!threadId) throw new AppServerUnavailableError('Codex App Server did not return a probe thread ID');
-      // No turn is started by the probe, so there is nothing to interrupt.
-      // Archive immediately: dynamic tools persist in thread metadata and this
-      // probe must never become a user-visible, resumable conversation.
-      await client.request('thread/archive', { threadId });
+      const catalogueThreadId = idFrom(catalogueResult, 'thread');
+      if (!catalogueThreadId) throw new AppServerUnavailableError('Codex App Server did not return a Swarm catalogue probe thread ID');
+      await client.request('thread/archive', { threadId: catalogueThreadId });
+
+      // A second isolated thread exposes only the inert diagnostic. Even if
+      // the model ignores its instruction, no real Swarm Dynamic Tool exists
+      // in this catalogue and no renderer action can be reached.
+      const probeResult = await client.request('thread/start', {
+        cwd: process.cwd(),
+        dynamicTools: [SAI_SWARM_CAPABILITY_PROBE],
+      });
+      const threadId = idFrom(probeResult, 'thread');
+      if (!threadId) throw new AppServerUnavailableError('Codex App Server did not return a Dynamic Tool probe thread ID');
+      const probe = this.createCapabilityProbe(client, threadId);
+      try {
+        const turnResult = await client.request('turn/start', {
+          threadId,
+          input: [{ type: 'text', text: 'SAI transport capability check: call sai_swarm_capability_probe exactly once with {}. Do not call any other tool or take any other action.' }],
+        });
+        const turnId = idFrom(turnResult, 'turn');
+        if (!turnId) throw new AppServerUnavailableError('Codex App Server did not return a Dynamic Tool probe turn ID');
+        probe.turnId = turnId;
+        await probe.promise;
+      } finally {
+        this.clearCapabilityProbe(probe);
+        if (probe.turnId) await client.request('turn/interrupt', { threadId, turnId: probe.turnId }).catch(() => undefined);
+        // Dynamic tools persist with a thread; always archive the probe even
+        // after timeout or rejection so it can never be resumed by a user.
+        await client.request('thread/archive', { threadId });
+      }
       return { available: true };
     } catch (error) {
       const reason = errorText(error);
@@ -506,6 +550,7 @@ export class AppServerBackend implements CodexBackend {
     this.pendingApprovals.delete(pending.key);
     try {
       pending.responder.respond(response);
+      this.emitApprovalResolved(pending);
       return { ok: true };
     } catch {
       return { ok: false, code: 'not-pending' };
@@ -744,6 +789,7 @@ export class AppServerBackend implements CodexBackend {
 
   private handleServerRequest(client: AppServerClientTransport, request: AppServerServerRequest): void {
     if (request.method === 'item/tool/call') {
+      if (this.handleCapabilityProbeRequest(client, request)) return;
       this.handleDynamicToolRequest(client, request);
       return;
     }
@@ -884,6 +930,52 @@ export class AppServerBackend implements CodexBackend {
       .then((response) => this.resolveDynamicTool(pending, response));
   }
 
+  private createCapabilityProbe(client: AppServerClientTransport, threadId: string): CapabilityProbe {
+    if (this.capabilityProbe) throw new AppServerUnavailableError('Codex App Server Dynamic Tool probe is already running');
+    let resolve!: () => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<void>((accept, fail) => { resolve = accept; reject = fail; });
+    const probe = {
+      client, threadId, promise, resolve, reject,
+      timeout: undefined as unknown as ReturnType<typeof setTimeout>,
+    } satisfies CapabilityProbe;
+    probe.timeout = setTimeout(() => {
+      if (this.capabilityProbe !== probe) return;
+      probe.reject(new AppServerUnavailableError('Codex App Server did not invoke SAI\'s Dynamic Tool capability probe'));
+    }, this.capabilityProbeTimeoutMs);
+    this.capabilityProbe = probe;
+    return probe;
+  }
+
+  private clearCapabilityProbe(probe: CapabilityProbe): void {
+    clearTimeout(probe.timeout);
+    if (this.capabilityProbe === probe) this.capabilityProbe = undefined;
+  }
+
+  /** Readiness-only request. It is never forwarded to the Swarm dispatcher. */
+  private handleCapabilityProbeRequest(client: AppServerClientTransport, request: AppServerServerRequest): boolean {
+    const params = record(request.params);
+    if (params?.tool !== SAI_SWARM_CAPABILITY_PROBE.name) return false;
+    const probe = this.capabilityProbe;
+    if (!probe || probe.client !== client) return false;
+    let responder: AppServerServerRequestResponder;
+    try { responder = client.claimServerRequest(request.id); } catch { return true; }
+    const ids = eventIds(request);
+    const argumentsValue = record(params.arguments);
+    if (!probe.turnId || ids.threadId !== probe.threadId || ids.turnId !== probe.turnId || !argumentsValue || Object.keys(argumentsValue).length > 0) {
+      try { responder.respond(dynamicToolResponse(undefined, true)); } catch { /* already resolved */ }
+      probe.reject(new AppServerUnavailableError('Codex App Server returned an invalid Dynamic Tool capability probe request'));
+      return true;
+    }
+    try {
+      responder.respond(dynamicToolResponse({ ok: true, capability: 'dynamic-tools' }));
+      probe.resolve();
+    } catch {
+      probe.reject(new AppServerUnavailableError('Codex App Server Dynamic Tool capability probe could not be acknowledged'));
+    }
+    return true;
+  }
+
   private resolveDynamicTool(pending: PendingDynamicTool, response: ReturnType<typeof dynamicToolResponse>): void {
     if (this.pendingDynamicTools.get(pending.key) !== pending || pending.resolved) return;
     pending.resolved = true;
@@ -994,12 +1086,18 @@ export class AppServerBackend implements CodexBackend {
       projectPath: pending.runtime.projectPath, scope: pending.runtime.scope, turnSeq: pending.active.seq });
   }
 
+  private emitApprovalResolved(pending: PendingApproval): void {
+    this.emit({ type: 'approval_resolved', provider: 'codex', requestHandle: pending.requestHandle,
+      toolUseId: pending.requestHandle, projectPath: pending.runtime.projectPath,
+      scope: pending.runtime.scope, turnSeq: pending.active.seq });
+  }
+
   private emitMcpElicitationResolved(pending: PendingMcpElicitation): void {
     this.emit({ type: 'mcp_elicitation_resolved', provider: 'codex', requestHandle: pending.requestHandle,
       projectPath: pending.runtime.projectPath, scope: pending.runtime.scope, turnSeq: pending.active.seq });
   }
 
-  private pendingFor<T extends { requestHandle: string; runtime: ScopeRuntime; active: ActiveTurn }>(
+  private pendingFor<T extends { id: string | number; requestHandle: string; runtime: ScopeRuntime; active: ActiveTurn }>(
     pending: Map<string, T>, projectPath: string, scope: string | undefined, requestHandle: string,
   ): T | undefined {
     const matches = [...pending.values()].filter((value) => value.requestHandle === requestHandle || String(value.id) === requestHandle);

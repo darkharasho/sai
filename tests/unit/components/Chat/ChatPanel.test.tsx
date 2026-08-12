@@ -658,7 +658,7 @@ describe('ChatPanel', () => {
       'scope-a',
       'orchestrator',
       orchestratorContext,
-      undefined,
+      '/project',
       expect.any(String),
       ['/repos/a', '/repos/b'],
     );

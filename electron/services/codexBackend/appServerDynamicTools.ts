@@ -36,6 +36,16 @@ export const SAI_SWARM_DYNAMIC_TOOLS: readonly CodexDynamicTool[] = Object.freez
   SWARM_TOOL_SCHEMA.map(staticTool),
 );
 
+/**
+ * Isolated readiness diagnostic. It never appears in an orchestrator's real
+ * catalogue and has no inputs, so probing cannot invoke a Swarm action.
+ */
+export const SAI_SWARM_CAPABILITY_PROBE: CodexDynamicTool = Object.freeze({
+  name: 'sai_swarm_capability_probe',
+  description: 'Internal SAI transport capability check. Call exactly once with an empty object.',
+  inputSchema: Object.freeze({ type: 'object', properties: {}, additionalProperties: false }),
+});
+
 export function isSaiSwarmDynamicTool(name: string): boolean {
   return SAI_SWARM_DYNAMIC_TOOLS.some((tool) => tool.name === name);
 }
