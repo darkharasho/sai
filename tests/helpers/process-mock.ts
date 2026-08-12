@@ -1,5 +1,5 @@
-import { EventEmitter } from 'events';
-import { Readable, Writable } from 'stream';
+import { EventEmitter } from 'node:events';
+import { Readable, Writable } from 'node:stream';
 import { vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
