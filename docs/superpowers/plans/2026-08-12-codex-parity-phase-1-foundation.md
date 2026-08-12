@@ -34,7 +34,7 @@
 - Modify: `tests/unit/electron/codexSdkEventMap.test.ts`
 - Modify: `electron/services/codexBackend/sdkEventMap.ts`
 
-- [ ] **Step 1: Write the failing legacy collaboration-event regression test**
+- [x] **Step 1: Write the failing legacy collaboration-event regression test**
 
 ```ts
 it('drops an unsupported legacy collaboration item instead of returning undefined', () => {
@@ -51,7 +51,7 @@ it('returns an empty envelope list for an unknown top-level event', () => {
 });
 ```
 
-- [ ] **Step 2: Verify the mapper currently returns `undefined`**
+- [x] **Step 2: Verify the mapper currently returns `undefined`**
 
 Run: `npm test -- --project unit tests/unit/electron/codexSdkEventMap.test.ts`
 
@@ -59,7 +59,7 @@ Expected: FAIL because `mapCodexSdkEvent()` returns `undefined` for both
 variants; `SdkCodexBackend.runTurn()` then throws `TypeError: envelopes is not
 iterable` while evaluating `for (const envelope of envelopes)`.
 
-- [ ] **Step 3: Make all event/item switches total**
+- [x] **Step 3: Make all event/item switches total**
 
 ```ts
 function startedItem(item: ThreadItem, ctx: CodexMapContext): SaiEnvelope[] {
@@ -82,13 +82,13 @@ events. That work must preserve the parent-session relationship and show
 spawn, progress, completion, and failure states without treating them as
 ordinary parent tool calls.
 
-- [ ] **Step 4: Verify mapper and backend regression coverage**
+- [x] **Step 4: Verify mapper and backend regression coverage**
 
 Run: `npm test -- --project unit tests/unit/electron/codexSdkEventMap.test.ts tests/unit/electron/codexSdkBackend.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the crash guard**
+- [x] **Step 5: Commit the crash guard**
 
 ```bash
 git add electron/services/codexBackend/sdkEventMap.ts tests/unit/electron/codexSdkEventMap.test.ts
@@ -110,7 +110,7 @@ visible. It must clear only when that same child reaches a terminal state
 (`completed`, `failed`, or `cancelled`) and no other child remains active. A
 normal parent `result`/`done` must not clear a still-running child.
 
-- [ ] **Step 1: Write failing mapper lifecycle tests for the legacy JSONL item**
+- [x] **Step 1: Write failing mapper lifecycle tests for the legacy JSONL item**
 
 ```ts
 const started = mapCodexSdkEvent({
@@ -132,7 +132,7 @@ missing or future fields: use a stable generic status label, prefer a supplied
 short description, truncate any prompt fallback, and keep unrelated unknown
 items as `[]`.
 
-- [ ] **Step 2: Write the failing ChatPanel lifecycle test**
+- [x] **Step 2: Write the failing ChatPanel lifecycle test**
 
 Drive the existing backend message listener with a `subagent_activity` start,
 then rerender with `isStreaming={false}` to model a quiet parent. Assert that
@@ -141,7 +141,7 @@ Send a terminal event for that `agentId`; assert the hint and extra thinking
 state disappear once the parent is also idle. Add a two-agent case so
 completion of one child does not hide the row while another is running.
 
-- [ ] **Step 3: Map only collaboration lifecycle data into a typed SAI envelope**
+- [x] **Step 3: Map only collaboration lifecycle data into a typed SAI envelope**
 
 Add a narrow runtime-safe reader for legacy `collab_tool_call` fields (the
 current SDK type does not yet declare this item). Emit `subagent_activity`
@@ -149,7 +149,7 @@ with `agentId`, normalized `status`, and a short safe summary on start/update/
 completion. Do not convert it into a normal Bash/Edit/MCP tool card, and do
 not weaken the total-switch fallback added in Task 0.
 
-- [ ] **Step 4: Keep display activity independent of the parent stream flag**
+- [x] **Step 4: Keep display activity independent of the parent stream flag**
 
 In `ChatPanel`, track active child IDs in local transient state. Derive
 `subagentThinking` from that set and use `streamingForDisplay ||
@@ -160,7 +160,7 @@ more specific primary visual when present. Clear this transient state on an
 explicit terminal child event and on unmount/session replacement; do not
 persist it into chat history.
 
-- [ ] **Step 5: Run mapper and renderer regression coverage**
+- [x] **Step 5: Run mapper and renderer regression coverage**
 
 Run: `npm test -- --project unit tests/unit/electron/codexSdkEventMap.test.ts tests/unit/components/Chat/ChatPanel.test.tsx`
 
@@ -168,7 +168,7 @@ Expected: PASS. The test must demonstrate that parent-idle plus active child
 still shows a thinking indicator, and that the final active child’s terminal
 event removes it.
 
-- [ ] **Step 6: Run the release-facing type check and commit**
+- [x] **Step 6: Run the release-facing type check and commit**
 
 Run: `npx tsc --noEmit`
 
@@ -185,7 +185,7 @@ git commit -m "feat(codex): show native subagent activity"
 - Modify: `tests/unit/providers/capabilities.test.ts`
 - Modify: `src/providers/capabilities.ts`
 
-- [ ] **Step 1: Write failing expectations for current Codex transport capabilities**
+- [x] **Step 1: Write failing expectations for current Codex transport capabilities**
 
 ```ts
 it('supports scoped sessions and terminal scope', () => {
@@ -203,13 +203,13 @@ it('does not advertise interactive-only integrations before App Server support',
 });
 ```
 
-- [ ] **Step 2: Verify the test fails for the two incorrectly hidden capabilities**
+- [x] **Step 2: Verify the test fails for the two incorrectly hidden capabilities**
 
 Run: `npm test -- --project unit tests/unit/providers/capabilities.test.ts`
 
 Expected: FAIL because `supportsTerminalScope` and `supportsMultiScope` are currently `false` for Codex.
 
-- [ ] **Step 3: Correct only the already-backed Codex flags**
+- [x] **Step 3: Correct only the already-backed Codex flags**
 
 ```ts
   codex: {
@@ -226,13 +226,13 @@ Expected: FAIL because `supportsTerminalScope` and `supportsMultiScope` are curr
   },
 ```
 
-- [ ] **Step 4: Verify the focused capability contract**
+- [x] **Step 4: Verify the focused capability contract**
 
 Run: `npm test -- --project unit tests/unit/providers/capabilities.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the isolated capability correction**
+- [x] **Step 5: Commit the isolated capability correction**
 
 ```bash
 git add src/providers/capabilities.ts tests/unit/providers/capabilities.test.ts
@@ -245,7 +245,7 @@ git commit -m "fix(codex): expose scoped session capabilities"
 - Modify: `tests/swarm/swarmTaskRunner.test.ts`
 - Modify: `src/lib/swarmTaskRunner.ts`
 
-- [ ] **Step 1: Write failing Codex worker dispatch tests**
+- [x] **Step 1: Write failing Codex worker dispatch tests**
 
 ```ts
 it('starts a Codex task in the worktree-scoped session', async () => {
@@ -266,13 +266,13 @@ it('uses full access only for a Codex Swarm task explicitly set to auto', async 
 });
 ```
 
-- [ ] **Step 2: Verify the Codex tests fail because the runner rejects every non-Claude task**
+- [x] **Step 2: Verify the Codex tests fail because the runner rejects every non-Claude task**
 
 Run: `npm test -- tests/swarm/swarmTaskRunner.test.ts`
 
 Expected: FAIL with `dispatched` equal to `false` and no Codex start/send calls.
 
-- [ ] **Step 3: Generalize the runner without changing Claude dispatch**
+- [x] **Step 3: Generalize the runner without changing Claude dispatch**
 
 ```ts
 export interface SwarmRunnerDeps {
@@ -307,13 +307,13 @@ on-request) profile in this SDK phase. The UI must not claim that it can
 intercept every approval until Task 5 of the master design replaces the
 transport with App Server.
 
-- [ ] **Step 4: Verify scoped dispatch and existing Claude behavior**
+- [x] **Step 4: Verify scoped dispatch and existing Claude behavior**
 
 Run: `npm test -- tests/swarm/swarmTaskRunner.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit provider-neutral task dispatch**
+- [x] **Step 5: Commit provider-neutral task dispatch**
 
 ```bash
 git add src/lib/swarmTaskRunner.ts tests/swarm/swarmTaskRunner.test.ts
@@ -326,20 +326,20 @@ git commit -m "feat(swarm): dispatch Codex workers by scope"
 - Modify: `src/App.tsx:1115-1145,1300-1385`
 - Test: `tests/swarm/swarmTaskRunner.test.ts`
 
-- [ ] **Step 1: Extend the dispatch test to require both provider bridges**
+- [x] **Step 1: Extend the dispatch test to require both provider bridges**
 
 ```ts
 expect(deps.claudeStart).not.toHaveBeenCalled();
 expect(deps.codexStart).toHaveBeenCalledTimes(1);
 ```
 
-- [ ] **Step 2: Verify the renderer currently supplies only Claude dependencies**
+- [x] **Step 2: Verify the renderer currently supplies only Claude dependencies**
 
 Run: `rg -n "claudeStart: sai.claudeStart|claudeSend: sai.claudeSend" src/App.tsx`
 
 Expected: one call site with no `codexStart` or `codexSend` entry.
 
-- [ ] **Step 3: Pass both bridges and target stop calls by task session scope**
+- [x] **Step 3: Pass both bridges and target stop calls by task session scope**
 
 ```ts
         {
@@ -357,13 +357,13 @@ if (p === 'kimi') return (window.sai as any).kimiStop?.(ws, task.sessionId);
 return (window.sai as any).claudeStop?.(ws, task.sessionId);
 ```
 
-- [ ] **Step 4: Run task and application type checks**
+- [x] **Step 4: Run task and application type checks**
 
 Run: `npm test -- tests/swarm/swarmTaskRunner.test.ts && npx tsc --noEmit`
 
 Expected: PASS and exit code 0.
 
-- [ ] **Step 5: Commit the renderer integration**
+- [x] **Step 5: Commit the renderer integration**
 
 ```bash
 git add src/App.tsx tests/swarm/swarmTaskRunner.test.ts
@@ -376,32 +376,32 @@ git commit -m "fix(swarm): route worker controls by task scope"
 - Modify: `tests/swarm/OrchestratorModelPicker.test.tsx`
 - Modify: `src/components/Swarm/OrchestratorModelPicker.tsx`
 
-- [ ] **Step 1: Replace the Claude-specific unavailable tooltip assertion**
+- [x] **Step 1: Replace the Claude-specific unavailable tooltip assertion**
 
 ```ts
 expect(codex.disabled).toBe(true);
 expect(codex.getAttribute('title')).toMatch(/Swarm MCP bridge/i);
 ```
 
-- [ ] **Step 2: Verify it fails against the stale explanatory copy**
+- [x] **Step 2: Verify it fails against the stale explanatory copy**
 
 Run: `npm test -- tests/swarm/OrchestratorModelPicker.test.tsx`
 
 Expected: FAIL because the current title says that dispatch requires Claude.
 
-- [ ] **Step 3: Explain the real, temporary protocol limitation**
+- [x] **Step 3: Explain the real, temporary protocol limitation**
 
 ```tsx
 title={isDisabled ? 'Codex orchestrator requires the App Server Swarm MCP bridge' : `Use ${p.label}`}
 ```
 
-- [ ] **Step 4: Verify the picker remains intentionally conservative**
+- [x] **Step 4: Verify the picker remains intentionally conservative**
 
 Run: `npm test -- tests/swarm/OrchestratorModelPicker.test.tsx`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the degraded-state clarification**
+- [x] **Step 5: Commit the degraded-state clarification**
 
 ```bash
 git add src/components/Swarm/OrchestratorModelPicker.tsx tests/swarm/OrchestratorModelPicker.test.tsx
@@ -416,7 +416,7 @@ git commit -m "fix(swarm): explain Codex orchestrator availability"
 - Modify: `tests/unit/remote/bridge-server-chat.test.ts`
 - Modify: `tests/unit/remote/pwa-wire.test.ts`
 
-- [ ] **Step 1: Write the bridge request/reply contract tests**
+- [x] **Step 1: Write the bridge request/reply contract tests**
 
 ```ts
 socket.emit('message', JSON.stringify({ type: 'claude_models_request', requestId: 'models-1' }));
@@ -432,13 +432,13 @@ receive({ type: 'claude_models', requestId: 'models-1', models: [{ id: 'fable', 
 expect(await client.waitForClaudeModels()).toEqual([{ id: 'fable', label: 'Fable', description: 'Account model' }]);
 ```
 
-- [ ] **Step 2: Verify both protocol tests fail because these frame types do not exist**
+- [x] **Step 2: Verify both protocol tests fail because these frame types do not exist**
 
 Run: `npm test -- --project unit tests/unit/remote/bridge-server-chat.test.ts tests/unit/remote/pwa-wire.test.ts`
 
 Expected: FAIL with missing request method or no `claude_models` reply.
 
-- [ ] **Step 3: Add the narrow authenticated catalogue exchange**
+- [x] **Step 3: Add the narrow authenticated catalogue exchange**
 
 ```ts
 case 'claude_models_request': {
@@ -462,13 +462,13 @@ Validate `requestId` as a non-empty string, return only `id`, `label`,
 authenticated connection guard. Do not serialize Claude configuration,
 credentials, or account data.
 
-- [ ] **Step 4: Verify bridge and wire correlation**
+- [x] **Step 4: Verify bridge and wire correlation**
 
 Run: `npm test -- --project unit tests/unit/remote/bridge-server-chat.test.ts tests/unit/remote/pwa-wire.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the Remote model-catalogue protocol**
+- [x] **Step 5: Commit the Remote model-catalogue protocol**
 
 ```bash
 git add electron/services/remote/bridge-server.ts src/renderer-remote/wire.ts tests/unit/remote/bridge-server-chat.test.ts tests/unit/remote/pwa-wire.test.ts
@@ -483,7 +483,7 @@ git commit -m "feat(remote): discover Claude models from desktop"
 - Modify: `tests/unit/remote/Composer.test.tsx` (create)
 - Modify: `sai-mobile/tests/wire-client.test.ts`
 
-- [ ] **Step 1: Write a Remote composer test for an account-supplied model**
+- [x] **Step 1: Write a Remote composer test for an account-supplied model**
 
 ```tsx
 render(<Composer models={[{ id: 'fable', label: 'Fable', description: 'Account model' }]} {...props} />);
@@ -491,13 +491,13 @@ fireEvent.click(screen.getByRole('button', { name: /model/i }));
 expect(screen.getByText('Fable')).toBeInTheDocument();
 ```
 
-- [ ] **Step 2: Verify it fails because Composer has only static version-pinned options**
+- [x] **Step 2: Verify it fails because Composer has only static version-pinned options**
 
 Run: `npm test -- --project unit tests/unit/remote/Composer.test.tsx`
 
 Expected: FAIL because `Composer` does not accept `models` and renders `claude-opus-4-8`.
 
-- [ ] **Step 3: Replace only fallbacks, not saved selections**
+- [x] **Step 3: Replace only fallbacks, not saved selections**
 
 ```ts
 const FALLBACK_MODEL_OPTIONS: ModelOption[] = [
@@ -514,13 +514,13 @@ persisted model as a selectable current value, and send `undefined` for the
 `default` choice. Change native mobile's fallback IDs to the same rolling
 aliases. Rebuild the PWA assets; never hand-edit `sai-mobile/assets/pwa`.
 
-- [ ] **Step 4: Verify UI, wire, and generated assets**
+- [x] **Step 4: Verify UI, wire, and generated assets**
 
 Run: `npm test -- --project unit tests/unit/remote/Composer.test.tsx tests/unit/remote/pwa-wire.test.ts && npm run build && ! rg -n "claude-opus-4-8|claude-opus-4-7" dist sai-mobile/assets/pwa`
 
 Expected: all tests and the build pass; the final search returns no matches.
 
-- [ ] **Step 5: Commit client model discovery**
+- [x] **Step 5: Commit client model discovery**
 
 ```bash
 git add src/renderer-remote/chat/Composer.tsx sai-mobile/components/Composer.tsx tests/unit/remote/Composer.test.tsx sai-mobile/assets/pwa
@@ -532,19 +532,19 @@ git commit -m "fix(models): use rolling Claude aliases on clients"
 **Files:**
 - Modify: `docs/superpowers/plans/2026-08-12-codex-parity-phase-1-foundation.md`
 
-- [ ] **Step 1: Run all Phase 1 focused tests**
+- [x] **Step 1: Run all Phase 1 focused tests**
 
 Run: `npm test -- --project unit tests/unit/electron/codexSdkEventMap.test.ts tests/unit/components/Chat/ChatPanel.test.tsx tests/unit/providers/capabilities.test.ts tests/swarm/swarmTaskRunner.test.ts tests/swarm/OrchestratorModelPicker.test.tsx tests/unit/remote/bridge-server-chat.test.ts tests/unit/remote/pwa-wire.test.ts tests/unit/remote/Composer.test.tsx`
 
 Expected: PASS with no failed test files.
 
-- [ ] **Step 2: Run the production build**
+- [x] **Step 2: Run the production build**
 
 Run: `npm run build`
 
 Expected: exit code 0.
 
-- [ ] **Step 3: Check the phase acceptance criteria**
+- [x] **Step 3: Check the phase acceptance criteria**
 
 ```bash
 git diff main...HEAD --check
@@ -554,7 +554,22 @@ rg -n "claude-opus-4-8|claude-opus-4-7" src sai-mobile --glob '!assets/pwa/*'
 Expected: no whitespace errors and no source fallback pinned to a retired
 Claude release.
 
-- [ ] **Step 4: Mark completed plan checkboxes and commit the plan record**
+**Verification record — 2026-08-12:**
+
+- `npm test -- --project unit …` for the Codex mapper/backend/ChatPanel,
+  capability, and Remote bridge/wire/Composer/PWA-sync coverage: **8 files,
+  218 tests passed**. The Swarm tests use a separate Vitest project, so
+  `npm test -- tests/swarm/swarmTaskRunner.test.ts
+  tests/swarm/OrchestratorModelPicker.test.tsx` was run separately: **2 files,
+  22 tests passed**.
+- `npm run build` completed the chained `tsc`, desktop Vite build, Remote PWA
+  build, and mobile PWA snapshot sync. The generated PWA snapshot was restored
+  afterward because this verification task must not introduce artifact-only
+  source changes.
+- `git diff main...HEAD --check` exited 0. The version-pinned-model scan exited
+  1 with no matches, as expected.
+
+- [x] **Step 4: Mark completed plan checkboxes and commit the plan record**
 
 ```bash
 git add docs/superpowers/plans/2026-08-12-codex-parity-phase-1-foundation.md
