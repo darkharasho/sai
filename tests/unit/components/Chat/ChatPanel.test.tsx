@@ -706,6 +706,14 @@ describe('ChatPanel', () => {
     });
     expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
     expect(latestChatInputProps.isStreaming).toBe(false);
+
+    await act(async () => {
+      handler({ type: 'streaming_start', turnSeq: 6, projectPath: '/project', scope: 'chat' });
+      handler({ type: 'subagent_activity', agentId: 'child-2', status: 'running', summary: 'New session child', turnSeq: 6, projectPath: '/project', scope: 'chat' });
+    });
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+    expect(container.textContent).toContain('New session child');
+    expect(latestChatInputProps.isStreaming).toBe(true);
   });
 
   it('does not persist native-subagent activity across an unmount and fresh mount', async () => {
