@@ -150,12 +150,12 @@ export default function Composer({ streaming, awaitingQuestion, onSend, onInterr
   const EffortIcon = effortCfg.icon;
 
   const catalogueModels = models?.length
-    ? models.map((item) => ({
+    ? [FALLBACK_MODEL_OPTIONS[0], ...models.map((item) => ({
       value: item.id,
       label: item.label,
       hint: item.description,
       color: item.recommended ? 'var(--accent)' : 'var(--text-secondary)',
-    }))
+    }))]
     : FALLBACK_MODEL_OPTIONS;
   const modelOptions = overrides.model && !catalogueModels.some((item) => item.value === overrides.model)
     ? [{ value: overrides.model, label: overrides.model, hint: 'Saved model selection', color: 'var(--text-secondary)' }, ...catalogueModels]

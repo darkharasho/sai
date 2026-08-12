@@ -61,6 +61,20 @@ describe('PWA wire helpers', () => {
     wire.close();
   });
 
+  it('requests a Claude model catalogue when crypto.randomUUID is unavailable', () => {
+    vi.stubGlobal('WebSocket', MockWebSocket);
+    vi.stubGlobal('crypto', {});
+    const wire = connect('token');
+    const socket = MockWebSocket.latest!;
+    socket.open();
+    socket.receive({ type: 'auth_ok' });
+
+    const requestId = wire.requestClaudeModels();
+    expect(requestId).toMatch(/.+/);
+    expect(socket.sent).toContainEqual({ type: 'claude_models_request', requestId });
+    wire.close();
+  });
+
   it('rejects and clears a pending Claude model catalogue wait when the socket closes', async () => {
     vi.stubGlobal('WebSocket', MockWebSocket);
     vi.stubGlobal('crypto', { randomUUID: vi.fn(() => 'close-model-request') });

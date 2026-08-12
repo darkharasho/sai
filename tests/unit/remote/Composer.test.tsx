@@ -41,6 +41,21 @@ describe('remote Composer model picker', () => {
     expect(modelForRequest('default')).toBeUndefined();
   });
 
+  it('keeps Desktop default available when account models are discovered', () => {
+    const onOverridesChange = vi.fn();
+    render(
+      <Composer
+        {...baseProps}
+        onOverridesChange={onOverridesChange}
+        models={[{ id: 'fable', label: 'Fable', description: 'Account model', recommended: true }]}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Model'));
+    fireEvent.click(screen.getByText('Desktop default'));
+    expect(onOverridesChange).toHaveBeenCalledWith({ model: undefined });
+  });
+
   it('keeps an unknown saved selection visible and selectable', () => {
     render(<Composer {...baseProps} overrides={{ model: 'saved-custom-model' }} />);
 

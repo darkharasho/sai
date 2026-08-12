@@ -16,6 +16,36 @@ function assertSnapshotPaths(source, target) {
 }
 
 /**
+ * Move a completed snapshot into place without relying on a platform allowing
+ * a directory rename over an existing directory. The current target is first
+ * moved to a sibling backup, then restored if the replacement move fails.
+ */
+export async function safeSwap(temporary, target, operations = {}) {
+  const renameDirectory = operations.rename ?? rename;
+  const removeDirectory = operations.rm ?? rm;
+  const makeTemporaryDirectory = operations.mkdtemp ?? mkdtemp;
+  const backupDirectory = await makeTemporaryDirectory(join(dirname(target), '.pwa-backup-'));
+  const backup = join(backupDirectory, basename(target));
+  let backedUp = false;
+  try {
+    try {
+      await renameDirectory(target, backup);
+      backedUp = true;
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+    try {
+      await renameDirectory(temporary, target);
+    } catch (error) {
+      if (backedUp) await renameDirectory(backup, target);
+      throw error;
+    }
+  } finally {
+    await removeDirectory(backupDirectory, { recursive: true, force: true });
+  }
+}
+
+/**
  * Replace the tracked mobile snapshot with the exact PWA build output. The
  * temporary sibling makes the destructive portion both narrow and atomic from
  * the perspective of readers: only the validated `.../assets/pwa` directory
@@ -33,11 +63,9 @@ export async function syncDirectory(sourceDirectory, targetDirectory) {
   const temporary = await mkdtemp(join(targetParent, '.pwa-sync-'));
   try {
     await cp(source, temporary, { recursive: true });
-    await rm(target, { recursive: true, force: true });
-    await rename(temporary, target);
-  } catch (error) {
+    await safeSwap(temporary, target);
+  } finally {
     await rm(temporary, { recursive: true, force: true });
-    throw error;
   }
 }
 
