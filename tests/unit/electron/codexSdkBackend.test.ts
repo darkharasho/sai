@@ -265,7 +265,7 @@ describe('SdkCodexBackend', () => {
     });
     await settle();
 
-    expect(h.emitted.some((event) => event.type === 'result')).toBe(true);
+    expect(h.emitted.at(-1)).toMatchObject({ type: 'result', turnSeq: 1 });
     expect(h.emitted).toContainEqual(expect.objectContaining({
       type: 'subagent_activity', agentId: 'child-1', status: 'running', turnSeq: 1,
     }));
@@ -289,6 +289,25 @@ describe('SdkCodexBackend', () => {
     expect(h.emitted.filter((event) => event.type === 'done')).toEqual([
       { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1 },
     ]);
+    expect(h.backend.isWorkspaceBusy('/a')).toBe(false);
+  });
+
+  it('settles a draining turn exactly once when the SDK iterator throws after parent completion', async () => {
+    const stream = (async function* (): AsyncGenerator<ThreadEvent> {
+      yield {
+        type: 'turn.completed',
+        usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0 },
+      };
+      throw new Error('late stream failure');
+    })();
+    const h = harness([stream]);
+    h.backend.start({ projectPath: '/a' });
+    h.backend.send({ projectPath: '/a', message: 'delegate' });
+    await settle();
+
+    expect(h.emitted.some((event) => event.type === 'result')).toBe(true);
+    expect(h.emitted.filter((event) => event.type === 'error')).toHaveLength(1);
+    expect(h.emitted.filter((event) => event.type === 'done')).toHaveLength(1);
     expect(h.backend.isWorkspaceBusy('/a')).toBe(false);
   });
 
@@ -438,6 +457,7 @@ describe('SdkCodexBackend', () => {
     await settle();
     expect(h.emitted.filter((e) => e.type === 'error')).toHaveLength(0);
     expect(h.emitted.filter((e) => e.type === 'done')).toHaveLength(1);
+    expect(h.backend.isWorkspaceBusy('/a')).toBe(false);
   });
 
   it('retires an interrupted thread so late identity cannot taint its replacement', async () => {
