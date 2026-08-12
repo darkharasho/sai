@@ -625,6 +625,35 @@ describe('ChatPanel', () => {
     });
   });
 
+  it('keeps native-subagent thinking visible while the parent has a running tool', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const };
+    const { container, rerender } = render(<ChatPanel {...props} isStreaming={false} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({
+        type: 'assistant',
+        projectPath: '/project',
+        scope: 'chat',
+        message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: { file: 'x.ts' } }] },
+      });
+      handler({
+        type: 'subagent_activity',
+        agentId: 'agent-1',
+        status: 'running',
+        summary: 'Inspect renderer',
+        projectPath: '/project',
+        scope: 'chat',
+      });
+    });
+    rerender(<ChatPanel {...props} isStreaming={false} />);
+
+    expect(container.querySelector('[data-msg-toolcalls="1"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+    expect(container.textContent).toContain('Inspect renderer');
+  });
+
   it('suppresses native-subagent thinking while awaiting a question', async () => {
     const props = { ...baseProps(), aiProvider: 'codex' as const, awaitingQuestion: true };
     const { container } = render(<ChatPanel {...props} isStreaming={false} />);
