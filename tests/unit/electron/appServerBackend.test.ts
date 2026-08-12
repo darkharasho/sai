@@ -67,6 +67,26 @@ describe('AppServerBackend', () => {
     expect(h.emitted).toContainEqual({ type: 'ready', projectPath: '/repo', scope: 'chat' });
   });
 
+  it('emits a new thread session ID so a fresh backend resumes the persisted chat', async () => {
+    const first = harness();
+    first.responses.set('thread/start', { thread: { id: 'thread-persisted' } });
+
+    await first.backend.start({ projectPath: '/repo', scope: 'chat' });
+
+    const session = first.emitted.find((event) => event.type === 'session_id');
+    expect(session).toEqual({
+      type: 'session_id', sessionId: 'thread-persisted', projectPath: '/repo', scope: 'chat',
+    });
+    expect(first.emitted.filter((event) => event.type === 'session_id')).toHaveLength(1);
+
+    const second = harness();
+    second.responses.set('thread/resume', { thread: { id: 'thread-persisted' } });
+    second.backend.setSessionId('/repo', session?.sessionId as string, 'chat');
+    await second.backend.start({ projectPath: '/repo', scope: 'chat' });
+
+    expect(second.requests).toEqual([{ method: 'thread/resume', params: { threadId: 'thread-persisted' } }]);
+  });
+
   it('resumes a persisted session only while that scope is idle', async () => {
     const h = harness();
     h.responses.set('thread/resume', { thread: { id: 'saved' } });

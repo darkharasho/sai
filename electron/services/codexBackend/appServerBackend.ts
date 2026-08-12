@@ -233,6 +233,7 @@ export class AppServerBackend implements CodexBackend {
   private async ensureThread(runtime: ScopeRuntime): Promise<void> {
     if (runtime.threadId) return;
     const client = await this.ensureClient();
+    const isNewThread = !runtime.sessionId;
     const result = runtime.sessionId
       ? await client.request('thread/resume', { threadId: runtime.sessionId })
       : await client.request('thread/start', { cwd: runtime.cwd });
@@ -240,6 +241,7 @@ export class AppServerBackend implements CodexBackend {
     if (!threadId) throw new AppServerUnavailableError('Codex App Server returned a thread without an ID');
     runtime.threadId = threadId;
     runtime.sessionId = threadId;
+    if (isNewThread) this.emit({ type: 'session_id', sessionId: threadId, projectPath: runtime.projectPath, scope: runtime.scope });
   }
 
   private async startTurn(runtime: ScopeRuntime, args: Pick<CodexSendArgs, 'message' | 'model' | 'effort' | 'permission'>): Promise<void> {
