@@ -56,6 +56,23 @@ describe('remote Composer model picker', () => {
     expect(onOverridesChange).toHaveBeenCalledWith({ model: undefined });
   });
 
+  it('deduplicates Desktop default when the account catalogue includes it', () => {
+    render(
+      <Composer
+        {...baseProps}
+        models={[
+          { id: 'default', label: 'Account default', description: 'Duplicate default', recommended: false },
+          { id: 'fable', label: 'Fable', description: 'Account model', recommended: true },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Model'));
+    expect(screen.getAllByText('Desktop default')).toHaveLength(1);
+    expect(screen.queryByText('Account default')).toBeNull();
+    expect(screen.getByText('Fable')).toBeTruthy();
+  });
+
   it('keeps an unknown saved selection visible and selectable', () => {
     render(<Composer {...baseProps} overrides={{ model: 'saved-custom-model' }} />);
 

@@ -150,7 +150,7 @@ export default function Composer({ streaming, awaitingQuestion, onSend, onInterr
   const EffortIcon = effortCfg.icon;
 
   const catalogueModels = models?.length
-    ? [FALLBACK_MODEL_OPTIONS[0], ...models.map((item) => ({
+    ? [FALLBACK_MODEL_OPTIONS[0], ...models.filter((item) => item.id !== 'default').map((item) => ({
       value: item.id,
       label: item.label,
       hint: item.description,
