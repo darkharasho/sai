@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make SAI accurately expose Codex's existing scoped-session and task-worker support, while bringing Claude model discovery to every supported client without version-pinned fallbacks.
+**Goal:** Make SAI accurately expose Codex's existing scoped-session and task-worker support, including visible native-subagent activity that keeps the thinking state alive, while bringing Claude model discovery to every supported client without version-pinned fallbacks.
 
-**Architecture:** Keep the existing Codex SDK backend for basic chat and scoped task execution. Add provider-neutral dispatch at the renderer boundary, preserving each provider's native permission vocabulary. Codex interactive approvals, native subagents, MCP configuration, and plugins remain deliberately unavailable until the App Server phase supplies working protocol support.
+**Architecture:** Keep the existing Codex SDK backend for basic chat and scoped task execution. Add provider-neutral dispatch at the renderer boundary, preserving each provider's native permission vocabulary. The SDK's legacy collaboration JSONL events supply a minimal native-subagent lifecycle display; rich agent controls, interactive approvals, MCP configuration, and plugins remain deliberately unavailable until the App Server phase supplies working protocol support.
 
 **Tech Stack:** Electron IPC, React/TypeScript, Vite Remote PWA, React Native mobile, Vitest.
 
@@ -25,6 +25,8 @@
 - `tests/unit/remote/bridge-server-chat.test.ts`, `tests/unit/remote/pwa-wire.test.ts`, and new Remote composer tests — cover protocol and visible selection behavior.
 - `electron/services/codexBackend/sdkEventMap.ts` — guarantees that newly introduced Codex JSONL event/item variants cannot abort a parent turn.
 - `tests/unit/electron/codexSdkEventMap.test.ts` — covers the legacy `collab_tool_call` event emitted by Codex subagents and other unknown variants.
+- `src/components/Chat/ChatPanel.tsx` — holds a visible working state while a native Codex subagent is active, even when the parent produces no text.
+- `tests/unit/components/Chat/ChatPanel.test.tsx` — proves a subagent start displays activity and a terminal lifecycle event releases it.
 
 ### Task 0: Keep new Codex subagent events from aborting their parent turn
 
@@ -91,6 +93,90 @@ Expected: PASS.
 ```bash
 git add electron/services/codexBackend/sdkEventMap.ts tests/unit/electron/codexSdkEventMap.test.ts
 git commit -m "fix(codex): tolerate collaboration stream events"
+```
+
+### Task 0a: Render native Codex subagent activity and count it as thinking
+
+**Files:**
+- Modify: `tests/unit/electron/codexSdkEventMap.test.ts`
+- Modify: `electron/services/codexBackend/sdkEventMap.ts`
+- Modify: `tests/unit/components/Chat/ChatPanel.test.tsx`
+- Modify: `src/components/Chat/ChatPanel.tsx`
+
+**Release requirement:** A Codex collaboration item must never make the chat
+look idle while its child agent is running. A child start or in-progress update
+must render a concise `agent · <status>` hint and keep the thinking animation
+visible. It must clear only when that same child reaches a terminal state
+(`completed`, `failed`, or `cancelled`) and no other child remains active. A
+normal parent `result`/`done` must not clear a still-running child.
+
+- [ ] **Step 1: Write failing mapper lifecycle tests for the legacy JSONL item**
+
+```ts
+const started = mapCodexSdkEvent({
+  type: 'item.started',
+  item: {
+    id: 'agent-1', type: 'collab_tool_call', tool: 'spawn_agent',
+    status: 'in_progress', description: 'Review the auth flow',
+  },
+} as unknown as ThreadEvent, ctx);
+
+expect(started).toEqual([expect.objectContaining({
+  type: 'subagent_activity', agentId: 'agent-1', status: 'running',
+  summary: 'Review the auth flow',
+})]);
+```
+
+Cover `item.updated` and `item.completed` too. Preserve safe fallbacks for
+missing or future fields: use a stable generic status label, prefer a supplied
+short description, truncate any prompt fallback, and keep unrelated unknown
+items as `[]`.
+
+- [ ] **Step 2: Write the failing ChatPanel lifecycle test**
+
+Drive the existing backend message listener with a `subagent_activity` start,
+then rerender with `isStreaming={false}` to model a quiet parent. Assert that
+the thinking row remains mounted and its hint identifies active agent work.
+Send a terminal event for that `agentId`; assert the hint and extra thinking
+state disappear once the parent is also idle. Add a two-agent case so
+completion of one child does not hide the row while another is running.
+
+- [ ] **Step 3: Map only collaboration lifecycle data into a typed SAI envelope**
+
+Add a narrow runtime-safe reader for legacy `collab_tool_call` fields (the
+current SDK type does not yet declare this item). Emit `subagent_activity`
+with `agentId`, normalized `status`, and a short safe summary on start/update/
+completion. Do not convert it into a normal Bash/Edit/MCP tool card, and do
+not weaken the total-switch fallback added in Task 0.
+
+- [ ] **Step 4: Keep display activity independent of the parent stream flag**
+
+In `ChatPanel`, track active child IDs in local transient state. Derive
+`subagentThinking` from that set and use `streamingForDisplay ||
+subagentThinking` for presentation-only thinking/Stop state. Preserve the
+existing waiting and question suppressions. Prefer the current child summary
+as `streamHint`, while leaving live reasoning and running-tool cards as the
+more specific primary visual when present. Clear this transient state on an
+explicit terminal child event and on unmount/session replacement; do not
+persist it into chat history.
+
+- [ ] **Step 5: Run mapper and renderer regression coverage**
+
+Run: `npm test -- --project unit tests/unit/electron/codexSdkEventMap.test.ts tests/unit/components/Chat/ChatPanel.test.tsx`
+
+Expected: PASS. The test must demonstrate that parent-idle plus active child
+still shows a thinking indicator, and that the final active child’s terminal
+event removes it.
+
+- [ ] **Step 6: Run the release-facing type check and commit**
+
+Run: `npx tsc --noEmit`
+
+Expected: PASS.
+
+```bash
+git add electron/services/codexBackend/sdkEventMap.ts tests/unit/electron/codexSdkEventMap.test.ts src/components/Chat/ChatPanel.tsx tests/unit/components/Chat/ChatPanel.test.tsx
+git commit -m "feat(codex): show native subagent activity"
 ```
 
 ### Task 1: Lock the safe Codex capability contract
@@ -448,7 +534,7 @@ git commit -m "fix(models): use rolling Claude aliases on clients"
 
 - [ ] **Step 1: Run all Phase 1 focused tests**
 
-Run: `npm test -- --project unit tests/unit/providers/capabilities.test.ts tests/swarm/swarmTaskRunner.test.ts tests/swarm/OrchestratorModelPicker.test.tsx tests/unit/remote/bridge-server-chat.test.ts tests/unit/remote/pwa-wire.test.ts tests/unit/remote/Composer.test.tsx`
+Run: `npm test -- --project unit tests/unit/electron/codexSdkEventMap.test.ts tests/unit/components/Chat/ChatPanel.test.tsx tests/unit/providers/capabilities.test.ts tests/swarm/swarmTaskRunner.test.ts tests/swarm/OrchestratorModelPicker.test.tsx tests/unit/remote/bridge-server-chat.test.ts tests/unit/remote/pwa-wire.test.ts tests/unit/remote/Composer.test.tsx`
 
 Expected: PASS with no failed test files.
 
