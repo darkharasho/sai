@@ -604,11 +604,14 @@ describe('ChatPanel', () => {
     await act(async () => {
       handler({ type: 'subagent_activity', agentId: 'agent-1', status: 'running', summary: 'Inspect renderer', projectPath: '/project', scope: 'chat' });
       handler({ type: 'subagent_activity', agentId: 'agent-2', status: 'running', summary: 'Check tests', projectPath: '/project', scope: 'chat' });
+      handler({ type: 'result', projectPath: '/project', scope: 'chat' });
+      handler({ type: 'done', projectPath: '/project', scope: 'chat' });
     });
     rerender(<ChatPanel {...props} isStreaming={false} />);
 
     expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
     expect(container.textContent).toContain('Inspect renderer');
+    expect(latestChatInputProps.isStreaming).toBe(true);
 
     await act(async () => {
       handler({ type: 'subagent_activity', agentId: 'agent-1', status: 'completed', projectPath: '/project', scope: 'chat' });
@@ -619,6 +622,55 @@ describe('ChatPanel', () => {
     await act(async () => {
       handler({ type: 'subagent_activity', agentId: 'agent-2', status: 'completed', projectPath: '/project', scope: 'chat' });
     });
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
+    });
+  });
+
+  it('suppresses native-subagent thinking while awaiting a question', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const, awaitingQuestion: true };
+    const { container } = render(<ChatPanel {...props} isStreaming={false} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'subagent_activity', agentId: 'agent-1', status: 'running', summary: 'Wait for answer', projectPath: '/project', scope: 'chat' });
+    });
+
+    expect(latestChatInputProps.isStreaming).toBe(true);
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
+  });
+
+  it('suppresses native-subagent thinking while the chat is waiting', async () => {
+    const props = {
+      ...baseProps(),
+      aiProvider: 'codex' as const,
+      waiting: { wait: { kind: 'background' as const, resumeInSeconds: null, taskCount: 1 }, startedAtMs: Date.now() },
+    };
+    const { container } = render(<ChatPanel {...props} isStreaming={false} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'subagent_activity', agentId: 'agent-1', status: 'running', summary: 'Wait in background', projectPath: '/project', scope: 'chat' });
+    });
+
+    expect(latestChatInputProps.isStreaming).toBe(true);
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
+  });
+
+  it('clears native-subagent activity when the session is replaced', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const, sessionId: 'session-1' };
+    const { container, rerender } = render(<ChatPanel {...props} isStreaming={false} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'subagent_activity', agentId: 'agent-1', status: 'running', summary: 'Old session work', projectPath: '/project', scope: 'chat' });
+    });
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+
+    rerender(<ChatPanel {...props} sessionId="session-2" isStreaming={false} />);
     await waitFor(() => {
       expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
     });
