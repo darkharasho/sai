@@ -186,6 +186,46 @@ describe('ApprovalPanel', () => {
     expect(onAlwaysAllow).toHaveBeenCalledTimes(1);
   });
 
+  it('limits Codex App Server actions to the decisions offered by the server', () => {
+    const approval = makeApproval({
+      provider: 'codex',
+      kind: 'command',
+      availableDecisions: ['accept', 'decline'],
+      command: 'git status',
+      cwd: '/workspace/sai',
+      network: { host: 'api.github.com', protocol: 'https' },
+    });
+    render(
+      <ApprovalPanel approval={approval} onApprove={vi.fn()} onDeny={vi.fn()} onAlwaysAllow={vi.fn()} />
+    );
+
+    expect(screen.getByText('Approve')).toBeTruthy();
+    expect(screen.getByText('Deny')).toBeTruthy();
+    expect(screen.queryByText('Always Allow')).toBeNull();
+    expect(screen.getByText('/workspace/sai')).toBeTruthy();
+    expect(screen.getByText('https://api.github.com')).toBeTruthy();
+  });
+
+  it('renders Codex file and permission approval context without exposing an edit field', () => {
+    const approval = makeApproval({
+      provider: 'codex',
+      kind: 'permissions',
+      availableDecisions: ['accept', 'acceptForSession', 'decline'],
+      command: '',
+      grantRoot: '/workspace/sai',
+      permissionsSummary: ['Read repository files', 'Network access'],
+    });
+    render(
+      <ApprovalPanel approval={approval} onApprove={vi.fn()} onDeny={vi.fn()} onAlwaysAllow={vi.fn()} />
+    );
+
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(screen.getByText('/workspace/sai')).toBeTruthy();
+    expect(screen.getByText('Read repository files')).toBeTruthy();
+    expect(screen.getByText('Network access')).toBeTruthy();
+    expect(screen.getByText('Always Allow')).toBeTruthy();
+  });
+
   it('pressing Enter calls onApprove for Bash tool', () => {
     const onApprove = vi.fn();
     const approval = makeApproval({ toolName: 'Bash' });

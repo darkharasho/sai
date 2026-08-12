@@ -9,12 +9,21 @@ interface ApprovalPanelProps {
   onApprove: (modifiedCommand?: string) => void;
   onDeny: () => void;
   onAlwaysAllow: () => void;
+  onAmend?: (execpolicyAmendment: string[]) => void;
 }
 
-export default function ApprovalPanel({ approval, onApprove, onDeny, onAlwaysAllow }: ApprovalPanelProps) {
+export default function ApprovalPanel({ approval, onApprove, onDeny, onAlwaysAllow, onAmend }: ApprovalPanelProps) {
   const [command, setCommand] = useState(approval.command);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isBash = approval.toolName === 'Bash';
+  const isCodexApproval = approval.provider === 'codex';
+  const isEditableBash = isBash && !isCodexApproval;
+  const decisions = new Set(approval.availableDecisions ?? []);
+  const showApprove = !isCodexApproval || decisions.has('accept');
+  const showDeny = !isCodexApproval || decisions.has('decline') || decisions.has('cancel');
+  const showAlwaysAllow = !isCodexApproval || decisions.has('acceptForSession');
+  const canAmend = isCodexApproval && decisions.has('acceptWithExecpolicyAmendment')
+    && Array.isArray(approval.proposedExecpolicyAmendment) && approval.proposedExecpolicyAmendment.length > 0;
   const entryTransition = useReducedMotionTransition(SPRING.pop);
   const exitTransition = useReducedMotionTransition(SPRING.gentle);
 
@@ -23,21 +32,21 @@ export default function ApprovalPanel({ approval, onApprove, onDeny, onAlwaysAll
   }, [approval.command]);
 
   useEffect(() => {
-    if (isBash && textareaRef.current) {
+    if (isEditableBash && textareaRef.current) {
       textareaRef.current.focus();
       textareaRef.current.selectionStart = textareaRef.current.value.length;
     }
-  }, [approval.toolUseId, isBash]);
+  }, [approval.toolUseId, isEditableBash]);
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       const modified = command !== approval.command ? command : undefined;
-      onApprove(modified);
+      if (showApprove) onApprove(modified);
     }
     if (e.key === 'Escape') {
       e.preventDefault();
-      onDeny();
+      if (showDeny) onDeny();
     }
   };
 
@@ -68,8 +77,8 @@ export default function ApprovalPanel({ approval, onApprove, onDeny, onAlwaysAll
         overflow: 'hidden',
         boxShadow: '0 -4px 24px rgba(0,0,0,0.4)',
       }}
-      onKeyDown={!isBash ? handleKeyDown : undefined}
-      tabIndex={!isBash ? 0 : undefined}
+      onKeyDown={!isEditableBash ? handleKeyDown : undefined}
+      tabIndex={!isEditableBash ? 0 : undefined}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px 0' }}>
         <ShieldAlert size={16} style={{ color: 'var(--accent)' }} />
@@ -80,7 +89,7 @@ export default function ApprovalPanel({ approval, onApprove, onDeny, onAlwaysAll
         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{toolLabel}</span>
       </div>
 
-      {isBash ? (
+      {isEditableBash ? (
         <textarea
           ref={textareaRef}
           value={command}
@@ -177,8 +186,22 @@ export default function ApprovalPanel({ approval, onApprove, onDeny, onAlwaysAll
         </div>
       )}
 
+      {isCodexApproval && (approval.cwd || approval.grantRoot || approval.network || approval.permissionsSummary?.length || approval.reason) && (
+        <div style={{
+          margin: '0 14px 4px', background: 'var(--surface-2)', border: '1px solid var(--border-hairline)',
+          borderRadius: 6, padding: '7px 10px', fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5,
+          maxHeight: 120, overflowY: 'auto', wordBreak: 'break-word',
+        }}>
+          {approval.reason && <div>{approval.reason}</div>}
+          {approval.cwd && <div><span style={{ color: 'var(--text-muted)' }}>Working directory: </span>{approval.cwd}</div>}
+          {approval.grantRoot && <div><span style={{ color: 'var(--text-muted)' }}>Grant root: </span>{approval.grantRoot}</div>}
+          {approval.network && <div><span style={{ color: 'var(--text-muted)' }}>Network: </span>{approval.network.protocol ? `${approval.network.protocol}://` : ''}{approval.network.host ?? 'requested'}</div>}
+          {approval.permissionsSummary?.map((permission, index) => <div key={`${permission}-${index}`}>{permission}</div>)}
+        </div>
+      )}
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px 10px' }}>
-        <button
+        {showApprove && <button
           onClick={() => {
             const modified = command !== approval.command ? command : undefined;
             onApprove(modified);
@@ -190,8 +213,8 @@ export default function ApprovalPanel({ approval, onApprove, onDeny, onAlwaysAll
           }}
         >
           <Check size={14} /> Approve
-        </button>
-        <button
+        </button>}
+        {showDeny && <button
           onClick={onDeny}
           style={{
             background: 'none', color: 'var(--text-secondary)',
@@ -201,8 +224,8 @@ export default function ApprovalPanel({ approval, onApprove, onDeny, onAlwaysAll
           }}
         >
           <X size={14} /> Deny
-        </button>
-        <button
+        </button>}
+        {showAlwaysAllow && <button
           onClick={onAlwaysAllow}
           style={{
             background: 'none', color: 'var(--text-secondary)',
@@ -212,23 +235,33 @@ export default function ApprovalPanel({ approval, onApprove, onDeny, onAlwaysAll
           }}
         >
           <ShieldCheck size={14} /> Always Allow
-        </button>
-        <span style={{
+        </button>}
+        {canAmend && <button
+          onClick={() => onAmend?.(approval.proposedExecpolicyAmendment!)}
+          style={{
+            background: 'none', color: 'var(--text-secondary)',
+            border: '1px solid var(--border-subtle)', borderRadius: 6,
+            padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+          }}
+        >
+          Approve amendment
+        </button>}
+        {(showApprove || showDeny) && <span style={{
           fontSize: 11, color: 'var(--text-muted)', marginLeft: 'auto',
           display: 'flex', alignItems: 'center', gap: 6,
         }}>
-          <kbd style={{
+          {showApprove && <><kbd style={{
             background: 'var(--surface-4)', border: '1px solid var(--border-hairline)', borderRadius: 3,
             padding: '1px 5px', fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
             color: 'var(--text-secondary)',
-          }}>Enter</kbd> approve
-          <span>·</span>
-          <kbd style={{
+          }}>Enter</kbd> approve</>}
+          {showApprove && showDeny && <span>·</span>}
+          {showDeny && <><kbd style={{
             background: 'var(--surface-4)', border: '1px solid var(--border-hairline)', borderRadius: 3,
             padding: '1px 5px', fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
             color: 'var(--text-secondary)',
-          }}>Esc</kbd> deny
-        </span>
+          }}>Esc</kbd> deny</>}
+        </span>}
       </div>
 
     </motion.div>

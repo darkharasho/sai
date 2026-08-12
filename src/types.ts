@@ -144,6 +144,17 @@ export interface PendingApproval {
   command: string;
   description: string;
   input: Record<string, any>;
+  /** Present only for the capability-gated Codex App Server preview. */
+  provider?: 'codex';
+  requestHandle?: string;
+  kind?: 'command' | 'file-change' | 'permissions';
+  availableDecisions?: string[];
+  reason?: string;
+  cwd?: string;
+  network?: { host?: string; protocol?: string };
+  grantRoot?: string;
+  permissionsSummary?: string[];
+  proposedExecpolicyAmendment?: string[];
 }
 
 export interface PendingSudoPrompt {

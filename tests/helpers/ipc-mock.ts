@@ -36,6 +36,7 @@ export interface MockSai {
   codexBackendModeGet: ReturnType<typeof vi.fn>;
   codexBackendModeSet: ReturnType<typeof vi.fn>;
   codexAppServerPreviewStatus: ReturnType<typeof vi.fn>;
+  codexAppServerApprove: ReturnType<typeof vi.fn>;
   codexStart: ReturnType<typeof vi.fn>;
   codexSend: ReturnType<typeof vi.fn>;
   codexStop: ReturnType<typeof vi.fn>;
@@ -187,6 +188,7 @@ export function createMockSai(): MockSai {
     codexBackendModeGet: vi.fn().mockResolvedValue('sdk'),
     codexBackendModeSet: vi.fn().mockResolvedValue('sdk'),
     codexAppServerPreviewStatus: vi.fn().mockResolvedValue({ available: true }),
+    codexAppServerApprove: vi.fn().mockResolvedValue({ ok: true }),
     codexStart: vi.fn().mockResolvedValue(undefined),
     codexSend: vi.fn(),
     codexStop: vi.fn(),

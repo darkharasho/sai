@@ -136,6 +136,45 @@ describe('ChatPanel', () => {
     expect(onGeminiSessionId).toHaveBeenCalledWith('gemini-session-42');
   });
 
+  it('routes Codex App Server approvals only through the structured preview bridge', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const, claudeScope: 'scope-a' };
+    render(<ChatPanel {...props} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+    await act(async () => {
+      for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+        (handler as (msg: any) => void)({
+          type: 'approval_needed', provider: 'codex', requestHandle: 'request-1', kind: 'command',
+          availableDecisions: ['accept', 'decline'], toolName: 'Command approval', toolUseId: 'request-1',
+          command: 'git status', projectPath: '/project', scope: 'scope-a',
+        });
+      }
+    });
+
+    expect(latestChatInputProps.pendingApproval?.provider).toBe('codex');
+    await act(async () => { latestChatInputProps.onApprove(); });
+    expect(mockSai.codexAppServerApprove).toHaveBeenCalledWith('/project', 'scope-a', 'request-1', {
+      type: 'decision', value: 'accept',
+    });
+    expect(mockSai.claudeApprove).not.toHaveBeenCalled();
+  });
+
+  it('does not surface unstructured SDK Codex approval events', async () => {
+    render(<ChatPanel {...{ ...baseProps(), aiProvider: 'codex' as const }} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+    await act(async () => {
+      for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+        (handler as (msg: any) => void)({
+          type: 'approval_needed', toolName: 'Bash', toolUseId: 'legacy-request', command: 'rm -rf nope',
+          projectPath: '/project', scope: 'chat',
+        });
+      }
+    });
+
+    expect(latestChatInputProps.pendingApproval).toBeNull();
+  });
+
   it('sends the raw Gemini prompt without synthetic conversation history and includes chat scope', async () => {
     const props: ChatPanelProps = {
       projectPath: '/project',

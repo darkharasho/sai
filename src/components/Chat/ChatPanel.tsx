@@ -1165,12 +1165,28 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
       // Tool approval request from main process
       if (msg.type === 'approval_needed') {
+        // Legacy SDK Codex approvals do not have a matching response bridge.
+        // Only App Server's structured, validated approval requests may render
+        // in a Codex chat; likewise, never leak one into another provider's UI.
+        if ((aiProvider === 'codex' && msg.provider !== 'codex') || (aiProvider !== 'codex' && msg.provider === 'codex')) return;
         setPendingApproval({
           toolName: msg.toolName,
           toolUseId: msg.toolUseId,
           command: msg.command,
           description: msg.description,
           input: msg.input,
+          ...(msg.provider === 'codex' ? {
+            provider: 'codex' as const,
+            requestHandle: msg.requestHandle,
+            kind: msg.kind,
+            availableDecisions: msg.availableDecisions,
+            reason: msg.reason,
+            cwd: msg.cwd,
+            network: msg.network,
+            grantRoot: msg.grantRoot,
+            permissionsSummary: msg.permissionsSummary,
+            proposedExecpolicyAmendment: msg.proposedExecpolicyAmendment,
+          } : {}),
         });
         return;
       }
@@ -1958,6 +1974,13 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
   const handleApprove = (modifiedCommand?: string) => {
     if (!pendingApproval) return;
+    if (pendingApproval.provider === 'codex') {
+      void window.sai.codexAppServerApprove?.(projectPath, claudeScope, pendingApproval.requestHandle ?? pendingApproval.toolUseId, {
+        type: 'decision', value: 'accept',
+      });
+      setPendingApproval(null);
+      return;
+    }
     if (aiProvider === 'gemini' || aiProvider === 'kimi') {
       const approve = aiProvider === 'kimi' ? (window.sai as any).kimiApprove : (window.sai as any).geminiApprove;
       approve?.(projectPath, pendingApproval.toolUseId, true, modifiedCommand, 'chat');
@@ -1969,6 +1992,14 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
   const handleDeny = () => {
     if (!pendingApproval) return;
+    if (pendingApproval.provider === 'codex') {
+      const value = pendingApproval.availableDecisions?.includes('decline') ? 'decline' : 'cancel';
+      void window.sai.codexAppServerApprove?.(projectPath, claudeScope, pendingApproval.requestHandle ?? pendingApproval.toolUseId, {
+        type: 'decision', value,
+      });
+      setPendingApproval(null);
+      return;
+    }
     if (aiProvider === 'gemini' || aiProvider === 'kimi') {
       const approve = aiProvider === 'kimi' ? (window.sai as any).kimiApprove : (window.sai as any).geminiApprove;
       approve?.(projectPath, pendingApproval.toolUseId, false, undefined, 'chat');
@@ -1980,6 +2011,13 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
   const handleAlwaysAllow = async () => {
     if (!pendingApproval) return;
+    if (pendingApproval.provider === 'codex') {
+      void window.sai.codexAppServerApprove?.(projectPath, claudeScope, pendingApproval.requestHandle ?? pendingApproval.toolUseId, {
+        type: 'decision', value: 'acceptForSession',
+      });
+      setPendingApproval(null);
+      return;
+    }
     if (aiProvider === 'gemini' || aiProvider === 'kimi') {
       // ACP providers don't support always-allow patterns — just approve this instance
       const approve = aiProvider === 'kimi' ? (window.sai as any).kimiApprove : (window.sai as any).geminiApprove;
@@ -1989,6 +2027,14 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       await window.sai.claudeAlwaysAllow(projectPath, pattern);
       window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, true, undefined, claudeScope);
     }
+    setPendingApproval(null);
+  };
+
+  const handleCodexAmendment = (execpolicyAmendment: string[]) => {
+    if (!pendingApproval || pendingApproval.provider !== 'codex') return;
+    void window.sai.codexAppServerApprove?.(projectPath, claudeScope, pendingApproval.requestHandle ?? pendingApproval.toolUseId, {
+      type: 'command-amendment', execpolicyAmendment,
+    });
     setPendingApproval(null);
   };
 
@@ -2512,6 +2558,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             onApprove={handleApprove}
             onDeny={handleDeny}
             onAlwaysAllow={handleAlwaysAllow}
+            onAmend={handleCodexAmendment}
             isStreaming={streamingForDisplay}
             waiting={isWaiting}
             awaitingQuestion={awaitingQuestion}
