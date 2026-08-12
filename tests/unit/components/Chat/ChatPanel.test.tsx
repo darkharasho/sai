@@ -659,21 +659,44 @@ describe('ChatPanel', () => {
     expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
   });
 
-  it('clears native-subagent activity when the session is replaced', async () => {
-    const props = { ...baseProps(), aiProvider: 'codex' as const, sessionId: 'session-1' };
+  it.each([
+    ['session', { sessionId: 'session-1' }, { sessionId: 'session-2' }],
+    ['project', { projectPath: '/project-a' }, { projectPath: '/project-b' }],
+    ['scope', { claudeScope: 'scope-a' }, { claudeScope: 'scope-b' }],
+  ])('clears native-subagent activity when the %s is replaced', async (_boundary, initial, replacement) => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const, ...initial };
     const { container, rerender } = render(<ChatPanel {...props} isStreaming={false} />);
     await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
     const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
 
     await act(async () => {
-      handler({ type: 'subagent_activity', agentId: 'agent-1', status: 'running', summary: 'Old session work', projectPath: '/project', scope: 'chat' });
+      handler({
+        type: 'subagent_activity', agentId: 'agent-1', status: 'running', summary: 'Old session work',
+        projectPath: props.projectPath, scope: props.claudeScope ?? 'chat',
+      });
     });
     expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
 
-    rerender(<ChatPanel {...props} sessionId="session-2" isStreaming={false} />);
+    rerender(<ChatPanel {...props} {...replacement} isStreaming={false} />);
     await waitFor(() => {
       expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
     });
+  });
+
+  it('does not persist native-subagent activity across an unmount and fresh mount', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const };
+    const first = render(<ChatPanel {...props} isStreaming={false} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'subagent_activity', agentId: 'agent-1', status: 'running', summary: 'Ephemeral work', projectPath: '/project', scope: 'chat' });
+    });
+    expect(first.container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+
+    first.unmount();
+    const second = render(<ChatPanel {...props} isStreaming={false} />);
+    expect(second.container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
   });
 
   it('passes the Codex model refresh callback through to ChatInput', async () => {
