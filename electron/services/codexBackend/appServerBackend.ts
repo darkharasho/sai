@@ -17,9 +17,13 @@ interface ScopeMeta {
 }
 
 interface ActiveTurn {
-  id: string;
+  id?: string;
   seq: number;
   done: boolean;
+  /** The renderer has moved on, but turn/start may still yield an ID. */
+  retired: boolean;
+  interruptSent: boolean;
+  pendingNotifications: AppServerNotification[];
 }
 
 interface ScopeRuntime extends ScopeMeta {
@@ -117,6 +121,7 @@ export class AppServerBackend implements CodexBackend {
       this.emit({ type: 'ready', projectPath: args.projectPath, scope });
     } catch (error) {
       this.settleUnavailable(runtime, errorText(error));
+      throw error;
     }
   }
 
@@ -125,14 +130,14 @@ export class AppServerBackend implements CodexBackend {
     const scope = codexScope(args.scope);
     const runtime = this.runtimeFor(args.projectPath, scope);
     if (args.imagePaths?.length) {
-      const active: ActiveTurn = { id: '', seq: ++runtime.turnSeq, done: false };
+      const active: ActiveTurn = this.newTurn(runtime);
       runtime.active = active;
       this.emit({ type: 'streaming_start', projectPath: args.projectPath, scope, turnSeq: active.seq, sessionId: runtime.sessionId ?? null });
       this.emit({ type: 'error', text: new AppServerUnsupportedCapabilityError('image input').message, projectPath: args.projectPath, scope, turnSeq: active.seq });
       this.finishTurn(runtime, active, { subagentsAborted: true });
       return;
     }
-    void this.startTurn(runtime, args.message);
+    void this.startTurn(runtime, args);
   }
 
   interrupt(projectPath: string, scope?: string): void {
@@ -142,7 +147,7 @@ export class AppServerBackend implements CodexBackend {
       return;
     }
     const active = runtime.active;
-    void this.interruptTurn(runtime, active);
+    this.retireTurn(runtime, active);
   }
 
   reconcileScope(projectPath: string, scope?: string): void {
@@ -175,7 +180,7 @@ export class AppServerBackend implements CodexBackend {
   suspendWorkspace(projectPath: string): void {
     for (const [key, runtime] of this.runtimes) {
       if (runtime.projectPath !== projectPath) continue;
-      if (runtime.active) this.finishTurn(runtime, runtime.active, { subagentsAborted: true });
+      if (runtime.active) this.retireTurn(runtime, runtime.active);
       this.runtimes.delete(key);
     }
     for (const [key, meta] of this.metadata) if (meta.projectPath === projectPath) this.metadata.delete(key);
@@ -186,7 +191,7 @@ export class AppServerBackend implements CodexBackend {
   }
 
   destroy(): void {
-    for (const runtime of this.runtimes.values()) if (runtime.active) this.finishTurn(runtime, runtime.active, { subagentsAborted: true });
+    for (const runtime of this.runtimes.values()) if (runtime.active) this.retireTurn(runtime, runtime.active);
     this.runtimes.clear();
     this.metadata.clear();
     this.unsubscribeNotifications?.();
@@ -235,38 +240,45 @@ export class AppServerBackend implements CodexBackend {
     runtime.sessionId = threadId;
   }
 
-  private async startTurn(runtime: ScopeRuntime, message: string): Promise<void> {
-    if (runtime.active) await this.interruptTurn(runtime, runtime.active);
-    const active: ActiveTurn = { id: '', seq: ++runtime.turnSeq, done: false };
+  private async startTurn(runtime: ScopeRuntime, args: Pick<CodexSendArgs, 'message' | 'model' | 'effort' | 'permission'>): Promise<void> {
+    if (runtime.active) this.retireTurn(runtime, runtime.active);
+    const active = this.newTurn(runtime);
     runtime.active = active;
     this.emit({ type: 'streaming_start', projectPath: runtime.projectPath, scope: runtime.scope, turnSeq: active.seq, sessionId: runtime.sessionId ?? null });
     try {
       await this.ensureThread(runtime);
       const client = await this.ensureClient();
-      const result = await client.request('turn/start', {
-        threadId: runtime.threadId,
-        input: [{ type: 'text', text: message }],
-      });
+      const result = await client.request('turn/start', this.turnStartParams(runtime, args));
       const turnId = idFrom(result, 'turn');
       if (!turnId) throw new AppServerUnavailableError('Codex App Server returned a turn without an ID');
-      if (runtime.active !== active) return;
       active.id = turnId;
+      if (active.retired) {
+        void this.requestInterrupt(runtime, active);
+        return;
+      }
+      if (runtime.active !== active) return;
+      this.flushPendingNotifications(runtime, active);
     } catch (error) {
       if (runtime.active === active) this.settleUnavailable(runtime, errorText(error));
     }
   }
 
-  private async interruptTurn(runtime: ScopeRuntime, active: ActiveTurn): Promise<void> {
+  private async requestInterrupt(runtime: ScopeRuntime, active: ActiveTurn): Promise<void> {
+    if (active.interruptSent || !active.id || !runtime.threadId) return;
+    active.interruptSent = true;
     try {
-      if (active.id && runtime.threadId) {
-        const client = await this.ensureClient();
-        await client.request('turn/interrupt', { threadId: runtime.threadId, turnId: active.id });
-      }
+      const client = await this.ensureClient();
+      await client.request('turn/interrupt', { threadId: runtime.threadId, turnId: active.id });
     } catch (error) {
       this.markUnavailable(errorText(error));
-    } finally {
-      this.finishTurn(runtime, active, { subagentsAborted: true });
     }
+  }
+
+  private retireTurn(runtime: ScopeRuntime, active: ActiveTurn): void {
+    if (active.retired) return;
+    active.retired = true;
+    void this.requestInterrupt(runtime, active);
+    this.finishTurn(runtime, active, { subagentsAborted: true });
   }
 
   private handleNotification(event: AppServerNotification): void {
@@ -276,14 +288,17 @@ export class AppServerBackend implements CodexBackend {
     if (!ids.threadId) return;
     for (const [key, runtime] of this.runtimes) {
       if (runtime.threadId !== ids.threadId || this.runtimes.get(key) !== runtime) continue;
-      if (runtime.active && (!ids.turnId || ids.turnId !== runtime.active.id)) continue;
-      const context = { projectPath: runtime.projectPath, scope: runtime.scope, turnSeq: runtime.active?.seq ?? runtime.turnSeq, threadId: runtime.threadId, turnId: runtime.active?.id };
-      const envelopes = mapAppServerEvent(event, context);
-      const terminal = envelopes.some((envelope) => envelope.type === 'done');
-      // The mapper exposes `done` for standalone consumers, while this
-      // backend owns scope cleanup. Emit it exactly once with lifecycle flags.
-      for (const envelope of envelopes) if (envelope.type !== 'done') this.emit(envelope);
-      if (terminal && runtime.active) this.finishTurn(runtime, runtime.active, { subagentsSettled: true });
+      const active = runtime.active;
+      if (!active || active.retired) continue;
+      if (!active.id) {
+        // App Server can notify before its turn/start response arrives. A
+        // single pending turn is safe to stage; bind and validate it once the
+        // authoritative response supplies its turn ID.
+        if (ids.turnId) active.pendingNotifications.push(event);
+        continue;
+      }
+      if (ids.turnId !== active.id) continue;
+      this.emitNotification(runtime, active, event);
     }
   }
 
@@ -314,5 +329,54 @@ export class AppServerBackend implements CodexBackend {
     active.done = true;
     this.emit({ type: 'done', projectPath: runtime.projectPath, scope: runtime.scope, turnSeq: active.seq, ...flags });
     runtime.active = undefined;
+  }
+
+  private newTurn(runtime: ScopeRuntime): ActiveTurn {
+    return { seq: ++runtime.turnSeq, done: false, retired: false, interruptSent: false, pendingNotifications: [] };
+  }
+
+  private turnStartParams(runtime: ScopeRuntime, args: Pick<CodexSendArgs, 'message' | 'model' | 'effort' | 'permission'>): Record<string, unknown> {
+    const params: Record<string, unknown> = {
+      threadId: runtime.threadId,
+      input: [{ type: 'text', text: args.message }],
+      cwd: runtime.cwd,
+    };
+    if (args.model) params.model = args.model;
+    if (args.effort) params.effort = args.effort;
+    switch (args.permission ?? 'auto') {
+      case 'auto':
+        params.approvalPolicy = 'onRequest';
+        params.sandboxPolicy = { type: 'workspaceWrite', writableRoots: [runtime.cwd], networkAccess: true };
+        break;
+      case 'read-only':
+        params.approvalPolicy = 'never';
+        params.sandboxPolicy = { type: 'readOnly' };
+        break;
+      case 'full-access':
+        params.approvalPolicy = 'never';
+        params.sandboxPolicy = { type: 'dangerFullAccess' };
+        break;
+    }
+    return params;
+  }
+
+  private flushPendingNotifications(runtime: ScopeRuntime, active: ActiveTurn): void {
+    const pending = active.pendingNotifications;
+    active.pendingNotifications = [];
+    for (const event of pending) {
+      if (runtime.active !== active || active.done || active.retired) break;
+      if (eventIds(event).turnId !== active.id) continue;
+      this.emitNotification(runtime, active, event);
+    }
+  }
+
+  private emitNotification(runtime: ScopeRuntime, active: ActiveTurn, event: AppServerNotification): void {
+    const context = { projectPath: runtime.projectPath, scope: runtime.scope, turnSeq: active.seq, threadId: runtime.threadId, turnId: active.id };
+    const envelopes = mapAppServerEvent(event, context);
+    const terminal = envelopes.some((envelope) => envelope.type === 'done');
+    // The mapper exposes `done` for standalone consumers, while this backend
+    // owns scope cleanup and emits its lifecycle flags exactly once.
+    for (const envelope of envelopes) if (envelope.type !== 'done') this.emit(envelope);
+    if (terminal) this.finishTurn(runtime, active, { subagentsSettled: true });
   }
 }

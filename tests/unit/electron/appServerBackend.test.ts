@@ -10,12 +10,13 @@ function harness() {
   const failures = new Set<(error: Error) => void>();
   const requests: Request[] = [];
   const responses = new Map<string, unknown>();
+  const queuedResponses = new Map<string, unknown[]>();
   const client: AppServerClientTransport = {
     failureReason: undefined,
     start: vi.fn(async () => undefined),
     request: vi.fn(async (method: string, params: unknown) => {
       requests.push({ method, params });
-      const response = responses.get(method);
+      const response = queuedResponses.get(method)?.shift() ?? responses.get(method);
       if (response instanceof Error) throw response;
       return response ?? {};
     }),
@@ -33,9 +34,20 @@ function harness() {
   });
   return {
     backend, client, requests, responses, emitted, registerWorkspace,
+    queueResponse: (method: string, response: unknown) => {
+      const queue = queuedResponses.get(method) ?? [];
+      queue.push(response);
+      queuedResponses.set(method, queue);
+    },
     notify: (method: string, params: unknown) => notifications.forEach((listener) => listener({ jsonrpc: '2.0', method, params })),
     fail: (error: Error) => failures.forEach((listener) => listener(error as never)),
   };
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((accept) => { resolve = accept; });
+  return { promise, resolve };
 }
 
 async function settle(): Promise<void> {
@@ -79,7 +91,8 @@ describe('AppServerBackend', () => {
     await settle();
 
     expect(h.requests.at(-1)).toEqual({ method: 'turn/start', params: {
-      threadId: 'thread-a', input: [{ type: 'text', text: 'hello' }],
+      threadId: 'thread-a', input: [{ type: 'text', text: 'hello' }], cwd: '/repo',
+      approvalPolicy: 'onRequest', sandboxPolicy: { type: 'workspaceWrite', writableRoots: ['/repo'], networkAccess: true },
     } });
     h.notify('item/agentMessage/delta', { threadId: 'thread-stale', turnId: 'turn-a', delta: 'wrong' });
     h.notify('item/agentMessage/delta', { threadId: 'thread-a', turnId: 'turn-a', delta: 'right' });
@@ -101,6 +114,66 @@ describe('AppServerBackend', () => {
     expect(h.requests.at(-1)).toEqual({ method: 'turn/interrupt', params: { threadId: 'thread-a', turnId: 'turn-a' } });
     h.backend.reconcileScope('/repo', 'b');
     expect(h.emitted).toContainEqual({ type: 'done', projectPath: '/repo', scope: 'b', turnSeq: null });
+  });
+
+  it.each(['interrupt', 'replacement', 'suspend'] as const)('interrupts a turn once its delayed ID resolves after %s', async (action) => {
+    const h = harness();
+    const delayedTurn = deferred<unknown>();
+    h.responses.set('thread/start', { thread: { id: 'thread-a' } });
+    h.queueResponse('turn/start', delayedTurn.promise);
+    h.queueResponse('turn/start', { turn: { id: 'turn-next' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'first' });
+    await settle();
+
+    if (action === 'interrupt') h.backend.interrupt('/repo', 'a');
+    if (action === 'replacement') h.backend.send({ projectPath: '/repo', scope: 'a', message: 'second' });
+    if (action === 'suspend') h.backend.suspendWorkspace('/repo');
+    delayedTurn.resolve({ turn: { id: 'turn-late' } });
+    await settle();
+
+    expect(h.requests.filter((request) => request.method === 'turn/interrupt')).toEqual([
+      { method: 'turn/interrupt', params: { threadId: 'thread-a', turnId: 'turn-late' } },
+    ]);
+  });
+
+  it('buffers early matching notifications until a delayed turn/start response binds their ID', async () => {
+    const h = harness();
+    const delayedTurn = deferred<unknown>();
+    h.responses.set('thread/start', { thread: { id: 'thread-a' } });
+    h.responses.set('turn/start', delayedTurn.promise);
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
+    await settle();
+    h.notify('item/agentMessage/delta', { threadId: 'thread-a', turnId: 'turn-a', delta: 'early' });
+    h.notify('turn/completed', { threadId: 'thread-a', turn: { id: 'turn-a', status: 'completed' } });
+    expect(h.emitted).not.toContainEqual(expect.objectContaining({ type: 'assistant' }));
+
+    delayedTurn.resolve({ turn: { id: 'turn-a' } });
+    await settle();
+    expect(h.emitted).toContainEqual(expect.objectContaining({ type: 'assistant', message: { content: [{ type: 'text', text: 'early' }] } }));
+    expect(h.emitted.filter((event) => event.type === 'done')).toHaveLength(1);
+    expect(h.backend.isWorkspaceBusy('/repo')).toBe(false);
+  });
+
+  it('passes model, effort, and permission through documented turn/start overrides', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-a' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-a' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go', model: 'gpt-5', effort: 'high', permission: 'full-access' });
+    await settle();
+    expect(h.requests.at(-1)).toEqual({ method: 'turn/start', params: expect.objectContaining({
+      model: 'gpt-5', effort: 'high', approvalPolicy: 'never', sandboxPolicy: { type: 'dangerFullAccess' },
+    }) });
+  });
+
+  it('rejects startup failures instead of announcing a ready preview', async () => {
+    const h = harness();
+    h.responses.set('thread/start', new Error('cannot start thread'));
+    await expect(h.backend.start({ projectPath: '/repo', scope: 'a' })).rejects.toThrow('cannot start thread');
+    expect(h.emitted).not.toContainEqual({ type: 'ready', projectPath: '/repo', scope: 'a' });
+    expect(h.backend.previewStatus).toEqual({ available: false, reason: 'cannot start thread' });
   });
 
   it('drops delayed notifications after a scope is suspended', async () => {
