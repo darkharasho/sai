@@ -157,7 +157,11 @@ export default function OrchestratorModelPicker({ provider, model, onChange, dis
                 aria-checked={isSelected}
                 disabled={isDisabled}
                 data-testid={`orch-model-picker-provider-${p.id}`}
-                title={isDisabled ? 'Orchestrator chat-driven dispatch requires Claude' : `Use ${p.label}`}
+                title={isDisabled
+                  ? p.id === 'codex'
+                    ? 'Codex orchestrator requires the App Server Swarm MCP bridge'
+                    : 'Orchestrator chat-driven dispatch requires Claude'
+                  : `Use ${p.label}`}
                 onClick={() => {
                   if (isDisabled) return;
                   if (p.id !== provider) onChange(p.id, p.defaultModel);

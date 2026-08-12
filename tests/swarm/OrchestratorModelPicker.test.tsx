@@ -37,8 +37,8 @@ describe('OrchestratorModelPicker', () => {
     const gemini = screen.getByTestId('orch-model-picker-provider-gemini') as HTMLButtonElement;
     expect(codex.disabled).toBe(true);
     expect(gemini.disabled).toBe(true);
-    // Tooltip explains why.
-    expect(codex.getAttribute('title')).toMatch(/requires Claude/i);
+    // Tooltip explains why Codex remains intentionally unavailable.
+    expect(codex.getAttribute('title')).toMatch(/codex orchestrator requires the app server swarm mcp bridge/i);
   });
 
   it('clicking a disabled provider does not fire onChange', () => {
