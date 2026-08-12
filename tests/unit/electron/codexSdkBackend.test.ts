@@ -248,6 +248,50 @@ describe('SdkCodexBackend', () => {
     expect(h.notifyCompletion).toHaveBeenCalledWith('/a', { provider: 'Codex', summary: 'finished' });
   });
 
+  it('drains native subagent lifecycle events after the parent completes before settling the turn', async () => {
+    const stream = pendingStream();
+    const h = harness([stream.events]);
+    h.backend.start({ projectPath: '/a', scope: 'chat' });
+    h.backend.send({ projectPath: '/a', scope: 'chat', message: 'delegate' });
+    await settle();
+
+    stream.push({
+      type: 'item.started',
+      item: { id: 'child-1', type: 'collab_tool_call', status: 'running', description: 'Inspect renderer' },
+    } as unknown as ThreadEvent);
+    stream.push({
+      type: 'turn.completed',
+      usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0 },
+    });
+    await settle();
+
+    expect(h.emitted.some((event) => event.type === 'result')).toBe(true);
+    expect(h.emitted).toContainEqual(expect.objectContaining({
+      type: 'subagent_activity', agentId: 'child-1', status: 'running', turnSeq: 1,
+    }));
+    expect(h.emitted.filter((event) => event.type === 'done')).toHaveLength(0);
+    expect(h.backend.isWorkspaceBusy('/a')).toBe(true);
+
+    stream.push({
+      type: 'item.completed',
+      item: { id: 'child-1', type: 'collab_tool_call', status: 'completed', description: 'Inspect renderer' },
+    } as unknown as ThreadEvent);
+    await settle();
+
+    expect(h.emitted).toContainEqual(expect.objectContaining({
+      type: 'subagent_activity', agentId: 'child-1', status: 'completed', turnSeq: 1,
+    }));
+    expect(h.emitted.filter((event) => event.type === 'done')).toHaveLength(0);
+
+    stream.end();
+    await settle();
+
+    expect(h.emitted.filter((event) => event.type === 'done')).toEqual([
+      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1 },
+    ]);
+    expect(h.backend.isWorkspaceBusy('/a')).toBe(false);
+  });
+
   it.each([
     {
       label: 'a task turn',

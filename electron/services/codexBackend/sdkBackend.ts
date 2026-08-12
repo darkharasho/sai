@@ -340,13 +340,13 @@ export class SdkCodexBackend implements CodexBackend {
           turnSeq: active.seq,
         });
         for (const envelope of envelopes) {
-          if (envelope.type === 'done') {
-            this.finishTurn(runtime, active);
-          } else if (this.isCurrent(runtime, active)) {
+          // The parent can report `turn.completed` before native delegated
+          // children emit their terminal collaboration events. Keep draining
+          // the SDK iterator and emit its single SAI terminal `done` at EOF.
+          if (envelope.type !== 'done' && this.isCurrent(runtime, active)) {
             this.emit(envelope);
           }
         }
-        if (!this.isCurrent(runtime, active)) return;
       }
       if (thread.id) runtime.sessionId = thread.id;
       this.finishTurn(runtime, active);
