@@ -38,6 +38,13 @@ function makeDeps() {
   };
 }
 
+function makeClaudeDeps() {
+  return {
+    claudeStart: vi.fn().mockResolvedValue(undefined),
+    claudeSend: vi.fn(),
+  };
+}
+
 describe('permModeForPolicy', () => {
   it('maps auto → bypass', () => {
     expect(permModeForPolicy('auto')).toBe('bypass');
@@ -151,8 +158,19 @@ describe('runSwarmTask', () => {
     expect(deps.codexSend.mock.calls[0][3]).toBe('full-access');
   });
 
-  it('returns false and skips IPC when provider is not claude', async () => {
-    const task = makeTask({ provider: 'gemini' });
+  it('returns false without IPC when Codex bridges are unavailable', async () => {
+    const task = makeTask({ provider: 'codex' });
+    const deps = makeClaudeDeps();
+
+    const dispatched = await runSwarmTask(task, deps);
+
+    expect(dispatched).toBe(false);
+    expect(deps.claudeStart).not.toHaveBeenCalled();
+    expect(deps.claudeSend).not.toHaveBeenCalled();
+  });
+
+  it.each(['gemini', 'kimi'] as const)('returns false and skips IPC for unsupported provider %s', async (provider) => {
+    const task = makeTask({ provider });
     const deps = makeDeps();
 
     const dispatched = await runSwarmTask(task, deps);

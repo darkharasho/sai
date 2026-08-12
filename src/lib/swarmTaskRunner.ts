@@ -25,8 +25,8 @@ export type ProviderSend = (
 export interface SwarmRunnerDeps {
   claudeStart: ProviderStart;
   claudeSend: ProviderSend;
-  codexStart: ProviderStart;
-  codexSend: ProviderSend;
+  codexStart?: ProviderStart;
+  codexSend?: ProviderSend;
 }
 
 /**
@@ -83,6 +83,10 @@ export async function runSwarmTask(task: SwarmTask, deps: SwarmRunnerDeps): Prom
   }
 
   if (task.provider === 'codex') {
+    if (!deps.codexStart || !deps.codexSend) {
+      return false;
+    }
+
     const projectPath = task.workspaceId;
     const scopeCwd = cwdForTask(task);
     await deps.codexStart(projectPath, task.sessionId, 'task', undefined, scopeCwd);
