@@ -571,6 +571,42 @@ describe('AppServerBackend', () => {
     expect(responder.respond).toHaveBeenCalledWith({ action: 'accept', content: { date: '2026-08-12' } });
   });
 
+  it('cancels an optional-turn MCP request when its thread belongs to multiple active scopes', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'shared-thread' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-a' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    await h.backend.start({ projectPath: '/repo', scope: 'b' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
+    await settle();
+    const responder = h.serverRequest('ambiguous-mcp', 'mcpServer/elicitation/request', {
+      threadId: 'shared-thread', serverName: 'calendar', mode: 'url', message: 'Sign in', url: 'https://example.test', elicitationId: 'e-1',
+    });
+
+    expect(responder.respond).toHaveBeenCalledWith({ action: 'cancel', content: null });
+    expect(h.emitted.some((event) => event.type === 'mcp_elicitation_needed')).toBe(false);
+  });
+
+  it('rejects unknown, deep, and oversized form values even when a requested schema allows additional properties', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-a' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-a' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
+    await settle();
+    h.serverRequest('bounded-form', 'mcpServer/elicitation/request', {
+      threadId: 'thread-a', turnId: 'turn-a', serverName: 'calendar', mode: 'form', message: 'Choose a date',
+      requestedSchema: { type: 'object', properties: { date: { type: 'string' }, meta: { type: 'object', properties: {}, additionalProperties: true } }, required: ['date'], additionalProperties: true },
+    });
+
+    expect(h.backend.resolveMcpElicitation('/repo', 'a', 'bounded-form', { action: 'accept', content: { date: '2026-08-12', injected: 'nope' } }))
+      .toEqual({ ok: false, code: 'invalid-decision' });
+    expect(h.backend.resolveMcpElicitation('/repo', 'a', 'bounded-form', { action: 'accept', content: { date: '2026-08-12', meta: { a: { b: { c: { d: { e: 'too deep' } } } } } } }))
+      .toEqual({ ok: false, code: 'invalid-decision' });
+    expect(h.backend.resolveMcpElicitation('/repo', 'a', 'bounded-form', { action: 'accept', content: { date: 'x'.repeat(2_001) } }))
+      .toEqual({ ok: false, code: 'invalid-decision' });
+  });
+
   it('cancels unsupported or stale MCP elicitation and retires it after server resolution', async () => {
     const h = harness();
     h.responses.set('thread/start', { thread: { id: 'thread-a' } });
@@ -590,5 +626,20 @@ describe('AppServerBackend', () => {
     expect(h.backend.resolveMcpElicitation('/repo', 'a', 'mcp-url', { action: 'accept', content: null }))
       .toEqual({ ok: false, code: 'not-pending' });
     expect(responder.respond).not.toHaveBeenCalled();
+  });
+
+  it('cancels URL elicitation without its required opaque elicitation ID', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-a' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-a' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
+    await settle();
+    const responder = h.serverRequest('missing-url-id', 'mcpServer/elicitation/request', {
+      threadId: 'thread-a', turnId: 'turn-a', serverName: 'calendar', mode: 'url', message: 'Sign in', url: 'https://example.test',
+    });
+
+    expect(responder.respond).toHaveBeenCalledWith({ action: 'cancel', content: null });
+    expect(h.emitted.some((event) => event.type === 'mcp_elicitation_needed')).toBe(false);
   });
 });

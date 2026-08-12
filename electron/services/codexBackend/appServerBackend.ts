@@ -263,10 +263,11 @@ function safeSchema(value: unknown, depth = 0): Record<string, unknown> | undefi
       if (!Array.isArray(schema.required) || schema.required.some((key) => typeof key !== 'string' || !Object.prototype.hasOwnProperty.call(safeProperties, key))) return undefined;
       normalized.required = [...schema.required];
     }
-    if (schema.additionalProperties !== undefined) {
-      if (typeof schema.additionalProperties !== 'boolean') return undefined;
-      normalized.additionalProperties = schema.additionalProperties;
-    }
+    if (schema.additionalProperties !== undefined && typeof schema.additionalProperties !== 'boolean') return undefined;
+    // SAI intentionally supports a closed schema subset. Even when an MCP
+    // server permits arbitrary properties, unknown content is not safe to
+    // accept from a renderer boundary.
+    normalized.additionalProperties = false;
   }
   if (type === 'array') {
     const items = safeSchema(schema.items, depth + 1);
@@ -291,9 +292,9 @@ function mcpElicitation(params: Record<string, unknown>): CodexMcpElicitationFor
     const parsed = new URL(url);
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return undefined;
   } catch { return undefined; }
-  const elicitationId = params.elicitationId === undefined ? undefined : boundedText(params.elicitationId, 256);
-  if (params.elicitationId !== undefined && !elicitationId) return undefined;
-  return { mode: 'url', serverName, message, url, ...(elicitationId ? { elicitationId } : {}) };
+  const elicitationId = boundedText(params.elicitationId, 256);
+  if (!elicitationId) return undefined;
+  return { mode: 'url', serverName, message, url, elicitationId };
 }
 
 function schemaAccepts(schema: Record<string, unknown>, value: unknown, depth = 0): boolean {
@@ -311,10 +312,10 @@ function schemaAccepts(schema: Record<string, unknown>, value: unknown, depth = 
       const object = record(value);
       const properties = record(schema.properties) ?? {};
       if (!object) return false;
+      if (Object.keys(object).length > 20 || Object.keys(object).some((key) => !(key in properties))) return false;
       const required = Array.isArray(schema.required) ? schema.required : [];
       if (required.some((key) => typeof key !== 'string' || !(key in object))) return false;
-      if (schema.additionalProperties === false && Object.keys(object).some((key) => !(key in properties))) return false;
-      return Object.entries(object).every(([key, entry]) => !properties[key] || schemaAccepts(properties[key] as Record<string, unknown>, entry, depth + 1));
+      return Object.entries(object).every(([key, entry]) => schemaAccepts(properties[key] as Record<string, unknown>, entry, depth + 1));
     }
     default: return false;
   }
@@ -680,7 +681,10 @@ export class AppServerBackend implements CodexBackend {
     let responder: AppServerServerRequestResponder;
     try { responder = this.client?.claimServerRequest(request.id)!; } catch { return undefined; }
     const ids = eventIds(request);
-    const runtime = ids.threadId ? [...this.runtimes.values()].find((candidate) => candidate.threadId === ids.threadId) : undefined;
+    const candidates = ids.threadId ? [...this.runtimes.values()].filter((candidate) => candidate.threadId === ids.threadId) : [];
+    // A request without turnId can only be scoped by thread. Never guess when
+    // a stale/reused App Server thread is owned by more than one SAI scope.
+    const runtime = candidates.length === 1 ? candidates[0] : undefined;
     const active = runtime?.active;
     return { responder, runtime, active };
   }
