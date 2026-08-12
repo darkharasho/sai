@@ -63,7 +63,7 @@ export function registerCodexHandlers(): void {
   ipcMain.handle('codex:appServerPreviewStatus', () => getCodexAppServerPreviewStatus());
 
   ipcMain.handle(
-    'codex:approve',
+    'codex:appServerApprove',
     (_event, projectPath: unknown, scope: unknown, requestHandle: unknown, decision: unknown): CodexApprovalResult => {
       if (typeof projectPath !== 'string' || projectPath.length === 0
         || (scope !== undefined && typeof scope !== 'string')

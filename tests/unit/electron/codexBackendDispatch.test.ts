@@ -484,12 +484,12 @@ describe('Codex IPC dispatch', () => {
     __setCodexBackendForTests(backend);
     registerCodexHandlers();
 
-    await expect(mocks.ipcMain.invoke('codex:approve', '/project', 'task:7', 'request-7', {
+    await expect(mocks.ipcMain.invoke('codex:appServerApprove', '/project', 'task:7', 'request-7', {
       type: 'decision', value: 'accept',
     })).resolves.toEqual({ ok: true });
     expect(backend.approve).toHaveBeenCalledWith('/project', 'task:7', 'request-7', { type: 'decision', value: 'accept' });
 
-    await expect(mocks.ipcMain.invoke('codex:approve', '/project', 'task:7', 'request-7', {
+    await expect(mocks.ipcMain.invoke('codex:appServerApprove', '/project', 'task:7', 'request-7', {
       type: 'permissions', scope: 'everywhere', permissions: [],
     })).resolves.toEqual({ ok: false, code: 'invalid-decision' });
     expect(backend.approve).toHaveBeenCalledOnce();

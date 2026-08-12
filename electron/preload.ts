@@ -78,12 +78,12 @@ contextBridge.exposeInMainWorld('sai', {
   codexBackendModeGet: () => ipcRenderer.invoke('codex:backendMode:get'),
   codexBackendModeSet: (mode: 'sdk' | 'app-server') => ipcRenderer.invoke('codex:backendMode:set', mode),
   codexAppServerPreviewStatus: () => ipcRenderer.invoke('codex:appServerPreviewStatus'),
-  codexApprove: (
+  codexAppServerApprove: (
     projectPath: string,
     scope: string | undefined,
     requestHandle: string,
     decision: import('./services/codexBackend').CodexApprovalDecision,
-  ) => ipcRenderer.invoke('codex:approve', projectPath, scope, requestHandle, decision),
+  ) => ipcRenderer.invoke('codex:appServerApprove', projectPath, scope, requestHandle, decision),
   codexModels: (forceRefresh?: boolean) => ipcRenderer.invoke('codex:models', forceRefresh),
   codexStart: (cwd: string, scope?: string, kind?: string, orchestratorContext?: unknown, scopeCwd?: string, metaPreamble?: string, additionalDirectories?: string[]) =>
     ipcRenderer.invoke('codex:start', cwd, scope, kind, orchestratorContext, scopeCwd, metaPreamble, additionalDirectories),

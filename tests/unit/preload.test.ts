@@ -117,6 +117,22 @@ describe('characterization: existing IPC routing', () => {
     expect(invoke).toHaveBeenNthCalledWith(3, 'codex:appServerPreviewStatus');
   });
 
+  it('keeps the legacy Swarm Codex approval call isolated from App Server decisions', async () => {
+    expect(exposed.codexApprove).toBeUndefined();
+
+    await exposed.codexAppServerApprove('/proj', 'scope-a', 'request-1', {
+      type: 'decision', value: 'accept',
+    });
+
+    expect(invoke).toHaveBeenCalledWith(
+      'codex:appServerApprove',
+      '/proj',
+      'scope-a',
+      'request-1',
+      { type: 'decision', value: 'accept' },
+    );
+  });
+
   it('codexUsageFetch defaults to a non-forced refresh when called with no argument', async () => {
     invoke.mockResolvedValue({ provider: 'codex', primary: null, secondary: null });
     await exposed.codexUsageFetch();

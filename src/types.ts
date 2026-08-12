@@ -364,7 +364,7 @@ declare global {
     codexBackendModeGet?: () => Promise<'sdk' | 'app-server'>;
     codexBackendModeSet?: (mode: 'sdk' | 'app-server') => Promise<'sdk' | 'app-server'>;
     codexAppServerPreviewStatus?: () => Promise<{ available: boolean; reason?: string }>;
-    codexApprove?: (
+    codexAppServerApprove?: (
       projectPath: string,
       scope: string | undefined,
       requestHandle: string,
