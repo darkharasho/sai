@@ -558,11 +558,17 @@ function createWindow() {
     // mode) and the in-process SDK MCP server (SDK mode, via saiToolBridge). The
     // orchestrator-card injection below is a no-op for chat scopes (no
     // orchSessionId), so SDK chat tools reuse this unchanged.
-    const dispatchSwarmTool = async (req: { tool: string; input: unknown; workspace: string }) => {
+    const dispatchSwarmTool = async (req: { tool: string; input: unknown; workspace: string; scope?: string; suppressSyntheticCard?: boolean }) => {
       const id = `mcp-${crypto.randomUUID()}`;
+      // App Server Dynamic Tool calls carry the owning scope from its backend.
+      // Never let a call for one orchestrator route through another workspace's
+      // renderer host or manufacture a second tool card.
+      if (req.scope && swarmOrchestratorSessions.get(req.workspace) !== req.scope) {
+        throw new Error('orchestrator workspace/scope ownership mismatch');
+      }
       // Deterministic tool_use id so the later tool_result can be matched.
       const toolUseId = `mcp-tooluse-${id}`;
-      const orchSessionId = injectSyntheticOrchCards ? swarmOrchestratorSessions.get(req.workspace) : undefined;
+      const orchSessionId = !req.suppressSyntheticCard && injectSyntheticOrchCards ? swarmOrchestratorSessions.get(req.workspace) : undefined;
 
       // Inject a synthetic assistant tool_use into the orchestrator chat so a
       // SwarmToolCardSelector card renders inline. Claude CLI's stream-json

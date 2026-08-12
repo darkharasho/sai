@@ -8,9 +8,11 @@ import {
 } from './appServerClient';
 import { mapAppServerEvent } from './appServerEventMap';
 import { SAI_SWARM_DYNAMIC_TOOLS } from './appServerDynamicTools';
+import { dispatchSaiSwarmDynamicTool, dynamicToolResponse, validateSaiSwarmDynamicToolCall } from './dynamicToolBridge';
 import { isCodexUserInputResponse, normalizeCodexModelOption, codexScope, codexScopeKey, type CodexAppServerPreviewStatus, type CodexApprovalDecision, type CodexApprovalMetadata, type CodexApprovalResult, type CodexBackend, type CodexMcpElicitationDecision, type CodexMcpElicitationForm, type CodexMcpElicitationUrl, type CodexModelResult, type CodexSendArgs, type CodexSessionKind, type CodexStartArgs, type CodexUserInputAnswers, type CodexUserInputQuestion, type CodexUserInputResponse } from './types';
 import type { SaiEnvelope } from './sdkEventMap';
 import { getOrCreate as getOrCreateWorkspace } from '../workspace';
+import type { SaiToolDispatch } from '../saiToolBridge';
 
 interface ScopeMeta {
   projectPath: string;
@@ -65,6 +67,14 @@ interface PendingMcpElicitation {
   readonly elicitation: CodexMcpElicitationForm | CodexMcpElicitationUrl;
 }
 
+interface PendingDynamicTool {
+  readonly id: string | number;
+  readonly runtime: ScopeRuntime;
+  readonly active: ActiveTurn;
+  readonly responder: AppServerServerRequestResponder;
+  resolved: boolean;
+}
+
 const APPROVAL_METHODS = {
   'item/commandExecution/requestApproval': 'command',
   'item/fileChange/requestApproval': 'file-change',
@@ -91,6 +101,8 @@ export interface AppServerBackendDeps {
   createClient?: (options: { experimentalApi: boolean }) => AppServerClientTransport;
   emit?: (event: SaiEnvelope) => void;
   registerWorkspace?: (projectPath: string) => void;
+  /** Main-process owned renderer bridge for fixed App Server Dynamic Tools. */
+  dynamicToolDispatch?: SaiToolDispatch | null;
 }
 
 type AppServerClientKind = 'standard' | 'orchestrator';
@@ -339,6 +351,8 @@ export class AppServerBackend implements CodexBackend {
   private readonly pendingApprovals = new Map<string | number, PendingApproval>();
   private readonly pendingUserInputs = new Map<string | number, PendingUserInput>();
   private readonly pendingMcpElicitations = new Map<string | number, PendingMcpElicitation>();
+  private readonly pendingDynamicTools = new Map<string | number, PendingDynamicTool>();
+  private readonly dynamicToolDispatch: SaiToolDispatch | null | undefined;
 
   constructor(deps: AppServerBackendDeps = {}) {
     this.createClient = deps.createClient ?? ((options) => new AppServerClient(options));
@@ -346,6 +360,7 @@ export class AppServerBackend implements CodexBackend {
     this.registerWorkspace = deps.registerWorkspace ?? ((projectPath) => {
       try { getOrCreateWorkspace(projectPath); } catch { /* isolated tests or shutdown */ }
     });
+    this.dynamicToolDispatch = deps.dynamicToolDispatch;
   }
 
   get previewStatus(): CodexAppServerPreviewStatus {
@@ -657,6 +672,10 @@ export class AppServerBackend implements CodexBackend {
   }
 
   private handleServerRequest(client: AppServerClientTransport, request: AppServerServerRequest): void {
+    if (request.method === 'item/tool/call') {
+      this.handleDynamicToolRequest(client, request);
+      return;
+    }
     if (request.method === USER_INPUT_METHOD) {
       this.handleUserInputRequest(client, request);
       return;
@@ -764,6 +783,32 @@ export class AppServerBackend implements CodexBackend {
     });
   }
 
+  private handleDynamicToolRequest(client: AppServerClientTransport, request: AppServerServerRequest): void {
+    const claimed = this.claimScopedRequest(client, request);
+    if (!claimed) return;
+    const { responder, runtime, active } = claimed;
+    const ids = eventIds(request);
+    const call = validateSaiSwarmDynamicToolCall(request.params);
+    // Dynamic tools are an orchestrator-only protocol. Require both wire IDs:
+    // accepting a thread-only request could route a previous turn's action.
+    if (!runtime || !active || runtime.kind !== 'orchestrator' || !ids.threadId || !ids.turnId
+      || !this.isActiveOwner(runtime, active, request) || !call || this.pendingDynamicTools.has(request.id)) {
+      try { responder.respond(dynamicToolResponse(undefined, true)); } catch { /* resolved */ }
+      return;
+    }
+    const pending: PendingDynamicTool = { id: request.id, runtime, active, responder, resolved: false };
+    this.pendingDynamicTools.set(request.id, pending);
+    void dispatchSaiSwarmDynamicTool(call, { workspace: runtime.projectPath, scope: runtime.scope }, this.dynamicToolDispatch)
+      .then((response) => this.resolveDynamicTool(pending, response));
+  }
+
+  private resolveDynamicTool(pending: PendingDynamicTool, response: ReturnType<typeof dynamicToolResponse>): void {
+    if (this.pendingDynamicTools.get(pending.id) !== pending || pending.resolved) return;
+    pending.resolved = true;
+    this.pendingDynamicTools.delete(pending.id);
+    try { pending.responder.respond(response); } catch { /* resolved */ }
+  }
+
   private resolveServerRequest(event: AppServerNotification): void {
     const params = record(event.params);
     const id = params?.requestId ?? params?.id;
@@ -838,6 +883,16 @@ export class AppServerBackend implements CodexBackend {
       this.pendingMcpElicitations.delete(id);
       this.emitMcpElicitationResolved(pending);
       if (respond) this.cancelMcpElicitation(pending.responder);
+    }
+    for (const [id, pending] of this.pendingDynamicTools) {
+      if (pending.runtime !== runtime || (active && pending.active !== active)) continue;
+      this.pendingDynamicTools.delete(id);
+      if (!pending.resolved) {
+        pending.resolved = true;
+        if (respond) {
+          try { pending.responder.respond(dynamicToolResponse(undefined, true)); } catch { /* resolved */ }
+        }
+      }
     }
   }
 

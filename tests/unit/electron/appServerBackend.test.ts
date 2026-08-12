@@ -37,6 +37,7 @@ function harness() {
   };
   const emitted: Array<Record<string, unknown>> = [];
   const registerWorkspace = vi.fn();
+  const dispatchDynamicTool = vi.fn(async () => ({ ok: true, tasks: [] }));
   const backend = new AppServerBackend({
     createClient: (options) => {
       clientOptions.push(options);
@@ -44,9 +45,10 @@ function harness() {
     },
     emit: (event) => emitted.push(event),
     registerWorkspace,
+    dynamicToolDispatch: dispatchDynamicTool,
   });
   return {
-    backend, client, clientOptions, requests, responses, emitted, registerWorkspace,
+    backend, client, clientOptions, requests, responses, emitted, registerWorkspace, dispatchDynamicTool,
     queueResponse: (method: string, response: unknown) => {
       const queue = queuedResponses.get(method) ?? [];
       queue.push(response);
@@ -79,6 +81,69 @@ async function settle(): Promise<void> {
 }
 
 describe('AppServerBackend', () => {
+  it('executes an active orchestrator Dynamic Tool through the scoped Swarm bridge', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-orchestrator' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-orchestrator' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'orchestrator:run-1', kind: 'orchestrator' });
+    h.backend.send({ projectPath: '/repo', scope: 'orchestrator:run-1', message: 'delegate work' });
+    await settle();
+
+    const responder = h.serverRequest('dynamic-1', 'item/tool/call', {
+      threadId: 'thread-orchestrator', turnId: 'turn-orchestrator', itemId: 'tool-1',
+      tool: 'sai_swarm_query_status', arguments: {},
+    });
+    await settle();
+
+    expect(h.dispatchDynamicTool).toHaveBeenCalledWith({
+      tool: 'query_status', input: {}, workspace: '/repo', scope: 'orchestrator:run-1', suppressSyntheticCard: true,
+    });
+    expect(responder.respond).toHaveBeenCalledWith({
+      success: true,
+      contentItems: [{ type: 'inputText', text: '{"ok":true,"tasks":[]}' }],
+    });
+    expect(h.emitted).not.toContainEqual(expect.objectContaining({ type: 'approval_needed' }));
+  });
+
+  it.each([
+    ['stale turn', { threadId: 'thread-orchestrator', turnId: 'turn-stale', tool: 'sai_swarm_query_status', arguments: {} }],
+    ['unknown tool', { threadId: 'thread-orchestrator', turnId: 'turn-orchestrator', tool: 'bash', arguments: {} }],
+    ['malformed arguments', { threadId: 'thread-orchestrator', turnId: 'turn-orchestrator', tool: 'sai_swarm_query_status', arguments: { extra: true } }],
+  ])('rejects a %s Dynamic Tool request without dispatching it', async (_label, request) => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-orchestrator' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-orchestrator' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'orchestrator:run-1', kind: 'orchestrator' });
+    h.backend.send({ projectPath: '/repo', scope: 'orchestrator:run-1', message: 'delegate work' });
+    await settle();
+
+    const responder = h.serverRequest('dynamic-invalid', 'item/tool/call', request);
+    await settle();
+    expect(h.dispatchDynamicTool).not.toHaveBeenCalled();
+    expect(responder.respond).toHaveBeenCalledWith(expect.objectContaining({ success: false }));
+    expect(h.emitted).not.toContainEqual(expect.objectContaining({ type: 'approval_needed' }));
+  });
+
+  it('settles a Dynamic Tool exactly once when the orchestrator turn is stopped', async () => {
+    const h = harness();
+    const pending = deferred<unknown>();
+    h.dispatchDynamicTool.mockReturnValueOnce(pending.promise);
+    h.responses.set('thread/start', { thread: { id: 'thread-orchestrator' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-orchestrator' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'orchestrator:run-1', kind: 'orchestrator' });
+    h.backend.send({ projectPath: '/repo', scope: 'orchestrator:run-1', message: 'delegate work' });
+    await settle();
+    const responder = h.serverRequest('dynamic-stop', 'item/tool/call', {
+      threadId: 'thread-orchestrator', turnId: 'turn-orchestrator', tool: 'sai_swarm_query_status', arguments: {},
+    });
+    await settle();
+    h.backend.interrupt('/repo', 'orchestrator:run-1');
+    pending.resolve({ ok: true });
+    await settle();
+
+    expect(responder.respond).toHaveBeenCalledTimes(1);
+    expect(responder.respond).toHaveBeenCalledWith(expect.objectContaining({ success: false }));
+  });
   it('starts a scoped thread with its scoped cwd and announces readiness', async () => {
     const h = harness();
     h.responses.set('thread/start', { thread: { id: 'thread-chat' } });

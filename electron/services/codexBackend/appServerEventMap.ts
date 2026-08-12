@@ -208,6 +208,11 @@ function startedItem(item: RecordValue, ctx: AppServerMapContext): SaiEnvelope[]
         item.arguments ?? {},
         ctx,
       )];
+    case 'dynamicToolCall': {
+      const tool = text(item.tool);
+      const name = tool?.startsWith('sai_swarm_') ? `mcp__swarm__${tool.slice('sai_swarm_'.length)}` : undefined;
+      return name ? [toolUse(id, name, item.arguments ?? {}, ctx)] : [];
+    }
     case 'webSearch':
       return [toolUse(id, 'WebSearch', { query: text(item.query) ?? '' }, ctx)];
     case 'todoList':
@@ -239,6 +244,10 @@ function completedItem(item: RecordValue, ctx: AppServerMapContext): SaiEnvelope
     case 'mcpToolCall': {
       const error = isRecord(item.error) ? text(item.error.message) : undefined;
       return [toolResult(id, error ?? rendererMcpContent(item.result), text(item.status) === 'failed', ctx)];
+    }
+    case 'dynamicToolCall': {
+      const content = item.contentItems ?? item.content ?? (item.success === false ? 'Dynamic tool failed' : '');
+      return [toolResult(id, typeof content === 'string' ? content : stableJson(content), text(item.status) !== 'completed' || item.success === false, ctx)];
     }
     case 'webSearch':
       return [toolResult(id, text(item.query) ?? '', false, ctx)];
