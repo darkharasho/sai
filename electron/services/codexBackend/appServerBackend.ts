@@ -41,6 +41,9 @@ interface ScopeRuntime extends ScopeMeta {
 }
 
 interface PendingApproval {
+  readonly key: string;
+  readonly requestHandle: string;
+  readonly client: AppServerClientTransport;
   readonly id: string | number;
   readonly runtime: ScopeRuntime;
   readonly active: ActiveTurn;
@@ -51,6 +54,9 @@ interface PendingApproval {
 }
 
 interface PendingUserInput {
+  readonly key: string;
+  readonly requestHandle: string;
+  readonly client: AppServerClientTransport;
   readonly id: string | number;
   readonly runtime: ScopeRuntime;
   readonly active: ActiveTurn;
@@ -60,6 +66,9 @@ interface PendingUserInput {
 }
 
 interface PendingMcpElicitation {
+  readonly key: string;
+  readonly requestHandle: string;
+  readonly client: AppServerClientTransport;
   readonly id: string | number;
   readonly runtime: ScopeRuntime;
   readonly active: ActiveTurn;
@@ -68,6 +77,8 @@ interface PendingMcpElicitation {
 }
 
 interface PendingDynamicTool {
+  readonly key: string;
+  readonly client: AppServerClientTransport;
   readonly id: string | number;
   readonly runtime: ScopeRuntime;
   readonly active: ActiveTurn;
@@ -167,14 +178,14 @@ function jsonSafeCopy(value: unknown): unknown | undefined {
   try { return JSON.parse(identity); } catch { return undefined; }
 }
 
-function approvalMetadata(request: AppServerServerRequest): CodexApprovalMetadata | undefined {
+function approvalMetadata(request: AppServerServerRequest, requestHandle = String(request.id)): CodexApprovalMetadata | undefined {
   if (!(request.method in APPROVAL_METHODS)) return undefined;
   const params = record(request.params);
   if (!params) return undefined;
   const kind = APPROVAL_METHODS[request.method as ApprovalMethod];
   const metadata: CodexApprovalMetadata = {
     provider: 'codex',
-    requestHandle: String(request.id),
+    requestHandle,
     kind,
     availableDecisions: stringList(params.availableDecisions),
     reason: asText(params.reason),
@@ -348,10 +359,13 @@ export class AppServerBackend implements CodexBackend {
   private unavailableReason: string | undefined;
   private orchestratorUnavailableReason: string | undefined;
   private readonly clientUnsubscribers: Array<() => void> = [];
-  private readonly pendingApprovals = new Map<string | number, PendingApproval>();
-  private readonly pendingUserInputs = new Map<string | number, PendingUserInput>();
-  private readonly pendingMcpElicitations = new Map<string | number, PendingMcpElicitation>();
-  private readonly pendingDynamicTools = new Map<string | number, PendingDynamicTool>();
+  private readonly pendingApprovals = new Map<string, PendingApproval>();
+  private readonly pendingUserInputs = new Map<string, PendingUserInput>();
+  private readonly pendingMcpElicitations = new Map<string, PendingMcpElicitation>();
+  private readonly pendingDynamicTools = new Map<string, PendingDynamicTool>();
+  private readonly clientRequestTokens = new Map<AppServerClientTransport, number>();
+  private nextClientRequestToken = 0;
+  private nextRendererRequestHandle = 0;
   private readonly dynamicToolDispatch: SaiToolDispatch | null | undefined;
 
   constructor(deps: AppServerBackendDeps = {}) {
@@ -449,9 +463,10 @@ export class AppServerBackend implements CodexBackend {
 
   approve(projectPath: string, scope: string | undefined, requestHandle: string, decision: CodexApprovalDecision): CodexApprovalResult {
     const normalizedScope = codexScope(scope);
-    const matches = [...this.pendingApprovals.values()].filter((pending) => String(pending.id) === requestHandle);
-    // Treat a string/number request-id collision as invalid rather than
-    // guessing which wire request a renderer intended to answer.
+    // Accept the raw ID only as a backwards-compatible main-process caller
+    // path when it identifies exactly one outstanding request. Renderer events
+    // always receive the opaque, client-unique handle above.
+    const matches = [...this.pendingApprovals.values()].filter((pending) => pending.requestHandle === requestHandle || String(pending.id) === requestHandle);
     if (matches.length !== 1) return { ok: false, code: 'not-pending' };
     const pending = matches[0];
     if (pending.runtime.projectPath !== projectPath || pending.runtime.scope !== normalizedScope
@@ -460,7 +475,7 @@ export class AppServerBackend implements CodexBackend {
     }
     const response = this.approvalResponse(pending, decision);
     if (!response) return { ok: false, code: 'invalid-decision' };
-    this.pendingApprovals.delete(pending.id);
+    this.pendingApprovals.delete(pending.key);
     try {
       pending.responder.respond(response);
       return { ok: true };
@@ -477,7 +492,7 @@ export class AppServerBackend implements CodexBackend {
     if (!protocolResponse) return { ok: false, code: 'invalid-decision' };
     try {
       pending.responder.respond(protocolResponse);
-      this.pendingUserInputs.delete(pending.id);
+      this.pendingUserInputs.delete(pending.key);
       if (pending.timeout) clearTimeout(pending.timeout);
       this.emitUserInputResolved(pending);
       return { ok: true };
@@ -491,7 +506,7 @@ export class AppServerBackend implements CodexBackend {
     if (!response) return { ok: false, code: 'invalid-decision' };
     try {
       pending.responder.respond(response);
-      this.pendingMcpElicitations.delete(pending.id);
+      this.pendingMcpElicitations.delete(pending.key);
       this.emitMcpElicitationResolved(pending);
       return { ok: true };
     } catch { return { ok: false, code: 'not-pending' }; }
@@ -643,6 +658,26 @@ export class AppServerBackend implements CodexBackend {
     return this.clients.get(this.clientKind(runtime)) === client;
   }
 
+  /** JSON-RPC request IDs are only unique within one App Server connection. */
+  private requestKey(client: AppServerClientTransport, id: string | number): string {
+    let token = this.clientRequestTokens.get(client);
+    if (!token) {
+      token = ++this.nextClientRequestToken;
+      this.clientRequestTokens.set(client, token);
+    }
+    return JSON.stringify([token, typeof id, id]);
+  }
+
+  /** Never expose a wire request ID as the renderer's capability handle. */
+  private rendererRequestHandle(client: AppServerClientTransport): string {
+    let token = this.clientRequestTokens.get(client);
+    if (!token) {
+      token = ++this.nextClientRequestToken;
+      this.clientRequestTokens.set(client, token);
+    }
+    return `codex-app-server-${token}-${++this.nextRendererRequestHandle}`;
+  }
+
   private handleNotification(client: AppServerClientTransport, event: AppServerNotification): void {
     if (event.method === 'serverRequest/resolved') {
       this.resolveServerRequest(client, event);
@@ -692,7 +727,7 @@ export class AppServerBackend implements CodexBackend {
       this.handleMcpElicitationRequest(client, request);
       return;
     }
-    const metadata = approvalMetadata(request);
+    const metadata = approvalMetadata(request, this.rendererRequestHandle(client));
     // Leave unsupported methods unclaimed so the transport sends its fail-closed
     // JSON-RPC error and retires the preview process.
     if (!metadata) return;
@@ -713,14 +748,15 @@ export class AppServerBackend implements CodexBackend {
       this.declineResponder(responder, metadata.kind);
       return;
     }
-    const pending: PendingApproval = { id: request.id, runtime, active, responder, kind: metadata.kind, params };
-    this.pendingApprovals.set(request.id, pending);
+    const key = this.requestKey(client, request.id);
+    const pending: PendingApproval = { key, requestHandle: metadata.requestHandle, client, id: request.id, runtime, active, responder, kind: metadata.kind, params };
+    this.pendingApprovals.set(key, pending);
     this.emit({
       type: 'approval_needed',
       projectPath: runtime.projectPath,
       scope: runtime.scope,
       turnSeq: active.seq,
-      toolUseId: metadata.requestHandle,
+      toolUseId: pending.requestHandle,
       toolName: metadata.kind === 'command' ? 'Command approval' : metadata.kind === 'file-change' ? 'File change approval' : 'Permission approval',
       ...metadata,
     });
@@ -757,19 +793,22 @@ export class AppServerBackend implements CodexBackend {
       return;
     }
     const timeoutMs = safeAutoResolution(params.autoResolutionMs);
-    const pending: PendingUserInput = { id: request.id, runtime, active: active!, responder, questions };
+    const key = this.requestKey(client, request.id);
+    const pending: PendingUserInput = {
+      key, requestHandle: this.rendererRequestHandle(client), client, id: request.id, runtime, active: active!, responder, questions,
+    };
     if (timeoutMs) {
       const timeout = setTimeout(() => {
-        if (this.pendingUserInputs.get(request.id) !== pending) return;
-        this.pendingUserInputs.delete(request.id);
+        if (this.pendingUserInputs.get(key) !== pending) return;
+        this.pendingUserInputs.delete(key);
         this.emitUserInputResolved(pending);
         this.respondEmptyUserInput(responder);
       }, timeoutMs);
       pending.timeout = timeout;
     }
-    this.pendingUserInputs.set(request.id, pending);
+    this.pendingUserInputs.set(key, pending);
     this.emit({
-      type: 'user_input_needed', provider: 'codex', requestHandle: String(request.id),
+      type: 'user_input_needed', provider: 'codex', requestHandle: pending.requestHandle,
       projectPath: runtime.projectPath, scope: runtime.scope, turnSeq: active!.seq,
       questions, ...(timeoutMs ? { autoResolutionMs: timeoutMs } : {}),
     });
@@ -785,9 +824,13 @@ export class AppServerBackend implements CodexBackend {
       this.cancelMcpElicitation(responder);
       return;
     }
-    this.pendingMcpElicitations.set(request.id, { id: request.id, runtime, active: active!, responder, elicitation });
+    const key = this.requestKey(client, request.id);
+    const pending: PendingMcpElicitation = {
+      key, requestHandle: this.rendererRequestHandle(client), client, id: request.id, runtime, active: active!, responder, elicitation,
+    };
+    this.pendingMcpElicitations.set(key, pending);
     this.emit({
-      type: 'mcp_elicitation_needed', provider: 'codex', requestHandle: String(request.id),
+      type: 'mcp_elicitation_needed', provider: 'codex', requestHandle: pending.requestHandle,
       projectPath: runtime.projectPath, scope: runtime.scope, turnSeq: active!.seq,
       ...elicitation,
     });
@@ -802,20 +845,21 @@ export class AppServerBackend implements CodexBackend {
     // Dynamic tools are an orchestrator-only protocol. Require both wire IDs:
     // accepting a thread-only request could route a previous turn's action.
     if (!runtime || !active || runtime.kind !== 'orchestrator' || !ids.threadId || !ids.turnId
-      || !this.isActiveOwner(runtime, active, request) || !call || this.pendingDynamicTools.has(request.id)) {
+      || !this.isActiveOwner(runtime, active, request) || !call || this.pendingDynamicTools.has(this.requestKey(client, request.id))) {
       try { responder.respond(dynamicToolResponse(undefined, true)); } catch { /* resolved */ }
       return;
     }
-    const pending: PendingDynamicTool = { id: request.id, runtime, active, responder, resolved: false };
-    this.pendingDynamicTools.set(request.id, pending);
+    const key = this.requestKey(client, request.id);
+    const pending: PendingDynamicTool = { key, client, id: request.id, runtime, active, responder, resolved: false };
+    this.pendingDynamicTools.set(key, pending);
     void dispatchSaiSwarmDynamicTool(call, { workspace: runtime.projectPath, scope: runtime.scope }, this.dynamicToolDispatch)
       .then((response) => this.resolveDynamicTool(pending, response));
   }
 
   private resolveDynamicTool(pending: PendingDynamicTool, response: ReturnType<typeof dynamicToolResponse>): void {
-    if (this.pendingDynamicTools.get(pending.id) !== pending || pending.resolved) return;
+    if (this.pendingDynamicTools.get(pending.key) !== pending || pending.resolved) return;
     pending.resolved = true;
-    this.pendingDynamicTools.delete(pending.id);
+    this.pendingDynamicTools.delete(pending.key);
     try { pending.responder.respond(response); } catch { /* resolved */ }
   }
 
@@ -823,17 +867,23 @@ export class AppServerBackend implements CodexBackend {
     const params = record(event.params);
     const id = params?.requestId ?? params?.id;
     if (typeof id !== 'string' && typeof id !== 'number') return;
-    const pending = this.pendingApprovals.get(id) ?? this.pendingUserInputs.get(id) ?? this.pendingMcpElicitations.get(id);
+    const key = this.requestKey(client, id);
+    const pending = this.pendingApprovals.get(key) ?? this.pendingUserInputs.get(key) ?? this.pendingMcpElicitations.get(key) ?? this.pendingDynamicTools.get(key);
     if (!pending) return;
-    if (!this.ownsRuntime(client, pending.runtime)) return;
+    if (pending.client !== client || !this.ownsRuntime(client, pending.runtime)) return;
     const ids = eventIds(event);
     if ((ids.threadId && ids.threadId !== pending.active.threadId) || (ids.turnId && ids.turnId !== pending.active.id)) return;
-    const input = this.pendingUserInputs.get(id);
+    const input = this.pendingUserInputs.get(key);
     if (input?.timeout) clearTimeout(input.timeout);
-    const elicitation = this.pendingMcpElicitations.get(id);
-    this.pendingApprovals.delete(id);
-    this.pendingUserInputs.delete(id);
-    this.pendingMcpElicitations.delete(id);
+    const elicitation = this.pendingMcpElicitations.get(key);
+    const dynamic = this.pendingDynamicTools.get(key);
+    this.pendingApprovals.delete(key);
+    this.pendingUserInputs.delete(key);
+    this.pendingMcpElicitations.delete(key);
+    if (dynamic) {
+      dynamic.resolved = true;
+      this.pendingDynamicTools.delete(key);
+    }
     if (input) this.emitUserInputResolved(input);
     if (elicitation) this.emitMcpElicitationResolved(elicitation);
   }
@@ -873,31 +923,31 @@ export class AppServerBackend implements CodexBackend {
   }
 
   private clearPendingApprovals(runtime: ScopeRuntime, active?: ActiveTurn, respond = true): void {
-    for (const [id, pending] of this.pendingApprovals) {
+    for (const [key, pending] of this.pendingApprovals) {
       if (pending.runtime !== runtime || (active && pending.active !== active)) continue;
-      this.pendingApprovals.delete(id);
+      this.pendingApprovals.delete(key);
       if (respond) this.declineResponder(pending.responder, pending.kind);
     }
   }
 
   private clearPending(runtime: ScopeRuntime, active?: ActiveTurn, respond = true): void {
     this.clearPendingApprovals(runtime, active, respond);
-    for (const [id, pending] of this.pendingUserInputs) {
+    for (const [key, pending] of this.pendingUserInputs) {
       if (pending.runtime !== runtime || (active && pending.active !== active)) continue;
-      this.pendingUserInputs.delete(id);
+      this.pendingUserInputs.delete(key);
       if (pending.timeout) clearTimeout(pending.timeout);
       this.emitUserInputResolved(pending);
       if (respond) this.respondEmptyUserInput(pending.responder);
     }
-    for (const [id, pending] of this.pendingMcpElicitations) {
+    for (const [key, pending] of this.pendingMcpElicitations) {
       if (pending.runtime !== runtime || (active && pending.active !== active)) continue;
-      this.pendingMcpElicitations.delete(id);
+      this.pendingMcpElicitations.delete(key);
       this.emitMcpElicitationResolved(pending);
       if (respond) this.cancelMcpElicitation(pending.responder);
     }
-    for (const [id, pending] of this.pendingDynamicTools) {
+    for (const [key, pending] of this.pendingDynamicTools) {
       if (pending.runtime !== runtime || (active && pending.active !== active)) continue;
-      this.pendingDynamicTools.delete(id);
+      this.pendingDynamicTools.delete(key);
       if (!pending.resolved) {
         pending.resolved = true;
         if (respond) {
@@ -912,19 +962,19 @@ export class AppServerBackend implements CodexBackend {
   }
 
   private emitUserInputResolved(pending: PendingUserInput): void {
-    this.emit({ type: 'user_input_resolved', provider: 'codex', requestHandle: String(pending.id),
+    this.emit({ type: 'user_input_resolved', provider: 'codex', requestHandle: pending.requestHandle,
       projectPath: pending.runtime.projectPath, scope: pending.runtime.scope, turnSeq: pending.active.seq });
   }
 
   private emitMcpElicitationResolved(pending: PendingMcpElicitation): void {
-    this.emit({ type: 'mcp_elicitation_resolved', provider: 'codex', requestHandle: String(pending.id),
+    this.emit({ type: 'mcp_elicitation_resolved', provider: 'codex', requestHandle: pending.requestHandle,
       projectPath: pending.runtime.projectPath, scope: pending.runtime.scope, turnSeq: pending.active.seq });
   }
 
-  private pendingFor<T extends { id: string | number; runtime: ScopeRuntime; active: ActiveTurn }>(
-    pending: Map<string | number, T>, projectPath: string, scope: string | undefined, requestHandle: string,
+  private pendingFor<T extends { requestHandle: string; runtime: ScopeRuntime; active: ActiveTurn }>(
+    pending: Map<string, T>, projectPath: string, scope: string | undefined, requestHandle: string,
   ): T | undefined {
-    const matches = [...pending.values()].filter((value) => String(value.id) === requestHandle);
+    const matches = [...pending.values()].filter((value) => value.requestHandle === requestHandle || String(value.id) === requestHandle);
     if (matches.length !== 1) return undefined;
     const value = matches[0];
     return value.runtime.projectPath === projectPath && value.runtime.scope === codexScope(scope)

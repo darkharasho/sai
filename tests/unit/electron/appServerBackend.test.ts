@@ -147,6 +147,74 @@ describe('AppServerBackend', () => {
     expect(responder.respond).toHaveBeenCalledWith(expect.objectContaining({ success: false }));
   });
 
+  it('keeps same-ID approvals from standard and orchestrator App Server clients independently resolvable', async () => {
+    const makeClient = (threadId: string, turnId: string) => {
+      const notifications = new Set<(notification: AppServerNotification) => void>();
+      const serverRequests = new Set<(request: AppServerServerRequest) => void>();
+      const responders = new Map<string | number, AppServerServerRequestResponder>();
+      const client: AppServerClientTransport = {
+        failureReason: undefined,
+        start: vi.fn(async () => undefined),
+        request: vi.fn(async (method: string) => method === 'thread/start'
+          ? { thread: { id: threadId } }
+          : { turn: { id: turnId } }),
+        notify: vi.fn(),
+        onNotification: vi.fn((listener) => { notifications.add(listener); return () => notifications.delete(listener); }),
+        onServerRequest: vi.fn((listener) => { serverRequests.add(listener); return () => serverRequests.delete(listener); }),
+        claimServerRequest: vi.fn((id) => {
+          const responder = responders.get(id);
+          if (!responder) throw new Error('No server request is pending');
+          responders.delete(id);
+          return responder;
+        }),
+        onFailure: vi.fn(() => () => undefined),
+        destroy: vi.fn(),
+      };
+      return {
+        client,
+        notify: (method: string, params: unknown) => notifications.forEach((listener) => listener({ jsonrpc: '2.0', method, params })),
+        serverRequest: (id: string | number, method: string, params: unknown) => {
+          const responder: AppServerServerRequestResponder = { request: { id, method, params }, respond: vi.fn(), reject: vi.fn() };
+          responders.set(id, responder);
+          serverRequests.forEach((listener) => listener(responder.request));
+          return responder;
+        },
+      };
+    };
+    const standard = makeClient('thread-standard', 'turn-standard');
+    const orchestrator = makeClient('thread-orchestrator', 'turn-orchestrator');
+    const emitted: Array<Record<string, unknown>> = [];
+    const backend = new AppServerBackend({
+      createClient: ({ experimentalApi }) => experimentalApi ? orchestrator.client : standard.client,
+      emit: (event) => emitted.push(event), registerWorkspace: vi.fn(),
+    });
+
+    await backend.start({ projectPath: '/repo', scope: 'chat' });
+    await backend.start({ projectPath: '/repo', scope: 'orchestrator:run-1', kind: 'orchestrator' });
+    backend.send({ projectPath: '/repo', scope: 'chat', message: 'chat' });
+    backend.send({ projectPath: '/repo', scope: 'orchestrator:run-1', message: 'delegate' });
+    await settle();
+
+    const standardResponder = standard.serverRequest('same-id', 'item/commandExecution/requestApproval', {
+      threadId: 'thread-standard', turnId: 'turn-standard', availableDecisions: ['accept'],
+    });
+    const orchestratorResponder = orchestrator.serverRequest('same-id', 'item/commandExecution/requestApproval', {
+      threadId: 'thread-orchestrator', turnId: 'turn-orchestrator', availableDecisions: ['decline'],
+    });
+    const standardHandle = emitted.find((event) => event.type === 'approval_needed' && event.scope === 'chat')?.requestHandle as string;
+    const orchestratorHandle = emitted.find((event) => event.type === 'approval_needed' && event.scope === 'orchestrator:run-1')?.requestHandle as string;
+
+    expect(standardHandle).toEqual(expect.any(String));
+    expect(orchestratorHandle).toEqual(expect.any(String));
+    expect(standardHandle).not.toBe(orchestratorHandle);
+    standard.notify('serverRequest/resolved', { requestId: 'same-id', threadId: 'thread-standard', turnId: 'turn-standard' });
+    expect(backend.approve('/repo', 'chat', standardHandle, { type: 'decision', value: 'accept' }))
+      .toEqual({ ok: false, code: 'not-pending' });
+    expect(backend.approve('/repo', 'orchestrator:run-1', orchestratorHandle, { type: 'decision', value: 'decline' })).toEqual({ ok: true });
+    expect(standardResponder.respond).not.toHaveBeenCalled();
+    expect(orchestratorResponder.respond).toHaveBeenCalledWith({ decision: 'decline' });
+  });
+
   it('executes an active orchestrator Dynamic Tool through the scoped Swarm bridge', async () => {
     const h = harness();
     h.responses.set('thread/start', { thread: { id: 'thread-orchestrator' } });
@@ -539,8 +607,8 @@ describe('AppServerBackend', () => {
 
     expect(h.client.claimServerRequest).toHaveBeenCalledWith(`request-${method}`);
     expect(h.emitted).toContainEqual(expect.objectContaining({
-      type: 'approval_needed', provider: 'codex', requestHandle: `request-${method}`,
-      projectPath: '/repo', scope: 'a', toolUseId: `request-${method}`, ...expected,
+      type: 'approval_needed', provider: 'codex', requestHandle: expect.stringMatching(/^codex-app-server-/),
+      projectPath: '/repo', scope: 'a', toolUseId: expect.stringMatching(/^codex-app-server-/), ...expected,
     }));
     expect(h.backend.isScopeBusy?.('/repo', 'a')).toBe(true);
   });
@@ -695,7 +763,7 @@ describe('AppServerBackend', () => {
     });
 
     expect(h.emitted).toContainEqual(expect.objectContaining({
-      type: 'user_input_needed', provider: 'codex', requestHandle: 'input',
+      type: 'user_input_needed', provider: 'codex', requestHandle: expect.stringMatching(/^codex-app-server-/),
       projectPath: '/repo', scope: 'a', autoResolutionMs: 1200,
       questions: [{ id: 'format', header: 'Output format', isSecret: true, prompt: 'Choose a format', options: [
         { id: 'JSON', label: 'JSON' }, { id: 'YAML', label: 'YAML' },
@@ -806,7 +874,7 @@ describe('AppServerBackend', () => {
       await vi.advanceTimersByTimeAsync(100);
       expect(responder.respond).toHaveBeenCalledWith({ answers: {} });
       expect(h.emitted).toContainEqual(expect.objectContaining({
-        type: 'user_input_resolved', provider: 'codex', requestHandle: 'timed',
+        type: 'user_input_resolved', provider: 'codex', requestHandle: expect.stringMatching(/^codex-app-server-/),
         projectPath: '/repo', scope: 'a',
       }));
       expect(h.backend.answerUserInput('/repo', 'a', 'timed', { type: 'answers', answers: { format: { answers: ['JSON'] } } }))
@@ -829,7 +897,7 @@ describe('AppServerBackend', () => {
     });
 
     expect(h.emitted).toContainEqual(expect.objectContaining({
-      type: 'mcp_elicitation_needed', provider: 'codex', requestHandle: 'mcp-form',
+      type: 'mcp_elicitation_needed', provider: 'codex', requestHandle: expect.stringMatching(/^codex-app-server-/),
       serverName: 'calendar', message: 'Choose a date', mode: 'form',
       requestedSchema: { type: 'object', properties: { date: { type: 'string' } }, required: ['date'], additionalProperties: false },
     }));
@@ -910,7 +978,7 @@ describe('AppServerBackend', () => {
     });
     h.notify('serverRequest/resolved', { requestId: 'mcp-url', threadId: 'thread-a', turnId: 'turn-a' });
     expect(h.emitted).toContainEqual(expect.objectContaining({
-      type: 'mcp_elicitation_resolved', provider: 'codex', requestHandle: 'mcp-url',
+      type: 'mcp_elicitation_resolved', provider: 'codex', requestHandle: expect.stringMatching(/^codex-app-server-/),
       projectPath: '/repo', scope: 'a',
     }));
     expect(h.backend.resolveMcpElicitation('/repo', 'a', 'mcp-url', { action: 'accept', content: null }))
@@ -934,8 +1002,8 @@ describe('AppServerBackend', () => {
 
     h.notify('turn/completed', { threadId: 'thread-a', turn: { id: 'turn-a', status: 'completed' } });
 
-    expect(h.emitted).toContainEqual(expect.objectContaining({ type: 'user_input_resolved', provider: 'codex', requestHandle: 'input-end' }));
-    expect(h.emitted).toContainEqual(expect.objectContaining({ type: 'mcp_elicitation_resolved', provider: 'codex', requestHandle: 'mcp-end' }));
+    expect(h.emitted).toContainEqual(expect.objectContaining({ type: 'user_input_resolved', provider: 'codex', requestHandle: expect.stringMatching(/^codex-app-server-/) }));
+    expect(h.emitted).toContainEqual(expect.objectContaining({ type: 'mcp_elicitation_resolved', provider: 'codex', requestHandle: expect.stringMatching(/^codex-app-server-/) }));
   });
 
   it('rejects nested MCP form fields that the renderer cannot safely render', async () => {
