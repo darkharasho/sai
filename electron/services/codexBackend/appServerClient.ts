@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess, type SpawnOptionsWithoutStdio } from 'node:child_process';
+import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import path from 'node:path';
 import { enrichedEnv } from '../shellEnv';
 import { resolveBundledCodex } from './bundledModels';
@@ -56,7 +56,7 @@ export interface AppServerClientTransport {
 type AppServerSpawn = (
   command: string,
   args: readonly string[],
-  options: SpawnOptionsWithoutStdio,
+  options: SpawnOptions,
 ) => ChildProcess;
 
 export interface AppServerClientDeps {
