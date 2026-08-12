@@ -143,7 +143,7 @@ export class AppServerClient implements AppServerClientTransport {
       }, this.initializationTimeoutMs);
       this.startPromise = initialization
         .then(() => {
-          this.write({ jsonrpc: '2.0', method: 'initialized' });
+          this.write({ method: 'initialized' });
           this.initialized = true;
         })
         .finally(() => this.clearInitializationTimeout());
@@ -163,7 +163,7 @@ export class AppServerClient implements AppServerClientTransport {
   notify(method: string, params?: unknown): void {
     if (this.failure) throw this.failure;
     if (!this.initialized) throw new AppServerUnavailableError('Codex App Server transport is not initialized');
-    this.write({ jsonrpc: '2.0', method, ...(params === undefined ? {} : { params }) });
+    this.write({ method, ...(params === undefined ? {} : { params }) });
   }
 
   onNotification(listener: (message: AppServerNotification) => void): () => void {
@@ -228,7 +228,7 @@ export class AppServerClient implements AppServerClientTransport {
       }
       try {
         this.write({
-          jsonrpc: '2.0', id: message.id,
+          id: message.id,
           error: { code: -32601, message: 'Unsupported App Server request in preview' },
         });
       } catch {
@@ -280,7 +280,7 @@ export class AppServerClient implements AppServerClientTransport {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject, failOnResponseError: options.failOnResponseError ?? false });
-      try { this.write({ jsonrpc: '2.0', id, method, ...(params === undefined ? {} : { params }) }); }
+      try { this.write({ id, method, ...(params === undefined ? {} : { params }) }); }
       catch (error) {
         this.pending.delete(id);
         reject(error instanceof Error ? error : new AppServerUnavailableError(errorText(error)));

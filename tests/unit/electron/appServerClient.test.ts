@@ -32,8 +32,8 @@ function reply(child: ReturnType<typeof fakeChild>, body: unknown) {
 
 async function start(client: AppServerClient, child: ReturnType<typeof fakeChild>) {
   const ready = client.start();
-  expect(JSON.parse(child.stdin.write.mock.calls[0][0])).toMatchObject({
-    jsonrpc: '2.0', id: 0, method: 'initialize',
+  expect(JSON.parse(child.stdin.write.mock.calls[0][0])).toEqual({
+    id: 0, method: 'initialize', params: { clientInfo: { name: 'sai', version: '1.0' } },
   });
   reply(child, { jsonrpc: '2.0', id: 0, result: { protocolVersion: 1 } });
   await ready;
@@ -50,7 +50,7 @@ describe('AppServerClient', () => {
       shell: false,
       stdio: ['pipe', 'pipe', 'ignore'],
     }));
-    expect(JSON.parse(child.stdin.write.mock.calls[1][0])).toEqual({ jsonrpc: '2.0', method: 'initialized' });
+    expect(JSON.parse(child.stdin.write.mock.calls[1][0])).toEqual({ method: 'initialized' });
   });
 
   it('fails closed when initialize returns a JSON-RPC error', async () => {
@@ -104,7 +104,7 @@ describe('AppServerClient', () => {
     }
   });
 
-  it('serializes requests as newline-delimited JSON and correlates their responses', async () => {
+  it('serializes every outgoing App Server message as headerless newline-delimited JSON', async () => {
     const child = fakeChild();
     const { client } = createClient(child);
     await start(client, child);
@@ -112,10 +112,23 @@ describe('AppServerClient', () => {
     const pending = client.request<{ thread: { id: string } }>('thread/start', { cwd: '/repo' });
     const request = JSON.parse(child.stdin.write.mock.calls.at(-1)[0]);
     expect(child.stdin.write.mock.calls.at(-1)[0]).toMatch(/\n$/);
-    expect(request).toMatchObject({ jsonrpc: '2.0', id: 1, method: 'thread/start', params: { cwd: '/repo' } });
+    expect(request).toEqual({ id: 1, method: 'thread/start', params: { cwd: '/repo' } });
     reply(child, { jsonrpc: '2.0', id: 1, result: { thread: { id: 'thread-1' } } });
 
     await expect(pending).resolves.toEqual({ thread: { id: 'thread-1' } });
+    client.notify('thread/archive', { threadId: 'thread-1' });
+
+    reply(child, { jsonrpc: '2.0', id: 99, method: 'item/commandExecution/requestApproval', params: {} });
+
+    const outgoing = child.stdin.write.mock.calls.map(([line]) => JSON.parse(line));
+    expect(outgoing).toEqual([
+      { id: 0, method: 'initialize', params: { clientInfo: { name: 'sai', version: '1.0' } } },
+      { method: 'initialized' },
+      { id: 1, method: 'thread/start', params: { cwd: '/repo' } },
+      { method: 'thread/archive', params: { threadId: 'thread-1' } },
+      { id: 99, error: { code: -32601, message: 'Unsupported App Server request in preview' } },
+    ]);
+    expect(outgoing.every((message) => !Object.hasOwn(message, 'jsonrpc'))).toBe(true);
   });
 
   it('rejects business requests until initialization has completed', () => {
@@ -136,7 +149,7 @@ describe('AppServerClient', () => {
     reply(child, { jsonrpc: '2.0', id: 99, method: 'item/commandExecution/requestApproval', params: {} });
 
     expect(JSON.parse(child.stdin.write.mock.calls.at(-1)[0])).toEqual({
-      jsonrpc: '2.0', id: 99,
+      id: 99,
       error: { code: -32601, message: 'Unsupported App Server request in preview' },
     });
     await expect(pending).rejects.toThrow(/Unsupported App Server request in preview/);
