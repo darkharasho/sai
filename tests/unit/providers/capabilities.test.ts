@@ -26,11 +26,13 @@ describe('getCapabilities', () => {
   describe('codex', () => {
     it('does not have orchestrator', () => expect(getCapabilities('codex').hasOrchestrator).toBe(false));
     it('does not have slash commands', () => expect(getCapabilities('codex').hasSlashCommands).toBe(false));
+    it('does not have MCP support', () => expect(getCapabilities('codex').hasMcp).toBe(false));
+    it('does not have plugins', () => expect(getCapabilities('codex').hasPlugins).toBe(false));
     it('has its own effort mode', () => expect(getCapabilities('codex').hasEffortMode).toBe(true));
     it('does not have conversation mode', () => expect(getCapabilities('codex').hasConversationMode).toBe(false));
     it('has approval mode', () => expect(getCapabilities('codex').hasApprovalMode).toBe(true));
-    it('does not support terminal scope', () => expect(getCapabilities('codex').supportsTerminalScope).toBe(false));
-    it('does not support multi-scope', () => expect(getCapabilities('codex').supportsMultiScope).toBe(false));
+    it('supports terminal scope', () => expect(getCapabilities('codex').supportsTerminalScope).toBe(true));
+    it('supports multi-scope', () => expect(getCapabilities('codex').supportsMultiScope).toBe(true));
   });
 });
 
