@@ -266,6 +266,40 @@ describe('ChatPanel', () => {
     expect(screen.queryByTestId('codex-user-input-request')).toBeNull();
   });
 
+  it('clears App Server input panels on an authoritative terminal event', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const, claudeScope: 'scope-a' };
+    render(<ChatPanel {...props} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'user_input_needed', provider: 'codex', requestHandle: 'question-terminal', projectPath: '/project', scope: 'scope-a', questions: [{ id: 'style', prompt: 'Choose style', options: [{ id: 'brief', label: 'Brief' }] }] });
+      handler({ type: 'mcp_elicitation_needed', provider: 'codex', requestHandle: 'mcp-terminal', mode: 'url', serverName: 'Calendar', message: 'Continue login', url: 'https://calendar.test/login', projectPath: '/project', scope: 'scope-a' });
+    });
+    expect(screen.getByTestId('codex-user-input-request')).toBeTruthy();
+    expect(screen.getByTestId('codex-mcp-elicitation')).toBeTruthy();
+
+    await act(async () => { handler({ type: 'done', projectPath: '/project', scope: 'scope-a', subagentsSettled: true }); });
+
+    expect(screen.queryByTestId('codex-user-input-request')).toBeNull();
+    expect(screen.queryByTestId('codex-mcp-elicitation')).toBeNull();
+  });
+
+  it('does not render unbranded SDK Codex input events as App Server panels', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const, claudeScope: 'scope-a' };
+    render(<ChatPanel {...props} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'user_input_needed', requestHandle: 'sdk-question', projectPath: '/project', scope: 'scope-a', questions: [{ id: 'style', prompt: 'Choose style' }] });
+      handler({ type: 'mcp_elicitation_needed', requestHandle: 'sdk-mcp', mode: 'url', serverName: 'SDK', message: 'Ignore', url: 'https://example.test' });
+    });
+
+    expect(screen.queryByTestId('codex-user-input-request')).toBeNull();
+    expect(screen.queryByTestId('codex-mcp-elicitation')).toBeNull();
+  });
+
   it('routes only Codex App Server MCP elicitation through its response bridge', async () => {
     const props = { ...baseProps(), aiProvider: 'codex' as const, claudeScope: 'scope-a' };
     render(<ChatPanel {...props} />);

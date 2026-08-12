@@ -41,6 +41,26 @@ describe('McpElicitationPanel', () => {
     expect(onResolve).toHaveBeenLastCalledWith({ action: 'cancel' });
   });
 
+  it('visibly requires every required primitive form field before submission', () => {
+    const onResolve = vi.fn();
+    render(
+      <McpElicitationPanel
+        request={{ requestHandle: 'mcp-required', mode: 'form', serverName: 'Calendar', message: 'Choose details', requestedSchema: {
+          type: 'object', properties: { city: { type: 'string' }, days: { type: 'integer' } }, required: ['city', 'days'],
+        } }}
+        onResolve={onResolve}
+      />,
+    );
+
+    expect(screen.getAllByText('Required')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Submit' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('city'), { target: { value: 'Portland' } });
+    expect(screen.getByRole('button', { name: 'Submit' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('days'), { target: { value: '3' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+    expect(onResolve).toHaveBeenCalledWith({ action: 'accept', content: { city: 'Portland', days: 3 } });
+  });
+
   it('shows URL elicitation details without launching the URL', () => {
     render(
       <McpElicitationPanel

@@ -939,6 +939,10 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           clearStreamHint();
           finalizeReasoning();
           setTurnStartIndex(null);
+          // App Server normally sends correlated resolution events before
+          // done. Clear any surviving cards as a defensive terminal boundary.
+          setPendingCodexUserInput(null);
+          setPendingCodexMcpElicitation(null);
           flushMessagesToParent();
           onTurnComplete?.();
         }
@@ -952,6 +956,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         activeSubagentTurnsRef.current.clear();
         setActiveSubagents(prev => (prev.size === 0 ? prev : new Map()));
         setPendingApproval(null);
+        setPendingCodexUserInput(null);
+        setPendingCodexMcpElicitation(null);
         flushMessagesToParent();
         onTurnComplete?.();
         return;

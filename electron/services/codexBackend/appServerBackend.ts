@@ -237,44 +237,39 @@ function userInputQuestions(params: Record<string, unknown>): CodexUserInputQues
   return normalized;
 }
 
-function safeSchema(value: unknown, depth = 0): Record<string, unknown> | undefined {
-  if (depth > 4) return undefined;
+function safePrimitiveSchema(value: unknown): Record<string, unknown> | undefined {
   const schema = record(value);
   if (!schema) return undefined;
   const type = schema?.type;
-  if (type !== 'object' && type !== 'array' && type !== 'string' && type !== 'number' && type !== 'integer' && type !== 'boolean') return undefined;
+  if (type !== 'string' && type !== 'number' && type !== 'integer' && type !== 'boolean') return undefined;
   const normalized: Record<string, unknown> = { type };
   if (Array.isArray(schema.enum) && schema.enum.length > 0 && schema.enum.length <= 32
-    && schema.enum.every((entry) => entry === null || typeof entry === 'string' || typeof entry === 'number' || typeof entry === 'boolean')) {
+    && schema.enum.every((entry) => (type === 'string' && typeof entry === 'string')
+      || (type === 'number' && typeof entry === 'number' && Number.isFinite(entry))
+      || (type === 'integer' && typeof entry === 'number' && Number.isInteger(entry))
+      || (type === 'boolean' && typeof entry === 'boolean'))) {
     normalized.enum = [...schema.enum];
   } else if (schema.enum !== undefined) return undefined;
-  if (type === 'object') {
-    const properties = record(schema.properties) ?? {};
-    const keys = Object.keys(properties);
-    if (keys.length > 20 || keys.some((key) => key.length === 0 || key.length > 128)) return undefined;
-    const safeProperties: Record<string, unknown> = {};
-    for (const key of keys) {
-      const child = safeSchema(properties[key], depth + 1);
-      if (!child) return undefined;
-      safeProperties[key] = child;
-    }
-    normalized.properties = safeProperties;
-    if (schema.required !== undefined) {
-      if (!Array.isArray(schema.required) || schema.required.some((key) => typeof key !== 'string' || !Object.prototype.hasOwnProperty.call(safeProperties, key))) return undefined;
-      normalized.required = [...schema.required];
-    }
-    if (schema.additionalProperties !== undefined && typeof schema.additionalProperties !== 'boolean') return undefined;
-    // SAI intentionally supports a closed schema subset. Even when an MCP
-    // server permits arbitrary properties, unknown content is not safe to
-    // accept from a renderer boundary.
-    normalized.additionalProperties = false;
-  }
-  if (type === 'array') {
-    const items = safeSchema(schema.items, depth + 1);
-    if (!items) return undefined;
-    normalized.items = items;
-  }
   return normalized;
+}
+
+/** The renderer intentionally offers scalar controls only. */
+function safeSchema(value: unknown): Record<string, unknown> | undefined {
+  const schema = record(value);
+  if (!schema || schema.type !== 'object') return undefined;
+  const properties = record(schema.properties) ?? {};
+  const keys = Object.keys(properties);
+  if (keys.length > 20 || keys.some((key) => key.length === 0 || key.length > 128)) return undefined;
+  const safeProperties: Record<string, unknown> = {};
+  for (const key of keys) {
+    const child = safePrimitiveSchema(properties[key]);
+    if (!child) return undefined;
+    safeProperties[key] = child;
+  }
+  if (schema.required !== undefined && (!Array.isArray(schema.required)
+    || schema.required.some((key) => typeof key !== 'string' || !Object.prototype.hasOwnProperty.call(safeProperties, key)))) return undefined;
+  if (schema.additionalProperties !== undefined && typeof schema.additionalProperties !== 'boolean') return undefined;
+  return { type: 'object', properties: safeProperties, ...(schema.required ? { required: [...schema.required] } : {}), additionalProperties: false };
 }
 
 function mcpElicitation(params: Record<string, unknown>): CodexMcpElicitationForm | CodexMcpElicitationUrl | undefined {
@@ -462,6 +457,7 @@ export class AppServerBackend implements CodexBackend {
       pending.responder.respond({ answers });
       this.pendingUserInputs.delete(pending.id);
       if (pending.timeout) clearTimeout(pending.timeout);
+      this.emitUserInputResolved(pending);
       return { ok: true };
     } catch { return { ok: false, code: 'not-pending' }; }
   }
@@ -474,6 +470,7 @@ export class AppServerBackend implements CodexBackend {
     try {
       pending.responder.respond(response);
       this.pendingMcpElicitations.delete(pending.id);
+      this.emitMcpElicitationResolved(pending);
       return { ok: true };
     } catch { return { ok: false, code: 'not-pending' }; }
   }
@@ -711,6 +708,7 @@ export class AppServerBackend implements CodexBackend {
       const timeout = setTimeout(() => {
         if (this.pendingUserInputs.get(request.id) !== pending) return;
         this.pendingUserInputs.delete(request.id);
+        this.emitUserInputResolved(pending);
         this.respondEmptyUserInput(responder);
       }, timeoutMs);
       pending.timeout = timeout;
@@ -749,11 +747,14 @@ export class AppServerBackend implements CodexBackend {
     if (!pending) return;
     const ids = eventIds(event);
     if ((ids.threadId && ids.threadId !== pending.active.threadId) || (ids.turnId && ids.turnId !== pending.active.id)) return;
-    this.pendingApprovals.delete(id);
     const input = this.pendingUserInputs.get(id);
     if (input?.timeout) clearTimeout(input.timeout);
+    const elicitation = this.pendingMcpElicitations.get(id);
+    this.pendingApprovals.delete(id);
     this.pendingUserInputs.delete(id);
     this.pendingMcpElicitations.delete(id);
+    if (input) this.emitUserInputResolved(input);
+    if (elicitation) this.emitMcpElicitationResolved(elicitation);
   }
 
   private declineResponder(responder: AppServerServerRequestResponder, kind: CodexApprovalMetadata['kind']): void {
@@ -804,17 +805,29 @@ export class AppServerBackend implements CodexBackend {
       if (pending.runtime !== runtime || (active && pending.active !== active)) continue;
       this.pendingUserInputs.delete(id);
       if (pending.timeout) clearTimeout(pending.timeout);
+      this.emitUserInputResolved(pending);
       if (respond) this.respondEmptyUserInput(pending.responder);
     }
     for (const [id, pending] of this.pendingMcpElicitations) {
       if (pending.runtime !== runtime || (active && pending.active !== active)) continue;
       this.pendingMcpElicitations.delete(id);
+      this.emitMcpElicitationResolved(pending);
       if (respond) this.cancelMcpElicitation(pending.responder);
     }
   }
 
   private clearAllPending(respond = true): void {
     for (const runtime of this.runtimes.values()) this.clearPending(runtime, undefined, respond);
+  }
+
+  private emitUserInputResolved(pending: PendingUserInput): void {
+    this.emit({ type: 'user_input_resolved', provider: 'codex', requestHandle: String(pending.id),
+      projectPath: pending.runtime.projectPath, scope: pending.runtime.scope, turnSeq: pending.active.seq });
+  }
+
+  private emitMcpElicitationResolved(pending: PendingMcpElicitation): void {
+    this.emit({ type: 'mcp_elicitation_resolved', provider: 'codex', requestHandle: String(pending.id),
+      projectPath: pending.runtime.projectPath, scope: pending.runtime.scope, turnSeq: pending.active.seq });
   }
 
   private pendingFor<T extends { id: string | number; runtime: ScopeRuntime; active: ActiveTurn }>(
