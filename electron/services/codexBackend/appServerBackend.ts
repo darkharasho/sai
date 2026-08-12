@@ -3,9 +3,11 @@ import {
   AppServerUnavailableError,
   type AppServerClientTransport,
   type AppServerNotification,
+  type AppServerServerRequest,
+  type AppServerServerRequestResponder,
 } from './appServerClient';
 import { mapAppServerEvent } from './appServerEventMap';
-import { normalizeCodexModelOption, codexScope, codexScopeKey, type CodexAppServerPreviewStatus, type CodexBackend, type CodexModelResult, type CodexSendArgs, type CodexSessionKind, type CodexStartArgs } from './types';
+import { normalizeCodexModelOption, codexScope, codexScopeKey, type CodexAppServerPreviewStatus, type CodexApprovalMetadata, type CodexBackend, type CodexModelResult, type CodexSendArgs, type CodexSessionKind, type CodexStartArgs } from './types';
 import type { SaiEnvelope } from './sdkEventMap';
 import { getOrCreate as getOrCreateWorkspace } from '../workspace';
 
@@ -35,6 +37,21 @@ interface ScopeRuntime extends ScopeMeta {
   active?: ActiveTurn;
 }
 
+interface PendingApproval {
+  readonly id: string | number;
+  readonly runtime: ScopeRuntime;
+  readonly active: ActiveTurn;
+  readonly responder: AppServerServerRequestResponder;
+}
+
+const APPROVAL_METHODS = {
+  'item/commandExecution/requestApproval': 'command',
+  'item/fileChange/requestApproval': 'file-change',
+  'item/permissions/requestApproval': 'permissions',
+} as const;
+
+type ApprovalMethod = keyof typeof APPROVAL_METHODS;
+
 export class AppServerUnsupportedCapabilityError extends Error {
   constructor(capability: string) {
     super(`Codex App Server preview: ${capability} is not supported`);
@@ -63,7 +80,7 @@ function idFrom(result: unknown, property: 'thread' | 'turn'): string | undefine
   return typeof id === 'string' && id.length > 0 ? id : undefined;
 }
 
-function eventIds(event: AppServerNotification): { threadId?: string; turnId?: string } {
+function eventIds(event: Pick<AppServerNotification, 'params'>): { threadId?: string; turnId?: string } {
   const params = record(event.params);
   const thread = record(params?.thread);
   const turn = record(params?.turn);
@@ -71,6 +88,50 @@ function eventIds(event: AppServerNotification): { threadId?: string; turnId?: s
     threadId: typeof params?.threadId === 'string' ? params.threadId : typeof thread?.id === 'string' ? thread.id : undefined,
     turnId: typeof params?.turnId === 'string' ? params.turnId : typeof turn?.id === 'string' ? turn.id : undefined,
   };
+}
+
+function asText(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0) : [];
+}
+
+function approvalMetadata(request: AppServerServerRequest): CodexApprovalMetadata | undefined {
+  if (!(request.method in APPROVAL_METHODS)) return undefined;
+  const params = record(request.params);
+  if (!params) return undefined;
+  const kind = APPROVAL_METHODS[request.method as ApprovalMethod];
+  const metadata: CodexApprovalMetadata = {
+    provider: 'codex',
+    requestHandle: String(request.id),
+    kind,
+    availableDecisions: stringList(params.availableDecisions),
+    reason: asText(params.reason),
+  };
+  if (kind === 'command') {
+    metadata.command = asText(params.command);
+    metadata.cwd = asText(params.cwd);
+  }
+  if (kind === 'file-change') metadata.grantRoot = asText(params.grantRoot);
+  if (kind === 'permissions') {
+    const permissions = Array.isArray(params.permissions) ? params.permissions : [];
+    metadata.permissionsSummary = permissions.map((permission) => {
+      if (typeof permission === 'string') return permission;
+      const item = record(permission);
+      return asText(item?.description) ?? asText(item?.kind) ?? 'Requested permission';
+    });
+    const networkPermission = permissions.map(record).find((permission) => asText(permission?.kind) === 'network');
+    if (networkPermission) {
+      const network = record(networkPermission.network);
+      metadata.network = {
+        host: asText(networkPermission.host) ?? asText(network?.host),
+        protocol: asText(networkPermission.protocol) ?? asText(network?.protocol),
+      };
+    }
+  }
+  return metadata;
 }
 
 /**
@@ -88,7 +149,9 @@ export class AppServerBackend implements CodexBackend {
   private clientStart: Promise<void> | undefined;
   private unavailableReason: string | undefined;
   private unsubscribeNotifications: (() => void) | undefined;
+  private unsubscribeServerRequests: (() => void) | undefined;
   private unsubscribeFailure: (() => void) | undefined;
+  private readonly pendingApprovals = new Map<string | number, PendingApproval>();
 
   constructor(deps: AppServerBackendDeps = {}) {
     this.createClient = deps.createClient ?? (() => new AppServerClient());
@@ -161,6 +224,7 @@ export class AppServerBackend implements CodexBackend {
   setSessionId(projectPath: string, sessionId: string | undefined, scope?: string): void {
     const runtime = this.runtimeFor(projectPath, codexScope(scope));
     if (runtime.active) return;
+    this.clearPendingApprovals(runtime);
     runtime.sessionId = sessionId;
     runtime.threadId = undefined;
   }
@@ -205,9 +269,12 @@ export class AppServerBackend implements CodexBackend {
     for (const runtime of this.runtimes.values()) if (runtime.active) this.retireTurn(runtime, runtime.active);
     this.runtimes.clear();
     this.metadata.clear();
+    this.pendingApprovals.clear();
     this.unsubscribeNotifications?.();
+    this.unsubscribeServerRequests?.();
     this.unsubscribeFailure?.();
     this.unsubscribeNotifications = undefined;
+    this.unsubscribeServerRequests = undefined;
     this.unsubscribeFailure = undefined;
     this.client?.destroy();
     this.client = undefined;
@@ -229,6 +296,7 @@ export class AppServerBackend implements CodexBackend {
     if (!this.client) {
       this.client = this.createClient();
       this.unsubscribeNotifications = this.client.onNotification((event) => this.handleNotification(event));
+      this.unsubscribeServerRequests = this.client.onServerRequest((request) => this.handleServerRequest(request));
       this.unsubscribeFailure = this.client.onFailure((error) => this.handleFailure(error));
       this.clientStart = this.client.start().catch((error) => {
         this.markUnavailable(errorText(error));
@@ -296,6 +364,10 @@ export class AppServerBackend implements CodexBackend {
   }
 
   private handleNotification(event: AppServerNotification): void {
+    if (event.method === 'serverRequest/resolved') {
+      this.resolveServerRequest(event);
+      return;
+    }
     const ids = eventIds(event);
     if (!ids.threadId) {
       if (!ids.turnId) return;
@@ -327,6 +399,62 @@ export class AppServerBackend implements CodexBackend {
     }
   }
 
+  private handleServerRequest(request: AppServerServerRequest): void {
+    const metadata = approvalMetadata(request);
+    // Leave unsupported methods unclaimed so the transport sends its fail-closed
+    // JSON-RPC error and retires the preview process.
+    if (!metadata) return;
+    let responder: AppServerServerRequestResponder;
+    try {
+      responder = this.client?.claimServerRequest(request.id)!;
+    } catch {
+      return;
+    }
+    const ids = eventIds(request);
+    const runtime = ids.threadId
+      ? [...this.runtimes.values()].find((candidate) => candidate.threadId === ids.threadId)
+      : undefined;
+    const active = runtime?.active;
+    if (!runtime || !active || active.retired || !active.id || active.id !== ids.turnId || active.threadId !== ids.threadId) {
+      this.declineResponder(responder);
+      return;
+    }
+    const pending: PendingApproval = { id: request.id, runtime, active, responder };
+    this.pendingApprovals.set(request.id, pending);
+    this.emit({
+      type: 'approval_needed',
+      projectPath: runtime.projectPath,
+      scope: runtime.scope,
+      turnSeq: active.seq,
+      toolUseId: metadata.requestHandle,
+      toolName: metadata.kind === 'command' ? 'Command approval' : metadata.kind === 'file-change' ? 'File change approval' : 'Permission approval',
+      ...metadata,
+    });
+  }
+
+  private resolveServerRequest(event: AppServerNotification): void {
+    const params = record(event.params);
+    const id = params?.requestId ?? params?.id;
+    if (typeof id !== 'string' && typeof id !== 'number') return;
+    const pending = this.pendingApprovals.get(id);
+    if (!pending) return;
+    const ids = eventIds(event);
+    if ((ids.threadId && ids.threadId !== pending.active.threadId) || (ids.turnId && ids.turnId !== pending.active.id)) return;
+    this.pendingApprovals.delete(id);
+  }
+
+  private declineResponder(responder: AppServerServerRequestResponder): void {
+    try { responder.respond({ decision: 'decline' }); } catch { /* already resolved or unavailable */ }
+  }
+
+  private clearPendingApprovals(runtime: ScopeRuntime, active?: ActiveTurn, respond = true): void {
+    for (const [id, pending] of this.pendingApprovals) {
+      if (pending.runtime !== runtime || (active && pending.active !== active)) continue;
+      this.pendingApprovals.delete(id);
+      if (respond) this.declineResponder(pending.responder);
+    }
+  }
+
   private handleFailure(error: AppServerUnavailableError): void {
     this.markUnavailable(error.message);
   }
@@ -334,7 +462,10 @@ export class AppServerBackend implements CodexBackend {
   private markUnavailable(reason: string): void {
     if (this.unavailableReason) return;
     this.unavailableReason = reason;
-    for (const runtime of this.runtimes.values()) if (runtime.active) this.settleUnavailable(runtime, reason);
+    for (const runtime of this.runtimes.values()) {
+      this.clearPendingApprovals(runtime, undefined, false);
+      if (runtime.active) this.settleUnavailable(runtime, reason);
+    }
   }
 
   private settleUnavailable(runtime: ScopeRuntime, reason: string): void {
@@ -352,6 +483,7 @@ export class AppServerBackend implements CodexBackend {
   private finishTurn(runtime: ScopeRuntime, active: ActiveTurn, flags: { subagentsAborted?: boolean; subagentsSettled?: boolean } = {}): void {
     if (runtime.active !== active || active.done) return;
     active.done = true;
+    this.clearPendingApprovals(runtime, active);
     this.emit({ type: 'done', projectPath: runtime.projectPath, scope: runtime.scope, turnSeq: active.seq, ...flags });
     runtime.active = undefined;
   }

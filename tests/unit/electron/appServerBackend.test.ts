@@ -1,16 +1,18 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
-import type { AppServerClientTransport, AppServerNotification } from '../../../electron/services/codexBackend/appServerClient';
+import type { AppServerClientTransport, AppServerNotification, AppServerServerRequest, AppServerServerRequestResponder } from '../../../electron/services/codexBackend/appServerClient';
 import { AppServerBackend } from '../../../electron/services/codexBackend/appServerBackend';
 
 type Request = { method: string; params: unknown };
 
 function harness() {
   const notifications = new Set<(notification: AppServerNotification) => void>();
+  const serverRequests = new Set<(request: AppServerServerRequest) => void>();
   const failures = new Set<(error: Error) => void>();
   const requests: Request[] = [];
   const responses = new Map<string, unknown>();
   const queuedResponses = new Map<string, unknown[]>();
+  const responders = new Map<string | number, AppServerServerRequestResponder>();
   const client: AppServerClientTransport = {
     failureReason: undefined,
     start: vi.fn(async () => undefined),
@@ -22,8 +24,13 @@ function harness() {
     }),
     notify: vi.fn(),
     onNotification: vi.fn((listener) => { notifications.add(listener); return () => notifications.delete(listener); }),
-    onServerRequest: vi.fn(() => () => undefined),
-    claimServerRequest: vi.fn(() => { throw new Error('No server request is pending'); }),
+    onServerRequest: vi.fn((listener) => { serverRequests.add(listener); return () => serverRequests.delete(listener); }),
+    claimServerRequest: vi.fn((id) => {
+      const responder = responders.get(id);
+      if (!responder) throw new Error('No server request is pending');
+      responders.delete(id);
+      return responder;
+    }),
     onFailure: vi.fn((listener) => { failures.add(listener); return () => failures.delete(listener); }),
     destroy: vi.fn(),
   };
@@ -42,6 +49,16 @@ function harness() {
       queuedResponses.set(method, queue);
     },
     notify: (method: string, params: unknown) => notifications.forEach((listener) => listener({ jsonrpc: '2.0', method, params })),
+    serverRequest: (id: string | number, method: string, params: unknown) => {
+      const responder: AppServerServerRequestResponder = {
+        request: { id, method, params },
+        respond: vi.fn(),
+        reject: vi.fn(),
+      };
+      responders.set(id, responder);
+      serverRequests.forEach((listener) => listener(responder.request));
+      return responder;
+    },
     fail: (error: Error) => failures.forEach((listener) => listener(error as never)),
   };
 }
@@ -294,5 +311,94 @@ describe('AppServerBackend', () => {
     });
     expect(h.client.start).toHaveBeenCalledOnce();
     expect(h.requests).toEqual([{ method: 'model/list', params: {} }]);
+  });
+
+  it.each([
+    ['item/commandExecution/requestApproval', {
+      threadId: 'thread-a', turnId: 'turn-a', reason: 'Needs to run tests', command: 'npm test', cwd: '/repo',
+      availableDecisions: ['accept', 'decline'],
+    }, { toolName: 'Command approval', command: 'npm test', cwd: '/repo', reason: 'Needs to run tests' }],
+    ['item/fileChange/requestApproval', {
+      threadId: 'thread-a', turnId: 'turn-a', reason: 'Needs write access', grantRoot: '/repo/src',
+      availableDecisions: ['accept', 'decline'],
+    }, { toolName: 'File change approval', grantRoot: '/repo/src', reason: 'Needs write access' }],
+    ['item/permissions/requestApproval', {
+      threadId: 'thread-a', turnId: 'turn-a', reason: 'Needs network', permissions: [{ kind: 'network', host: 'api.openai.com', protocol: 'https' }],
+      availableDecisions: ['accept', 'decline'],
+    }, { toolName: 'Permission approval', reason: 'Needs network', network: { host: 'api.openai.com', protocol: 'https' } }],
+  ] as const)('claims and normalizes %s approvals for the active scoped turn', async (method, params, expected) => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-a' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-a' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
+    await settle();
+
+    h.serverRequest(`request-${method}`, method, params);
+
+    expect(h.client.claimServerRequest).toHaveBeenCalledWith(`request-${method}`);
+    expect(h.emitted).toContainEqual(expect.objectContaining({
+      type: 'approval_needed', provider: 'codex', requestHandle: `request-${method}`,
+      projectPath: '/repo', scope: 'a', toolUseId: `request-${method}`, ...expected,
+    }));
+    expect(h.backend.isScopeBusy?.('/repo', 'a')).toBe(true);
+  });
+
+  it('declines stale approval requests without exposing a renderer event', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-a' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-a' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
+    await settle();
+
+    const responder = h.serverRequest('stale', 'item/commandExecution/requestApproval', {
+      threadId: 'wrong-thread', turnId: 'turn-a', command: 'rm -rf /', cwd: '/wrong',
+    });
+
+    expect(responder.respond).toHaveBeenCalledWith({ decision: 'decline' });
+    expect(h.emitted.some((event) => event.type === 'approval_needed')).toBe(false);
+  });
+
+  it.each(['completed', 'interrupt', 'session replacement', 'suspend', 'failure'] as const)('retires pending approvals when the turn is %s', async (action) => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-a' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-a' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
+    await settle();
+    const responder = h.serverRequest('pending', 'item/commandExecution/requestApproval', {
+      threadId: 'thread-a', turnId: 'turn-a', command: 'npm test', cwd: '/repo',
+    });
+
+    if (action === 'completed') h.notify('turn/completed', { threadId: 'thread-a', turn: { id: 'turn-a', status: 'completed' } });
+    if (action === 'interrupt') h.backend.interrupt('/repo', 'a');
+    if (action === 'session replacement') h.backend.interrupt('/repo', 'a');
+    if (action === 'session replacement') h.backend.setSessionId('/repo', 'next', 'a');
+    if (action === 'suspend') h.backend.suspendWorkspace('/repo');
+    if (action === 'failure') h.fail(new Error('server exited'));
+    await settle();
+
+    if (action === 'failure') expect(responder.respond).not.toHaveBeenCalled();
+    else expect(responder.respond).toHaveBeenCalledWith({ decision: 'decline' });
+    expect(h.backend.isScopeBusy?.('/repo', 'a')).toBe(false);
+  });
+
+  it('removes a request resolved by App Server without writing a stale decision', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-a' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-a' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
+    await settle();
+    const responder = h.serverRequest('resolved', 'item/commandExecution/requestApproval', {
+      threadId: 'thread-a', turnId: 'turn-a', command: 'npm test', cwd: '/repo',
+    });
+
+    h.notify('serverRequest/resolved', { requestId: 'resolved', threadId: 'thread-a', turnId: 'turn-a' });
+    h.backend.interrupt('/repo', 'a');
+    await settle();
+
+    expect(responder.respond).not.toHaveBeenCalled();
   });
 });

@@ -9,6 +9,20 @@ export interface CodexAppServerPreviewStatus {
 export type CodexPermission = 'auto' | 'read-only' | 'full-access';
 export type CodexReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 
+/** Sanitized metadata for an App Server approval; raw protocol params stay main-process only. */
+export interface CodexApprovalMetadata {
+  provider: 'codex';
+  requestHandle: string;
+  kind: 'command' | 'file-change' | 'permissions';
+  availableDecisions: string[];
+  reason?: string;
+  command?: string;
+  cwd?: string;
+  network?: { host?: string; protocol?: string };
+  grantRoot?: string;
+  permissionsSummary?: string[];
+}
+
 export interface CodexStartArgs {
   projectPath: string;
   scope?: string;
