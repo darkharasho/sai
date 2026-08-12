@@ -118,7 +118,7 @@ function rendererMcpBlock(block: McpContentBlock): RendererContentBlock {
 function rendererMcpContent(result: McpResult | undefined): RendererContentBlock[] {
   if (!result) return [];
 
-  const content = result.content.map(rendererMcpBlock);
+  const content = Array.isArray(result.content) ? result.content.map(rendererMcpBlock) : [];
   if (result.structured_content !== null && result.structured_content !== undefined) {
     content.push({
       type: 'text',

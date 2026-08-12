@@ -1,4 +1,5 @@
-import { emitChatMessage } from '../claude';
+import { emitChatMessage, getMainWin } from '../claude';
+import { notifyCompletion } from '../notify';
 import { registerWorkspaceBackendHooks } from '../workspace';
 import { fetchBundledCodexModels } from './bundledModels';
 import { SdkCodexBackend } from './sdkBackend';
@@ -15,6 +16,10 @@ export function getCodexBackend(): CodexBackend {
   active = new SdkCodexBackend({
     emit: emitChatMessage,
     getModels: fetchBundledCodexModels,
+    notifyCompletion: (projectPath, info) => {
+      const win = getMainWin();
+      if (win) notifyCompletion(win, projectPath, info);
+    },
   });
 
   registerWorkspaceBackendHooks('codex', {

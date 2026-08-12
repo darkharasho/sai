@@ -380,6 +380,25 @@ describe('mapCodexSdkEvent', () => {
       ])]);
     });
 
+    it('treats malformed MCP result content as empty while preserving structured output', () => {
+      const event = {
+        type: 'item.completed',
+        item: {
+          id: 'mcp-malformed-content',
+          type: 'mcp_tool_call',
+          server: 'superpowers',
+          tool: 'executing_plans',
+          arguments: {},
+          result: { content: { unexpected: true }, structured_content: { ok: true } },
+          status: 'completed',
+        },
+      } as unknown as ThreadEvent;
+
+      expect(mapCodexSdkEvent(event, ctx)).toEqual([toolResult('mcp-malformed-content', [
+        { type: 'text', text: '{"ok":true}' },
+      ])]);
+    });
+
     it('uses deterministically serialized structured-only MCP output', () => {
       const event = {
         type: 'item.completed',
