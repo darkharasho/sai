@@ -5,22 +5,23 @@ import { AppServerClient, AppServerProtocolError } from '../../../electron/servi
 
 function fakeChild() {
   const child = new EventEmitter() as EventEmitter & {
-    stdin: { write: ReturnType<typeof vi.fn> };
+    stdin: EventEmitter & { write: ReturnType<typeof vi.fn> };
     stdout: EventEmitter;
     kill: ReturnType<typeof vi.fn>;
   };
-  child.stdin = { write: vi.fn(() => true) };
+  child.stdin = Object.assign(new EventEmitter(), { write: vi.fn(() => true) });
   child.stdout = new EventEmitter();
   child.kill = vi.fn();
   return child;
 }
 
-function createClient(child: ReturnType<typeof fakeChild>) {
+function createClient(child: ReturnType<typeof fakeChild>, initializationTimeoutMs?: number) {
   const spawn = vi.fn(() => child);
   const client = new AppServerClient({
     spawn: spawn as never,
     resolveBundledCodex: () => ({ executablePath: '/app/codex', pathDirs: ['/app/bin'] }),
     getEnv: () => ({ PATH: '/usr/bin' }),
+    initializationTimeoutMs,
   });
   return { client, spawn };
 }
@@ -83,6 +84,24 @@ describe('AppServerClient', () => {
     expect(client.failureReason).toMatch(/write failed: stdin closed/i);
     expect(failures).toEqual([expect.stringMatching(/write failed: stdin closed/i)]);
     expect(child.kill).toHaveBeenCalledOnce();
+  });
+
+  it('fails and terminates when initialization does not respond before its timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const child = fakeChild();
+      const { client } = createClient(child, 25);
+      const ready = client.start();
+      const rejected = expect(ready).rejects.toThrow(/initialization timed out after 25ms/i);
+
+      await vi.advanceTimersByTimeAsync(25);
+
+      await rejected;
+      expect(client.failureReason).toMatch(/initialization timed out after 25ms/i);
+      expect(child.kill).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('serializes requests as newline-delimited JSON and correlates their responses', async () => {
@@ -196,6 +215,19 @@ describe('AppServerClient', () => {
     child.emit('error', new Error('broken pipe'));
 
     await expect(pending).rejects.toThrow(/transport error: broken pipe/i);
+  });
+
+  it('fails closed when the App Server stdin stream errors', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+    const pending = client.request('thread/start', {});
+
+    expect(() => child.stdin.emit('error', new Error('stdin disconnected'))).not.toThrow();
+
+    await expect(pending).rejects.toThrow(/stdin error: stdin disconnected/i);
+    expect(client.failureReason).toMatch(/stdin error: stdin disconnected/i);
+    expect(child.kill).toHaveBeenCalledOnce();
   });
 
   it('is safe to destroy more than once', async () => {

@@ -50,6 +50,7 @@ export interface AppServerClientDeps {
   resolveBundledCodex?: typeof resolveBundledCodex;
   getEnv?: () => NodeJS.ProcessEnv;
   clientInfo?: { name: string; version: string };
+  initializationTimeoutMs?: number;
 }
 
 interface PendingRequest {
@@ -57,6 +58,8 @@ interface PendingRequest {
   reject: (error: Error) => void;
   failOnResponseError: boolean;
 }
+
+const DEFAULT_INITIALIZATION_TIMEOUT_MS = 10_000;
 
 function messageText(error: JsonRpcError): string {
   return `${error.message} (${error.code})`;
@@ -84,6 +87,7 @@ export class AppServerClient implements AppServerClientTransport {
   private readonly resolveExecutable: typeof resolveBundledCodex;
   private readonly getEnv: () => NodeJS.ProcessEnv;
   private readonly clientInfo: { name: string; version: string };
+  private readonly initializationTimeoutMs: number;
   private readonly pending = new Map<number, PendingRequest>();
   private readonly listeners = new Set<(message: AppServerNotification) => void>();
   private readonly failureListeners = new Set<(error: AppServerUnavailableError) => void>();
@@ -94,12 +98,16 @@ export class AppServerClient implements AppServerClientTransport {
   private initialized = false;
   private destroyed = false;
   private failure: AppServerUnavailableError | undefined;
+  private initializationTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(deps: AppServerClientDeps = {}) {
     this.spawnImpl = deps.spawn ?? spawn;
     this.resolveExecutable = deps.resolveBundledCodex ?? resolveBundledCodex;
     this.getEnv = deps.getEnv ?? enrichedEnv;
     this.clientInfo = deps.clientInfo ?? { name: 'sai', version: '1.0' };
+    this.initializationTimeoutMs = deps.initializationTimeoutMs && deps.initializationTimeoutMs > 0
+      ? deps.initializationTimeoutMs
+      : DEFAULT_INITIALIZATION_TIMEOUT_MS;
   }
 
   get failureReason(): string | undefined {
@@ -126,14 +134,19 @@ export class AppServerClient implements AppServerClientTransport {
         stdio: ['pipe', 'pipe', 'ignore'],
       });
       this.attach(this.child);
-      this.startPromise = this.sendRequest('initialize', { clientInfo: this.clientInfo }, {
+      const initialization = this.sendRequest('initialize', { clientInfo: this.clientInfo }, {
         allowBeforeInitialized: true,
         failOnResponseError: true,
-      })
+      });
+      this.initializationTimer = setTimeout(() => {
+        this.fail(new AppServerUnavailableError(`Codex App Server initialization timed out after ${this.initializationTimeoutMs}ms`));
+      }, this.initializationTimeoutMs);
+      this.startPromise = initialization
         .then(() => {
           this.write({ jsonrpc: '2.0', method: 'initialized' });
           this.initialized = true;
-        });
+        })
+        .finally(() => this.clearInitializationTimeout());
     } catch (error) {
       this.fail(new AppServerUnavailableError(`Unable to start Codex App Server: ${errorText(error)}`));
       this.startPromise = Promise.reject(this.failure);
@@ -173,6 +186,8 @@ export class AppServerClient implements AppServerClientTransport {
   private attach(child: ChildProcess): void {
     if (!child.stdin || !child.stdout) throw new AppServerUnavailableError('Codex App Server did not expose piped stdio');
     child.stdout.on('data', (chunk: Buffer | string) => this.accept(chunk.toString()));
+    child.stdin.on('error', (error) => this.fail(new AppServerUnavailableError(`Codex App Server stdin error: ${errorText(error)}`)));
+    child.stdout.on('error', (error) => this.fail(new AppServerUnavailableError(`Codex App Server stdout error: ${errorText(error)}`)));
     child.on('error', (error) => this.fail(new AppServerUnavailableError(`Codex App Server transport error: ${errorText(error)}`)));
     child.on('exit', (code, signal) => {
       if (!this.destroyed) this.fail(new AppServerUnavailableError(`Codex App Server transport exited${code === null || code === undefined ? '' : ` (${code})`}${signal ? ` (${signal})` : ''}`));
@@ -290,12 +305,19 @@ export class AppServerClient implements AppServerClientTransport {
       : new AppServerUnavailableError(error.message);
     this.failure = unavailable;
     this.initialized = false;
+    this.clearInitializationTimeout();
     for (const pending of this.pending.values()) pending.reject(unavailable);
     this.pending.clear();
     for (const listener of this.failureListeners) listener(unavailable);
     const child = this.child;
     this.child = undefined;
     try { child?.kill(); } catch { /* process already exited */ }
+  }
+
+  private clearInitializationTimeout(): void {
+    if (!this.initializationTimer) return;
+    clearTimeout(this.initializationTimer);
+    this.initializationTimer = undefined;
   }
 }
 
