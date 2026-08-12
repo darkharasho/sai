@@ -501,11 +501,43 @@ describe('AppServerBackend', () => {
         { id: 'JSON', label: 'JSON' }, { id: 'YAML', label: 'YAML' },
       ] }],
     }));
-    expect(h.backend.answerUserInput('/repo', 'a', 'input', { format: ['shell'] }))
+    expect(h.backend.answerUserInput('/repo', 'a', 'input', { type: 'answers', answers: { format: ['shell'] } }))
       .toEqual({ ok: false, code: 'invalid-decision' });
-    expect(h.backend.answerUserInput('/repo', 'a', 'input', { format: ['YAML'] }))
+    expect(h.backend.answerUserInput('/repo', 'a', 'input', { type: 'answers', answers: { format: ['YAML'] } }))
       .toEqual({ ok: true });
     expect(responder.respond).toHaveBeenCalledWith({ answers: { format: ['YAML'] } });
+  });
+
+  it('maps an explicit user-input cancellation to the protocol empty-answer response', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-a' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-a' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
+    await settle();
+    const responder = h.serverRequest('cancel-input', 'item/tool/requestUserInput', {
+      threadId: 'thread-a', turnId: 'turn-a', questions: [{ id: 'format', question: 'Choose', options: [{ label: 'JSON' }] }],
+    });
+
+    expect(h.backend.answerUserInput('/repo', 'a', 'cancel-input', { type: 'cancel' }))
+      .toEqual({ ok: true });
+    expect(responder.respond).toHaveBeenCalledWith({ answers: {} });
+  });
+
+  it('rejects malformed cancel responses rather than accepting arbitrary answer data', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-a' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-a' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
+    await settle();
+    const responder = h.serverRequest('malformed-cancel', 'item/tool/requestUserInput', {
+      threadId: 'thread-a', turnId: 'turn-a', questions: [{ id: 'format', question: 'Choose', options: [{ label: 'JSON' }] }],
+    });
+
+    expect(h.backend.answerUserInput('/repo', 'a', 'malformed-cancel', { type: 'cancel', answers: { format: ['JSON'] } } as any))
+      .toEqual({ ok: false, code: 'invalid-decision' });
+    expect(responder.respond).not.toHaveBeenCalled();
   });
 
   it('keeps a user-input request pending when its protocol response fails, then retires it only after success', async () => {
@@ -520,9 +552,9 @@ describe('AppServerBackend', () => {
     });
     vi.mocked(responder.respond).mockImplementationOnce(() => { throw new Error('closed'); });
 
-    expect(h.backend.answerUserInput('/repo', 'a', 'retry-input', { format: ['JSON'] }))
+    expect(h.backend.answerUserInput('/repo', 'a', 'retry-input', { type: 'answers', answers: { format: ['JSON'] } }))
       .toEqual({ ok: false, code: 'not-pending' });
-    expect(h.backend.answerUserInput('/repo', 'a', 'retry-input', { format: ['JSON'] }))
+    expect(h.backend.answerUserInput('/repo', 'a', 'retry-input', { type: 'answers', answers: { format: ['JSON'] } }))
       .toEqual({ ok: true });
   });
 
@@ -562,7 +594,7 @@ describe('AppServerBackend', () => {
         type: 'user_input_resolved', provider: 'codex', requestHandle: 'timed',
         projectPath: '/repo', scope: 'a',
       }));
-      expect(h.backend.answerUserInput('/repo', 'a', 'timed', { format: ['JSON'] }))
+      expect(h.backend.answerUserInput('/repo', 'a', 'timed', { type: 'answers', answers: { format: ['JSON'] } }))
         .toEqual({ ok: false, code: 'not-pending' });
     } finally {
       vi.useRealTimers();

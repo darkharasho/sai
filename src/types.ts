@@ -412,7 +412,7 @@ declare global {
       projectPath: string,
       scope: string | undefined,
       requestHandle: string,
-      answers: import('../electron/services/codexBackend').CodexUserInputAnswers,
+      response: import('../electron/services/codexBackend').CodexUserInputResponse,
     ) => Promise<import('../electron/services/codexBackend').CodexApprovalResult>;
     codexAppServerResolveMcpElicitation?: (
       projectPath: string,

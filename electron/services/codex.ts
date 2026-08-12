@@ -12,7 +12,7 @@ import {
   isCodexReasoningEffort,
   isCodexApprovalDecision,
   isCodexMcpElicitationDecision,
-  isCodexUserInputAnswers,
+  isCodexUserInputResponse,
 } from './codexBackend';
 import { CodexTelemetryService } from './codexTelemetry';
 
@@ -79,14 +79,14 @@ export function registerCodexHandlers(): void {
 
   ipcMain.handle(
     'codex:appServerAnswerUserInput',
-    (_event, projectPath: unknown, scope: unknown, requestHandle: unknown, answers: unknown): CodexApprovalResult => {
+    (_event, projectPath: unknown, scope: unknown, requestHandle: unknown, response: unknown): CodexApprovalResult => {
       if (typeof projectPath !== 'string' || projectPath.length === 0
         || (scope !== undefined && typeof scope !== 'string')
         || typeof requestHandle !== 'string' || requestHandle.length === 0
-        || !isCodexUserInputAnswers(answers)) {
+        || !isCodexUserInputResponse(response)) {
         return { ok: false, code: 'invalid-decision' };
       }
-      return getCodexBackend().answerUserInput(projectPath, scope, requestHandle, answers);
+      return getCodexBackend().answerUserInput(projectPath, scope, requestHandle, response);
     },
   );
 

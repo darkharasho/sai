@@ -512,11 +512,16 @@ describe('Codex IPC dispatch', () => {
     registerCodexHandlers();
 
     await expect(mocks.ipcMain.invoke('codex:appServerAnswerUserInput', '/project', 'task:7', 'question-7', {
-      format: ['json'], target: ['other'],
+      type: 'answers', answers: { format: ['json'], target: ['other'] },
     })).resolves.toEqual({ ok: true });
     expect(backend.answerUserInput).toHaveBeenCalledWith('/project', 'task:7', 'question-7', {
-      format: ['json'], target: ['other'],
+      type: 'answers', answers: { format: ['json'], target: ['other'] },
     });
+
+    await expect(mocks.ipcMain.invoke('codex:appServerAnswerUserInput', '/project', 'task:7', 'question-cancel', {
+      type: 'cancel',
+    })).resolves.toEqual({ ok: true });
+    expect(backend.answerUserInput).toHaveBeenLastCalledWith('/project', 'task:7', 'question-cancel', { type: 'cancel' });
 
     await expect(mocks.ipcMain.invoke('codex:appServerResolveMcpElicitation', '/project', 'task:7', 'mcp-7', {
       action: 'accept', content: { calendar: 'primary' },
@@ -526,7 +531,7 @@ describe('Codex IPC dispatch', () => {
     });
 
     await expect(mocks.ipcMain.invoke('codex:appServerAnswerUserInput', '/project', 'task:7', 'question-7', {
-      format: ['json', 1],
+      type: 'answers', answers: { format: ['json', 1] },
     })).resolves.toEqual({ ok: false, code: 'invalid-decision' });
     await expect(mocks.ipcMain.invoke('codex:appServerResolveMcpElicitation', '/project', 'task:7', 'mcp-7', {
       action: 'accept', content: { redirect: 'https://untrusted.test' }, navigate: true,
@@ -534,7 +539,7 @@ describe('Codex IPC dispatch', () => {
     await expect(mocks.ipcMain.invoke('codex:appServerResolveMcpElicitation', '/project', 'task:7', 'mcp-7', {
       action: 'accept', content: null,
     })).resolves.toEqual({ ok: true });
-    expect(backend.answerUserInput).toHaveBeenCalledTimes(1);
+    expect(backend.answerUserInput).toHaveBeenCalledTimes(2);
     expect(backend.resolveMcpElicitation).toHaveBeenCalledTimes(2);
   });
 
@@ -550,7 +555,7 @@ describe('Codex IPC dispatch', () => {
     registerCodexHandlers();
 
     await expect(mocks.ipcMain.invoke('codex:appServerAnswerUserInput', '/project', 'task:7', 'question-7', {
-      answer: ['yes'],
+      type: 'answers', answers: { answer: ['yes'] },
     })).resolves.toEqual({ ok: true });
     expect(appServer.answerUserInput).toHaveBeenCalledOnce();
 

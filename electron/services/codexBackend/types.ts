@@ -49,6 +49,15 @@ export interface CodexUserInputQuestion {
 /** App Server requires one or more selected option labels for each question. */
 export type CodexUserInputAnswers = Record<string, string[]>;
 
+/**
+ * A renderer response to an App Server `tool/requestUserInput` request.
+ * Cancellation deliberately carries no answer data; the backend converts it
+ * to the protocol's valid empty answer map.
+ */
+export type CodexUserInputResponse =
+  | { type: 'answers'; answers: CodexUserInputAnswers }
+  | { type: 'cancel' };
+
 export interface CodexMcpElicitationForm {
   mode: 'form';
   serverName: string;
@@ -85,6 +94,13 @@ export function isCodexUserInputAnswers(value: unknown): value is CodexUserInput
     && selections.length > 0 && selections.length <= CODEX_INPUT_MAX_OPTIONS
     && selections.every((selection) => typeof selection === 'string' && selection.length > 0 && selection.length <= CODEX_INPUT_MAX_TEXT),
   );
+}
+
+export function isCodexUserInputResponse(value: unknown): value is CodexUserInputResponse {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const input = value as Record<string, unknown>;
+  if (input.type === 'cancel') return Object.keys(input).length === 1;
+  return input.type === 'answers' && Object.keys(input).length === 2 && isCodexUserInputAnswers(input.answers);
 }
 
 function isSafeMcpContent(value: unknown, depth = 0): boolean {
@@ -193,7 +209,7 @@ export interface CodexBackend {
   getModels(forceRefresh?: boolean): Promise<CodexModelResult>;
   approve(projectPath: string, scope: string | undefined, requestHandle: string, decision: CodexApprovalDecision): CodexApprovalResult;
   /** SDK returns a typed unsupported result; App Server validates a pending request. */
-  answerUserInput(projectPath: string, scope: string | undefined, requestHandle: string, answers: CodexUserInputAnswers): CodexApprovalResult;
+  answerUserInput(projectPath: string, scope: string | undefined, requestHandle: string, response: CodexUserInputResponse): CodexApprovalResult;
   /** SDK returns a typed unsupported result; App Server validates a pending request. */
   resolveMcpElicitation(projectPath: string, scope: string | undefined, requestHandle: string, decision: CodexMcpElicitationDecision): CodexApprovalResult;
   suspendWorkspace(projectPath: string): void;

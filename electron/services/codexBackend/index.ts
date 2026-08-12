@@ -4,7 +4,7 @@ import { registerWorkspaceBackendHooks } from '../workspace';
 import { fetchBundledCodexModels } from './bundledModels';
 import { AppServerBackend } from './appServerBackend';
 import { SdkCodexBackend } from './sdkBackend';
-import { codexScopeKey, type CodexAppServerPreviewStatus, type CodexApprovalDecision, type CodexApprovalResult, type CodexBackend, type CodexBackendMode, type CodexMcpElicitationDecision, type CodexModelResult, type CodexSendArgs, type CodexStartArgs, type CodexUserInputAnswers } from './types';
+import { codexScopeKey, type CodexAppServerPreviewStatus, type CodexApprovalDecision, type CodexApprovalResult, type CodexBackend, type CodexBackendMode, type CodexMcpElicitationDecision, type CodexModelResult, type CodexSendArgs, type CodexStartArgs, type CodexUserInputResponse } from './types';
 
 export * from './types';
 
@@ -115,10 +115,10 @@ class ScopedCodexBackend implements CodexBackend {
     return this.backendFor(mode).approve(projectPath, scope, requestHandle, decision);
   }
 
-  answerUserInput(projectPath: string, scope: string | undefined, requestHandle: string, answers: CodexUserInputAnswers): CodexApprovalResult {
+  answerUserInput(projectPath: string, scope: string | undefined, requestHandle: string, response: CodexUserInputResponse): CodexApprovalResult {
     const mode = this.assignments.get(codexScopeKey(projectPath, scope));
     if (!mode) return { ok: false, code: 'not-pending' };
-    return this.backendFor(mode).answerUserInput(projectPath, scope, requestHandle, answers);
+    return this.backendFor(mode).answerUserInput(projectPath, scope, requestHandle, response);
   }
 
   resolveMcpElicitation(projectPath: string, scope: string | undefined, requestHandle: string, decision: CodexMcpElicitationDecision): CodexApprovalResult {

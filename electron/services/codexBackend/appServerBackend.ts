@@ -7,7 +7,7 @@ import {
   type AppServerServerRequestResponder,
 } from './appServerClient';
 import { mapAppServerEvent } from './appServerEventMap';
-import { normalizeCodexModelOption, codexScope, codexScopeKey, type CodexAppServerPreviewStatus, type CodexApprovalDecision, type CodexApprovalMetadata, type CodexApprovalResult, type CodexBackend, type CodexMcpElicitationDecision, type CodexMcpElicitationForm, type CodexMcpElicitationUrl, type CodexModelResult, type CodexSendArgs, type CodexSessionKind, type CodexStartArgs, type CodexUserInputAnswers, type CodexUserInputQuestion } from './types';
+import { isCodexUserInputResponse, normalizeCodexModelOption, codexScope, codexScopeKey, type CodexAppServerPreviewStatus, type CodexApprovalDecision, type CodexApprovalMetadata, type CodexApprovalResult, type CodexBackend, type CodexMcpElicitationDecision, type CodexMcpElicitationForm, type CodexMcpElicitationUrl, type CodexModelResult, type CodexSendArgs, type CodexSessionKind, type CodexStartArgs, type CodexUserInputQuestion, type CodexUserInputResponse } from './types';
 import type { SaiEnvelope } from './sdkEventMap';
 import { getOrCreate as getOrCreateWorkspace } from '../workspace';
 
@@ -449,12 +449,14 @@ export class AppServerBackend implements CodexBackend {
     }
   }
 
-  answerUserInput(projectPath: string, scope: string | undefined, requestHandle: string, answers: CodexUserInputAnswers): CodexApprovalResult {
+  answerUserInput(projectPath: string, scope: string | undefined, requestHandle: string, response: CodexUserInputResponse): CodexApprovalResult {
     const pending = this.pendingFor(this.pendingUserInputs, projectPath, scope, requestHandle);
     if (!pending) return { ok: false, code: 'not-pending' };
-    if (!this.userInputResponse(pending.questions, answers)) return { ok: false, code: 'invalid-decision' };
+    if (!isCodexUserInputResponse(response)) return { ok: false, code: 'invalid-decision' };
+    const protocolResponse = this.userInputResponse(pending.questions, response);
+    if (!protocolResponse) return { ok: false, code: 'invalid-decision' };
     try {
-      pending.responder.respond({ answers });
+      pending.responder.respond(protocolResponse);
       this.pendingUserInputs.delete(pending.id);
       if (pending.timeout) clearTimeout(pending.timeout);
       this.emitUserInputResolved(pending);
@@ -842,11 +844,13 @@ export class AppServerBackend implements CodexBackend {
       : undefined;
   }
 
-  private userInputResponse(questions: CodexUserInputQuestion[], answers: CodexUserInputAnswers): boolean {
-    if (!answers || typeof answers !== 'object' || Array.isArray(answers)) return false;
+  private userInputResponse(questions: CodexUserInputQuestion[], response: CodexUserInputResponse): { answers: Record<string, string[]> } | undefined {
+    if (response.type === 'cancel') return { answers: {} };
+    const { answers } = response;
+    if (!answers || typeof answers !== 'object' || Array.isArray(answers)) return undefined;
     const ids = questions.map((question) => question.id);
-    if (Object.keys(answers).length !== ids.length || Object.keys(answers).some((id) => !ids.includes(id))) return false;
-    return questions.every((question) => {
+    if (Object.keys(answers).length !== ids.length || Object.keys(answers).some((id) => !ids.includes(id))) return undefined;
+    const valid = questions.every((question) => {
       const values = answers[question.id];
       if (!Array.isArray(values)) return false;
       if (values.length < 1 || values.length > MAX_OPTIONS || values.some((value) => typeof value !== 'string' || value.length < 1 || value.length > MAX_TEXT)) return false;
@@ -854,6 +858,7 @@ export class AppServerBackend implements CodexBackend {
       const offered = new Set(question.options.map((option) => option.id));
       return values.every((value) => offered.has(value) || question.allowOther === true);
     });
+    return valid ? { answers } : undefined;
   }
 
   private mcpElicitationResponse(

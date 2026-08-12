@@ -88,8 +88,8 @@ contextBridge.exposeInMainWorld('sai', {
     projectPath: string,
     scope: string | undefined,
     requestHandle: string,
-    answers: import('./services/codexBackend').CodexUserInputAnswers,
-  ) => ipcRenderer.invoke('codex:appServerAnswerUserInput', projectPath, scope, requestHandle, answers),
+    response: import('./services/codexBackend').CodexUserInputResponse,
+  ) => ipcRenderer.invoke('codex:appServerAnswerUserInput', projectPath, scope, requestHandle, response),
   codexAppServerResolveMcpElicitation: (
     projectPath: string,
     scope: string | undefined,

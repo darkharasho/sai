@@ -257,12 +257,30 @@ describe('ChatPanel', () => {
     });
     fireEvent.click(screen.getByLabelText('Brief'));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Submit' })); });
-    expect(mockSai.codexAppServerAnswerUserInput).toHaveBeenCalledWith('/project', 'scope-a', 'question-1', { style: ['brief'] });
+    expect(mockSai.codexAppServerAnswerUserInput).toHaveBeenCalledWith('/project', 'scope-a', 'question-1', {
+      type: 'answers', answers: { style: ['brief'] },
+    });
     expect(screen.getByTestId('codex-user-input-request')).toBeTruthy();
 
     await act(async () => {
       handler({ type: 'user_input_resolved', provider: 'codex', requestHandle: 'question-1', projectPath: '/project', scope: 'scope-a' });
     });
+    expect(screen.queryByTestId('codex-user-input-request')).toBeNull();
+  });
+
+  it('sends an explicit typed cancellation for a Codex App Server input request', async () => {
+    mockSai.codexAppServerAnswerUserInput.mockResolvedValueOnce({ ok: true });
+    const props = { ...baseProps(), aiProvider: 'codex' as const, claudeScope: 'scope-a' };
+    render(<ChatPanel {...props} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'user_input_needed', provider: 'codex', requestHandle: 'cancel-question', projectPath: '/project', scope: 'scope-a', questions: [{ id: 'style', prompt: 'Choose style', options: [{ id: 'brief', label: 'Brief' }] }] });
+    });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Cancel' })); });
+
+    expect(mockSai.codexAppServerAnswerUserInput).toHaveBeenCalledWith('/project', 'scope-a', 'cancel-question', { type: 'cancel' });
     expect(screen.queryByTestId('codex-user-input-request')).toBeNull();
   });
 

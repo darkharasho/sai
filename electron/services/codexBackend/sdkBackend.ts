@@ -24,7 +24,7 @@ import {
   type CodexSendArgs,
   type CodexSessionKind,
   type CodexStartArgs,
-  type CodexUserInputAnswers,
+  type CodexUserInputResponse,
 } from './types';
 
 export interface CodexSdkThread {
@@ -253,7 +253,7 @@ export class SdkCodexBackend implements CodexBackend {
     return { ok: false, code: 'unsupported' };
   }
 
-  answerUserInput(_projectPath: string, _scope: string | undefined, _requestHandle: string, _answers: CodexUserInputAnswers): CodexApprovalResult {
+  answerUserInput(_projectPath: string, _scope: string | undefined, _requestHandle: string, _response: CodexUserInputResponse): CodexApprovalResult {
     return { ok: false, code: 'unsupported' };
   }
 

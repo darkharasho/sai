@@ -2100,9 +2100,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     });
   };
 
-  const submitCodexUserInput = async (request: PendingCodexUserInput, answers: Record<string, string[]>) => {
+  const submitCodexUserInput = async (request: PendingCodexUserInput, response: import('../../../electron/services/codexBackend').CodexUserInputResponse) => {
     try {
-      const result = await window.sai.codexAppServerAnswerUserInput?.(projectPath, claudeScope, request.requestHandle, answers);
+      const result = await window.sai.codexAppServerAnswerUserInput?.(projectPath, claudeScope, request.requestHandle, response);
       if (result?.ok) setPendingCodexUserInput(current => current?.requestHandle === request.requestHandle ? null : current);
     } catch {
       // Keep the request actionable when the App Server preview is unavailable.
@@ -2628,8 +2628,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           {pendingCodexUserInput && aiProvider === 'codex' && (
             <UserInputRequestPanel
               request={pendingCodexUserInput}
-              onSubmit={(answers) => { void submitCodexUserInput(pendingCodexUserInput, answers); }}
-              onCancel={() => { void submitCodexUserInput(pendingCodexUserInput, {}); }}
+              onSubmit={(answers) => { void submitCodexUserInput(pendingCodexUserInput, { type: 'answers', answers }); }}
+              onCancel={() => { void submitCodexUserInput(pendingCodexUserInput, { type: 'cancel' }); }}
             />
           )}
           {pendingCodexMcpElicitation && aiProvider === 'codex' && (
