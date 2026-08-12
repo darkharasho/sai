@@ -714,7 +714,7 @@ describe('ChatPanel', () => {
     expect(latestChatInputProps.isStreaming).toBe(true);
   });
 
-  it('clears current native-subagent activity on its matching terminal done', async () => {
+  it('clears native-subagent activity when an interrupted parent receives its matching done', async () => {
     const props = { ...baseProps(), aiProvider: 'codex' as const };
     const { container, rerender } = render(<ChatPanel {...props} isStreaming={false} />);
     await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
@@ -727,6 +727,8 @@ describe('ChatPanel', () => {
     expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
 
     await act(async () => {
+      // The interrupted parent is terminal; its child must not keep the new
+      // idle chat looking as if it is still working.
       handler({ type: 'done', turnSeq: 5, projectPath: '/project', scope: 'chat' });
     });
     rerender(<ChatPanel {...props} isStreaming={false} />);
@@ -734,6 +736,29 @@ describe('ChatPanel', () => {
     await waitFor(() => {
       expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
       expect(container.textContent).not.toContain('Current child');
+      expect(latestChatInputProps.isStreaming).toBe(false);
+    });
+  });
+
+  it('clears native-subagent activity at a fresh streaming boundary', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const };
+    const { container } = render(<ChatPanel {...props} isStreaming={false} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'streaming_start', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+      handler({ type: 'subagent_activity', agentId: 'child-1', status: 'running', summary: 'Old child', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+    });
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+
+    await act(async () => {
+      handler({ type: 'streaming_start', turnSeq: 6, projectPath: '/project', scope: 'chat' });
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
+      expect(container.textContent).not.toContain('Old child');
       expect(latestChatInputProps.isStreaming).toBe(false);
     });
   });
