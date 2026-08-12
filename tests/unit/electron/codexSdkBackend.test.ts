@@ -330,6 +330,27 @@ describe('SdkCodexBackend', () => {
     expect(h.notifyCompletion).not.toHaveBeenCalled();
   });
 
+  it('settles a top-level stream error immediately without waiting for its iterator to end', async () => {
+    const stream = pendingStream();
+    const h = harness([stream.events]);
+    h.backend.start({ projectPath: '/a', scope: 'chat' });
+    h.backend.send({ projectPath: '/a', scope: 'chat', message: 'delegate' });
+    await settle();
+
+    stream.push({ type: 'error', message: 'transport lost' });
+    await settle();
+
+    expect(h.emitted.filter((event) => event.type === 'error')).toEqual([
+      expect.objectContaining({ text: 'transport lost', turnSeq: 1 }),
+    ]);
+    expect(h.emitted.filter((event) => event.type === 'result')).toHaveLength(0);
+    expect(h.emitted.filter((event) => event.type === 'done')).toEqual([
+      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1 },
+    ]);
+    expect(h.backend.isWorkspaceBusy('/a')).toBe(false);
+    expect(h.notifyCompletion).not.toHaveBeenCalled();
+  });
+
   it('settles a draining turn exactly once when the SDK iterator throws after parent completion', async () => {
     const stream = (async function* (): AsyncGenerator<ThreadEvent> {
       yield {
