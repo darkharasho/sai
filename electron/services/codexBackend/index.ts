@@ -46,12 +46,12 @@ function isScopeBusy(backend: CodexBackend, projectPath: string, scope?: string)
 /**
  * Keeps transport ownership at the same granularity as a Codex conversation.
  * A settings change may select a different transport for new scopes, but an
- * in-flight scope remains with the backend that owns its thread and turn.
+ * assigned scope remains with the backend that owns its conversation until it
+ * is explicitly reset or its workspace is suspended.
  */
 class ScopedCodexBackend implements CodexBackend {
   private readonly backends: BackendByMode = {};
   private readonly assignments = new Map<string, CodexBackendMode>();
-  private readonly previewFallbackScopes = new Set<string>();
   private fallbackReason: string | undefined;
 
   constructor() {
@@ -91,7 +91,16 @@ class ScopedCodexBackend implements CodexBackend {
   }
 
   setSessionId(projectPath: string, sessionId: string | undefined, scope?: string): void {
-    this.route(projectPath, scope, true).setSessionId(projectPath, sessionId, scope);
+    const key = codexScopeKey(projectPath, scope);
+    const backend = this.route(projectPath, scope, sessionId !== undefined);
+    backend.setSessionId(projectPath, sessionId, scope);
+
+    // An explicit session clear is the renderer's new-chat/delete lifecycle.
+    // Once the old scope is settled, release its transport ownership so the
+    // next conversation in that scope may use the newly selected backend.
+    if (sessionId === undefined && !isScopeBusy(backend, projectPath, scope)) {
+      this.assignments.delete(key);
+    }
   }
 
   getModels(forceRefresh?: boolean): Promise<CodexModelResult> {
@@ -103,7 +112,6 @@ class ScopedCodexBackend implements CodexBackend {
     for (const key of this.assignments.keys()) {
       if (!key.startsWith(`${projectPath}\u0000`)) continue;
       this.assignments.delete(key);
-      this.previewFallbackScopes.delete(key);
     }
   }
 
@@ -120,7 +128,6 @@ class ScopedCodexBackend implements CodexBackend {
   destroy(): void {
     for (const backend of Object.values(this.backends)) backend?.destroy();
     this.assignments.clear();
-    this.previewFallbackScopes.clear();
     this.backends.sdk = undefined;
     this.backends['app-server'] = undefined;
   }
@@ -138,14 +145,12 @@ class ScopedCodexBackend implements CodexBackend {
         const preview = this.backends['app-server'];
         if (preview && isScopeBusy(preview, projectPath, scope)) return preview;
         this.assignments.set(key, 'sdk');
-        this.previewFallbackScopes.add(key);
         return backend;
       }
-      if (this.previewFallbackScopes.has(key)) {
-        return backend;
-      } else if (assigned === requestedMode || isScopeBusy(backend, projectPath, scope)) {
-        return backend;
-      }
+      // A scope owns one transport for its entire conversation, including
+      // between settled turns. The only ordinary release points are an
+      // explicit session reset and workspace suspension (above).
+      return backend;
     }
     const backend = this.backendFor(requestedMode);
     if (assign) this.assignments.set(key, backend === this.backends['app-server'] ? 'app-server' : 'sdk');

@@ -166,6 +166,50 @@ describe('Codex backend selection', () => {
     expect(appServer.send).not.toHaveBeenCalled();
   });
 
+  it('keeps a settled SDK scope on SDK after selecting App Server', () => {
+    const sdk = backendStub();
+    const appServer = backendStub();
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
+
+    const backend = getCodexBackend();
+    backend.start({ projectPath: '/project', scope: 'settled-sdk' });
+    setCodexBackendMode('app-server');
+    backend.send({ projectPath: '/project', scope: 'settled-sdk', message: 'continue' });
+
+    expect(sdk.send).toHaveBeenCalledWith(expect.objectContaining({ scope: 'settled-sdk' }));
+    expect(appServer.send).not.toHaveBeenCalled();
+  });
+
+  it('keeps a settled App Server scope on App Server after selecting SDK', () => {
+    const sdk = backendStub();
+    const appServer = backendStub();
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
+    setCodexBackendMode('app-server');
+
+    const backend = getCodexBackend();
+    backend.start({ projectPath: '/project', scope: 'settled-preview' });
+    setCodexBackendMode('sdk');
+    backend.send({ projectPath: '/project', scope: 'settled-preview', message: 'continue' });
+
+    expect(appServer.send).toHaveBeenCalledWith(expect.objectContaining({ scope: 'settled-preview' }));
+    expect(sdk.send).not.toHaveBeenCalled();
+  });
+
+  it('unassigns a reset settled scope so its next start uses the selected backend', () => {
+    const sdk = backendStub();
+    const appServer = backendStub();
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
+
+    const backend = getCodexBackend();
+    backend.start({ projectPath: '/project', scope: 'reset' });
+    setCodexBackendMode('app-server');
+    backend.setSessionId('/project', undefined, 'reset');
+    backend.start({ projectPath: '/project', scope: 'reset' });
+
+    expect(sdk.setSessionId).toHaveBeenCalledWith('/project', undefined, 'reset');
+    expect(appServer.start).toHaveBeenCalledWith(expect.objectContaining({ scope: 'reset' }));
+  });
+
   it('routes a fresh scope to the selected backend while another SDK scope is active', () => {
     const sdk = backendStub();
     (sdk as CodexBackend & { isAnyWorkspaceBusy: ReturnType<typeof vi.fn> }).isAnyWorkspaceBusy = vi.fn().mockReturnValue(true);
