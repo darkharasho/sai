@@ -139,8 +139,8 @@ export function requestCodexRateLimits(deps: RequestCodexRateLimitsDeps = {}): P
       if (!isRecord(msg)) return;
       if (msg.id === 0) {
         if (msg.error) { finish({ ok: false, message: ERRORS.initialize }); return; }
-        write({ jsonrpc: '2.0', method: 'initialized' });
-        write({ jsonrpc: '2.0', method: 'account/rateLimits/read', id: 1 });
+        write({ method: 'initialized' });
+        write({ method: 'account/rateLimits/read', id: 1 });
         return;
       }
       if (msg.id === 1) {
@@ -170,7 +170,7 @@ export function requestCodexRateLimits(deps: RequestCodexRateLimitsDeps = {}): P
     proc.on('error', onError);
     proc.on('exit', onExit);
 
-    write({ jsonrpc: '2.0', method: 'initialize', id: 0, params: { clientInfo: { name: 'sai', version: '1.0' } } });
+    write({ method: 'initialize', id: 0, params: { clientInfo: { name: 'sai', version: '1.0' } } });
   });
 }
 
