@@ -7,7 +7,7 @@ import {
   type AppServerServerRequestResponder,
 } from './appServerClient';
 import { mapAppServerEvent } from './appServerEventMap';
-import { normalizeCodexModelOption, codexScope, codexScopeKey, type CodexAppServerPreviewStatus, type CodexApprovalDecision, type CodexApprovalMetadata, type CodexApprovalResult, type CodexBackend, type CodexModelResult, type CodexSendArgs, type CodexSessionKind, type CodexStartArgs } from './types';
+import { normalizeCodexModelOption, codexScope, codexScopeKey, type CodexAppServerPreviewStatus, type CodexApprovalDecision, type CodexApprovalMetadata, type CodexApprovalResult, type CodexBackend, type CodexMcpElicitationDecision, type CodexMcpElicitationForm, type CodexMcpElicitationUrl, type CodexModelResult, type CodexSendArgs, type CodexSessionKind, type CodexStartArgs, type CodexUserInputAnswers, type CodexUserInputQuestion } from './types';
 import type { SaiEnvelope } from './sdkEventMap';
 import { getOrCreate as getOrCreateWorkspace } from '../workspace';
 
@@ -47,6 +47,23 @@ interface PendingApproval {
   readonly params: Record<string, unknown>;
 }
 
+interface PendingUserInput {
+  readonly id: string | number;
+  readonly runtime: ScopeRuntime;
+  readonly active: ActiveTurn;
+  readonly responder: AppServerServerRequestResponder;
+  readonly questions: CodexUserInputQuestion[];
+  timeout?: ReturnType<typeof setTimeout>;
+}
+
+interface PendingMcpElicitation {
+  readonly id: string | number;
+  readonly runtime: ScopeRuntime;
+  readonly active: ActiveTurn;
+  readonly responder: AppServerServerRequestResponder;
+  readonly elicitation: CodexMcpElicitationForm | CodexMcpElicitationUrl;
+}
+
 const APPROVAL_METHODS = {
   'item/commandExecution/requestApproval': 'command',
   'item/fileChange/requestApproval': 'file-change',
@@ -54,6 +71,13 @@ const APPROVAL_METHODS = {
 } as const;
 
 type ApprovalMethod = keyof typeof APPROVAL_METHODS;
+
+const USER_INPUT_METHOD = 'item/tool/requestUserInput';
+const MCP_ELICITATION_METHOD = 'mcpServer/elicitation/request';
+const MAX_QUESTIONS = 3;
+const MAX_OPTIONS = 20;
+const MAX_TEXT = 2_000;
+const MAX_AUTO_RESOLUTION_MS = 5 * 60_000;
 
 export class AppServerUnsupportedCapabilityError extends Error {
   constructor(capability: string) {
@@ -170,6 +194,132 @@ function approvalMetadata(request: AppServerServerRequest): CodexApprovalMetadat
   return metadata;
 }
 
+function boundedText(value: unknown, max = MAX_TEXT): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 && value.length <= max ? value : undefined;
+}
+
+function safeAutoResolution(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= MAX_AUTO_RESOLUTION_MS
+    ? value
+    : undefined;
+}
+
+function userInputQuestions(params: Record<string, unknown>): CodexUserInputQuestion[] | undefined {
+  if (!Array.isArray(params.questions) || params.questions.length < 1 || params.questions.length > MAX_QUESTIONS) return undefined;
+  const ids = new Set<string>();
+  const normalized: CodexUserInputQuestion[] = [];
+  for (const value of params.questions) {
+    const question = record(value);
+    const id = boundedText(question?.id, 128);
+    const prompt = boundedText(question?.question ?? question?.prompt);
+    if (!id || !prompt || ids.has(id)) return undefined;
+    ids.add(id);
+    let options: CodexUserInputQuestion['options'];
+    if (question?.options !== undefined) {
+      if (!Array.isArray(question.options) || question.options.length < 1 || question.options.length > MAX_OPTIONS) return undefined;
+      const optionIds = new Set<string>();
+      options = [];
+      for (const optionValue of question.options) {
+        const option = record(optionValue);
+        // App Server's user-input response identifies selected options by
+        // label. Expose that as the renderer's opaque option ID as well so a
+        // selected value can be sent back without retaining raw request data.
+        const optionId = boundedText(option?.label, 128);
+        const label = boundedText(option?.label, 256);
+        const description = option?.description === undefined ? undefined : boundedText(option.description, 512);
+        if (!optionId || !label || optionIds.has(optionId) || (option?.description !== undefined && !description)) return undefined;
+        optionIds.add(optionId);
+        options.push({ id: optionId, label, ...(description ? { description } : {}) });
+      }
+    }
+    normalized.push({ id, prompt, ...(options ? { options } : {}), ...(question?.isOther === true ? { allowOther: true } : {}) });
+  }
+  return normalized;
+}
+
+function safeSchema(value: unknown, depth = 0): Record<string, unknown> | undefined {
+  if (depth > 4) return undefined;
+  const schema = record(value);
+  if (!schema) return undefined;
+  const type = schema?.type;
+  if (type !== 'object' && type !== 'array' && type !== 'string' && type !== 'number' && type !== 'integer' && type !== 'boolean') return undefined;
+  const normalized: Record<string, unknown> = { type };
+  if (Array.isArray(schema.enum) && schema.enum.length > 0 && schema.enum.length <= 32
+    && schema.enum.every((entry) => entry === null || typeof entry === 'string' || typeof entry === 'number' || typeof entry === 'boolean')) {
+    normalized.enum = [...schema.enum];
+  } else if (schema.enum !== undefined) return undefined;
+  if (type === 'object') {
+    const properties = record(schema.properties) ?? {};
+    const keys = Object.keys(properties);
+    if (keys.length > 20 || keys.some((key) => key.length === 0 || key.length > 128)) return undefined;
+    const safeProperties: Record<string, unknown> = {};
+    for (const key of keys) {
+      const child = safeSchema(properties[key], depth + 1);
+      if (!child) return undefined;
+      safeProperties[key] = child;
+    }
+    normalized.properties = safeProperties;
+    if (schema.required !== undefined) {
+      if (!Array.isArray(schema.required) || schema.required.some((key) => typeof key !== 'string' || !Object.prototype.hasOwnProperty.call(safeProperties, key))) return undefined;
+      normalized.required = [...schema.required];
+    }
+    if (schema.additionalProperties !== undefined) {
+      if (typeof schema.additionalProperties !== 'boolean') return undefined;
+      normalized.additionalProperties = schema.additionalProperties;
+    }
+  }
+  if (type === 'array') {
+    const items = safeSchema(schema.items, depth + 1);
+    if (!items) return undefined;
+    normalized.items = items;
+  }
+  return normalized;
+}
+
+function mcpElicitation(params: Record<string, unknown>): CodexMcpElicitationForm | CodexMcpElicitationUrl | undefined {
+  const serverName = boundedText(params.serverName, 128);
+  const message = boundedText(params.message);
+  if (!serverName || !message) return undefined;
+  if (params.mode === 'form' || params.mode === 'openai/form') {
+    const requestedSchema = safeSchema(params.requestedSchema);
+    return requestedSchema ? { mode: 'form', serverName, message, requestedSchema } : undefined;
+  }
+  if (params.mode !== 'url') return undefined;
+  const url = boundedText(params.url, 2_048);
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return undefined;
+  } catch { return undefined; }
+  const elicitationId = params.elicitationId === undefined ? undefined : boundedText(params.elicitationId, 256);
+  if (params.elicitationId !== undefined && !elicitationId) return undefined;
+  return { mode: 'url', serverName, message, url, ...(elicitationId ? { elicitationId } : {}) };
+}
+
+function schemaAccepts(schema: Record<string, unknown>, value: unknown, depth = 0): boolean {
+  if (depth > 4 || value === undefined) return false;
+  const enumValues = schema.enum;
+  if (Array.isArray(enumValues) && !enumValues.some((entry) => jsonIdentity(entry) === jsonIdentity(value))) return false;
+  switch (schema.type) {
+    case 'string': return typeof value === 'string' && value.length <= MAX_TEXT;
+    case 'number': return typeof value === 'number' && Number.isFinite(value);
+    case 'integer': return typeof value === 'number' && Number.isInteger(value);
+    case 'boolean': return typeof value === 'boolean';
+    case 'array': return Array.isArray(value) && value.length <= MAX_OPTIONS && record(schema.items) !== undefined
+      && value.every((entry) => schemaAccepts(schema.items as Record<string, unknown>, entry, depth + 1));
+    case 'object': {
+      const object = record(value);
+      const properties = record(schema.properties) ?? {};
+      if (!object) return false;
+      const required = Array.isArray(schema.required) ? schema.required : [];
+      if (required.some((key) => typeof key !== 'string' || !(key in object))) return false;
+      if (schema.additionalProperties === false && Object.keys(object).some((key) => !(key in properties))) return false;
+      return Object.entries(object).every(([key, entry]) => !properties[key] || schemaAccepts(properties[key] as Record<string, unknown>, entry, depth + 1));
+    }
+    default: return false;
+  }
+}
+
 /**
  * App Server implementation with separate thread and active-turn identity per
  * SAI scope. The transport is intentionally a preview boundary: callers can
@@ -188,6 +338,8 @@ export class AppServerBackend implements CodexBackend {
   private unsubscribeServerRequests: (() => void) | undefined;
   private unsubscribeFailure: (() => void) | undefined;
   private readonly pendingApprovals = new Map<string | number, PendingApproval>();
+  private readonly pendingUserInputs = new Map<string | number, PendingUserInput>();
+  private readonly pendingMcpElicitations = new Map<string | number, PendingMcpElicitation>();
 
   constructor(deps: AppServerBackendDeps = {}) {
     this.createClient = deps.createClient ?? (() => new AppServerClient());
@@ -260,7 +412,7 @@ export class AppServerBackend implements CodexBackend {
   setSessionId(projectPath: string, sessionId: string | undefined, scope?: string): void {
     const runtime = this.runtimeFor(projectPath, codexScope(scope));
     if (runtime.active) return;
-    this.clearPendingApprovals(runtime);
+    this.clearPending(runtime);
     runtime.sessionId = sessionId;
     runtime.threadId = undefined;
   }
@@ -301,6 +453,30 @@ export class AppServerBackend implements CodexBackend {
     }
   }
 
+  answerUserInput(projectPath: string, scope: string | undefined, requestHandle: string, answers: CodexUserInputAnswers): CodexApprovalResult {
+    const pending = this.pendingFor(this.pendingUserInputs, projectPath, scope, requestHandle);
+    if (!pending) return { ok: false, code: 'not-pending' };
+    if (!this.userInputResponse(pending.questions, answers)) return { ok: false, code: 'invalid-decision' };
+    this.pendingUserInputs.delete(pending.id);
+    if (pending.timeout) clearTimeout(pending.timeout);
+    try {
+      pending.responder.respond({ answers });
+      return { ok: true };
+    } catch { return { ok: false, code: 'not-pending' }; }
+  }
+
+  resolveMcpElicitation(projectPath: string, scope: string | undefined, requestHandle: string, decision: CodexMcpElicitationDecision): CodexApprovalResult {
+    const pending = this.pendingFor(this.pendingMcpElicitations, projectPath, scope, requestHandle);
+    if (!pending) return { ok: false, code: 'not-pending' };
+    const response = this.mcpElicitationResponse(pending.elicitation, decision);
+    if (!response) return { ok: false, code: 'invalid-decision' };
+    this.pendingMcpElicitations.delete(pending.id);
+    try {
+      pending.responder.respond(response);
+      return { ok: true };
+    } catch { return { ok: false, code: 'not-pending' }; }
+  }
+
   suspendWorkspace(projectPath: string): void {
     for (const [key, runtime] of this.runtimes) {
       if (runtime.projectPath !== projectPath) continue;
@@ -325,9 +501,9 @@ export class AppServerBackend implements CodexBackend {
 
   destroy(): void {
     for (const runtime of this.runtimes.values()) if (runtime.active) this.retireTurn(runtime, runtime.active);
+    this.clearAllPending(false);
     this.runtimes.clear();
     this.metadata.clear();
-    this.pendingApprovals.clear();
     this.unsubscribeNotifications?.();
     this.unsubscribeServerRequests?.();
     this.unsubscribeFailure?.();
@@ -458,6 +634,14 @@ export class AppServerBackend implements CodexBackend {
   }
 
   private handleServerRequest(request: AppServerServerRequest): void {
+    if (request.method === USER_INPUT_METHOD) {
+      this.handleUserInputRequest(request);
+      return;
+    }
+    if (request.method === MCP_ELICITATION_METHOD) {
+      this.handleMcpElicitationRequest(request);
+      return;
+    }
     const metadata = approvalMetadata(request);
     // Leave unsupported methods unclaimed so the transport sends its fail-closed
     // JSON-RPC error and retires the preview process.
@@ -492,15 +676,80 @@ export class AppServerBackend implements CodexBackend {
     });
   }
 
+  private claimScopedRequest(request: AppServerServerRequest): { responder: AppServerServerRequestResponder; runtime?: ScopeRuntime; active?: ActiveTurn } | undefined {
+    let responder: AppServerServerRequestResponder;
+    try { responder = this.client?.claimServerRequest(request.id)!; } catch { return undefined; }
+    const ids = eventIds(request);
+    const runtime = ids.threadId ? [...this.runtimes.values()].find((candidate) => candidate.threadId === ids.threadId) : undefined;
+    const active = runtime?.active;
+    return { responder, runtime, active };
+  }
+
+  private isActiveOwner(runtime: ScopeRuntime | undefined, active: ActiveTurn | undefined, request: AppServerServerRequest): runtime is ScopeRuntime {
+    const ids = eventIds(request);
+    return Boolean(runtime && active && !active.retired && !active.done && active.id
+      && active.threadId === ids.threadId && (!ids.turnId || active.id === ids.turnId));
+  }
+
+  private handleUserInputRequest(request: AppServerServerRequest): void {
+    const params = record(request.params);
+    const questions = params && userInputQuestions(params);
+    const claimed = this.claimScopedRequest(request);
+    if (!claimed) return;
+    const { responder, runtime, active } = claimed;
+    if (!params || !questions || !this.isActiveOwner(runtime, active, request)) {
+      this.respondEmptyUserInput(responder);
+      return;
+    }
+    const timeoutMs = safeAutoResolution(params.autoResolutionMs);
+    const pending: PendingUserInput = { id: request.id, runtime, active: active!, responder, questions };
+    if (timeoutMs) {
+      const timeout = setTimeout(() => {
+        if (this.pendingUserInputs.get(request.id) !== pending) return;
+        this.pendingUserInputs.delete(request.id);
+        this.respondEmptyUserInput(responder);
+      }, timeoutMs);
+      pending.timeout = timeout;
+    }
+    this.pendingUserInputs.set(request.id, pending);
+    this.emit({
+      type: 'user_input_needed', provider: 'codex', requestHandle: String(request.id),
+      projectPath: runtime.projectPath, scope: runtime.scope, turnSeq: active!.seq,
+      questions, ...(timeoutMs ? { autoResolutionMs: timeoutMs } : {}),
+    });
+  }
+
+  private handleMcpElicitationRequest(request: AppServerServerRequest): void {
+    const params = record(request.params);
+    const elicitation = params && mcpElicitation(params);
+    const claimed = this.claimScopedRequest(request);
+    if (!claimed) return;
+    const { responder, runtime, active } = claimed;
+    if (!params || !elicitation || !this.isActiveOwner(runtime, active, request)) {
+      this.cancelMcpElicitation(responder);
+      return;
+    }
+    this.pendingMcpElicitations.set(request.id, { id: request.id, runtime, active: active!, responder, elicitation });
+    this.emit({
+      type: 'mcp_elicitation_needed', provider: 'codex', requestHandle: String(request.id),
+      projectPath: runtime.projectPath, scope: runtime.scope, turnSeq: active!.seq,
+      ...elicitation,
+    });
+  }
+
   private resolveServerRequest(event: AppServerNotification): void {
     const params = record(event.params);
     const id = params?.requestId ?? params?.id;
     if (typeof id !== 'string' && typeof id !== 'number') return;
-    const pending = this.pendingApprovals.get(id);
+    const pending = this.pendingApprovals.get(id) ?? this.pendingUserInputs.get(id) ?? this.pendingMcpElicitations.get(id);
     if (!pending) return;
     const ids = eventIds(event);
     if ((ids.threadId && ids.threadId !== pending.active.threadId) || (ids.turnId && ids.turnId !== pending.active.id)) return;
     this.pendingApprovals.delete(id);
+    const input = this.pendingUserInputs.get(id);
+    if (input?.timeout) clearTimeout(input.timeout);
+    this.pendingUserInputs.delete(id);
+    this.pendingMcpElicitations.delete(id);
   }
 
   private declineResponder(responder: AppServerServerRequestResponder, kind: CodexApprovalMetadata['kind']): void {
@@ -545,6 +794,74 @@ export class AppServerBackend implements CodexBackend {
     }
   }
 
+  private clearPending(runtime: ScopeRuntime, active?: ActiveTurn, respond = true): void {
+    this.clearPendingApprovals(runtime, active, respond);
+    for (const [id, pending] of this.pendingUserInputs) {
+      if (pending.runtime !== runtime || (active && pending.active !== active)) continue;
+      this.pendingUserInputs.delete(id);
+      if (pending.timeout) clearTimeout(pending.timeout);
+      if (respond) this.respondEmptyUserInput(pending.responder);
+    }
+    for (const [id, pending] of this.pendingMcpElicitations) {
+      if (pending.runtime !== runtime || (active && pending.active !== active)) continue;
+      this.pendingMcpElicitations.delete(id);
+      if (respond) this.cancelMcpElicitation(pending.responder);
+    }
+  }
+
+  private clearAllPending(respond = true): void {
+    for (const runtime of this.runtimes.values()) this.clearPending(runtime, undefined, respond);
+  }
+
+  private pendingFor<T extends { id: string | number; runtime: ScopeRuntime; active: ActiveTurn }>(
+    pending: Map<string | number, T>, projectPath: string, scope: string | undefined, requestHandle: string,
+  ): T | undefined {
+    const matches = [...pending.values()].filter((value) => String(value.id) === requestHandle);
+    if (matches.length !== 1) return undefined;
+    const value = matches[0];
+    return value.runtime.projectPath === projectPath && value.runtime.scope === codexScope(scope)
+      && value.runtime.active === value.active && !value.active.retired && !value.active.done
+      ? value
+      : undefined;
+  }
+
+  private userInputResponse(questions: CodexUserInputQuestion[], answers: CodexUserInputAnswers): boolean {
+    if (!answers || typeof answers !== 'object' || Array.isArray(answers)) return false;
+    const ids = questions.map((question) => question.id);
+    if (Object.keys(answers).length !== ids.length || Object.keys(answers).some((id) => !ids.includes(id))) return false;
+    return questions.every((question) => {
+      const values = answers[question.id];
+      if (!Array.isArray(values)) return false;
+      if (values.length < 1 || values.length > MAX_OPTIONS || values.some((value) => typeof value !== 'string' || value.length < 1 || value.length > MAX_TEXT)) return false;
+      if (!question.options) return values.length === 1;
+      const offered = new Set(question.options.map((option) => option.id));
+      return values.every((value) => offered.has(value) || question.allowOther === true);
+    });
+  }
+
+  private mcpElicitationResponse(
+    elicitation: CodexMcpElicitationForm | CodexMcpElicitationUrl,
+    decision: CodexMcpElicitationDecision,
+  ): Record<string, unknown> | undefined {
+    if (!decision || typeof decision !== 'object') return undefined;
+    if (decision.action === 'decline' || decision.action === 'cancel') return decision.content === undefined || decision.content === null
+      ? { action: decision.action, content: null }
+      : undefined;
+    if (decision.action !== 'accept') return undefined;
+    if (elicitation.mode === 'url') return decision.content === null ? { action: 'accept', content: null } : undefined;
+    return decision.content !== null && schemaAccepts(elicitation.requestedSchema, decision.content)
+      ? { action: 'accept', content: decision.content }
+      : undefined;
+  }
+
+  private respondEmptyUserInput(responder: AppServerServerRequestResponder): void {
+    try { responder.respond({ answers: {} }); } catch { /* already resolved */ }
+  }
+
+  private cancelMcpElicitation(responder: AppServerServerRequestResponder): void {
+    try { responder.respond({ action: 'cancel', content: null }); } catch { /* already resolved */ }
+  }
+
   private handleFailure(error: AppServerUnavailableError): void {
     this.markUnavailable(error.message);
   }
@@ -553,7 +870,7 @@ export class AppServerBackend implements CodexBackend {
     if (this.unavailableReason) return;
     this.unavailableReason = reason;
     for (const runtime of this.runtimes.values()) {
-      this.clearPendingApprovals(runtime, undefined, false);
+      this.clearPending(runtime, undefined, false);
       if (runtime.active) this.settleUnavailable(runtime, reason);
     }
   }
@@ -573,7 +890,7 @@ export class AppServerBackend implements CodexBackend {
   private finishTurn(runtime: ScopeRuntime, active: ActiveTurn, flags: { subagentsAborted?: boolean; subagentsSettled?: boolean } = {}): void {
     if (runtime.active !== active || active.done) return;
     active.done = true;
-    this.clearPendingApprovals(runtime, active);
+    this.clearPending(runtime, active);
     this.emit({ type: 'done', projectPath: runtime.projectPath, scope: runtime.scope, turnSeq: active.seq, ...flags });
     runtime.active = undefined;
   }

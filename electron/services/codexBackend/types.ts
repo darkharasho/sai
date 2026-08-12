@@ -38,6 +38,36 @@ export type CodexApprovalResult =
   | { ok: true }
   | { ok: false; code: 'unsupported' | 'not-pending' | 'invalid-decision' };
 
+/** A bounded, renderer-safe question shape from App Server. */
+export interface CodexUserInputQuestion {
+  id: string;
+  prompt: string;
+  options?: Array<{ id: string; label: string; description?: string }>;
+  allowOther?: boolean;
+}
+
+/** App Server requires one or more selected option labels for each question. */
+export type CodexUserInputAnswers = Record<string, string[]>;
+
+export interface CodexMcpElicitationForm {
+  mode: 'form';
+  serverName: string;
+  message: string;
+  requestedSchema: Record<string, unknown>;
+}
+
+export interface CodexMcpElicitationUrl {
+  mode: 'url';
+  serverName: string;
+  message: string;
+  url: string;
+  elicitationId?: string;
+}
+
+export type CodexMcpElicitationDecision =
+  | { action: 'accept'; content: Record<string, unknown> | null }
+  | { action: 'decline' | 'cancel'; content?: null };
+
 export function isCodexApprovalDecision(value: unknown): value is CodexApprovalDecision {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const input = value as Record<string, unknown>;
@@ -115,6 +145,8 @@ export interface CodexBackend {
   setSessionId(projectPath: string, sessionId: string | undefined, scope?: string): void;
   getModels(forceRefresh?: boolean): Promise<CodexModelResult>;
   approve(projectPath: string, scope: string | undefined, requestHandle: string, decision: CodexApprovalDecision): CodexApprovalResult;
+  answerUserInput?(projectPath: string, scope: string | undefined, requestHandle: string, answers: CodexUserInputAnswers): CodexApprovalResult;
+  resolveMcpElicitation?(projectPath: string, scope: string | undefined, requestHandle: string, decision: CodexMcpElicitationDecision): CodexApprovalResult;
   suspendWorkspace(projectPath: string): void;
   isWorkspaceBusy(projectPath: string): boolean;
   /** Optional finer-grained busy check used when routing concurrent scopes. */

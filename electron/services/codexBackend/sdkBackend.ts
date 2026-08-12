@@ -19,10 +19,12 @@ import {
   type CodexBackend,
   type CodexApprovalDecision,
   type CodexApprovalResult,
+  type CodexMcpElicitationDecision,
   type CodexModelResult,
   type CodexSendArgs,
   type CodexSessionKind,
   type CodexStartArgs,
+  type CodexUserInputAnswers,
 } from './types';
 
 export interface CodexSdkThread {
@@ -248,6 +250,14 @@ export class SdkCodexBackend implements CodexBackend {
   }
 
   approve(_projectPath: string, _scope: string | undefined, _requestHandle: string, _decision: CodexApprovalDecision): CodexApprovalResult {
+    return { ok: false, code: 'unsupported' };
+  }
+
+  answerUserInput(_projectPath: string, _scope: string | undefined, _requestHandle: string, _answers: CodexUserInputAnswers): CodexApprovalResult {
+    return { ok: false, code: 'unsupported' };
+  }
+
+  resolveMcpElicitation(_projectPath: string, _scope: string | undefined, _requestHandle: string, _decision: CodexMcpElicitationDecision): CodexApprovalResult {
     return { ok: false, code: 'unsupported' };
   }
 

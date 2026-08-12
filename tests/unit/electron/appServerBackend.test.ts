@@ -479,4 +479,116 @@ describe('AppServerBackend', () => {
       .toEqual({ ok: true });
     expect(responder.respond).toHaveBeenCalledWith({ permissions: [requested[0]], scope: 'turn' });
   });
+
+  it('claims active scoped user-input requests and responds only with offered option IDs', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-a' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-a' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
+    await settle();
+    const responder = h.serverRequest('input', 'item/tool/requestUserInput', {
+      threadId: 'thread-a', turnId: 'turn-a', autoResolutionMs: 1200,
+      questions: [{ id: 'format', question: 'Choose a format', options: [
+        { label: 'JSON' }, { label: 'YAML' },
+      ] }],
+    });
+
+    expect(h.emitted).toContainEqual(expect.objectContaining({
+      type: 'user_input_needed', provider: 'codex', requestHandle: 'input',
+      projectPath: '/repo', scope: 'a', autoResolutionMs: 1200,
+      questions: [{ id: 'format', prompt: 'Choose a format', options: [
+        { id: 'JSON', label: 'JSON' }, { id: 'YAML', label: 'YAML' },
+      ] }],
+    }));
+    expect(h.backend.answerUserInput('/repo', 'a', 'input', { format: ['shell'] }))
+      .toEqual({ ok: false, code: 'invalid-decision' });
+    expect(h.backend.answerUserInput('/repo', 'a', 'input', { format: ['YAML'] }))
+      .toEqual({ ok: true });
+    expect(responder.respond).toHaveBeenCalledWith({ answers: { format: ['YAML'] } });
+  });
+
+  it('declines stale user-input requests without exposing renderer data', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-a' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-a' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
+    await settle();
+
+    const responder = h.serverRequest('stale-input', 'item/tool/requestUserInput', {
+      threadId: 'other', turnId: 'turn-a', questions: [{ id: 'x', question: 'Wrong' }],
+    });
+
+    expect(responder.respond).toHaveBeenCalledWith({ answers: {} });
+    expect(h.emitted.some((event) => event.type === 'user_input_needed')).toBe(false);
+  });
+
+  it('retires a timed-out user-input request without allowing a late answer', async () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness();
+      h.responses.set('thread/start', { thread: { id: 'thread-a' } });
+      h.responses.set('turn/start', { turn: { id: 'turn-a' } });
+      await h.backend.start({ projectPath: '/repo', scope: 'a' });
+      h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
+      await vi.runAllTimersAsync();
+      const responder = h.serverRequest('timed', 'item/tool/requestUserInput', {
+        threadId: 'thread-a', turnId: 'turn-a', autoResolutionMs: 100,
+        questions: [{ id: 'format', question: 'Choose', options: [{ label: 'JSON' }] }],
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(responder.respond).toHaveBeenCalledWith({ answers: {} });
+      expect(h.backend.answerUserInput('/repo', 'a', 'timed', { format: ['JSON'] }))
+        .toEqual({ ok: false, code: 'not-pending' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('normalizes active MCP form elicitation and validates its response against the requested schema', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-a' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-a' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
+    await settle();
+    const responder = h.serverRequest('mcp-form', 'mcpServer/elicitation/request', {
+      threadId: 'thread-a', turnId: 'turn-a', serverName: 'calendar', mode: 'form', message: 'Choose a date',
+      requestedSchema: { type: 'object', properties: { date: { type: 'string' } }, required: ['date'], additionalProperties: false },
+    });
+
+    expect(h.emitted).toContainEqual(expect.objectContaining({
+      type: 'mcp_elicitation_needed', provider: 'codex', requestHandle: 'mcp-form',
+      serverName: 'calendar', message: 'Choose a date', mode: 'form',
+      requestedSchema: { type: 'object', properties: { date: { type: 'string' } }, required: ['date'], additionalProperties: false },
+    }));
+    expect(h.backend.resolveMcpElicitation('/repo', 'a', 'mcp-form', { action: 'accept', content: { date: 3 } }))
+      .toEqual({ ok: false, code: 'invalid-decision' });
+    expect(h.backend.resolveMcpElicitation('/repo', 'a', 'mcp-form', { action: 'accept', content: { date: '2026-08-12' } }))
+      .toEqual({ ok: true });
+    expect(responder.respond).toHaveBeenCalledWith({ action: 'accept', content: { date: '2026-08-12' } });
+  });
+
+  it('cancels unsupported or stale MCP elicitation and retires it after server resolution', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-a' } });
+    h.responses.set('turn/start', { turn: { id: 'turn-a' } });
+    await h.backend.start({ projectPath: '/repo', scope: 'a' });
+    h.backend.send({ projectPath: '/repo', scope: 'a', message: 'go' });
+    await settle();
+    const stale = h.serverRequest('stale-mcp', 'mcpServer/elicitation/request', {
+      threadId: 'wrong', turnId: 'turn-a', serverName: 'calendar', mode: 'url', message: 'Sign in', url: 'https://example.test', elicitationId: 'e-1',
+    });
+    expect(stale.respond).toHaveBeenCalledWith({ action: 'cancel', content: null });
+
+    const responder = h.serverRequest('mcp-url', 'mcpServer/elicitation/request', {
+      threadId: 'thread-a', turnId: 'turn-a', serverName: 'calendar', mode: 'url', message: 'Sign in', url: 'https://example.test', elicitationId: 'e-1',
+    });
+    h.notify('serverRequest/resolved', { requestId: 'mcp-url', threadId: 'thread-a', turnId: 'turn-a' });
+    expect(h.backend.resolveMcpElicitation('/repo', 'a', 'mcp-url', { action: 'accept', content: null }))
+      .toEqual({ ok: false, code: 'not-pending' });
+    expect(responder.respond).not.toHaveBeenCalled();
+  });
 });
