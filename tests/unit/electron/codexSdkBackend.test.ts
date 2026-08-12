@@ -301,11 +301,35 @@ describe('SdkCodexBackend', () => {
       expect.objectContaining({ type: 'result', projectPath: '/a', scope: 'chat', turnSeq: 1 }),
     ]);
     expect(h.emitted.filter((event) => event.type === 'done')).toEqual([
-      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1 },
+      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1, subagentsSettled: true },
     ]);
     expect(h.emitted.map((event) => event.type).slice(-2)).toEqual(['result', 'done']);
     expect(h.notifyCompletion).toHaveBeenCalledTimes(1);
     expect(h.timeline.slice(-3)).toEqual(['emit:result', 'emit:done', 'notify']);
+    expect(h.backend.isWorkspaceBusy('/a')).toBe(false);
+  });
+
+  it('settles an active native child when the stream reaches EOF without its terminal event', async () => {
+    const stream = pendingStream();
+    const h = harness([stream.events]);
+    h.backend.start({ projectPath: '/a', scope: 'chat' });
+    h.backend.send({ projectPath: '/a', scope: 'chat', message: 'delegate' });
+    await settle();
+
+    stream.push({
+      type: 'item.started',
+      item: { id: 'child-1', type: 'collab_tool_call', status: 'running', description: 'Inspect renderer' },
+    } as unknown as ThreadEvent);
+    stream.push({
+      type: 'turn.completed',
+      usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0 },
+    });
+    stream.end();
+    await settle();
+
+    expect(h.emitted.filter((event) => event.type === 'done')).toEqual([
+      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1, subagentsSettled: true },
+    ]);
     expect(h.backend.isWorkspaceBusy('/a')).toBe(false);
   });
 
@@ -481,7 +505,7 @@ describe('SdkCodexBackend', () => {
     h.backend.send({ projectPath: '/a', message: 'go' });
     await settle();
     expect(h.emitted.filter((e) => e.type === 'done')).toEqual([
-      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1 },
+      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1, subagentsSettled: true },
     ]);
   });
 
@@ -491,7 +515,7 @@ describe('SdkCodexBackend', () => {
     h.backend.send({ projectPath: '/a', message: 'go' });
     await settle();
     expect(h.emitted.filter((e) => e.type === 'done')).toEqual([
-      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1 },
+      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1, subagentsSettled: true },
     ]);
   });
 

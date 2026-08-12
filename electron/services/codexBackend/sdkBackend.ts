@@ -307,7 +307,10 @@ export class SdkCodexBackend implements CodexBackend {
   private finishTurn(
     runtime: ScopeRuntime,
     active: ActiveTurn,
-    { subagentsAborted = false }: { subagentsAborted?: boolean } = {},
+    {
+      subagentsAborted = false,
+      subagentsSettled = false,
+    }: { subagentsAborted?: boolean; subagentsSettled?: boolean } = {},
   ): void {
     if (!this.isCurrent(runtime, active) || active.done) return;
     active.done = true;
@@ -317,6 +320,7 @@ export class SdkCodexBackend implements CodexBackend {
       scope: runtime.scope,
       turnSeq: active.seq,
       ...(subagentsAborted ? { subagentsAborted: true } : {}),
+      ...(subagentsSettled ? { subagentsSettled: true } : {}),
     });
     runtime.active = undefined;
   }
@@ -376,7 +380,10 @@ export class SdkCodexBackend implements CodexBackend {
         this.emit(pendingResult);
       }
       const shouldNotifyCompletion = Boolean(pendingResult) && runtime.kind === 'chat';
-      this.finishTurn(runtime, active);
+      // At physical EOF no further collaboration events can arrive. Mark the
+      // final envelope so the renderer can clear any child the CLI omitted a
+      // terminal event for, while an earlier logical parent done remains safe.
+      this.finishTurn(runtime, active, { subagentsSettled: true });
       if (shouldNotifyCompletion) {
         this.notifyCompletion(runtime.projectPath, { provider: 'Codex', summary: active.summary });
       }

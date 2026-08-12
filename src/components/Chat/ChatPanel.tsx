@@ -925,9 +925,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         if (msg.turnSeq != null && msg.turnSeq !== turnSeqRef.current) return;
         if (msg.type === 'done') {
           // A normal parent completion can precede native child terminal
-          // activity. Only an explicit forced termination proves children
-          // stopped; otherwise preserve their visible working state.
-          if (msg.subagentsAborted === true) {
+          // activity. A forced termination or physical SDK EOF proves no
+          // trailing child event can arrive; otherwise preserve working state.
+          if (msg.subagentsAborted === true || msg.subagentsSettled === true) {
             activeSubagentTurnsRef.current.clear();
             setActiveSubagents(prev => (prev.size === 0 ? prev : new Map()));
           }
