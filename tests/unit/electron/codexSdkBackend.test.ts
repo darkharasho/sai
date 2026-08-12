@@ -76,6 +76,7 @@ interface FakeHarness {
   streams: Array<AsyncGenerator<ThreadEvent> | Error>;
   registerWorkspace: ReturnType<typeof vi.fn>;
   notifyCompletion: ReturnType<typeof vi.fn>;
+  timeline: string[];
 }
 
 function harness(streams: Array<AsyncGenerator<ThreadEvent> | Error> = []): FakeHarness {
@@ -105,12 +106,16 @@ function harness(streams: Array<AsyncGenerator<ThreadEvent> | Error> = []): Fake
   });
 
   const registerWorkspace = vi.fn();
-  const notifyCompletion = vi.fn();
+  const timeline: string[] = [];
+  const notifyCompletion = vi.fn(() => timeline.push('notify'));
 
   return {
     backend: new SdkCodexBackend({
       createClient,
-      emit: (event) => emitted.push(event),
+      emit: (event) => {
+        emitted.push(event);
+        timeline.push(`emit:${event.type}`);
+      },
       getModels: vi.fn(async () => ({ models: [{ id: 'gpt-5', name: 'GPT-5' }], defaultModel: 'gpt-5' })),
       getEnv: () => ({ PATH: '/bin', EMPTY: undefined, TOKEN: 'secret' }),
       registerWorkspace,
@@ -122,6 +127,7 @@ function harness(streams: Array<AsyncGenerator<ThreadEvent> | Error> = []): Fake
     streams: queue,
     registerWorkspace,
     notifyCompletion,
+    timeline,
   };
 }
 
@@ -265,7 +271,9 @@ describe('SdkCodexBackend', () => {
     });
     await settle();
 
-    expect(h.emitted.at(-1)).toMatchObject({ type: 'result', turnSeq: 1 });
+    expect(h.emitted.some((event) => event.type === 'result')).toBe(false);
+    expect(h.emitted.some((event) => event.type === 'done')).toBe(false);
+    expect(h.notifyCompletion).not.toHaveBeenCalled();
     expect(h.emitted).toContainEqual(expect.objectContaining({
       type: 'subagent_activity', agentId: 'child-1', status: 'running', turnSeq: 1,
     }));
@@ -286,10 +294,40 @@ describe('SdkCodexBackend', () => {
     stream.end();
     await settle();
 
+    expect(h.emitted.filter((event) => event.type === 'subagent_activity').map((event) => event.status)).toEqual([
+      'running', 'completed',
+    ]);
+    expect(h.emitted.filter((event) => event.type === 'result')).toEqual([
+      expect.objectContaining({ type: 'result', projectPath: '/a', scope: 'chat', turnSeq: 1 }),
+    ]);
+    expect(h.emitted.filter((event) => event.type === 'done')).toEqual([
+      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1 },
+    ]);
+    expect(h.emitted.map((event) => event.type).slice(-2)).toEqual(['result', 'done']);
+    expect(h.notifyCompletion).toHaveBeenCalledTimes(1);
+    expect(h.timeline.slice(-3)).toEqual(['emit:result', 'emit:done', 'notify']);
+    expect(h.backend.isWorkspaceBusy('/a')).toBe(false);
+  });
+
+  it('settles a failed stream immediately without waiting for its iterator to end', async () => {
+    const stream = pendingStream();
+    const h = harness([stream.events]);
+    h.backend.start({ projectPath: '/a', scope: 'chat' });
+    h.backend.send({ projectPath: '/a', scope: 'chat', message: 'delegate' });
+    await settle();
+
+    stream.push({ type: 'turn.failed', error: { message: 'boom' } });
+    await settle();
+
+    expect(h.emitted.filter((event) => event.type === 'error')).toEqual([
+      expect.objectContaining({ text: 'boom', turnSeq: 1 }),
+    ]);
+    expect(h.emitted.filter((event) => event.type === 'result')).toHaveLength(0);
     expect(h.emitted.filter((event) => event.type === 'done')).toEqual([
       { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1 },
     ]);
     expect(h.backend.isWorkspaceBusy('/a')).toBe(false);
+    expect(h.notifyCompletion).not.toHaveBeenCalled();
   });
 
   it('settles a draining turn exactly once when the SDK iterator throws after parent completion', async () => {
@@ -305,7 +343,7 @@ describe('SdkCodexBackend', () => {
     h.backend.send({ projectPath: '/a', message: 'delegate' });
     await settle();
 
-    expect(h.emitted.some((event) => event.type === 'result')).toBe(true);
+    expect(h.emitted.some((event) => event.type === 'result')).toBe(false);
     expect(h.emitted.filter((event) => event.type === 'error')).toHaveLength(1);
     expect(h.emitted.filter((event) => event.type === 'done')).toHaveLength(1);
     expect(h.backend.isWorkspaceBusy('/a')).toBe(false);

@@ -857,6 +857,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
       if (msg.type === 'streaming_start') {
         if (msg.turnSeq != null) turnSeqRef.current = msg.turnSeq;
+        // A new stream boundary supersedes any child state that did not get a
+        // terminal lifecycle event (for example, an interrupted parent turn).
+        setActiveSubagents(prev => (prev.size === 0 ? prev : new Map()));
         clearStreamHint();
         // A fresh turn (or a wait-resume re-arm) must show its thinking row
         // immediately — never inherit the previous reply's post-settle hold.
@@ -911,6 +914,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         // arrives tagged with the old turnSeq and should not affect the new turn's state.
         if (msg.turnSeq != null && msg.turnSeq !== turnSeqRef.current) return;
         if (msg.type === 'done') {
+          // Clear only after the turn-sequence stale guard above: an old
+          // completion must never erase a child belonging to newer work.
+          setActiveSubagents(prev => (prev.size === 0 ? prev : new Map()));
           turnSeqRef.current = -1;
           clearStreamHint();
           finalizeReasoning();

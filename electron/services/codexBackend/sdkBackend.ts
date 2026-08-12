@@ -323,6 +323,7 @@ export class SdkCodexBackend implements CodexBackend {
     thread: CodexSdkThread,
     input: Input,
   ): Promise<void> {
+    let pendingResult: SaiEnvelope | undefined;
     try {
       const streamed = await thread.runStreamed(input, { signal: active.controller.signal });
       for await (const event of streamed.events) {
@@ -331,14 +332,31 @@ export class SdkCodexBackend implements CodexBackend {
         if (event.type === 'item.completed' && event.item.type === 'agent_message') {
           active.summary = event.item.text || undefined;
         }
-        if (event.type === 'turn.completed' && runtime.kind === 'chat') {
-          this.notifyCompletion(runtime.projectPath, { provider: 'Codex', summary: active.summary });
-        }
         const envelopes = mapCodexSdkEvent(event, {
           projectPath: runtime.projectPath,
           scope: runtime.scope,
           turnSeq: active.seq,
         });
+        if (event.type === 'turn.completed') {
+          // Native children can continue emitting collaboration events after
+          // their parent reports completion. A SAI `result` is terminal to
+          // the renderer, so retain it until the physical stream ends.
+          pendingResult = envelopes.find((envelope) => envelope.type === 'result');
+          continue;
+        }
+        if (event.type === 'turn.failed' || event.type === 'error') {
+          // Failures must settle promptly: an SDK iterator is allowed to stay
+          // open after a terminal error, and waiting for EOF would leave SAI
+          // permanently busy. Do not leak a previously pending success.
+          pendingResult = undefined;
+          for (const envelope of envelopes) {
+            if (envelope.type !== 'done' && this.isCurrent(runtime, active)) {
+              this.emit(envelope);
+            }
+          }
+          this.finishTurn(runtime, active);
+          return;
+        }
         for (const envelope of envelopes) {
           // The parent can report `turn.completed` before native delegated
           // children emit their terminal collaboration events. Keep draining
@@ -349,7 +367,14 @@ export class SdkCodexBackend implements CodexBackend {
         }
       }
       if (thread.id) runtime.sessionId = thread.id;
+      if (pendingResult && this.isCurrent(runtime, active)) {
+        this.emit(pendingResult);
+      }
+      const shouldNotifyCompletion = Boolean(pendingResult) && runtime.kind === 'chat';
       this.finishTurn(runtime, active);
+      if (shouldNotifyCompletion) {
+        this.notifyCompletion(runtime.projectPath, { provider: 'Codex', summary: active.summary });
+      }
     } catch (error) {
       if (!this.isCurrent(runtime, active) || this.runtimes.get(key) !== runtime) return;
       if (!active.controller.signal.aborted && !isAbortError(error)) {
