@@ -73,7 +73,27 @@ describe('AppServerClient', () => {
     expect(() => client.request('thread/start', {})).toThrow(/not initialized/i);
   });
 
-  it('routes notifications to subscribers and rejects unsupported server requests', async () => {
+  it('rejects an unsupported server request, disables the preview, and surfaces its reason', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+    const failures: string[] = [];
+    client.onFailure((error) => failures.push(error.message));
+    const pending = client.request('thread/start', {});
+
+    reply(child, { jsonrpc: '2.0', id: 99, method: 'item/commandExecution/requestApproval', params: {} });
+
+    expect(JSON.parse(child.stdin.write.mock.calls.at(-1)[0])).toEqual({
+      jsonrpc: '2.0', id: 99,
+      error: { code: -32601, message: 'Unsupported App Server request in preview' },
+    });
+    await expect(pending).rejects.toThrow(/Unsupported App Server request in preview/);
+    expect(client.failureReason).toBe('Unsupported App Server request in preview');
+    expect(failures).toEqual(['Unsupported App Server request in preview']);
+    expect(() => client.request('thread/start', {})).toThrow(/Unsupported App Server request in preview/);
+  });
+
+  it('routes notifications to subscribers', async () => {
     const child = fakeChild();
     const { client } = createClient(child);
     await start(client, child);
@@ -81,13 +101,8 @@ describe('AppServerClient', () => {
     client.onNotification((message) => events.push(message));
 
     reply(child, { jsonrpc: '2.0', method: 'turn/started', params: { turn: { id: 'turn-1' } } });
-    reply(child, { jsonrpc: '2.0', id: 99, method: 'item/commandExecution/requestApproval', params: {} });
 
     expect(events).toEqual([{ jsonrpc: '2.0', method: 'turn/started', params: { turn: { id: 'turn-1' } } }]);
-    expect(JSON.parse(child.stdin.write.mock.calls.at(-1)[0])).toEqual({
-      jsonrpc: '2.0', id: 99,
-      error: { code: -32601, message: 'Unsupported App Server request in preview' },
-    });
   });
 
   it('rejects pending requests after malformed protocol data', async () => {
@@ -101,6 +116,17 @@ describe('AppServerClient', () => {
     await expect(pending).rejects.toBeInstanceOf(AppServerProtocolError);
   });
 
+  it('rejects pending requests for an unexpected response ID', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+    const pending = client.request('thread/start', {});
+
+    reply(child, { jsonrpc: '2.0', id: 99, result: {} });
+
+    await expect(pending).rejects.toThrow(/unexpected response ID: 99/i);
+  });
+
   it('rejects pending requests when the App Server process exits', async () => {
     const child = fakeChild();
     const { client } = createClient(child);
@@ -110,6 +136,17 @@ describe('AppServerClient', () => {
     child.emit('exit', 1);
 
     await expect(pending).rejects.toThrow(/transport exited/i);
+  });
+
+  it('rejects pending requests when the App Server process errors', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+    const pending = client.request('thread/start', {});
+
+    child.emit('error', new Error('broken pipe'));
+
+    await expect(pending).rejects.toThrow(/transport error: broken pipe/i);
   });
 
   it('is safe to destroy more than once', async () => {

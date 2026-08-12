@@ -41,10 +41,12 @@ export class AppServerUnavailableError extends AppServerProtocolError {
 }
 
 export interface AppServerClient {
+  readonly failureReason: string | undefined;
   start(): Promise<void>;
   request<T = unknown>(method: string, params?: unknown): Promise<T>;
   notify(method: string, params?: unknown): void;
   onNotification(listener: (message: AppServerNotification) => void): () => void;
+  onFailure(listener: (error: AppServerUnavailableError) => void): () => void;
   destroy(): void;
 }
 
@@ -86,6 +88,7 @@ export class AppServerClient implements AppServerClient {
   private readonly clientInfo: { name: string; version: string };
   private readonly pending = new Map<number, PendingRequest>();
   private readonly listeners = new Set<(message: AppServerNotification) => void>();
+  private readonly failureListeners = new Set<(error: AppServerUnavailableError) => void>();
   private child: ChildProcess | undefined;
   private startPromise: Promise<void> | undefined;
   private nextId = 0;
@@ -99,6 +102,10 @@ export class AppServerClient implements AppServerClient {
     this.resolveExecutable = deps.resolveBundledCodex ?? resolveBundledCodex;
     this.getEnv = deps.getEnv ?? enrichedEnv;
     this.clientInfo = deps.clientInfo ?? { name: 'sai', version: '1.0' };
+  }
+
+  get failureReason(): string | undefined {
+    return this.failure?.message;
   }
 
   start(): Promise<void> {
@@ -132,11 +139,13 @@ export class AppServerClient implements AppServerClient {
   }
 
   request<T = unknown>(method: string, params?: unknown): Promise<T> {
+    if (this.failure) throw this.failure;
     if (!this.initialized) throw new AppServerUnavailableError('Codex App Server transport is not initialized');
     return this.sendRequest(method, params) as Promise<T>;
   }
 
   notify(method: string, params?: unknown): void {
+    if (this.failure) throw this.failure;
     if (!this.initialized) throw new AppServerUnavailableError('Codex App Server transport is not initialized');
     this.write({ jsonrpc: '2.0', method, ...(params === undefined ? {} : { params }) });
   }
@@ -144,6 +153,12 @@ export class AppServerClient implements AppServerClient {
   onNotification(listener: (message: AppServerNotification) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  onFailure(listener: (error: AppServerUnavailableError) => void): () => void {
+    this.failureListeners.add(listener);
+    if (this.failure) listener(this.failure);
+    return () => this.failureListeners.delete(listener);
   }
 
   destroy(): void {
@@ -196,6 +211,8 @@ export class AppServerClient implements AppServerClient {
         jsonrpc: '2.0', id: request.id,
         error: { code: -32601, message: 'Unsupported App Server request in preview' },
       });
+      this.fail(new AppServerUnavailableError('Unsupported App Server request in preview'));
+      try { this.child?.kill(); } catch { /* process already exited */ }
       return;
     }
     const notification: AppServerNotification = {
@@ -248,6 +265,7 @@ export class AppServerClient implements AppServerClient {
     this.initialized = false;
     for (const pending of this.pending.values()) pending.reject(unavailable);
     this.pending.clear();
+    for (const listener of this.failureListeners) listener(unavailable);
   }
 }
 
