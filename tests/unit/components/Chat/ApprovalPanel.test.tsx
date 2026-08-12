@@ -226,6 +226,23 @@ describe('ApprovalPanel', () => {
     expect(screen.getByText('Always Allow')).toBeTruthy();
   });
 
+  it('keeps permission approvals actionable when App Server omits available decisions', () => {
+    const approval = makeApproval({
+      provider: 'codex',
+      kind: 'permissions',
+      availableDecisions: [],
+      command: '',
+      permissionsSummary: ['Network access'],
+    });
+    render(
+      <ApprovalPanel approval={approval} onApprove={vi.fn()} onDeny={vi.fn()} onAlwaysAllow={vi.fn()} />
+    );
+
+    expect(screen.getByText('Approve')).toBeTruthy();
+    expect(screen.getByText('Deny')).toBeTruthy();
+    expect(screen.getByText('Always Allow')).toBeTruthy();
+  });
+
   it('pressing Enter calls onApprove for Bash tool', () => {
     const onApprove = vi.fn();
     const approval = makeApproval({ toolName: 'Bash' });

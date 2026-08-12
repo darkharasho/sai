@@ -121,6 +121,13 @@ function jsonIdentity(value: unknown): string | undefined {
   try { return JSON.stringify(normalize(value)); } catch { return undefined; }
 }
 
+/** Copy only JSON-safe protocol values across the renderer boundary. */
+function jsonSafeCopy(value: unknown): unknown | undefined {
+  const identity = jsonIdentity(value);
+  if (!identity) return undefined;
+  try { return JSON.parse(identity); } catch { return undefined; }
+}
+
 function approvalMetadata(request: AppServerServerRequest): CodexApprovalMetadata | undefined {
   if (!(request.method in APPROVAL_METHODS)) return undefined;
   const params = record(request.params);
@@ -142,6 +149,10 @@ function approvalMetadata(request: AppServerServerRequest): CodexApprovalMetadat
   if (kind === 'file-change') metadata.grantRoot = asText(params.grantRoot);
   if (kind === 'permissions') {
     const permissions = Array.isArray(params.permissions) ? params.permissions : [];
+    metadata.requestedPermissions = permissions.flatMap((permission) => {
+      const copy = jsonSafeCopy(permission);
+      return copy === undefined ? [] : [copy];
+    });
     metadata.permissionsSummary = permissions.map((permission) => {
       if (typeof permission === 'string') return permission;
       const item = record(permission);

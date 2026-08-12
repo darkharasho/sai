@@ -159,6 +159,76 @@ describe('ChatPanel', () => {
     expect(mockSai.claudeApprove).not.toHaveBeenCalled();
   });
 
+  it('grants and denies Codex App Server permission requests with permission payloads', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const, claudeScope: 'scope-a' };
+    render(<ChatPanel {...props} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const requestedPermissions = [{ kind: 'network', host: 'api.openai.com' }];
+
+    await act(async () => {
+      for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+        (handler as (msg: any) => void)({
+          type: 'approval_needed', provider: 'codex', requestHandle: 'permissions-1', kind: 'permissions',
+          availableDecisions: [], requestedPermissions, toolName: 'Permission approval', toolUseId: 'permissions-1',
+          command: '', projectPath: '/project', scope: 'scope-a',
+        });
+      }
+    });
+
+    await act(async () => { await latestChatInputProps.onApprove(); });
+    expect(mockSai.codexAppServerApprove).toHaveBeenCalledWith('/project', 'scope-a', 'permissions-1', {
+      type: 'permissions', permissions: requestedPermissions, scope: 'turn',
+    });
+
+    await act(async () => {
+      for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+        (handler as (msg: any) => void)({
+          type: 'approval_needed', provider: 'codex', requestHandle: 'permissions-2', kind: 'permissions',
+          availableDecisions: [], requestedPermissions, toolName: 'Permission approval', toolUseId: 'permissions-2',
+          command: '', projectPath: '/project', scope: 'scope-a',
+        });
+      }
+    });
+    await act(async () => { await latestChatInputProps.onDeny(); });
+    expect(mockSai.codexAppServerApprove).toHaveBeenCalledWith('/project', 'scope-a', 'permissions-2', {
+      type: 'permissions', permissions: [], scope: 'turn',
+    });
+
+    await act(async () => {
+      for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+        (handler as (msg: any) => void)({
+          type: 'approval_needed', provider: 'codex', requestHandle: 'permissions-3', kind: 'permissions',
+          availableDecisions: [], requestedPermissions, toolName: 'Permission approval', toolUseId: 'permissions-3',
+          command: '', projectPath: '/project', scope: 'scope-a',
+        });
+      }
+    });
+    await act(async () => { await latestChatInputProps.onAlwaysAllow(); });
+    expect(mockSai.codexAppServerApprove).toHaveBeenCalledWith('/project', 'scope-a', 'permissions-3', {
+      type: 'permissions', permissions: requestedPermissions, scope: 'session',
+    });
+  });
+
+  it('keeps a Codex permission approval visible when the preview bridge rejects it', async () => {
+    mockSai.codexAppServerApprove.mockResolvedValueOnce({ ok: false, code: 'not-pending' });
+    const props = { ...baseProps(), aiProvider: 'codex' as const, claudeScope: 'scope-a' };
+    render(<ChatPanel {...props} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+    await act(async () => {
+      for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+        (handler as (msg: any) => void)({
+          type: 'approval_needed', provider: 'codex', requestHandle: 'permissions-stale', kind: 'permissions',
+          requestedPermissions: [{ kind: 'network', host: 'api.openai.com' }], toolName: 'Permission approval', toolUseId: 'permissions-stale',
+          command: '', projectPath: '/project', scope: 'scope-a',
+        });
+      }
+    });
+
+    await act(async () => { await latestChatInputProps.onApprove(); });
+    expect(latestChatInputProps.pendingApproval?.toolUseId).toBe('permissions-stale');
+  });
+
   it('does not surface unstructured SDK Codex approval events', async () => {
     render(<ChatPanel {...{ ...baseProps(), aiProvider: 'codex' as const }} />);
     await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());

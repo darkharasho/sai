@@ -18,10 +18,13 @@ export default function ApprovalPanel({ approval, onApprove, onDeny, onAlwaysAll
   const isBash = approval.toolName === 'Bash';
   const isCodexApproval = approval.provider === 'codex';
   const isEditableBash = isBash && !isCodexApproval;
+  const isCodexPermissionApproval = isCodexApproval && approval.kind === 'permissions';
   const decisions = new Set(approval.availableDecisions ?? []);
-  const showApprove = !isCodexApproval || decisions.has('accept');
-  const showDeny = !isCodexApproval || decisions.has('decline') || decisions.has('cancel');
-  const showAlwaysAllow = !isCodexApproval || decisions.has('acceptForSession');
+  // Permission requests use a permissions/scope response, not availableDecisions.
+  // The App Server protocol explicitly supports turn and session scope for them.
+  const showApprove = !isCodexApproval || isCodexPermissionApproval || decisions.has('accept');
+  const showDeny = !isCodexApproval || isCodexPermissionApproval || decisions.has('decline') || decisions.has('cancel');
+  const showAlwaysAllow = !isCodexApproval || isCodexPermissionApproval || decisions.has('acceptForSession');
   const canAmend = isCodexApproval && decisions.has('acceptWithExecpolicyAmendment')
     && Array.isArray(approval.proposedExecpolicyAmendment) && approval.proposedExecpolicyAmendment.length > 0;
   const entryTransition = useReducedMotionTransition(SPRING.pop);

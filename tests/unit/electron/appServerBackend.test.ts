@@ -326,7 +326,7 @@ describe('AppServerBackend', () => {
     ['item/permissions/requestApproval', {
       threadId: 'thread-a', turnId: 'turn-a', reason: 'Needs network', permissions: [{ kind: 'network', host: 'api.openai.com', protocol: 'https' }],
       availableDecisions: ['accept', 'decline'],
-    }, { toolName: 'Permission approval', reason: 'Needs network', network: { host: 'api.openai.com', protocol: 'https' } }],
+    }, { toolName: 'Permission approval', reason: 'Needs network', network: { host: 'api.openai.com', protocol: 'https' }, requestedPermissions: [{ kind: 'network', host: 'api.openai.com', protocol: 'https' }] }],
   ] as const)('claims and normalizes %s approvals for the active scoped turn', async (method, params, expected) => {
     const h = harness();
     h.responses.set('thread/start', { thread: { id: 'thread-a' } });

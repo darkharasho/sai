@@ -21,6 +21,8 @@ export interface CodexApprovalMetadata {
   network?: { host?: string; protocol?: string };
   grantRoot?: string;
   permissionsSummary?: string[];
+  /** JSON-safe opaque copies of the permission objects that the UI may grant. */
+  requestedPermissions?: unknown[];
 }
 
 /**

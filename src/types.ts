@@ -154,6 +154,8 @@ export interface PendingApproval {
   network?: { host?: string; protocol?: string };
   grantRoot?: string;
   permissionsSummary?: string[];
+  /** JSON-safe opaque copies of the Codex App Server permissions being requested. */
+  requestedPermissions?: unknown[];
   proposedExecpolicyAmendment?: string[];
 }
 

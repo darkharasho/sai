@@ -489,10 +489,17 @@ describe('Codex IPC dispatch', () => {
     })).resolves.toEqual({ ok: true });
     expect(backend.approve).toHaveBeenCalledWith('/project', 'task:7', 'request-7', { type: 'decision', value: 'accept' });
 
+    await expect(mocks.ipcMain.invoke('codex:appServerApprove', '/project', 'task:7', 'request-8', {
+      type: 'permissions', scope: 'turn', permissions: [{ kind: 'network', host: 'api.openai.com' }],
+    })).resolves.toEqual({ ok: true });
+    expect(backend.approve).toHaveBeenLastCalledWith('/project', 'task:7', 'request-8', {
+      type: 'permissions', scope: 'turn', permissions: [{ kind: 'network', host: 'api.openai.com' }],
+    });
+
     await expect(mocks.ipcMain.invoke('codex:appServerApprove', '/project', 'task:7', 'request-7', {
       type: 'permissions', scope: 'everywhere', permissions: [],
     })).resolves.toEqual({ ok: false, code: 'invalid-decision' });
-    expect(backend.approve).toHaveBeenCalledOnce();
+    expect(backend.approve).toHaveBeenCalledTimes(2);
   });
 
   it('routes codex:usage to the injected telemetry singleton with a forced refresh', async () => {

@@ -1185,6 +1185,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             network: msg.network,
             grantRoot: msg.grantRoot,
             permissionsSummary: msg.permissionsSummary,
+            requestedPermissions: msg.requestedPermissions,
             proposedExecpolicyAmendment: msg.proposedExecpolicyAmendment,
           } : {}),
         });
@@ -1972,13 +1973,32 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     return () => window.removeEventListener('sai-github-watcher-snapshot', handler);
   }, []);
 
-  const handleApprove = (modifiedCommand?: string) => {
+  const submitCodexApproval = async (approval: NonNullable<typeof pendingApproval>, decision: import('../../../electron/services/codexBackend').CodexApprovalDecision) => {
+    try {
+      const result = await window.sai.codexAppServerApprove?.(
+        projectPath,
+        claudeScope,
+        approval.requestHandle ?? approval.toolUseId,
+        decision,
+      );
+      if (result?.ok) {
+        // A late completion must never dismiss a newer approval card.
+        setPendingApproval(current => current?.provider === 'codex'
+          && (current.requestHandle ?? current.toolUseId) === (approval.requestHandle ?? approval.toolUseId)
+          ? null
+          : current);
+      }
+    } catch {
+      // Keep the card actionable if the preview process is no longer reachable.
+    }
+  };
+
+  const handleApprove = async (modifiedCommand?: string) => {
     if (!pendingApproval) return;
     if (pendingApproval.provider === 'codex') {
-      void window.sai.codexAppServerApprove?.(projectPath, claudeScope, pendingApproval.requestHandle ?? pendingApproval.toolUseId, {
-        type: 'decision', value: 'accept',
-      });
-      setPendingApproval(null);
+      await submitCodexApproval(pendingApproval, pendingApproval.kind === 'permissions'
+        ? { type: 'permissions', permissions: pendingApproval.requestedPermissions ?? [], scope: 'turn' }
+        : { type: 'decision', value: 'accept' });
       return;
     }
     if (aiProvider === 'gemini' || aiProvider === 'kimi') {
@@ -1990,14 +2010,15 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     setPendingApproval(null);
   };
 
-  const handleDeny = () => {
+  const handleDeny = async () => {
     if (!pendingApproval) return;
     if (pendingApproval.provider === 'codex') {
+      if (pendingApproval.kind === 'permissions') {
+        await submitCodexApproval(pendingApproval, { type: 'permissions', permissions: [], scope: 'turn' });
+        return;
+      }
       const value = pendingApproval.availableDecisions?.includes('decline') ? 'decline' : 'cancel';
-      void window.sai.codexAppServerApprove?.(projectPath, claudeScope, pendingApproval.requestHandle ?? pendingApproval.toolUseId, {
-        type: 'decision', value,
-      });
-      setPendingApproval(null);
+      await submitCodexApproval(pendingApproval, { type: 'decision', value });
       return;
     }
     if (aiProvider === 'gemini' || aiProvider === 'kimi') {
@@ -2012,10 +2033,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const handleAlwaysAllow = async () => {
     if (!pendingApproval) return;
     if (pendingApproval.provider === 'codex') {
-      void window.sai.codexAppServerApprove?.(projectPath, claudeScope, pendingApproval.requestHandle ?? pendingApproval.toolUseId, {
-        type: 'decision', value: 'acceptForSession',
-      });
-      setPendingApproval(null);
+      await submitCodexApproval(pendingApproval, pendingApproval.kind === 'permissions'
+        ? { type: 'permissions', permissions: pendingApproval.requestedPermissions ?? [], scope: 'session' }
+        : { type: 'decision', value: 'acceptForSession' });
       return;
     }
     if (aiProvider === 'gemini' || aiProvider === 'kimi') {
@@ -2030,12 +2050,11 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     setPendingApproval(null);
   };
 
-  const handleCodexAmendment = (execpolicyAmendment: string[]) => {
+  const handleCodexAmendment = async (execpolicyAmendment: string[]) => {
     if (!pendingApproval || pendingApproval.provider !== 'codex') return;
-    void window.sai.codexAppServerApprove?.(projectPath, claudeScope, pendingApproval.requestHandle ?? pendingApproval.toolUseId, {
+    await submitCodexApproval(pendingApproval, {
       type: 'command-amendment', execpolicyAmendment,
     });
-    setPendingApproval(null);
   };
 
   const handleFakeError = useCallback((text: string) => {
