@@ -743,7 +743,7 @@ describe('ChatPanel', () => {
     expect(latestChatInputProps.isStreaming).toBe(true);
   });
 
-  it('clears native-subagent activity when an interrupted parent receives its matching done', async () => {
+  it('keeps native-subagent activity through a normal parent done until the process exits', async () => {
     const props = { ...baseProps(), aiProvider: 'codex' as const };
     const { container, rerender } = render(<ChatPanel {...props} isStreaming={false} />);
     await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
@@ -756,15 +756,61 @@ describe('ChatPanel', () => {
     expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
 
     await act(async () => {
-      // The interrupted parent is terminal; its child must not keep the new
-      // idle chat looking as if it is still working.
       handler({ type: 'done', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+    });
+    rerender(<ChatPanel {...props} isStreaming={false} />);
+
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+    expect(container.textContent).toContain('Current child');
+    expect(latestChatInputProps.isStreaming).toBe(true);
+
+    await act(async () => {
+      handler({ type: 'process_exit', projectPath: '/project', scope: 'chat' });
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
+      expect(container.textContent).not.toContain('Current child');
+      expect(latestChatInputProps.isStreaming).toBe(false);
+    });
+  });
+
+  it('clears native-subagent activity when an aborted parent receives its matching done', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const };
+    const { container, rerender } = render(<ChatPanel {...props} isStreaming={false} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'streaming_start', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+      handler({ type: 'subagent_activity', agentId: 'child-1', status: 'running', summary: 'Current child', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+      handler({ type: 'done', subagentsAborted: true, turnSeq: 5, projectPath: '/project', scope: 'chat' });
     });
     rerender(<ChatPanel {...props} isStreaming={false} />);
 
     await waitFor(() => {
       expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
       expect(container.textContent).not.toContain('Current child');
+      expect(latestChatInputProps.isStreaming).toBe(false);
+    });
+  });
+
+  it('accepts a child terminal event after its parent normal done', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const };
+    const { container } = render(<ChatPanel {...props} isStreaming={false} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'streaming_start', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+      handler({ type: 'subagent_activity', agentId: 'child-1', status: 'running', summary: 'Trailing child', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+      handler({ type: 'done', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+      handler({ type: 'subagent_activity', agentId: 'child-1', status: 'completed', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
+      expect(container.textContent).not.toContain('Trailing child');
       expect(latestChatInputProps.isStreaming).toBe(false);
     });
   });
@@ -792,7 +838,7 @@ describe('ChatPanel', () => {
     });
   });
 
-  it('keeps newer native-subagent activity when a stale turn sends done', async () => {
+  it('keeps newer native-subagent activity when a stale aborted turn sends done', async () => {
     const props = { ...baseProps(), aiProvider: 'codex' as const };
     const { container } = render(<ChatPanel {...props} isStreaming={false} />);
     await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
@@ -801,7 +847,7 @@ describe('ChatPanel', () => {
     await act(async () => {
       handler({ type: 'streaming_start', turnSeq: 6, projectPath: '/project', scope: 'chat' });
       handler({ type: 'subagent_activity', agentId: 'child-2', status: 'running', summary: 'New child', turnSeq: 6, projectPath: '/project', scope: 'chat' });
-      handler({ type: 'done', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+      handler({ type: 'done', subagentsAborted: true, turnSeq: 5, projectPath: '/project', scope: 'chat' });
     });
 
     expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();

@@ -324,7 +324,7 @@ describe('SdkCodexBackend', () => {
     ]);
     expect(h.emitted.filter((event) => event.type === 'result')).toHaveLength(0);
     expect(h.emitted.filter((event) => event.type === 'done')).toEqual([
-      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1 },
+      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1, subagentsAborted: true },
     ]);
     expect(h.backend.isWorkspaceBusy('/a')).toBe(false);
     expect(h.notifyCompletion).not.toHaveBeenCalled();
@@ -345,7 +345,7 @@ describe('SdkCodexBackend', () => {
     ]);
     expect(h.emitted.filter((event) => event.type === 'result')).toHaveLength(0);
     expect(h.emitted.filter((event) => event.type === 'done')).toEqual([
-      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1 },
+      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1, subagentsAborted: true },
     ]);
     expect(h.backend.isWorkspaceBusy('/a')).toBe(false);
     expect(h.notifyCompletion).not.toHaveBeenCalled();
@@ -504,6 +504,9 @@ describe('SdkCodexBackend', () => {
       { type: 'error', text: 'SDK exploded', projectPath: '/a', scope: 'task', turnSeq: 1 },
     ]);
     expect(h.emitted.filter((e) => e.type === 'done')).toHaveLength(1);
+    expect(h.emitted.filter((e) => e.type === 'done')).toEqual([
+      { type: 'done', projectPath: '/a', scope: 'task', turnSeq: 1, subagentsAborted: true },
+    ]);
   });
 
   it('settles an aborted turn without reporting it as an error', async () => {
@@ -515,7 +518,9 @@ describe('SdkCodexBackend', () => {
     h.backend.interrupt('/a');
     await settle();
     expect(h.emitted.filter((e) => e.type === 'error')).toHaveLength(0);
-    expect(h.emitted.filter((e) => e.type === 'done')).toHaveLength(1);
+    expect(h.emitted.filter((e) => e.type === 'done')).toEqual([
+      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1, subagentsAborted: true },
+    ]);
     expect(h.backend.isWorkspaceBusy('/a')).toBe(false);
   });
 
@@ -560,6 +565,9 @@ describe('SdkCodexBackend', () => {
     h.backend.send({ projectPath: '/a', message: 'replacement' });
     await settle();
     expect(h.runs[0].options?.signal?.aborted).toBe(true);
+    expect(h.emitted.filter((e) => e.type === 'done')).toEqual([
+      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1, subagentsAborted: true },
+    ]);
     expect(h.clients).toHaveLength(2);
     expect(h.clients[0].start.mock.results[0]?.value).not.toBe(h.clients[1].start.mock.results[0]?.value);
     expect(h.backend.isWorkspaceBusy('/a')).toBe(true);
@@ -674,7 +682,7 @@ describe('SdkCodexBackend', () => {
         turnSeq: 1, sessionId: null,
       },
       { type: 'error', text: 'client init failed', projectPath: '/a', scope: 'task', turnSeq: 1 },
-      { type: 'done', projectPath: '/a', scope: 'task', turnSeq: 1 },
+      { type: 'done', projectPath: '/a', scope: 'task', turnSeq: 1, subagentsAborted: true },
     ]);
   });
 

@@ -155,7 +155,7 @@ export class SdkCodexBackend implements CodexBackend {
     if (runtime.active) {
       const prior = runtime.active;
       prior.controller.abort();
-      this.finishTurn(runtime, prior);
+      this.finishTurn(runtime, prior, { subagentsAborted: true });
       // A Thread may still be draining after AbortSignal cancellation. Never
       // run its replacement through that same mutable object: create a fresh
       // client/thread below and resume only an already-authoritative session ID.
@@ -202,7 +202,7 @@ export class SdkCodexBackend implements CodexBackend {
       void this.runTurn(key, runtime, active, runtime.thread, input);
     } catch (error) {
       this.emit({ type: 'error', text: errorText(error), projectPath: args.projectPath, scope, turnSeq: active.seq });
-      this.finishTurn(runtime, active);
+      this.finishTurn(runtime, active, { subagentsAborted: true });
     }
   }
 
@@ -215,7 +215,7 @@ export class SdkCodexBackend implements CodexBackend {
     }
     const active = runtime.active;
     active.controller.abort();
-    this.finishTurn(runtime, active);
+    this.finishTurn(runtime, active, { subagentsAborted: true });
     // AbortSignal cancellation does not guarantee the SDK iterator has
     // finished draining. Retire the mutable thread while retaining sessionId,
     // so the next send gets a fresh thread and resumes only known-good identity.
@@ -251,7 +251,7 @@ export class SdkCodexBackend implements CodexBackend {
       if (runtime.active) {
         const active = runtime.active;
         active.controller.abort();
-        this.finishTurn(runtime, active);
+        this.finishTurn(runtime, active, { subagentsAborted: true });
       }
       this.runtimes.delete(key);
     }
@@ -272,7 +272,7 @@ export class SdkCodexBackend implements CodexBackend {
       if (!runtime.active) continue;
       const active = runtime.active;
       active.controller.abort();
-      this.finishTurn(runtime, active);
+      this.finishTurn(runtime, active, { subagentsAborted: true });
     }
     this.runtimes.clear();
     this.metadata.clear();
@@ -304,7 +304,11 @@ export class SdkCodexBackend implements CodexBackend {
     return runtime.active === active;
   }
 
-  private finishTurn(runtime: ScopeRuntime, active: ActiveTurn): void {
+  private finishTurn(
+    runtime: ScopeRuntime,
+    active: ActiveTurn,
+    { subagentsAborted = false }: { subagentsAborted?: boolean } = {},
+  ): void {
     if (!this.isCurrent(runtime, active) || active.done) return;
     active.done = true;
     this.emit({
@@ -312,6 +316,7 @@ export class SdkCodexBackend implements CodexBackend {
       projectPath: runtime.projectPath,
       scope: runtime.scope,
       turnSeq: active.seq,
+      ...(subagentsAborted ? { subagentsAborted: true } : {}),
     });
     runtime.active = undefined;
   }
@@ -354,7 +359,7 @@ export class SdkCodexBackend implements CodexBackend {
               this.emit(envelope);
             }
           }
-          this.finishTurn(runtime, active);
+          this.finishTurn(runtime, active, { subagentsAborted: true });
           return;
         }
         for (const envelope of envelopes) {
@@ -386,7 +391,7 @@ export class SdkCodexBackend implements CodexBackend {
           turnSeq: active.seq,
         });
       }
-      this.finishTurn(runtime, active);
+      this.finishTurn(runtime, active, { subagentsAborted: true });
     }
   }
 }

@@ -507,9 +507,11 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // terminal status. Keep each child here so the UI remains visibly active
   // until every child has actually stopped.
   const [activeSubagents, setActiveSubagents] = useState<Map<string, string>>(new Map());
+  const activeSubagentTurnsRef = useRef<Map<string, number | null>>(new Map());
   useEffect(() => {
     // Activity belongs to the live backend session only. A session/workspace
     // replacement must never inherit a stale child and look permanently busy.
+    activeSubagentTurnsRef.current.clear();
     setActiveSubagents(prev => (prev.size === 0 ? prev : new Map()));
   }, [sessionId, projectPath, claudeScope]);
   // Summarized reasoning ("Show reasoning" setting; SDK backend streams it as
@@ -859,6 +861,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         if (msg.turnSeq != null) turnSeqRef.current = msg.turnSeq;
         // A new stream boundary supersedes any child state that did not get a
         // terminal lifecycle event (for example, an interrupted parent turn).
+        activeSubagentTurnsRef.current.clear();
         setActiveSubagents(prev => (prev.size === 0 ? prev : new Map()));
         clearStreamHint();
         // A fresh turn (or a wait-resume re-arm) must show its thinking row
@@ -876,8 +879,15 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       }
 
       if (msg.type === 'subagent_activity' && typeof msg.agentId === 'string') {
-        if (msg.turnSeq != null && msg.turnSeq !== turnSeqRef.current) return;
         const terminal = msg.status === 'completed' || msg.status === 'failed' || msg.status === 'cancelled';
+        const trackedTurn = activeSubagentTurnsRef.current.get(msg.agentId);
+        if (msg.turnSeq != null && msg.turnSeq !== turnSeqRef.current
+          && (!terminal || trackedTurn !== msg.turnSeq)) return;
+        if (terminal) {
+          activeSubagentTurnsRef.current.delete(msg.agentId);
+        } else {
+          activeSubagentTurnsRef.current.set(msg.agentId, msg.turnSeq ?? null);
+        }
         setActiveSubagents(prev => {
           const next = new Map(prev);
           if (terminal) {
@@ -914,9 +924,13 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         // arrives tagged with the old turnSeq and should not affect the new turn's state.
         if (msg.turnSeq != null && msg.turnSeq !== turnSeqRef.current) return;
         if (msg.type === 'done') {
-          // Clear only after the turn-sequence stale guard above: an old
-          // completion must never erase a child belonging to newer work.
-          setActiveSubagents(prev => (prev.size === 0 ? prev : new Map()));
+          // A normal parent completion can precede native child terminal
+          // activity. Only an explicit forced termination proves children
+          // stopped; otherwise preserve their visible working state.
+          if (msg.subagentsAborted === true) {
+            activeSubagentTurnsRef.current.clear();
+            setActiveSubagents(prev => (prev.size === 0 ? prev : new Map()));
+          }
           turnSeqRef.current = -1;
           clearStreamHint();
           finalizeReasoning();
@@ -931,6 +945,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
       if (msg.type === 'process_exit') {
         setReady(false);
+        activeSubagentTurnsRef.current.clear();
+        setActiveSubagents(prev => (prev.size === 0 ? prev : new Map()));
         setPendingApproval(null);
         flushMessagesToParent();
         onTurnComplete?.();
