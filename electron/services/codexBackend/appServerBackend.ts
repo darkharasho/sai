@@ -462,17 +462,25 @@ export class AppServerBackend implements CodexBackend {
   }
 
   /**
-   * Swarm is only safe to advertise after its separate experimental App Server
-   * connection has negotiated and can serve its catalogue. This deliberately
-   * does not create a thread: selecting the Swarm sidebar must not leave an
-   * orphan Codex conversation behind.
+   * Swarm is only safe to advertise after an isolated experimental client has
+   * accepted SAI's exact Dynamic Tool catalogue. A handshake/model list alone
+   * does not establish that `dynamicTools` is supported by this App Server.
    */
   async getSwarmStatus(): Promise<CodexAppServerPreviewStatus> {
     if (this.unavailableReason) return { available: false, reason: this.unavailableReason };
     if (this.orchestratorUnavailableReason) return { available: false, reason: this.orchestratorUnavailableReason };
     try {
       const client = await this.ensureClient({ kind: 'orchestrator' } as ScopeRuntime);
-      await client.request('model/list', {});
+      const result = await client.request('thread/start', {
+        cwd: process.cwd(),
+        dynamicTools: SAI_SWARM_DYNAMIC_TOOLS,
+      });
+      const threadId = idFrom(result, 'thread');
+      if (!threadId) throw new AppServerUnavailableError('Codex App Server did not return a probe thread ID');
+      // No turn is started by the probe, so there is nothing to interrupt.
+      // Archive immediately: dynamic tools persist in thread metadata and this
+      // probe must never become a user-visible, resumable conversation.
+      await client.request('thread/archive', { threadId });
       return { available: true };
     } catch (error) {
       const reason = errorText(error);

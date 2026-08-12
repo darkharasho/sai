@@ -81,22 +81,36 @@ async function settle(): Promise<void> {
 }
 
 describe('AppServerBackend', () => {
-  it('probes the isolated experimental client and its catalogue before enabling Swarm', async () => {
+  it('probes an isolated thread with SAI dynamic tools and archives it before enabling Swarm', async () => {
     const h = harness();
-    h.responses.set('model/list', { data: [{ model: 'gpt-5.6' }] });
+    h.responses.set('thread/start', { thread: { id: 'probe-thread' } });
 
     await expect(h.backend.getSwarmStatus()).resolves.toEqual({ available: true });
     expect(h.clientOptions).toEqual([{ experimentalApi: true }]);
-    expect(h.requests).toEqual([{ method: 'model/list', params: {} }]);
+    expect(h.requests).toEqual([
+      { method: 'thread/start', params: expect.objectContaining({ dynamicTools: expect.any(Array) }) },
+      { method: 'thread/archive', params: { threadId: 'probe-thread' } },
+    ]);
   });
 
-  it('reports the experimental bridge failure without enabling Swarm', async () => {
+  it('reports dynamic tool rejection without enabling Swarm', async () => {
     const h = harness();
-    h.responses.set('model/list', new Error('experimental API rejected'));
+    h.responses.set('thread/start', new Error('dynamicTools requires experimentalApi capability'));
 
     await expect(h.backend.getSwarmStatus()).resolves.toEqual({
       available: false,
-      reason: 'experimental API rejected',
+      reason: 'dynamicTools requires experimentalApi capability',
+    });
+  });
+
+  it('keeps the Swarm picker disabled when the probe thread cannot be archived', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'probe-thread' } });
+    h.responses.set('thread/archive', new Error('thread/archive unavailable'));
+
+    await expect(h.backend.getSwarmStatus()).resolves.toEqual({
+      available: false,
+      reason: 'thread/archive unavailable',
     });
   });
 

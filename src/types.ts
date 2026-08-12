@@ -518,5 +518,12 @@ export interface SwarmApproval {
   command?: string;
   description?: string;
   input?: unknown;
+  /** App Server approvals are scoped by an opaque main-process handle. */
+  provider?: 'codex';
+  requestHandle?: string;
+  kind?: 'command' | 'file-change' | 'permissions';
+  availableDecisions?: string[];
+  /** Exact, JSON-safe permission values emitted by the App Server backend. */
+  requestedPermissions?: unknown[];
   createdAt: number;
 }

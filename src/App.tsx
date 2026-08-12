@@ -50,6 +50,7 @@ import InlineApprovalCard from './components/Swarm/cards/InlineApprovalCard';
 import QuitSwarmConfirmModal from './components/Swarm/QuitSwarmConfirmModal';
 import { swarmInit, swarmGetApprovals, swarmResolveApproval, swarmCreateApproval, swarmCreateTask, swarmDeleteTask, swarmGetApproval, swarmDeleteApprovalsByTask } from './swarmDb';
 import { approvalRoutingTarget } from './lib/swarmApprovalRouting';
+import { resolveCodexAppServerSwarmApproval } from './lib/codexAppServerSwarmApproval';
 import { diffSwarmTasks } from './lib/swarmPersistenceDiff';
 import { hydrateWorkspaceSwarm } from './lib/swarmHydrate';
 import { SwarmScheduler, isLikelyReadOnlyPrompt, findStaleTasks } from './lib/swarmScheduler';
@@ -1376,17 +1377,20 @@ export default function App() {
 
     // Resolve an approval by id, routed to the approval's OWN workspace (not
     // the active one), idempotent against double-resolution.
-    const resolveApproval = async (approvalId: string, approved: boolean) => {
-      if (resolvingApprovalsRef.current.has(approvalId)) return;
+    const resolveApproval = async (approvalId: string, approved: boolean): Promise<void> => {
+      if (resolvingApprovalsRef.current.has(approvalId)) throw new Error('Approval is already being resolved');
       resolvingApprovalsRef.current.add(approvalId);
       try {
         const a = await swarmGetApproval(approvalId);
-        if (!a) return;
+        if (!a) throw new Error('Approval is no longer pending');
         const { workspaceId, task, toolUseId } = approvalRoutingTarget(a, swarmTasksByWsRef.current);
         if (task) {
           const scope = task.sessionId;
           const p = task.provider;
-          if (p === 'codex') (window.sai as any).codexApprove?.(workspaceId, toolUseId, approved, undefined, scope);
+          if (p === 'codex') {
+            const resolved = await resolveCodexAppServerSwarmApproval(window.sai, a, scope, approved);
+            if (!resolved) throw new Error('Codex App Server approval is no longer pending');
+          }
           else if (p === 'gemini') (window.sai as any).geminiApprove?.(workspaceId, toolUseId, approved, undefined, scope);
           else if (p === 'kimi') (window.sai as any).kimiApprove?.(workspaceId, toolUseId, approved, undefined, scope);
           else (window.sai as any).claudeApprove?.(workspaceId, toolUseId, approved, undefined, scope);
@@ -3079,6 +3083,24 @@ export default function App() {
         if (swarmTask) {
           if (!shouldRequireApproval(swarmTask.approvalPolicy, msg.toolName)) {
             // Auto-approve without surfacing UI or transitioning task state.
+            if (msg.provider === 'codex' && msg.requestHandle) {
+              const autoApproval: SwarmApproval = {
+                id: '', taskId: swarmTask.id, workspaceId: msg.projectPath,
+                toolName: msg.toolName, toolUseId: msg.toolUseId, createdAt: Date.now(),
+                provider: 'codex', requestHandle: msg.requestHandle, kind: msg.kind,
+                availableDecisions: msg.availableDecisions,
+                requestedPermissions: msg.requestedPermissions,
+              };
+              void resolveCodexAppServerSwarmApproval(window.sai, autoApproval, scope, true).then((resolved) => {
+                if (!resolved) return;
+                try {
+                  void (window.sai as any).swarmEmitCard?.(msg.projectPath, 'auto_approved', {
+                    taskTitle: swarmTask.title, toolName: msg.toolName, branch: swarmTask.branch,
+                  });
+                } catch { /* best-effort */ }
+              }).catch(() => { /* stale or unavailable: retain the pending request */ });
+              return;
+            }
             try { (window.sai as any).claudeApprove(msg.projectPath, msg.toolUseId, true, undefined, scope); } catch {}
             // Emit a subtle inline auto_approved card so the orchestrator chat
             // surfaces what would otherwise be silent activity.
@@ -3123,6 +3145,13 @@ export default function App() {
             command: msg.command,
             description: msg.description,
             input: msg.input,
+            ...(msg.provider === 'codex' && msg.requestHandle ? {
+              provider: 'codex' as const,
+              requestHandle: msg.requestHandle,
+              kind: msg.kind,
+              availableDecisions: msg.availableDecisions,
+              requestedPermissions: msg.requestedPermissions,
+            } : {}),
             createdAt: Date.now(),
           };
           void swarmCreateApproval(approvalRecord)
@@ -4864,8 +4893,12 @@ export default function App() {
                         return (
                           <InlineApprovalCard
                             meta={meta}
-                            onApprove={(id) => { void swarmHost.approve(id); resolveLocally('approved'); }}
-                            onDeny={(id) => { void swarmHost.deny(id); resolveLocally('denied'); }}
+                            onApprove={(id) => {
+                              void swarmHost.approve(id).then(() => resolveLocally('approved')).catch(() => {});
+                            }}
+                            onDeny={(id) => {
+                              void swarmHost.deny(id).then(() => resolveLocally('denied')).catch(() => {});
+                            }}
                             onView={() => setSwarmSelected(meta.taskId)}
                           />
                         );
