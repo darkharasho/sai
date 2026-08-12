@@ -222,6 +222,7 @@ export function connect(token: string): WireClient {
     clearTimers();
     notifyState('opening');
     const socket = new WebSocket(wsUrl);
+    let authenticated = false;
     ws = socket;
     socket.onopen = () => {
       if (ws !== socket) return;
@@ -233,7 +234,8 @@ export function connect(token: string): WireClient {
       lastActivityTs = Date.now();
       let msg: WireMsg;
       try { msg = JSON.parse(ev.data); } catch { return; }
-      if (msg.type === 'auth_ok') {
+      if (msg.type === 'auth_ok' && !authenticated) {
+        authenticated = true;
         retryAttempt = 0; // successful auth resets backoff
         notifyState('open');
         // Replay client-side state the server doesn't persist across sockets.

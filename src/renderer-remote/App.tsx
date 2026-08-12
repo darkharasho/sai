@@ -102,7 +102,7 @@ function OfflineBanner({ show }: { show: boolean }) {
   );
 }
 
-function ConnectedShell({ client }: { client: WireClient }) {
+export function ConnectedShell({ client }: { client: WireClient }) {
   const [workspacePath, setWorkspacePath] = useState<string>('');
   const [metaMembers, setMetaMembers] = useState<{ projectPath: string; name: string }[] | undefined>(undefined);
   const [navOpen, setNavOpen] = useState(false);
@@ -110,15 +110,27 @@ function ConnectedShell({ client }: { client: WireClient }) {
   const [active, setActive] = useState<ChatActive | null>(null);
   const [claudeModels, setClaudeModels] = useState<RemoteClaudeModel[]>([]);
 
-  // The catalogue is account-scoped, so wait until the authenticated shell is
-  // mounted. A failure deliberately leaves the rolling-alias fallback intact.
+  // The catalogue is account-scoped. A request that was in flight when a
+  // socket closes is rejected by WireClient, so repeat discovery after every
+  // authenticated replacement connection. The request sequence makes delayed
+  // replies from an old connection harmless.
   useEffect(() => {
     let cancelled = false;
-    client.requestClaudeModels();
-    void client.waitForClaudeModels()
-      .then((models) => { if (!cancelled) setClaudeModels(models); })
-      .catch(() => { /* fallback remains available */ });
-    return () => { cancelled = true; };
+    let requestSequence = 0;
+    const loadClaudeModels = () => {
+      const sequence = ++requestSequence;
+      client.requestClaudeModels();
+      void client.waitForClaudeModels()
+        .then((models) => {
+          if (!cancelled && sequence === requestSequence) setClaudeModels(models);
+        })
+        .catch(() => { /* fallback remains available */ });
+    };
+    loadClaudeModels();
+    const off = client.onState((state) => {
+      if (state === 'open') loadClaudeModels();
+    });
+    return () => { cancelled = true; off(); };
   }, [client]);
 
   useEffect(() => {
