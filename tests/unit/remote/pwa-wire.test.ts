@@ -54,4 +54,23 @@ describe('PWA wire helpers', () => {
     await expect(wire.waitForClaudeModels()).resolves.toEqual(models);
     wire.close();
   });
+
+  it('rejects and clears a pending Claude model catalogue wait when the socket closes', async () => {
+    vi.stubGlobal('WebSocket', MockWebSocket);
+    vi.stubGlobal('crypto', { randomUUID: vi.fn(() => 'close-model-request') });
+    const wire = connect('token');
+    const socket = MockWebSocket.latest!;
+    socket.open();
+    socket.receive({ type: 'auth_ok' });
+
+    const requestId = wire.requestClaudeModels();
+    const pending = wire.waitForClaudeModels();
+    socket.close();
+    await expect(pending).rejects.toThrow('connection lost');
+
+    // A late response cannot revive the cleared waiter.
+    socket.receive({ type: 'claude_models', requestId, models: [{ id: 'fable' }] });
+    await expect(pending).rejects.toThrow('connection lost');
+    wire.close();
+  });
 });

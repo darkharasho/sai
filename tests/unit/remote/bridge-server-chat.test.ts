@@ -167,6 +167,23 @@ describe('BridgeServer chat routing', () => {
     await expectNoMessage(ws);
     ws.close();
   });
+
+  it('rejects a Claude model catalogue request before authentication without invoking discovery', async () => {
+    const models = vi.fn().mockReturnValue({ models: [] });
+    await server.stop();
+    server = new BridgeServer({
+      tailnetIp: '127.0.0.1', pairing: new PairingStore(':memory:'), bus,
+      pwaDir: null, screenshotSecret: 'x', loadScreenshot: async () => null,
+      getClaudeModels: models,
+    });
+    ({ port } = await server.start());
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await new Promise<void>((resolve) => ws.once('open', resolve));
+    const closed = new Promise<number>((resolve) => ws.once('close', resolve));
+    ws.send(JSON.stringify({ type: 'claude_models_request', requestId: 'before-auth' }));
+    await expect(closed).resolves.toBe(4001);
+    expect(models).not.toHaveBeenCalled();
+  });
 });
 
 describe('BridgeServer workspace routing', () => {
