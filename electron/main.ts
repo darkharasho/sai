@@ -261,6 +261,7 @@ async function getOrInitRemote(): Promise<RemoteModule> {
           await getClaudeBackend().answerQuestion({ projectPath: args.projectPath, toolUseId: args.toolUseId, answers: args.answers, scope: args.scope });
         },
         interruptTurn: (path, scope) => getClaudeBackend().interrupt(path, scope),
+        getClaudeModels: () => getClaudeBackend().getModels(),
         listSessions: async (path) => (await rendererProxy!.listSessions(path)) as any,
         loadHistory: async (sid) => (await rendererProxy!.loadHistory(sid)) as any,
         listWorkspaces: () => rendererProxy!.listWorkspaces(),

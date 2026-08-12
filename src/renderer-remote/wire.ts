@@ -17,6 +17,13 @@ export async function pair(code: string, deviceLabel: string, clientId: string):
 
 export type WireMsg = { type: string; [k: string]: unknown };
 
+export interface RemoteClaudeModel {
+  id: string;
+  label: string;
+  description: string;
+  recommended: boolean;
+}
+
 export interface WriteStaleError extends Error {
   code: 'stale';
   currentMtime: number;
@@ -55,6 +62,8 @@ export interface WireClient {
   onState(handler: (s: 'opening' | 'open' | 'closed') => void): () => void;
   attach(args: { projectPath: string; scope?: string; sessionId: string }): void;
   setFollow(enabled: boolean): void;
+  requestClaudeModels(): string;
+  waitForClaudeModels(): Promise<RemoteClaudeModel[]>;
   listSessions(projectPath: string): Promise<unknown[]>;
   listWorkspaces(): Promise<unknown[]>;
   setActiveWorkspace(projectPath: string): void;
@@ -255,14 +264,36 @@ export function connect(token: string): WireClient {
         for (const [, entry] of pendingReq) try { entry.reject(err); } catch { /* ignore */ }
         pendingReq.clear();
       }
+      const pendingModels = finishClaudeModelsPending();
+      if (pendingModels) pendingModels.reject(Object.assign(new Error('connection lost'), { code: 'wire_closed' }));
       if (!closed) scheduleReconnect();
     };
   };
 
   let reqCounter = 0;
   const pendingReq = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void }>();
+  let claudeModelsPending: {
+    requestId: string;
+    resolve: (models: RemoteClaudeModel[]) => void;
+    reject: (error: Error) => void;
+    timeout: ReturnType<typeof setTimeout>;
+  } | null = null;
+  let latestClaudeModelsWait: Promise<RemoteClaudeModel[]> = Promise.resolve([]);
+  const finishClaudeModelsPending = () => {
+    if (!claudeModelsPending) return null;
+    const pending = claudeModelsPending;
+    claudeModelsPending = null;
+    clearTimeout(pending.timeout);
+    return pending;
+  };
   open();
   handlers.add((msg) => {
+    if (msg.type === 'claude_models' && typeof msg.requestId === 'string'
+        && claudeModelsPending?.requestId === msg.requestId) {
+      const pending = finishClaudeModelsPending();
+      if (pending) pending.resolve(Array.isArray(msg.models) ? msg.models as RemoteClaudeModel[] : []);
+      return;
+    }
     const reqId = (msg as any).reqId;
     if (typeof reqId === 'string' && pendingReq.has(reqId)) {
       const entry = pendingReq.get(reqId)!;
@@ -344,6 +375,27 @@ export function connect(token: string): WireClient {
       replayFollow = enabled;
       sendFrame({ type: 'session.follow', enabled });
     },
+    requestClaudeModels: () => {
+      const previous = finishClaudeModelsPending();
+      if (previous) previous.reject(new Error('Claude model request superseded'));
+      const requestId = crypto.randomUUID();
+      let resolve!: (models: RemoteClaudeModel[]) => void;
+      let reject!: (error: Error) => void;
+      latestClaudeModelsWait = new Promise<RemoteClaudeModel[]>((res, rej) => { resolve = res; reject = rej; });
+      // requestClaudeModels returns only the ID; keep a passive rejection
+      // handler so a caller that never waits cannot produce an unhandled
+      // timeout/connection-loss rejection. Consumers still receive it from
+      // waitForClaudeModels().
+      void latestClaudeModelsWait.catch(() => undefined);
+      const timeout = setTimeout(() => {
+        const pending = finishClaudeModelsPending();
+        if (pending?.requestId === requestId) pending.reject(new Error('claude_models timeout'));
+      }, 5000);
+      claudeModelsPending = { requestId, resolve, reject, timeout };
+      sendFrame({ type: 'claude_models_request', requestId });
+      return requestId;
+    },
+    waitForClaudeModels: () => latestClaudeModelsWait,
     listSessions: (projectPath) => new Promise((resolve, reject) => {
       const reqId = `r${++reqCounter}`;
       pendingReq.set(reqId, { resolve, reject });
