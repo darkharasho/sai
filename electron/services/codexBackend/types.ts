@@ -1,4 +1,11 @@
 export type CodexSessionKind = 'chat' | 'task' | 'orchestrator';
+export type CodexBackendMode = 'sdk' | 'app-server';
+
+/** The App Server preview is opt-in and may become unavailable at runtime. */
+export interface CodexAppServerPreviewStatus {
+  available: boolean;
+  reason?: string;
+}
 export type CodexPermission = 'auto' | 'read-only' | 'full-access';
 export type CodexReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 
