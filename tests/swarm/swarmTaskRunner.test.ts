@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import { runSwarmTask, permModeForPolicy, cwdForTask } from '@/lib/swarmTaskRunner';
+import {
+  runSwarmTask,
+  permModeForPolicy,
+  codexPermissionForPolicy,
+  cwdForTask,
+} from '@/lib/swarmTaskRunner';
 import type { SwarmTask } from '@/types';
 
 function makeTask(overrides: Partial<SwarmTask> = {}): SwarmTask {
@@ -28,6 +33,8 @@ function makeDeps() {
   return {
     claudeStart: vi.fn().mockResolvedValue(undefined),
     claudeSend: vi.fn(),
+    codexStart: vi.fn().mockResolvedValue(undefined),
+    codexSend: vi.fn(),
   };
 }
 
@@ -40,6 +47,18 @@ describe('permModeForPolicy', () => {
   });
   it('maps always-ask → default', () => {
     expect(permModeForPolicy('always-ask')).toBe('default');
+  });
+});
+
+describe('codexPermissionForPolicy', () => {
+  it('maps auto → full-access', () => {
+    expect(codexPermissionForPolicy('auto')).toBe('full-access');
+  });
+  it('maps auto-read → auto', () => {
+    expect(codexPermissionForPolicy('auto-read')).toBe('auto');
+  });
+  it('maps always-ask → auto', () => {
+    expect(codexPermissionForPolicy('always-ask')).toBe('auto');
   });
 });
 
@@ -102,8 +121,38 @@ describe('runSwarmTask', () => {
     expect(deps.claudeSend.mock.calls[0][3]).toBe('default');
   });
 
+  it('starts a Codex task in the worktree-scoped session', async () => {
+    const task = makeTask({ provider: 'codex', model: 'gpt-5.6', worktreePath: '/tmp/wt' });
+    const deps = makeDeps();
+
+    const dispatched = await runSwarmTask(task, deps);
+
+    expect(dispatched).toBe(true);
+    expect(deps.codexStart).toHaveBeenCalledWith('/tmp/project', 'session-1', 'task', undefined, '/tmp/wt');
+    expect(deps.codexSend).toHaveBeenCalledWith(
+      '/tmp/project',
+      'create hello.txt with hi',
+      undefined,
+      'auto',
+      undefined,
+      'gpt-5.6',
+      'session-1',
+    );
+    expect(deps.claudeStart).not.toHaveBeenCalled();
+    expect(deps.claudeSend).not.toHaveBeenCalled();
+  });
+
+  it('uses full-access for a Codex task with approvalPolicy=auto', async () => {
+    const task = makeTask({ provider: 'codex', approvalPolicy: 'auto', worktreePath: '/tmp/wt' });
+    const deps = makeDeps();
+
+    await runSwarmTask(task, deps);
+
+    expect(deps.codexSend.mock.calls[0][3]).toBe('full-access');
+  });
+
   it('returns false and skips IPC when provider is not claude', async () => {
-    const task = makeTask({ provider: 'codex' });
+    const task = makeTask({ provider: 'gemini' });
     const deps = makeDeps();
 
     const dispatched = await runSwarmTask(task, deps);
@@ -111,5 +160,7 @@ describe('runSwarmTask', () => {
     expect(dispatched).toBe(false);
     expect(deps.claudeStart).not.toHaveBeenCalled();
     expect(deps.claudeSend).not.toHaveBeenCalled();
+    expect(deps.codexStart).not.toHaveBeenCalled();
+    expect(deps.codexSend).not.toHaveBeenCalled();
   });
 });
