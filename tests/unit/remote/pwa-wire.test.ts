@@ -108,4 +108,31 @@ describe('PWA wire helpers', () => {
     await expect(pending).resolves.toEqual([{ id: 'fable' }]);
     wire.close();
   });
+
+  it('does not let a replaced socket watchdog close a newer model request', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('WebSocket', MockWebSocket);
+    vi.stubGlobal('crypto', { randomUUID: vi.fn(() => 'watchdog-model-request') });
+    const wire = connect('token');
+    const first = MockWebSocket.latest!;
+    first.open();
+    first.receive({ type: 'auth_ok' });
+    await vi.advanceTimersByTimeAsync(25_000); // old heartbeat starts its pong deadline
+
+    // Simulate a zombie socket observed as closed before its delayed onclose.
+    first.readyState = MockWebSocket.CLOSED;
+    window.dispatchEvent(new Event('online'));
+    const second = MockWebSocket.latest!;
+    expect(second).not.toBe(first);
+    await vi.advanceTimersByTimeAsync(10_000); // old pong deadline would fire here
+    expect(second.readyState).toBe(MockWebSocket.CONNECTING);
+    second.open();
+    second.receive({ type: 'auth_ok' });
+    const requestId = wire.requestClaudeModels();
+    const pending = wire.waitForClaudeModels();
+
+    second.receive({ type: 'claude_models', requestId, models: [{ id: 'fable' }] });
+    await expect(pending).resolves.toEqual([{ id: 'fable' }]);
+    wire.close();
+  });
 });

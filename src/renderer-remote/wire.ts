@@ -204,6 +204,10 @@ export function connect(token: string): WireClient {
   }
 
   const open = () => {
+    // A replacement connection takes ownership of watchdogs. Otherwise an
+    // interval/deadline from a zombie socket can later act on the new global
+    // `ws` reference and close it.
+    clearTimers();
     notifyState('opening');
     const socket = new WebSocket(wsUrl);
     ws = socket;
