@@ -595,7 +595,10 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const handleCodexBackendModeChange = (mode: 'sdk' | 'app-server') => {
     setCodexBackendMode(mode);
     window.sai.settingsSet('codexBackendMode', mode);
-    window.sai.codexBackendModeSet?.(mode).finally(() => refreshCodexAppServerStatus());
+    void Promise.resolve(window.sai.codexBackendModeSet?.(mode)).finally(() => {
+      refreshCodexAppServerStatus();
+      onSettingChange?.('codexBackendMode', mode);
+    });
   };
 
   const retryCodexAppServer = () => {

@@ -81,6 +81,25 @@ async function settle(): Promise<void> {
 }
 
 describe('AppServerBackend', () => {
+  it('probes the isolated experimental client and its catalogue before enabling Swarm', async () => {
+    const h = harness();
+    h.responses.set('model/list', { data: [{ model: 'gpt-5.6' }] });
+
+    await expect(h.backend.getSwarmStatus()).resolves.toEqual({ available: true });
+    expect(h.clientOptions).toEqual([{ experimentalApi: true }]);
+    expect(h.requests).toEqual([{ method: 'model/list', params: {} }]);
+  });
+
+  it('reports the experimental bridge failure without enabling Swarm', async () => {
+    const h = harness();
+    h.responses.set('model/list', new Error('experimental API rejected'));
+
+    await expect(h.backend.getSwarmStatus()).resolves.toEqual({
+      available: false,
+      reason: 'experimental API rejected',
+    });
+  });
+
   it('rejects a standard-client dynamic request and notification that impersonate an orchestrator turn', async () => {
     const makeClient = (threadId: string, turnId: string) => {
       const notifications = new Set<(notification: AppServerNotification) => void>();

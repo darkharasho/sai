@@ -26,10 +26,10 @@ function modelColor(id: string): string {
   return 'var(--text-secondary)';
 }
 
-const PROVIDERS: { id: AIProvider; label: string; enabled: boolean; defaultModel: string }[] = [
-  { id: 'claude', label: 'Claude', enabled: true,  defaultModel: 'opus' },
-  { id: 'codex',  label: 'Codex',  enabled: false, defaultModel: 'o3' },
-  { id: 'gemini', label: 'Gemini', enabled: false, defaultModel: 'auto-gemini-3' },
+const PROVIDERS: { id: AIProvider; label: string; defaultModel: string }[] = [
+  { id: 'claude', label: 'Claude', defaultModel: 'opus' },
+  { id: 'codex',  label: 'Codex',  defaultModel: 'gpt-5.6' },
+  { id: 'gemini', label: 'Gemini', defaultModel: 'auto-gemini-3' },
 ];
 
 interface Props {
@@ -37,6 +37,8 @@ interface Props {
   model: string;
   onChange: (provider: AIProvider, model: string) => void;
   disabled?: boolean;
+  /** Evidence from the main-process App Server Dynamic Tools probe. */
+  codexSwarm?: { available: boolean; reason?: string };
 }
 
 function modelLabel(provider: AIProvider, model: string, claudeOptions: ModelOption[]): string {
@@ -47,7 +49,7 @@ function modelLabel(provider: AIProvider, model: string, claudeOptions: ModelOpt
   return model || 'Model';
 }
 
-export default function OrchestratorModelPicker({ provider, model, onChange, disabled }: Props) {
+export default function OrchestratorModelPicker({ provider, model, onChange, disabled, codexSwarm }: Props) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -147,8 +149,9 @@ export default function OrchestratorModelPicker({ provider, model, onChange, dis
             Provider
           </div>
           {PROVIDERS.map(p => {
-            const isSelected = p.id === provider && p.enabled;
-            const isDisabled = !p.enabled;
+            const isEnabled = p.id === 'claude' || (p.id === 'codex' && codexSwarm?.available === true);
+            const isSelected = p.id === provider && isEnabled;
+            const isDisabled = !isEnabled;
             return (
               <button
                 key={p.id}
@@ -159,7 +162,7 @@ export default function OrchestratorModelPicker({ provider, model, onChange, dis
                 data-testid={`orch-model-picker-provider-${p.id}`}
                 title={isDisabled
                   ? p.id === 'codex'
-                    ? 'Codex orchestrator requires the App Server Swarm MCP bridge'
+                    ? codexSwarm?.reason || 'Codex Swarm requires the App Server preview backend selected and its Dynamic Tools bridge ready'
                     : 'Orchestrator chat-driven dispatch requires Claude'
                   : `Use ${p.label}`}
                 onClick={() => {

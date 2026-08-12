@@ -403,6 +403,7 @@ declare global {
     geminiSetSessionId?: (projectPath: string, sessionId: string | undefined, scope?: string) => void;
     codexBackendModeGet?: () => Promise<'sdk' | 'app-server'>;
     codexBackendModeSet?: (mode: 'sdk' | 'app-server') => Promise<'sdk' | 'app-server'>;
+    codexSwarmStatus?: () => Promise<{ available: boolean; reason?: string }>;
     codexAppServerPreviewStatus?: () => Promise<{ available: boolean; reason?: string }>;
     codexAppServerApprove?: (
       projectPath: string,

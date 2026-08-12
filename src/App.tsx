@@ -281,6 +281,11 @@ export default function App() {
   const [claudeModels, setClaudeModels] = useState<ClaudeModelOption[]>([]);
   const [codexPermission, setCodexPermission] = useState<CodexPermission>('auto');
   const [codexEffort, setCodexEffort] = useState<CodexEffort>('high');
+  const [codexBackendMode, setCodexBackendMode] = useState<'sdk' | 'app-server'>('sdk');
+  const [codexSwarmStatus, setCodexSwarmStatus] = useState<{ available: boolean; reason?: string }>({
+    available: false,
+    reason: 'Codex Swarm requires the App Server preview backend selected and its Dynamic Tools bridge ready.',
+  });
   const [geminiModel, setGeminiModel] = useState('auto-gemini-3');
   const [geminiModels, setGeminiModels] = useState<{ id: string; name: string }[]>([]);
   const [geminiApprovalMode, setGeminiApprovalMode] = useState<GeminiApprovalMode>('default');
@@ -792,14 +797,14 @@ export default function App() {
 
   // Close provider-specific sidebars when switching to a provider that doesn't support them.
   useEffect(() => {
-    const caps = getCapabilities(aiProvider);
+    const caps = getCapabilities(aiProvider, { codexBackendMode, codexSwarmStatus });
     setSidebarOpen(prev => {
       if (prev === 'mcp' && !caps.hasMcp) return null;
       if (prev === 'plugins' && !caps.hasPlugins) return null;
       if (prev === 'swarm' && !caps.hasOrchestrator) return null;
       return prev;
     });
-  }, [aiProvider]);
+  }, [aiProvider, codexBackendMode, codexSwarmStatus]);
   const swarmSelectedRef = useRef<string>('overview');
   useEffect(() => { swarmSelectedRef.current = swarmSelected; }, [swarmSelected]);
 
@@ -2171,7 +2176,12 @@ export default function App() {
       if (merged.effort) setCodexEffort(merged.effort);
     }));
     window.sai.settingsGet('codexBackendMode', 'sdk').then(guard((mode: unknown) => {
-      void window.sai.codexBackendModeSet?.(mode === 'app-server' ? 'app-server' : 'sdk');
+      const selectedMode = mode === 'app-server' ? 'app-server' : 'sdk';
+      setCodexBackendMode(selectedMode);
+      void window.sai.codexBackendModeSet?.(selectedMode)
+        .then(() => window.sai.codexSwarmStatus?.())
+        .then((status) => { if (status) setCodexSwarmStatus(status); })
+        .catch(() => setCodexSwarmStatus({ available: false, reason: 'Codex App Server Swarm bridge could not be initialized.' }));
     }));
     window.sai.settingsGet('gemini', {}).then(guard((g: any) => {
       if (g.model) setGeminiModel(g.model);
@@ -4895,6 +4905,7 @@ export default function App() {
                     projectLabel={activeMetaRuntime && activeMetaRuntime.syntheticRoot === wsPath ? activeMetaRuntime.meta.name : undefined}
                     orchestratorProvider={orchProvider}
                     orchestratorModel={orchModel}
+                    codexSwarm={codexSwarmStatus}
                     onProviderModelChange={(nextProvider, nextModel) => {
                       // Persist + update ref so downstream session re-spawns pick
                       // up the new model. Provider is currently locked to claude
@@ -4906,10 +4917,11 @@ export default function App() {
                       swarmSettingsRef.current.orchestratorModel = nextModel;
                       // Force a re-render so the new label shows immediately.
                       setSwarmSettingsTick(t => t + 1);
-                      // Restart the orchestrator Claude scope so the new
-                      // --model flag takes effect on the next turn.
+                      // Restart only the current orchestrator transport so a
+                      // model/provider change applies to its dedicated scope.
                       try {
-                        (window.sai as any).claudeStop?.(wsPath, orchSessionId);
+                        const stop = orchProvider === 'codex' ? window.sai.codexStop : window.sai.claudeStop;
+                        stop?.(wsPath, orchSessionId);
                       } catch { /* noop */ }
                       try {
                         const wsName = wsPath.split(/[\\/]/).filter(Boolean).pop() || wsPath;
@@ -4922,7 +4934,8 @@ export default function App() {
                           defaultApprovalPolicy: cfg.defaultApprovalPolicy ?? 'auto-read',
                           concurrencyCap: cfg.concurrencyCap ?? 5,
                         };
-                        (window.sai as any).claudeStart?.(wsPath, orchSessionId, 'orchestrator', ctx);
+                        const start = nextProvider === 'codex' ? window.sai.codexStart : window.sai.claudeStart;
+                        start?.(wsPath, orchSessionId, 'orchestrator', ctx, wsPath);
                       } catch { /* noop */ }
                     }}
                     stats={{
@@ -5618,6 +5631,12 @@ export default function App() {
           if (key === 'codexModel') handleCodexModelChange(value);
           if (key === 'codexPermission') handleCodexPermissionChange(value);
           if (key === 'codexEffort' && (value === undefined || isCodexEffort(value))) handleCodexEffortChange(value);
+          if (key === 'codexBackendMode') {
+            setCodexBackendMode(value === 'app-server' ? 'app-server' : 'sdk');
+            void window.sai.codexSwarmStatus?.()
+              .then((status) => { if (status) setCodexSwarmStatus(status); })
+              .catch(() => setCodexSwarmStatus({ available: false, reason: 'Codex App Server Swarm bridge could not be initialized.' }));
+          }
           if (key === 'focusedChat') { setFocusedChat(value); if (value) { setExpanded(['chat', 'terminal']); setSplitRatio(0.66); } }
           if (key === 'overlayEnabled') setOverlayEnabled(!!value);
           if (key === 'defaultView') { /* persisted only, applies on next launch */ }
@@ -5709,7 +5728,7 @@ export default function App() {
           swarmApprovalCount={swarmApprovalCount}
           chatNotificationCount={chatNotificationCount}
           overallStatus={approvalSessions.size > 0 ? 'approval' : busyWorkspaces.size > 0 && completedWorkspaces.size > 0 ? 'busy-done' : completedWorkspaces.size > 0 ? 'done' : busyWorkspaces.size > 0 ? 'busy' : null}
-          hasOrchestrator={getCapabilities(aiProvider).hasOrchestrator}
+          hasOrchestrator={getCapabilities(aiProvider, { codexBackendMode, codexSwarmStatus }).hasOrchestrator}
           hasMcp={getCapabilities(aiProvider).hasMcp}
           hasPlugins={getCapabilities(aiProvider).hasPlugins}
         />

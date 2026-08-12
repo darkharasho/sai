@@ -78,6 +78,7 @@ contextBridge.exposeInMainWorld('sai', {
   codexBackendModeGet: () => ipcRenderer.invoke('codex:backendMode:get'),
   codexBackendModeSet: (mode: 'sdk' | 'app-server') => ipcRenderer.invoke('codex:backendMode:set', mode),
   codexAppServerPreviewStatus: () => ipcRenderer.invoke('codex:appServerPreviewStatus'),
+  codexSwarmStatus: () => ipcRenderer.invoke('codex:swarmStatus'),
   codexAppServerApprove: (
     projectPath: string,
     scope: string | undefined,

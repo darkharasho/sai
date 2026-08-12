@@ -90,6 +90,7 @@ import {
   __setCodexBackendFactoriesForTests,
   destroyCodexBackendIfActive,
   getCodexAppServerPreviewStatus,
+  getCodexSwarmStatus,
   getCodexBackend,
   getCodexBackendMode,
   setCodexBackendMode,
@@ -131,6 +132,26 @@ afterEach(() => {
 });
 
 describe('Codex backend selection', () => {
+  it('keeps Swarm disabled on the SDK and probes only the selected App Server bridge', async () => {
+    const sdk = backendStub();
+    const appServer = {
+      ...backendStub(),
+      previewStatus: { available: true },
+      getSwarmStatus: vi.fn().mockResolvedValue({ available: true }),
+    };
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
+
+    await expect(getCodexSwarmStatus()).resolves.toEqual(expect.objectContaining({
+      available: false,
+      reason: expect.stringMatching(/SDK backend is selected/i),
+    }));
+    expect(appServer.getSwarmStatus).not.toHaveBeenCalled();
+
+    setCodexBackendMode('app-server');
+    await expect(getCodexSwarmStatus()).resolves.toEqual({ available: true });
+    expect(appServer.getSwarmStatus).toHaveBeenCalledOnce();
+  });
+
   it('constructs and caches one SDK backend', () => {
     const first = getCodexBackend();
     const second = getCodexBackend();

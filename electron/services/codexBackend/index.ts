@@ -107,6 +107,21 @@ class ScopedCodexBackend implements CodexBackend {
     return this.backendFor(requestedMode).getModels(forceRefresh);
   }
 
+  async getSwarmStatus(): Promise<CodexAppServerPreviewStatus> {
+    if (requestedMode !== 'app-server') {
+      return { available: false, reason: 'Codex Swarm requires the App Server preview backend; the SDK backend is selected.' };
+    }
+    const preview = this.backends['app-server'] ?? (this.backends['app-server'] = createAppServerBackend());
+    if (!isAppServerPreviewBackend(preview)) {
+      return { available: false, reason: 'Codex Swarm requires an App Server backend with Dynamic Tools support.' };
+    }
+    if (!preview.previewStatus.available) return preview.previewStatus;
+    if (!preview.getSwarmStatus) {
+      return { available: false, reason: 'Codex App Server Swarm bridge is unavailable.' };
+    }
+    return preview.getSwarmStatus();
+  }
+
   approve(projectPath: string, scope: string | undefined, requestHandle: string, decision: CodexApprovalDecision): CodexApprovalResult {
     const mode = this.assignments.get(codexScopeKey(projectPath, scope));
     // Never route a decision to a newly selected backend: a request is valid
@@ -206,6 +221,13 @@ export function getCodexAppServerPreviewStatus(): CodexAppServerPreviewStatus {
   if (active instanceof ScopedCodexBackend) return active.previewStatus;
   if (isAppServerPreviewBackend(active)) return active.previewStatus;
   return { available: true };
+}
+
+/** Runtime capability check for the isolated App Server Dynamic Tools bridge. */
+export async function getCodexSwarmStatus(): Promise<CodexAppServerPreviewStatus> {
+  const backend = getCodexBackend();
+  if (backend instanceof ScopedCodexBackend) return backend.getSwarmStatus();
+  return { available: false, reason: 'Codex Swarm requires the App Server preview backend.' };
 }
 
 /** Return the scoped dispatcher, constructing the stable SDK transport first. */

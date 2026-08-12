@@ -2,6 +2,7 @@ import { ipcMain } from 'electron';
 import {
   getCodexBackend,
   getCodexAppServerPreviewStatus,
+  getCodexSwarmStatus,
   getCodexBackendMode,
   setCodexBackendMode,
   type CodexBackendMode,
@@ -63,6 +64,7 @@ export function registerCodexHandlers(): void {
     return setCodexBackendMode(normalized);
   });
   ipcMain.handle('codex:appServerPreviewStatus', () => getCodexAppServerPreviewStatus());
+  ipcMain.handle('codex:swarmStatus', () => getCodexSwarmStatus());
 
   ipcMain.handle(
     'codex:appServerApprove',

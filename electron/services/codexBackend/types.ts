@@ -226,6 +226,8 @@ export interface CodexBackend {
   reconcileScope(projectPath: string, scope?: string): void;
   setSessionId(projectPath: string, sessionId: string | undefined, scope?: string): void;
   getModels(forceRefresh?: boolean): Promise<CodexModelResult>;
+  /** App Server exposes this only after its experimental Swarm bridge probes cleanly. */
+  getSwarmStatus?(): Promise<CodexAppServerPreviewStatus>;
   approve(projectPath: string, scope: string | undefined, requestHandle: string, decision: CodexApprovalDecision): CodexApprovalResult;
   /** SDK returns a typed unsupported result; App Server validates a pending request. */
   answerUserInput(projectPath: string, scope: string | undefined, requestHandle: string, response: CodexUserInputResponse): CodexApprovalResult;

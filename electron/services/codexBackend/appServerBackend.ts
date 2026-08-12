@@ -461,6 +461,26 @@ export class AppServerBackend implements CodexBackend {
     }
   }
 
+  /**
+   * Swarm is only safe to advertise after its separate experimental App Server
+   * connection has negotiated and can serve its catalogue. This deliberately
+   * does not create a thread: selecting the Swarm sidebar must not leave an
+   * orphan Codex conversation behind.
+   */
+  async getSwarmStatus(): Promise<CodexAppServerPreviewStatus> {
+    if (this.unavailableReason) return { available: false, reason: this.unavailableReason };
+    if (this.orchestratorUnavailableReason) return { available: false, reason: this.orchestratorUnavailableReason };
+    try {
+      const client = await this.ensureClient({ kind: 'orchestrator' } as ScopeRuntime);
+      await client.request('model/list', {});
+      return { available: true };
+    } catch (error) {
+      const reason = errorText(error);
+      this.handleFailure('orchestrator', new AppServerUnavailableError(reason));
+      return { available: false, reason };
+    }
+  }
+
   approve(projectPath: string, scope: string | undefined, requestHandle: string, decision: CodexApprovalDecision): CodexApprovalResult {
     const normalizedScope = codexScope(scope);
     // Accept the raw ID only as a backwards-compatible main-process caller
