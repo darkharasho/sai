@@ -11,6 +11,8 @@ import { parseToolResultBlocks } from '../../lib/toolResultContent';
 import { registerChatListener, unregisterChatListener, takeBufferedMessages, reconcileDrainedMessages } from '../../lib/chatFrameGate';
 import { buildPendingQuestionAnswer } from '../../lib/pendingQuestionAnswer';
 import WaitingIndicator from './WaitingIndicator';
+import UserInputRequestPanel from './UserInputRequestPanel';
+import McpElicitationPanel from './McpElicitationPanel';
 
 // Projects whose brainstorm seed has already been consumed (or attempted) in
 // this renderer process. The seed is one-shot, but the chat start-effect can
@@ -76,7 +78,7 @@ import { watchTargetsFromMessage } from './githubRunResolver';
 
 const EMPTY_URL_SET: Set<string> = new Set();
 import ChatInput, { type ContextItem } from './ChatInput';
-import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, PendingSudoPrompt, QueuedMessage, TerminalTab } from '../../types';
+import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, PendingSudoPrompt, PendingCodexUserInput, PendingCodexMcpElicitation, QueuedMessage, TerminalTab } from '../../types';
 import type { MetaWorkspaceRuntime, CodexEffort, CodexModelOption } from '../../types';
 import type { WaitMeta } from '../../../electron/services/waitClassifier';
 import { buildHelpMessage } from './helpText';
@@ -639,6 +641,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const [drainInFlight, setDrainInFlight] = useState(false);
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(initialPendingApproval);
+  const [pendingCodexUserInput, setPendingCodexUserInput] = useState<PendingCodexUserInput | null>(null);
+  const [pendingCodexMcpElicitation, setPendingCodexMcpElicitation] = useState<PendingCodexMcpElicitation | null>(null);
   const [pendingSudoPrompt, setPendingSudoPrompt] = useState<PendingSudoPrompt | null>(null);
   const [fileContextEnabled, setFileContextEnabled] = useState(true);
   // Provider-neutral telemetry state. Null/empty until a provider actually
@@ -1160,6 +1164,39 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           });
           return touched ? { ...m, toolCalls: newToolCalls } : m;
         }));
+        return;
+      }
+
+      // Interactive App Server requests are capability-gated: never render
+      // them for SDK Codex or another provider, and keep each panel tied to
+      // the message subscription's workspace/scope.
+      if (msg.type === 'user_input_needed') {
+        if (aiProvider !== 'codex' || msg.provider !== 'codex'
+          || typeof msg.requestHandle !== 'string' || !Array.isArray(msg.questions)) return;
+        setPendingCodexUserInput({
+          provider: 'codex', requestHandle: msg.requestHandle, questions: msg.questions,
+          ...(typeof msg.autoResolutionMs === 'number' ? { autoResolutionMs: msg.autoResolutionMs } : {}),
+        });
+        return;
+      }
+      if (msg.type === 'mcp_elicitation_needed') {
+        if (aiProvider !== 'codex' || msg.provider !== 'codex'
+          || typeof msg.requestHandle !== 'string' || typeof msg.serverName !== 'string' || typeof msg.message !== 'string') return;
+        if (msg.mode === 'form' && msg.requestedSchema && typeof msg.requestedSchema === 'object') {
+          setPendingCodexMcpElicitation({ provider: 'codex', requestHandle: msg.requestHandle, mode: 'form', serverName: msg.serverName, message: msg.message, requestedSchema: msg.requestedSchema });
+        } else if (msg.mode === 'url' && typeof msg.url === 'string') {
+          setPendingCodexMcpElicitation({ provider: 'codex', requestHandle: msg.requestHandle, mode: 'url', serverName: msg.serverName, message: msg.message, url: msg.url, ...(typeof msg.elicitationId === 'string' ? { elicitationId: msg.elicitationId } : {}) });
+        }
+        return;
+      }
+      // Main process sends one of these only after the server has resolved the
+      // request. This is intentionally the only event-driven dismissal path.
+      if (msg.type === 'user_input_resolved' && msg.provider === 'codex' && typeof msg.requestHandle === 'string') {
+        setPendingCodexUserInput(current => current?.requestHandle === msg.requestHandle ? null : current);
+        return;
+      }
+      if (msg.type === 'mcp_elicitation_resolved' && msg.provider === 'codex' && typeof msg.requestHandle === 'string') {
+        setPendingCodexMcpElicitation(current => current?.requestHandle === msg.requestHandle ? null : current);
         return;
       }
 
@@ -2057,6 +2094,24 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     });
   };
 
+  const submitCodexUserInput = async (request: PendingCodexUserInput, answers: Record<string, string[]>) => {
+    try {
+      const result = await window.sai.codexAppServerAnswerUserInput?.(projectPath, claudeScope, request.requestHandle, answers);
+      if (result?.ok) setPendingCodexUserInput(current => current?.requestHandle === request.requestHandle ? null : current);
+    } catch {
+      // Keep the request actionable when the App Server preview is unavailable.
+    }
+  };
+
+  const resolveCodexMcpElicitation = async (request: PendingCodexMcpElicitation, decision: import('../../../electron/services/codexBackend').CodexMcpElicitationDecision) => {
+    try {
+      const result = await window.sai.codexAppServerResolveMcpElicitation?.(projectPath, claudeScope, request.requestHandle, decision);
+      if (result?.ok) setPendingCodexMcpElicitation(current => current?.requestHandle === request.requestHandle ? null : current);
+    } catch {
+      // Keep the request actionable when the App Server preview is unavailable.
+    }
+  };
+
   const handleFakeError = useCallback((text: string) => {
     const arg = text.replace(/^\/fake-error\s*/, '').trim() as keyof typeof FAKE_ERROR_VARIANTS;
     const variant = FAKE_ERROR_VARIANTS[arg] ?? FAKE_ERROR_VARIANTS[''];
@@ -2563,6 +2618,19 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
                 ×
               </button>
             </div>
+          )}
+          {pendingCodexUserInput && aiProvider === 'codex' && (
+            <UserInputRequestPanel
+              request={pendingCodexUserInput}
+              onSubmit={(answers) => { void submitCodexUserInput(pendingCodexUserInput, answers); }}
+              onCancel={() => { void submitCodexUserInput(pendingCodexUserInput, {}); }}
+            />
+          )}
+          {pendingCodexMcpElicitation && aiProvider === 'codex' && (
+            <McpElicitationPanel
+              request={pendingCodexMcpElicitation}
+              onResolve={(decision) => { void resolveCodexMcpElicitation(pendingCodexMcpElicitation, decision); }}
+            />
           )}
           <ChatInput
             onSend={handleSend}

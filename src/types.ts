@@ -167,6 +167,31 @@ export interface PendingSudoPrompt {
   error?: string;
 }
 
+/** Renderer-safe, capability-gated Codex App Server input request. */
+export interface PendingCodexUserInput {
+  provider: 'codex';
+  requestHandle: string;
+  questions: Array<{
+    id: string;
+    prompt: string;
+    options?: Array<{ id: string; label: string; description?: string }>;
+    allowOther?: boolean;
+  }>;
+  /** Present only when the server supplied an automatic-resolution deadline. */
+  autoResolutionMs?: number;
+}
+
+/** Renderer-safe MCP elicitation request from the Codex App Server preview. */
+export type PendingCodexMcpElicitation = {
+  provider: 'codex';
+  requestHandle: string;
+  serverName: string;
+  message: string;
+} & (
+  | { mode: 'form'; requestedSchema: Record<string, unknown> }
+  | { mode: 'url'; url: string; elicitationId?: string }
+);
+
 export interface QueuedMessage {
   id: string;
   text: string;

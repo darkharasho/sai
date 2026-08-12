@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, render, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { installMockSai } from '../../../helpers/ipc-mock';
 import { readFlipRect, _resetFlipRegistry } from '../../../../src/components/Chat/flipRegistry';
@@ -243,6 +243,43 @@ describe('ChatPanel', () => {
     });
 
     expect(latestChatInputProps.pendingApproval).toBeNull();
+  });
+
+  it('routes Codex App Server input requests through the isolated bridge and keeps them actionable until resolved', async () => {
+    mockSai.codexAppServerAnswerUserInput.mockResolvedValueOnce({ ok: false, code: 'not-pending' });
+    const props = { ...baseProps(), aiProvider: 'codex' as const, claudeScope: 'scope-a' };
+    render(<ChatPanel {...props} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'user_input_needed', provider: 'codex', requestHandle: 'question-1', projectPath: '/project', scope: 'scope-a', questions: [{ id: 'style', prompt: 'Choose style', options: [{ id: 'brief', label: 'Brief' }] }] });
+    });
+    fireEvent.click(screen.getByLabelText('Brief'));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Submit' })); });
+    expect(mockSai.codexAppServerAnswerUserInput).toHaveBeenCalledWith('/project', 'scope-a', 'question-1', { style: ['brief'] });
+    expect(screen.getByTestId('codex-user-input-request')).toBeTruthy();
+
+    await act(async () => {
+      handler({ type: 'user_input_resolved', provider: 'codex', requestHandle: 'question-1', projectPath: '/project', scope: 'scope-a' });
+    });
+    expect(screen.queryByTestId('codex-user-input-request')).toBeNull();
+  });
+
+  it('routes only Codex App Server MCP elicitation through its response bridge', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const, claudeScope: 'scope-a' };
+    render(<ChatPanel {...props} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'mcp_elicitation_needed', requestHandle: 'legacy', mode: 'url', serverName: 'Wrong', message: 'Ignore', url: 'https://wrong.test', projectPath: '/project', scope: 'scope-a' });
+      handler({ type: 'mcp_elicitation_needed', provider: 'codex', requestHandle: 'mcp-1', mode: 'url', serverName: 'Calendar', message: 'Continue login', url: 'https://calendar.test/login', projectPath: '/project', scope: 'scope-a' });
+    });
+    expect(screen.getByText('Calendar')).toBeTruthy();
+    expect(screen.queryByText('Wrong')).toBeNull();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Cancel' })); });
+    expect(mockSai.codexAppServerResolveMcpElicitation).toHaveBeenCalledWith('/project', 'scope-a', 'mcp-1', { action: 'cancel' });
   });
 
   it('sends the raw Gemini prompt without synthetic conversation history and includes chat scope', async () => {
