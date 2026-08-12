@@ -56,9 +56,10 @@ const EFFORT_CONFIG = {
 };
 
 const MODEL_OPTIONS = [
-  { value: 'claude-opus-4-8',           label: 'Opus',   hint: 'Most capable',  color: C.orange },
-  { value: 'claude-sonnet-4-6',         label: 'Sonnet', hint: 'Balanced',      color: C.accent },
-  { value: 'claude-haiku-4-5-20251001', label: 'Haiku',  hint: 'Fastest',       color: C.green },
+  { value: 'default', label: 'Desktop default', hint: 'Use the desktop default', color: C.textMuted },
+  { value: 'opus',    label: 'Latest Opus',     hint: 'Most capable',            color: C.orange },
+  { value: 'sonnet',  label: 'Latest Sonnet',   hint: 'Balanced',                color: C.accent },
+  { value: 'haiku',   label: 'Latest Haiku',    hint: 'Fastest',                 color: C.green },
 ];
 
 const PERM_MODES: { value: PermMode; label: string; hint?: string }[] = [
@@ -300,9 +301,8 @@ export function Composer({
         title="Model"
         options={MODEL_OPTIONS}
         current={overrides.model}
-        onSelect={(v) => onOverridesChange({ ...overrides, model: v })}
+        onSelect={(v) => onOverridesChange({ ...overrides, model: v === 'default' ? undefined : v })}
         onClose={() => setSheet(null)}
-        allowClear
       />
       <PickerSheet
         open={sheet === 'permMode'}

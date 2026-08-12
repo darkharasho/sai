@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BEARER_KEY, connect, extractPairCode, pair, type WireClient } from './wire';
+import { BEARER_KEY, connect, extractPairCode, pair, type RemoteClaudeModel, type WireClient } from './wire';
 import { describeDevice } from './deviceLabel';
 import { readPersisted, writePersisted, removePersisted, isNonEmptyString } from './lib/persisted';
 
@@ -108,6 +108,18 @@ function ConnectedShell({ client }: { client: WireClient }) {
   const [navOpen, setNavOpen] = useState(false);
   const [follow, setFollow] = useState(true);
   const [active, setActive] = useState<ChatActive | null>(null);
+  const [claudeModels, setClaudeModels] = useState<RemoteClaudeModel[]>([]);
+
+  // The catalogue is account-scoped, so wait until the authenticated shell is
+  // mounted. A failure deliberately leaves the rolling-alias fallback intact.
+  useEffect(() => {
+    let cancelled = false;
+    client.requestClaudeModels();
+    void client.waitForClaudeModels()
+      .then((models) => { if (!cancelled) setClaudeModels(models); })
+      .catch(() => { /* fallback remains available */ });
+    return () => { cancelled = true; };
+  }, [client]);
 
   useEffect(() => {
     return client.on((msg) => {
@@ -159,6 +171,7 @@ function ConnectedShell({ client }: { client: WireClient }) {
           follow={follow}
           onFollowChange={setFollow}
           onOpenNav={() => setNavOpen(true)}
+          models={claudeModels}
         />
       </div>
       <NavDrawer
