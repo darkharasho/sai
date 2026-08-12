@@ -7,6 +7,7 @@ import {
   type AppServerServerRequestResponder,
 } from './appServerClient';
 import { mapAppServerEvent } from './appServerEventMap';
+import { SAI_SWARM_DYNAMIC_TOOLS } from './appServerDynamicTools';
 import { isCodexUserInputResponse, normalizeCodexModelOption, codexScope, codexScopeKey, type CodexAppServerPreviewStatus, type CodexApprovalDecision, type CodexApprovalMetadata, type CodexApprovalResult, type CodexBackend, type CodexMcpElicitationDecision, type CodexMcpElicitationForm, type CodexMcpElicitationUrl, type CodexModelResult, type CodexSendArgs, type CodexSessionKind, type CodexStartArgs, type CodexUserInputAnswers, type CodexUserInputQuestion, type CodexUserInputResponse } from './types';
 import type { SaiEnvelope } from './sdkEventMap';
 import { getOrCreate as getOrCreateWorkspace } from '../workspace';
@@ -87,10 +88,12 @@ export class AppServerUnsupportedCapabilityError extends Error {
 }
 
 export interface AppServerBackendDeps {
-  createClient?: () => AppServerClientTransport;
+  createClient?: (options: { experimentalApi: boolean }) => AppServerClientTransport;
   emit?: (event: SaiEnvelope) => void;
   registerWorkspace?: (projectPath: string) => void;
 }
+
+type AppServerClientKind = 'standard' | 'orchestrator';
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -325,21 +328,20 @@ function schemaAccepts(schema: Record<string, unknown>, value: unknown, depth = 
 export class AppServerBackend implements CodexBackend {
   private readonly runtimes = new Map<string, ScopeRuntime>();
   private readonly metadata = new Map<string, ScopeMeta>();
-  private readonly createClient: () => AppServerClientTransport;
+  private readonly createClient: (options: { experimentalApi: boolean }) => AppServerClientTransport;
   private readonly emit: (event: SaiEnvelope) => void;
   private readonly registerWorkspace: (projectPath: string) => void;
-  private client: AppServerClientTransport | undefined;
-  private clientStart: Promise<void> | undefined;
+  private readonly clients = new Map<AppServerClientKind, AppServerClientTransport>();
+  private readonly clientStarts = new Map<AppServerClientKind, Promise<void>>();
   private unavailableReason: string | undefined;
-  private unsubscribeNotifications: (() => void) | undefined;
-  private unsubscribeServerRequests: (() => void) | undefined;
-  private unsubscribeFailure: (() => void) | undefined;
+  private orchestratorUnavailableReason: string | undefined;
+  private readonly clientUnsubscribers: Array<() => void> = [];
   private readonly pendingApprovals = new Map<string | number, PendingApproval>();
   private readonly pendingUserInputs = new Map<string | number, PendingUserInput>();
   private readonly pendingMcpElicitations = new Map<string | number, PendingMcpElicitation>();
 
   constructor(deps: AppServerBackendDeps = {}) {
-    this.createClient = deps.createClient ?? (() => new AppServerClient());
+    this.createClient = deps.createClient ?? ((options) => new AppServerClient(options));
     this.emit = deps.emit ?? (() => undefined);
     this.registerWorkspace = deps.registerWorkspace ?? ((projectPath) => {
       try { getOrCreateWorkspace(projectPath); } catch { /* isolated tests or shutdown */ }
@@ -370,8 +372,10 @@ export class AppServerBackend implements CodexBackend {
       await this.ensureThread(runtime);
       this.emit({ type: 'ready', projectPath: args.projectPath, scope });
     } catch (error) {
-      this.settleUnavailable(runtime, errorText(error));
-      throw error;
+      const failure = this.startupFailure(runtime, error);
+      if (runtime.kind === 'orchestrator') this.orchestratorUnavailableReason ??= failure.message;
+      this.settleUnavailable(runtime, failure.message, runtime.kind !== 'orchestrator');
+      throw failure;
     }
   }
 
@@ -505,15 +509,10 @@ export class AppServerBackend implements CodexBackend {
     this.clearAllPending(false);
     this.runtimes.clear();
     this.metadata.clear();
-    this.unsubscribeNotifications?.();
-    this.unsubscribeServerRequests?.();
-    this.unsubscribeFailure?.();
-    this.unsubscribeNotifications = undefined;
-    this.unsubscribeServerRequests = undefined;
-    this.unsubscribeFailure = undefined;
-    this.client?.destroy();
-    this.client = undefined;
-    this.clientStart = undefined;
+    for (const unsubscribe of this.clientUnsubscribers.splice(0)) unsubscribe();
+    for (const client of this.clients.values()) client.destroy();
+    this.clients.clear();
+    this.clientStarts.clear();
   }
 
   private runtimeFor(projectPath: string, scope: string): ScopeRuntime {
@@ -526,29 +525,52 @@ export class AppServerBackend implements CodexBackend {
     return runtime;
   }
 
-  private async ensureClient(): Promise<AppServerClientTransport> {
-    if (this.unavailableReason) throw new AppServerUnavailableError(this.unavailableReason);
-    if (!this.client) {
-      this.client = this.createClient();
-      this.unsubscribeNotifications = this.client.onNotification((event) => this.handleNotification(event));
-      this.unsubscribeServerRequests = this.client.onServerRequest((request) => this.handleServerRequest(request));
-      this.unsubscribeFailure = this.client.onFailure((error) => this.handleFailure(error));
-      this.clientStart = this.client.start().catch((error) => {
-        this.markUnavailable(errorText(error));
-        throw error;
-      });
+  private startupFailure(runtime: ScopeRuntime, error: unknown): Error {
+    const reason = errorText(error);
+    if (runtime.kind === 'orchestrator' && /dynamicTools|experimentalApi/i.test(reason)) {
+      return new AppServerUnavailableError(
+        `Codex App Server Swarm tools require a newer Codex App Server host with experimental API support: ${reason}`,
+      );
     }
-    await this.clientStart;
-    return this.client;
+    return error instanceof Error ? error : new AppServerUnavailableError(reason);
+  }
+
+  private clientKind(runtime?: ScopeRuntime): AppServerClientKind {
+    return runtime?.kind === 'orchestrator' ? 'orchestrator' : 'standard';
+  }
+
+  private async ensureClient(runtime?: ScopeRuntime): Promise<AppServerClientTransport> {
+    if (this.unavailableReason) throw new AppServerUnavailableError(this.unavailableReason);
+    const kind = this.clientKind(runtime);
+    if (kind === 'orchestrator' && this.orchestratorUnavailableReason) {
+      throw new AppServerUnavailableError(this.orchestratorUnavailableReason);
+    }
+    let client = this.clients.get(kind);
+    if (!client) {
+      client = this.createClient({ experimentalApi: kind === 'orchestrator' });
+      this.clients.set(kind, client);
+      this.clientUnsubscribers.push(client.onNotification((event) => this.handleNotification(event)));
+      this.clientUnsubscribers.push(client.onServerRequest((request) => this.handleServerRequest(client!, request)));
+      this.clientUnsubscribers.push(client.onFailure((error) => this.handleFailure(kind, error)));
+      this.clientStarts.set(kind, client.start().catch((error) => {
+        this.handleFailure(kind, error instanceof AppServerUnavailableError ? error : new AppServerUnavailableError(errorText(error)));
+        throw error;
+      }));
+    }
+    await this.clientStarts.get(kind)!;
+    return client;
   }
 
   private async ensureThread(runtime: ScopeRuntime): Promise<void> {
     if (runtime.threadId) return;
-    const client = await this.ensureClient();
+    const client = await this.ensureClient(runtime);
     const isNewThread = !runtime.sessionId;
     const result = runtime.sessionId
       ? await client.request('thread/resume', { threadId: runtime.sessionId })
-      : await client.request('thread/start', { cwd: runtime.cwd });
+      : await client.request('thread/start', {
+        cwd: runtime.cwd,
+        ...(runtime.kind === 'orchestrator' ? { dynamicTools: SAI_SWARM_DYNAMIC_TOOLS } : {}),
+      });
     const threadId = idFrom(result, 'thread');
     if (!threadId) throw new AppServerUnavailableError('Codex App Server returned a thread without an ID');
     runtime.threadId = threadId;
@@ -564,7 +586,7 @@ export class AppServerBackend implements CodexBackend {
     try {
       await this.ensureThread(runtime);
       active.threadId ??= runtime.threadId;
-      const client = await this.ensureClient();
+      const client = await this.ensureClient(runtime);
       const result = await client.request('turn/start', this.turnStartParams(runtime, args));
       const turnId = idFrom(result, 'turn');
       if (!turnId) throw new AppServerUnavailableError('Codex App Server returned a turn without an ID');
@@ -576,7 +598,7 @@ export class AppServerBackend implements CodexBackend {
       if (runtime.active !== active) return;
       this.flushPendingNotifications(runtime, active);
     } catch (error) {
-      if (runtime.active === active) this.settleUnavailable(runtime, errorText(error));
+      if (runtime.active === active) this.settleUnavailable(runtime, errorText(error), runtime.kind !== 'orchestrator');
     }
   }
 
@@ -584,10 +606,10 @@ export class AppServerBackend implements CodexBackend {
     if (active.interruptSent || !active.id || !active.threadId) return;
     active.interruptSent = true;
     try {
-      const client = await this.ensureClient();
+      const client = await this.ensureClient(runtime);
       await client.request('turn/interrupt', { threadId: active.threadId, turnId: active.id });
     } catch (error) {
-      this.markUnavailable(errorText(error));
+      this.handleRuntimeFailure(runtime, errorText(error));
     }
   }
 
@@ -634,13 +656,13 @@ export class AppServerBackend implements CodexBackend {
     }
   }
 
-  private handleServerRequest(request: AppServerServerRequest): void {
+  private handleServerRequest(client: AppServerClientTransport, request: AppServerServerRequest): void {
     if (request.method === USER_INPUT_METHOD) {
-      this.handleUserInputRequest(request);
+      this.handleUserInputRequest(client, request);
       return;
     }
     if (request.method === MCP_ELICITATION_METHOD) {
-      this.handleMcpElicitationRequest(request);
+      this.handleMcpElicitationRequest(client, request);
       return;
     }
     const metadata = approvalMetadata(request);
@@ -651,7 +673,7 @@ export class AppServerBackend implements CodexBackend {
     if (!params) return;
     let responder: AppServerServerRequestResponder;
     try {
-      responder = this.client?.claimServerRequest(request.id)!;
+      responder = client.claimServerRequest(request.id);
     } catch {
       return;
     }
@@ -677,9 +699,9 @@ export class AppServerBackend implements CodexBackend {
     });
   }
 
-  private claimScopedRequest(request: AppServerServerRequest): { responder: AppServerServerRequestResponder; runtime?: ScopeRuntime; active?: ActiveTurn } | undefined {
+  private claimScopedRequest(client: AppServerClientTransport, request: AppServerServerRequest): { responder: AppServerServerRequestResponder; runtime?: ScopeRuntime; active?: ActiveTurn } | undefined {
     let responder: AppServerServerRequestResponder;
-    try { responder = this.client?.claimServerRequest(request.id)!; } catch { return undefined; }
+    try { responder = client.claimServerRequest(request.id); } catch { return undefined; }
     const ids = eventIds(request);
     const candidates = ids.threadId ? [...this.runtimes.values()].filter((candidate) => candidate.threadId === ids.threadId) : [];
     // A request without turnId can only be scoped by thread. Never guess when
@@ -695,10 +717,10 @@ export class AppServerBackend implements CodexBackend {
       && active.threadId === ids.threadId && (!ids.turnId || active.id === ids.turnId));
   }
 
-  private handleUserInputRequest(request: AppServerServerRequest): void {
+  private handleUserInputRequest(client: AppServerClientTransport, request: AppServerServerRequest): void {
     const params = record(request.params);
     const questions = params && userInputQuestions(params);
-    const claimed = this.claimScopedRequest(request);
+    const claimed = this.claimScopedRequest(client, request);
     if (!claimed) return;
     const { responder, runtime, active } = claimed;
     if (!params || !questions || !this.isActiveOwner(runtime, active, request)) {
@@ -724,10 +746,10 @@ export class AppServerBackend implements CodexBackend {
     });
   }
 
-  private handleMcpElicitationRequest(request: AppServerServerRequest): void {
+  private handleMcpElicitationRequest(client: AppServerClientTransport, request: AppServerServerRequest): void {
     const params = record(request.params);
     const elicitation = params && mcpElicitation(params);
-    const claimed = this.claimScopedRequest(request);
+    const claimed = this.claimScopedRequest(client, request);
     if (!claimed) return;
     const { responder, runtime, active } = claimed;
     if (!params || !elicitation || !this.isActiveOwner(runtime, active, request)) {
@@ -885,8 +907,25 @@ export class AppServerBackend implements CodexBackend {
     try { responder.respond({ action: 'cancel', content: null }); } catch { /* already resolved */ }
   }
 
-  private handleFailure(error: AppServerUnavailableError): void {
-    this.markUnavailable(error.message);
+  private handleFailure(kind: AppServerClientKind, error: AppServerUnavailableError): void {
+    if (kind === 'standard') {
+      this.markUnavailable(error.message);
+      return;
+    }
+    this.orchestratorUnavailableReason ??= error.message;
+    for (const runtime of this.runtimes.values()) {
+      if (this.clientKind(runtime) !== 'orchestrator') continue;
+      this.clearPending(runtime, undefined, false);
+      if (runtime.active) this.settleUnavailable(runtime, error.message, false);
+    }
+  }
+
+  private handleRuntimeFailure(runtime: ScopeRuntime, reason: string): void {
+    if (this.clientKind(runtime) === 'orchestrator') {
+      this.handleFailure('orchestrator', new AppServerUnavailableError(reason));
+      return;
+    }
+    this.markUnavailable(reason);
   }
 
   private markUnavailable(reason: string): void {
@@ -898,8 +937,8 @@ export class AppServerBackend implements CodexBackend {
     }
   }
 
-  private settleUnavailable(runtime: ScopeRuntime, reason: string): void {
-    this.unavailableReason ??= reason;
+  private settleUnavailable(runtime: ScopeRuntime, reason: string, global = true): void {
+    if (global) this.unavailableReason ??= reason;
     if (!runtime.active) {
       this.emit({ type: 'error', text: reason, projectPath: runtime.projectPath, scope: runtime.scope, turnSeq: null });
       this.emit({ type: 'done', projectPath: runtime.projectPath, scope: runtime.scope, turnSeq: null, subagentsAborted: true });

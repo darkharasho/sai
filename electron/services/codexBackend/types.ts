@@ -1,6 +1,13 @@
 export type CodexSessionKind = 'chat' | 'task' | 'orchestrator';
 export type CodexBackendMode = 'sdk' | 'app-server';
 
+/** Fixed, main-process-owned definition for an App Server Dynamic Tool. */
+export interface CodexDynamicTool {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
 /** The App Server preview is opt-in and may become unavailable at runtime. */
 export interface CodexAppServerPreviewStatus {
   available: boolean;

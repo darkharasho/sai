@@ -15,13 +15,14 @@ function fakeChild() {
   return child;
 }
 
-function createClient(child: ReturnType<typeof fakeChild>, initializationTimeoutMs?: number) {
+function createClient(child: ReturnType<typeof fakeChild>, initializationTimeoutMs?: number, experimentalApi = false) {
   const spawn = vi.fn(() => child);
   const client = new AppServerClient({
     spawn: spawn as never,
     resolveBundledCodex: () => ({ executablePath: '/app/codex', pathDirs: ['/app/bin'] }),
     getEnv: () => ({ PATH: '/usr/bin' }),
     initializationTimeoutMs,
+    experimentalApi,
   });
   return { client, spawn };
 }
@@ -30,10 +31,15 @@ function reply(child: ReturnType<typeof fakeChild>, body: unknown) {
   child.stdout.emit('data', Buffer.from(`${JSON.stringify(body)}\n`));
 }
 
-async function start(client: AppServerClient, child: ReturnType<typeof fakeChild>) {
+async function start(client: AppServerClient, child: ReturnType<typeof fakeChild>, experimentalApi = false) {
   const ready = client.start();
   expect(JSON.parse(child.stdin.write.mock.calls[0][0])).toEqual({
-    id: 0, method: 'initialize', params: { clientInfo: { name: 'sai', version: '1.0' } },
+    id: 0,
+    method: 'initialize',
+    params: {
+      clientInfo: { name: 'sai', version: '1.0' },
+      ...(experimentalApi ? { capabilities: { experimentalApi: true } } : {}),
+    },
   });
   reply(child, { jsonrpc: '2.0', id: 0, result: { protocolVersion: 1 } });
   await ready;
@@ -51,6 +57,22 @@ describe('AppServerClient', () => {
       stdio: ['pipe', 'pipe', 'ignore'],
     }));
     expect(JSON.parse(child.stdin.write.mock.calls[1][0])).toEqual({ method: 'initialized' });
+  });
+
+  it('opts into experimental APIs only when explicitly requested', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child, undefined, true);
+
+    await start(client, child, true);
+
+    expect(JSON.parse(child.stdin.write.mock.calls[0][0])).toEqual({
+      id: 0,
+      method: 'initialize',
+      params: {
+        clientInfo: { name: 'sai', version: '1.0' },
+        capabilities: { experimentalApi: true },
+      },
+    });
   });
 
   it('fails closed when initialize returns a JSON-RPC error', async () => {

@@ -13,6 +13,7 @@ function harness() {
   const responses = new Map<string, unknown>();
   const queuedResponses = new Map<string, unknown[]>();
   const responders = new Map<string | number, AppServerServerRequestResponder>();
+  const clientOptions: Array<{ experimentalApi: boolean }> = [];
   const client: AppServerClientTransport = {
     failureReason: undefined,
     start: vi.fn(async () => undefined),
@@ -37,12 +38,15 @@ function harness() {
   const emitted: Array<Record<string, unknown>> = [];
   const registerWorkspace = vi.fn();
   const backend = new AppServerBackend({
-    createClient: () => client,
+    createClient: (options) => {
+      clientOptions.push(options);
+      return client;
+    },
     emit: (event) => emitted.push(event),
     registerWorkspace,
   });
   return {
-    backend, client, requests, responses, emitted, registerWorkspace,
+    backend, client, clientOptions, requests, responses, emitted, registerWorkspace,
     queueResponse: (method: string, response: unknown) => {
       const queue = queuedResponses.get(method) ?? [];
       queue.push(response);
@@ -83,6 +87,71 @@ describe('AppServerBackend', () => {
 
     expect(h.registerWorkspace).toHaveBeenCalledWith('/repo');
     expect(h.requests).toEqual([{ method: 'thread/start', params: { cwd: '/repo/chat' } }]);
+    expect(h.emitted).toContainEqual({ type: 'ready', projectPath: '/repo', scope: 'chat' });
+  });
+
+  it('starts an orchestrator thread with SAI\'s fixed dynamic Swarm tools', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-orchestrator' } });
+
+    await h.backend.start({ projectPath: '/repo', scope: 'orchestrator:run-1', kind: 'orchestrator' });
+
+    expect(h.requests).toEqual([{ method: 'thread/start', params: expect.objectContaining({
+      cwd: '/repo',
+      dynamicTools: expect.arrayContaining([
+        expect.objectContaining({ name: 'sai_swarm_spawn_task' }),
+        expect.objectContaining({ name: 'sai_swarm_query_status' }),
+      ]),
+    }) }]);
+    expect(h.clientOptions).toEqual([{ experimentalApi: true }]);
+  });
+
+  it('does not expose dynamic Swarm tools to ordinary chat or task threads', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-chat' } });
+
+    await h.backend.start({ projectPath: '/repo', scope: 'chat', kind: 'chat' });
+    await h.backend.start({ projectPath: '/repo', scope: 'task:one', kind: 'task' });
+
+    expect(h.requests).toEqual([
+      { method: 'thread/start', params: { cwd: '/repo' } },
+      { method: 'thread/start', params: { cwd: '/repo' } },
+    ]);
+    expect(h.clientOptions).toEqual([{ experimentalApi: false }]);
+  });
+
+  it('resumes an orchestrator without replacing its persisted Dynamic Tool catalogue', async () => {
+    const h = harness();
+    h.responses.set('thread/resume', { thread: { id: 'thread-orchestrator' } });
+    h.backend.setSessionId('/repo', 'thread-orchestrator', 'orchestrator:run-1');
+
+    await h.backend.start({ projectPath: '/repo', scope: 'orchestrator:run-1', kind: 'orchestrator' });
+
+    expect(h.clientOptions).toEqual([{ experimentalApi: true }]);
+    expect(h.requests).toEqual([{ method: 'thread/resume', params: { threadId: 'thread-orchestrator' } }]);
+  });
+
+  it('reports an actionable scoped failure when the host rejects Dynamic Tools', async () => {
+    const h = harness();
+    h.responses.set('thread/start', new Error('dynamicTools requires experimentalApi capability'));
+
+    await expect(h.backend.start({ projectPath: '/repo', scope: 'orchestrator:run-1', kind: 'orchestrator' }))
+      .rejects.toThrow(/Swarm tools require a newer Codex App Server host/i);
+    expect(h.emitted).toContainEqual(expect.objectContaining({
+      type: 'error', scope: 'orchestrator:run-1', text: expect.stringMatching(/Swarm tools require a newer Codex App Server host/i),
+    }));
+  });
+
+  it('keeps normal chat available when the isolated orchestrator host is unavailable', async () => {
+    const h = harness();
+    h.queueResponse('thread/start', new Error('dynamicTools requires experimentalApi capability'));
+    h.queueResponse('thread/start', { thread: { id: 'thread-chat' } });
+
+    await expect(h.backend.start({ projectPath: '/repo', scope: 'orchestrator:run-1', kind: 'orchestrator' }))
+      .rejects.toThrow(/Swarm tools require a newer Codex App Server host/i);
+    await expect(h.backend.start({ projectPath: '/repo', scope: 'chat', kind: 'chat' })).resolves.toBeUndefined();
+
+    expect(h.clientOptions).toEqual([{ experimentalApi: true }, { experimentalApi: false }]);
     expect(h.emitted).toContainEqual({ type: 'ready', projectPath: '/repo', scope: 'chat' });
   });
 
