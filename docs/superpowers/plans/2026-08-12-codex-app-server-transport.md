@@ -91,3 +91,12 @@
 3. Record the commands and results in the parity verification document, including the intentional follow-up scope: approval requests, command/MCP control, image input if supported, and full App Server Swarm orchestration.
 
 **Commit:** `docs: verify Codex App Server transport`
+
+### Verification record — 2026-08-12
+
+- `npm test -- --project unit tests/unit/electron/appServerClient.test.ts tests/unit/electron/appServerEventMap.test.ts tests/unit/electron/appServerBackend.test.ts tests/unit/electron/codexBackendDispatch.test.ts tests/unit/electron/codexBundledModels.test.ts tests/unit/electron/codexSdkBackend.test.ts tests/unit/electron/codexSdkEventMap.test.ts tests/unit/electron/codexSdkOptions.test.ts tests/unit/electron/codexTelemetry.test.ts tests/unit/components/SettingsModal.test.tsx tests/unit/preload.test.ts tests/unit/lib/codexEffort.test.ts` completed with **12 files and 287 tests passed**.
+- `npx tsc --noEmit` completed with exit code 0.
+- `npm run build` completed with exit code 0, including TypeScript, the desktop Vite build, the Remote PWA build, and the mobile-PWA asset sync.  It left the worktree clean.
+- `git diff --check 720fc794..HEAD` completed with exit code 0.  A focused source review confirmed that the client writes newline-delimited JSON-RPC to the bundled executable with `shell: false`; initialization is gated; malformed/unknown protocol traffic and unsupported server requests make the preview unavailable; thread/turn notifications are matched to the active scoped owner; and a preview failure remains pinned until that conversation is reset rather than silently moving an active turn.
+
+The verified preview deliberately does **not** offer interactive approval handling, command/MCP configuration or control, image input, or App Server-backed Swarm orchestration.  App Server requests are answered with JSON-RPC `-32601` and the preview becomes unavailable; image input emits a typed unsupported error.  Tool and MCP *activity* may be rendered from the stream, but no interactive control surface is claimed by this slice.
