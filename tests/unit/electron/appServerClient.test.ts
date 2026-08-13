@@ -204,6 +204,38 @@ describe('AppServerClient', () => {
     expect(validateUserMcpConfigServers([{ name: 'same', transport: 'stdio', command: 'npx', args: [] }, { name: 'same', transport: 'http', url: 'https://example.test' }])).toBeUndefined();
   });
 
+  it('fails closed without returning literal credentials from a config read', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+
+    const read = client.readUserMcpConfig();
+    reply(child, { id: 1, result: { layers: [{ layer: 'user', version: 'v1', config: {
+      mcp_servers: {
+        stdioSecret: { command: 'npx', args: ['--token=literal-secret-value', 'server'] },
+      },
+    } }] } });
+
+    await expect(read).rejects.toMatchObject({ code: 'unavailable', message: 'Codex MCP configuration is unavailable' });
+    await expect(client.writeUserMcpConfig('v1', [])).rejects.toMatchObject({ code: 'invalid' });
+    expect(child.stdin.write.mock.calls.map(([line]) => line).join('')).not.toContain('literal-secret-value');
+  });
+
+  it('rejects sensitive stdio and HTTP values before staging a config write', () => {
+    expect(normalizeUserMcpConfigServer('stdio-command', { command: 'Bearer literal-secret-value', args: [] })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('stdio-args', { command: 'npx', args: ['--credential=literal-secret-value'] })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('url-userinfo', { url: 'https://user:literal-secret-value@example.test/mcp' })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('url-query', { url: 'https://example.test/mcp?access_token=literal-secret-value' })).toBeUndefined();
+    expect(validateUserMcpConfigServers([{ name: 'write-secret', transport: 'http', url: 'https://example.test/mcp?token=literal-secret-value' }])).toBeUndefined();
+
+    expect(normalizeUserMcpConfigServer('safe-stdio', { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '/repo'] })).toEqual({
+      name: 'safe-stdio', transport: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '/repo'],
+    });
+    expect(normalizeUserMcpConfigServer('safe-http', { url: 'https://mcp.example.test/v1/connect?region=us-west-2' })).toEqual({
+      name: 'safe-http', transport: 'http', url: 'https://mcp.example.test/v1/connect?region=us-west-2',
+    });
+  });
+
   it('does not submit stale or invalid MCP config snapshots', async () => {
     const child = fakeChild();
     const { client } = createClient(child);
@@ -214,7 +246,11 @@ describe('AppServerClient', () => {
 
     await expect(client.writeUserMcpConfig('other', [])).rejects.toMatchObject({ code: 'invalid' });
     await expect(client.writeUserMcpConfig('v1', [{ name: 'unsafe', transport: 'http', url: 'file:///tmp/a' } as never])).rejects.toMatchObject({ code: 'invalid' });
+    await expect(client.writeUserMcpConfig('v1', [{
+      name: 'unsafe-secret', transport: 'stdio', command: 'npx', args: ['--token=literal-secret-value'],
+    }])).rejects.toMatchObject({ code: 'invalid' });
     expect(child.stdin.write).toHaveBeenCalledTimes(3); // initialize, initialized, config/read only
+    expect(child.stdin.write.mock.calls.map(([line]) => line).join('')).not.toContain('literal-secret-value');
   });
 
   it('invalidates the User config snapshot when the App Server connection fails', async () => {

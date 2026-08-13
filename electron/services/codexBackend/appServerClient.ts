@@ -114,6 +114,7 @@ const MCP_CONFIG_ENV = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
 const MCP_CONFIG_ENV_REFERENCE = /^\$\{?[A-Za-z_][A-Za-z0-9_]{0,127}\}?$/;
 const SENSITIVE_KEY = /(token|secret|password|authorization|cookie|credential|api[_-]?key)/i;
 const SENSITIVE_VALUE = /(?:bearer\s+|basic\s+|api[_-]?key|token|secret|password|sk-[a-z0-9])/i;
+const SENSITIVE_LITERAL = /(?:^|[\s:='\"])(?:bearer|basic)\s+\S+|(?:^|[-_?&\s])(?:access[_-]?token|token|secret|password|credential|api[_-]?key|authorization)(?:\s*[:=]\s*|\s+)\S+|(?:^|[\s:='\"])(?:sk-[a-z0-9][\w-]*)/i;
 
 /**
  * App Server error text may include command output, configuration, or secrets.
@@ -138,6 +139,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function safeConfigText(value: unknown, max = MCP_CONFIG_MAX_TEXT): string | undefined {
   return typeof value === 'string' && value.length > 0 && value.length <= max ? value : undefined;
+}
+
+/**
+ * Stdio commands and arguments are returned to the renderer and written back
+ * through config/batchWrite. Do not allow either path to carry credentials.
+ */
+function safeConnectionText(value: unknown): string | undefined {
+  const text = safeConfigText(value);
+  return text && !SENSITIVE_LITERAL.test(text) ? text : undefined;
+}
+
+function safeHttpConnectionUrl(value: unknown): string | undefined {
+  const url = safeConfigText(value);
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return undefined;
+    for (const [key, queryValue] of parsed.searchParams) {
+      if (SENSITIVE_KEY.test(key) || SENSITIVE_LITERAL.test(queryValue)) return undefined;
+    }
+    return url;
+  } catch {
+    return undefined;
+  }
 }
 
 function safeConfigMap(value: unknown, keyPattern: RegExp, rejectSensitiveKeys: boolean): Record<string, string> | undefined {
@@ -171,9 +196,9 @@ export function normalizeUserMcpConfigServer(name: unknown, value: unknown): Cod
   if (keys.length > MCP_CONFIG_MAX_FIELDS) return undefined;
   if (typeof value.command === 'string') {
     if (keys.some((key) => key !== 'command' && key !== 'args' && key !== 'env')) return undefined;
-    const command = safeConfigText(value.command);
+    const command = safeConnectionText(value.command);
     const args = value.args === undefined ? [] : Array.isArray(value.args) && value.args.length <= MCP_CONFIG_MAX_ARGS
-      ? value.args.map((arg) => safeConfigText(arg)).filter((arg): arg is string => Boolean(arg)) : undefined;
+      ? value.args.map((arg) => safeConnectionText(arg)).filter((arg): arg is string => Boolean(arg)) : undefined;
     if (!command || !args || args.length !== (Array.isArray(value.args) ? value.args.length : 0)) return undefined;
     const env = value.env === undefined ? undefined : safeConfigEnv(value.env);
     if (value.env !== undefined && !env) return undefined;
@@ -181,9 +206,8 @@ export function normalizeUserMcpConfigServer(name: unknown, value: unknown): Cod
   }
   if (typeof value.url === 'string') {
     if (keys.some((key) => key !== 'url' && key !== 'headers')) return undefined;
-    const url = safeConfigText(value.url);
+    const url = safeHttpConnectionUrl(value.url);
     if (!url) return undefined;
-    try { if (!['http:', 'https:'].includes(new URL(url).protocol)) return undefined; } catch { return undefined; }
     const headers = value.headers === undefined ? undefined : safeConfigMap(value.headers, /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/, true);
     if (value.headers !== undefined && !headers) return undefined;
     return { name, transport: 'http', url, ...(headers && Object.keys(headers).length ? { headers } : {}) };
