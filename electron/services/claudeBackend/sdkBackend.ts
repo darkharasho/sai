@@ -655,7 +655,8 @@ export class SdkBackend implements ClaudeBackend {
     }
     // Not a pending SDK approval — delegate to the CLI impl, which also owns
     // Gemini approvals (they route through the same claude:approve IPC).
-    return approveImpl(projectPath, toolUseId, approved, modifiedCommand, scope);
+    return approveImpl(projectPath, toolUseId, approved, modifiedCommand, scope)
+      .then((result) => result === undefined ? false : result);
   }
 
   answerQuestion(a: AnswerQuestionArgs): Promise<boolean> {
