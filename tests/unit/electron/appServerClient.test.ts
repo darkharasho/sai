@@ -222,6 +222,32 @@ describe('AppServerClient', () => {
     expect(child.stdin.write.mock.calls.map(([line]) => line).join('')).not.toContain('literal-secret-value');
   });
 
+  it('rejects attached short credential carriers from config reads without exposing their values', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+
+    const read = client.readUserMcpConfig();
+    reply(child, { id: 1, result: { layers: [{ layer: 'user', version: 'v1', config: {
+      mcp_servers: {
+        env: { command: 'npx', args: ['-eAPI_KEY=literal-secret-value'] },
+      },
+    } }] } });
+
+    await expect(read).rejects.toMatchObject({ code: 'unavailable', message: 'Codex MCP configuration is unavailable' });
+    expect(child.stdin.write.mock.calls.map(([line]) => line).join('')).not.toContain('literal-secret-value');
+
+    const headerChild = fakeChild();
+    const { client: headerClient } = createClient(headerChild);
+    await start(headerClient, headerChild);
+    const headerRead = headerClient.readUserMcpConfig();
+    reply(headerChild, { id: 1, result: { layers: [{ layer: 'user', version: 'v1', config: {
+      mcp_servers: { header: { command: 'curl', args: ['-HAuthorization:literal-secret-value'] } },
+    } }] } });
+    await expect(headerRead).rejects.toMatchObject({ code: 'unavailable', message: 'Codex MCP configuration is unavailable' });
+    expect(headerChild.stdin.write.mock.calls.map(([line]) => line).join('')).not.toContain('literal-secret-value');
+  });
+
   it('rejects sensitive stdio and HTTP values before staging a config write', () => {
     expect(normalizeUserMcpConfigServer('stdio-command', { command: 'Bearer literal-secret-value', args: [] })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('stdio-args', { command: 'npx', args: ['--credential=literal-secret-value'] })).toBeUndefined();
@@ -233,6 +259,9 @@ describe('AppServerClient', () => {
     expect(normalizeUserMcpConfigServer('stdio-auth-split', { command: 'npx', args: ['--auth', 'literal-secret-value'] })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('stdio-env-inline', { command: 'npx', args: ['--env=API_KEY=literal-secret-value'] })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('stdio-env-split', { command: 'npx', args: ['--env', 'API_KEY=literal-secret-value'] })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('stdio-env-short-attached', { command: 'npx', args: ['-eAPI_KEY=literal-secret-value'] })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('stdio-header-short-attached', { command: 'curl', args: ['-HAuthorization:literal-secret-value'] })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('stdio-header-long-attached', { command: 'curl', args: ['--header=Authorization: literal-secret-value'] })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('url-userinfo', { url: 'https://user:literal-secret-value@example.test/mcp' })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('url-query', { url: 'https://example.test/mcp?access_token=literal-secret-value' })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('url-fragment', { url: 'https://example.test/mcp#literal-secret-value' })).toBeUndefined();
@@ -240,6 +269,10 @@ describe('AppServerClient', () => {
     expect(validateUserMcpConfigServers([{ name: 'write-auth', transport: 'stdio', command: 'npx', args: ['--auth=literal-secret-value'] }])).toBeUndefined();
     expect(validateUserMcpConfigServers([{ name: 'write-token-split', transport: 'stdio', command: 'npx', args: ['--token', 'literal-secret-value'] }])).toBeUndefined();
     expect(validateUserMcpConfigServers([{ name: 'write-env-split', transport: 'stdio', command: 'npx', args: ['--env', 'API_KEY=literal-secret-value'] }])).toBeUndefined();
+
+    expect(normalizeUserMcpConfigServer('safe-short-options', { command: 'npx', args: ['-y', '--port=3000', '--verbose'] })).toEqual({
+      name: 'safe-short-options', transport: 'stdio', command: 'npx', args: ['-y', '--port=3000', '--verbose'],
+    });
 
     expect(normalizeUserMcpConfigServer('safe-stdio', { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '/repo'] })).toEqual({
       name: 'safe-stdio', transport: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '/repo'],
@@ -305,6 +338,25 @@ describe('AppServerClient', () => {
     await expect(client.writeUserMcpConfig('v1', [{
       name: 'unsafe-secret', transport: 'stdio', command: 'npx', args: ['--auth=literal-secret-value'],
     }])).rejects.toMatchObject({ code: 'invalid' });
+    expect(child.stdin.write).toHaveBeenCalledTimes(3); // initialize, initialized, config/read only
+    expect(child.stdin.write.mock.calls.map(([line]) => line).join('')).not.toContain('literal-secret-value');
+  });
+
+  it('does not submit attached short credential carriers in a config write', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+    const read = client.readUserMcpConfig();
+    reply(child, { id: 1, result: { layers: [{ layer: 'user', version: 'v1', config: { mcp_servers: {} } }] } });
+    await read;
+
+    await expect(client.writeUserMcpConfig('v1', [{
+      name: 'unsafe-env', transport: 'stdio', command: 'npx', args: ['-eAPI_KEY=literal-secret-value'],
+    }])).rejects.toMatchObject({ code: 'invalid' });
+    await expect(client.writeUserMcpConfig('v1', [{
+      name: 'unsafe-header', transport: 'stdio', command: 'curl', args: ['-HAuthorization:literal-secret-value'],
+    }])).rejects.toMatchObject({ code: 'invalid' });
+
     expect(child.stdin.write).toHaveBeenCalledTimes(3); // initialize, initialized, config/read only
     expect(child.stdin.write.mock.calls.map(([line]) => line).join('')).not.toContain('literal-secret-value');
   });

@@ -112,8 +112,14 @@ const MCP_CONFIG_MAX_TEXT = 2_048;
 const MCP_CONFIG_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/;
 const MCP_CONFIG_ENV = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
 const MCP_CONFIG_ENV_REFERENCE = /^\$\{?[A-Za-z_][A-Za-z0-9_]{0,127}\}?$/;
-const MCP_CONFIG_CREDENTIAL_FLAG = /^--(?:auth|authorization|access[_-]?token|token|secret|password|credential|api[_-]?key)$/i;
-const MCP_CONFIG_ENV_CARRIER = /^(?:--(?:env|environment)(?:=|$)|-e(?:=|$))/i;
+/**
+ * A connection editor has no safe representation for values carried directly
+ * by command-line flags. Reject the common long and short credential, env,
+ * and HTTP-header spellings rather than trying to distinguish a secret from a
+ * value that merely resembles one. This covers `-eNAME=value`,
+ * `-HHeader: value`, and their long attached forms as well as split flags.
+ */
+const MCP_CONFIG_VALUE_CARRIER = /^(?:--(?:env|environment|header|headers|auth|authorization|access[_-]?token|token|secret|password|credential|api[_-]?key)(?:=|:|$|[A-Za-z_])|-e(?:=|$|[A-Za-z_])|-H(?:=|$|\S)|-(?:a|p|u)(?:=|:|$|\S))/i;
 const SENSITIVE_KEY = /(token|secret|password|authorization|cookie|credential|api[_-]?key)/i;
 const SENSITIVE_LITERAL = /(?:^|[\s:='\"])(?:bearer|basic)\s+\S+|(?:^|[-_?&\s])(?:access[_-]?token|token|secret|password|credential|api[_-]?key|authorization)(?:\s*[:=]\s*|\s+)\S+|(?:^|\s)--?(?:auth|authorization|access[_-]?token|token|secret|password|credential|api[_-]?key)\s*=\s*\S+|(?:^|[\s:='\"])(?:sk-[a-z0-9][\w-]*)/i;
 
@@ -201,9 +207,9 @@ function safeConnectionArgs(value: unknown): string[] | undefined {
   if (args.some((arg) => !arg)) return undefined;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]!;
-    // Split secret flags and environment forwarding both hide credentials from
-    // the per-argument literal scan. Neither has a safe editor representation.
-    if (MCP_CONFIG_ENV_CARRIER.test(arg) || (MCP_CONFIG_CREDENTIAL_FLAG.test(arg) && index + 1 < args.length)) return undefined;
+    // Flag carriers hide values from the per-argument literal scan. Neither
+    // split nor attached forms have a safe editor representation.
+    if (MCP_CONFIG_VALUE_CARRIER.test(arg)) return undefined;
   }
   return args as string[];
 }
