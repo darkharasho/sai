@@ -39,4 +39,25 @@ describe('translateAcpEvent', () => {
     }, '/p', 'chat');
     expect(out.message.content[0]).toMatchObject({ type: 'tool_result', tool_use_id: 't1', content: 'boom', is_error: true });
   });
+
+  it('maps an in-progress command update to a partial tool result', () => {
+    const out = translateAcpEvent({
+      method: 'session/update',
+      params: { update: {
+        sessionUpdate: 'tool_call_update', toolCallId: 'cmd-1', status: 'in_progress',
+        content: [{ type: 'content', content: { type: 'text', text: 'running tests\n' } }],
+      } },
+    }, '/p', 'chat');
+    expect(out.message.content[0]).toMatchObject({
+      type: 'tool_result', tool_use_id: 'cmd-1', content: 'running tests\n', partial: true,
+    });
+  });
+
+  it('does not mark a completed tool update partial', () => {
+    const out = translateAcpEvent({
+      method: 'session/update',
+      params: { update: { sessionUpdate: 'tool_call_update', toolCallId: 'cmd-1', status: 'completed', content: [] } },
+    }, '/p', 'chat');
+    expect(out.message.content[0].partial).toBeUndefined();
+  });
 });

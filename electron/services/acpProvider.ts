@@ -356,6 +356,7 @@ export function translateAcpEvent(msg: any, projectPath: string, scope: string):
     }
 
     if (update?.sessionUpdate === 'tool_call_update') {
+      const terminal = update.status === 'completed' || update.status === 'failed' || update.status === 'cancelled';
       return {
         type: 'user',
         projectPath,
@@ -366,6 +367,7 @@ export function translateAcpEvent(msg: any, projectPath: string, scope: string):
             tool_use_id: update.toolCallId,
             content: acpContentToToolResult(update.content),
             is_error: update.status === 'failed',
+            ...(terminal ? {} : { partial: true }),
           }],
         },
       };
