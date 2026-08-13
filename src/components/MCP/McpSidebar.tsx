@@ -145,10 +145,10 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
   };
 
   useEffect(() => {
-    if (tab === 'browse' && registry.length === 0) {
+    if (!isCodex && tab === 'browse' && registry.length === 0) {
       loadRegistry();
     }
-  }, [tab]);
+  }, [isCodex, tab]);
 
   const handleAdd = async (config: McpServerConfig) => {
     await window.sai.mcpAdd(config);

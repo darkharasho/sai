@@ -73,6 +73,7 @@ describe('McpSidebar', () => {
     expect(queryByText('Add')).toBeNull();
     expect(mockSai.codexMcpRuntimeStatus).toHaveBeenCalledWith('/repo', 'chat-1');
     expect(mockSai.mcpList).not.toHaveBeenCalled();
+    expect(mockSai.mcpRegistryList).not.toHaveBeenCalled();
   });
 
   it('renders a concise unavailable explanation for Codex without stale Claude servers', async () => {
@@ -90,6 +91,23 @@ describe('McpSidebar', () => {
     await waitFor(() => expect(getByText('Codex MCP runtime status is unavailable on the SDK backend.')).toBeTruthy());
     expect(queryByText('claude-only')).toBeNull();
     expect(mockSai.mcpList).not.toHaveBeenCalled();
+    expect(mockSai.mcpRegistryList).not.toHaveBeenCalled();
+  });
+
+  it('does not load Claude MCP data when a persisted browse tab becomes Codex', async () => {
+    const { getByText, rerender } = render(
+      <McpSidebar provider="claude" projectPath="/repo" scope="chat-1" />,
+    );
+
+    fireEvent.click(getByText('Browse'));
+    await waitFor(() => expect(mockSai.mcpRegistryList).toHaveBeenCalledTimes(1));
+    vi.clearAllMocks();
+
+    rerender(<McpSidebar provider="codex" projectPath="/repo" scope="chat-1" />);
+
+    await waitFor(() => expect(mockSai.codexMcpRuntimeStatus).toHaveBeenCalledWith('/repo', 'chat-1'));
+    expect(mockSai.mcpList).not.toHaveBeenCalled();
+    expect(mockSai.mcpRegistryList).not.toHaveBeenCalled();
   });
 
   it('keeps the Claude installed and browse management flow unchanged', async () => {
