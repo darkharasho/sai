@@ -57,6 +57,21 @@ describe('ToolCallCard', () => {
     expect(container.querySelector('.tool-status-done')).toBeTruthy();
   });
 
+  it('keeps command output in the running card until live output settles', () => {
+    const toolCall = {
+      id: 'cmd-1', type: 'terminal_command' as const, name: 'Bash',
+      input: JSON.stringify({ command: 'npm test' }), output: 'collecting...\n', liveOutput: true,
+    };
+    const { container, rerender } = render(<ToolCallCard toolCall={toolCall} />);
+    expect(container.querySelector('.tool-call-card--running')).toBeTruthy();
+    expect(container.textContent).toContain('collecting...');
+
+    rerender(<ToolCallCard toolCall={{ ...toolCall, liveOutput: false }} />);
+    expect(container.querySelector('.tool-call-card--running')).toBeNull();
+    expect(container.querySelector('.tool-status-done')).toBeTruthy();
+    expect(container.textContent).toContain('collecting...');
+  });
+
   it('renders a failed mapped command result with the error status', () => {
     const event = {
       type: 'item.completed',

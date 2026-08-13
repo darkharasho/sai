@@ -68,6 +68,8 @@ export interface TranscriptMessage {
   toolUseId?: string;
   toolInput?: Record<string, unknown>;
   toolResult?: string | Record<string, unknown>;
+  /** True while `toolResult` is receiving incremental command output. */
+  toolLiveOutput?: boolean;
   toolStatus?: 'running' | 'done' | 'error';
   streaming?: boolean;
   /** Set on the assistant's terminal envelope (`result`) so we can render

@@ -212,7 +212,7 @@ export default function ToolCard({ name, input, result, status, toolUseId, onAns
                 </Section>
               )}
               {result !== undefined && (
-                <Section title={status === 'error' ? 'error' : 'result'}>
+                <Section title={status === 'running' ? 'output' : status === 'error' ? 'error' : 'result'}>
                   <CodeBlock content={typeof result === 'string' ? result : JSON.stringify(result, null, 2)} />
                 </Section>
               )}

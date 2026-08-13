@@ -251,10 +251,24 @@ export default function Chat({ client, statusStore, watcherStore, active, onActi
               : Array.isArray(b.content)
               ? b.content.map((c: any) => (c?.type === 'text' ? c.text : JSON.stringify(c))).join('\n')
               : JSON.stringify(b.content);
-            const status: 'done' | 'error' = b.is_error ? 'error' : 'done';
-            setMessages((arr) => arr.map((m) =>
-              m.id === `tool-${b.tool_use_id}` ? { ...m, toolResult: resultText, toolStatus: status } : m
-            ));
+            const partial = b.partial === true;
+            setMessages((arr) => arr.map((m) => {
+              if (m.id !== `tool-${b.tool_use_id}`) return m;
+              if (partial && m.toolLiveOutput === false) return m;
+              if (partial) {
+                const previous = typeof m.toolResult === 'string' ? m.toolResult : '';
+                const toolResult = resultText.startsWith(previous)
+                  ? resultText
+                  : previous.endsWith(resultText) ? previous : previous + resultText;
+                return { ...m, toolResult, toolLiveOutput: true, toolStatus: 'running' };
+              }
+              return {
+                ...m,
+                toolResult: resultText,
+                toolLiveOutput: false,
+                toolStatus: b.is_error ? 'error' : 'done',
+              };
+            }));
           }
         }
         return;

@@ -11,6 +11,8 @@ vi.mock('../../../../src/components/Chat/ChatMessage', () => ({
       data-msg-id={props.message?.id}
       data-msg-content={typeof props.message?.content === 'string' ? props.message.content : ''}
       data-msg-toolcalls={props.message?.toolCalls ? props.message.toolCalls.length : 0}
+      data-tool-output={props.message?.toolCalls?.[0]?.output ?? ''}
+      data-tool-live-output={props.message?.toolCalls?.[0]?.liveOutput === true ? 'true' : 'false'}
       data-streaming={props.isStreaming ? 'true' : 'false'}
     />
   ),
@@ -1458,6 +1460,36 @@ describe('ChatPanel', () => {
       });
       rerender(<ChatPanel {...props} isStreaming />);
       expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+    });
+
+    it('keeps partial command output live until the terminal result arrives', async () => {
+      const props = { ...baseProps(), aiProvider: 'claude' as const };
+      const { container } = render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+      const emit = async (message: any) => act(async () => {
+        for (const [handler] of mockSai.claudeOnMessage.mock.calls) (handler as (m: any) => void)(message);
+      });
+      await emit({
+        ...toolUseEvent(),
+        message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command: 'npm test' } }] },
+      });
+      await emit({ type: 'user', projectPath: '/project', scope: 'chat', message: {
+        content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'one\n', partial: true }],
+      } });
+      await emit({ type: 'user', projectPath: '/project', scope: 'chat', message: {
+        content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'two\n', partial: true }],
+      } });
+      expect(container.querySelector('[data-tool-output]')?.getAttribute('data-tool-output')).toBe('one\ntwo\n');
+      expect(container.querySelector('[data-tool-live-output]')?.getAttribute('data-tool-live-output')).toBe('true');
+
+      await emit({ type: 'user', projectPath: '/project', scope: 'chat', message: {
+        content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'final\n' }],
+      } });
+      await emit({ type: 'user', projectPath: '/project', scope: 'chat', message: {
+        content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'late\n', partial: true }],
+      } });
+      expect(container.querySelector('[data-tool-output]')?.getAttribute('data-tool-output')).toBe('final\n');
+      expect(container.querySelector('[data-tool-live-output]')?.getAttribute('data-tool-live-output')).toBe('false');
     });
   });
 

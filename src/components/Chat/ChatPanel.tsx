@@ -1153,11 +1153,11 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
       // Tool results come back as user messages with tool_result content blocks
       if (msg.type === 'user' && Array.isArray(msg.message?.content)) {
-        const results: Array<{ tool_use_id: string; output: string; images?: import('../../types').ToolResultImage[] }> = [];
+        const results: Array<{ tool_use_id: string; output: string; images?: import('../../types').ToolResultImage[]; partial: boolean }> = [];
         for (const block of msg.message.content) {
           if (block.type === 'tool_result' && block.tool_use_id) {
             const { text, images } = parseToolResultBlocks(block.content);
-            results.push({ tool_use_id: block.tool_use_id, output: text, images });
+            results.push({ tool_use_id: block.tool_use_id, output: text, images, partial: block.partial === true });
           }
         }
         if (results.length > 0) {
@@ -1172,11 +1172,27 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
                 const newToolCalls = msg.toolCalls.map(tc => {
                   const result = results.find(r => r.tool_use_id === tc.id);
                   if (result) {
+                    // Never let a delayed progress notification reopen or
+                    // overwrite a settled tool card.
+                    if (result.partial && tc.liveOutput === false) return tc;
                     updated = true;
+                    if (result.partial) {
+                      const previous = tc.output ?? '';
+                      // ACP implementations may send either a fresh chunk or
+                      // the cumulative output so far. Preserve both shapes
+                      // without duplicating content.
+                      const output = result.output.startsWith(previous)
+                        ? result.output
+                        : previous.endsWith(result.output)
+                          ? previous
+                          : previous + result.output;
+                      return { ...tc, output, liveOutput: true };
+                    }
                     const durationMs = typeof tc.startedAt === 'number' ? now - tc.startedAt : undefined;
                     return {
                       ...tc,
                       output: result.output,
+                      liveOutput: false,
                       ...(result.images ? { resultImages: result.images } : {}),
                       ...(durationMs != null ? { durationMs } : {}),
                     };
