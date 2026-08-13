@@ -44,6 +44,7 @@ function toolResult(
   content: ToolResultContent,
   isError: boolean,
   ctx: CodexMapContext,
+  partial = false,
 ): SaiEnvelope {
   const compatibleContent = isError ? toolErrorContent(content) : content;
   return {
@@ -55,6 +56,7 @@ function toolResult(
         tool_use_id: id,
         content: compatibleContent,
         is_error: isError,
+        ...(partial ? { partial: true } : {}),
       }],
     },
   };
@@ -186,11 +188,20 @@ function startedItem(item: ThreadItem, ctx: CodexMapContext): SaiEnvelope[] {
 
 function updatedItem(item: ThreadItem, ctx: CodexMapContext): SaiEnvelope[] {
   switch (item.type) {
+    case 'command_execution': {
+      const terminal = item.status === 'completed' || item.status === 'failed';
+      return [toolResult(
+        item.id,
+        item.aggregated_output,
+        item.status === 'failed' || (item.exit_code ?? 0) !== 0,
+        ctx,
+        !terminal,
+      )];
+    }
     case 'todo_list':
       return todoSnapshot(item, ctx);
     case 'agent_message':
     case 'reasoning':
-    case 'command_execution':
     case 'file_change':
     case 'mcp_tool_call':
     case 'web_search':

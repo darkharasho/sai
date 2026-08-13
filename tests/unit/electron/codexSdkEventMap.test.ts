@@ -191,16 +191,49 @@ describe('mapCodexSdkEvent', () => {
   });
 
   describe('item.updated', () => {
+    it('maps command output as a partial result while the command is running', () => {
+      const event = {
+        type: 'item.updated',
+        item: {
+          id: 'cmd-1',
+          type: 'command_execution',
+          command: 'npm test',
+          aggregated_output: 'running tests\n',
+          status: 'in_progress',
+        },
+      } satisfies ThreadEvent;
+
+      expect(mapCodexSdkEvent(event, ctx)).toEqual([{
+        type: 'user',
+        ...metadata,
+        message: { content: [{
+          type: 'tool_result',
+          tool_use_id: 'cmd-1',
+          content: 'running tests\n',
+          is_error: false,
+          partial: true,
+        }] },
+      }]);
+    });
+
+    it('maps a terminal command update with empty output as a settled result', () => {
+      const event = {
+        type: 'item.updated',
+        item: {
+          id: 'cmd-1',
+          type: 'command_execution',
+          command: 'true',
+          aggregated_output: '',
+          status: 'completed',
+        },
+      } satisfies ThreadEvent;
+
+      expect(mapCodexSdkEvent(event, ctx)).toEqual([toolResult('cmd-1', '')]);
+    });
+
     const updatedItems = [
       { id: 'message-1', type: 'agent_message', text: 'partial' },
       { id: 'reason-1', type: 'reasoning', text: 'partial thought' },
-      {
-        id: 'cmd-1',
-        type: 'command_execution',
-        command: 'npm test',
-        aggregated_output: 'running',
-        status: 'in_progress',
-      },
       {
         id: 'file-1',
         type: 'file_change',
