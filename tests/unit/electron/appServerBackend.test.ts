@@ -115,6 +115,16 @@ describe('AppServerBackend', () => {
     expect(h.client.readUserMcpConfig).not.toHaveBeenCalled();
   });
 
+  it('reports an App Server transport failure during an MCP config read as unavailable', async () => {
+    const h = harness();
+    const { AppServerUnavailableError } = await import('../../../electron/services/codexBackend/appServerClient');
+    h.client.readUserMcpConfig = vi.fn(async () => {
+      throw new AppServerUnavailableError('Codex App Server transport exited (1)');
+    });
+
+    await expect(h.backend.getMcpConfig()).resolves.toEqual({ ok: false, code: 'unavailable' });
+  });
+
   it('refreshes MCP runtime state from the client that owns the requested scope', async () => {
     const makeClient = (name: string): AppServerClientTransport => ({
       failureReason: undefined,

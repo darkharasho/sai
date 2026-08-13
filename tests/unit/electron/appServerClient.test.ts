@@ -276,6 +276,20 @@ describe('AppServerClient', () => {
     await expect(read).rejects.toMatchObject({ code: 'host-error', message: 'Codex MCP configuration is unavailable' });
   });
 
+  it('maps a transport failure during a config read to unavailable', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+
+    const read = client.readUserMcpConfig();
+    child.emit('exit', 1, null);
+
+    await expect(read).rejects.toMatchObject({
+      code: 'unavailable',
+      message: 'Codex MCP configuration is unavailable',
+    });
+  });
+
   it('rejects business requests until initialization has completed', () => {
     const child = fakeChild();
     const { client } = createClient(child);

@@ -254,6 +254,7 @@ function userConfigSnapshot(result: unknown): CodexMcpConfigSnapshot | undefined
 }
 
 function configError(error: unknown): AppServerMcpConfigError {
+  if (error instanceof AppServerUnavailableError) return new AppServerMcpConfigError('unavailable');
   const text = error instanceof Error ? error.message : '';
   if (/version|conflict|409/i.test(text)) return new AppServerMcpConfigError('conflict');
   return new AppServerMcpConfigError('host-error');
