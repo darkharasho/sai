@@ -29,8 +29,8 @@ describe('getCapabilities', () => {
     it('has its own effort mode', () => expect(getCapabilities('codex').hasEffortMode).toBe(true));
     it('does not have conversation mode', () => expect(getCapabilities('codex').hasConversationMode).toBe(false));
     it('has approval mode', () => expect(getCapabilities('codex').hasApprovalMode).toBe(true));
-    it('does not support terminal scope', () => expect(getCapabilities('codex').supportsTerminalScope).toBe(false));
-    it('does not support multi-scope', () => expect(getCapabilities('codex').supportsMultiScope).toBe(false));
+    it('supports terminal scope through the scoped SDK runtime', () => expect(getCapabilities('codex').supportsTerminalScope).toBe(true));
+    it('supports independent scopes through the scoped SDK runtime', () => expect(getCapabilities('codex').supportsMultiScope).toBe(true));
   });
 });
 
