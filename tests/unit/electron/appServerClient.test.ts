@@ -294,6 +294,8 @@ describe('AppServerClient', () => {
 
   it('rejects sensitive stdio and HTTP values before staging a config write', () => {
     expect(normalizeUserMcpConfigServer('stdio-command', { command: 'Bearer literal-secret-value', args: [] })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('stdio-command-client-key', { command: 'node --client-key literal-secret-value', args: [] })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('stdio-command-registry-userinfo', { command: 'node --registry=https://user:literal-secret-value@registry.example.test', args: [] })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('stdio-args', { command: 'npx', args: ['--credential=literal-secret-value'] })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('stdio-auth', { command: 'npx', args: ['--auth=literal-secret-value'] })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('stdio-token', { command: 'npx', args: ['--token=literal-secret-value'] })).toBeUndefined();

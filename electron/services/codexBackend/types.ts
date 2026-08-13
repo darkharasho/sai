@@ -86,6 +86,19 @@ function isSafeMcpConnectionText(value: unknown): value is string {
   return isSafeMcpConfigText(value) && !MCP_CONFIG_SENSITIVE_LITERAL.test(value);
 }
 
+/**
+ * A stdio command must be one executable token. Treating this field as a
+ * shell command would let embedded flags and URLs bypass argument validation;
+ * the host receives command and args separately, so whitespace is never
+ * needed for a legitimate executable path.
+ */
+function isSafeMcpConnectionCommand(value: unknown): value is string {
+  return isSafeMcpConnectionText(value)
+    && !/\s/.test(value)
+    && !value.startsWith('-')
+    && !value.includes('://');
+}
+
 function isSafeMcpConnectionArgs(value: unknown): value is string[] {
   return Array.isArray(value) && value.length <= MCP_CONFIG_MAX_ARGS && value.every((arg) => {
     if (!isSafeMcpConnectionText(arg)) return false;
@@ -125,7 +138,7 @@ export function isCodexMcpConfigServers(value: unknown): value is CodexMcpConfig
     if (item.transport === 'stdio') {
       return ['name', 'transport', 'command', 'args'].every((key) => key in item)
         && Object.keys(item).every((key) => ['name', 'transport', 'command', 'args', 'env'].includes(key))
-        && isSafeMcpConnectionText(item.command)
+        && isSafeMcpConnectionCommand(item.command)
         && isSafeMcpConnectionArgs(item.args)
         && (item.env === undefined || isMcpConfigReferences(item.env, (key) => MCP_CONFIG_ENV.test(key)));
     }

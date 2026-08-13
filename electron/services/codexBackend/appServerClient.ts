@@ -167,6 +167,14 @@ function safeConnectionText(value: unknown): string | undefined {
   return text && !SENSITIVE_LITERAL.test(text) ? text : undefined;
 }
 
+/** See the shared IPC policy: command is an executable token, never a shell line. */
+function safeConnectionCommand(value: unknown): string | undefined {
+  const command = safeConnectionText(value);
+  return command && !/\s/.test(command) && !command.startsWith('-') && !command.includes('://')
+    ? command
+    : undefined;
+}
+
 function safeHttpConnectionUrl(value: unknown): string | undefined {
   const url = safeConfigText(value);
   // Fragments never participate in an HTTP request to an MCP server and can
@@ -232,7 +240,7 @@ export function normalizeUserMcpConfigServer(name: unknown, value: unknown): Cod
   if (keys.length > MCP_CONFIG_MAX_FIELDS) return undefined;
   if (typeof value.command === 'string') {
     if (keys.some((key) => key !== 'command' && key !== 'args' && key !== 'env')) return undefined;
-    const command = safeConnectionText(value.command);
+    const command = safeConnectionCommand(value.command);
     const args = value.args === undefined ? [] : safeConnectionArgs(value.args);
     if (!command || !args) return undefined;
     const env = value.env === undefined ? undefined : safeConfigEnv(value.env);

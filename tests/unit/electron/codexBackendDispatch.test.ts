@@ -561,7 +561,8 @@ describe('Codex IPC dispatch', () => {
 
   it('bridges only confirmed App Server MCP config reads and writes', async () => {
     const backend = backendStub();
-    const snapshot = { version: 'v1', impact: 'global-user-config' as const, servers: [] };
+    const safeServer = { name: 'local', transport: 'stdio' as const, command: '/usr/local/bin/mcp-server', args: ['--port=3000'] };
+    const snapshot = { version: 'v1', impact: 'global-user-config' as const, servers: [safeServer] };
     backend.getMcpConfig = vi.fn().mockResolvedValue({ ok: true, snapshot });
     backend.replaceMcpConfig = vi.fn().mockResolvedValue({ ok: true, snapshot });
     __setCodexBackendForTests(backend);
@@ -570,12 +571,12 @@ describe('Codex IPC dispatch', () => {
 
     await expect(mocks.ipcMain.invoke('codex:mcpConfig:get')).resolves.toEqual({ ok: true, snapshot });
     await expect(mocks.ipcMain.invoke('codex:mcpConfig:replace', {
-      expectedVersion: 'v1', servers: [], confirmationToken: 'confirm-global-user-mcp-config',
+      expectedVersion: 'v1', servers: [safeServer], confirmationToken: 'confirm-global-user-mcp-config',
     })).resolves.toEqual({ ok: true, snapshot });
-    expect(backend.replaceMcpConfig).toHaveBeenCalledWith('v1', []);
+    expect(backend.replaceMcpConfig).toHaveBeenCalledWith('v1', [safeServer]);
 
     await expect(mocks.ipcMain.invoke('codex:mcpConfig:replace', {
-      expectedVersion: 'v1', servers: [], confirmationToken: 'nope',
+      expectedVersion: 'v1', servers: [safeServer], confirmationToken: 'nope',
     })).resolves.toEqual({ ok: false, code: 'invalid' });
     expect(backend.replaceMcpConfig).toHaveBeenCalledOnce();
   });
@@ -610,6 +611,11 @@ describe('Codex IPC dispatch', () => {
         name: 'unsafe', transport: 'stdio', command: 'node', args: ['--token=literal-secret'],
       }],
     })).resolves.toEqual({ ok: false, code: 'invalid' });
+    await expect(mocks.ipcMain.invoke('codex:mcpConfig:replace', {
+      expectedVersion: 'v1', confirmationToken: 'confirm-global-user-mcp-config', servers: [{
+        name: 'unsafe-command', transport: 'stdio', command: 'node --client-key literal-secret', args: [],
+      }],
+    })).resolves.toEqual({ ok: false, code: 'invalid' });
     expect(backend.replaceMcpConfig).toHaveBeenCalledOnce();
   });
 
@@ -636,6 +642,14 @@ describe('Codex IPC dispatch', () => {
     {
       label: 'split header carriers',
       server: { name: 'headers', transport: 'stdio', command: 'node', args: ['serve', '-H', 'Authorization: Bearer literal-secret'] },
+    },
+    {
+      label: 'credential-bearing command strings',
+      server: { name: 'command-secret', transport: 'stdio', command: 'node --client-key literal-secret', args: [] },
+    },
+    {
+      label: 'registry URLs with userinfo in command strings',
+      server: { name: 'command-registry', transport: 'stdio', command: 'node --registry=https://user:literal-secret@registry.example.test', args: [] },
     },
   ])('does not expose future backend MCP config snapshots with $label', async ({ server }) => {
     const backend = backendStub();
