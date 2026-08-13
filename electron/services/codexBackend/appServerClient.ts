@@ -132,6 +132,12 @@ function lifecycle(value: unknown): CodexMcpRuntimeServerStatus['lifecycle'] | u
 
 function authentication(value: unknown): CodexMcpRuntimeServerStatus['authentication'] | undefined {
   switch (value) {
+    // These are the documented mcpServerStatus/list authStatus values. Keep
+    // them deliberately coarse before passing anything to the renderer.
+    case 'bearerToken':
+    case 'oAuth': return 'authenticated';
+    case 'notLoggedIn': return 'unauthenticated';
+    case 'unsupported': return 'not-required';
     case 'authenticated': return 'authenticated';
     case 'unauthenticated': return 'unauthenticated';
     case 'not-required':
@@ -145,6 +151,9 @@ function authentication(value: unknown): CodexMcpRuntimeServerStatus['authentica
 export function normalizeMcpRuntimeServerStatus(value: unknown): CodexMcpRuntimeServerStatus | undefined {
   if (!isRecord(value)) return undefined;
   const name = boundedText(value.name);
+  // The list endpoint does not include a lifecycle. An entry that supplied a
+  // valid tool list is at least available; status-bearing notifications retain
+  // their more precise startup state below.
   const status = lifecycle(value.status);
   const auth = authentication(value.authStatus ?? value.authentication) ?? 'unknown';
   const toolCount = Array.isArray(value.tools)
@@ -152,10 +161,16 @@ export function normalizeMcpRuntimeServerStatus(value: unknown): CodexMcpRuntime
     : typeof value.toolCount === 'number' && Number.isSafeInteger(value.toolCount) && value.toolCount >= 0 && value.toolCount <= MCP_STATUS_MAX_TOOLS
       ? value.toolCount
       : undefined;
-  if (!name || !status || toolCount === undefined || toolCount > MCP_STATUS_MAX_TOOLS) return undefined;
+  if (!name || toolCount === undefined || toolCount > MCP_STATUS_MAX_TOOLS) return undefined;
   const rawError = typeof value.error === 'string' ? value.error : isRecord(value.error) ? value.error.message : value.failureReason;
   const failureReason = boundedText(rawError);
-  return { name, lifecycle: status, authentication: auth, toolCount, ...(failureReason ? { failureReason } : {}) };
+  return {
+    name,
+    lifecycle: status ?? (Array.isArray(value.tools) ? 'available' : 'unknown'),
+    authentication: auth,
+    toolCount,
+    ...(failureReason ? { failureReason } : {}),
+  };
 }
 
 /**

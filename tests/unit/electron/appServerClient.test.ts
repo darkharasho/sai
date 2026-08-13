@@ -357,8 +357,12 @@ describe('AppServerClient', () => {
     });
     reply(child, { id: 1, result: {
       data: [
-        { name: 'safe', status: 'connected', authStatus: 'authenticated', tools: [{ name: 'search' }], token: 'never expose' },
-        { name: 'invalid', status: 'mystery', tools: [] },
+        // mcpServerStatus/list reports the coarse auth state and tool list;
+        // unlike startup notifications, it does not include a lifecycle status.
+        { name: 'safe', authStatus: 'oAuth', tools: [{ name: 'search' }], token: 'never expose' },
+        { name: 'not-logged-in', authStatus: 'notLoggedIn', tools: [] },
+        { name: 'unsupported-auth', authStatus: 'unsupported', tools: [] },
+        { name: 'invalid', authStatus: 'oAuth', tools: 'not-an-array' },
       ],
       nextCursor: 'page-2',
     } });
@@ -367,13 +371,15 @@ describe('AppServerClient', () => {
       id: 2, method: 'mcpServerStatus/list', params: { detail: 'toolsAndAuthOnly', limit: 100, cursor: 'page-2' },
     });
     reply(child, { id: 2, result: { data: [{
-      name: 'failed', status: 'failed', authentication: 'unauthenticated', toolCount: 2,
+      name: 'unknown-auth', authStatus: 'unknown', tools: [{}, {}],
       error: { message: 'x'.repeat(600), stack: 'drop me' },
     }] } });
 
     await expect(refreshed).resolves.toEqual({ available: true, servers: [
-      { name: 'failed', lifecycle: 'failed', authentication: 'unauthenticated', toolCount: 2, failureReason: 'x'.repeat(512) },
-      { name: 'safe', lifecycle: 'running', authentication: 'authenticated', toolCount: 1 },
+      { name: 'not-logged-in', lifecycle: 'available', authentication: 'unauthenticated', toolCount: 0 },
+      { name: 'safe', lifecycle: 'available', authentication: 'authenticated', toolCount: 1 },
+      { name: 'unknown-auth', lifecycle: 'available', authentication: 'unknown', toolCount: 2, failureReason: 'x'.repeat(512) },
+      { name: 'unsupported-auth', lifecycle: 'available', authentication: 'not-required', toolCount: 0 },
     ] });
   });
 

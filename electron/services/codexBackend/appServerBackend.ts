@@ -369,6 +369,13 @@ export class AppServerBackend implements CodexBackend {
   private readonly registerWorkspace: (projectPath: string) => void;
   private readonly clients = new Map<AppServerClientKind, AppServerClientTransport>();
   private readonly clientStarts = new Map<AppServerClientKind, Promise<void>>();
+  /**
+   * mcpServerStatus/list is aggregate connection state and contains no
+   * thread ID. A connection may expose it only while it has served exactly
+   * one SAI scope; after another scope uses it, status is permanently hidden
+   * rather than leaking one workspace's server information into another.
+   */
+  private readonly mcpStatusScopeOwners = new Map<AppServerClientTransport, string | null>();
   private unavailableReason: string | undefined;
   private orchestratorUnavailableReason: string | undefined;
   private readonly clientUnsubscribers: Array<() => void> = [];
@@ -488,8 +495,20 @@ export class AppServerBackend implements CodexBackend {
     const runtime = projectPath === undefined
       ? undefined
       : this.runtimes.get(codexScopeKey(projectPath, codexScope(scope)));
+    if (!runtime?.threadId) {
+      return { available: false, reason: 'Codex App Server MCP status is unavailable for this scope', servers: [] };
+    }
     try {
       const client = await this.ensureClient(runtime);
+      const owner = this.mcpStatusScopeOwners.get(client);
+      const key = codexScopeKey(runtime.projectPath, runtime.scope);
+      if (owner !== key) {
+        return {
+          available: false,
+          reason: 'Codex App Server MCP status is unavailable because this connection is shared across scopes',
+          servers: [],
+        };
+      }
       return await client.refreshMcpRuntimeStatus();
     } catch (error) {
       const reason = errorText(error);
@@ -635,6 +654,7 @@ export class AppServerBackend implements CodexBackend {
     for (const client of this.clients.values()) client.destroy();
     this.clients.clear();
     this.clientStarts.clear();
+    this.mcpStatusScopeOwners.clear();
   }
 
   private runtimeFor(projectPath: string, scope: string): ScopeRuntime {
@@ -701,7 +721,18 @@ export class AppServerBackend implements CodexBackend {
     if (!threadId) throw new AppServerUnavailableError('Codex App Server returned a thread without an ID');
     runtime.threadId = threadId;
     runtime.sessionId = threadId;
+    this.claimMcpStatusScope(client, runtime);
     if (isNewThread) this.emit({ type: 'session_id', sessionId: threadId, projectPath: runtime.projectPath, scope: runtime.scope });
+  }
+
+  private claimMcpStatusScope(client: AppServerClientTransport, runtime: ScopeRuntime): void {
+    const key = codexScopeKey(runtime.projectPath, runtime.scope);
+    const owner = this.mcpStatusScopeOwners.get(client);
+    if (owner === undefined) {
+      this.mcpStatusScopeOwners.set(client, key);
+    } else if (owner !== key) {
+      this.mcpStatusScopeOwners.set(client, null);
+    }
   }
 
   private async startTurn(runtime: ScopeRuntime, args: Pick<CodexSendArgs, 'message' | 'model' | 'effort' | 'permission'>): Promise<void> {

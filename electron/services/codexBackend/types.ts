@@ -15,7 +15,7 @@ export interface CodexAppServerPreviewStatus {
 }
 
 /** Read-only, deliberately coarse MCP runtime state from Codex App Server. */
-export type CodexMcpServerLifecycle = 'starting' | 'running' | 'failed' | 'disabled';
+export type CodexMcpServerLifecycle = 'unknown' | 'available' | 'starting' | 'running' | 'failed' | 'disabled';
 export type CodexMcpServerAuthentication = 'authenticated' | 'unauthenticated' | 'not-required' | 'unknown';
 
 export interface CodexMcpRuntimeServerStatus {
