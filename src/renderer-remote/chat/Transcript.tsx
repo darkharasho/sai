@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
-import { Terminal } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Terminal, Sparkles, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import ToolCard from './ToolCard';
@@ -62,7 +62,7 @@ const mdComponents = {
 
 export interface TranscriptMessage {
   id: string;
-  role: 'user' | 'assistant' | 'tool' | 'system';
+  role: 'user' | 'assistant' | 'tool' | 'system' | 'reasoning';
   text?: string;
   toolName?: string;
   toolUseId?: string;
@@ -75,6 +75,41 @@ export interface TranscriptMessage {
   /** Set on the assistant's terminal envelope (`result`) so we can render
    *  the desktop-style `[Nms]` tag above the bubble body. */
   durationMs?: number;
+}
+
+/** A compact, persistent disclosure for Codex's safe reasoning summaries. */
+function ReasoningCard({ text, streaming }: { text: string; streaming?: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div
+      data-testid="remote-reasoning-card"
+      style={{
+        width: '100%', minWidth: 0, flexShrink: 0,
+        border: '1px solid var(--border)', borderRadius: 10,
+        background: 'var(--bg-mid)', overflow: 'hidden',
+      }}
+    >
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        style={{
+          width: '100%', minWidth: 0, display: 'flex', alignItems: 'center', gap: 8,
+          padding: '8px 10px', border: 'none', background: 'transparent', color: 'var(--text)',
+          fontFamily: 'inherit', fontSize: 12, fontWeight: 600, textAlign: 'left', cursor: 'pointer',
+        }}
+      >
+        <Sparkles size={14} color="var(--accent)" style={{ flexShrink: 0 }} />
+        <span style={{ flex: 1, minWidth: 0 }}>Reasoning{streaming ? '…' : ''}</span>
+        <ChevronRight size={14} color="var(--text-muted)" style={{ flexShrink: 0, transform: open ? 'rotate(90deg)' : undefined }} />
+      </button>
+      {open && (
+        <div style={{ borderTop: '1px solid var(--border)', padding: '10px 12px 12px 32px', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.55 }}>
+          {text}
+        </div>
+      )}
+    </div>
+  );
 }
 
 interface Props {
@@ -182,6 +217,9 @@ export default function Transcript({ messages, streaming = false, awaitingQuesti
       }}
     >
       {messages.map((m) => {
+        if (m.role === 'reasoning') {
+          return <ReasoningCard key={m.id} text={m.text ?? ''} streaming={m.streaming} />;
+        }
         if (m.role === 'tool') {
           const watchTarget = watchTargetFromToolCall({
             name: m.toolName ?? '',

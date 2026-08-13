@@ -169,6 +169,18 @@ export default function Chat({ client, statusStore, watcherStore, active, onActi
         return;
       }
       if (t === 'streaming_start') { setLocalStreaming(true); return; }
+      if (t === 'reasoning_delta') {
+        const text = (msg as any).text;
+        if (typeof text !== 'string' || !text) return;
+        setMessages((arr) => {
+          const last = arr[arr.length - 1];
+          if (last?.role === 'reasoning' && last.streaming) {
+            return [...arr.slice(0, -1), { ...last, text: (last.text ?? '') + text }];
+          }
+          return [...arr, { id: `r-${Date.now()}-${arr.length}`, role: 'reasoning', text, streaming: true }];
+        });
+        return;
+      }
       if (t === 'assistant') {
         // SDK shape: { type:'assistant', message: { content: Block[] } }
         // Blocks: { type:'text', text } | { type:'tool_use', id, name, input }
@@ -192,6 +204,10 @@ export default function Chat({ client, statusStore, watcherStore, active, onActi
         if (!blocks.length) return;
         setMessages((arr) => {
           let next = arr.slice();
+          if (next[next.length - 1]?.role === 'reasoning') {
+            const last = next[next.length - 1];
+            next[next.length - 1] = { ...last, streaming: false };
+          }
           for (const blk of blocks) {
             if (blk.kind === 'text') {
               const last = next[next.length - 1];
@@ -311,6 +327,7 @@ export default function Chat({ client, statusStore, watcherStore, active, onActi
           ? (msg as any).duration_ms
           : undefined;
         setMessages((arr) => arr.map((m, i) => {
+          if (m.role === 'reasoning' && m.streaming) return { ...m, streaming: false };
           if (i !== arr.length - 1) return m;
           if (m.role !== 'assistant') return m;
           const next = { ...m, streaming: false };

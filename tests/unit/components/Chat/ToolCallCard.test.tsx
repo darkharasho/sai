@@ -351,6 +351,19 @@ describe('ToolCallCard search rendering', () => {
     // Bash keeps its dedicated IN/OUT rendering
     expect(container.querySelector('.bash-inout-body')).toBeTruthy();
   });
+
+  it('keeps a Codex web-search query readable in the expanded card', () => {
+    const query = 'site:developers.googleblog.com Gemini CLI June 18 2026';
+    const { container } = render(
+      <ToolCallCard toolCall={{
+        id: 'web-1', type: 'web_fetch', name: 'WebSearch',
+        input: JSON.stringify({ query }), output: query,
+      }} />,
+    );
+
+    expect(container.querySelector('.web-search-query')?.textContent).toBe(query);
+    expect(container.querySelector('.tool-call-header-expandable')).toBeTruthy();
+  });
 });
 
 describe('ToolCallCard task rendering', () => {

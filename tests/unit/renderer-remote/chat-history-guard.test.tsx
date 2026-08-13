@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import 'fake-indexeddb/auto';
-import { render, act, screen } from '@testing-library/react';
+import { render, act, screen, fireEvent } from '@testing-library/react';
 import Chat from '../../../src/renderer-remote/chat/Chat';
 import { createWorkspaceStatusStore } from '../../../src/renderer-remote/lib/workspaceStatusStore';
 
@@ -67,5 +67,30 @@ describe('Chat session.history guard', () => {
       fire({ type: 'session.history', sessionId: 'A', messages: [{ role: 'assistant', content: 'fresh reply from A' }] });
     });
     expect(screen.queryByText('fresh reply from A')).not.toBeNull();
+  });
+
+  it('renders Codex reasoning summaries as transcript cards', async () => {
+    const { client, fire } = makeClient();
+    const statusStore = createWorkspaceStatusStore();
+    render(
+      <Chat
+        client={client}
+        statusStore={statusStore}
+        active={{ projectPath: '/p', scope: 'chat', sessionId: 'A' }}
+        onActiveChange={() => {}}
+        follow={false}
+        onFollowChange={() => {}}
+        onOpenNav={() => {}}
+      />,
+    );
+
+    await act(async () => {
+      fire({ type: 'reasoning_delta', text: 'Checking the Codex event stream.' });
+      fire({ type: 'assistant', message: { content: [{ type: 'text', text: 'Found it.' }] } });
+    });
+
+    fireEvent.click(screen.getByTestId('remote-reasoning-card').querySelector('button')!);
+    expect(screen.getByTestId('remote-reasoning-card')).toHaveTextContent('Checking the Codex event stream.');
+    expect(screen.getByText('Found it.')).toBeTruthy();
   });
 });

@@ -587,6 +587,7 @@ describe('AppServerBackend', () => {
 
     expect(h.requests.at(-1)).toEqual({ method: 'turn/start', params: {
       threadId: 'thread-a', input: [{ type: 'text', text: 'hello' }], cwd: '/repo',
+      summary: 'concise',
       approvalPolicy: 'onRequest', sandboxPolicy: { type: 'workspaceWrite', writableRoots: ['/repo'], networkAccess: true },
     } });
     h.notify('item/agentMessage/delta', { threadId: 'thread-stale', turnId: 'turn-a', delta: 'wrong' });

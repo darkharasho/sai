@@ -1048,6 +1048,11 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
   const expandTransition = useReducedMotionTransition({ height: { duration: 0.26, ease: [0.22, 1, 0.36, 1] as const }, opacity: { duration: 0.18 } });
 
   const isBash = toolCall.type === 'terminal_command';
+  // Codex reports web search completion as the submitted query, rather than
+  // grep-style result rows. Keep that query in the expandable body so it is
+  // readable instead of being limited to the ellipsized header label.
+  const isWebSearch = toolCall.name === 'WebSearch';
+  const webSearchQuery = isWebSearch ? label : '';
   const isTodo = toolCall.name === 'TodoWrite';
   const isAskUserQuestion = toolCall.name === 'AskUserQuestion';
   const isTaskCreate = toolCall.name === 'TaskCreate';
@@ -1069,7 +1074,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
     settled && parseToolError(toolCall.output ?? '').isToolError ? 'error' :
     settled ? 'done' : 'running';
 
-  const hasBody = isAskUserQuestion ? true : isTask ? true : isBash ? !!toolCall.output : isTodo ? true : search ? (!!toolCall.output || !!query) : !!code;
+  const hasBody = isAskUserQuestion ? true : isTask ? true : isBash ? !!toolCall.output : isTodo ? true : isWebSearch ? !!webSearchQuery || !!toolCall.output : search ? (!!toolCall.output || !!query) : !!code;
 
   const sigClass =
     (toolCall.name.includes('Edit') || toolCall.name === 'Write' || toolCall.type === 'file_edit') ? 'tool-sig-wipe' :
@@ -1186,6 +1191,24 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
                 input={toolCall.input || ''}
                 onAnswerQuestion={onAnswerQuestion}
               />
+            )}
+            {isWebSearch && (
+              <div className="tool-call-body web-search-body">
+                {webSearchQuery && (
+                  <div className="web-search-query-wrap">
+                    <span className="web-search-query-label">Query</span>
+                    <div className="web-search-query">{webSearchQuery}</div>
+                  </div>
+                )}
+                {toolCall.output && toolCall.output !== webSearchQuery && (
+                  <div className="tool-call-output">
+                    <div className="tool-call-output-header">
+                      <span className="tool-call-output-label">Output</span>
+                    </div>
+                    <HighlightedCode code={toolCall.output} lang="text" />
+                  </div>
+                )}
+              </div>
             )}
             {search && !isTask && (
               <div className="tool-call-body search-tool-body">
@@ -1614,6 +1637,32 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             text-transform: uppercase;
             color: var(--text-muted);
             letter-spacing: 0.5px;
+          }
+          .web-search-body {
+            padding: 10px 12px;
+          }
+          .web-search-query-wrap {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            min-width: 0;
+          }
+          .web-search-query-label {
+            flex: 0 0 auto;
+            color: var(--text-muted);
+            font-family: 'Geist Mono', 'JetBrains Mono', monospace;
+            font-size: 10px;
+            letter-spacing: .06em;
+            text-transform: uppercase;
+          }
+          .web-search-query {
+            min-width: 0;
+            color: var(--text);
+            font-family: 'Geist Mono', 'JetBrains Mono', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            overflow-wrap: anywhere;
+            white-space: pre-wrap;
           }
           .tool-error-display {
             display: flex;

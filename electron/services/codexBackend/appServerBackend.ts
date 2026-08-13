@@ -1318,6 +1318,10 @@ export class AppServerBackend implements CodexBackend {
       threadId: runtime.threadId,
       input: [{ type: 'text', text: args.message }],
       cwd: runtime.cwd,
+      // Codex defaults to no reasoning summary for several models. Request
+      // the documented safe summary stream explicitly so the desktop
+      // ReasoningBlock receives `summaryTextDelta` events.
+      summary: 'concise',
     };
     if (args.model) params.model = args.model;
     if (args.effort) params.effort = args.effort;
