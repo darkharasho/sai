@@ -213,6 +213,7 @@ describe('AppServerClient', () => {
     reply(child, { id: 1, result: { layers: [{ layer: 'user', version: 'v1', config: {
       mcp_servers: {
         httpFragment: { url: 'https://example.test/mcp#literal-secret-value' },
+        httpHeader: { url: 'https://example.test/mcp', http_headers: { 'X-Auth': 'Bearer literal-secret-value' } },
       },
     } }] } });
 
@@ -228,11 +229,17 @@ describe('AppServerClient', () => {
     expect(normalizeUserMcpConfigServer('stdio-token', { command: 'npx', args: ['--token=literal-secret-value'] })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('stdio-password', { command: 'npx', args: ['--password=literal-secret-value'] })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('stdio-api-key', { command: 'npx', args: ['--api-key=literal-secret-value'] })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('stdio-token-split', { command: 'npx', args: ['--token', 'literal-secret-value'] })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('stdio-auth-split', { command: 'npx', args: ['--auth', 'literal-secret-value'] })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('stdio-env-inline', { command: 'npx', args: ['--env=API_KEY=literal-secret-value'] })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('stdio-env-split', { command: 'npx', args: ['--env', 'API_KEY=literal-secret-value'] })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('url-userinfo', { url: 'https://user:literal-secret-value@example.test/mcp' })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('url-query', { url: 'https://example.test/mcp?access_token=literal-secret-value' })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('url-fragment', { url: 'https://example.test/mcp#literal-secret-value' })).toBeUndefined();
     expect(validateUserMcpConfigServers([{ name: 'write-secret', transport: 'http', url: 'https://example.test/mcp?token=literal-secret-value' }])).toBeUndefined();
     expect(validateUserMcpConfigServers([{ name: 'write-auth', transport: 'stdio', command: 'npx', args: ['--auth=literal-secret-value'] }])).toBeUndefined();
+    expect(validateUserMcpConfigServers([{ name: 'write-token-split', transport: 'stdio', command: 'npx', args: ['--token', 'literal-secret-value'] }])).toBeUndefined();
+    expect(validateUserMcpConfigServers([{ name: 'write-env-split', transport: 'stdio', command: 'npx', args: ['--env', 'API_KEY=literal-secret-value'] }])).toBeUndefined();
 
     expect(normalizeUserMcpConfigServer('safe-stdio', { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '/repo'] })).toEqual({
       name: 'safe-stdio', transport: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '/repo'],
@@ -240,6 +247,49 @@ describe('AppServerClient', () => {
     expect(normalizeUserMcpConfigServer('safe-http', { url: 'https://mcp.example.test/v1/connect?region=us-west-2' })).toEqual({
       name: 'safe-http', transport: 'http', url: 'https://mcp.example.test/v1/connect?region=us-west-2',
     });
+    expect(normalizeUserMcpConfigServer('safe-http-headers', {
+      url: 'https://mcp.example.test/v1/connect',
+      http_headers: { 'X-Auth': '$MCP_AUTH_TOKEN' },
+    })).toEqual({
+      name: 'safe-http-headers', transport: 'http', url: 'https://mcp.example.test/v1/connect',
+      httpHeaders: { 'X-Auth': '$MCP_AUTH_TOKEN' },
+    });
+    expect(normalizeUserMcpConfigServer('unsafe-http-header', {
+      url: 'https://mcp.example.test/v1/connect',
+      http_headers: { 'X-Auth': 'Bearer literal-secret-value' },
+    })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('legacy-http-header', {
+      url: 'https://mcp.example.test/v1/connect',
+      headers: { 'X-Auth': '$MCP_AUTH_TOKEN' },
+    })).toBeUndefined();
+  });
+
+  it('round-trips safe HTTP header references through the documented http_headers field', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+
+    const read = client.readUserMcpConfig();
+    reply(child, { id: 1, result: { layers: [{ layer: 'user', version: 'v1', config: { mcp_servers: {
+      safe: { url: 'https://mcp.example.test/v1/connect', http_headers: { 'X-Auth': '$MCP_AUTH_TOKEN' } },
+    } } }] } });
+    await expect(read).resolves.toEqual({ version: 'v1', impact: 'global-user-config', servers: [{
+      name: 'safe', transport: 'http', url: 'https://mcp.example.test/v1/connect', httpHeaders: { 'X-Auth': '$MCP_AUTH_TOKEN' },
+    }] });
+
+    const write = client.writeUserMcpConfig('v1', [{
+      name: 'safe', transport: 'http', url: 'https://mcp.example.test/v1/connect', httpHeaders: { 'X-Auth': '$MCP_AUTH_TOKEN' },
+    }]);
+    expect(JSON.parse(child.stdin.write.mock.calls.at(-1)[0])).toEqual({
+      id: 2, method: 'config/batchWrite', params: {
+        edits: [{ keyPath: 'mcp_servers', value: { safe: {
+          url: 'https://mcp.example.test/v1/connect', http_headers: { 'X-Auth': '$MCP_AUTH_TOKEN' },
+        } }, mergeStrategy: 'replace' }],
+        expectedVersion: 'v1', reloadUserConfig: true,
+      },
+    });
+    reply(child, { id: 2, result: {} });
+    await expect(write).resolves.toBeUndefined();
   });
 
   it('does not submit stale or invalid MCP config snapshots', async () => {

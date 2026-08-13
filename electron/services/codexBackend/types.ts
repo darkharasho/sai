@@ -36,7 +36,7 @@ export interface CodexMcpRuntimeStatus {
 /** A bounded, renderer-safe MCP server definition from the User config layer. */
 export type CodexMcpConfigServer =
   | { name: string; transport: 'stdio'; command: string; args: string[]; env?: Record<string, string> }
-  | { name: string; transport: 'http'; url: string; headers?: Record<string, string> };
+  | { name: string; transport: 'http'; url: string; httpHeaders?: Record<string, string> };
 
 /** This snapshot is intentionally limited to the global User config layer. */
 export interface CodexMcpConfigSnapshot {

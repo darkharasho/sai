@@ -112,8 +112,9 @@ const MCP_CONFIG_MAX_TEXT = 2_048;
 const MCP_CONFIG_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/;
 const MCP_CONFIG_ENV = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
 const MCP_CONFIG_ENV_REFERENCE = /^\$\{?[A-Za-z_][A-Za-z0-9_]{0,127}\}?$/;
+const MCP_CONFIG_CREDENTIAL_FLAG = /^--(?:auth|authorization|access[_-]?token|token|secret|password|credential|api[_-]?key)$/i;
+const MCP_CONFIG_ENV_CARRIER = /^(?:--(?:env|environment)(?:=|$)|-e(?:=|$))/i;
 const SENSITIVE_KEY = /(token|secret|password|authorization|cookie|credential|api[_-]?key)/i;
-const SENSITIVE_VALUE = /(?:bearer\s+|basic\s+|api[_-]?key|token|secret|password|sk-[a-z0-9])/i;
 const SENSITIVE_LITERAL = /(?:^|[\s:='\"])(?:bearer|basic)\s+\S+|(?:^|[-_?&\s])(?:access[_-]?token|token|secret|password|credential|api[_-]?key|authorization)(?:\s*[:=]\s*|\s+)\S+|(?:^|\s)--?(?:auth|authorization|access[_-]?token|token|secret|password|credential|api[_-]?key)\s*=\s*\S+|(?:^|[\s:='\"])(?:sk-[a-z0-9][\w-]*)/i;
 
 /**
@@ -168,12 +169,14 @@ function safeHttpConnectionUrl(value: unknown): string | undefined {
   }
 }
 
-function safeConfigMap(value: unknown, keyPattern: RegExp, rejectSensitiveKeys: boolean): Record<string, string> | undefined {
+function safeHttpHeaderReferences(value: unknown): Record<string, string> | undefined {
   if (!isRecord(value) || Object.keys(value).length > MCP_CONFIG_MAX_FIELDS) return undefined;
   const result: Record<string, string> = {};
   for (const [key, raw] of Object.entries(value)) {
     const text = safeConfigText(raw);
-    if (!keyPattern.test(key) || !text || (rejectSensitiveKeys && SENSITIVE_KEY.test(key)) || SENSITIVE_VALUE.test(text)) return undefined;
+    // HTTP config reaches the Codex host. Only retain explicit environment
+    // references so static authorization values cannot cross the IPC boundary.
+    if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/.test(key) || !text || !MCP_CONFIG_ENV_REFERENCE.test(text)) return undefined;
     result[key] = text;
   }
   return result;
@@ -192,6 +195,19 @@ function safeConfigEnv(value: unknown): Record<string, string> | undefined {
   return result;
 }
 
+function safeConnectionArgs(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || value.length > MCP_CONFIG_MAX_ARGS) return undefined;
+  const args = value.map((arg) => safeConnectionText(arg));
+  if (args.some((arg) => !arg)) return undefined;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]!;
+    // Split secret flags and environment forwarding both hide credentials from
+    // the per-argument literal scan. Neither has a safe editor representation.
+    if (MCP_CONFIG_ENV_CARRIER.test(arg) || (MCP_CONFIG_CREDENTIAL_FLAG.test(arg) && index + 1 < args.length)) return undefined;
+  }
+  return args as string[];
+}
+
 /** Parse only the deliberately narrow MCP connection shapes SAI can edit. */
 export function normalizeUserMcpConfigServer(name: unknown, value: unknown): CodexMcpConfigServer | undefined {
   if (typeof name !== 'string' || !MCP_CONFIG_NAME.test(name) || !isRecord(value)) return undefined;
@@ -200,20 +216,19 @@ export function normalizeUserMcpConfigServer(name: unknown, value: unknown): Cod
   if (typeof value.command === 'string') {
     if (keys.some((key) => key !== 'command' && key !== 'args' && key !== 'env')) return undefined;
     const command = safeConnectionText(value.command);
-    const args = value.args === undefined ? [] : Array.isArray(value.args) && value.args.length <= MCP_CONFIG_MAX_ARGS
-      ? value.args.map((arg) => safeConnectionText(arg)).filter((arg): arg is string => Boolean(arg)) : undefined;
-    if (!command || !args || args.length !== (Array.isArray(value.args) ? value.args.length : 0)) return undefined;
+    const args = value.args === undefined ? [] : safeConnectionArgs(value.args);
+    if (!command || !args) return undefined;
     const env = value.env === undefined ? undefined : safeConfigEnv(value.env);
     if (value.env !== undefined && !env) return undefined;
     return { name, transport: 'stdio', command, args, ...(env && Object.keys(env).length ? { env } : {}) };
   }
   if (typeof value.url === 'string') {
-    if (keys.some((key) => key !== 'url' && key !== 'headers')) return undefined;
+    if (keys.some((key) => key !== 'url' && key !== 'http_headers')) return undefined;
     const url = safeHttpConnectionUrl(value.url);
     if (!url) return undefined;
-    const headers = value.headers === undefined ? undefined : safeConfigMap(value.headers, /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/, true);
-    if (value.headers !== undefined && !headers) return undefined;
-    return { name, transport: 'http', url, ...(headers && Object.keys(headers).length ? { headers } : {}) };
+    const httpHeaders = value.http_headers === undefined ? undefined : safeHttpHeaderReferences(value.http_headers);
+    if (value.http_headers !== undefined && !httpHeaders) return undefined;
+    return { name, transport: 'http', url, ...(httpHeaders && Object.keys(httpHeaders).length ? { httpHeaders } : {}) };
   }
   return undefined;
 }
@@ -228,7 +243,7 @@ export function validateUserMcpConfigServers(value: unknown): CodexMcpConfigServ
     const source = item.transport === 'stdio'
       ? { command: item.command, args: item.args, ...(item.env === undefined ? {} : { env: item.env }) }
       : item.transport === 'http'
-        ? { url: item.url, ...(item.headers === undefined ? {} : { headers: item.headers }) }
+        ? { url: item.url, ...(item.httpHeaders === undefined ? {} : { http_headers: item.httpHeaders }) }
         : undefined;
     const normalized = source ? normalizeUserMcpConfigServer(item.name, source) : undefined;
     if (!normalized) return undefined;
@@ -266,7 +281,7 @@ function configError(error: unknown): AppServerMcpConfigError {
 function configTable(servers: CodexMcpConfigServer[]): Record<string, unknown> {
   return Object.fromEntries(servers.map((server) => [server.name, server.transport === 'stdio'
     ? { command: server.command, args: server.args, ...(server.env ? { env: server.env } : {}) }
-    : { url: server.url, ...(server.headers ? { headers: server.headers } : {}) },
+    : { url: server.url, ...(server.httpHeaders ? { http_headers: server.httpHeaders } : {}) },
   ]));
 }
 
