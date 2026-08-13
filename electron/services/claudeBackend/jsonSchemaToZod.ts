@@ -2,14 +2,18 @@ import { z, type ZodRawShape, type ZodTypeAny } from 'zod';
 
 interface JsonProp {
   type?: string;
-  enum?: string[];
+  enum?: readonly string[];
   items?: JsonProp;
   description?: string;
 }
 
 interface JsonObjectSchema {
-  properties?: Record<string, JsonProp>;
-  required?: string[];
+  properties?: Record<string, unknown>;
+  required?: readonly string[];
+}
+
+function asJsonProp(value: unknown): JsonProp | undefined {
+  return value && typeof value === 'object' ? value as JsonProp : undefined;
 }
 
 function leafToZod(prop: JsonProp | undefined): ZodTypeAny {
@@ -43,8 +47,9 @@ function leafToZod(prop: JsonProp | undefined): ZodTypeAny {
 export function jsonSchemaToZodShape(schema: JsonObjectSchema): ZodRawShape {
   const properties = schema.properties ?? {};
   const required = new Set(schema.required ?? []);
-  const shape: ZodRawShape = {};
-  for (const [key, prop] of Object.entries(properties)) {
+  const shape: Record<string, ZodTypeAny> = {};
+  for (const [key, value] of Object.entries(properties)) {
+    const prop = asJsonProp(value);
     let zt = leafToZod(prop);
     if (prop && typeof prop.description === 'string') {
       zt = zt.describe(prop.description);
@@ -54,5 +59,5 @@ export function jsonSchemaToZodShape(schema: JsonObjectSchema): ZodRawShape {
     }
     shape[key] = zt;
   }
-  return shape;
+  return shape as ZodRawShape;
 }

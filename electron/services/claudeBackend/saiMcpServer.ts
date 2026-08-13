@@ -40,7 +40,7 @@ export function buildSaiChatMcpServer(deps: SaiMcpDeps): McpSdkServerConfigWithI
       advertisedName,
       def.description,
       jsonSchemaToZodShape(def.input_schema),
-      handler as Parameters<typeof tool>[3],
+      handler as unknown as Parameters<typeof tool>[3],
     );
   });
 

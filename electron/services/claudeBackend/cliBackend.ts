@@ -15,7 +15,7 @@ export class CliBackend implements ClaudeBackend {
   reconcileScope(projectPath: string, scope?: string) { reconcileScopeImpl(projectPath, scope); }
   setSessionId(projectPath: string, sessionId: string | undefined, scope?: string) { setSessionIdImpl(projectPath, sessionId, scope); }
   compact(a: CompactArgs) { compactImpl(a); }
-  approve(a: ApproveArgs) { return Promise.resolve(approveImpl(a.projectPath, a.toolUseId, a.approved, a.modifiedCommand, a.scope)); }
+  approve(a: ApproveArgs) { return Promise.resolve(approveImpl(a.projectPath, a.toolUseId, a.approved, a.modifiedCommand, a.scope)).then((result) => result === true); }
   answerQuestion(a: AnswerQuestionArgs) { return Promise.resolve(answerQuestionImpl(a.projectPath, a.toolUseId, a.answers, a.scope)); }
   answerPlanReview(a: AnswerPlanArgs) { return Promise.resolve(answerPlanReviewImpl(a.projectPath, a.toolUseId, a.approved, a.scope)); }
   alwaysAllow(projectPath: string, toolPattern: string) { return alwaysAllowImpl(projectPath, toolPattern); }

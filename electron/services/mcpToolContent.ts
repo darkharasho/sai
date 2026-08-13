@@ -1,3 +1,5 @@
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+
 /**
  * Shared MCP content wrapping for SAI chat tools. Both transports — the
  * subprocess socket server (electron/swarm-mcp-server.ts) and the in-process
@@ -5,10 +7,7 @@
  * renderer round-trip result into MCP content blocks here, so the `__mcpImage`
  * handling lives in exactly one place.
  */
-export interface McpToolContent {
-  content: Array<Record<string, unknown>>;
-  isError?: boolean;
-}
+export type McpToolContent = CallToolResult;
 
 export function toMcpSuccessContent(result: unknown): McpToolContent {
   const content: Array<Record<string, unknown>> = [];
@@ -20,9 +19,9 @@ export function toMcpSuccessContent(result: unknown): McpToolContent {
     const img = image as { base64: string; mimeType?: string };
     content.push({ type: 'image', data: img.base64, mimeType: img.mimeType ?? 'image/png' });
   }
-  return { content };
+  return { content } as McpToolContent;
 }
 
 export function toMcpErrorContent(message: string): McpToolContent {
-  return { content: [{ type: 'text', text: message }], isError: true };
+  return { content: [{ type: 'text', text: message }], isError: true } as McpToolContent;
 }

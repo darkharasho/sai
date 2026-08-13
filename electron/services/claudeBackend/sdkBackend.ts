@@ -12,7 +12,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import type { query as QueryFn, SDKUserMessage, PermissionResult, McpSdkServerConfigWithInstance, SdkPluginConfig } from '@anthropic-ai/claude-agent-sdk';
+import type { query as QueryFn, SDKUserMessage, PermissionResult, McpSdkServerConfigWithInstance, McpServerConfig, SdkPluginConfig } from '@anthropic-ai/claude-agent-sdk';
 import { enrichedEnv } from '../shellEnv';
 import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASKS_NUDGE } from '../chatNudges';
 import {
@@ -196,11 +196,13 @@ function friendlyError(text: string): string {
 }
 
 /** API image-block support: only these media types are accepted by the API. */
-const API_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+type ApiImageMediaType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+const API_IMAGE_TYPES = new Set<ApiImageMediaType>(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+const isApiImageMediaType = (value: string): value is ApiImageMediaType => API_IMAGE_TYPES.has(value as ApiImageMediaType);
 /** Max bytes we inline as base64 (API limit is ~5MB per image). */
 const MAX_INLINE_IMAGE_BYTES = 4_500_000;
 
-type UserContent = string | Array<Record<string, unknown>>;
+type UserContent = SDKUserMessage['message']['content'];
 
 /**
  * Build the user-message content. Attached images become real base64 image
@@ -211,12 +213,12 @@ type UserContent = string | Array<Record<string, unknown>>;
 function buildUserContent(message: string, imagePaths?: string[]): UserContent {
   if (!imagePaths || imagePaths.length === 0) return message;
 
-  const blocks: Array<Record<string, unknown>> = [];
+  const blocks: Exclude<UserContent, string> = [];
   const refs: string[] = [];
   for (const p of imagePaths) {
     try {
       const mediaType = mimeForImagePath(p);
-      if (isImagePath(p) && API_IMAGE_TYPES.has(mediaType)) {
+      if (isImagePath(p) && isApiImageMediaType(mediaType)) {
         const buf = fs.readFileSync(p);
         if (buf.length <= MAX_INLINE_IMAGE_BYTES) {
           blocks.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data: buf.toString('base64') } });
@@ -841,7 +843,7 @@ export class SdkBackend implements ClaudeBackend {
 
     // Chat scopes get the in-process SAI tool MCP server + the render/github
     // nudges (deferred since Phase 1). Other kinds (task/orchestrator) do not.
-    let mcpServers: Record<string, McpSdkServerConfigWithInstance> | undefined;
+    let mcpServers: Record<string, McpServerConfig> | undefined;
     let chatAppendSystemPrompt = appendSystemPrompt;
     let systemPromptOverride: string | undefined;
 
@@ -883,7 +885,7 @@ export class SdkBackend implements ClaudeBackend {
       );
       const userServers = { ...external.servers, ...overrideServers };
       if (Object.keys(userServers).length > 0) {
-        mcpServers = { ...userServers, ...(mcpServers ?? {}) }; // SAI's `sai` key wins on collision
+        mcpServers = { ...userServers as Record<string, McpServerConfig>, ...(mcpServers ?? {}) }; // SAI's `sai` key wins on collision
       }
       if (external.plugins.length > 0) {
         plugins = external.plugins;

@@ -39,7 +39,7 @@ export function buildSwarmMcpServer(deps: SwarmMcpDeps): McpSdkServerConfigWithI
       def.name, // bare name → mcp__swarm__<name>
       def.description,
       jsonSchemaToZodShape(def.input_schema),
-      handler as Parameters<typeof tool>[3],
+      handler as unknown as Parameters<typeof tool>[3],
     );
   });
 
