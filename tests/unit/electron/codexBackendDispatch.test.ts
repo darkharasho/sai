@@ -559,6 +559,71 @@ describe('Codex IPC dispatch', () => {
     });
   });
 
+  it('bridges only confirmed App Server MCP config reads and writes', async () => {
+    const backend = backendStub();
+    const snapshot = { version: 'v1', impact: 'global-user-config' as const, servers: [] };
+    backend.getMcpConfig = vi.fn().mockResolvedValue({ ok: true, snapshot });
+    backend.replaceMcpConfig = vi.fn().mockResolvedValue({ ok: true, snapshot });
+    __setCodexBackendForTests(backend);
+    setCodexBackendMode('app-server');
+    registerCodexHandlers();
+
+    await expect(mocks.ipcMain.invoke('codex:mcpConfig:get')).resolves.toEqual({ ok: true, snapshot });
+    await expect(mocks.ipcMain.invoke('codex:mcpConfig:replace', {
+      expectedVersion: 'v1', servers: [], confirmationToken: 'confirm-global-user-mcp-config',
+    })).resolves.toEqual({ ok: true, snapshot });
+    expect(backend.replaceMcpConfig).toHaveBeenCalledWith('v1', []);
+
+    await expect(mocks.ipcMain.invoke('codex:mcpConfig:replace', {
+      expectedVersion: 'v1', servers: [], confirmationToken: 'nope',
+    })).resolves.toEqual({ ok: false, code: 'invalid' });
+    expect(backend.replaceMcpConfig).toHaveBeenCalledOnce();
+  });
+
+  it('refuses Codex MCP config edits when the SDK owns the selected backend', async () => {
+    const backend = backendStub();
+    backend.getMcpConfig = vi.fn();
+    backend.replaceMcpConfig = vi.fn();
+    __setCodexBackendForTests(backend);
+    registerCodexHandlers();
+
+    await expect(mocks.ipcMain.invoke('codex:mcpConfig:get')).resolves.toEqual({ ok: false, code: 'unavailable' });
+    await expect(mocks.ipcMain.invoke('codex:mcpConfig:replace', {
+      expectedVersion: 'v1', servers: [], confirmationToken: 'confirm-global-user-mcp-config',
+    })).resolves.toEqual({ ok: false, code: 'unavailable' });
+    expect(backend.getMcpConfig).not.toHaveBeenCalled();
+    expect(backend.replaceMcpConfig).not.toHaveBeenCalled();
+  });
+
+  it('preserves a coarse host conflict and rejects credential-shaped config before dispatch', async () => {
+    const backend = backendStub();
+    backend.replaceMcpConfig = vi.fn().mockResolvedValue({ ok: false, code: 'conflict' });
+    __setCodexBackendForTests(backend);
+    setCodexBackendMode('app-server');
+    registerCodexHandlers();
+
+    await expect(mocks.ipcMain.invoke('codex:mcpConfig:replace', {
+      expectedVersion: 'v1', servers: [], confirmationToken: 'confirm-global-user-mcp-config',
+    })).resolves.toEqual({ ok: false, code: 'conflict' });
+    await expect(mocks.ipcMain.invoke('codex:mcpConfig:replace', {
+      expectedVersion: 'v1', confirmationToken: 'confirm-global-user-mcp-config', servers: [{
+        name: 'unsafe', transport: 'stdio', command: 'node', args: ['--token=literal-secret'],
+      }],
+    })).resolves.toEqual({ ok: false, code: 'invalid' });
+    expect(backend.replaceMcpConfig).toHaveBeenCalledOnce();
+  });
+
+  it('does not expose malformed Codex MCP config snapshots from a backend', async () => {
+    const backend = backendStub();
+    backend.getMcpConfig = vi.fn().mockResolvedValue({ ok: true, snapshot: {
+      version: 'v1', impact: 'global-user-config', servers: [], rawConfigPath: '/private/config.toml',
+    } });
+    __setCodexBackendForTests(backend);
+    setCodexBackendMode('app-server');
+    registerCodexHandlers();
+    await expect(mocks.ipcMain.invoke('codex:mcpConfig:get')).resolves.toEqual({ ok: false, code: 'host-error' });
+  });
+
   it('does not expose malformed MCP status data from a backend to the renderer', async () => {
     const backend = backendStub();
     backend.getMcpRuntimeStatus = vi.fn().mockResolvedValue({

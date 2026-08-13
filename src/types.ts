@@ -409,6 +409,10 @@ declare global {
       projectPath: string,
       scope?: string,
     ) => Promise<import('../electron/services/codexBackend').CodexMcpRuntimeStatus>;
+    codexMcpConfigGet?: () => Promise<import('../electron/services/codexBackend').CodexMcpConfigResult>;
+    codexMcpConfigReplace?: (
+      request: import('../electron/services/codexBackend').CodexMcpConfigWriteRequest,
+    ) => Promise<import('../electron/services/codexBackend').CodexMcpConfigResult>;
     codexAppServerApprove?: (
       projectPath: string,
       scope: string | undefined,

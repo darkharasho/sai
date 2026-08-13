@@ -432,6 +432,9 @@ contextBridge.exposeInMainWorld('sai', {
   // route this through Claude's configuration or aggregate runtime status.
   codexMcpRuntimeStatus: (projectPath: string, scope?: string) =>
     ipcRenderer.invoke('codex:mcpRuntimeStatus', projectPath, scope),
+  codexMcpConfigGet: () => ipcRenderer.invoke('codex:mcpConfig:get'),
+  codexMcpConfigReplace: (request: import('./services/codexBackend').CodexMcpConfigWriteRequest) =>
+    ipcRenderer.invoke('codex:mcpConfig:replace', request),
   onMcpRuntimeStatus: (cb: (status: any) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, status: any) => cb(status);
     ipcRenderer.on('mcp:runtime-status', listener);

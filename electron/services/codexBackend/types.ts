@@ -48,6 +48,66 @@ export interface CodexMcpConfigSnapshot {
 export type CodexMcpConfigResult =
   | { ok: true; snapshot: CodexMcpConfigSnapshot }
   | { ok: false; code: 'unavailable' | 'invalid' | 'conflict' | 'host-error' };
+
+/** Deliberate UI acknowledgement; host-side validation remains authoritative. */
+export const CODEX_MCP_CONFIG_CONFIRMATION_TOKEN = 'confirm-global-user-mcp-config';
+
+export interface CodexMcpConfigWriteRequest {
+  expectedVersion: string;
+  servers: CodexMcpConfigServer[];
+  confirmationToken: typeof CODEX_MCP_CONFIG_CONFIRMATION_TOKEN;
+}
+
+const MCP_CONFIG_MAX_SERVERS = 64;
+const MCP_CONFIG_MAX_ARGS = 64;
+const MCP_CONFIG_MAX_TEXT = 2_048;
+const MCP_CONFIG_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/;
+const MCP_CONFIG_ENV = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
+const MCP_CONFIG_ENV_REFERENCE = /^\$\{?[A-Za-z_][A-Za-z0-9_]{0,127}\}?$/;
+const MCP_CONFIG_SENSITIVE = /(?:token|secret|password|credential|authorization|bearer|api[-_]?key)/i;
+const MCP_CONFIG_SENSITIVE_ARG = /^(?:-e(?:=|$|[A-Za-z_])|-H(?:=|$|\S)|-(?:a|p|u)(?:=|:|$|\S)|--(?:token|secret|password|credential|authorization|bearer|api[-_]?key)(?:[=:]|$))/i;
+
+function isSafeMcpConfigText(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= MCP_CONFIG_MAX_TEXT;
+}
+
+function isMcpConfigReferences(value: unknown, keys: (key: string) => boolean): value is Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const entries = Object.entries(value);
+  return entries.length <= 32 && entries.every(([key, text]) => keys(key) && isSafeMcpConfigText(text) && MCP_CONFIG_ENV_REFERENCE.test(text));
+}
+
+/** Repeated Electron-boundary validation for the small editable connection subset. */
+export function isCodexMcpConfigWriteRequest(value: unknown): value is CodexMcpConfigWriteRequest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const input = value as Record<string, unknown>;
+  if (Object.keys(input).length !== 3 || input.confirmationToken !== CODEX_MCP_CONFIG_CONFIRMATION_TOKEN
+    || !isSafeMcpConfigText(input.expectedVersion) || !Array.isArray(input.servers) || input.servers.length > MCP_CONFIG_MAX_SERVERS) return false;
+  const names = new Set<string>();
+  return input.servers.every((server) => {
+    if (!server || typeof server !== 'object' || Array.isArray(server)) return false;
+    const item = server as Record<string, unknown>;
+    if (!isSafeMcpConfigText(item.name) || !MCP_CONFIG_NAME.test(item.name) || names.has(item.name)) return false;
+    names.add(item.name);
+    if (item.transport === 'stdio') {
+      if (!['name', 'transport', 'command', 'args'].every((key) => key in item)
+        || !Object.keys(item).every((key) => ['name', 'transport', 'command', 'args', 'env'].includes(key))
+        || !isSafeMcpConfigText(item.command) || !Array.isArray(item.args) || item.args.length > MCP_CONFIG_MAX_ARGS
+        || !item.args.every((arg) => isSafeMcpConfigText(arg) && !MCP_CONFIG_SENSITIVE_ARG.test(arg))) return false;
+      return item.env === undefined || isMcpConfigReferences(item.env, (key) => MCP_CONFIG_ENV.test(key));
+    }
+    if (item.transport === 'http') {
+      if (!Object.keys(item).every((key) => ['name', 'transport', 'url', 'httpHeaders'].includes(key))
+        || !isSafeMcpConfigText(item.url)) return false;
+      try {
+        const parsed = new URL(item.url);
+        if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password || parsed.hash) return false;
+      } catch { return false; }
+      return item.httpHeaders === undefined || isMcpConfigReferences(item.httpHeaders, (key) => !MCP_CONFIG_SENSITIVE.test(key));
+    }
+    return false;
+  });
+}
 export type CodexPermission = 'auto' | 'read-only' | 'full-access';
 export type CodexReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 

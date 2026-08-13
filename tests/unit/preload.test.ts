@@ -117,6 +117,14 @@ describe('characterization: existing IPC routing', () => {
     expect(invoke).toHaveBeenNthCalledWith(3, 'codex:appServerPreviewStatus');
   });
 
+  it('exposes isolated confirmed Codex MCP config IPC methods', async () => {
+    const request = { expectedVersion: 'v1', servers: [], confirmationToken: 'confirm-global-user-mcp-config' };
+    await exposed.codexMcpConfigGet();
+    await exposed.codexMcpConfigReplace(request);
+    expect(invoke).toHaveBeenNthCalledWith(1, 'codex:mcpConfig:get');
+    expect(invoke).toHaveBeenNthCalledWith(2, 'codex:mcpConfig:replace', request);
+  });
+
   it('keeps the legacy Swarm Codex approval call isolated from App Server decisions', async () => {
     expect(exposed.codexApprove).toBeUndefined();
 

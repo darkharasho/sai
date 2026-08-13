@@ -4,7 +4,7 @@ import { registerWorkspaceBackendHooks } from '../workspace';
 import { fetchBundledCodexModels } from './bundledModels';
 import { AppServerBackend } from './appServerBackend';
 import { SdkCodexBackend } from './sdkBackend';
-import { codexScopeKey, type CodexAppServerPreviewStatus, type CodexApprovalDecision, type CodexApprovalResult, type CodexBackend, type CodexBackendMode, type CodexMcpElicitationDecision, type CodexMcpRuntimeStatus, type CodexModelResult, type CodexSendArgs, type CodexStartArgs, type CodexUserInputResponse } from './types';
+import { CODEX_MCP_CONFIG_CONFIRMATION_TOKEN, codexScopeKey, isCodexMcpConfigWriteRequest, type CodexAppServerPreviewStatus, type CodexApprovalDecision, type CodexApprovalResult, type CodexBackend, type CodexBackendMode, type CodexMcpConfigResult, type CodexMcpConfigServer, type CodexMcpElicitationDecision, type CodexMcpRuntimeStatus, type CodexModelResult, type CodexSendArgs, type CodexStartArgs, type CodexUserInputResponse } from './types';
 
 export * from './types';
 
@@ -12,6 +12,25 @@ type BackendFactory = () => CodexBackend;
 type BackendByMode = Partial<Record<CodexBackendMode, CodexBackend>>;
 
 const CODEX_MCP_SDK_UNAVAILABLE_REASON = 'Codex MCP runtime status is unavailable on the SDK backend.';
+const CODEX_MCP_CONFIG_UNAVAILABLE: CodexMcpConfigResult = { ok: false, code: 'unavailable' };
+const CODEX_MCP_CONFIG_RESULT_CODES = new Set(['unavailable', 'invalid', 'conflict', 'host-error']);
+
+function sanitizeCodexMcpConfigResult(value: unknown): CodexMcpConfigResult {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { ok: false, code: 'host-error' };
+  const result = value as Record<string, unknown>;
+  if (result.ok === false && Object.keys(result).length === 2 && typeof result.code === 'string' && CODEX_MCP_CONFIG_RESULT_CODES.has(result.code)) {
+    return { ok: false, code: result.code as Extract<CodexMcpConfigResult, { ok: false }>['code'] };
+  }
+  if (result.ok !== true || Object.keys(result).length !== 2 || !result.snapshot || typeof result.snapshot !== 'object' || Array.isArray(result.snapshot)) {
+    return { ok: false, code: 'host-error' };
+  }
+  const snapshot = result.snapshot as Record<string, unknown>;
+  if (Object.keys(snapshot).length !== 3 || snapshot.impact !== 'global-user-config'
+    || !isCodexMcpConfigWriteRequest({ expectedVersion: snapshot.version, servers: snapshot.servers, confirmationToken: CODEX_MCP_CONFIG_CONFIRMATION_TOKEN })) {
+    return { ok: false, code: 'host-error' };
+  }
+  return { ok: true, snapshot: { version: snapshot.version as string, impact: 'global-user-config', servers: snapshot.servers as CodexMcpConfigServer[] } };
+}
 const CODEX_MCP_INVALID_DATA_REASON = 'Codex MCP runtime status returned invalid data.';
 const CODEX_MCP_LIFECYCLES = new Set(['unknown', 'available', 'starting', 'running', 'failed', 'disabled']);
 const CODEX_MCP_AUTHENTICATION = new Set(['authenticated', 'unauthenticated', 'not-required', 'unknown']);
@@ -182,6 +201,20 @@ class ScopedCodexBackend implements CodexBackend {
     return backend.getMcpRuntimeStatus(projectPath, scope);
   }
 
+  async getMcpConfig(): Promise<CodexMcpConfigResult> {
+    if (requestedMode !== 'app-server') return CODEX_MCP_CONFIG_UNAVAILABLE;
+    const backend = this.backendFor('app-server');
+    if (backend === this.backends.sdk || !backend.getMcpConfig) return CODEX_MCP_CONFIG_UNAVAILABLE;
+    return backend.getMcpConfig();
+  }
+
+  async replaceMcpConfig(expectedVersion: string, servers: CodexMcpConfigServer[]): Promise<CodexMcpConfigResult> {
+    if (requestedMode !== 'app-server') return CODEX_MCP_CONFIG_UNAVAILABLE;
+    const backend = this.backendFor('app-server');
+    if (backend === this.backends.sdk || !backend.replaceMcpConfig) return CODEX_MCP_CONFIG_UNAVAILABLE;
+    return backend.replaceMcpConfig(expectedVersion, servers);
+  }
+
   async getSwarmStatus(): Promise<CodexAppServerPreviewStatus> {
     if (requestedMode !== 'app-server') {
       return { available: false, reason: 'Codex Swarm requires the App Server preview backend; the SDK backend is selected.' };
@@ -318,6 +351,21 @@ export async function getCodexMcpRuntimeStatus(projectPath: string, scope?: stri
     // filesystem details) over Electron IPC.
     return { available: false, reason: 'Codex MCP runtime status is unavailable.', servers: [] };
   }
+}
+
+/** Global User config is App Server-only and deliberately never touches Claude MCP IPC. */
+export async function getCodexMcpConfig(): Promise<CodexMcpConfigResult> {
+  if (requestedMode !== 'app-server') return CODEX_MCP_CONFIG_UNAVAILABLE;
+  const backend = getCodexBackend();
+  if (!backend.getMcpConfig) return CODEX_MCP_CONFIG_UNAVAILABLE;
+  try { return sanitizeCodexMcpConfigResult(await backend.getMcpConfig()); } catch { return { ok: false, code: 'host-error' }; }
+}
+
+export async function replaceCodexMcpConfig(expectedVersion: string, servers: CodexMcpConfigServer[]): Promise<CodexMcpConfigResult> {
+  if (requestedMode !== 'app-server') return CODEX_MCP_CONFIG_UNAVAILABLE;
+  const backend = getCodexBackend();
+  if (!backend.replaceMcpConfig) return CODEX_MCP_CONFIG_UNAVAILABLE;
+  try { return sanitizeCodexMcpConfigResult(await backend.replaceMcpConfig(expectedVersion, servers)); } catch { return { ok: false, code: 'host-error' }; }
 }
 
 /** Return the scoped dispatcher, constructing the stable SDK transport first. */

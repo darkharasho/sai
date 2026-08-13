@@ -3,6 +3,8 @@ import {
   getCodexBackend,
   getCodexAppServerPreviewStatus,
   getCodexMcpRuntimeStatus,
+  getCodexMcpConfig,
+  replaceCodexMcpConfig,
   getCodexSwarmStatus,
   getCodexBackendMode,
   setCodexBackendMode,
@@ -16,6 +18,7 @@ import {
   isCodexApprovalDecision,
   isCodexMcpElicitationDecision,
   isCodexUserInputResponse,
+  isCodexMcpConfigWriteRequest,
 } from './codexBackend';
 import { CodexTelemetryService } from './codexTelemetry';
 
@@ -79,6 +82,11 @@ export function registerCodexHandlers(): void {
       return getCodexMcpRuntimeStatus(projectPath, scope);
     },
   );
+  ipcMain.handle('codex:mcpConfig:get', () => getCodexMcpConfig());
+  ipcMain.handle('codex:mcpConfig:replace', (_event, request: unknown) => {
+    if (!isCodexMcpConfigWriteRequest(request)) return { ok: false, code: 'invalid' };
+    return replaceCodexMcpConfig(request.expectedVersion, request.servers);
+  });
 
   ipcMain.handle(
     'codex:appServerApprove',
