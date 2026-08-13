@@ -632,7 +632,7 @@ export class SdkBackend implements ClaudeBackend {
 
   // ─── Approvals / questions / plan reviews ──────────────────────────────────
 
-  approve(a: ApproveArgs): Promise<boolean> {
+  approve(a: ApproveArgs): Promise<import('./types').ApproveResult> {
     const { projectPath, toolUseId, approved, modifiedCommand, scope } = a;
     const effectiveScope = scope ?? 'chat';
     const gate = this.pendingGates.get(toolUseId);
@@ -655,7 +655,7 @@ export class SdkBackend implements ClaudeBackend {
     }
     // Not a pending SDK approval — delegate to the CLI impl, which also owns
     // Gemini approvals (they route through the same claude:approve IPC).
-    return Promise.resolve(approveImpl(projectPath, toolUseId, approved, modifiedCommand, scope)).then((r) => r === true);
+    return approveImpl(projectPath, toolUseId, approved, modifiedCommand, scope);
   }
 
   answerQuestion(a: AnswerQuestionArgs): Promise<boolean> {

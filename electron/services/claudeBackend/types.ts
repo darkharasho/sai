@@ -32,6 +32,8 @@ export interface ApproveArgs {
   modifiedCommand?: string;
   scope?: string;
 }
+
+export type ApproveResult = boolean | void | { result: string; isError: boolean };
 export interface AnswerQuestionArgs {
   projectPath: string;
   toolUseId: string;
@@ -58,7 +60,7 @@ export interface ClaudeBackend {
   reconcileScope(projectPath: string, scope?: string): void;
   setSessionId(projectPath: string, sessionId: string | undefined, scope?: string): void;
   compact(args: CompactArgs): void;
-  approve(args: ApproveArgs): Promise<boolean>;
+  approve(args: ApproveArgs): Promise<ApproveResult>;
   answerQuestion(args: AnswerQuestionArgs): Promise<boolean>;
   answerPlanReview(args: AnswerPlanArgs): Promise<boolean>;
   alwaysAllow(projectPath: string, toolPattern: string): Promise<boolean>;
