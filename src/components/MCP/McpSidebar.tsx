@@ -4,14 +4,36 @@ import McpDetail from './McpDetail';
 import McpAddServer from './McpAddServer';
 import McpRegistryDetail from './McpRegistryDetail';
 import McpIcon from './McpIcon';
+import CodexMcpConfigPanel from './CodexMcpConfigPanel';
 import SaiLogo from '../SaiLogo';
 import { DOT_MASK_URL } from '../../lib/assets';
-import type { McpServer, McpServerConfig, RegistryMcpServer } from '../../types';
+import type { AIProvider, McpServer, McpServerConfig, RegistryMcpServer } from '../../types';
 
 type Tab = 'installed' | 'browse';
 type View = 'list' | 'detail' | 'add' | 'registry-detail';
 
-export default function McpSidebar() {
+type CodexMcpRuntimeStatus = {
+  available: boolean;
+  reason?: string;
+  servers: Array<{
+    name: string;
+    lifecycle: string;
+    authentication: string;
+    toolCount: number;
+    failureReason?: string;
+  }>;
+};
+
+interface McpSidebarProps {
+  /** Claude's MCP configuration UI is intentionally separate from Codex's
+   * isolated App Server runtime. */
+  provider?: AIProvider;
+  projectPath?: string;
+  scope?: string;
+}
+
+export default function McpSidebar({ provider = 'claude', projectPath, scope }: McpSidebarProps) {
+  const isCodex = provider === 'codex';
   const [tab, setTab] = useState<Tab>('installed');
   const [search, setSearch] = useState('');
   const [installed, setInstalled] = useState<McpServer[]>([]);
@@ -22,6 +44,8 @@ export default function McpSidebar() {
   const [selectedServer, setSelectedServer] = useState<McpServer | null>(null);
   const [selectedRegistryServer, setSelectedRegistryServer] = useState<RegistryMcpServer | null>(null);
   const [runtime, setRuntime] = useState<Record<string, { status: string }>>({});
+  const [codexRuntime, setCodexRuntime] = useState<CodexMcpRuntimeStatus | null>(null);
+  const [codexLoading, setCodexLoading] = useState(false);
 
   const loadInstalled = async () => {
     setLoading(true);
@@ -59,11 +83,45 @@ export default function McpSidebar() {
     setLoading(false);
   };
 
-  useEffect(() => { loadInstalled(); }, []);
+  useEffect(() => {
+    if (!isCodex) loadInstalled();
+  }, [isCodex]);
+
+  // Codex App Server owns an isolated runtime and configuration. Do not call
+  // the Claude MCP APIs here: their installed list is neither shared nor safe
+  // to present as Codex state.
+  useEffect(() => {
+    if (!isCodex) {
+      setCodexRuntime(null);
+      setCodexLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setView('list');
+    setCodexRuntime(null);
+    if (!projectPath || !window.sai.codexMcpRuntimeStatus) {
+      setCodexRuntime({ available: false, reason: 'Codex MCP runtime status is unavailable.', servers: [] });
+      return;
+    }
+    setCodexLoading(true);
+    window.sai.codexMcpRuntimeStatus(projectPath, scope)
+      .then((status) => {
+        if (!cancelled) setCodexRuntime(status);
+      })
+      .catch(() => {
+        if (!cancelled) setCodexRuntime({ available: false, reason: 'Codex MCP runtime status is unavailable.', servers: [] });
+      })
+      .finally(() => {
+        if (!cancelled) setCodexLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [isCodex, projectPath, scope]);
 
   // Live connection status from the SDK backend (init-message report). The CLI
   // backend never reports this, so badges only appear in SDK mode.
   useEffect(() => {
+    if (isCodex) return;
     const api = window.sai as any;
     let cancelled = false;
     api.mcpRuntimeStatus?.().then((r: any) => {
@@ -73,7 +131,7 @@ export default function McpSidebar() {
       if (r?.servers) setRuntime(r.servers);
     });
     return () => { cancelled = true; off?.(); };
-  }, []);
+  }, [isCodex]);
 
   // Runtime entries are keyed by the name the SDK saw; plugin servers appear in
   // the sidebar as `plugin:<short>:<name>` — fall back to matching the bare
@@ -88,10 +146,10 @@ export default function McpSidebar() {
   };
 
   useEffect(() => {
-    if (tab === 'browse' && registry.length === 0) {
+    if (!isCodex && tab === 'browse' && registry.length === 0) {
       loadRegistry();
     }
-  }, [tab]);
+  }, [isCodex, tab]);
 
   const handleAdd = async (config: McpServerConfig) => {
     await window.sai.mcpAdd(config);
@@ -133,6 +191,58 @@ export default function McpSidebar() {
     ),
     [registry, query]
   );
+
+  if (isCodex) {
+    return (
+      <div className="mcp-sidebar sidebar-mount codex-mcp-sidebar" data-testid="codex-mcp-runtime">
+        <div className="codex-mcp-header">
+          <Server size={15} />
+          <div>
+            <div className="codex-mcp-title">Codex App Server MCP</div>
+            <div className="codex-mcp-subtitle">Runtime status · global configuration</div>
+          </div>
+        </div>
+        <div className="sidebar-list">
+          {codexLoading && <div className="sidebar-empty">Loading Codex MCP runtime…</div>}
+          {!codexLoading && codexRuntime?.available === false && (
+            <div className="codex-mcp-unavailable">{codexRuntime.reason || 'Codex MCP runtime status is unavailable.'}</div>
+          )}
+          {!codexLoading && codexRuntime?.available && codexRuntime.servers.length === 0 && (
+            <div className="sidebar-empty">No MCP servers reported by Codex.</div>
+          )}
+          {!codexLoading && codexRuntime?.available && codexRuntime.servers.map((server) => (
+            <div className="codex-mcp-card" key={server.name}>
+              <div className="card-icon"><Server size={14} /></div>
+              <div className="card-info">
+                <div className="card-name">{server.name}</div>
+                <div className="card-desc">{server.toolCount} {server.toolCount === 1 ? 'tool' : 'tools'} · {server.authentication}</div>
+                {server.failureReason && <div className="codex-mcp-failure">{server.failureReason}</div>}
+              </div>
+              <span className={`codex-mcp-lifecycle codex-mcp-${server.lifecycle}`}>{server.lifecycle}</span>
+            </div>
+          ))}
+          {!codexLoading && codexRuntime?.available && (
+            <CodexMcpConfigPanel
+              available
+            />
+          )}
+        </div>
+        <style>{`
+          .codex-mcp-header { display: flex; align-items: center; gap: 9px; padding: 13px 12px; border-bottom: 1px solid var(--border-hairline); color: var(--text); }
+          .codex-mcp-title { font-size: 12px; font-weight: 650; }
+          .codex-mcp-subtitle { margin-top: 2px; color: var(--text-muted); font-size: 10px; }
+          .codex-mcp-card { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border-hairline); }
+          .codex-mcp-card .card-info { min-width: 0; flex: 1; }
+          .codex-mcp-lifecycle { margin-top: 2px; color: var(--text-muted); font-size: 10px; text-transform: capitalize; white-space: nowrap; }
+          .codex-mcp-running, .codex-mcp-available { color: var(--success, #6fbf73); }
+          .codex-mcp-failed { color: var(--error, #e07171); }
+          .codex-mcp-failure, .codex-mcp-unavailable { color: var(--text-muted); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
+          .codex-mcp-failure { margin-top: 4px; color: var(--error, #e07171); }
+          .codex-mcp-unavailable { padding: 14px 12px; }
+        `}</style>
+      </div>
+    );
+  }
 
   if (view === 'registry-detail' && selectedRegistryServer) {
     return (

@@ -52,3 +52,8 @@ export function clearOverrides(sessionId: string): void {
   delete map[sessionId];
   write(map);
 }
+
+/** The rolling `default` alias means "let the desktop choose", not a model ID. */
+export function modelForRequest(model: string | undefined): string | undefined {
+  return model === 'default' ? undefined : model;
+}

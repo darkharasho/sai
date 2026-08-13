@@ -121,6 +121,8 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [codexDefaultModel, setCodexDefaultModel] = useState('');
   const [codexDefaultPermission, setCodexDefaultPermission] = useState<'auto' | 'read-only' | 'full-access'>('auto');
   const [codexDefaultEffort, setCodexDefaultEffort] = useState<CodexEffort>('high');
+  const [codexBackendMode, setCodexBackendMode] = useState<'sdk' | 'app-server'>('sdk');
+  const [codexAppServerStatus, setCodexAppServerStatus] = useState<{ available: boolean; reason?: string }>({ available: true });
   const [codexAvailableModels, setCodexAvailableModels] = useState<CodexModelOption[]>([]);
   const codexAvailableModelsRef = useRef<CodexModelOption[]>([]);
   const codexSettingsRef = useRef<{ model?: string; permission?: 'auto' | 'read-only' | 'full-access'; effort?: CodexEffort }>({});
@@ -192,6 +194,12 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     }).catch(() => {});
   }
 
+  function refreshCodexAppServerStatus(): void {
+    window.sai.codexAppServerPreviewStatus?.()
+      .then((status) => setCodexAppServerStatus(status))
+      .catch(() => setCodexAppServerStatus({ available: false, reason: 'Unable to check App Server preview' }));
+  }
+
   useEffect(() => {
     let mounted = true;
     window.sai.settingsGet('suspendTimeout', DEFAULT_TIMEOUT).then((v: number) => setSuspendTimeout(v));
@@ -230,6 +238,13 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if (merged.permission) setCodexDefaultPermission(merged.permission);
       if (merged.effort) setCodexDefaultEffort(merged.effort);
     });
+    window.sai.settingsGet('codexBackendMode', 'sdk').then((value: unknown) => {
+      if (!mounted) return;
+      const mode = value === 'app-server' ? 'app-server' : 'sdk';
+      setCodexBackendMode(mode);
+      void window.sai.codexBackendModeSet?.(mode);
+    });
+    refreshCodexAppServerStatus();
     (window.sai as any).geminiModels?.().then((result: { models: { id: string; name: string }[]; defaultModel: string } | undefined) => {
       if (result?.models?.length) {
         setGeminiAvailableModels(result.models);
@@ -575,6 +590,21 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     codexSettingsRef.current = { ...codexSettingsRef.current, effort: normalized };
     if (onSettingChange) onSettingChange('codexEffort', normalized);
     else window.sai.settingsSet('codex', codexSettingsRef.current);
+  };
+
+  const handleCodexBackendModeChange = (mode: 'sdk' | 'app-server') => {
+    setCodexBackendMode(mode);
+    window.sai.settingsSet('codexBackendMode', mode);
+    void Promise.resolve(window.sai.codexBackendModeSet?.(mode)).finally(() => {
+      refreshCodexAppServerStatus();
+      onSettingChange?.('codexBackendMode', mode);
+    });
+  };
+
+  const retryCodexAppServer = () => {
+    // Re-submit the selected preview mode so the main-process selector clears
+    // its scoped fallback and creates a fresh transport on the next scope.
+    window.sai.codexBackendModeSet?.('app-server').finally(() => refreshCodexAppServerStatus());
   };
 
   const handleFocusedChatChange = (value: boolean) => {
@@ -1245,6 +1275,25 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     return (
     <section className="settings-section">
       <div className="settings-section-label">Codex</div>
+      <div className="settings-row">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Backend</div>
+          <div className="settings-row-desc">
+            {codexBackendMode === 'app-server'
+              ? codexAppServerStatus.available
+                ? 'App Server is a preview transport. Active turns keep their current backend.'
+                : `${codexAppServerStatus.reason || 'App Server preview is unavailable; new work uses the SDK backend.'} You can retry it for new work.`
+              : 'SDK is the stable default backend.'}
+          </div>
+        </div>
+        <select aria-label="Codex backend" className="settings-select" value={codexBackendMode} onChange={e => handleCodexBackendModeChange(e.target.value as 'sdk' | 'app-server')}>
+          <option value="sdk">SDK (default)</option>
+          <option value="app-server">App Server (preview)</option>
+        </select>
+        {codexBackendMode === 'app-server' && !codexAppServerStatus.available && (
+          <button className="settings-button" onClick={retryCodexAppServer}>Retry App Server</button>
+        )}
+      </div>
       {codexAvailableModels.length > 0 && (
         <div className="settings-row">
           <div className="settings-row-info">

@@ -13,6 +13,14 @@ export interface ProviderCapabilities {
   hasPlugins: boolean;
 }
 
+/** Runtime-only capability evidence. Codex Swarm requires the isolated App
+ * Server transport to have completed its experimental handshake; the static
+ * provider table alone must never advertise it. */
+export interface ProviderCapabilityRuntime {
+  codexBackendMode?: 'sdk' | 'app-server';
+  codexSwarmStatus?: { available: boolean; reason?: string };
+}
+
 const CAPABILITIES: Record<AIProvider, ProviderCapabilities> = {
   claude: {
     hasOrchestrator: true,
@@ -47,7 +55,9 @@ const CAPABILITIES: Record<AIProvider, ProviderCapabilities> = {
     supportsImages: true,
     supportsTerminalScope: true,
     supportsMultiScope: true,
-    hasMcp: false,
+    // Codex exposes a read-only App Server MCP runtime view. It does not
+    // reuse Claude's install/configuration controls.
+    hasMcp: true,
     hasPlugins: false,
   },
   kimi: {
@@ -64,6 +74,11 @@ const CAPABILITIES: Record<AIProvider, ProviderCapabilities> = {
   },
 };
 
-export function getCapabilities(provider: AIProvider): ProviderCapabilities {
-  return CAPABILITIES[provider];
+export function getCapabilities(provider: AIProvider, runtime: ProviderCapabilityRuntime = {}): ProviderCapabilities {
+  const capabilities = CAPABILITIES[provider];
+  if (provider !== 'codex') return capabilities;
+  return {
+    ...capabilities,
+    hasOrchestrator: runtime.codexBackendMode === 'app-server' && runtime.codexSwarmStatus?.available === true,
+  };
 }

@@ -1,6 +1,317 @@
 export type CodexSessionKind = 'chat' | 'task' | 'orchestrator';
+export type CodexBackendMode = 'sdk' | 'app-server';
+
+/** Fixed, main-process-owned definition for an App Server Dynamic Tool. */
+export interface CodexDynamicTool {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
+/** The App Server preview is opt-in and may become unavailable at runtime. */
+export interface CodexAppServerPreviewStatus {
+  available: boolean;
+  reason?: string;
+}
+
+/** Read-only, deliberately coarse MCP runtime state from Codex App Server. */
+export type CodexMcpServerLifecycle = 'unknown' | 'available' | 'starting' | 'running' | 'failed' | 'disabled';
+export type CodexMcpServerAuthentication = 'authenticated' | 'unauthenticated' | 'not-required' | 'unknown';
+
+export interface CodexMcpRuntimeServerStatus {
+  name: string;
+  lifecycle: CodexMcpServerLifecycle;
+  authentication: CodexMcpServerAuthentication;
+  toolCount: number;
+  /** Coarse renderer-safe status only; raw protocol errors never leave the backend. */
+  failureReason?: string;
+}
+
+export interface CodexMcpRuntimeStatus {
+  available: boolean;
+  reason?: string;
+  servers: CodexMcpRuntimeServerStatus[];
+}
+
+/** A bounded, renderer-safe MCP server definition from the User config layer. */
+export type CodexMcpConfigServer =
+  | { name: string; transport: 'stdio'; command: string; args: string[]; env?: Record<string, string> }
+  | { name: string; transport: 'http'; url: string; httpHeaders?: Record<string, string> };
+
+/** This snapshot is intentionally limited to the global User config layer. */
+export interface CodexMcpConfigSnapshot {
+  version: string;
+  impact: 'global-user-config';
+  servers: CodexMcpConfigServer[];
+}
+
+export type CodexMcpConfigResult =
+  | { ok: true; snapshot: CodexMcpConfigSnapshot }
+  | { ok: false; code: 'unavailable' | 'invalid' | 'conflict' | 'host-error' };
+
+/** Deliberate UI acknowledgement; host-side validation remains authoritative. */
+export const CODEX_MCP_CONFIG_CONFIRMATION_TOKEN = 'confirm-global-user-mcp-config';
+
+export interface CodexMcpConfigWriteRequest {
+  expectedVersion: string;
+  servers: CodexMcpConfigServer[];
+  confirmationToken: typeof CODEX_MCP_CONFIG_CONFIRMATION_TOKEN;
+}
+
+const MCP_CONFIG_MAX_SERVERS = 64;
+const MCP_CONFIG_MAX_ARGS = 64;
+const MCP_CONFIG_MAX_TEXT = 2_048;
+const MCP_CONFIG_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/;
+const MCP_CONFIG_ENV = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
+const MCP_CONFIG_ENV_REFERENCE = /^\$\{?[A-Za-z_][A-Za-z0-9_]{0,127}\}?$/;
+const MCP_CONFIG_SENSITIVE = /(?:token|secret|password|credential|authorization|bearer|api[-_]?key)/i;
+const MCP_CONFIG_SHORT_VALUE_CARRIER = /^(?:-e(?:=|$|[A-Za-z_])|-H(?:=|$|\S)|-(?:a|p|u)(?:=|:|$|\S))/i;
+const MCP_CONFIG_LONG_OPTION = /^--([A-Za-z0-9][A-Za-z0-9_-]*)(?:[=:]|$)/;
+const MCP_CONFIG_SENSITIVE_NAME_PARTS = [
+  'token', 'secret', 'key', 'auth', 'credential', 'password', 'cookie',
+  'session', 'signature', 'sig', 'code', 'user', 'bearer', 'oauth', 'env', 'header',
+] as const;
+const MCP_CONFIG_SENSITIVE_LITERAL = /(?:^|[\s:='\"])(?:bearer|basic)\s+\S+|(?:^|[-_?&\s])(?:access[_-]?token|token|secret|password|credential|api[_-]?key|authorization)(?:\s*[:=]\s*|\s+)\S+|(?:^|\s)--?(?:auth|authorization|access[_-]?token|token|secret|password|credential|api[_-]?key)\s*=\s*\S+|(?:^|[\s:='\"])(?:sk-[a-z0-9][\w-]*)/i;
+
+function isSafeMcpConfigText(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= MCP_CONFIG_MAX_TEXT;
+}
+
+function isSensitiveMcpConfigCarrierName(value: string): boolean {
+  const normalized = value.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return MCP_CONFIG_SENSITIVE_NAME_PARTS.some((part) => normalized.includes(part));
+}
+
+function isSafeMcpConnectionText(value: unknown): value is string {
+  return isSafeMcpConfigText(value) && !MCP_CONFIG_SENSITIVE_LITERAL.test(value);
+}
+
+/**
+ * A stdio command must be one executable token. Treating this field as a
+ * shell command would let embedded flags and URLs bypass argument validation;
+ * the host receives command and args separately, so whitespace is never
+ * needed for a legitimate executable path.
+ */
+function isSafeMcpConnectionCommand(value: unknown): value is string {
+  return isSafeMcpConnectionText(value)
+    && !/\s/.test(value)
+    && !value.startsWith('-')
+    && !value.includes('://');
+}
+
+function isSafeMcpConnectionArgs(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length <= MCP_CONFIG_MAX_ARGS && value.every((arg) => {
+    if (!isSafeMcpConnectionText(arg)) return false;
+    const longOption = MCP_CONFIG_LONG_OPTION.exec(arg);
+    return !MCP_CONFIG_SHORT_VALUE_CARRIER.test(arg)
+      && !(longOption && isSensitiveMcpConfigCarrierName(longOption[1]!));
+  });
+}
+
+function isSafeMcpHttpUrl(value: unknown): value is string {
+  if (!isSafeMcpConfigText(value) || value.includes('#')) return false;
+  try {
+    const parsed = new URL(value);
+    if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password) return false;
+    return [...parsed.searchParams].every(([key, queryValue]) =>
+      !isSensitiveMcpConfigCarrierName(key) && !MCP_CONFIG_SENSITIVE_LITERAL.test(queryValue));
+  } catch {
+    return false;
+  }
+}
+
+function isMcpConfigReferences(value: unknown, keys: (key: string) => boolean): value is Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const entries = Object.entries(value);
+  return entries.length <= 32 && entries.every(([key, text]) => keys(key) && isSafeMcpConfigText(text) && MCP_CONFIG_ENV_REFERENCE.test(text));
+}
+
+/** Shared connection policy for App Server and the renderer-facing IPC boundary. */
+export function isCodexMcpConfigServers(value: unknown): value is CodexMcpConfigServer[] {
+  if (!Array.isArray(value) || value.length > MCP_CONFIG_MAX_SERVERS) return false;
+  const names = new Set<string>();
+  return value.every((server) => {
+    if (!server || typeof server !== 'object' || Array.isArray(server)) return false;
+    const item = server as Record<string, unknown>;
+    if (!isSafeMcpConfigText(item.name) || !MCP_CONFIG_NAME.test(item.name) || names.has(item.name)) return false;
+    names.add(item.name);
+    if (item.transport === 'stdio') {
+      return ['name', 'transport', 'command', 'args'].every((key) => key in item)
+        && Object.keys(item).every((key) => ['name', 'transport', 'command', 'args', 'env'].includes(key))
+        && isSafeMcpConnectionCommand(item.command)
+        && isSafeMcpConnectionArgs(item.args)
+        && (item.env === undefined || isMcpConfigReferences(item.env, (key) => MCP_CONFIG_ENV.test(key)));
+    }
+    if (item.transport === 'http') {
+      return Object.keys(item).every((key) => ['name', 'transport', 'url', 'httpHeaders'].includes(key))
+        && isSafeMcpHttpUrl(item.url)
+        && (item.httpHeaders === undefined || isMcpConfigReferences(item.httpHeaders, (key) => !MCP_CONFIG_SENSITIVE.test(key)));
+    }
+    return false;
+  });
+}
+
+/** Repeated Electron-boundary validation for the small editable connection subset. */
+export function isCodexMcpConfigWriteRequest(value: unknown): value is CodexMcpConfigWriteRequest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const input = value as Record<string, unknown>;
+  if (Object.keys(input).length !== 3 || input.confirmationToken !== CODEX_MCP_CONFIG_CONFIRMATION_TOKEN
+    || !isSafeMcpConfigText(input.expectedVersion)) return false;
+  return isCodexMcpConfigServers(input.servers);
+}
 export type CodexPermission = 'auto' | 'read-only' | 'full-access';
 export type CodexReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
+
+/** Sanitized metadata for an App Server approval; raw protocol params stay main-process only. */
+export interface CodexApprovalMetadata {
+  provider: 'codex';
+  requestHandle: string;
+  kind: 'command' | 'file-change' | 'permissions';
+  availableDecisions: string[];
+  reason?: string;
+  command?: string;
+  cwd?: string;
+  network?: { host?: string; protocol?: string };
+  grantRoot?: string;
+  permissionsSummary?: string[];
+  /** JSON-safe opaque copies of the permission objects that the UI may grant. */
+  requestedPermissions?: unknown[];
+}
+
+/**
+ * Renderer-to-main approval input. The App Server backend validates this
+ * against the exact pending request before it ever reaches the protocol.
+ */
+export type CodexApprovalDecision =
+  | { type: 'decision'; value: 'accept' | 'acceptForSession' | 'decline' | 'cancel' }
+  | { type: 'command-amendment'; execpolicyAmendment: string[] }
+  | { type: 'permissions'; permissions: unknown[]; scope: 'turn' | 'session' };
+
+export type CodexApprovalResult =
+  | { ok: true }
+  | { ok: false; code: 'unsupported' | 'not-pending' | 'invalid-decision' };
+
+/** A bounded, renderer-safe question shape from App Server. */
+export interface CodexUserInputQuestion {
+  id: string;
+  /** Short protocol section label, bounded before renderer exposure. */
+  header: string;
+  prompt: string;
+  options?: Array<{ id: string; label: string; description?: string }>;
+  allowOther?: boolean;
+  /** Render free-form answers as a masked password control. */
+  isSecret?: boolean;
+}
+
+/** App Server requires one or more selected option labels for each question. */
+export interface CodexUserInputAnswer {
+  answers: string[];
+}
+
+/** Exact `ToolRequestUserInputResponse.answers` wire shape. */
+export type CodexUserInputAnswers = Record<string, CodexUserInputAnswer>;
+
+/**
+ * A renderer response to an App Server `tool/requestUserInput` request.
+ * Cancellation deliberately carries no answer data; the backend converts it
+ * to the protocol's valid empty answer map.
+ */
+export type CodexUserInputResponse =
+  | { type: 'answers'; answers: CodexUserInputAnswers }
+  | { type: 'cancel' };
+
+export interface CodexMcpElicitationForm {
+  mode: 'form';
+  serverName: string;
+  message: string;
+  requestedSchema: Record<string, unknown>;
+}
+
+export interface CodexMcpElicitationUrl {
+  mode: 'url';
+  serverName: string;
+  message: string;
+  url: string;
+  elicitationId?: string;
+}
+
+export type CodexMcpElicitationDecision =
+  | { action: 'accept'; content: Record<string, unknown> | null }
+  | { action: 'decline' | 'cancel'; content?: null };
+
+const CODEX_INPUT_MAX_FIELDS = 20;
+const CODEX_INPUT_MAX_OPTIONS = 20;
+const CODEX_INPUT_MAX_TEXT = 2_000;
+
+/**
+ * Narrow the renderer payload before it crosses into a pending App Server
+ * request. The backend then validates selected option IDs against the exact
+ * question and form content against the exact, server-provided safe schema.
+ */
+export function isCodexUserInputAnswers(value: unknown): value is CodexUserInputAnswers {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const entries = Object.entries(value as Record<string, unknown>);
+  return entries.length <= CODEX_INPUT_MAX_FIELDS && entries.every(([id, answer]) => {
+    if (id.length === 0 || id.length > 128 || !answer || typeof answer !== 'object' || Array.isArray(answer)) return false;
+    const fields = Object.entries(answer as Record<string, unknown>);
+    const selections = (answer as CodexUserInputAnswer).answers;
+    return fields.length === 1 && fields[0][0] === 'answers' && Array.isArray(selections)
+      && selections.length > 0 && selections.length <= CODEX_INPUT_MAX_OPTIONS
+      && selections.every((selection) => typeof selection === 'string' && selection.length > 0 && selection.length <= CODEX_INPUT_MAX_TEXT);
+  });
+}
+
+export function isCodexUserInputResponse(value: unknown): value is CodexUserInputResponse {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const input = value as Record<string, unknown>;
+  if (input.type === 'cancel') return Object.keys(input).length === 1;
+  return input.type === 'answers' && Object.keys(input).length === 2 && isCodexUserInputAnswers(input.answers);
+}
+
+function isSafeMcpContent(value: unknown, depth = 0): boolean {
+  if (depth > 4 || value === null || typeof value === 'string' || typeof value === 'boolean') {
+    return value === null || typeof value === 'boolean' || (typeof value === 'string' && value.length <= CODEX_INPUT_MAX_TEXT);
+  }
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (Array.isArray(value)) return value.length <= CODEX_INPUT_MAX_OPTIONS && value.every((entry) => isSafeMcpContent(entry, depth + 1));
+  if (!value || typeof value !== 'object') return false;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  const entries = Object.entries(value as Record<string, unknown>);
+  return entries.length <= CODEX_INPUT_MAX_FIELDS
+    && entries.every(([key, entry]) => key.length > 0 && key.length <= 128 && isSafeMcpContent(entry, depth + 1));
+}
+
+/** Does not authorize a URL action; the pending elicitation mode does that. */
+export function isCodexMcpElicitationDecision(value: unknown): value is CodexMcpElicitationDecision {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const input = value as Record<string, unknown>;
+  if (input.action === 'decline' || input.action === 'cancel') {
+    return Object.keys(input).every((key) => key === 'action' || key === 'content')
+      && (input.content === undefined || input.content === null);
+  }
+  return input.action === 'accept'
+    && Object.keys(input).every((key) => key === 'action' || key === 'content')
+    && Object.prototype.hasOwnProperty.call(input, 'content')
+    && (input.content === null || isSafeMcpContent(input.content));
+}
+
+export function isCodexApprovalDecision(value: unknown): value is CodexApprovalDecision {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const input = value as Record<string, unknown>;
+  if (input.type === 'decision') {
+    return Object.keys(input).every((key) => key === 'type' || key === 'value')
+      && (input.value === 'accept' || input.value === 'acceptForSession' || input.value === 'decline' || input.value === 'cancel');
+  }
+  if (input.type === 'command-amendment') {
+    return Object.keys(input).every((key) => key === 'type' || key === 'execpolicyAmendment')
+      && Array.isArray(input.execpolicyAmendment) && input.execpolicyAmendment.length > 0
+      && input.execpolicyAmendment.every((entry) => typeof entry === 'string' && entry.length > 0);
+  }
+  return input.type === 'permissions' && Object.keys(input).every((key) => key === 'type' || key === 'permissions' || key === 'scope')
+    && (input.scope === 'turn' || input.scope === 'session')
+    && Array.isArray(input.permissions);
+}
 
 export interface CodexStartArgs {
   projectPath: string;
@@ -61,8 +372,22 @@ export interface CodexBackend {
   reconcileScope(projectPath: string, scope?: string): void;
   setSessionId(projectPath: string, sessionId: string | undefined, scope?: string): void;
   getModels(forceRefresh?: boolean): Promise<CodexModelResult>;
+  /** Read-only App Server MCP runtime state; SDK support is added by its bridge slice. */
+  getMcpRuntimeStatus?(projectPath?: string, scope?: string): Promise<CodexMcpRuntimeStatus>;
+  /** App Server-only global User MCP configuration bridge. */
+  getMcpConfig?(): Promise<CodexMcpConfigResult>;
+  replaceMcpConfig?(expectedVersion: string, servers: CodexMcpConfigServer[]): Promise<CodexMcpConfigResult>;
+  /** App Server exposes this only after its experimental Swarm bridge probes cleanly. */
+  getSwarmStatus?(): Promise<CodexAppServerPreviewStatus>;
+  approve(projectPath: string, scope: string | undefined, requestHandle: string, decision: CodexApprovalDecision): CodexApprovalResult;
+  /** SDK returns a typed unsupported result; App Server validates a pending request. */
+  answerUserInput(projectPath: string, scope: string | undefined, requestHandle: string, response: CodexUserInputResponse): CodexApprovalResult;
+  /** SDK returns a typed unsupported result; App Server validates a pending request. */
+  resolveMcpElicitation(projectPath: string, scope: string | undefined, requestHandle: string, decision: CodexMcpElicitationDecision): CodexApprovalResult;
   suspendWorkspace(projectPath: string): void;
   isWorkspaceBusy(projectPath: string): boolean;
+  /** Optional finer-grained busy check used when routing concurrent scopes. */
+  isScopeBusy?(projectPath: string, scope?: string): boolean;
   destroy(): void;
 }
 

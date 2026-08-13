@@ -30,6 +30,7 @@ interface Props {
   orchestratorProvider?: string | null;
   orchestratorModel?: string | null;
   onProviderModelChange?: (provider: AIProvider, model: string) => void;
+  codexSwarm?: { available: boolean; reason?: string };
   chatSlot?: React.ReactNode;       // App.tsx can pass an embedded ChatPanel here
   /** When the active workspace is a meta workspace, its display name replaces the synthetic-root UUID. */
   projectLabel?: string;
@@ -54,6 +55,7 @@ export default function OrchestratorView({
   projectPath, stats,
   orchestratorProvider, orchestratorModel,
   onProviderModelChange,
+  codexSwarm,
   chatSlot,
   projectLabel,
 }: Props) {
@@ -103,6 +105,7 @@ export default function OrchestratorView({
             provider={pickerProvider}
             model={pickerModel}
             onChange={(p, m) => { onProviderModelChange?.(p, m); }}
+            codexSwarm={codexSwarm}
           />
           <button
             type="button"

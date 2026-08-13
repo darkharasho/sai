@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, render, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { installMockSai } from '../../../helpers/ipc-mock';
 import { readFlipRect, _resetFlipRegistry } from '../../../../src/components/Chat/flipRegistry';
@@ -36,10 +36,11 @@ vi.mock('../../../../src/components/Chat/MessageQueue', () => ({
 }));
 
 vi.mock('../../../../src/components/ThinkingAnimation', () => ({
-  default: () => (
+  default: ({ hint }: { hint?: string | null }) => (
     <div data-testid="thinking-animation">
       <span className="thinking-clock">[00:00.0]</span>
       <span className="thinking-cursor thinking-cursor-block" />
+      {hint && <span data-testid="thinking-hint">{hint}</span>}
     </div>
   ),
 }));
@@ -135,6 +136,204 @@ describe('ChatPanel', () => {
     });
 
     expect(onGeminiSessionId).toHaveBeenCalledWith('gemini-session-42');
+  });
+
+  it('routes Codex App Server approvals only through the structured preview bridge', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const, claudeScope: 'scope-a' };
+    render(<ChatPanel {...props} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+    await act(async () => {
+      for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+        (handler as (msg: any) => void)({
+          type: 'approval_needed', provider: 'codex', requestHandle: 'request-1', kind: 'command',
+          availableDecisions: ['accept', 'decline'], toolName: 'Command approval', toolUseId: 'request-1',
+          command: 'git status', projectPath: '/project', scope: 'scope-a',
+        });
+      }
+    });
+
+    expect(latestChatInputProps.pendingApproval?.provider).toBe('codex');
+    await act(async () => { latestChatInputProps.onApprove(); });
+    expect(mockSai.codexAppServerApprove).toHaveBeenCalledWith('/project', 'scope-a', 'request-1', {
+      type: 'decision', value: 'accept',
+    });
+    expect(mockSai.claudeApprove).not.toHaveBeenCalled();
+  });
+
+  it('grants and denies Codex App Server permission requests with permission payloads', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const, claudeScope: 'scope-a' };
+    render(<ChatPanel {...props} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const requestedPermissions = [{ kind: 'network', host: 'api.openai.com' }];
+
+    await act(async () => {
+      for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+        (handler as (msg: any) => void)({
+          type: 'approval_needed', provider: 'codex', requestHandle: 'permissions-1', kind: 'permissions',
+          availableDecisions: [], requestedPermissions, toolName: 'Permission approval', toolUseId: 'permissions-1',
+          command: '', projectPath: '/project', scope: 'scope-a',
+        });
+      }
+    });
+
+    await act(async () => { await latestChatInputProps.onApprove(); });
+    expect(mockSai.codexAppServerApprove).toHaveBeenCalledWith('/project', 'scope-a', 'permissions-1', {
+      type: 'permissions', permissions: requestedPermissions, scope: 'turn',
+    });
+
+    await act(async () => {
+      for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+        (handler as (msg: any) => void)({
+          type: 'approval_needed', provider: 'codex', requestHandle: 'permissions-2', kind: 'permissions',
+          availableDecisions: [], requestedPermissions, toolName: 'Permission approval', toolUseId: 'permissions-2',
+          command: '', projectPath: '/project', scope: 'scope-a',
+        });
+      }
+    });
+    await act(async () => { await latestChatInputProps.onDeny(); });
+    expect(mockSai.codexAppServerApprove).toHaveBeenCalledWith('/project', 'scope-a', 'permissions-2', {
+      type: 'permissions', permissions: [], scope: 'turn',
+    });
+
+    await act(async () => {
+      for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+        (handler as (msg: any) => void)({
+          type: 'approval_needed', provider: 'codex', requestHandle: 'permissions-3', kind: 'permissions',
+          availableDecisions: [], requestedPermissions, toolName: 'Permission approval', toolUseId: 'permissions-3',
+          command: '', projectPath: '/project', scope: 'scope-a',
+        });
+      }
+    });
+    await act(async () => { await latestChatInputProps.onAlwaysAllow(); });
+    expect(mockSai.codexAppServerApprove).toHaveBeenCalledWith('/project', 'scope-a', 'permissions-3', {
+      type: 'permissions', permissions: requestedPermissions, scope: 'session',
+    });
+  });
+
+  it('keeps a Codex permission approval visible when the preview bridge rejects it', async () => {
+    mockSai.codexAppServerApprove.mockResolvedValueOnce({ ok: false, code: 'not-pending' });
+    const props = { ...baseProps(), aiProvider: 'codex' as const, claudeScope: 'scope-a' };
+    render(<ChatPanel {...props} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+    await act(async () => {
+      for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+        (handler as (msg: any) => void)({
+          type: 'approval_needed', provider: 'codex', requestHandle: 'permissions-stale', kind: 'permissions',
+          requestedPermissions: [{ kind: 'network', host: 'api.openai.com' }], toolName: 'Permission approval', toolUseId: 'permissions-stale',
+          command: '', projectPath: '/project', scope: 'scope-a',
+        });
+      }
+    });
+
+    await act(async () => { await latestChatInputProps.onApprove(); });
+    expect(latestChatInputProps.pendingApproval?.toolUseId).toBe('permissions-stale');
+  });
+
+  it('does not surface unstructured SDK Codex approval events', async () => {
+    render(<ChatPanel {...{ ...baseProps(), aiProvider: 'codex' as const }} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+
+    await act(async () => {
+      for (const [handler] of mockSai.claudeOnMessage.mock.calls) {
+        (handler as (msg: any) => void)({
+          type: 'approval_needed', toolName: 'Bash', toolUseId: 'legacy-request', command: 'rm -rf nope',
+          projectPath: '/project', scope: 'chat',
+        });
+      }
+    });
+
+    expect(latestChatInputProps.pendingApproval).toBeNull();
+  });
+
+  it('routes Codex App Server input requests through the isolated bridge and keeps them actionable until resolved', async () => {
+    mockSai.codexAppServerAnswerUserInput.mockResolvedValueOnce({ ok: false, code: 'not-pending' });
+    const props = { ...baseProps(), aiProvider: 'codex' as const, claudeScope: 'scope-a' };
+    render(<ChatPanel {...props} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'user_input_needed', provider: 'codex', requestHandle: 'question-1', projectPath: '/project', scope: 'scope-a', questions: [{ id: 'style', header: 'Response style', prompt: 'Choose style', options: [{ id: 'brief', label: 'Brief' }] }] });
+    });
+    fireEvent.click(screen.getByLabelText('Brief'));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Submit' })); });
+    expect(mockSai.codexAppServerAnswerUserInput).toHaveBeenCalledWith('/project', 'scope-a', 'question-1', {
+      type: 'answers', answers: { style: { answers: ['brief'] } },
+    });
+    expect(screen.getByTestId('codex-user-input-request')).toBeTruthy();
+
+    await act(async () => {
+      handler({ type: 'user_input_resolved', provider: 'codex', requestHandle: 'question-1', projectPath: '/project', scope: 'scope-a' });
+    });
+    expect(screen.queryByTestId('codex-user-input-request')).toBeNull();
+  });
+
+  it('sends an explicit typed cancellation for a Codex App Server input request', async () => {
+    mockSai.codexAppServerAnswerUserInput.mockResolvedValueOnce({ ok: true });
+    const props = { ...baseProps(), aiProvider: 'codex' as const, claudeScope: 'scope-a' };
+    render(<ChatPanel {...props} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'user_input_needed', provider: 'codex', requestHandle: 'cancel-question', projectPath: '/project', scope: 'scope-a', questions: [{ id: 'style', header: 'Response style', prompt: 'Choose style', options: [{ id: 'brief', label: 'Brief' }] }] });
+    });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Cancel' })); });
+
+    expect(mockSai.codexAppServerAnswerUserInput).toHaveBeenCalledWith('/project', 'scope-a', 'cancel-question', { type: 'cancel' });
+    expect(screen.queryByTestId('codex-user-input-request')).toBeNull();
+  });
+
+  it('clears App Server input panels on an authoritative terminal event', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const, claudeScope: 'scope-a' };
+    render(<ChatPanel {...props} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'user_input_needed', provider: 'codex', requestHandle: 'question-terminal', projectPath: '/project', scope: 'scope-a', questions: [{ id: 'style', header: 'Response style', prompt: 'Choose style', options: [{ id: 'brief', label: 'Brief' }] }] });
+      handler({ type: 'mcp_elicitation_needed', provider: 'codex', requestHandle: 'mcp-terminal', mode: 'url', serverName: 'Calendar', message: 'Continue login', url: 'https://calendar.test/login', projectPath: '/project', scope: 'scope-a' });
+    });
+    expect(screen.getByTestId('codex-user-input-request')).toBeTruthy();
+    expect(screen.getByTestId('codex-mcp-elicitation')).toBeTruthy();
+
+    await act(async () => { handler({ type: 'done', projectPath: '/project', scope: 'scope-a', subagentsSettled: true }); });
+
+    expect(screen.queryByTestId('codex-user-input-request')).toBeNull();
+    expect(screen.queryByTestId('codex-mcp-elicitation')).toBeNull();
+  });
+
+  it('does not render unbranded SDK Codex input events as App Server panels', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const, claudeScope: 'scope-a' };
+    render(<ChatPanel {...props} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'user_input_needed', requestHandle: 'sdk-question', projectPath: '/project', scope: 'scope-a', questions: [{ id: 'style', header: 'Response style', prompt: 'Choose style' }] });
+      handler({ type: 'mcp_elicitation_needed', requestHandle: 'sdk-mcp', mode: 'url', serverName: 'SDK', message: 'Ignore', url: 'https://example.test' });
+    });
+
+    expect(screen.queryByTestId('codex-user-input-request')).toBeNull();
+    expect(screen.queryByTestId('codex-mcp-elicitation')).toBeNull();
+  });
+
+  it('routes only Codex App Server MCP elicitation through its response bridge', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const, claudeScope: 'scope-a' };
+    render(<ChatPanel {...props} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'mcp_elicitation_needed', requestHandle: 'legacy', mode: 'url', serverName: 'Wrong', message: 'Ignore', url: 'https://wrong.test', projectPath: '/project', scope: 'scope-a' });
+      handler({ type: 'mcp_elicitation_needed', provider: 'codex', requestHandle: 'mcp-1', mode: 'url', serverName: 'Calendar', message: 'Continue login', url: 'https://calendar.test/login', projectPath: '/project', scope: 'scope-a' });
+    });
+    expect(screen.getByText('Calendar')).toBeTruthy();
+    expect(screen.queryByText('Wrong')).toBeNull();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Cancel' })); });
+    expect(mockSai.codexAppServerResolveMcpElicitation).toHaveBeenCalledWith('/project', 'scope-a', 'mcp-1', { action: 'cancel' });
   });
 
   it('sends the raw Gemini prompt without synthetic conversation history and includes chat scope', async () => {
@@ -461,7 +660,7 @@ describe('ChatPanel', () => {
       'scope-a',
       'orchestrator',
       orchestratorContext,
-      undefined,
+      '/project',
       expect.any(String),
       ['/repos/a', '/repos/b'],
     );
@@ -594,6 +793,305 @@ describe('ChatPanel', () => {
 
     // Provider-specific animations removed — Codex no longer gets its own "Working" wave
     expect(container.querySelector('.codex-working-wave')).toBeFalsy();
+  });
+
+  it('keeps Codex thinking visible for active native subagents after the parent becomes idle', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const };
+    const { container, rerender } = render(<ChatPanel {...props} isStreaming />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'subagent_activity', agentId: 'agent-1', status: 'running', summary: 'Inspect renderer', projectPath: '/project', scope: 'chat' });
+      handler({ type: 'subagent_activity', agentId: 'agent-2', status: 'running', summary: 'Check tests', projectPath: '/project', scope: 'chat' });
+    });
+    rerender(<ChatPanel {...props} isStreaming={false} />);
+
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+    expect(container.textContent).toContain('Inspect renderer');
+    expect(latestChatInputProps.isStreaming).toBe(true);
+
+    await act(async () => {
+      handler({ type: 'subagent_activity', agentId: 'agent-1', status: 'completed', projectPath: '/project', scope: 'chat' });
+    });
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+    expect(container.textContent).toContain('Check tests');
+
+    await act(async () => {
+      handler({ type: 'subagent_activity', agentId: 'agent-2', status: 'completed', projectPath: '/project', scope: 'chat' });
+    });
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
+    });
+  });
+
+  it('keeps native-subagent thinking visible while the parent has a running tool', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const };
+    const { container, rerender } = render(<ChatPanel {...props} isStreaming={false} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({
+        type: 'assistant',
+        projectPath: '/project',
+        scope: 'chat',
+        message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: { file: 'x.ts' } }] },
+      });
+      handler({
+        type: 'subagent_activity',
+        agentId: 'agent-1',
+        status: 'running',
+        summary: 'Inspect renderer',
+        projectPath: '/project',
+        scope: 'chat',
+      });
+    });
+    rerender(<ChatPanel {...props} isStreaming={false} />);
+
+    expect(container.querySelector('[data-msg-toolcalls="1"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+    expect(container.textContent).toContain('Inspect renderer');
+  });
+
+  it('suppresses native-subagent thinking while awaiting a question', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const, awaitingQuestion: true };
+    const { container } = render(<ChatPanel {...props} isStreaming={false} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'subagent_activity', agentId: 'agent-1', status: 'running', summary: 'Wait for answer', projectPath: '/project', scope: 'chat' });
+    });
+
+    expect(latestChatInputProps.isStreaming).toBe(true);
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
+  });
+
+  it('suppresses native-subagent thinking while the chat is waiting', async () => {
+    const props = {
+      ...baseProps(),
+      aiProvider: 'codex' as const,
+      waiting: { wait: { kind: 'background' as const, resumeInSeconds: null, taskCount: 1 }, startedAtMs: Date.now() },
+    };
+    const { container } = render(<ChatPanel {...props} isStreaming={false} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'subagent_activity', agentId: 'agent-1', status: 'running', summary: 'Wait in background', projectPath: '/project', scope: 'chat' });
+    });
+
+    expect(latestChatInputProps.isStreaming).toBe(true);
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
+  });
+
+  it.each([
+    ['session', { sessionId: 'session-1' }, { sessionId: 'session-2' }],
+    ['project', { projectPath: '/project-a' }, { projectPath: '/project-b' }],
+    ['scope', { claudeScope: 'scope-a' }, { claudeScope: 'scope-b' }],
+  ])('clears native-subagent activity when the %s is replaced', async (_boundary, initial, replacement) => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const, ...initial };
+    const { container, rerender } = render(<ChatPanel {...props} isStreaming={false} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({
+        type: 'subagent_activity', agentId: 'agent-1', status: 'running', summary: 'Old session work',
+        projectPath: props.projectPath, scope: props.claudeScope ?? 'chat',
+      });
+    });
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+
+    rerender(<ChatPanel {...props} {...replacement} isStreaming={false} />);
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
+    });
+  });
+
+  it('rejects a late native-subagent event from the previous Codex turn after a session switch', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const, sessionId: 'session-1' };
+    const { container, rerender } = render(<ChatPanel {...props} isStreaming={false} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'streaming_start', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+      handler({ type: 'subagent_activity', agentId: 'child-1', status: 'running', summary: 'Current child', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+    });
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+    expect(latestChatInputProps.isStreaming).toBe(true);
+
+    rerender(<ChatPanel {...props} sessionId="session-2" isStreaming={false} />);
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
+    });
+
+    await act(async () => {
+      handler({ type: 'subagent_activity', agentId: 'child-1', status: 'running', summary: 'Late old child', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+    });
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
+    expect(latestChatInputProps.isStreaming).toBe(false);
+
+    await act(async () => {
+      handler({ type: 'streaming_start', turnSeq: 6, projectPath: '/project', scope: 'chat' });
+      handler({ type: 'subagent_activity', agentId: 'child-2', status: 'running', summary: 'New session child', turnSeq: 6, projectPath: '/project', scope: 'chat' });
+    });
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+    expect(container.textContent).toContain('New session child');
+    expect(latestChatInputProps.isStreaming).toBe(true);
+  });
+
+  it('keeps native-subagent activity through a normal parent done until the process exits', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const };
+    const { container, rerender } = render(<ChatPanel {...props} isStreaming={false} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'streaming_start', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+      handler({ type: 'subagent_activity', agentId: 'child-1', status: 'running', summary: 'Current child', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+    });
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+
+    await act(async () => {
+      handler({ type: 'done', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+    });
+    rerender(<ChatPanel {...props} isStreaming={false} />);
+
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+    expect(container.textContent).toContain('Current child');
+    expect(latestChatInputProps.isStreaming).toBe(true);
+
+    await act(async () => {
+      handler({ type: 'process_exit', projectPath: '/project', scope: 'chat' });
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
+      expect(container.textContent).not.toContain('Current child');
+      expect(latestChatInputProps.isStreaming).toBe(false);
+    });
+  });
+
+  it('clears native-subagent activity when an aborted parent receives its matching done', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const };
+    const { container, rerender } = render(<ChatPanel {...props} isStreaming={false} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'streaming_start', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+      handler({ type: 'subagent_activity', agentId: 'child-1', status: 'running', summary: 'Current child', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+      handler({ type: 'done', subagentsAborted: true, turnSeq: 5, projectPath: '/project', scope: 'chat' });
+    });
+    rerender(<ChatPanel {...props} isStreaming={false} />);
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
+      expect(container.textContent).not.toContain('Current child');
+      expect(latestChatInputProps.isStreaming).toBe(false);
+    });
+  });
+
+  it('clears native-subagent activity when a settled parent receives its matching done', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const };
+    const { container, rerender } = render(<ChatPanel {...props} isStreaming={false} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'streaming_start', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+      handler({ type: 'subagent_activity', agentId: 'child-1', status: 'running', summary: 'Current child', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+      handler({ type: 'done', subagentsSettled: true, turnSeq: 5, projectPath: '/project', scope: 'chat' });
+    });
+    rerender(<ChatPanel {...props} isStreaming={false} />);
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
+      expect(container.textContent).not.toContain('Current child');
+      expect(latestChatInputProps.isStreaming).toBe(false);
+    });
+  });
+
+  it('accepts a child terminal event after its parent normal done', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const };
+    const { container } = render(<ChatPanel {...props} isStreaming={false} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'streaming_start', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+      handler({ type: 'subagent_activity', agentId: 'child-1', status: 'running', summary: 'Trailing child', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+      handler({ type: 'done', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+      handler({ type: 'subagent_activity', agentId: 'child-1', status: 'completed', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
+      expect(container.textContent).not.toContain('Trailing child');
+      expect(latestChatInputProps.isStreaming).toBe(false);
+    });
+  });
+
+  it('clears native-subagent activity at a fresh streaming boundary', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const };
+    const { container } = render(<ChatPanel {...props} isStreaming={false} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'streaming_start', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+      handler({ type: 'subagent_activity', agentId: 'child-1', status: 'running', summary: 'Old child', turnSeq: 5, projectPath: '/project', scope: 'chat' });
+    });
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+
+    await act(async () => {
+      handler({ type: 'streaming_start', turnSeq: 6, projectPath: '/project', scope: 'chat' });
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
+      expect(container.textContent).not.toContain('Old child');
+      expect(latestChatInputProps.isStreaming).toBe(false);
+    });
+  });
+
+  it.each(['subagentsAborted', 'subagentsSettled'] as const)(
+    'keeps newer native-subagent activity when a stale turn sends done marked %s',
+    async (terminationMarker) => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const };
+    const { container } = render(<ChatPanel {...props} isStreaming={false} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'streaming_start', turnSeq: 6, projectPath: '/project', scope: 'chat' });
+      handler({ type: 'subagent_activity', agentId: 'child-2', status: 'running', summary: 'New child', turnSeq: 6, projectPath: '/project', scope: 'chat' });
+      handler({ type: 'done', [terminationMarker]: true, turnSeq: 5, projectPath: '/project', scope: 'chat' });
+    });
+
+    expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+    expect(container.textContent).toContain('New child');
+    expect(latestChatInputProps.isStreaming).toBe(true);
+    },
+  );
+
+  it('does not persist native-subagent activity across an unmount and fresh mount', async () => {
+    const props = { ...baseProps(), aiProvider: 'codex' as const };
+    const first = render(<ChatPanel {...props} isStreaming={false} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+    await act(async () => {
+      handler({ type: 'subagent_activity', agentId: 'agent-1', status: 'running', summary: 'Ephemeral work', projectPath: '/project', scope: 'chat' });
+    });
+    expect(first.container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+
+    first.unmount();
+    const second = render(<ChatPanel {...props} isStreaming={false} />);
+    expect(second.container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
   });
 
   it('passes the Codex model refresh callback through to ChatInput', async () => {

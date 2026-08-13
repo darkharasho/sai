@@ -29,6 +29,21 @@ async function pairedSocket(server: BridgeServer, port: number): Promise<WebSock
   return ws;
 }
 
+async function expectNoMessage(ws: WebSocket, ms = 50): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const onMessage = (data: WebSocket.Data) => {
+      cleanup();
+      reject(new Error(`unexpected message: ${data.toString()}`));
+    };
+    const timer = setTimeout(() => { cleanup(); resolve(); }, ms);
+    const cleanup = () => {
+      clearTimeout(timer);
+      ws.off('message', onMessage);
+    };
+    ws.on('message', onMessage);
+  });
+}
+
 describe('BridgeServer chat routing', () => {
   let server: BridgeServer; let port: number; let bus: SessionBus;
   let sendPrompt = vi.fn(); let resolveApproval = vi.fn(); let interruptTurn = vi.fn();
@@ -114,6 +129,60 @@ describe('BridgeServer chat routing', () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(interruptTurn).toHaveBeenCalledWith('/p', 'chat');
     ws.close();
+  });
+
+  it('returns a sanitized Claude model catalogue to an authenticated request', async () => {
+    const models = vi.fn().mockReturnValue({
+      models: [{
+        id: 'fable', label: 'Fable', description: 'Account model', recommended: true,
+        apiKey: 'must-not-leak', accountId: 'must-not-leak', config: { secret: 'must-not-leak' },
+      }],
+      detected: true,
+    });
+    await server.stop();
+    server = new BridgeServer({
+      tailnetIp: '127.0.0.1', pairing: new PairingStore(':memory:'), bus,
+      pwaDir: null, screenshotSecret: 'x', loadScreenshot: async () => null,
+      getClaudeModels: models,
+    });
+    ({ port } = await server.start());
+    const ws = await pairedSocket(server, port);
+    ws.send(JSON.stringify({ type: 'claude_models_request', requestId: 'models-1' }));
+    const m = await once(ws, (reply) => reply.type === 'claude_models');
+    expect(m).toEqual({
+      v: 1,
+      type: 'claude_models',
+      requestId: 'models-1',
+      models: [{ id: 'fable', label: 'Fable', description: 'Account model', recommended: true }],
+    });
+    expect(models).toHaveBeenCalledOnce();
+    ws.close();
+  });
+
+  it('ignores Claude model catalogue requests without a nonempty request ID', async () => {
+    const ws = await pairedSocket(server, port);
+    ws.send(JSON.stringify({ type: 'claude_models_request', requestId: '' }));
+    await expectNoMessage(ws);
+    ws.send(JSON.stringify({ type: 'claude_models_request', requestId: '   ' }));
+    await expectNoMessage(ws);
+    ws.close();
+  });
+
+  it('rejects a Claude model catalogue request before authentication without invoking discovery', async () => {
+    const models = vi.fn().mockReturnValue({ models: [] });
+    await server.stop();
+    server = new BridgeServer({
+      tailnetIp: '127.0.0.1', pairing: new PairingStore(':memory:'), bus,
+      pwaDir: null, screenshotSecret: 'x', loadScreenshot: async () => null,
+      getClaudeModels: models,
+    });
+    ({ port } = await server.start());
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await new Promise<void>((resolve) => ws.once('open', resolve));
+    const closed = new Promise<number>((resolve) => ws.once('close', resolve));
+    ws.send(JSON.stringify({ type: 'claude_models_request', requestId: 'before-auth' }));
+    await expect(closed).resolves.toBe(4001);
+    expect(models).not.toHaveBeenCalled();
   });
 });
 

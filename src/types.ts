@@ -146,6 +146,19 @@ export interface PendingApproval {
   command: string;
   description: string;
   input: Record<string, any>;
+  /** Present only for the capability-gated Codex App Server preview. */
+  provider?: 'codex';
+  requestHandle?: string;
+  kind?: 'command' | 'file-change' | 'permissions';
+  availableDecisions?: string[];
+  reason?: string;
+  cwd?: string;
+  network?: { host?: string; protocol?: string };
+  grantRoot?: string;
+  permissionsSummary?: string[];
+  /** JSON-safe opaque copies of the Codex App Server permissions being requested. */
+  requestedPermissions?: unknown[];
+  proposedExecpolicyAmendment?: string[];
 }
 
 export interface PendingSudoPrompt {
@@ -155,6 +168,33 @@ export interface PendingSudoPrompt {
   /** Reason the previous attempt failed (e.g. "Incorrect password"). */
   error?: string;
 }
+
+/** Renderer-safe, capability-gated Codex App Server input request. */
+export interface PendingCodexUserInput {
+  provider: 'codex';
+  requestHandle: string;
+  questions: Array<{
+    id: string;
+    header: string;
+    prompt: string;
+    options?: Array<{ id: string; label: string; description?: string }>;
+    allowOther?: boolean;
+    isSecret?: boolean;
+  }>;
+  /** Present only when the server supplied an automatic-resolution deadline. */
+  autoResolutionMs?: number;
+}
+
+/** Renderer-safe MCP elicitation request from the Codex App Server preview. */
+export type PendingCodexMcpElicitation = {
+  provider: 'codex';
+  requestHandle: string;
+  serverName: string;
+  message: string;
+} & (
+  | { mode: 'form'; requestedSchema: Record<string, unknown> }
+  | { mode: 'url'; url: string; elicitationId?: string }
+);
 
 export interface QueuedMessage {
   id: string;
@@ -363,6 +403,36 @@ declare global {
     metaWorkspaceActivate?: (id: string) => Promise<any>;
     metaWorkspaceDelete?: (id: string) => Promise<boolean>;
     geminiSetSessionId?: (projectPath: string, sessionId: string | undefined, scope?: string) => void;
+    codexBackendModeGet?: () => Promise<'sdk' | 'app-server'>;
+    codexBackendModeSet?: (mode: 'sdk' | 'app-server') => Promise<'sdk' | 'app-server'>;
+    codexSwarmStatus?: () => Promise<{ available: boolean; reason?: string }>;
+    codexAppServerPreviewStatus?: () => Promise<{ available: boolean; reason?: string }>;
+    codexMcpRuntimeStatus?: (
+      projectPath: string,
+      scope?: string,
+    ) => Promise<import('../electron/services/codexBackend').CodexMcpRuntimeStatus>;
+    codexMcpConfigGet?: () => Promise<import('../electron/services/codexBackend').CodexMcpConfigResult>;
+    codexMcpConfigReplace?: (
+      request: import('../electron/services/codexBackend').CodexMcpConfigWriteRequest,
+    ) => Promise<import('../electron/services/codexBackend').CodexMcpConfigResult>;
+    codexAppServerApprove?: (
+      projectPath: string,
+      scope: string | undefined,
+      requestHandle: string,
+      decision: import('../electron/services/codexBackend').CodexApprovalDecision,
+    ) => Promise<import('../electron/services/codexBackend').CodexApprovalResult>;
+    codexAppServerAnswerUserInput?: (
+      projectPath: string,
+      scope: string | undefined,
+      requestHandle: string,
+      response: import('../electron/services/codexBackend').CodexUserInputResponse,
+    ) => Promise<import('../electron/services/codexBackend').CodexApprovalResult>;
+    codexAppServerResolveMcpElicitation?: (
+      projectPath: string,
+      scope: string | undefined,
+      requestHandle: string,
+      decision: import('../electron/services/codexBackend').CodexMcpElicitationDecision,
+    ) => Promise<import('../electron/services/codexBackend').CodexApprovalResult>;
     searchRun?: SaiSearchApi['searchRun'];
     searchReplaceFile?: SaiSearchApi['searchReplaceFile'];
     swarm?: {
@@ -458,5 +528,12 @@ export interface SwarmApproval {
   command?: string;
   description?: string;
   input?: unknown;
+  /** App Server approvals are scoped by an opaque main-process handle. */
+  provider?: 'codex';
+  requestHandle?: string;
+  kind?: 'command' | 'file-change' | 'permissions';
+  availableDecisions?: string[];
+  /** Exact, JSON-safe permission values emitted by the App Server backend. */
+  requestedPermissions?: unknown[];
   createdAt: number;
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BEARER_KEY, connect, extractPairCode, pair, type WireClient } from './wire';
+import { BEARER_KEY, connect, extractPairCode, pair, type RemoteClaudeModel, type WireClient } from './wire';
 import { describeDevice } from './deviceLabel';
 import { readPersisted, writePersisted, removePersisted, isNonEmptyString } from './lib/persisted';
 
@@ -102,12 +102,36 @@ function OfflineBanner({ show }: { show: boolean }) {
   );
 }
 
-function ConnectedShell({ client }: { client: WireClient }) {
+export function ConnectedShell({ client }: { client: WireClient }) {
   const [workspacePath, setWorkspacePath] = useState<string>('');
   const [metaMembers, setMetaMembers] = useState<{ projectPath: string; name: string }[] | undefined>(undefined);
   const [navOpen, setNavOpen] = useState(false);
   const [follow, setFollow] = useState(true);
   const [active, setActive] = useState<ChatActive | null>(null);
+  const [claudeModels, setClaudeModels] = useState<RemoteClaudeModel[]>([]);
+
+  // The catalogue is account-scoped. A request that was in flight when a
+  // socket closes is rejected by WireClient, so repeat discovery after every
+  // authenticated replacement connection. The request sequence makes delayed
+  // replies from an old connection harmless.
+  useEffect(() => {
+    let cancelled = false;
+    let requestSequence = 0;
+    const loadClaudeModels = () => {
+      const sequence = ++requestSequence;
+      client.requestClaudeModels();
+      void client.waitForClaudeModels()
+        .then((models) => {
+          if (!cancelled && sequence === requestSequence) setClaudeModels(models);
+        })
+        .catch(() => { /* fallback remains available */ });
+    };
+    loadClaudeModels();
+    const off = client.onState((state) => {
+      if (state === 'open') loadClaudeModels();
+    });
+    return () => { cancelled = true; off(); };
+  }, [client]);
 
   useEffect(() => {
     return client.on((msg) => {
@@ -159,6 +183,7 @@ function ConnectedShell({ client }: { client: WireClient }) {
           follow={follow}
           onFollowChange={setFollow}
           onOpenNav={() => setNavOpen(true)}
+          models={claudeModels}
         />
       </div>
       <NavDrawer

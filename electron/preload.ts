@@ -75,6 +75,28 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.invoke('claude:alwaysAllow', projectPath, toolPattern),
   claudeModels: () => ipcRenderer.invoke('claude:models'),
   // Codex SDK
+  codexBackendModeGet: () => ipcRenderer.invoke('codex:backendMode:get'),
+  codexBackendModeSet: (mode: 'sdk' | 'app-server') => ipcRenderer.invoke('codex:backendMode:set', mode),
+  codexAppServerPreviewStatus: () => ipcRenderer.invoke('codex:appServerPreviewStatus'),
+  codexSwarmStatus: () => ipcRenderer.invoke('codex:swarmStatus'),
+  codexAppServerApprove: (
+    projectPath: string,
+    scope: string | undefined,
+    requestHandle: string,
+    decision: import('./services/codexBackend').CodexApprovalDecision,
+  ) => ipcRenderer.invoke('codex:appServerApprove', projectPath, scope, requestHandle, decision),
+  codexAppServerAnswerUserInput: (
+    projectPath: string,
+    scope: string | undefined,
+    requestHandle: string,
+    response: import('./services/codexBackend').CodexUserInputResponse,
+  ) => ipcRenderer.invoke('codex:appServerAnswerUserInput', projectPath, scope, requestHandle, response),
+  codexAppServerResolveMcpElicitation: (
+    projectPath: string,
+    scope: string | undefined,
+    requestHandle: string,
+    decision: import('./services/codexBackend').CodexMcpElicitationDecision,
+  ) => ipcRenderer.invoke('codex:appServerResolveMcpElicitation', projectPath, scope, requestHandle, decision),
   codexModels: (forceRefresh?: boolean) => ipcRenderer.invoke('codex:models', forceRefresh),
   codexStart: (cwd: string, scope?: string, kind?: string, orchestratorContext?: unknown, scopeCwd?: string, metaPreamble?: string, additionalDirectories?: string[]) =>
     ipcRenderer.invoke('codex:start', cwd, scope, kind, orchestratorContext, scopeCwd, metaPreamble, additionalDirectories),
@@ -406,6 +428,13 @@ contextBridge.exposeInMainWorld('sai', {
   mcpUpdate: (name: string, updates: any) => ipcRenderer.invoke('mcp:update', name, updates),
   mcpRegistryList: () => ipcRenderer.invoke('mcp:registryList'),
   mcpRuntimeStatus: () => ipcRenderer.invoke('mcp:runtimeStatus'),
+  // Codex App Server has an isolated read-only MCP runtime channel. Never
+  // route this through Claude's configuration or aggregate runtime status.
+  codexMcpRuntimeStatus: (projectPath: string, scope?: string) =>
+    ipcRenderer.invoke('codex:mcpRuntimeStatus', projectPath, scope),
+  codexMcpConfigGet: () => ipcRenderer.invoke('codex:mcpConfig:get'),
+  codexMcpConfigReplace: (request: import('./services/codexBackend').CodexMcpConfigWriteRequest) =>
+    ipcRenderer.invoke('codex:mcpConfig:replace', request),
   onMcpRuntimeStatus: (cb: (status: any) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, status: any) => cb(status);
     ipcRenderer.on('mcp:runtime-status', listener);

@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => {
     emitChatMessage: vi.fn(),
     fetchBundledCodexModels: vi.fn(),
     sdkConstructor: vi.fn(),
+    appServerConstructor: vi.fn(),
     registerWorkspaceBackendHooks: vi.fn(),
   };
 });
@@ -60,9 +61,22 @@ vi.mock('@electron/services/codexBackend/sdkBackend', () => ({
       reconcileScope: vi.fn(),
       setSessionId: vi.fn(),
       getModels: vi.fn(),
+      approve: vi.fn().mockReturnValue({ ok: false, code: 'unsupported' }),
       suspendWorkspace: vi.fn(),
       isWorkspaceBusy: vi.fn(),
       destroy: vi.fn(),
+    };
+  }),
+}));
+
+vi.mock('@electron/services/codexBackend/appServerBackend', () => ({
+  AppServerBackend: vi.fn().mockImplementation(function (deps: unknown) {
+    mocks.appServerConstructor(deps);
+    return {
+      previewStatus: { available: true },
+      start: vi.fn(), send: vi.fn(), interrupt: vi.fn(), reconcileScope: vi.fn(),
+      setSessionId: vi.fn(), getModels: vi.fn(), suspendWorkspace: vi.fn(),
+      isWorkspaceBusy: vi.fn().mockReturnValue(false), destroy: vi.fn(),
     };
   }),
 }));
@@ -73,8 +87,13 @@ vi.mock('@electron/services/codexBackend/bundledModels', () => ({
 
 import {
   __setCodexBackendForTests,
+  __setCodexBackendFactoriesForTests,
   destroyCodexBackendIfActive,
+  getCodexAppServerPreviewStatus,
+  getCodexSwarmStatus,
   getCodexBackend,
+  getCodexBackendMode,
+  setCodexBackendMode,
 } from '@electron/services/codexBackend';
 import type { CodexBackend } from '@electron/services/codexBackend';
 import { SdkCodexBackend } from '@electron/services/codexBackend/sdkBackend';
@@ -90,6 +109,9 @@ function backendStub(): CodexBackend {
     reconcileScope: vi.fn(),
     setSessionId: vi.fn(),
     getModels: vi.fn().mockResolvedValue({ models: [], defaultModel: '' }),
+    approve: vi.fn().mockReturnValue({ ok: false, code: 'unsupported' }),
+    answerUserInput: vi.fn().mockReturnValue({ ok: false, code: 'unsupported' }),
+    resolveMcpElicitation: vi.fn().mockReturnValue({ ok: false, code: 'unsupported' }),
     suspendWorkspace: vi.fn(),
     isWorkspaceBusy: vi.fn().mockReturnValue(false),
     destroy: vi.fn(),
@@ -98,15 +120,38 @@ function backendStub(): CodexBackend {
 
 beforeEach(() => {
   mocks.fetchBundledCodexModels.mockResolvedValue({ models: [], defaultModel: '' });
+  __setCodexBackendFactoriesForTests();
+  setCodexBackendMode('sdk');
 });
 
 afterEach(() => {
   destroyCodexBackendIfActive();
+  __setCodexBackendFactoriesForTests();
   mocks.ipcMain.reset();
   vi.clearAllMocks();
 });
 
 describe('Codex backend selection', () => {
+  it('keeps Swarm disabled on the SDK and probes only the selected App Server bridge', async () => {
+    const sdk = backendStub();
+    const appServer = {
+      ...backendStub(),
+      previewStatus: { available: true },
+      getSwarmStatus: vi.fn().mockResolvedValue({ available: true }),
+    };
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
+
+    await expect(getCodexSwarmStatus()).resolves.toEqual(expect.objectContaining({
+      available: false,
+      reason: expect.stringMatching(/SDK backend is selected/i),
+    }));
+    expect(appServer.getSwarmStatus).not.toHaveBeenCalled();
+
+    setCodexBackendMode('app-server');
+    await expect(getCodexSwarmStatus()).resolves.toEqual({ available: true });
+    expect(appServer.getSwarmStatus).toHaveBeenCalledOnce();
+  });
+
   it('constructs and caches one SDK backend', () => {
     const first = getCodexBackend();
     const second = getCodexBackend();
@@ -129,7 +174,180 @@ describe('Codex backend selection', () => {
     });
   });
 
+  it('keeps an active scope on SDK after selecting App Server', () => {
+    const sdk = backendStub();
+    sdk.isScopeBusy = vi.fn().mockReturnValue(true);
+    (sdk as CodexBackend & { isAnyWorkspaceBusy: ReturnType<typeof vi.fn> }).isAnyWorkspaceBusy = vi.fn().mockReturnValue(true);
+    const appServer = backendStub();
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
+
+    const backend = getCodexBackend();
+    backend.start({ projectPath: '/project', scope: 'active' });
+    setCodexBackendMode('app-server');
+    backend.send({ projectPath: '/project', scope: 'active', message: 'continue' });
+    expect(getCodexBackendMode()).toBe('app-server');
+    expect(sdk.destroy).not.toHaveBeenCalled();
+    expect(sdk.send).toHaveBeenCalledWith(expect.objectContaining({ scope: 'active' }));
+    expect(appServer.send).not.toHaveBeenCalled();
+  });
+
+  it('keeps a settled SDK scope on SDK after selecting App Server', () => {
+    const sdk = backendStub();
+    const appServer = backendStub();
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
+
+    const backend = getCodexBackend();
+    backend.start({ projectPath: '/project', scope: 'settled-sdk' });
+    setCodexBackendMode('app-server');
+    backend.send({ projectPath: '/project', scope: 'settled-sdk', message: 'continue' });
+
+    expect(sdk.send).toHaveBeenCalledWith(expect.objectContaining({ scope: 'settled-sdk' }));
+    expect(appServer.send).not.toHaveBeenCalled();
+  });
+
+  it('keeps a settled App Server scope on App Server after selecting SDK', () => {
+    const sdk = backendStub();
+    const appServer = backendStub();
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
+    setCodexBackendMode('app-server');
+
+    const backend = getCodexBackend();
+    backend.start({ projectPath: '/project', scope: 'settled-preview' });
+    setCodexBackendMode('sdk');
+    backend.send({ projectPath: '/project', scope: 'settled-preview', message: 'continue' });
+
+    expect(appServer.send).toHaveBeenCalledWith(expect.objectContaining({ scope: 'settled-preview' }));
+    expect(sdk.send).not.toHaveBeenCalled();
+  });
+
+  it('keeps MCP runtime status with the App Server transport that owns its scope', async () => {
+    const sdk = backendStub();
+    const appServer = {
+      ...backendStub(),
+      previewStatus: { available: true },
+      getMcpRuntimeStatus: vi.fn().mockResolvedValue({ available: true, servers: [] }),
+    };
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
+    setCodexBackendMode('app-server');
+    const dispatcher = getCodexBackend();
+    dispatcher.start({ projectPath: '/project', scope: 'task:7' });
+    setCodexBackendMode('sdk');
+
+    await expect(dispatcher.getMcpRuntimeStatus?.('/project', 'task:7')).resolves.toEqual({ available: true, servers: [] });
+    expect(appServer.getMcpRuntimeStatus).toHaveBeenCalledWith('/project', 'task:7');
+    expect(sdk.getMcpRuntimeStatus).toBeUndefined();
+  });
+
+  it('unassigns a reset settled scope so its next start uses the selected backend', () => {
+    const sdk = backendStub();
+    const appServer = backendStub();
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
+
+    const backend = getCodexBackend();
+    backend.start({ projectPath: '/project', scope: 'reset' });
+    setCodexBackendMode('app-server');
+    backend.setSessionId('/project', undefined, 'reset');
+    backend.start({ projectPath: '/project', scope: 'reset' });
+
+    expect(sdk.setSessionId).toHaveBeenCalledWith('/project', undefined, 'reset');
+    expect(appServer.start).toHaveBeenCalledWith(expect.objectContaining({ scope: 'reset' }));
+  });
+
+  it('routes a fresh scope to the selected backend while another SDK scope is active', () => {
+    const sdk = backendStub();
+    (sdk as CodexBackend & { isAnyWorkspaceBusy: ReturnType<typeof vi.fn> }).isAnyWorkspaceBusy = vi.fn().mockReturnValue(true);
+    const appServer = backendStub();
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
+
+    getCodexBackend().start({ projectPath: '/project', scope: 'scope-a' });
+    getCodexBackend().send({ projectPath: '/project', scope: 'scope-a', message: 'keep working' });
+    setCodexBackendMode('app-server');
+    getCodexBackend().start({ projectPath: '/project', scope: 'scope-b' });
+
+    expect(sdk.start).toHaveBeenCalledWith(expect.objectContaining({ scope: 'scope-a' }));
+    expect(sdk.send).toHaveBeenCalledWith(expect.objectContaining({ scope: 'scope-a' }));
+    expect(appServer.start).toHaveBeenCalledWith(expect.objectContaining({ scope: 'scope-b' }));
+    expect(sdk.destroy).not.toHaveBeenCalled();
+  });
+
+  it('falls back to SDK for new work after App Server becomes unavailable', () => {
+    let available = true;
+    const appServer = { ...backendStub(), get previewStatus() { return available ? { available: true } : { available: false, reason: 'Handshake failed' }; } };
+    const sdk = backendStub();
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
+    setCodexBackendMode('app-server');
+
+    getCodexBackend().start({ projectPath: '/project', scope: 'preview' });
+    expect(appServer.start).toHaveBeenCalledOnce();
+    available = false;
+    expect(getCodexAppServerPreviewStatus()).toEqual({ available: false, reason: 'Handshake failed' });
+    getCodexBackend().start({ projectPath: '/project', scope: 'fallback' });
+    expect(sdk.start).toHaveBeenCalledWith(expect.objectContaining({ scope: 'fallback' }));
+    expect(getCodexAppServerPreviewStatus()).toEqual({ available: false, reason: 'Handshake failed' });
+  });
+
+  it('keeps a settled App Server scope on SDK after preview fallback', () => {
+    let available = true;
+    const appServer = { ...backendStub(), get previewStatus() { return available ? { available: true } : { available: false, reason: 'Handshake failed' }; } };
+    const sdk = backendStub();
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
+    setCodexBackendMode('app-server');
+    const backend = getCodexBackend();
+
+    backend.start({ projectPath: '/project', scope: 'preview' });
+    available = false;
+    backend.start({ projectPath: '/project', scope: 'preview' });
+    available = true;
+    backend.send({ projectPath: '/project', scope: 'preview', message: 'continue' });
+
+    expect(sdk.start).toHaveBeenCalledWith(expect.objectContaining({ scope: 'preview' }));
+    expect(sdk.send).toHaveBeenCalledWith(expect.objectContaining({ scope: 'preview' }));
+    expect(appServer.send).not.toHaveBeenCalled();
+  });
+
+  it('does not move a busy App Server scope to SDK after preview fallback', () => {
+    let available = true;
+    const appServer = {
+      ...backendStub(),
+      isScopeBusy: vi.fn().mockReturnValue(true),
+      get previewStatus() { return available ? { available: true } : { available: false, reason: 'Handshake failed' }; },
+    };
+    const sdk = backendStub();
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
+    setCodexBackendMode('app-server');
+    const backend = getCodexBackend();
+
+    backend.start({ projectPath: '/project', scope: 'preview' });
+    available = false;
+    backend.send({ projectPath: '/project', scope: 'preview', message: 'continue' });
+
+    expect(appServer.send).toHaveBeenCalledWith(expect.objectContaining({ scope: 'preview' }));
+    expect(sdk.send).not.toHaveBeenCalled();
+  });
+
+  it('retries App Server for a fresh scope when preview mode is selected again', () => {
+    let available = false;
+    const firstAppServer = { ...backendStub(), get previewStatus() { return available ? { available: true } : { available: false, reason: 'Handshake failed' }; } };
+    const retryAppServer = { ...backendStub(), previewStatus: { available: true } };
+    const sdk = backendStub();
+    const makeAppServer = vi.fn()
+      .mockReturnValueOnce(firstAppServer)
+      .mockReturnValueOnce(retryAppServer);
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: makeAppServer });
+
+    setCodexBackendMode('app-server');
+    getCodexBackend().start({ projectPath: '/project', scope: 'failed' });
+    expect(getCodexAppServerPreviewStatus()).toEqual({ available: false, reason: 'Handshake failed' });
+
+    setCodexBackendMode('app-server');
+    getCodexBackend().start({ projectPath: '/project', scope: 'retry' });
+
+    expect(retryAppServer.start).toHaveBeenCalledWith(expect.objectContaining({ scope: 'retry' }));
+  });
+
   it('wires workspace hooks to the active backend and neutralizes them after destroy', () => {
+    const sdk = backendStub();
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk });
     const backend = getCodexBackend();
     const registration = mocks.registerWorkspaceBackendHooks.mock.calls.at(-1);
 
@@ -140,14 +358,14 @@ describe('Codex backend selection', () => {
     };
     hooks.suspend('/project');
     hooks.isBusy('/project');
-    expect(backend.suspendWorkspace).toHaveBeenCalledWith('/project');
-    expect(backend.isWorkspaceBusy).toHaveBeenCalledWith('/project');
+    expect(sdk.suspendWorkspace).toHaveBeenCalledWith('/project');
+    expect(sdk.isWorkspaceBusy).toHaveBeenCalledWith('/project');
 
     destroyCodexBackendIfActive();
     expect(() => hooks.suspend('/project')).not.toThrow();
     expect(hooks.isBusy('/project')).toBe(false);
-    expect(backend.suspendWorkspace).toHaveBeenCalledTimes(1);
-    expect(backend.isWorkspaceBusy).toHaveBeenCalledTimes(1);
+    expect(sdk.suspendWorkspace).toHaveBeenCalledTimes(1);
+    expect(sdk.isWorkspaceBusy).toHaveBeenCalledTimes(1);
   });
 
   it('destroys replaced, reset, and active injected backends exactly once', () => {
@@ -180,13 +398,12 @@ describe('Codex backend selection', () => {
 });
 
 describe('Codex backend source regression', () => {
-  it('never reads the codexBackend setting or imports the CLI backend', () => {
+  it('never imports the CLI backend', () => {
     const source = fs.readFileSync(
       path.join(__dirname, '../../../electron/services/codexBackend/index.ts'),
       'utf-8',
     );
 
-    expect(source).not.toMatch(/codexBackend\s*(setting|===|:)/i);
     expect(source).not.toMatch(/CliCodexBackend/);
   });
 });
@@ -300,6 +517,269 @@ describe('Codex IPC dispatch', () => {
     await mocks.ipcMain.invoke('codex:models');
 
     expect(backend.getModels).toHaveBeenCalledWith(false);
+  });
+
+  it('uses a dedicated, scoped and read-only channel for Codex MCP runtime status', async () => {
+    const backend = backendStub();
+    backend.getMcpRuntimeStatus = vi.fn().mockResolvedValue({
+      available: true,
+      servers: [{ name: 'github', lifecycle: 'running', authentication: 'authenticated', toolCount: 4 }],
+    });
+    __setCodexBackendForTests(backend);
+    registerCodexHandlers();
+
+    await expect(mocks.ipcMain.invoke('codex:mcpRuntimeStatus', '/project', 'task:7')).resolves.toEqual({
+      available: true,
+      servers: [{ name: 'github', lifecycle: 'running', authentication: 'authenticated', toolCount: 4 }],
+    });
+    expect(backend.getMcpRuntimeStatus).toHaveBeenCalledWith('/project', 'task:7');
+
+    await expect(mocks.ipcMain.invoke('codex:mcpRuntimeStatus', '', 'task:7')).resolves.toEqual({
+      available: false,
+      reason: 'Codex MCP runtime status requires a non-empty project path and an optional string scope.',
+      servers: [],
+    });
+    await expect(mocks.ipcMain.invoke('codex:mcpRuntimeStatus', '/project', 7)).resolves.toEqual({
+      available: false,
+      reason: 'Codex MCP runtime status requires a non-empty project path and an optional string scope.',
+      servers: [],
+    });
+    expect(backend.getMcpRuntimeStatus).toHaveBeenCalledOnce();
+  });
+
+  it('reports SDK MCP runtime status as unavailable without touching the Claude MCP channel', async () => {
+    const backend = backendStub();
+    __setCodexBackendForTests(backend);
+    registerCodexHandlers();
+
+    await expect(mocks.ipcMain.invoke('codex:mcpRuntimeStatus', '/project', 'chat')).resolves.toEqual({
+      available: false,
+      reason: 'Codex MCP runtime status is unavailable on the SDK backend.',
+      servers: [],
+    });
+  });
+
+  it('bridges only confirmed App Server MCP config reads and writes', async () => {
+    const backend = backendStub();
+    const safeServer = { name: 'local', transport: 'stdio' as const, command: '/usr/local/bin/mcp-server', args: ['--port=3000'] };
+    const snapshot = { version: 'v1', impact: 'global-user-config' as const, servers: [safeServer] };
+    backend.getMcpConfig = vi.fn().mockResolvedValue({ ok: true, snapshot });
+    backend.replaceMcpConfig = vi.fn().mockResolvedValue({ ok: true, snapshot });
+    __setCodexBackendForTests(backend);
+    setCodexBackendMode('app-server');
+    registerCodexHandlers();
+
+    await expect(mocks.ipcMain.invoke('codex:mcpConfig:get')).resolves.toEqual({ ok: true, snapshot });
+    await expect(mocks.ipcMain.invoke('codex:mcpConfig:replace', {
+      expectedVersion: 'v1', servers: [safeServer], confirmationToken: 'confirm-global-user-mcp-config',
+    })).resolves.toEqual({ ok: true, snapshot });
+    expect(backend.replaceMcpConfig).toHaveBeenCalledWith('v1', [safeServer]);
+
+    await expect(mocks.ipcMain.invoke('codex:mcpConfig:replace', {
+      expectedVersion: 'v1', servers: [safeServer], confirmationToken: 'nope',
+    })).resolves.toEqual({ ok: false, code: 'invalid' });
+    expect(backend.replaceMcpConfig).toHaveBeenCalledOnce();
+  });
+
+  it('refuses Codex MCP config edits when the SDK owns the selected backend', async () => {
+    const backend = backendStub();
+    backend.getMcpConfig = vi.fn();
+    backend.replaceMcpConfig = vi.fn();
+    __setCodexBackendForTests(backend);
+    registerCodexHandlers();
+
+    await expect(mocks.ipcMain.invoke('codex:mcpConfig:get')).resolves.toEqual({ ok: false, code: 'unavailable' });
+    await expect(mocks.ipcMain.invoke('codex:mcpConfig:replace', {
+      expectedVersion: 'v1', servers: [], confirmationToken: 'confirm-global-user-mcp-config',
+    })).resolves.toEqual({ ok: false, code: 'unavailable' });
+    expect(backend.getMcpConfig).not.toHaveBeenCalled();
+    expect(backend.replaceMcpConfig).not.toHaveBeenCalled();
+  });
+
+  it('preserves a coarse host conflict and rejects credential-shaped config before dispatch', async () => {
+    const backend = backendStub();
+    backend.replaceMcpConfig = vi.fn().mockResolvedValue({ ok: false, code: 'conflict' });
+    __setCodexBackendForTests(backend);
+    setCodexBackendMode('app-server');
+    registerCodexHandlers();
+
+    await expect(mocks.ipcMain.invoke('codex:mcpConfig:replace', {
+      expectedVersion: 'v1', servers: [], confirmationToken: 'confirm-global-user-mcp-config',
+    })).resolves.toEqual({ ok: false, code: 'conflict' });
+    await expect(mocks.ipcMain.invoke('codex:mcpConfig:replace', {
+      expectedVersion: 'v1', confirmationToken: 'confirm-global-user-mcp-config', servers: [{
+        name: 'unsafe', transport: 'stdio', command: 'node', args: ['--token=literal-secret'],
+      }],
+    })).resolves.toEqual({ ok: false, code: 'invalid' });
+    await expect(mocks.ipcMain.invoke('codex:mcpConfig:replace', {
+      expectedVersion: 'v1', confirmationToken: 'confirm-global-user-mcp-config', servers: [{
+        name: 'unsafe-command', transport: 'stdio', command: 'node --client-key literal-secret', args: [],
+      }],
+    })).resolves.toEqual({ ok: false, code: 'invalid' });
+    expect(backend.replaceMcpConfig).toHaveBeenCalledOnce();
+  });
+
+  it('does not expose malformed Codex MCP config snapshots from a backend', async () => {
+    const backend = backendStub();
+    backend.getMcpConfig = vi.fn().mockResolvedValue({ ok: true, snapshot: {
+      version: 'v1', impact: 'global-user-config', servers: [], rawConfigPath: '/private/config.toml',
+    } });
+    __setCodexBackendForTests(backend);
+    setCodexBackendMode('app-server');
+    registerCodexHandlers();
+    await expect(mocks.ipcMain.invoke('codex:mcpConfig:get')).resolves.toEqual({ ok: false, code: 'host-error' });
+  });
+
+  it.each([
+    {
+      label: 'credential-bearing URL query aliases',
+      server: { name: 'remote', transport: 'http', url: 'https://mcp.example.test/rpc?access_token=literal-secret' },
+    },
+    {
+      label: 'credential-shaped long command options',
+      server: { name: 'local', transport: 'stdio', command: 'node', args: ['serve', '--client-key', 'literal-secret'] },
+    },
+    {
+      label: 'split header carriers',
+      server: { name: 'headers', transport: 'stdio', command: 'node', args: ['serve', '-H', 'Authorization: Bearer literal-secret'] },
+    },
+    {
+      label: 'credential-bearing command strings',
+      server: { name: 'command-secret', transport: 'stdio', command: 'node --client-key literal-secret', args: [] },
+    },
+    {
+      label: 'registry URLs with userinfo in command strings',
+      server: { name: 'command-registry', transport: 'stdio', command: 'node --registry=https://user:literal-secret@registry.example.test', args: [] },
+    },
+  ])('does not expose future backend MCP config snapshots with $label', async ({ server }) => {
+    const backend = backendStub();
+    backend.getMcpConfig = vi.fn().mockResolvedValue({ ok: true, snapshot: {
+      version: 'v1', impact: 'global-user-config', servers: [server],
+    } });
+    __setCodexBackendForTests(backend);
+    setCodexBackendMode('app-server');
+    registerCodexHandlers();
+
+    const result = await mocks.ipcMain.invoke('codex:mcpConfig:get');
+
+    expect(result).toEqual({ ok: false, code: 'host-error' });
+    expect(JSON.stringify(result)).not.toContain('literal-secret');
+  });
+
+  it('does not expose malformed MCP status data from a backend to the renderer', async () => {
+    const backend = backendStub();
+    backend.getMcpRuntimeStatus = vi.fn().mockResolvedValue({
+      available: true,
+      servers: [{ name: 'github', lifecycle: 'running', authentication: 'authenticated', toolCount: -1, rawError: 'secret' }],
+    });
+    __setCodexBackendForTests(backend);
+    registerCodexHandlers();
+
+    await expect(mocks.ipcMain.invoke('codex:mcpRuntimeStatus', '/project', 'chat')).resolves.toEqual({
+      available: false,
+      reason: 'Codex MCP runtime status returned invalid data.',
+      servers: [],
+    });
+  });
+
+  it('converts an unavailable Codex MCP backend into a renderer-safe status', async () => {
+    const backend = backendStub();
+    backend.getMcpRuntimeStatus = vi.fn().mockRejectedValue(new Error('raw protocol failure: /private/token'));
+    __setCodexBackendForTests(backend);
+    registerCodexHandlers();
+
+    await expect(mocks.ipcMain.invoke('codex:mcpRuntimeStatus', '/project', 'chat')).resolves.toEqual({
+      available: false,
+      reason: 'Codex MCP runtime status is unavailable.',
+      servers: [],
+    });
+  });
+
+  it('accepts only the narrow typed Codex approval payload and delegates it with scope', async () => {
+    const backend = backendStub();
+    vi.mocked(backend.approve).mockReturnValue({ ok: true });
+    __setCodexBackendForTests(backend);
+    registerCodexHandlers();
+
+    await expect(mocks.ipcMain.invoke('codex:appServerApprove', '/project', 'task:7', 'request-7', {
+      type: 'decision', value: 'accept',
+    })).resolves.toEqual({ ok: true });
+    expect(backend.approve).toHaveBeenCalledWith('/project', 'task:7', 'request-7', { type: 'decision', value: 'accept' });
+
+    await expect(mocks.ipcMain.invoke('codex:appServerApprove', '/project', 'task:7', 'request-8', {
+      type: 'permissions', scope: 'turn', permissions: [{ kind: 'network', host: 'api.openai.com' }],
+    })).resolves.toEqual({ ok: true });
+    expect(backend.approve).toHaveBeenLastCalledWith('/project', 'task:7', 'request-8', {
+      type: 'permissions', scope: 'turn', permissions: [{ kind: 'network', host: 'api.openai.com' }],
+    });
+
+    await expect(mocks.ipcMain.invoke('codex:appServerApprove', '/project', 'task:7', 'request-7', {
+      type: 'permissions', scope: 'everywhere', permissions: [],
+    })).resolves.toEqual({ ok: false, code: 'invalid-decision' });
+    expect(backend.approve).toHaveBeenCalledTimes(2);
+  });
+
+  it('routes only bounded App Server input and MCP-elicitation responses through dedicated IPC channels', async () => {
+    const backend = backendStub();
+    backend.answerUserInput = vi.fn().mockReturnValue({ ok: true });
+    backend.resolveMcpElicitation = vi.fn().mockReturnValue({ ok: true });
+    __setCodexBackendForTests(backend);
+    registerCodexHandlers();
+
+    await expect(mocks.ipcMain.invoke('codex:appServerAnswerUserInput', '/project', 'task:7', 'question-7', {
+      type: 'answers', answers: { format: { answers: ['json'] }, target: { answers: ['other'] } },
+    })).resolves.toEqual({ ok: true });
+    expect(backend.answerUserInput).toHaveBeenCalledWith('/project', 'task:7', 'question-7', {
+      type: 'answers', answers: { format: { answers: ['json'] }, target: { answers: ['other'] } },
+    });
+
+    await expect(mocks.ipcMain.invoke('codex:appServerAnswerUserInput', '/project', 'task:7', 'question-cancel', {
+      type: 'cancel',
+    })).resolves.toEqual({ ok: true });
+    expect(backend.answerUserInput).toHaveBeenLastCalledWith('/project', 'task:7', 'question-cancel', { type: 'cancel' });
+
+    await expect(mocks.ipcMain.invoke('codex:appServerResolveMcpElicitation', '/project', 'task:7', 'mcp-7', {
+      action: 'accept', content: { calendar: 'primary' },
+    })).resolves.toEqual({ ok: true });
+    expect(backend.resolveMcpElicitation).toHaveBeenCalledWith('/project', 'task:7', 'mcp-7', {
+      action: 'accept', content: { calendar: 'primary' },
+    });
+
+    await expect(mocks.ipcMain.invoke('codex:appServerAnswerUserInput', '/project', 'task:7', 'question-7', {
+      type: 'answers', answers: { format: { answers: ['json', 1] } },
+    })).resolves.toEqual({ ok: false, code: 'invalid-decision' });
+    await expect(mocks.ipcMain.invoke('codex:appServerResolveMcpElicitation', '/project', 'task:7', 'mcp-7', {
+      action: 'accept', content: { redirect: 'https://untrusted.test' }, navigate: true,
+    })).resolves.toEqual({ ok: false, code: 'invalid-decision' });
+    await expect(mocks.ipcMain.invoke('codex:appServerResolveMcpElicitation', '/project', 'task:7', 'mcp-7', {
+      action: 'accept', content: null,
+    })).resolves.toEqual({ ok: true });
+    expect(backend.answerUserInput).toHaveBeenCalledTimes(2);
+    expect(backend.resolveMcpElicitation).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps App Server input replies with the transport that owns the scoped conversation', async () => {
+    const sdk = backendStub();
+    const appServer = backendStub();
+    appServer.answerUserInput = vi.fn().mockReturnValue({ ok: true });
+    appServer.resolveMcpElicitation = vi.fn().mockReturnValue({ ok: true });
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
+    setCodexBackendMode('app-server');
+    const dispatcher = getCodexBackend();
+    await dispatcher.start({ projectPath: '/project', scope: 'task:7' });
+    registerCodexHandlers();
+
+    await expect(mocks.ipcMain.invoke('codex:appServerAnswerUserInput', '/project', 'task:7', 'question-7', {
+      type: 'answers', answers: { answer: { answers: ['yes'] } },
+    })).resolves.toEqual({ ok: true });
+    expect(appServer.answerUserInput).toHaveBeenCalledOnce();
+
+    setCodexBackendMode('sdk');
+    await expect(mocks.ipcMain.invoke('codex:appServerResolveMcpElicitation', '/project', 'task:7', 'mcp-7', {
+      action: 'cancel',
+    })).resolves.toEqual({ ok: true });
+    expect(appServer.resolveMcpElicitation).toHaveBeenCalledOnce();
+    expect(sdk.resolveMcpElicitation).not.toHaveBeenCalled();
   });
 
   it('routes codex:usage to the injected telemetry singleton with a forced refresh', async () => {

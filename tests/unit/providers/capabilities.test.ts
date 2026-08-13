@@ -12,6 +12,12 @@ describe('getCapabilities', () => {
     it('supports images', () => expect(getCapabilities('claude').supportsImages).toBe(true));
     it('supports terminal scope', () => expect(getCapabilities('claude').supportsTerminalScope).toBe(true));
     it('supports multi-scope', () => expect(getCapabilities('claude').supportsMultiScope).toBe(true));
+    it('keeps orchestrator support independent of Codex transport state', () => {
+      expect(getCapabilities('claude', {
+        codexBackendMode: 'sdk',
+        codexSwarmStatus: { available: false, reason: 'SDK selected' },
+      }).hasOrchestrator).toBe(true);
+    });
   });
 
   describe('gemini', () => {
@@ -26,11 +32,27 @@ describe('getCapabilities', () => {
   describe('codex', () => {
     it('does not have orchestrator', () => expect(getCapabilities('codex').hasOrchestrator).toBe(false));
     it('does not have slash commands', () => expect(getCapabilities('codex').hasSlashCommands).toBe(false));
+    it('has read-only MCP runtime status', () => expect(getCapabilities('codex').hasMcp).toBe(true));
+    it('does not have plugins', () => expect(getCapabilities('codex').hasPlugins).toBe(false));
     it('has its own effort mode', () => expect(getCapabilities('codex').hasEffortMode).toBe(true));
     it('does not have conversation mode', () => expect(getCapabilities('codex').hasConversationMode).toBe(false));
     it('has approval mode', () => expect(getCapabilities('codex').hasApprovalMode).toBe(true));
     it('supports terminal scope through the scoped SDK runtime', () => expect(getCapabilities('codex').supportsTerminalScope).toBe(true));
     it('supports independent scopes through the scoped SDK runtime', () => expect(getCapabilities('codex').supportsMultiScope).toBe(true));
+
+    it('enables the orchestrator only after the App Server Swarm bridge is ready', () => {
+      expect(getCapabilities('codex', {
+        codexBackendMode: 'app-server',
+        codexSwarmStatus: { available: true },
+      }).hasOrchestrator).toBe(true);
+    });
+
+    it.each([
+      ['SDK backend', { codexBackendMode: 'sdk' as const, codexSwarmStatus: { available: true } }],
+      ['unnegotiated App Server', { codexBackendMode: 'app-server' as const, codexSwarmStatus: { available: false, reason: 'Dynamic tools are unavailable' } }],
+    ])('keeps the orchestrator disabled for %s', (_label, runtime) => {
+      expect(getCapabilities('codex', runtime).hasOrchestrator).toBe(false);
+    });
   });
 });
 

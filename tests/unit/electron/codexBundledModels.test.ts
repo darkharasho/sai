@@ -1,12 +1,54 @@
-import { describe, expect, it } from 'vitest';
+import { EventEmitter } from 'node:events';
+import { describe, expect, it, vi } from 'vitest';
 import {
   resolveBundledCodex,
   parseCodexModelContextWindows,
   enrichCodexModelsWithContext,
+  fetchBundledCodexModels,
+  type FetchBundledCodexModelsDeps,
 } from '../../../electron/services/codexBackend/bundledModels';
 import { normalizeCodexModelOption } from '../../../electron/services/codexBackend/types';
 
 describe('bundled Codex resolver', () => {
+  it('uses the initialize/initialized/model-list headerless JSONL handshake', async () => {
+    const proc = new EventEmitter() as EventEmitter & {
+      stdin: { write: (line: string) => boolean };
+      stdout: EventEmitter;
+      kill: ReturnType<typeof vi.fn>;
+    };
+    const writes: string[] = [];
+    proc.stdin = { write: (line) => { writes.push(line); return true; } };
+    proc.stdout = new EventEmitter();
+    proc.kill = vi.fn();
+    const deps: FetchBundledCodexModelsDeps = {
+      spawn: vi.fn().mockReturnValue(proc) as unknown as FetchBundledCodexModelsDeps['spawn'],
+      resolveBundledCodex: () => ({ executablePath: '/bin/codex', pathDirs: [] }),
+      enrichedEnv: () => ({ PATH: '/usr/bin' }),
+    };
+
+    const result = fetchBundledCodexModels(true, deps);
+    expect(JSON.parse(writes[0])).toEqual({
+      id: 0,
+      method: 'initialize',
+      params: { clientInfo: { name: 'sai', version: '1.0' } },
+    });
+    proc.stdout.emit('data', Buffer.from(`${JSON.stringify({ id: 0, result: {} })}\n`));
+    expect(writes.map((line) => JSON.parse(line))).toEqual([
+      {
+        id: 0,
+        method: 'initialize',
+        params: { clientInfo: { name: 'sai', version: '1.0' } },
+      },
+      { method: 'initialized' },
+      { id: 1, method: 'model/list', params: {} },
+    ]);
+    expect(writes.map((line) => JSON.parse(line)).every((message) => !Object.hasOwn(message, 'jsonrpc'))).toBe(true);
+
+    proc.stdout.emit('data', Buffer.from(`${JSON.stringify({ id: 1, result: { data: [] } })}\n`));
+    await expect(result).resolves.toEqual({ models: [], defaultModel: '' });
+    expect(proc.kill).toHaveBeenCalledOnce();
+  });
+
   it('normalizes dynamic model reasoning metadata including max and ultra', () => {
     expect(normalizeCodexModelOption({
       model: 'gpt-5.6-sol', displayName: 'GPT 5.6 Sol',

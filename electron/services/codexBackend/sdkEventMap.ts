@@ -167,7 +167,48 @@ function todoSnapshot(
   return [toolUse(item.id, 'TodoWrite', { todos: normalizeTodos(item) }, ctx)];
 }
 
+type SubagentStatus = 'running' | 'completed' | 'failed' | 'cancelled';
+
+function collaborationActivity(
+  item: unknown,
+  ctx: CodexMapContext,
+  completed = false,
+): SaiEnvelope[] | null {
+  // `collab_tool_call` is emitted by the bundled Codex CLI but is not yet part
+  // of the SDK's ThreadItem union. Read it defensively so a future SDK shape
+  // change cannot take down the whole turn stream.
+  if (!item || typeof item !== 'object') return null;
+  const record = item as Record<string, unknown>;
+  if (record.type !== 'collab_tool_call') return null;
+  if (typeof record.id !== 'string' || record.id.trim().length === 0) return [];
+
+  const rawStatus = typeof record.status === 'string' ? record.status : '';
+  const status: SubagentStatus = rawStatus === 'completed'
+    ? 'completed'
+    : rawStatus === 'failed'
+      ? 'failed'
+      : rawStatus === 'cancelled' || rawStatus === 'canceled'
+        ? 'cancelled'
+        : completed
+          ? 'completed'
+          : 'running';
+  const description = typeof record.description === 'string' ? record.description.trim() : '';
+  const prompt = typeof record.prompt === 'string' ? record.prompt.trim() : '';
+  const source = description || prompt;
+  const summary = source ? source.slice(0, 160) + (source.length > 160 ? '…' : '') : undefined;
+
+  return [{
+    type: 'subagent_activity',
+    agentId: record.id,
+    status,
+    ...(summary ? { summary } : {}),
+    ...base(ctx),
+  }];
+}
+
 function startedItem(item: ThreadItem, ctx: CodexMapContext): SaiEnvelope[] {
+  const collaboration = collaborationActivity(item, ctx);
+  if (collaboration !== null) return collaboration;
   switch (item.type) {
     case 'command_execution':
       return [toolUse(item.id, 'Bash', { command: item.command }, ctx)];
@@ -183,10 +224,14 @@ function startedItem(item: ThreadItem, ctx: CodexMapContext): SaiEnvelope[] {
     case 'reasoning':
     case 'error':
       return [];
+    default:
+      return [];
   }
 }
 
 function updatedItem(item: ThreadItem, ctx: CodexMapContext): SaiEnvelope[] {
+  const collaboration = collaborationActivity(item, ctx);
+  if (collaboration !== null) return collaboration;
   switch (item.type) {
     case 'command_execution': {
       const terminal = item.status === 'completed' || item.status === 'failed';
@@ -207,10 +252,14 @@ function updatedItem(item: ThreadItem, ctx: CodexMapContext): SaiEnvelope[] {
     case 'web_search':
     case 'error':
       return [];
+    default:
+      return [];
   }
 }
 
 function completedItem(item: ThreadItem, ctx: CodexMapContext): SaiEnvelope[] {
+  const collaboration = collaborationActivity(item, ctx, true);
+  if (collaboration !== null) return collaboration;
   switch (item.type) {
     case 'agent_message':
       return item.text
@@ -251,6 +300,8 @@ function completedItem(item: ThreadItem, ctx: CodexMapContext): SaiEnvelope[] {
       return [toolResult(item.id, JSON.stringify(item.items), false, ctx)];
     case 'error':
       return [{ type: 'error', text: item.message, ...base(ctx) }];
+    default:
+      return [];
   }
 }
 
@@ -299,5 +350,7 @@ export function mapCodexSdkEvent(
         { type: 'error', text: event.message, ...base(ctx) },
         { type: 'done', ...base(ctx) },
       ];
+    default:
+      return [];
   }
 }

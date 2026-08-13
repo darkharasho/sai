@@ -50,6 +50,7 @@ import InlineApprovalCard from './components/Swarm/cards/InlineApprovalCard';
 import QuitSwarmConfirmModal from './components/Swarm/QuitSwarmConfirmModal';
 import { swarmInit, swarmGetApprovals, swarmResolveApproval, swarmCreateApproval, swarmCreateTask, swarmDeleteTask, swarmGetApproval, swarmDeleteApprovalsByTask } from './swarmDb';
 import { approvalRoutingTarget } from './lib/swarmApprovalRouting';
+import { resolveCodexAppServerSwarmApproval } from './lib/codexAppServerSwarmApproval';
 import { diffSwarmTasks } from './lib/swarmPersistenceDiff';
 import { hydrateWorkspaceSwarm } from './lib/swarmHydrate';
 import { SwarmScheduler, isLikelyReadOnlyPrompt, findStaleTasks } from './lib/swarmScheduler';
@@ -97,6 +98,19 @@ import { normalizeCodexEffort } from './lib/codexEffort';
 interface ScopeReconcileBridge {
   claudeReconcileScope?: (projectPath: string, scope?: string) => void;
   codexReconcileScope?: (projectPath: string, scope?: string) => void;
+}
+
+function stopSwarmTaskProvider(task: SwarmTask): void {
+  const { workspaceId, sessionId, provider } = task;
+  if (provider === 'codex') {
+    window.sai.codexStop?.(workspaceId, sessionId);
+  } else if (provider === 'gemini') {
+    window.sai.geminiStop?.(workspaceId, sessionId);
+  } else if (provider === 'kimi') {
+    window.sai.kimiStop?.(workspaceId, sessionId);
+  } else {
+    window.sai.claudeStop?.(workspaceId, sessionId);
+  }
 }
 
 function resolveScopedProvider(
@@ -268,6 +282,11 @@ export default function App() {
   const [claudeModels, setClaudeModels] = useState<ClaudeModelOption[]>([]);
   const [codexPermission, setCodexPermission] = useState<CodexPermission>('auto');
   const [codexEffort, setCodexEffort] = useState<CodexEffort>('high');
+  const [codexBackendMode, setCodexBackendMode] = useState<'sdk' | 'app-server'>('sdk');
+  const [codexSwarmStatus, setCodexSwarmStatus] = useState<{ available: boolean; reason?: string }>({
+    available: false,
+    reason: 'Codex Swarm requires the App Server preview backend selected and its Dynamic Tools bridge ready.',
+  });
   const [geminiModel, setGeminiModel] = useState('auto-gemini-3');
   const [geminiModels, setGeminiModels] = useState<{ id: string; name: string }[]>([]);
   const [geminiApprovalMode, setGeminiApprovalMode] = useState<GeminiApprovalMode>('default');
@@ -779,14 +798,14 @@ export default function App() {
 
   // Close provider-specific sidebars when switching to a provider that doesn't support them.
   useEffect(() => {
-    const caps = getCapabilities(aiProvider);
+    const caps = getCapabilities(aiProvider, { codexBackendMode, codexSwarmStatus });
     setSidebarOpen(prev => {
       if (prev === 'mcp' && !caps.hasMcp) return null;
       if (prev === 'plugins' && !caps.hasPlugins) return null;
       if (prev === 'swarm' && !caps.hasOrchestrator) return null;
       return prev;
     });
-  }, [aiProvider]);
+  }, [aiProvider, codexBackendMode, codexSwarmStatus]);
   const swarmSelectedRef = useRef<string>('overview');
   useEffect(() => { swarmSelectedRef.current = swarmSelected; }, [swarmSelected]);
 
@@ -1114,14 +1133,15 @@ export default function App() {
       }
     }
     // Kick off the provider runner for the task's session.
-    // Today only Claude is supported (codex/gemini IPC don't yet thread scope/kind through start).
     try {
-      const sai = window.sai as any;
+      const sai = window.sai;
       const dispatched = await runSwarmTask(
         { ...task, worktreePath: effectiveWorktreePath },
         {
           claudeStart: sai.claudeStart,
           claudeSend: sai.claudeSend,
+          codexStart: sai.codexStart,
+          codexSend: sai.codexSend,
         },
       );
       if (!dispatched) {
@@ -1132,7 +1152,7 @@ export default function App() {
             title: task.title,
             branch: task.branch,
             prompt: task.prompt,
-            reason: 'Task runner currently supports Claude only. Codex / Gemini support is a planned follow-up.',
+            reason: `Task runner does not support provider: ${task.provider}.`,
           });
         } catch { /* best-effort */ }
         removeFromList();
@@ -1323,11 +1343,7 @@ export default function App() {
     }
 
     function stopProvider(task: SwarmTask) {
-      const p = task.provider;
-      if (p === 'codex') return (window.sai as any).codexStop?.(ws);
-      if (p === 'gemini') return (window.sai as any).geminiStop?.(ws);
-      if (p === 'kimi') return (window.sai as any).kimiStop?.(ws);
-      return (window.sai as any).claudeStop?.(ws);
+      return stopSwarmTaskProvider(task);
     }
 
     const spawnTask = async (i: { prompt: string; title?: string; provider?: string; model?: string; approvalPolicy?: string; project?: string }) => {
@@ -1361,17 +1377,20 @@ export default function App() {
 
     // Resolve an approval by id, routed to the approval's OWN workspace (not
     // the active one), idempotent against double-resolution.
-    const resolveApproval = async (approvalId: string, approved: boolean) => {
-      if (resolvingApprovalsRef.current.has(approvalId)) return;
+    const resolveApproval = async (approvalId: string, approved: boolean): Promise<void> => {
+      if (resolvingApprovalsRef.current.has(approvalId)) throw new Error('Approval is already being resolved');
       resolvingApprovalsRef.current.add(approvalId);
       try {
         const a = await swarmGetApproval(approvalId);
-        if (!a) return;
+        if (!a) throw new Error('Approval is no longer pending');
         const { workspaceId, task, toolUseId } = approvalRoutingTarget(a, swarmTasksByWsRef.current);
         if (task) {
           const scope = task.sessionId;
           const p = task.provider;
-          if (p === 'codex') (window.sai as any).codexApprove?.(workspaceId, toolUseId, approved, undefined, scope);
+          if (p === 'codex') {
+            const resolved = await resolveCodexAppServerSwarmApproval(window.sai, a, scope, approved);
+            if (!resolved) throw new Error('Codex App Server approval is no longer pending');
+          }
           else if (p === 'gemini') (window.sai as any).geminiApprove?.(workspaceId, toolUseId, approved, undefined, scope);
           else if (p === 'kimi') (window.sai as any).kimiApprove?.(workspaceId, toolUseId, approved, undefined, scope);
           else (window.sai as any).claudeApprove?.(workspaceId, toolUseId, approved, undefined, scope);
@@ -2159,6 +2178,14 @@ export default function App() {
       if (merged.model) setCodexModel(merged.model);
       if (merged.permission) setCodexPermission(merged.permission);
       if (merged.effort) setCodexEffort(merged.effort);
+    }));
+    window.sai.settingsGet('codexBackendMode', 'sdk').then(guard((mode: unknown) => {
+      const selectedMode = mode === 'app-server' ? 'app-server' : 'sdk';
+      setCodexBackendMode(selectedMode);
+      void window.sai.codexBackendModeSet?.(selectedMode)
+        .then(() => window.sai.codexSwarmStatus?.())
+        .then((status) => { if (status) setCodexSwarmStatus(status); })
+        .catch(() => setCodexSwarmStatus({ available: false, reason: 'Codex App Server Swarm bridge could not be initialized.' }));
     }));
     window.sai.settingsGet('gemini', {}).then(guard((g: any) => {
       if (g.model) setGeminiModel(g.model);
@@ -3056,6 +3083,24 @@ export default function App() {
         if (swarmTask) {
           if (!shouldRequireApproval(swarmTask.approvalPolicy, msg.toolName)) {
             // Auto-approve without surfacing UI or transitioning task state.
+            if (msg.provider === 'codex' && msg.requestHandle) {
+              const autoApproval: SwarmApproval = {
+                id: '', taskId: swarmTask.id, workspaceId: msg.projectPath,
+                toolName: msg.toolName, toolUseId: msg.toolUseId, createdAt: Date.now(),
+                provider: 'codex', requestHandle: msg.requestHandle, kind: msg.kind,
+                availableDecisions: msg.availableDecisions,
+                requestedPermissions: msg.requestedPermissions,
+              };
+              void resolveCodexAppServerSwarmApproval(window.sai, autoApproval, scope, true).then((resolved) => {
+                if (!resolved) return;
+                try {
+                  void (window.sai as any).swarmEmitCard?.(msg.projectPath, 'auto_approved', {
+                    taskTitle: swarmTask.title, toolName: msg.toolName, branch: swarmTask.branch,
+                  });
+                } catch { /* best-effort */ }
+              }).catch(() => { /* stale or unavailable: retain the pending request */ });
+              return;
+            }
             try { (window.sai as any).claudeApprove(msg.projectPath, msg.toolUseId, true, undefined, scope); } catch {}
             // Emit a subtle inline auto_approved card so the orchestrator chat
             // surfaces what would otherwise be silent activity.
@@ -3100,6 +3145,13 @@ export default function App() {
             command: msg.command,
             description: msg.description,
             input: msg.input,
+            ...(msg.provider === 'codex' && msg.requestHandle ? {
+              provider: 'codex' as const,
+              requestHandle: msg.requestHandle,
+              kind: msg.kind,
+              availableDecisions: msg.availableDecisions,
+              requestedPermissions: msg.requestedPermissions,
+            } : {}),
             createdAt: Date.now(),
           };
           void swarmCreateApproval(approvalRecord)
@@ -4473,9 +4525,9 @@ export default function App() {
                     onPause={() => {
                       const id = focusedSwarmTask.id;
                       const task = focusedSwarmTask;
-                      // Stop the task's Claude scope so streaming actually halts.
+                      // Stop the task's provider scope so streaming actually halts.
                       try {
-                        (window.sai as any).claudeStop?.(task.workspaceId, task.sessionId);
+                        stopSwarmTaskProvider(task);
                       } catch { /* noop */ }
                       setSwarmTasksByWs(prev => {
                         const m = new Map(prev);
@@ -4841,8 +4893,12 @@ export default function App() {
                         return (
                           <InlineApprovalCard
                             meta={meta}
-                            onApprove={(id) => { void swarmHost.approve(id); resolveLocally('approved'); }}
-                            onDeny={(id) => { void swarmHost.deny(id); resolveLocally('denied'); }}
+                            onApprove={(id) => {
+                              void swarmHost.approve(id).then(() => resolveLocally('approved')).catch(() => {});
+                            }}
+                            onDeny={(id) => {
+                              void swarmHost.deny(id).then(() => resolveLocally('denied')).catch(() => {});
+                            }}
                             onView={() => setSwarmSelected(meta.taskId)}
                           />
                         );
@@ -4882,6 +4938,7 @@ export default function App() {
                     projectLabel={activeMetaRuntime && activeMetaRuntime.syntheticRoot === wsPath ? activeMetaRuntime.meta.name : undefined}
                     orchestratorProvider={orchProvider}
                     orchestratorModel={orchModel}
+                    codexSwarm={codexSwarmStatus}
                     onProviderModelChange={(nextProvider, nextModel) => {
                       // Persist + update ref so downstream session re-spawns pick
                       // up the new model. Provider is currently locked to claude
@@ -4893,10 +4950,11 @@ export default function App() {
                       swarmSettingsRef.current.orchestratorModel = nextModel;
                       // Force a re-render so the new label shows immediately.
                       setSwarmSettingsTick(t => t + 1);
-                      // Restart the orchestrator Claude scope so the new
-                      // --model flag takes effect on the next turn.
+                      // Restart only the current orchestrator transport so a
+                      // model/provider change applies to its dedicated scope.
                       try {
-                        (window.sai as any).claudeStop?.(wsPath, orchSessionId);
+                        const stop = orchProvider === 'codex' ? window.sai.codexStop : window.sai.claudeStop;
+                        stop?.(wsPath, orchSessionId);
                       } catch { /* noop */ }
                       try {
                         const wsName = wsPath.split(/[\\/]/).filter(Boolean).pop() || wsPath;
@@ -4909,7 +4967,8 @@ export default function App() {
                           defaultApprovalPolicy: cfg.defaultApprovalPolicy ?? 'auto-read',
                           concurrencyCap: cfg.concurrencyCap ?? 5,
                         };
-                        (window.sai as any).claudeStart?.(wsPath, orchSessionId, 'orchestrator', ctx);
+                        const start = nextProvider === 'codex' ? window.sai.codexStart : window.sai.claudeStart;
+                        start?.(wsPath, orchSessionId, 'orchestrator', ctx, wsPath);
                       } catch { /* noop */ }
                     }}
                     stats={{
@@ -5605,6 +5664,12 @@ export default function App() {
           if (key === 'codexModel') handleCodexModelChange(value);
           if (key === 'codexPermission') handleCodexPermissionChange(value);
           if (key === 'codexEffort' && (value === undefined || isCodexEffort(value))) handleCodexEffortChange(value);
+          if (key === 'codexBackendMode') {
+            setCodexBackendMode(value === 'app-server' ? 'app-server' : 'sdk');
+            void window.sai.codexSwarmStatus?.()
+              .then((status) => { if (status) setCodexSwarmStatus(status); })
+              .catch(() => setCodexSwarmStatus({ available: false, reason: 'Codex App Server Swarm bridge could not be initialized.' }));
+          }
           if (key === 'focusedChat') { setFocusedChat(value); if (value) { setExpanded(['chat', 'terminal']); setSplitRatio(0.66); } }
           if (key === 'overlayEnabled') setOverlayEnabled(!!value);
           if (key === 'defaultView') { /* persisted only, applies on next launch */ }
@@ -5696,7 +5761,7 @@ export default function App() {
           swarmApprovalCount={swarmApprovalCount}
           chatNotificationCount={chatNotificationCount}
           overallStatus={approvalSessions.size > 0 ? 'approval' : busyWorkspaces.size > 0 && completedWorkspaces.size > 0 ? 'busy-done' : completedWorkspaces.size > 0 ? 'done' : busyWorkspaces.size > 0 ? 'busy' : null}
-          hasOrchestrator={getCapabilities(aiProvider).hasOrchestrator}
+          hasOrchestrator={getCapabilities(aiProvider, { codexBackendMode, codexSwarmStatus }).hasOrchestrator}
           hasMcp={getCapabilities(aiProvider).hasMcp}
           hasPlugins={getCapabilities(aiProvider).hasPlugins}
         />
@@ -5805,7 +5870,11 @@ export default function App() {
               transition={{ duration: 0.15, ease: [0.2, 0.8, 0.2, 1] }}
               style={{ overflow: 'hidden' }}
             >
-              <McpSidebar />
+              <McpSidebar
+                provider={activeSession.aiProvider ?? aiProvider}
+                projectPath={projectPath}
+                scope={activeSession.id}
+              />
             </motion.div>
           )}
           {sidebarOpen === 'swarm' && (

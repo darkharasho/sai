@@ -51,7 +51,53 @@ describe('mapCodexSdkEvent', () => {
     expect(mapCodexSdkEvent({ type: 'turn.started' } satisfies ThreadEvent, ctx)).toEqual([]);
   });
 
+  it.each(['item.started', 'item.updated', 'item.completed'] as const)(
+    'ignores an unknown %s item without throwing',
+    (type) => {
+      expect(mapCodexSdkEvent({
+        type,
+        item: { id: 'future-item', type: 'future_item' },
+      } as unknown as ThreadEvent, ctx)).toEqual([]);
+    },
+  );
+
   describe('item.started', () => {
+    it('maps a legacy collaboration start to running agent activity', () => {
+      const event = {
+        type: 'item.started',
+        item: {
+          id: 'agent-1',
+          type: 'collab_tool_call',
+          tool: 'spawn_agent',
+          status: 'in_progress',
+          description: 'Inspect the renderer state',
+        },
+      } as unknown as ThreadEvent;
+
+      expect(mapCodexSdkEvent(event, ctx)).toEqual([{
+        type: 'subagent_activity',
+        agentId: 'agent-1',
+        status: 'running',
+        summary: 'Inspect the renderer state',
+        ...metadata,
+      }]);
+    });
+
+    it('prefers a collaboration description over its prompt for the activity summary', () => {
+      const event = {
+        type: 'item.started',
+        item: {
+          id: 'agent-1', type: 'collab_tool_call', status: 'in_progress',
+          description: 'Review the event mapper', prompt: 'This longer prompt must not be shown.',
+        },
+      } as unknown as ThreadEvent;
+
+      expect(mapCodexSdkEvent(event, ctx)).toEqual([{
+        type: 'subagent_activity', agentId: 'agent-1', status: 'running',
+        summary: 'Review the event mapper', ...metadata,
+      }]);
+    });
+
     it.each([
       {
         label: 'command execution',
@@ -257,6 +303,39 @@ describe('mapCodexSdkEvent', () => {
         .toEqual([]);
     });
 
+    it('maps a legacy collaboration update to running agent activity with a bounded prompt fallback', () => {
+      const event = {
+        type: 'item.updated',
+        item: {
+          id: 'agent-1', type: 'collab_tool_call', status: 'in_progress',
+          prompt: 'Investigate why the thinking animation stalls while an agent is running.',
+        },
+      } as unknown as ThreadEvent;
+
+      expect(mapCodexSdkEvent(event, ctx)).toEqual([{
+        type: 'subagent_activity',
+        agentId: 'agent-1',
+        status: 'running',
+        summary: 'Investigate why the thinking animation stalls while an agent is running.',
+        ...metadata,
+      }]);
+    });
+
+    it('truncates a prompt-only collaboration summary to 160 characters plus an ellipsis', () => {
+      const prompt = 'x'.repeat(161);
+      const event = {
+        type: 'item.updated',
+        item: { id: 'agent-1', type: 'collab_tool_call', status: 'in_progress', prompt },
+      } as unknown as ThreadEvent;
+
+      const [activity] = mapCodexSdkEvent(event, ctx);
+      expect(activity).toMatchObject({
+        type: 'subagent_activity', agentId: 'agent-1', status: 'running',
+        summary: `${'x'.repeat(160)}…`, ...metadata,
+      });
+      expect((activity.summary as string)).toHaveLength(161);
+    });
+
     it('re-emits the same TodoWrite tool-use id with advanced statuses', () => {
       const startedEvent = {
         type: 'item.started',
@@ -307,6 +386,38 @@ describe('mapCodexSdkEvent', () => {
   });
 
   describe('item.completed', () => {
+    it.each([
+      ['completed', 'completed'],
+      ['failed', 'failed'],
+      ['cancelled', 'cancelled'],
+    ])('maps a legacy collaboration completion with %s status', (itemStatus, status) => {
+      const event = {
+        type: 'item.completed',
+        item: { id: 'agent-1', type: 'collab_tool_call', status: itemStatus },
+      } as unknown as ThreadEvent;
+
+      expect(mapCodexSdkEvent(event, ctx)).toEqual([{
+        type: 'subagent_activity',
+        agentId: 'agent-1',
+        status,
+        ...metadata,
+      }]);
+    });
+
+    it('treats a completion without a status as completed activity', () => {
+      const event = {
+        type: 'item.completed',
+        item: { id: 'agent-1', type: 'collab_tool_call' },
+      } as unknown as ThreadEvent;
+
+      expect(mapCodexSdkEvent(event, ctx)).toEqual([{
+        type: 'subagent_activity',
+        agentId: 'agent-1',
+        status: 'completed',
+        ...metadata,
+      }]);
+    });
+
     it('maps a nonempty agent message to assistant text', () => {
       const event = {
         type: 'item.completed',
@@ -720,5 +831,9 @@ describe('mapCodexSdkEvent', () => {
 
     expect(event).toEqual(eventBefore);
     expect(localContext).toEqual(contextBefore);
+  });
+
+  it('ignores an unknown top-level event', () => {
+    expect(mapCodexSdkEvent({ type: 'future.event' } as unknown as ThreadEvent, ctx)).toEqual([]);
   });
 });

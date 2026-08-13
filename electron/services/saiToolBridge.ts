@@ -10,6 +10,10 @@ export interface SaiToolRequest {
   tool: string;
   input: unknown;
   workspace: string;
+  /** Bound by the backend that owns an orchestrator thread; never renderer supplied. */
+  scope?: string;
+  /** App Server emits real dynamic tool items, so main must not inject a duplicate card. */
+  suppressSyntheticCard?: boolean;
 }
 
 export type SaiToolDispatch = (req: SaiToolRequest) => Promise<unknown>;

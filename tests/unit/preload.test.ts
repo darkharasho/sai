@@ -107,6 +107,40 @@ describe('characterization: existing IPC routing', () => {
     expect(invoke).toHaveBeenCalledWith('codex:usage', { force: true });
   });
 
+  it('exposes the narrow Codex App Server preview mode and status bridge', async () => {
+    await exposed.codexBackendModeGet();
+    await exposed.codexBackendModeSet('app-server');
+    await exposed.codexAppServerPreviewStatus();
+
+    expect(invoke).toHaveBeenNthCalledWith(1, 'codex:backendMode:get');
+    expect(invoke).toHaveBeenNthCalledWith(2, 'codex:backendMode:set', 'app-server');
+    expect(invoke).toHaveBeenNthCalledWith(3, 'codex:appServerPreviewStatus');
+  });
+
+  it('exposes isolated confirmed Codex MCP config IPC methods', async () => {
+    const request = { expectedVersion: 'v1', servers: [], confirmationToken: 'confirm-global-user-mcp-config' };
+    await exposed.codexMcpConfigGet();
+    await exposed.codexMcpConfigReplace(request);
+    expect(invoke).toHaveBeenNthCalledWith(1, 'codex:mcpConfig:get');
+    expect(invoke).toHaveBeenNthCalledWith(2, 'codex:mcpConfig:replace', request);
+  });
+
+  it('keeps the legacy Swarm Codex approval call isolated from App Server decisions', async () => {
+    expect(exposed.codexApprove).toBeUndefined();
+
+    await exposed.codexAppServerApprove('/proj', 'scope-a', 'request-1', {
+      type: 'decision', value: 'accept',
+    });
+
+    expect(invoke).toHaveBeenCalledWith(
+      'codex:appServerApprove',
+      '/proj',
+      'scope-a',
+      'request-1',
+      { type: 'decision', value: 'accept' },
+    );
+  });
+
   it('codexUsageFetch defaults to a non-forced refresh when called with no argument', async () => {
     invoke.mockResolvedValue({ provider: 'codex', primary: null, secondary: null });
     await exposed.codexUsageFetch();

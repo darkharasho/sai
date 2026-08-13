@@ -6,7 +6,8 @@ import Composer from './Composer';
 import Approval from './Approval';
 import SaiLogo from '../branding/SaiLogo';
 import WorkspaceHeader from './WorkspaceHeader';
-import { getOverrides, setOverrides as persistOverrides, clearOverrides, type SessionOverrides } from '../lib/overrides';
+import { getOverrides, setOverrides as persistOverrides, clearOverrides, modelForRequest, type SessionOverrides } from '../lib/overrides';
+import type { RemoteClaudeModel } from '../wire';
 import type { WorkspaceStatusStore } from '../lib/workspaceStatusStore';
 import type { GithubWatcherStore } from './githubWatcherStore';
 import { loadTranscript, saveTranscript } from '../lib/transcriptCache';
@@ -23,11 +24,12 @@ interface Props {
   follow: boolean;
   onFollowChange: (v: boolean) => void;
   onOpenNav: () => void;
+  models?: RemoteClaudeModel[];
 }
 
 interface PendingApproval { toolUseId: string; toolName: string; command?: string; input?: Record<string, unknown> }
 
-export default function Chat({ client, statusStore, watcherStore, active, onActiveChange, follow, onFollowChange, onOpenNav }: Props) {
+export default function Chat({ client, statusStore, watcherStore, active, onActiveChange, follow, onFollowChange, onOpenNav, models }: Props) {
   const setActive = onActiveChange;
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
   const [localStreaming, setLocalStreaming] = useState(false);
@@ -352,7 +354,7 @@ export default function Chat({ client, statusStore, watcherStore, active, onActi
       text,
       projectPath: active.projectPath,
       scope: active.scope,
-      model: overrides.model,
+      model: modelForRequest(overrides.model),
       effort: overrides.effort,
       permMode: overrides.permMode,
       sessionId: active.sessionId,
@@ -467,6 +469,7 @@ export default function Chat({ client, statusStore, watcherStore, active, onActi
           onInterrupt={onInterrupt}
           overrides={overrides}
           onOverridesChange={updateOverrides}
+          models={models}
         />
       </div>
     </div>

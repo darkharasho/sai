@@ -379,7 +379,7 @@ export default function Chat() {
             text,
             projectPath: active.projectPath,
             scope: active.scope,
-            model: overrides.model,
+            model: overrides.model === 'default' ? undefined : overrides.model,
             effort: overrides.effort,
             permMode: overrides.permMode,
             sessionId: sessionId || undefined,

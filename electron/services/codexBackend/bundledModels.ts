@@ -24,6 +24,12 @@ export interface BundledCodexPathDeps {
   exists?: (candidatePath: string) => boolean;
 }
 
+export interface FetchBundledCodexModelsDeps {
+  spawn?: typeof spawn;
+  resolveBundledCodex?: typeof resolveBundledCodex;
+  enrichedEnv?: typeof enrichedEnv;
+}
+
 export function resolveBundledCodex(deps: BundledCodexPathDeps = {}): { executablePath: string; pathDirs: string[] } {
   const platform = deps.platform ?? process.platform;
   const arch = deps.arch ?? process.arch;
@@ -94,17 +100,20 @@ function readCodexModelCatalog(): Map<string, number> {
 }
 
 /** Model discovery for the SDK backend using the SDK's bundled native CLI. */
-export function fetchBundledCodexModels(forceRefresh = false): Promise<CodexModelResult> {
+export function fetchBundledCodexModels(
+  forceRefresh = false,
+  deps: FetchBundledCodexModelsDeps = {},
+): Promise<CodexModelResult> {
   if (!forceRefresh && cachedModels) return Promise.resolve(cachedModels);
   const fallback: CodexModelResult = { models: [], defaultModel: '' };
   return new Promise((resolve) => {
     let proc: ChildProcess;
     try {
-      const bundled = resolveBundledCodex();
-      const env = enrichedEnv();
+      const bundled = (deps.resolveBundledCodex ?? resolveBundledCodex)();
+      const env = (deps.enrichedEnv ?? enrichedEnv)();
       const pathKey = process.platform === 'win32' ? (Object.keys(env).find(key => key.toLowerCase() === 'path') ?? 'Path') : 'PATH';
       env[pathKey] = [...bundled.pathDirs, env[pathKey]].filter(Boolean).join(path.delimiter);
-      proc = spawn(bundled.executablePath, ['app-server'], { env, stdio: ['pipe', 'pipe', 'pipe'], shell: false });
+      proc = (deps.spawn ?? spawn)(bundled.executablePath, ['app-server'], { env, stdio: ['pipe', 'pipe', 'pipe'], shell: false });
     } catch { resolve(fallback); return; }
     let buffer = '';
     let settled = false;
@@ -119,7 +128,10 @@ export function fetchBundledCodexModels(forceRefresh = false): Promise<CodexMode
     const line = (raw: string) => {
       try {
         const msg = JSON.parse(raw);
-        if (msg.id === 0 && !msg.error) proc.stdin?.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'model/list', id: 1, params: {} })}\n`);
+        if (msg.id === 0 && !msg.error) {
+          proc.stdin?.write(`${JSON.stringify({ method: 'initialized' })}\n`);
+          proc.stdin?.write(`${JSON.stringify({ method: 'model/list', id: 1, params: {} })}\n`);
+        }
         if (msg.id === 1 && msg.result) {
           const data = msg.result.data ?? [];
           const normalized = data.filter((m: any) => !m.hidden).map(normalizeCodexModelOption);
@@ -132,6 +144,6 @@ export function fetchBundledCodexModels(forceRefresh = false): Promise<CodexMode
     proc.stdout?.on('data', (chunk: Buffer) => { buffer += chunk.toString(); const lines = buffer.split('\n'); buffer = lines.pop() ?? ''; lines.forEach(line); });
     proc.on('error', () => { clearTimeout(timeout); finish(fallback); });
     proc.on('exit', () => { clearTimeout(timeout); setTimeout(() => { if (buffer.trim()) line(buffer); finish(fallback); }, 0); });
-    proc.stdin?.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'initialize', id: 0, params: { clientInfo: { name: 'sai', version: '1.0' } } })}\n`);
+    proc.stdin?.write(`${JSON.stringify({ method: 'initialize', id: 0, params: { clientInfo: { name: 'sai', version: '1.0' } } })}\n`);
   });
 }

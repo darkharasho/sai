@@ -4,6 +4,18 @@ export function extractPairCode(url: string): string | null {
   try { return new URL(url).searchParams.get('code'); } catch { return null; }
 }
 
+function randomUUID(): string {
+  const cryptoApi: Crypto | undefined = typeof crypto === 'undefined' ? undefined : crypto;
+  if (typeof cryptoApi?.randomUUID === 'function') return cryptoApi.randomUUID();
+  const bytes = new Uint8Array(16);
+  if (typeof cryptoApi?.getRandomValues === 'function') cryptoApi.getRandomValues(bytes);
+  else for (let index = 0; index < bytes.length; index++) bytes[index] = Math.floor(Math.random() * 256);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0'));
+  return `${hex.slice(0, 4).join('')}-${hex.slice(4, 6).join('')}-${hex.slice(6, 8).join('')}-${hex.slice(8, 10).join('')}-${hex.slice(10, 16).join('')}`;
+}
+
 export interface PairResult { token: string; deviceId: string }
 
 export async function pair(code: string, deviceLabel: string, clientId: string): Promise<PairResult> {
@@ -16,6 +28,13 @@ export async function pair(code: string, deviceLabel: string, clientId: string):
 }
 
 export type WireMsg = { type: string; [k: string]: unknown };
+
+export interface RemoteClaudeModel {
+  id: string;
+  label: string;
+  description: string;
+  recommended: boolean;
+}
 
 export interface WriteStaleError extends Error {
   code: 'stale';
@@ -55,6 +74,8 @@ export interface WireClient {
   onState(handler: (s: 'opening' | 'open' | 'closed') => void): () => void;
   attach(args: { projectPath: string; scope?: string; sessionId: string }): void;
   setFollow(enabled: boolean): void;
+  requestClaudeModels(): string;
+  waitForClaudeModels(): Promise<RemoteClaudeModel[]>;
   listSessions(projectPath: string): Promise<unknown[]>;
   listWorkspaces(): Promise<unknown[]>;
   setActiveWorkspace(projectPath: string): void;
@@ -195,41 +216,51 @@ export function connect(token: string): WireClient {
   }
 
   const open = () => {
+    // A replacement connection takes ownership of watchdogs. Otherwise an
+    // interval/deadline from a zombie socket can later act on the new global
+    // `ws` reference and close it.
+    clearTimers();
     notifyState('opening');
-    ws = new WebSocket(wsUrl);
-    ws.onopen = () => {
-      try { ws!.send(JSON.stringify({ type: 'auth', token })); }
+    const socket = new WebSocket(wsUrl);
+    let authenticated = false;
+    ws = socket;
+    socket.onopen = () => {
+      if (ws !== socket) return;
+      try { socket.send(JSON.stringify({ type: 'auth', token })); }
       catch { /* socket died between open and send; onclose will follow */ }
     };
-    ws.onmessage = (ev) => {
+    socket.onmessage = (ev) => {
+      if (ws !== socket) return;
       lastActivityTs = Date.now();
       let msg: WireMsg;
       try { msg = JSON.parse(ev.data); } catch { return; }
-      if (msg.type === 'auth_ok') {
+      if (msg.type === 'auth_ok' && !authenticated) {
+        authenticated = true;
         retryAttempt = 0; // successful auth resets backoff
         notifyState('open');
         // Replay client-side state the server doesn't persist across sockets.
         // Order matters: workspace.set before attach so the active-workspace
         // hint lands first, mirroring the original setup sequence.
         if (replayWorkspaceStatus) {
-          try { ws!.send(JSON.stringify({ type: 'workspace.status.subscribe' })); } catch { /* ignore */ }
+          try { socket.send(JSON.stringify({ type: 'workspace.status.subscribe' })); } catch { /* ignore */ }
         }
         if (replayGithubWatcher) {
-          try { ws!.send(JSON.stringify({ type: 'github.watcher.subscribe' })); } catch { /* ignore */ }
+          try { socket.send(JSON.stringify({ type: 'github.watcher.subscribe' })); } catch { /* ignore */ }
         }
         if (replayActiveWorkspace) {
-          try { ws!.send(JSON.stringify({ type: 'workspace.set', projectPath: replayActiveWorkspace })); } catch { /* ignore */ }
+          try { socket.send(JSON.stringify({ type: 'workspace.set', projectPath: replayActiveWorkspace })); } catch { /* ignore */ }
         }
         if (replayFollow !== null) {
-          try { ws!.send(JSON.stringify({ type: 'session.follow', enabled: replayFollow })); } catch { /* ignore */ }
+          try { socket.send(JSON.stringify({ type: 'session.follow', enabled: replayFollow })); } catch { /* ignore */ }
         }
         if (replayAttach) {
-          try { ws!.send(JSON.stringify({ type: 'session.attach', ...replayAttach })); } catch { /* ignore */ }
+          try { socket.send(JSON.stringify({ type: 'session.attach', ...replayAttach })); } catch { /* ignore */ }
         }
         // Heartbeat: ping every 25s; expect any traffic within 10s of each
         // ping (server replies with at least a pong / ack), else reconnect.
         pingTimer = setInterval(() => {
-          try { ws?.send(JSON.stringify({ type: 'ping' })); }
+          if (ws !== socket) return;
+          try { socket.send(JSON.stringify({ type: 'ping' })); }
           catch { killSocket(); return; }
           if (pongDeadline) return;
           const sentAt = Date.now();
@@ -244,7 +275,10 @@ export function connect(token: string): WireClient {
       if (probeDeadline) { clearTimeout(probeDeadline); probeDeadline = null; }
       for (const h of handlers) try { h(msg); } catch { /* isolate */ }
     };
-    ws.onclose = () => {
+    socket.onclose = () => {
+      // A delayed callback from a superseded socket must not tear down the
+      // replacement's timers or correlated requests.
+      if (ws !== socket) return;
       clearTimers();
       notifyState('closed');
       // Fail every in-flight request now so UI moves on instead of waiting
@@ -255,14 +289,36 @@ export function connect(token: string): WireClient {
         for (const [, entry] of pendingReq) try { entry.reject(err); } catch { /* ignore */ }
         pendingReq.clear();
       }
+      const pendingModels = finishClaudeModelsPending();
+      if (pendingModels) pendingModels.reject(Object.assign(new Error('connection lost'), { code: 'wire_closed' }));
       if (!closed) scheduleReconnect();
     };
   };
 
   let reqCounter = 0;
   const pendingReq = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void }>();
+  let claudeModelsPending: {
+    requestId: string;
+    resolve: (models: RemoteClaudeModel[]) => void;
+    reject: (error: Error) => void;
+    timeout: ReturnType<typeof setTimeout>;
+  } | null = null;
+  let latestClaudeModelsWait: Promise<RemoteClaudeModel[]> = Promise.resolve([]);
+  const finishClaudeModelsPending = () => {
+    if (!claudeModelsPending) return null;
+    const pending = claudeModelsPending;
+    claudeModelsPending = null;
+    clearTimeout(pending.timeout);
+    return pending;
+  };
   open();
   handlers.add((msg) => {
+    if (msg.type === 'claude_models' && typeof msg.requestId === 'string'
+        && claudeModelsPending?.requestId === msg.requestId) {
+      const pending = finishClaudeModelsPending();
+      if (pending) pending.resolve(Array.isArray(msg.models) ? msg.models as RemoteClaudeModel[] : []);
+      return;
+    }
     const reqId = (msg as any).reqId;
     if (typeof reqId === 'string' && pendingReq.has(reqId)) {
       const entry = pendingReq.get(reqId)!;
@@ -344,6 +400,27 @@ export function connect(token: string): WireClient {
       replayFollow = enabled;
       sendFrame({ type: 'session.follow', enabled });
     },
+    requestClaudeModels: () => {
+      const previous = finishClaudeModelsPending();
+      if (previous) previous.reject(new Error('Claude model request superseded'));
+      const requestId = randomUUID();
+      let resolve!: (models: RemoteClaudeModel[]) => void;
+      let reject!: (error: Error) => void;
+      latestClaudeModelsWait = new Promise<RemoteClaudeModel[]>((res, rej) => { resolve = res; reject = rej; });
+      // requestClaudeModels returns only the ID; keep a passive rejection
+      // handler so a caller that never waits cannot produce an unhandled
+      // timeout/connection-loss rejection. Consumers still receive it from
+      // waitForClaudeModels().
+      void latestClaudeModelsWait.catch(() => undefined);
+      const timeout = setTimeout(() => {
+        const pending = finishClaudeModelsPending();
+        if (pending?.requestId === requestId) pending.reject(new Error('claude_models timeout'));
+      }, 5000);
+      claudeModelsPending = { requestId, resolve, reject, timeout };
+      sendFrame({ type: 'claude_models_request', requestId });
+      return requestId;
+    },
+    waitForClaudeModels: () => latestClaudeModelsWait,
     listSessions: (projectPath) => new Promise((resolve, reject) => {
       const reqId = `r${++reqCounter}`;
       pendingReq.set(reqId, { resolve, reject });

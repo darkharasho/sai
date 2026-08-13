@@ -76,6 +76,7 @@ interface FakeHarness {
   streams: Array<AsyncGenerator<ThreadEvent> | Error>;
   registerWorkspace: ReturnType<typeof vi.fn>;
   notifyCompletion: ReturnType<typeof vi.fn>;
+  timeline: string[];
 }
 
 function harness(streams: Array<AsyncGenerator<ThreadEvent> | Error> = []): FakeHarness {
@@ -105,12 +106,16 @@ function harness(streams: Array<AsyncGenerator<ThreadEvent> | Error> = []): Fake
   });
 
   const registerWorkspace = vi.fn();
-  const notifyCompletion = vi.fn();
+  const timeline: string[] = [];
+  const notifyCompletion = vi.fn(() => timeline.push('notify'));
 
   return {
     backend: new SdkCodexBackend({
       createClient,
-      emit: (event) => emitted.push(event),
+      emit: (event) => {
+        emitted.push(event);
+        timeline.push(`emit:${event.type}`);
+      },
       getModels: vi.fn(async () => ({ models: [{ id: 'gpt-5', name: 'GPT-5' }], defaultModel: 'gpt-5' })),
       getEnv: () => ({ PATH: '/bin', EMPTY: undefined, TOKEN: 'secret' }),
       registerWorkspace,
@@ -122,6 +127,7 @@ function harness(streams: Array<AsyncGenerator<ThreadEvent> | Error> = []): Fake
     streams: queue,
     registerWorkspace,
     notifyCompletion,
+    timeline,
   };
 }
 
@@ -131,6 +137,15 @@ async function settle(): Promise<void> {
 }
 
 describe('SdkCodexBackend', () => {
+  it('returns typed unsupported results for App Server-only input requests', () => {
+    const h = harness();
+
+    expect(h.backend.answerUserInput('/repo', 'chat', 'request', { type: 'answers', answers: { answer: { answers: ['yes'] } } }))
+      .toEqual({ ok: false, code: 'unsupported' });
+    expect(h.backend.resolveMcpElicitation('/repo', 'chat', 'request', { action: 'cancel' }))
+      .toEqual({ ok: false, code: 'unsupported' });
+  });
+
   it('registers a workspace when a scope starts', () => {
     const h = harness();
     h.backend.start({ projectPath: '/repo', scope: 'chat' });
@@ -248,6 +263,146 @@ describe('SdkCodexBackend', () => {
     expect(h.notifyCompletion).toHaveBeenCalledWith('/a', { provider: 'Codex', summary: 'finished' });
   });
 
+  it('drains native subagent lifecycle events after the parent completes before settling the turn', async () => {
+    const stream = pendingStream();
+    const h = harness([stream.events]);
+    h.backend.start({ projectPath: '/a', scope: 'chat' });
+    h.backend.send({ projectPath: '/a', scope: 'chat', message: 'delegate' });
+    await settle();
+
+    stream.push({
+      type: 'item.started',
+      item: { id: 'child-1', type: 'collab_tool_call', status: 'running', description: 'Inspect renderer' },
+    } as unknown as ThreadEvent);
+    stream.push({
+      type: 'turn.completed',
+      usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0 },
+    });
+    await settle();
+
+    expect(h.emitted.some((event) => event.type === 'result')).toBe(false);
+    expect(h.emitted.some((event) => event.type === 'done')).toBe(false);
+    expect(h.notifyCompletion).not.toHaveBeenCalled();
+    expect(h.emitted).toContainEqual(expect.objectContaining({
+      type: 'subagent_activity', agentId: 'child-1', status: 'running', turnSeq: 1,
+    }));
+    expect(h.emitted.filter((event) => event.type === 'done')).toHaveLength(0);
+    expect(h.backend.isWorkspaceBusy('/a')).toBe(true);
+
+    stream.push({
+      type: 'item.completed',
+      item: { id: 'child-1', type: 'collab_tool_call', status: 'completed', description: 'Inspect renderer' },
+    } as unknown as ThreadEvent);
+    await settle();
+
+    expect(h.emitted).toContainEqual(expect.objectContaining({
+      type: 'subagent_activity', agentId: 'child-1', status: 'completed', turnSeq: 1,
+    }));
+    expect(h.emitted.filter((event) => event.type === 'done')).toHaveLength(0);
+
+    stream.end();
+    await settle();
+
+    expect(h.emitted.filter((event) => event.type === 'subagent_activity').map((event) => event.status)).toEqual([
+      'running', 'completed',
+    ]);
+    expect(h.emitted.filter((event) => event.type === 'result')).toEqual([
+      expect.objectContaining({ type: 'result', projectPath: '/a', scope: 'chat', turnSeq: 1 }),
+    ]);
+    expect(h.emitted.filter((event) => event.type === 'done')).toEqual([
+      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1, subagentsSettled: true },
+    ]);
+    expect(h.emitted.map((event) => event.type).slice(-2)).toEqual(['result', 'done']);
+    expect(h.notifyCompletion).toHaveBeenCalledTimes(1);
+    expect(h.timeline.slice(-3)).toEqual(['emit:result', 'emit:done', 'notify']);
+    expect(h.backend.isWorkspaceBusy('/a')).toBe(false);
+  });
+
+  it('settles an active native child when the stream reaches EOF without its terminal event', async () => {
+    const stream = pendingStream();
+    const h = harness([stream.events]);
+    h.backend.start({ projectPath: '/a', scope: 'chat' });
+    h.backend.send({ projectPath: '/a', scope: 'chat', message: 'delegate' });
+    await settle();
+
+    stream.push({
+      type: 'item.started',
+      item: { id: 'child-1', type: 'collab_tool_call', status: 'running', description: 'Inspect renderer' },
+    } as unknown as ThreadEvent);
+    stream.push({
+      type: 'turn.completed',
+      usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0 },
+    });
+    stream.end();
+    await settle();
+
+    expect(h.emitted.filter((event) => event.type === 'done')).toEqual([
+      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1, subagentsSettled: true },
+    ]);
+    expect(h.backend.isWorkspaceBusy('/a')).toBe(false);
+  });
+
+  it('settles a failed stream immediately without waiting for its iterator to end', async () => {
+    const stream = pendingStream();
+    const h = harness([stream.events]);
+    h.backend.start({ projectPath: '/a', scope: 'chat' });
+    h.backend.send({ projectPath: '/a', scope: 'chat', message: 'delegate' });
+    await settle();
+
+    stream.push({ type: 'turn.failed', error: { message: 'boom' } });
+    await settle();
+
+    expect(h.emitted.filter((event) => event.type === 'error')).toEqual([
+      expect.objectContaining({ text: 'boom', turnSeq: 1 }),
+    ]);
+    expect(h.emitted.filter((event) => event.type === 'result')).toHaveLength(0);
+    expect(h.emitted.filter((event) => event.type === 'done')).toEqual([
+      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1, subagentsAborted: true },
+    ]);
+    expect(h.backend.isWorkspaceBusy('/a')).toBe(false);
+    expect(h.notifyCompletion).not.toHaveBeenCalled();
+  });
+
+  it('settles a top-level stream error immediately without waiting for its iterator to end', async () => {
+    const stream = pendingStream();
+    const h = harness([stream.events]);
+    h.backend.start({ projectPath: '/a', scope: 'chat' });
+    h.backend.send({ projectPath: '/a', scope: 'chat', message: 'delegate' });
+    await settle();
+
+    stream.push({ type: 'error', message: 'transport lost' });
+    await settle();
+
+    expect(h.emitted.filter((event) => event.type === 'error')).toEqual([
+      expect.objectContaining({ text: 'transport lost', turnSeq: 1 }),
+    ]);
+    expect(h.emitted.filter((event) => event.type === 'result')).toHaveLength(0);
+    expect(h.emitted.filter((event) => event.type === 'done')).toEqual([
+      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1, subagentsAborted: true },
+    ]);
+    expect(h.backend.isWorkspaceBusy('/a')).toBe(false);
+    expect(h.notifyCompletion).not.toHaveBeenCalled();
+  });
+
+  it('settles a draining turn exactly once when the SDK iterator throws after parent completion', async () => {
+    const stream = (async function* (): AsyncGenerator<ThreadEvent> {
+      yield {
+        type: 'turn.completed',
+        usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0 },
+      };
+      throw new Error('late stream failure');
+    })();
+    const h = harness([stream]);
+    h.backend.start({ projectPath: '/a' });
+    h.backend.send({ projectPath: '/a', message: 'delegate' });
+    await settle();
+
+    expect(h.emitted.some((event) => event.type === 'result')).toBe(false);
+    expect(h.emitted.filter((event) => event.type === 'error')).toHaveLength(1);
+    expect(h.emitted.filter((event) => event.type === 'done')).toHaveLength(1);
+    expect(h.backend.isWorkspaceBusy('/a')).toBe(false);
+  });
+
   it.each([
     {
       label: 'a task turn',
@@ -359,7 +514,7 @@ describe('SdkCodexBackend', () => {
     h.backend.send({ projectPath: '/a', message: 'go' });
     await settle();
     expect(h.emitted.filter((e) => e.type === 'done')).toEqual([
-      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1 },
+      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1, subagentsSettled: true },
     ]);
   });
 
@@ -369,7 +524,7 @@ describe('SdkCodexBackend', () => {
     h.backend.send({ projectPath: '/a', message: 'go' });
     await settle();
     expect(h.emitted.filter((e) => e.type === 'done')).toEqual([
-      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1 },
+      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1, subagentsSettled: true },
     ]);
   });
 
@@ -382,6 +537,9 @@ describe('SdkCodexBackend', () => {
       { type: 'error', text: 'SDK exploded', projectPath: '/a', scope: 'task', turnSeq: 1 },
     ]);
     expect(h.emitted.filter((e) => e.type === 'done')).toHaveLength(1);
+    expect(h.emitted.filter((e) => e.type === 'done')).toEqual([
+      { type: 'done', projectPath: '/a', scope: 'task', turnSeq: 1, subagentsAborted: true },
+    ]);
   });
 
   it('settles an aborted turn without reporting it as an error', async () => {
@@ -393,7 +551,10 @@ describe('SdkCodexBackend', () => {
     h.backend.interrupt('/a');
     await settle();
     expect(h.emitted.filter((e) => e.type === 'error')).toHaveLength(0);
-    expect(h.emitted.filter((e) => e.type === 'done')).toHaveLength(1);
+    expect(h.emitted.filter((e) => e.type === 'done')).toEqual([
+      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1, subagentsAborted: true },
+    ]);
+    expect(h.backend.isWorkspaceBusy('/a')).toBe(false);
   });
 
   it('retires an interrupted thread so late identity cannot taint its replacement', async () => {
@@ -437,6 +598,9 @@ describe('SdkCodexBackend', () => {
     h.backend.send({ projectPath: '/a', message: 'replacement' });
     await settle();
     expect(h.runs[0].options?.signal?.aborted).toBe(true);
+    expect(h.emitted.filter((e) => e.type === 'done')).toEqual([
+      { type: 'done', projectPath: '/a', scope: 'chat', turnSeq: 1, subagentsAborted: true },
+    ]);
     expect(h.clients).toHaveLength(2);
     expect(h.clients[0].start.mock.results[0]?.value).not.toBe(h.clients[1].start.mock.results[0]?.value);
     expect(h.backend.isWorkspaceBusy('/a')).toBe(true);
@@ -551,7 +715,7 @@ describe('SdkCodexBackend', () => {
         turnSeq: 1, sessionId: null,
       },
       { type: 'error', text: 'client init failed', projectPath: '/a', scope: 'task', turnSeq: 1 },
-      { type: 'done', projectPath: '/a', scope: 'task', turnSeq: 1 },
+      { type: 'done', projectPath: '/a', scope: 'task', turnSeq: 1, subagentsAborted: true },
     ]);
   });
 
@@ -567,6 +731,12 @@ describe('SdkCodexBackend', () => {
       getEnv: () => ({}),
     });
     await expect(empty.getModels()).resolves.toEqual({ models: [], defaultModel: '' });
+  });
+
+  it('returns a typed unsupported result for approval decisions', () => {
+    const h = harness();
+    expect(h.backend.approve('/a', 'chat', 'request-1', { type: 'decision', value: 'accept' }))
+      .toEqual({ ok: false, code: 'unsupported' });
   });
 
   it('destroy aborts every active scope and leaves no workspace busy', async () => {

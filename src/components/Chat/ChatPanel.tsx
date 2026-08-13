@@ -11,6 +11,8 @@ import { parseToolResultBlocks } from '../../lib/toolResultContent';
 import { registerChatListener, unregisterChatListener, takeBufferedMessages, reconcileDrainedMessages } from '../../lib/chatFrameGate';
 import { buildPendingQuestionAnswer } from '../../lib/pendingQuestionAnswer';
 import WaitingIndicator from './WaitingIndicator';
+import UserInputRequestPanel from './UserInputRequestPanel';
+import McpElicitationPanel from './McpElicitationPanel';
 
 // Projects whose brainstorm seed has already been consumed (or attempted) in
 // this renderer process. The seed is one-shot, but the chat start-effect can
@@ -76,7 +78,7 @@ import { watchTargetsFromMessage } from './githubRunResolver';
 
 const EMPTY_URL_SET: Set<string> = new Set();
 import ChatInput, { type ContextItem } from './ChatInput';
-import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, PendingSudoPrompt, QueuedMessage, TerminalTab } from '../../types';
+import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, PendingSudoPrompt, PendingCodexUserInput, PendingCodexMcpElicitation, QueuedMessage, TerminalTab } from '../../types';
 import type { MetaWorkspaceRuntime, CodexEffort, CodexModelOption } from '../../types';
 import type { WaitMeta } from '../../../electron/services/waitClassifier';
 import { buildHelpMessage } from './helpText';
@@ -502,6 +504,18 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // soon as real output flows or the turn ends.
   const [streamHint, setStreamHint] = useState<string | null>(null);
   const clearStreamHint = useCallback(() => setStreamHint(prev => (prev == null ? prev : null)), []);
+  // Collaboration items are transient runtime state, not transcript content:
+  // Codex can finish the parent turn before a delegated child reports its
+  // terminal status. Keep each child here so the UI remains visibly active
+  // until every child has actually stopped.
+  const [activeSubagents, setActiveSubagents] = useState<Map<string, string>>(new Map());
+  const activeSubagentTurnsRef = useRef<Map<string, number | null>>(new Map());
+  useEffect(() => {
+    // Activity belongs to the live backend session only. A session/workspace
+    // replacement must never inherit a stale child and look permanently busy.
+    activeSubagentTurnsRef.current.clear();
+    setActiveSubagents(prev => (prev.size === 0 ? prev : new Map()));
+  }, [sessionId, projectPath, claudeScope]);
   // Summarized reasoning ("Show reasoning" setting; SDK backend streams it as
   // reasoning_delta). Rendered as a REAL transcript row: while the model thinks
   // it streams in-place as italic text (reasoningLive), then collapses into an
@@ -614,6 +628,11 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const dockTransition = useReducedMotionTransition(SPRING.dock);
   const followBtnTransition = useReducedMotionTransition(SPRING.flick);
   const turnSeqRef = useRef(0); // tracks the active turn's sequence number
+  useEffect(() => {
+    // Incoming events are scoped by project/scope, not session. Retire the
+    // old sequence so late child activity cannot revive a selected new chat.
+    turnSeqRef.current = -1;
+  }, [sessionId, projectPath, claudeScope]);
   const [ready, setReady] = useState(false);
   // True from the moment a queued follow-up is shifted for sending until the new
   // turn's `streaming_start` arrives. Bridges the gap where the prior turn's
@@ -622,6 +641,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const [drainInFlight, setDrainInFlight] = useState(false);
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(initialPendingApproval);
+  const [pendingCodexUserInput, setPendingCodexUserInput] = useState<PendingCodexUserInput | null>(null);
+  const [pendingCodexMcpElicitation, setPendingCodexMcpElicitation] = useState<PendingCodexMcpElicitation | null>(null);
   const [pendingSudoPrompt, setPendingSudoPrompt] = useState<PendingSudoPrompt | null>(null);
   const [fileContextEnabled, setFileContextEnabled] = useState(true);
   // Provider-neutral telemetry state. Null/empty until a provider actually
@@ -755,7 +776,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       projects: activeMetaRuntime.projects,
     } : null);
     const startArgs: any[] = aiProvider === 'claude' || aiProvider === 'codex'
-      ? [projectPath || '', claudeScope, claudeKind, claudeOrchestratorContext, undefined /* scopeCwd */, metaPreamble, aiProvider === 'codex' && activeMetaRuntime
+      ? [projectPath || '', claudeScope, claudeKind, claudeOrchestratorContext,
+        claudeKind === 'orchestrator' ? projectPath || '' : undefined /* scopeCwd */, metaPreamble, aiProvider === 'codex' && activeMetaRuntime
         ? [...new Set(activeMetaRuntime.projects.filter(project => project.status === 'ok' && project.path.trim()).map(project => project.path))]
         : undefined]
       : [projectPath || '', metaPreamble];
@@ -842,6 +864,10 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
       if (msg.type === 'streaming_start') {
         if (msg.turnSeq != null) turnSeqRef.current = msg.turnSeq;
+        // A new stream boundary supersedes any child state that did not get a
+        // terminal lifecycle event (for example, an interrupted parent turn).
+        activeSubagentTurnsRef.current.clear();
+        setActiveSubagents(prev => (prev.size === 0 ? prev : new Map()));
         clearStreamHint();
         // A fresh turn (or a wait-resume re-arm) must show its thinking row
         // immediately — never inherit the previous reply's post-settle hold.
@@ -854,6 +880,31 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           turnStartedAtRef.current = Date.now();
         }
         nextSegmentStartRef.current = Date.now();
+        return;
+      }
+
+      if (msg.type === 'subagent_activity' && typeof msg.agentId === 'string') {
+        const terminal = msg.status === 'completed' || msg.status === 'failed' || msg.status === 'cancelled';
+        const trackedTurn = activeSubagentTurnsRef.current.get(msg.agentId);
+        if (msg.turnSeq != null && msg.turnSeq !== turnSeqRef.current
+          && (!terminal || trackedTurn !== msg.turnSeq)) return;
+        if (terminal) {
+          activeSubagentTurnsRef.current.delete(msg.agentId);
+        } else {
+          activeSubagentTurnsRef.current.set(msg.agentId, msg.turnSeq ?? null);
+        }
+        setActiveSubagents(prev => {
+          const next = new Map(prev);
+          if (terminal) {
+            next.delete(msg.agentId);
+          } else {
+            const summary = typeof msg.summary === 'string' && msg.summary.trim()
+              ? msg.summary.trim()
+              : 'Working';
+            next.set(msg.agentId, summary);
+          }
+          return next;
+        });
         return;
       }
 
@@ -878,10 +929,21 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         // arrives tagged with the old turnSeq and should not affect the new turn's state.
         if (msg.turnSeq != null && msg.turnSeq !== turnSeqRef.current) return;
         if (msg.type === 'done') {
+          // A normal parent completion can precede native child terminal
+          // activity. A forced termination or physical SDK EOF proves no
+          // trailing child event can arrive; otherwise preserve working state.
+          if (msg.subagentsAborted === true || msg.subagentsSettled === true) {
+            activeSubagentTurnsRef.current.clear();
+            setActiveSubagents(prev => (prev.size === 0 ? prev : new Map()));
+          }
           turnSeqRef.current = -1;
           clearStreamHint();
           finalizeReasoning();
           setTurnStartIndex(null);
+          // App Server normally sends correlated resolution events before
+          // done. Clear any surviving cards as a defensive terminal boundary.
+          setPendingCodexUserInput(null);
+          setPendingCodexMcpElicitation(null);
           flushMessagesToParent();
           onTurnComplete?.();
         }
@@ -892,7 +954,11 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
       if (msg.type === 'process_exit') {
         setReady(false);
+        activeSubagentTurnsRef.current.clear();
+        setActiveSubagents(prev => (prev.size === 0 ? prev : new Map()));
         setPendingApproval(null);
+        setPendingCodexUserInput(null);
+        setPendingCodexMcpElicitation(null);
         flushMessagesToParent();
         onTurnComplete?.();
         return;
@@ -1108,14 +1174,64 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         return;
       }
 
+      // Interactive App Server requests are capability-gated: never render
+      // them for SDK Codex or another provider, and keep each panel tied to
+      // the message subscription's workspace/scope.
+      if (msg.type === 'user_input_needed') {
+        if (aiProvider !== 'codex' || msg.provider !== 'codex'
+          || typeof msg.requestHandle !== 'string' || !Array.isArray(msg.questions)) return;
+        setPendingCodexUserInput({
+          provider: 'codex', requestHandle: msg.requestHandle, questions: msg.questions,
+          ...(typeof msg.autoResolutionMs === 'number' ? { autoResolutionMs: msg.autoResolutionMs } : {}),
+        });
+        return;
+      }
+      if (msg.type === 'mcp_elicitation_needed') {
+        if (aiProvider !== 'codex' || msg.provider !== 'codex'
+          || typeof msg.requestHandle !== 'string' || typeof msg.serverName !== 'string' || typeof msg.message !== 'string') return;
+        if (msg.mode === 'form' && msg.requestedSchema && typeof msg.requestedSchema === 'object') {
+          setPendingCodexMcpElicitation({ provider: 'codex', requestHandle: msg.requestHandle, mode: 'form', serverName: msg.serverName, message: msg.message, requestedSchema: msg.requestedSchema });
+        } else if (msg.mode === 'url' && typeof msg.url === 'string') {
+          setPendingCodexMcpElicitation({ provider: 'codex', requestHandle: msg.requestHandle, mode: 'url', serverName: msg.serverName, message: msg.message, url: msg.url, ...(typeof msg.elicitationId === 'string' ? { elicitationId: msg.elicitationId } : {}) });
+        }
+        return;
+      }
+      // Main process sends one of these only after the server has resolved the
+      // request. This is intentionally the only event-driven dismissal path.
+      if (msg.type === 'user_input_resolved' && msg.provider === 'codex' && typeof msg.requestHandle === 'string') {
+        setPendingCodexUserInput(current => current?.requestHandle === msg.requestHandle ? null : current);
+        return;
+      }
+      if (msg.type === 'mcp_elicitation_resolved' && msg.provider === 'codex' && typeof msg.requestHandle === 'string') {
+        setPendingCodexMcpElicitation(current => current?.requestHandle === msg.requestHandle ? null : current);
+        return;
+      }
+
       // Tool approval request from main process
       if (msg.type === 'approval_needed') {
+        // Legacy SDK Codex approvals do not have a matching response bridge.
+        // Only App Server's structured, validated approval requests may render
+        // in a Codex chat; likewise, never leak one into another provider's UI.
+        if ((aiProvider === 'codex' && msg.provider !== 'codex') || (aiProvider !== 'codex' && msg.provider === 'codex')) return;
         setPendingApproval({
           toolName: msg.toolName,
           toolUseId: msg.toolUseId,
           command: msg.command,
           description: msg.description,
           input: msg.input,
+          ...(msg.provider === 'codex' ? {
+            provider: 'codex' as const,
+            requestHandle: msg.requestHandle,
+            kind: msg.kind,
+            availableDecisions: msg.availableDecisions,
+            reason: msg.reason,
+            cwd: msg.cwd,
+            network: msg.network,
+            grantRoot: msg.grantRoot,
+            permissionsSummary: msg.permissionsSummary,
+            requestedPermissions: msg.requestedPermissions,
+            proposedExecpolicyAmendment: msg.proposedExecpolicyAmendment,
+          } : {}),
         });
         return;
       }
@@ -1830,7 +1946,15 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // Stop button and thinking animation don't flicker to "idle" when the user sends
   // a follow-up right as the current turn finishes. The real `isStreaming` prop
   // still drives the turn/drain logic — only presentation uses this.
-  const streamingForDisplay = isStreaming || drainInFlight || messageQueue.length > 0;
+  const subagentThinking = activeSubagents.size > 0;
+  const subagentHint = useMemo(() => {
+    const entries = [...activeSubagents.values()];
+    if (entries.length === 0) return null;
+    const more = entries.length > 1 ? ` (+${entries.length - 1} more)` : '';
+    return `agent · ${entries[0]}${more}`;
+  }, [activeSubagents]);
+  const thinkingHint = subagentHint ?? streamHint;
+  const streamingForDisplay = isStreaming || drainInFlight || messageQueue.length > 0 || subagentThinking;
   const isWaiting = !!waiting && waiting.wait.kind !== 'none';
   // While waiting we are NOT thinking — suppress the thinking indicator.
   const showThinking = streamingForDisplay && !awaitingQuestion && !isWaiting;
@@ -1848,16 +1972,15 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // own elapsed timer) — a thinking row below it would be a duplicate spinner.
   const hasLiveReasoning = lastMsg?.role === 'assistant' && !!lastMsg.reasoningLive;
   // Same rule for a running tool: its card shimmers with a pulsing badge, so the
-  // tail row yields to it. The row exits in the same commit the card mounts, and
-  // the card mounts with the grow-in entry (seedGrow) — the row visibly becomes
-  // the card instead of a card popping in above a stationary spinner.
+  // tail row yields to it. An active native subagent is separate concurrent work,
+  // however, so keep the row visible with its agent hint in that case.
   const hasRunningTailTool = lastMsg?.role === 'assistant' && !!lastMsg.toolCalls?.some(tc => tc.output == null);
   // SAI morph path: only a pending tail row when no segment head is actively thinking.
   // postSettleHold keeps it hidden for a beat right after text settles, so the
   // end-of-turn wrap-up (result frame in flight) doesn't flash a thinking row
   // under a reply the user just watched finish.
   const showPendingSaiThinking = showThinking && saiMorphActive && !hasStreamingAssistantSegment
-    && !hasLiveReasoning && !hasRunningTailTool && !postSettleHold;
+    && !hasLiveReasoning && (!hasRunningTailTool || subagentThinking) && (!postSettleHold || subagentThinking);
   // Detached banner: non-SAI providers, OR SAI with the animation pref off (today's
   // fallback). No grow-in here, so it only yields to the reasoning card, keeping the
   // legacy always-on banner during tool runs.
@@ -1910,8 +2033,34 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     return () => window.removeEventListener('sai-github-watcher-snapshot', handler);
   }, []);
 
-  const handleApprove = (modifiedCommand?: string) => {
+  const submitCodexApproval = async (approval: NonNullable<typeof pendingApproval>, decision: import('../../../electron/services/codexBackend').CodexApprovalDecision) => {
+    try {
+      const result = await window.sai.codexAppServerApprove?.(
+        projectPath,
+        claudeScope,
+        approval.requestHandle ?? approval.toolUseId,
+        decision,
+      );
+      if (result?.ok) {
+        // A late completion must never dismiss a newer approval card.
+        setPendingApproval(current => current?.provider === 'codex'
+          && (current.requestHandle ?? current.toolUseId) === (approval.requestHandle ?? approval.toolUseId)
+          ? null
+          : current);
+      }
+    } catch {
+      // Keep the card actionable if the preview process is no longer reachable.
+    }
+  };
+
+  const handleApprove = async (modifiedCommand?: string) => {
     if (!pendingApproval) return;
+    if (pendingApproval.provider === 'codex') {
+      await submitCodexApproval(pendingApproval, pendingApproval.kind === 'permissions'
+        ? { type: 'permissions', permissions: pendingApproval.requestedPermissions ?? [], scope: 'turn' }
+        : { type: 'decision', value: 'accept' });
+      return;
+    }
     if (aiProvider === 'gemini' || aiProvider === 'kimi') {
       const approve = aiProvider === 'kimi' ? (window.sai as any).kimiApprove : (window.sai as any).geminiApprove;
       approve?.(projectPath, pendingApproval.toolUseId, true, modifiedCommand, 'chat');
@@ -1921,8 +2070,17 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     setPendingApproval(null);
   };
 
-  const handleDeny = () => {
+  const handleDeny = async () => {
     if (!pendingApproval) return;
+    if (pendingApproval.provider === 'codex') {
+      if (pendingApproval.kind === 'permissions') {
+        await submitCodexApproval(pendingApproval, { type: 'permissions', permissions: [], scope: 'turn' });
+        return;
+      }
+      const value = pendingApproval.availableDecisions?.includes('decline') ? 'decline' : 'cancel';
+      await submitCodexApproval(pendingApproval, { type: 'decision', value });
+      return;
+    }
     if (aiProvider === 'gemini' || aiProvider === 'kimi') {
       const approve = aiProvider === 'kimi' ? (window.sai as any).kimiApprove : (window.sai as any).geminiApprove;
       approve?.(projectPath, pendingApproval.toolUseId, false, undefined, 'chat');
@@ -1934,6 +2092,12 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
   const handleAlwaysAllow = async () => {
     if (!pendingApproval) return;
+    if (pendingApproval.provider === 'codex') {
+      await submitCodexApproval(pendingApproval, pendingApproval.kind === 'permissions'
+        ? { type: 'permissions', permissions: pendingApproval.requestedPermissions ?? [], scope: 'session' }
+        : { type: 'decision', value: 'acceptForSession' });
+      return;
+    }
     if (aiProvider === 'gemini' || aiProvider === 'kimi') {
       // ACP providers don't support always-allow patterns — just approve this instance
       const approve = aiProvider === 'kimi' ? (window.sai as any).kimiApprove : (window.sai as any).geminiApprove;
@@ -1944,6 +2108,31 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, true, undefined, claudeScope);
     }
     setPendingApproval(null);
+  };
+
+  const handleCodexAmendment = async (execpolicyAmendment: string[]) => {
+    if (!pendingApproval || pendingApproval.provider !== 'codex') return;
+    await submitCodexApproval(pendingApproval, {
+      type: 'command-amendment', execpolicyAmendment,
+    });
+  };
+
+  const submitCodexUserInput = async (request: PendingCodexUserInput, response: import('../../../electron/services/codexBackend').CodexUserInputResponse) => {
+    try {
+      const result = await window.sai.codexAppServerAnswerUserInput?.(projectPath, claudeScope, request.requestHandle, response);
+      if (result?.ok) setPendingCodexUserInput(current => current?.requestHandle === request.requestHandle ? null : current);
+    } catch {
+      // Keep the request actionable when the App Server preview is unavailable.
+    }
+  };
+
+  const resolveCodexMcpElicitation = async (request: PendingCodexMcpElicitation, decision: import('../../../electron/services/codexBackend').CodexMcpElicitationDecision) => {
+    try {
+      const result = await window.sai.codexAppServerResolveMcpElicitation?.(projectPath, claudeScope, request.requestHandle, decision);
+      if (result?.ok) setPendingCodexMcpElicitation(current => current?.requestHandle === request.requestHandle ? null : current);
+    } catch {
+      // Keep the request actionable when the App Server preview is unavailable.
+    }
   };
 
   const handleFakeError = useCallback((text: string) => {
@@ -2388,7 +2577,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
               className="thinking-row-wrap"
               transition={rowTransition}
             >
-              <ThinkingAnimation hint={streamHint} />
+              <ThinkingAnimation hint={thinkingHint} />
             </motion.div>
           )}
           {showPendingSaiThinking && (
@@ -2398,7 +2587,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
               className="thinking-row-wrap"
               transition={rowTransition}
             >
-              <ThinkingAnimation hint={streamHint} />
+              <ThinkingAnimation hint={thinkingHint} />
             </motion.div>
           )}
         </AnimatePresence>
@@ -2453,6 +2642,19 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
               </button>
             </div>
           )}
+          {pendingCodexUserInput && aiProvider === 'codex' && (
+            <UserInputRequestPanel
+              request={pendingCodexUserInput}
+              onSubmit={(answers) => { void submitCodexUserInput(pendingCodexUserInput, { type: 'answers', answers }); }}
+              onCancel={() => { void submitCodexUserInput(pendingCodexUserInput, { type: 'cancel' }); }}
+            />
+          )}
+          {pendingCodexMcpElicitation && aiProvider === 'codex' && (
+            <McpElicitationPanel
+              request={pendingCodexMcpElicitation}
+              onResolve={(decision) => { void resolveCodexMcpElicitation(pendingCodexMcpElicitation, decision); }}
+            />
+          )}
           <ChatInput
             onSend={handleSend}
             overlayControl={overlayControl}
@@ -2466,6 +2668,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             onApprove={handleApprove}
             onDeny={handleDeny}
             onAlwaysAllow={handleAlwaysAllow}
+            onAmend={handleCodexAmendment}
             isStreaming={streamingForDisplay}
             waiting={isWaiting}
             awaitingQuestion={awaitingQuestion}

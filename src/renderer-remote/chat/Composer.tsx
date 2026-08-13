@@ -2,6 +2,7 @@ import { useState, useRef } from 'react';
 import { ChevronDown, ChevronUp, Minus, Shield, ShieldOff, Send, Square, Paperclip, X } from 'lucide-react';
 import PickerSheet from './PickerSheet';
 import type { SessionOverrides } from '../lib/overrides';
+import type { RemoteClaudeModel } from '../wire';
 
 interface Props {
   streaming: boolean;
@@ -12,6 +13,8 @@ interface Props {
   onInterrupt: () => void;
   overrides: SessionOverrides;
   onOverridesChange: (next: SessionOverrides) => void;
+  /** Account-specific catalogue, loaded after the remote wire authenticates. */
+  models?: RemoteClaudeModel[];
 }
 
 const EFFORT_CONFIG = {
@@ -20,10 +23,11 @@ const EFFORT_CONFIG = {
   high:   { icon: ChevronUp,   label: 'Hi',  color: 'var(--accent)',          next: 'low'    as const },
 };
 
-const MODEL_OPTIONS: { value: string; label: string; hint?: string; color: string }[] = [
-  { value: 'claude-opus-4-8',           label: 'Opus',   hint: 'Most capable',  color: 'var(--orange)' },
-  { value: 'claude-sonnet-4-6',         label: 'Sonnet', hint: 'Balanced',      color: 'var(--accent)' },
-  { value: 'claude-haiku-4-5-20251001', label: 'Haiku',  hint: 'Fastest',       color: 'var(--green)' },
+const FALLBACK_MODEL_OPTIONS: { value: string; label: string; hint?: string; color: string }[] = [
+  { value: 'default', label: 'Desktop default', hint: 'Use the desktop default', color: 'var(--text-muted)' },
+  { value: 'opus',    label: 'Latest Opus',     hint: 'Most capable',            color: 'var(--orange)' },
+  { value: 'sonnet',  label: 'Latest Sonnet',   hint: 'Balanced',                color: 'var(--accent)' },
+  { value: 'haiku',   label: 'Latest Haiku',    hint: 'Fastest',                 color: 'var(--green)' },
 ];
 
 const PERM_MODES: { value: 'auto' | 'auto-read' | 'always-ask'; label: string; hint?: string }[] = [
@@ -48,7 +52,7 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-export default function Composer({ streaming, awaitingQuestion, onSend, onInterrupt, overrides, onOverridesChange }: Props) {
+export default function Composer({ streaming, awaitingQuestion, onSend, onInterrupt, overrides, onOverridesChange, models }: Props) {
   const [text, setText] = useState('');
   const [sheet, setSheet] = useState<Sheet>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -145,7 +149,18 @@ export default function Composer({ streaming, awaitingQuestion, onSend, onInterr
   const cycleEffort = () => onOverridesChange({ ...overrides, effort: effortCfg.next });
   const EffortIcon = effortCfg.icon;
 
-  const model = MODEL_OPTIONS.find((m) => m.value === overrides.model);
+  const catalogueModels = models?.length
+    ? [FALLBACK_MODEL_OPTIONS[0], ...models.filter((item) => item.id !== 'default').map((item) => ({
+      value: item.id,
+      label: item.label,
+      hint: item.description,
+      color: item.recommended ? 'var(--accent)' : 'var(--text-secondary)',
+    }))]
+    : FALLBACK_MODEL_OPTIONS;
+  const modelOptions = overrides.model && !catalogueModels.some((item) => item.value === overrides.model)
+    ? [{ value: overrides.model, label: overrides.model, hint: 'Saved model selection', color: 'var(--text-secondary)' }, ...catalogueModels]
+    : catalogueModels;
+  const model = modelOptions.find((m) => m.value === overrides.model);
   const permMode = PERM_MODES.find((p) => p.value === overrides.permMode);
   const bypassActive = overrides.permMode === 'auto';
 
@@ -381,11 +396,10 @@ export default function Composer({ streaming, awaitingQuestion, onSend, onInterr
       <PickerSheet
         open={sheet === 'model'}
         title="Model"
-        options={MODEL_OPTIONS}
+        options={modelOptions}
         current={overrides.model}
-        onSelect={(v) => onOverridesChange({ ...overrides, model: v })}
+        onSelect={(v) => onOverridesChange({ ...overrides, model: v === 'default' ? undefined : v })}
         onClose={() => setSheet(null)}
-        allowClear
       />
       <PickerSheet
         open={sheet === 'permMode'}

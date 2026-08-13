@@ -1,10 +1,24 @@
 import { ipcMain } from 'electron';
 import {
   getCodexBackend,
+  getCodexAppServerPreviewStatus,
+  getCodexMcpRuntimeStatus,
+  getCodexMcpConfig,
+  replaceCodexMcpConfig,
+  getCodexSwarmStatus,
+  getCodexBackendMode,
+  setCodexBackendMode,
+  type CodexBackendMode,
+  type CodexApprovalResult,
   type CodexPermission,
   type CodexReasoningEffort,
   type CodexSessionKind,
+  type CodexMcpRuntimeStatus,
   isCodexReasoningEffort,
+  isCodexApprovalDecision,
+  isCodexMcpElicitationDecision,
+  isCodexUserInputResponse,
+  isCodexMcpConfigWriteRequest,
 } from './codexBackend';
 import { CodexTelemetryService } from './codexTelemetry';
 
@@ -35,6 +49,8 @@ const normalizeDirectories = (value: unknown): string[] | undefined => {
 /** Module-owned singleton — renderer polling shares one cache/backoff instance. */
 let codexTelemetry: CodexTelemetryService = new CodexTelemetryService();
 
+const CODEX_MCP_RUNTIME_INVALID_REQUEST_REASON = 'Codex MCP runtime status requires a non-empty project path and an optional string scope.';
+
 /** Kill any active telemetry child process and drop cached state. Safe to call repeatedly. */
 export function destroyCodexTelemetry(): void {
   codexTelemetry.destroy();
@@ -49,6 +65,68 @@ export function __setCodexTelemetryForTests(service: CodexTelemetryService): voi
 
 /** Register the Codex IPC surface. Transport behavior lives in codexBackend. */
 export function registerCodexHandlers(): void {
+  ipcMain.handle('codex:backendMode:get', () => getCodexBackendMode());
+  ipcMain.handle('codex:backendMode:set', (_event, mode: unknown) => {
+    const normalized: CodexBackendMode = mode === 'app-server' ? 'app-server' : 'sdk';
+    return setCodexBackendMode(normalized);
+  });
+  ipcMain.handle('codex:appServerPreviewStatus', () => getCodexAppServerPreviewStatus());
+  ipcMain.handle('codex:swarmStatus', () => getCodexSwarmStatus());
+  ipcMain.handle(
+    'codex:mcpRuntimeStatus',
+    (_event, projectPath: unknown, scope: unknown): Promise<CodexMcpRuntimeStatus> | CodexMcpRuntimeStatus => {
+      if (typeof projectPath !== 'string' || projectPath.trim().length === 0
+        || (scope !== undefined && typeof scope !== 'string')) {
+        return { available: false, reason: CODEX_MCP_RUNTIME_INVALID_REQUEST_REASON, servers: [] };
+      }
+      return getCodexMcpRuntimeStatus(projectPath, scope);
+    },
+  );
+  ipcMain.handle('codex:mcpConfig:get', () => getCodexMcpConfig());
+  ipcMain.handle('codex:mcpConfig:replace', (_event, request: unknown) => {
+    if (!isCodexMcpConfigWriteRequest(request)) return { ok: false, code: 'invalid' };
+    return replaceCodexMcpConfig(request.expectedVersion, request.servers);
+  });
+
+  ipcMain.handle(
+    'codex:appServerApprove',
+    (_event, projectPath: unknown, scope: unknown, requestHandle: unknown, decision: unknown): CodexApprovalResult => {
+      if (typeof projectPath !== 'string' || projectPath.length === 0
+        || (scope !== undefined && typeof scope !== 'string')
+        || typeof requestHandle !== 'string' || requestHandle.length === 0
+        || !isCodexApprovalDecision(decision)) {
+        return { ok: false, code: 'invalid-decision' };
+      }
+      return getCodexBackend().approve(projectPath, scope, requestHandle, decision);
+    },
+  );
+
+  ipcMain.handle(
+    'codex:appServerAnswerUserInput',
+    (_event, projectPath: unknown, scope: unknown, requestHandle: unknown, response: unknown): CodexApprovalResult => {
+      if (typeof projectPath !== 'string' || projectPath.length === 0
+        || (scope !== undefined && typeof scope !== 'string')
+        || typeof requestHandle !== 'string' || requestHandle.length === 0
+        || !isCodexUserInputResponse(response)) {
+        return { ok: false, code: 'invalid-decision' };
+      }
+      return getCodexBackend().answerUserInput(projectPath, scope, requestHandle, response);
+    },
+  );
+
+  ipcMain.handle(
+    'codex:appServerResolveMcpElicitation',
+    (_event, projectPath: unknown, scope: unknown, requestHandle: unknown, decision: unknown): CodexApprovalResult => {
+      if (typeof projectPath !== 'string' || projectPath.length === 0
+        || (scope !== undefined && typeof scope !== 'string')
+        || typeof requestHandle !== 'string' || requestHandle.length === 0
+        || !isCodexMcpElicitationDecision(decision)) {
+        return { ok: false, code: 'invalid-decision' };
+      }
+      return getCodexBackend().resolveMcpElicitation(projectPath, scope, requestHandle, decision);
+    },
+  );
+
   ipcMain.handle('codex:models', (_event, forceRefresh?: boolean) =>
     getCodexBackend().getModels(Boolean(forceRefresh)));
 

@@ -43,11 +43,16 @@ describe('requestCodexRateLimits', () => {
     const { proc, writes, stdout } = createFakeChild();
     const promise = requestCodexRateLimits(baseDeps(proc));
 
-    expect(JSON.parse(writes[0])).toMatchObject({ method: 'initialize', id: 0 });
+    expect(JSON.parse(writes[0])).toEqual({
+      id: 0,
+      method: 'initialize',
+      params: { clientInfo: { name: 'sai', version: '1.0' } },
+    });
 
     emitLine(stdout, { id: 0, result: {} });
-    expect(JSON.parse(writes[1])).toEqual({ jsonrpc: '2.0', method: 'initialized' });
-    expect(JSON.parse(writes[2])).toMatchObject({ method: 'account/rateLimits/read', id: 1 });
+    expect(JSON.parse(writes[1])).toEqual({ method: 'initialized' });
+    expect(JSON.parse(writes[2])).toEqual({ id: 1, method: 'account/rateLimits/read' });
+    expect(writes.map((line) => JSON.parse(line)).every((message) => !Object.hasOwn(message, 'jsonrpc'))).toBe(true);
 
     emitLine(stdout, {
       id: 1,

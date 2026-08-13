@@ -37,8 +37,18 @@ describe('OrchestratorModelPicker', () => {
     const gemini = screen.getByTestId('orch-model-picker-provider-gemini') as HTMLButtonElement;
     expect(codex.disabled).toBe(true);
     expect(gemini.disabled).toBe(true);
-    // Tooltip explains why.
-    expect(codex.getAttribute('title')).toMatch(/requires Claude/i);
+    // Tooltip explains the selected transport cannot run the bridge.
+    expect(codex.getAttribute('title')).toMatch(/app server.*selected/i);
+  });
+
+  it('enables Codex only when the App Server Swarm bridge has negotiated', () => {
+    const onChange = vi.fn();
+    render(<OrchestratorModelPicker provider="claude" model="opus" onChange={onChange} codexSwarm={{ available: true }} />);
+    fireEvent.click(screen.getByTestId('orch-model-picker-button'));
+    const codex = screen.getByTestId('orch-model-picker-provider-codex') as HTMLButtonElement;
+    expect(codex.disabled).toBe(false);
+    fireEvent.click(codex);
+    expect(onChange).toHaveBeenCalledWith('codex', 'gpt-5.6');
   });
 
   it('clicking a disabled provider does not fire onChange', () => {

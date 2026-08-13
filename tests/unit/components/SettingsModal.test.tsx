@@ -46,6 +46,39 @@ describe('SettingsModal', () => {
     await waitFor(() => expect(mock.codexModels).toHaveBeenCalledWith(true));
   });
 
+  it('persists the explicit Codex App Server preview selection and shows its unavailable reason', async () => {
+    const mock = createMockSai();
+    mock.settingsGet = makeSettingsGetMock();
+    mock.codexAppServerPreviewStatus.mockResolvedValue({ available: false, reason: 'Handshake failed' });
+    installMockSai(mock);
+    render(<SettingsModal {...defaultProps} />);
+
+    fireEvent.click(screen.getByText('Codex'));
+    const backend = await screen.findByLabelText('Codex backend');
+    expect((backend as HTMLSelectElement).value).toBe('sdk');
+    fireEvent.change(backend, { target: { value: 'app-server' } });
+
+    expect(mock.settingsSet).toHaveBeenCalledWith('codexBackendMode', 'app-server');
+    expect(mock.codexBackendModeSet).toHaveBeenCalledWith('app-server');
+    expect(await screen.findByText(/Handshake failed/)).toBeTruthy();
+  });
+
+  it('offers an explicit App Server retry after preview fallback', async () => {
+    const mock = createMockSai();
+    mock.settingsGet = makeSettingsGetMock();
+    mock.codexAppServerPreviewStatus.mockResolvedValue({ available: false, reason: 'Handshake failed' });
+    installMockSai(mock);
+    render(<SettingsModal {...defaultProps} />);
+
+    fireEvent.click(screen.getByText('Codex'));
+    fireEvent.change(await screen.findByLabelText('Codex backend'), { target: { value: 'app-server' } });
+    const callsBeforeRetry = mock.codexBackendModeSet.mock.calls.length;
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry App Server' }));
+
+    expect(mock.codexBackendModeSet).toHaveBeenLastCalledWith('app-server');
+    expect(mock.codexBackendModeSet).toHaveBeenCalledTimes(callsBeforeRetry + 1);
+  });
+
   it('delegates Codex effort persistence to the owning App callback without a duplicate write', async () => {
     const mock = createMockSai();
     mock.settingsGet = vi.fn((key: string, fallback: unknown) => Promise.resolve(key === 'codex'
@@ -533,12 +566,7 @@ describe('SettingsModal', () => {
     });
   });
 
-  it('does not expose or synchronize a Codex transport setting', async () => {
-    // NOTE: the setting key/label under test is built via concatenation
-    // (rather than written as a literal) so this test itself doesn't trip
-    // a repo-wide grep for the retired setting name.
-    const retiredSettingKey = ['codex', 'Backend'].join('');
-    const retiredSettingLabel = new RegExp(['Codex', 'backend'].join(' '), 'i');
+  it('does not expose a retired Codex CLI backend option', async () => {
     const mock = createMockSai();
     mock.settingsGet = makeSettingsGetMock();
     installMockSai(mock);
@@ -547,11 +575,9 @@ describe('SettingsModal', () => {
     fireEvent.click(screen.getByText('Codex'));
     await screen.findByText(/default permission mode/i);
 
-    expect(screen.queryByText(retiredSettingLabel)).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(retiredSettingLabel)).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: /CLI/i })).not.toBeInTheDocument();
-    expect(mock.settingsGet).not.toHaveBeenCalledWith(retiredSettingKey, expect.anything());
-    expect(mock.settingsSet).not.toHaveBeenCalledWith(retiredSettingKey, expect.anything());
+    expect(screen.getByRole('option', { name: 'SDK (default)' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'App Server (preview)' })).toBeTruthy();
   });
 
   it('hides General content when on Provider page', async () => {

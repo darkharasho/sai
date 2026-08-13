@@ -17,10 +17,14 @@ import {
   codexScope,
   codexScopeKey,
   type CodexBackend,
+  type CodexApprovalDecision,
+  type CodexApprovalResult,
+  type CodexMcpElicitationDecision,
   type CodexModelResult,
   type CodexSendArgs,
   type CodexSessionKind,
   type CodexStartArgs,
+  type CodexUserInputResponse,
 } from './types';
 
 export interface CodexSdkThread {
@@ -155,7 +159,7 @@ export class SdkCodexBackend implements CodexBackend {
     if (runtime.active) {
       const prior = runtime.active;
       prior.controller.abort();
-      this.finishTurn(runtime, prior);
+      this.finishTurn(runtime, prior, { subagentsAborted: true });
       // A Thread may still be draining after AbortSignal cancellation. Never
       // run its replacement through that same mutable object: create a fresh
       // client/thread below and resume only an already-authoritative session ID.
@@ -202,7 +206,7 @@ export class SdkCodexBackend implements CodexBackend {
       void this.runTurn(key, runtime, active, runtime.thread, input);
     } catch (error) {
       this.emit({ type: 'error', text: errorText(error), projectPath: args.projectPath, scope, turnSeq: active.seq });
-      this.finishTurn(runtime, active);
+      this.finishTurn(runtime, active, { subagentsAborted: true });
     }
   }
 
@@ -215,7 +219,7 @@ export class SdkCodexBackend implements CodexBackend {
     }
     const active = runtime.active;
     active.controller.abort();
-    this.finishTurn(runtime, active);
+    this.finishTurn(runtime, active, { subagentsAborted: true });
     // AbortSignal cancellation does not guarantee the SDK iterator has
     // finished draining. Retire the mutable thread while retaining sessionId,
     // so the next send gets a fresh thread and resumes only known-good identity.
@@ -245,13 +249,25 @@ export class SdkCodexBackend implements CodexBackend {
     return this.loadModels(forceRefresh);
   }
 
+  approve(_projectPath: string, _scope: string | undefined, _requestHandle: string, _decision: CodexApprovalDecision): CodexApprovalResult {
+    return { ok: false, code: 'unsupported' };
+  }
+
+  answerUserInput(_projectPath: string, _scope: string | undefined, _requestHandle: string, _response: CodexUserInputResponse): CodexApprovalResult {
+    return { ok: false, code: 'unsupported' };
+  }
+
+  resolveMcpElicitation(_projectPath: string, _scope: string | undefined, _requestHandle: string, _decision: CodexMcpElicitationDecision): CodexApprovalResult {
+    return { ok: false, code: 'unsupported' };
+  }
+
   suspendWorkspace(projectPath: string): void {
     for (const [key, runtime] of this.runtimes) {
       if (runtime.projectPath !== projectPath) continue;
       if (runtime.active) {
         const active = runtime.active;
         active.controller.abort();
-        this.finishTurn(runtime, active);
+        this.finishTurn(runtime, active, { subagentsAborted: true });
       }
       this.runtimes.delete(key);
     }
@@ -267,12 +283,21 @@ export class SdkCodexBackend implements CodexBackend {
     return false;
   }
 
+  isScopeBusy(projectPath: string, scope?: string): boolean {
+    return Boolean(this.runtimes.get(codexScopeKey(projectPath, codexScope(scope)))?.active);
+  }
+
+  /** Selector-only aggregate used to avoid replacing an active transport. */
+  isAnyWorkspaceBusy(): boolean {
+    return [...this.runtimes.values()].some((runtime) => Boolean(runtime.active));
+  }
+
   destroy(): void {
     for (const runtime of this.runtimes.values()) {
       if (!runtime.active) continue;
       const active = runtime.active;
       active.controller.abort();
-      this.finishTurn(runtime, active);
+      this.finishTurn(runtime, active, { subagentsAborted: true });
     }
     this.runtimes.clear();
     this.metadata.clear();
@@ -304,7 +329,14 @@ export class SdkCodexBackend implements CodexBackend {
     return runtime.active === active;
   }
 
-  private finishTurn(runtime: ScopeRuntime, active: ActiveTurn): void {
+  private finishTurn(
+    runtime: ScopeRuntime,
+    active: ActiveTurn,
+    {
+      subagentsAborted = false,
+      subagentsSettled = false,
+    }: { subagentsAborted?: boolean; subagentsSettled?: boolean } = {},
+  ): void {
     if (!this.isCurrent(runtime, active) || active.done) return;
     active.done = true;
     this.emit({
@@ -312,6 +344,8 @@ export class SdkCodexBackend implements CodexBackend {
       projectPath: runtime.projectPath,
       scope: runtime.scope,
       turnSeq: active.seq,
+      ...(subagentsAborted ? { subagentsAborted: true } : {}),
+      ...(subagentsSettled ? { subagentsSettled: true } : {}),
     });
     runtime.active = undefined;
   }
@@ -323,6 +357,7 @@ export class SdkCodexBackend implements CodexBackend {
     thread: CodexSdkThread,
     input: Input,
   ): Promise<void> {
+    let pendingResult: SaiEnvelope | undefined;
     try {
       const streamed = await thread.runStreamed(input, { signal: active.controller.signal });
       for await (const event of streamed.events) {
@@ -331,25 +366,52 @@ export class SdkCodexBackend implements CodexBackend {
         if (event.type === 'item.completed' && event.item.type === 'agent_message') {
           active.summary = event.item.text || undefined;
         }
-        if (event.type === 'turn.completed' && runtime.kind === 'chat') {
-          this.notifyCompletion(runtime.projectPath, { provider: 'Codex', summary: active.summary });
-        }
         const envelopes = mapCodexSdkEvent(event, {
           projectPath: runtime.projectPath,
           scope: runtime.scope,
           turnSeq: active.seq,
         });
+        if (event.type === 'turn.completed') {
+          // Native children can continue emitting collaboration events after
+          // their parent reports completion. A SAI `result` is terminal to
+          // the renderer, so retain it until the physical stream ends.
+          pendingResult = envelopes.find((envelope) => envelope.type === 'result');
+          continue;
+        }
+        if (event.type === 'turn.failed' || event.type === 'error') {
+          // Failures must settle promptly: an SDK iterator is allowed to stay
+          // open after a terminal error, and waiting for EOF would leave SAI
+          // permanently busy. Do not leak a previously pending success.
+          pendingResult = undefined;
+          for (const envelope of envelopes) {
+            if (envelope.type !== 'done' && this.isCurrent(runtime, active)) {
+              this.emit(envelope);
+            }
+          }
+          this.finishTurn(runtime, active, { subagentsAborted: true });
+          return;
+        }
         for (const envelope of envelopes) {
-          if (envelope.type === 'done') {
-            this.finishTurn(runtime, active);
-          } else if (this.isCurrent(runtime, active)) {
+          // The parent can report `turn.completed` before native delegated
+          // children emit their terminal collaboration events. Keep draining
+          // the SDK iterator and emit its single SAI terminal `done` at EOF.
+          if (envelope.type !== 'done' && this.isCurrent(runtime, active)) {
             this.emit(envelope);
           }
         }
-        if (!this.isCurrent(runtime, active)) return;
       }
       if (thread.id) runtime.sessionId = thread.id;
-      this.finishTurn(runtime, active);
+      if (pendingResult && this.isCurrent(runtime, active)) {
+        this.emit(pendingResult);
+      }
+      const shouldNotifyCompletion = Boolean(pendingResult) && runtime.kind === 'chat';
+      // At physical EOF no further collaboration events can arrive. Mark the
+      // final envelope so the renderer can clear any child the CLI omitted a
+      // terminal event for, while an earlier logical parent done remains safe.
+      this.finishTurn(runtime, active, { subagentsSettled: true });
+      if (shouldNotifyCompletion) {
+        this.notifyCompletion(runtime.projectPath, { provider: 'Codex', summary: active.summary });
+      }
     } catch (error) {
       if (!this.isCurrent(runtime, active) || this.runtimes.get(key) !== runtime) return;
       if (!active.controller.signal.aborted && !isAbortError(error)) {
@@ -361,7 +423,7 @@ export class SdkCodexBackend implements CodexBackend {
           turnSeq: active.seq,
         });
       }
-      this.finishTurn(runtime, active);
+      this.finishTurn(runtime, active, { subagentsAborted: true });
     }
   }
 }

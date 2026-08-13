@@ -8,6 +8,8 @@ const mockSai = {
   mcpRemove: vi.fn().mockResolvedValue({ success: true }),
   mcpUpdate: vi.fn().mockResolvedValue({ success: true }),
   mcpGetTools: vi.fn().mockResolvedValue([]),
+  codexMcpRuntimeStatus: vi.fn().mockResolvedValue({ available: true, servers: [] }),
+  codexMcpConfigGet: vi.fn().mockResolvedValue({ ok: true, snapshot: { version: 'v1', impact: 'global-user-config', servers: [] } }),
 };
 
 Object.defineProperty(window, 'sai', { value: mockSai, writable: true });
@@ -17,6 +19,10 @@ import McpSidebar from '../../../../src/components/MCP/McpSidebar';
 describe('McpSidebar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSai.mcpList.mockResolvedValue([]);
+    mockSai.mcpRegistryList.mockResolvedValue([]);
+    mockSai.codexMcpRuntimeStatus.mockResolvedValue({ available: true, servers: [] });
+    mockSai.codexMcpConfigGet.mockResolvedValue({ ok: true, snapshot: { version: 'v1', impact: 'global-user-config', servers: [] } });
   });
 
   it('renders without crashing', () => {
@@ -50,5 +56,76 @@ describe('McpSidebar', () => {
     const { getByText } = render(<McpSidebar />);
     fireEvent.click(getByText('Add'));
     expect(getByText('Add MCP Server')).toBeTruthy();
+  });
+
+  it('shows only provider-labelled read-only runtime status for a Codex workspace', async () => {
+    mockSai.codexMcpRuntimeStatus.mockResolvedValue({
+      available: true,
+      servers: [{ name: 'linear', lifecycle: 'running', authentication: 'authenticated', toolCount: 4 }],
+    });
+
+    const { container, getByText, queryByText } = render(
+      <McpSidebar provider="codex" projectPath="/repo" scope="chat-1" />,
+    );
+
+    await waitFor(() => expect(getByText('Codex App Server MCP')).toBeTruthy());
+    expect(getByText('linear')).toBeTruthy();
+    expect(container.textContent).toContain('4 tools');
+    expect(queryByText('Browse')).toBeNull();
+    expect(queryByText('Add')).toBeNull();
+    expect(mockSai.codexMcpRuntimeStatus).toHaveBeenCalledWith('/repo', 'chat-1');
+    expect(mockSai.mcpList).not.toHaveBeenCalled();
+    expect(mockSai.mcpRegistryList).not.toHaveBeenCalled();
+  });
+
+  it('renders a concise unavailable explanation for Codex without stale Claude servers', async () => {
+    mockSai.mcpList.mockResolvedValue([{ name: 'claude-only', transport: 'stdio', enabled: true }]);
+    mockSai.codexMcpRuntimeStatus.mockResolvedValue({
+      available: false,
+      reason: 'Codex MCP runtime status is unavailable on the SDK backend.',
+      servers: [],
+    });
+
+    const { getByText, queryByText } = render(
+      <McpSidebar provider="codex" projectPath="/repo" scope="chat-1" />,
+    );
+
+    await waitFor(() => expect(getByText('Codex MCP runtime status is unavailable on the SDK backend.')).toBeTruthy());
+    expect(queryByText('claude-only')).toBeNull();
+    expect(mockSai.mcpList).not.toHaveBeenCalled();
+    expect(mockSai.mcpRegistryList).not.toHaveBeenCalled();
+    expect(mockSai.codexMcpConfigGet).not.toHaveBeenCalled();
+  });
+
+  it('offers the isolated global Codex editor only when App Server MCP runtime is available', async () => {
+    const { getByText } = render(<McpSidebar provider="codex" projectPath="/repo" scope="chat-1" />);
+    await waitFor(() => expect(getByText('Global MCP configuration')).toBeTruthy());
+    expect(mockSai.codexMcpConfigGet).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not load Claude MCP data when a persisted browse tab becomes Codex', async () => {
+    const { getByText, rerender } = render(
+      <McpSidebar provider="claude" projectPath="/repo" scope="chat-1" />,
+    );
+
+    fireEvent.click(getByText('Browse'));
+    await waitFor(() => expect(mockSai.mcpRegistryList).toHaveBeenCalledTimes(1));
+    vi.clearAllMocks();
+
+    rerender(<McpSidebar provider="codex" projectPath="/repo" scope="chat-1" />);
+
+    await waitFor(() => expect(mockSai.codexMcpRuntimeStatus).toHaveBeenCalledWith('/repo', 'chat-1'));
+    expect(mockSai.mcpList).not.toHaveBeenCalled();
+    expect(mockSai.mcpRegistryList).not.toHaveBeenCalled();
+  });
+
+  it('keeps the Claude installed and browse management flow unchanged', async () => {
+    mockSai.mcpList.mockResolvedValue([{ name: 'claude-server', transport: 'stdio', enabled: true }]);
+    const { getByText } = render(<McpSidebar provider="claude" projectPath="/repo" scope="chat-1" />);
+
+    await waitFor(() => expect(getByText('claude-server')).toBeTruthy());
+    expect(getByText('Browse')).toBeTruthy();
+    expect(getByText('Add')).toBeTruthy();
+    expect(mockSai.codexMcpRuntimeStatus).not.toHaveBeenCalled();
   });
 });
