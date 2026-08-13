@@ -220,6 +220,24 @@ describe('Codex backend selection', () => {
     expect(sdk.send).not.toHaveBeenCalled();
   });
 
+  it('keeps MCP runtime status with the App Server transport that owns its scope', async () => {
+    const sdk = backendStub();
+    const appServer = {
+      ...backendStub(),
+      previewStatus: { available: true },
+      getMcpRuntimeStatus: vi.fn().mockResolvedValue({ available: true, servers: [] }),
+    };
+    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
+    setCodexBackendMode('app-server');
+    const dispatcher = getCodexBackend();
+    dispatcher.start({ projectPath: '/project', scope: 'task:7' });
+    setCodexBackendMode('sdk');
+
+    await expect(dispatcher.getMcpRuntimeStatus?.('/project', 'task:7')).resolves.toEqual({ available: true, servers: [] });
+    expect(appServer.getMcpRuntimeStatus).toHaveBeenCalledWith('/project', 'task:7');
+    expect(sdk.getMcpRuntimeStatus).toBeUndefined();
+  });
+
   it('unassigns a reset settled scope so its next start uses the selected backend', () => {
     const sdk = backendStub();
     const appServer = backendStub();
@@ -499,6 +517,75 @@ describe('Codex IPC dispatch', () => {
     await mocks.ipcMain.invoke('codex:models');
 
     expect(backend.getModels).toHaveBeenCalledWith(false);
+  });
+
+  it('uses a dedicated, scoped and read-only channel for Codex MCP runtime status', async () => {
+    const backend = backendStub();
+    backend.getMcpRuntimeStatus = vi.fn().mockResolvedValue({
+      available: true,
+      servers: [{ name: 'github', lifecycle: 'running', authentication: 'authenticated', toolCount: 4 }],
+    });
+    __setCodexBackendForTests(backend);
+    registerCodexHandlers();
+
+    await expect(mocks.ipcMain.invoke('codex:mcpRuntimeStatus', '/project', 'task:7')).resolves.toEqual({
+      available: true,
+      servers: [{ name: 'github', lifecycle: 'running', authentication: 'authenticated', toolCount: 4 }],
+    });
+    expect(backend.getMcpRuntimeStatus).toHaveBeenCalledWith('/project', 'task:7');
+
+    await expect(mocks.ipcMain.invoke('codex:mcpRuntimeStatus', '', 'task:7')).resolves.toEqual({
+      available: false,
+      reason: 'Codex MCP runtime status requires a non-empty project path and an optional string scope.',
+      servers: [],
+    });
+    await expect(mocks.ipcMain.invoke('codex:mcpRuntimeStatus', '/project', 7)).resolves.toEqual({
+      available: false,
+      reason: 'Codex MCP runtime status requires a non-empty project path and an optional string scope.',
+      servers: [],
+    });
+    expect(backend.getMcpRuntimeStatus).toHaveBeenCalledOnce();
+  });
+
+  it('reports SDK MCP runtime status as unavailable without touching the Claude MCP channel', async () => {
+    const backend = backendStub();
+    __setCodexBackendForTests(backend);
+    registerCodexHandlers();
+
+    await expect(mocks.ipcMain.invoke('codex:mcpRuntimeStatus', '/project', 'chat')).resolves.toEqual({
+      available: false,
+      reason: 'Codex MCP runtime status is unavailable on the SDK backend.',
+      servers: [],
+    });
+  });
+
+  it('does not expose malformed MCP status data from a backend to the renderer', async () => {
+    const backend = backendStub();
+    backend.getMcpRuntimeStatus = vi.fn().mockResolvedValue({
+      available: true,
+      servers: [{ name: 'github', lifecycle: 'running', authentication: 'authenticated', toolCount: -1, rawError: 'secret' }],
+    });
+    __setCodexBackendForTests(backend);
+    registerCodexHandlers();
+
+    await expect(mocks.ipcMain.invoke('codex:mcpRuntimeStatus', '/project', 'chat')).resolves.toEqual({
+      available: false,
+      reason: 'Codex MCP runtime status returned invalid data.',
+      servers: [],
+    });
+  });
+
+  it('converts an unavailable Codex MCP backend into a renderer-safe status', async () => {
+    const backend = backendStub();
+    backend.getMcpRuntimeStatus = vi.fn().mockRejectedValue(new Error('raw protocol failure: /private/token'));
+    __setCodexBackendForTests(backend);
+    registerCodexHandlers();
+
+    await expect(mocks.ipcMain.invoke('codex:mcpRuntimeStatus', '/project', 'chat')).resolves.toEqual({
+      available: false,
+      reason: 'Codex MCP runtime status is unavailable.',
+      servers: [],
+    });
   });
 
   it('accepts only the narrow typed Codex approval payload and delegates it with scope', async () => {

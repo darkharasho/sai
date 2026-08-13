@@ -4,12 +4,60 @@ import { registerWorkspaceBackendHooks } from '../workspace';
 import { fetchBundledCodexModels } from './bundledModels';
 import { AppServerBackend } from './appServerBackend';
 import { SdkCodexBackend } from './sdkBackend';
-import { codexScopeKey, type CodexAppServerPreviewStatus, type CodexApprovalDecision, type CodexApprovalResult, type CodexBackend, type CodexBackendMode, type CodexMcpElicitationDecision, type CodexModelResult, type CodexSendArgs, type CodexStartArgs, type CodexUserInputResponse } from './types';
+import { codexScopeKey, type CodexAppServerPreviewStatus, type CodexApprovalDecision, type CodexApprovalResult, type CodexBackend, type CodexBackendMode, type CodexMcpElicitationDecision, type CodexMcpRuntimeStatus, type CodexModelResult, type CodexSendArgs, type CodexStartArgs, type CodexUserInputResponse } from './types';
 
 export * from './types';
 
 type BackendFactory = () => CodexBackend;
 type BackendByMode = Partial<Record<CodexBackendMode, CodexBackend>>;
+
+const CODEX_MCP_SDK_UNAVAILABLE_REASON = 'Codex MCP runtime status is unavailable on the SDK backend.';
+const CODEX_MCP_INVALID_DATA_REASON = 'Codex MCP runtime status returned invalid data.';
+const CODEX_MCP_LIFECYCLES = new Set(['unknown', 'available', 'starting', 'running', 'failed', 'disabled']);
+const CODEX_MCP_AUTHENTICATION = new Set(['authenticated', 'unauthenticated', 'not-required', 'unknown']);
+
+/**
+ * App Server status is already normalized at the protocol boundary, but this
+ * second, narrow validation prevents a future backend change from leaking
+ * arbitrary protocol fields through the preload bridge.
+ */
+function sanitizeCodexMcpRuntimeStatus(value: unknown): CodexMcpRuntimeStatus {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { available: false, reason: CODEX_MCP_INVALID_DATA_REASON, servers: [] };
+  }
+  const status = value as Record<string, unknown>;
+  if (typeof status.available !== 'boolean' || !Array.isArray(status.servers)
+    || (status.reason !== undefined && (typeof status.reason !== 'string' || status.reason.length > 1_000))
+    || status.servers.length > 100) {
+    return { available: false, reason: CODEX_MCP_INVALID_DATA_REASON, servers: [] };
+  }
+  const servers = [] as CodexMcpRuntimeStatus['servers'];
+  for (const entry of status.servers) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      return { available: false, reason: CODEX_MCP_INVALID_DATA_REASON, servers: [] };
+    }
+    const server = entry as Record<string, unknown>;
+    if (typeof server.name !== 'string' || server.name.length === 0 || server.name.length > 200
+      || typeof server.lifecycle !== 'string' || !CODEX_MCP_LIFECYCLES.has(server.lifecycle)
+      || typeof server.authentication !== 'string' || !CODEX_MCP_AUTHENTICATION.has(server.authentication)
+      || typeof server.toolCount !== 'number' || !Number.isSafeInteger(server.toolCount) || server.toolCount < 0 || server.toolCount > 10_000
+      || (server.failureReason !== undefined && (typeof server.failureReason !== 'string' || server.failureReason.length > 1_000))) {
+      return { available: false, reason: CODEX_MCP_INVALID_DATA_REASON, servers: [] };
+    }
+    servers.push({
+      name: server.name,
+      lifecycle: server.lifecycle as CodexMcpRuntimeStatus['servers'][number]['lifecycle'],
+      authentication: server.authentication as CodexMcpRuntimeStatus['servers'][number]['authentication'],
+      toolCount: server.toolCount,
+      ...(typeof server.failureReason === 'string' ? { failureReason: server.failureReason } : {}),
+    });
+  }
+  return {
+    available: status.available,
+    ...(typeof status.reason === 'string' ? { reason: status.reason } : {}),
+    servers,
+  };
+}
 
 let active: CodexBackend | null = null;
 let requestedMode: CodexBackendMode = 'sdk';
@@ -105,6 +153,33 @@ class ScopedCodexBackend implements CodexBackend {
 
   getModels(forceRefresh?: boolean): Promise<CodexModelResult> {
     return this.backendFor(requestedMode).getModels(forceRefresh);
+  }
+
+  async getMcpRuntimeStatus(projectPath?: string, scope?: string): Promise<CodexMcpRuntimeStatus> {
+    if (!projectPath) return { available: false, reason: 'Codex MCP runtime status requires a project path.', servers: [] };
+    const key = codexScopeKey(projectPath, scope);
+    const assignedMode = this.assignments.get(key);
+
+    // A running or settled SDK conversation never obtains App Server state:
+    // the two transports do not share an MCP connection or configuration.
+    if (assignedMode === 'sdk' || (!assignedMode && requestedMode === 'sdk')) {
+      return { available: false, reason: CODEX_MCP_SDK_UNAVAILABLE_REASON, servers: [] };
+    }
+
+    const backend = this.backendFor('app-server');
+    if (backend === this.backends.sdk) {
+      return {
+        available: false,
+        reason: this.fallbackReason
+          ? `Codex MCP runtime status is unavailable because App Server preview fell back to the SDK backend: ${this.fallbackReason}`
+          : CODEX_MCP_SDK_UNAVAILABLE_REASON,
+        servers: [],
+      };
+    }
+    if (!backend.getMcpRuntimeStatus) {
+      return { available: false, reason: 'Codex App Server MCP status is unavailable.', servers: [] };
+    }
+    return backend.getMcpRuntimeStatus(projectPath, scope);
   }
 
   async getSwarmStatus(): Promise<CodexAppServerPreviewStatus> {
@@ -228,6 +303,21 @@ export async function getCodexSwarmStatus(): Promise<CodexAppServerPreviewStatus
   const backend = getCodexBackend();
   if (backend instanceof ScopedCodexBackend) return backend.getSwarmStatus();
   return { available: false, reason: 'Codex Swarm requires the App Server preview backend.' };
+}
+
+/** Read-only MCP runtime state is intentionally separate from Claude's MCP IPC. */
+export async function getCodexMcpRuntimeStatus(projectPath: string, scope?: string): Promise<CodexMcpRuntimeStatus> {
+  const backend = getCodexBackend();
+  if (!backend.getMcpRuntimeStatus) {
+    return { available: false, reason: CODEX_MCP_SDK_UNAVAILABLE_REASON, servers: [] };
+  }
+  try {
+    return sanitizeCodexMcpRuntimeStatus(await backend.getMcpRuntimeStatus(projectPath, scope));
+  } catch {
+    // Never pass a protocol/process error (which may contain connection or
+    // filesystem details) over Electron IPC.
+    return { available: false, reason: 'Codex MCP runtime status is unavailable.', servers: [] };
+  }
 }
 
 /** Return the scoped dispatcher, constructing the stable SDK transport first. */

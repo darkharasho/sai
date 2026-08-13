@@ -405,6 +405,10 @@ declare global {
     codexBackendModeSet?: (mode: 'sdk' | 'app-server') => Promise<'sdk' | 'app-server'>;
     codexSwarmStatus?: () => Promise<{ available: boolean; reason?: string }>;
     codexAppServerPreviewStatus?: () => Promise<{ available: boolean; reason?: string }>;
+    codexMcpRuntimeStatus?: (
+      projectPath: string,
+      scope?: string,
+    ) => Promise<import('../electron/services/codexBackend').CodexMcpRuntimeStatus>;
     codexAppServerApprove?: (
       projectPath: string,
       scope: string | undefined,

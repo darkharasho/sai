@@ -428,6 +428,10 @@ contextBridge.exposeInMainWorld('sai', {
   mcpUpdate: (name: string, updates: any) => ipcRenderer.invoke('mcp:update', name, updates),
   mcpRegistryList: () => ipcRenderer.invoke('mcp:registryList'),
   mcpRuntimeStatus: () => ipcRenderer.invoke('mcp:runtimeStatus'),
+  // Codex App Server has an isolated read-only MCP runtime channel. Never
+  // route this through Claude's configuration or aggregate runtime status.
+  codexMcpRuntimeStatus: (projectPath: string, scope?: string) =>
+    ipcRenderer.invoke('codex:mcpRuntimeStatus', projectPath, scope),
   onMcpRuntimeStatus: (cb: (status: any) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, status: any) => cb(status);
     ipcRenderer.on('mcp:runtime-status', listener);

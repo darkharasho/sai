@@ -2,6 +2,7 @@ import { ipcMain } from 'electron';
 import {
   getCodexBackend,
   getCodexAppServerPreviewStatus,
+  getCodexMcpRuntimeStatus,
   getCodexSwarmStatus,
   getCodexBackendMode,
   setCodexBackendMode,
@@ -10,6 +11,7 @@ import {
   type CodexPermission,
   type CodexReasoningEffort,
   type CodexSessionKind,
+  type CodexMcpRuntimeStatus,
   isCodexReasoningEffort,
   isCodexApprovalDecision,
   isCodexMcpElicitationDecision,
@@ -44,6 +46,8 @@ const normalizeDirectories = (value: unknown): string[] | undefined => {
 /** Module-owned singleton — renderer polling shares one cache/backoff instance. */
 let codexTelemetry: CodexTelemetryService = new CodexTelemetryService();
 
+const CODEX_MCP_RUNTIME_INVALID_REQUEST_REASON = 'Codex MCP runtime status requires a non-empty project path and an optional string scope.';
+
 /** Kill any active telemetry child process and drop cached state. Safe to call repeatedly. */
 export function destroyCodexTelemetry(): void {
   codexTelemetry.destroy();
@@ -65,6 +69,16 @@ export function registerCodexHandlers(): void {
   });
   ipcMain.handle('codex:appServerPreviewStatus', () => getCodexAppServerPreviewStatus());
   ipcMain.handle('codex:swarmStatus', () => getCodexSwarmStatus());
+  ipcMain.handle(
+    'codex:mcpRuntimeStatus',
+    (_event, projectPath: unknown, scope: unknown): Promise<CodexMcpRuntimeStatus> | CodexMcpRuntimeStatus => {
+      if (typeof projectPath !== 'string' || projectPath.trim().length === 0
+        || (scope !== undefined && typeof scope !== 'string')) {
+        return { available: false, reason: CODEX_MCP_RUNTIME_INVALID_REQUEST_REASON, servers: [] };
+      }
+      return getCodexMcpRuntimeStatus(projectPath, scope);
+    },
+  );
 
   ipcMain.handle(
     'codex:appServerApprove',
