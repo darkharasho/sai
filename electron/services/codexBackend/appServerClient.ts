@@ -119,13 +119,19 @@ const MCP_CONFIG_ENV_REFERENCE = /^\$\{?[A-Za-z_][A-Za-z0-9_]{0,127}\}?$/;
  * value that merely resembles one. This covers `-eNAME=value`,
  * `-HHeader: value`, and their long attached forms as well as split flags.
  */
-const MCP_CONFIG_SENSITIVE_CARRIER_NAME = '(?:env|environment|header|headers|auth(?:entication|orization)?|access[_-]?token|token|secret|password|credential|api[_-]?key|apikey|key|user(?:name)?|bearer(?:[_-]?token)?|oauth2?(?:[_-]?(?:bearer|token))?)';
-const MCP_CONFIG_VALUE_CARRIER = new RegExp(
-  `^(?:--${MCP_CONFIG_SENSITIVE_CARRIER_NAME}(?:=|:|$|[A-Za-z_])|-e(?:=|$|[A-Za-z_])|-H(?:=|$|\\S)|-(?:a|p|u)(?:=|:|$|\\S))`,
-  'i',
-);
-const MCP_CONFIG_SENSITIVE_QUERY_KEY = /^(?:auth(?:entication|orization)?|access[_-]?token|token|secret|password|credential|api[_-]?key|apikey|key|user(?:name)?|bearer(?:[_-]?token)?|oauth2?(?:[_-]?(?:bearer|token))?|cookie)$/i;
+const MCP_CONFIG_SHORT_VALUE_CARRIER = /^(?:-e(?:=|$|[A-Za-z_])|-H(?:=|$|\S)|-(?:a|p|u)(?:=|:|$|\S))/i;
+const MCP_CONFIG_LONG_OPTION = /^--([A-Za-z0-9][A-Za-z0-9_-]*)(?:[=:]|$)/;
+const MCP_CONFIG_SENSITIVE_NAME_PARTS = [
+  'token', 'secret', 'key', 'auth', 'credential', 'password', 'cookie',
+  'session', 'signature', 'sig', 'code', 'user', 'bearer', 'oauth', 'env', 'header',
+] as const;
 const SENSITIVE_LITERAL = /(?:^|[\s:='\"])(?:bearer|basic)\s+\S+|(?:^|[-_?&\s])(?:access[_-]?token|token|secret|password|credential|api[_-]?key|authorization)(?:\s*[:=]\s*|\s+)\S+|(?:^|\s)--?(?:auth|authorization|access[_-]?token|token|secret|password|credential|api[_-]?key)\s*=\s*\S+|(?:^|[\s:='\"])(?:sk-[a-z0-9][\w-]*)/i;
+
+/** Normalize separators/casing so credential carriers cannot evade a fixed alias list. */
+function isSensitiveMcpConfigCarrierName(value: string): boolean {
+  const normalized = value.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return MCP_CONFIG_SENSITIVE_NAME_PARTS.some((part) => normalized.includes(part));
+}
 
 /**
  * App Server error text may include command output, configuration, or secrets.
@@ -171,7 +177,7 @@ function safeHttpConnectionUrl(value: unknown): string | undefined {
     const parsed = new URL(url);
     if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return undefined;
     for (const [key, queryValue] of parsed.searchParams) {
-      if (MCP_CONFIG_SENSITIVE_QUERY_KEY.test(key) || SENSITIVE_LITERAL.test(queryValue)) return undefined;
+      if (isSensitiveMcpConfigCarrierName(key) || SENSITIVE_LITERAL.test(queryValue)) return undefined;
     }
     return url;
   } catch {
@@ -213,7 +219,8 @@ function safeConnectionArgs(value: unknown): string[] | undefined {
     const arg = args[index]!;
     // Flag carriers hide values from the per-argument literal scan. Neither
     // split nor attached forms have a safe editor representation.
-    if (MCP_CONFIG_VALUE_CARRIER.test(arg)) return undefined;
+    const longOption = MCP_CONFIG_LONG_OPTION.exec(arg);
+    if (MCP_CONFIG_SHORT_VALUE_CARRIER.test(arg) || (longOption && isSensitiveMcpConfigCarrierName(longOption[1]!))) return undefined;
   }
   return args as string[];
 }
@@ -531,6 +538,9 @@ export class AppServerClient implements AppServerClientTransport {
   }
 
   async readUserMcpConfig(): Promise<CodexMcpConfigSnapshot> {
+    // Snapshots authorize exactly one write. Clear an old snapshot before the
+    // host read begins, so a failed/late refresh cannot reuse stale config.
+    this.userMcpConfigSnapshot = undefined;
     try {
       const snapshot = userConfigSnapshot(await this.request<unknown>('config/read', { includeLayers: true }));
       if (!snapshot) throw new AppServerMcpConfigError('unavailable');
@@ -545,16 +555,19 @@ export class AppServerClient implements AppServerClientTransport {
   async writeUserMcpConfig(expectedVersion: string, servers: CodexMcpConfigServer[]): Promise<void> {
     if (this.failure || !this.initialized) throw new AppServerMcpConfigError('unavailable');
     const normalized = validateUserMcpConfigServers(servers);
-    if (!normalized || !safeConfigText(expectedVersion, 512) || this.userMcpConfigSnapshot?.version !== expectedVersion) {
+    const snapshot = this.userMcpConfigSnapshot;
+    if (!normalized || !safeConfigText(expectedVersion, 512) || snapshot?.version !== expectedVersion) {
       throw new AppServerMcpConfigError('invalid');
     }
+    // Consume it synchronously before the async request, preventing a second
+    // writer from racing through with the same optimistic-concurrency version.
+    this.userMcpConfigSnapshot = undefined;
     try {
       await this.request('config/batchWrite', {
         edits: [{ keyPath: 'mcp_servers', value: configTable(normalized), mergeStrategy: 'replace' }],
         expectedVersion,
         reloadUserConfig: true,
       });
-      this.userMcpConfigSnapshot = undefined;
     } catch (error) {
       throw configError(error);
     }
