@@ -129,3 +129,44 @@ Remaining parity gaps are dynamic App Server tools, Codex configuration/MCP mana
 - The bridge exposes no generic shell, filesystem, network, renderer-eval, or raw-secret capability.  Its sole callable catalogue is the existing named Swarm operation taxonomy; consequential task actions continue through that taxonomy's existing approval path.  The readiness probe uses a separate archived thread with one inert no-input tool and never forwards to Swarm.
 
 Remaining parity gaps are Codex configuration/MCP management, plugins/skills management, Remote/mobile interactive action routing, durable Swarm approval/input persistence and recovery, image input, and a live Electron/App Server smoke with a real Codex process.  The Dynamic Tool bridge is intentionally Desktop/App Server preview only; it does not create a generic Remote execution channel.
+
+### Codex MCP runtime-status verification record — 2026-08-12
+
+- Focused coverage completed with **6 files and 187 tests passed**: the App
+  Server client/backend, Codex dispatcher, preload, MCP sidebar, and provider
+  capability suites. This covers bounded `mcpServerStatus/list`
+  pagination/sanitization, lifecycle updates, SDK-unavailable/fallback states,
+  Electron argument validation, and the Codex-only read-only sidebar.
+- `npm run test:unit` completed with exit code 0: **210 files passed, 2,591
+  tests passed, and 3 skipped**. Its existing JSDOM `scrollTo` notices did not
+  fail the suite.
+- `npx tsc --noEmit` and the repository's `npm run build` both stop with exit
+  code 2 at the same **10 inherited diagnostics in
+  `electron/services/claudeBackend/**`** (CLI approval return typing, nullable
+  backend selection, JSON-schema/Zod mutability, and Claude MCP/SDK schema or
+  content types). Neither reports a diagnostic in the App Server MCP status,
+  Codex IPC/preload, capability, or sidebar files in this slice. `npm run
+  build` therefore does not reach its Vite/PWA stages. The independent
+  `npx vite build && npm run build:pwa-mobile` completed with exit code 0,
+  including desktop Vite, Remote PWA, and generated mobile asset sync.
+- `git diff --check 5dd86f5b..HEAD` and `git diff --check` completed with exit
+  code 0; the worktree was clean after the verification build. The source
+  audit confirms that this slice makes only the App Server
+  `mcpServerStatus/list` request and consumes its startup-status notification.
+  It adds no `config/*` request, TOML read/write, OAuth or reload action, or
+  MCP tool-call endpoint. The renderer receives only a bounded name,
+  lifecycle, authentication class, tool count, and safe failure reason;
+  configuration, headers, resources, URLs, environment, and raw protocol
+  errors are excluded.
+- Cross-client isolation is explicit: aggregate status is exposed only while
+  one App Server client has served one SAI scope. A second scope permanently
+  marks that client unavailable for runtime status, and updates cannot cross
+  the standard/orchestrator client boundary. The dedicated `codex:*` IPC route
+  does not invoke the Claude MCP service; the pre-existing generic chat
+  emitter remains separate from MCP configuration/runtime operations.
+
+Deferred work remains deliberately separate: confirmation-gated Codex TOML
+configuration editing, reload and OAuth actions, per-tool policy controls,
+ephemeral SAI MCP bridge configuration, Remote/mobile runtime-status and
+action surfaces, plugins/skills management, and a real Electron/App Server
+smoke against an installed Codex host.
