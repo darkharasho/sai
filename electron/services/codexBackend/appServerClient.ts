@@ -119,8 +119,12 @@ const MCP_CONFIG_ENV_REFERENCE = /^\$\{?[A-Za-z_][A-Za-z0-9_]{0,127}\}?$/;
  * value that merely resembles one. This covers `-eNAME=value`,
  * `-HHeader: value`, and their long attached forms as well as split flags.
  */
-const MCP_CONFIG_VALUE_CARRIER = /^(?:--(?:env|environment|header|headers|auth|authorization|access[_-]?token|token|secret|password|credential|api[_-]?key)(?:=|:|$|[A-Za-z_])|-e(?:=|$|[A-Za-z_])|-H(?:=|$|\S)|-(?:a|p|u)(?:=|:|$|\S))/i;
-const SENSITIVE_KEY = /(token|secret|password|authorization|cookie|credential|api[_-]?key)/i;
+const MCP_CONFIG_SENSITIVE_CARRIER_NAME = '(?:env|environment|header|headers|auth(?:entication|orization)?|access[_-]?token|token|secret|password|credential|api[_-]?key|apikey|key|user(?:name)?|bearer(?:[_-]?token)?|oauth2?(?:[_-]?(?:bearer|token))?)';
+const MCP_CONFIG_VALUE_CARRIER = new RegExp(
+  `^(?:--${MCP_CONFIG_SENSITIVE_CARRIER_NAME}(?:=|:|$|[A-Za-z_])|-e(?:=|$|[A-Za-z_])|-H(?:=|$|\\S)|-(?:a|p|u)(?:=|:|$|\\S))`,
+  'i',
+);
+const MCP_CONFIG_SENSITIVE_QUERY_KEY = /^(?:auth(?:entication|orization)?|access[_-]?token|token|secret|password|credential|api[_-]?key|apikey|key|user(?:name)?|bearer(?:[_-]?token)?|oauth2?(?:[_-]?(?:bearer|token))?|cookie)$/i;
 const SENSITIVE_LITERAL = /(?:^|[\s:='\"])(?:bearer|basic)\s+\S+|(?:^|[-_?&\s])(?:access[_-]?token|token|secret|password|credential|api[_-]?key|authorization)(?:\s*[:=]\s*|\s+)\S+|(?:^|\s)--?(?:auth|authorization|access[_-]?token|token|secret|password|credential|api[_-]?key)\s*=\s*\S+|(?:^|[\s:='\"])(?:sk-[a-z0-9][\w-]*)/i;
 
 /**
@@ -167,7 +171,7 @@ function safeHttpConnectionUrl(value: unknown): string | undefined {
     const parsed = new URL(url);
     if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return undefined;
     for (const [key, queryValue] of parsed.searchParams) {
-      if (SENSITIVE_KEY.test(key) || SENSITIVE_LITERAL.test(queryValue)) return undefined;
+      if (MCP_CONFIG_SENSITIVE_QUERY_KEY.test(key) || SENSITIVE_LITERAL.test(queryValue)) return undefined;
     }
     return url;
   } catch {

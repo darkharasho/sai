@@ -248,11 +248,39 @@ describe('AppServerClient', () => {
     expect(headerChild.stdin.write.mock.calls.map(([line]) => line).join('')).not.toContain('literal-secret-value');
   });
 
+  it('rejects user and OAuth bearer carriers from config reads without exposing their values', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+
+    const read = client.readUserMcpConfig();
+    reply(child, { id: 1, result: { layers: [{ layer: 'user', version: 'v1', config: {
+      mcp_servers: {
+        user: { command: 'curl', args: ['--user=literal-user-value'] },
+        oauthBearer: { command: 'curl', args: ['--oauth2-bearer=literal-oauth-value'] },
+        queryAuth: { url: 'https://example.test/mcp?auth=literal-auth-value' },
+        queryKey: { url: 'https://example.test/mcp?key=literal-key-value' },
+      },
+    } }] } });
+
+    await expect(read).rejects.toMatchObject({ code: 'unavailable', message: 'Codex MCP configuration is unavailable' });
+    const hostPayload = child.stdin.write.mock.calls.map(([line]) => line).join('');
+    expect(hostPayload).not.toContain('literal-user-value');
+    expect(hostPayload).not.toContain('literal-oauth-value');
+    expect(hostPayload).not.toContain('literal-auth-value');
+    expect(hostPayload).not.toContain('literal-key-value');
+  });
+
   it('rejects sensitive stdio and HTTP values before staging a config write', () => {
     expect(normalizeUserMcpConfigServer('stdio-command', { command: 'Bearer literal-secret-value', args: [] })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('stdio-args', { command: 'npx', args: ['--credential=literal-secret-value'] })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('stdio-auth', { command: 'npx', args: ['--auth=literal-secret-value'] })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('stdio-token', { command: 'npx', args: ['--token=literal-secret-value'] })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('stdio-user', { command: 'curl', args: ['--user=literal-secret-value'] })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('stdio-username', { command: 'curl', args: ['--username=literal-secret-value'] })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('stdio-bearer', { command: 'curl', args: ['--bearer-token=literal-secret-value'] })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('stdio-oauth', { command: 'curl', args: ['--oauth-bearer=literal-secret-value'] })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('stdio-oauth2', { command: 'curl', args: ['--oauth2-bearer=literal-secret-value'] })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('stdio-password', { command: 'npx', args: ['--password=literal-secret-value'] })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('stdio-api-key', { command: 'npx', args: ['--api-key=literal-secret-value'] })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('stdio-token-split', { command: 'npx', args: ['--token', 'literal-secret-value'] })).toBeUndefined();
@@ -264,6 +292,10 @@ describe('AppServerClient', () => {
     expect(normalizeUserMcpConfigServer('stdio-header-long-attached', { command: 'curl', args: ['--header=Authorization: literal-secret-value'] })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('url-userinfo', { url: 'https://user:literal-secret-value@example.test/mcp' })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('url-query', { url: 'https://example.test/mcp?access_token=literal-secret-value' })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('url-query-auth', { url: 'https://example.test/mcp?auth=literal-secret-value' })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('url-query-key', { url: 'https://example.test/mcp?key=literal-secret-value' })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('url-query-bearer', { url: 'https://example.test/mcp?bearer_token=literal-secret-value' })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('url-query-oauth', { url: 'https://example.test/mcp?oauth2_token=literal-secret-value' })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('url-fragment', { url: 'https://example.test/mcp#literal-secret-value' })).toBeUndefined();
     expect(validateUserMcpConfigServers([{ name: 'write-secret', transport: 'http', url: 'https://example.test/mcp?token=literal-secret-value' }])).toBeUndefined();
     expect(validateUserMcpConfigServers([{ name: 'write-auth', transport: 'stdio', command: 'npx', args: ['--auth=literal-secret-value'] }])).toBeUndefined();
@@ -359,6 +391,32 @@ describe('AppServerClient', () => {
 
     expect(child.stdin.write).toHaveBeenCalledTimes(3); // initialize, initialized, config/read only
     expect(child.stdin.write.mock.calls.map(([line]) => line).join('')).not.toContain('literal-secret-value');
+  });
+
+  it('rejects user, OAuth bearer, and auth/key query carriers before a config write', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+    const read = client.readUserMcpConfig();
+    reply(child, { id: 1, result: { layers: [{ layer: 'user', version: 'v1', config: { mcp_servers: {} } }] } });
+    await read;
+
+    const forbidden = [
+      { name: 'user', transport: 'stdio' as const, command: 'curl', args: ['--user=literal-user-value'] },
+      { name: 'oauth-bearer', transport: 'stdio' as const, command: 'curl', args: ['--oauth2-bearer=literal-oauth-value'] },
+      { name: 'query-auth', transport: 'http' as const, url: 'https://example.test/mcp?auth=literal-auth-value' },
+      { name: 'query-key', transport: 'http' as const, url: 'https://example.test/mcp?key=literal-key-value' },
+    ];
+    for (const server of forbidden) {
+      await expect(client.writeUserMcpConfig('v1', [server])).rejects.toMatchObject({ code: 'invalid' });
+    }
+
+    expect(child.stdin.write).toHaveBeenCalledTimes(3); // initialize, initialized, config/read only
+    const hostPayload = child.stdin.write.mock.calls.map(([line]) => line).join('');
+    expect(hostPayload).not.toContain('literal-user-value');
+    expect(hostPayload).not.toContain('literal-oauth-value');
+    expect(hostPayload).not.toContain('literal-auth-value');
+    expect(hostPayload).not.toContain('literal-key-value');
   });
 
   it('invalidates the User config snapshot when the App Server connection fails', async () => {
