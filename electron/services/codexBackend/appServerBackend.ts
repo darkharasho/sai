@@ -111,6 +111,8 @@ const MAX_OPTIONS = 20;
 const MAX_TEXT = 2_000;
 const MAX_AUTO_RESOLUTION_MS = 5 * 60_000;
 const DEFAULT_CAPABILITY_PROBE_TIMEOUT_MS = 15_000;
+const MCP_RUNTIME_UNAVAILABLE_REASON = 'Codex App Server MCP status is unavailable';
+const MCP_RUNTIME_SHARED_SCOPE_REASON = 'Codex App Server MCP status is unavailable because this connection is shared across scopes';
 
 export class AppServerUnsupportedCapabilityError extends Error {
   constructor(capability: string) {
@@ -500,20 +502,19 @@ export class AppServerBackend implements CodexBackend {
     }
     try {
       const client = await this.ensureClient(runtime);
-      const owner = this.mcpStatusScopeOwners.get(client);
       const key = codexScopeKey(runtime.projectPath, runtime.scope);
-      if (owner !== key) {
-        return {
-          available: false,
-          reason: 'Codex App Server MCP status is unavailable because this connection is shared across scopes',
-          servers: [],
-        };
-      }
-      return await client.refreshMcpRuntimeStatus();
+      const kind = this.clientKind(runtime);
+      if (!this.canExposeMcpRuntimeStatus(runtime, key, kind, client)) return this.mcpRuntimeStatusUnavailable(client, key);
+      const status = await client.refreshMcpRuntimeStatus();
+      // Refresh is asynchronous. A second scope can claim this physical
+      // client while it is in flight, so never return its aggregate snapshot
+      // unless this exact runtime still owns the same client afterwards.
+      if (!this.canExposeMcpRuntimeStatus(runtime, key, kind, client)) return this.mcpRuntimeStatusUnavailable(client, key);
+      return status;
     } catch (error) {
       const reason = errorText(error);
       if (this.clientKind(runtime) === 'standard') this.markUnavailable(reason);
-      return { available: false, reason, servers: [] };
+      return { available: false, reason: MCP_RUNTIME_UNAVAILABLE_REASON, servers: [] };
     }
   }
 
@@ -733,6 +734,28 @@ export class AppServerBackend implements CodexBackend {
     } else if (owner !== key) {
       this.mcpStatusScopeOwners.set(client, null);
     }
+  }
+
+  private canExposeMcpRuntimeStatus(
+    runtime: ScopeRuntime,
+    key: string,
+    kind: AppServerClientKind,
+    client: AppServerClientTransport,
+  ): boolean {
+    return this.runtimes.get(key) === runtime
+      && this.clientKind(runtime) === kind
+      && this.clients.get(kind) === client
+      && this.mcpStatusScopeOwners.get(client) === key;
+  }
+
+  private mcpRuntimeStatusUnavailable(client: AppServerClientTransport, key: string): CodexMcpRuntimeStatus {
+    return {
+      available: false,
+      reason: this.mcpStatusScopeOwners.get(client) === null
+        ? MCP_RUNTIME_SHARED_SCOPE_REASON
+        : MCP_RUNTIME_UNAVAILABLE_REASON,
+      servers: [],
+    };
   }
 
   private async startTurn(runtime: ScopeRuntime, args: Pick<CodexSendArgs, 'message' | 'model' | 'effort' | 'permission'>): Promise<void> {

@@ -23,7 +23,7 @@ export interface CodexMcpRuntimeServerStatus {
   lifecycle: CodexMcpServerLifecycle;
   authentication: CodexMcpServerAuthentication;
   toolCount: number;
-  /** Bounded plain text only; raw protocol errors never leave the backend. */
+  /** Coarse renderer-safe status only; raw protocol errors never leave the backend. */
   failureReason?: string;
 }
 

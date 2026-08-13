@@ -143,6 +143,31 @@ describe('AppServerBackend', () => {
     expect(h.client.refreshMcpRuntimeStatus).toHaveBeenCalledOnce();
   });
 
+  it('fails closed when another scope claims the client during an MCP status refresh', async () => {
+    const h = harness();
+    h.responses.set('thread/start', { thread: { id: 'thread-one' } });
+    await h.backend.start({ projectPath: '/one', scope: 'chat' });
+
+    const pendingRefresh = deferred<{ available: true; servers: Array<{
+      name: string; lifecycle: 'running'; authentication: 'unknown'; toolCount: number;
+    }> }>();
+    h.client.refreshMcpRuntimeStatus = vi.fn(() => pendingRefresh.promise);
+    const pendingStatus = h.backend.getMcpRuntimeStatus('/one', 'chat');
+    await Promise.resolve();
+
+    h.responses.set('thread/start', { thread: { id: 'thread-two' } });
+    await h.backend.start({ projectPath: '/two', scope: 'chat' });
+    pendingRefresh.resolve({ available: true, servers: [{
+      name: 'only-one', lifecycle: 'running', authentication: 'unknown', toolCount: 1,
+    }] });
+
+    await expect(pendingStatus).resolves.toEqual({
+      available: false,
+      reason: 'Codex App Server MCP status is unavailable because this connection is shared across scopes',
+      servers: [],
+    });
+  });
+
   it('verifies an isolated no-op Dynamic Tool round-trip before enabling Swarm', async () => {
     const h = harness();
     h.responses.set('thread/start', { thread: { id: 'probe-thread' } });

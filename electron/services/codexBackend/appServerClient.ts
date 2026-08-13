@@ -93,6 +93,20 @@ const MCP_STATUS_MAX_SERVERS = 100;
 const MCP_STATUS_MAX_CURSOR_LENGTH = 512;
 const MCP_STATUS_MAX_TEXT_LENGTH = 512;
 const MCP_STATUS_MAX_TOOLS = 10_000;
+const MCP_RUNTIME_UNAVAILABLE_REASON = 'Codex App Server MCP status is unavailable';
+
+/**
+ * App Server error text may include command output, configuration, or secrets.
+ * Keep protocol details in the main process and expose only a stable, coarse
+ * renderer message. The single known authentication signal is intentionally
+ * translated rather than passed through verbatim.
+ */
+function safeMcpFailureReason(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.trim().length === 0) return undefined;
+  return value === 'reauthenticationRequired'
+    ? 'Authentication required'
+    : 'MCP server reported a failure';
+}
 
 function messageText(error: JsonRpcError): string {
   return `${error.message} (${error.code})`;
@@ -163,7 +177,7 @@ export function normalizeMcpRuntimeServerStatus(value: unknown): CodexMcpRuntime
       : undefined;
   if (!name || toolCount === undefined || toolCount > MCP_STATUS_MAX_TOOLS) return undefined;
   const rawError = typeof value.error === 'string' ? value.error : isRecord(value.error) ? value.error.message : value.failureReason;
-  const failureReason = boundedText(rawError);
+  const failureReason = safeMcpFailureReason(rawError);
   return {
     name,
     lifecycle: status ?? (Array.isArray(value.tools) ? 'available' : 'unknown'),
@@ -300,7 +314,7 @@ export class AppServerClient implements AppServerClientTransport {
   }
 
   getMcpRuntimeStatus(): CodexMcpRuntimeStatus {
-    if (this.failure) return { available: false, reason: this.failure.message, servers: [] };
+    if (this.failure) return { available: false, reason: MCP_RUNTIME_UNAVAILABLE_REASON, servers: [] };
     if (!this.initialized) return { available: false, reason: 'Codex App Server transport is not initialized', servers: [] };
     return { available: true, servers: [...this.mcpRuntimeStatuses.values()].sort((a, b) => a.name.localeCompare(b.name)) };
   }
@@ -433,7 +447,7 @@ export class AppServerClient implements AppServerClientTransport {
     const previous = name ? this.mcpRuntimeStatuses.get(name) : undefined;
     if (!name || !status || !previous) return;
     const rawError = typeof raw.error === 'string' ? raw.error : isRecord(raw.error) ? raw.error.message : raw.failureReason;
-    const failureReason = boundedText(rawError);
+    const failureReason = safeMcpFailureReason(rawError);
     this.mcpRuntimeStatuses.set(name, {
       ...previous,
       lifecycle: status,

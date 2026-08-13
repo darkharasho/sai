@@ -378,7 +378,7 @@ describe('AppServerClient', () => {
     await expect(refreshed).resolves.toEqual({ available: true, servers: [
       { name: 'not-logged-in', lifecycle: 'available', authentication: 'unauthenticated', toolCount: 0 },
       { name: 'safe', lifecycle: 'available', authentication: 'authenticated', toolCount: 1 },
-      { name: 'unknown-auth', lifecycle: 'available', authentication: 'unknown', toolCount: 2, failureReason: 'x'.repeat(512) },
+      { name: 'unknown-auth', lifecycle: 'available', authentication: 'unknown', toolCount: 2, failureReason: 'MCP server reported a failure' },
       { name: 'unsupported-auth', lifecycle: 'available', authentication: 'not-required', toolCount: 0 },
     ] });
   });
@@ -399,11 +399,31 @@ describe('AppServerClient', () => {
     } });
     reply(child, { method: 'mcpServer/startupStatus/updated', params: { name: 'bad', status: 'ready', tools: 'not an array' } });
     expect(client.getMcpRuntimeStatus()).toEqual({ available: true, servers: [
-      { name: 'one', lifecycle: 'failed', authentication: 'not-required', toolCount: 2, failureReason: 'reauthenticationRequired' },
+      { name: 'one', lifecycle: 'failed', authentication: 'not-required', toolCount: 2, failureReason: 'Authentication required' },
     ] });
 
     child.emit('exit', 1);
     expect(client.getMcpRuntimeStatus()).toEqual(expect.objectContaining({ available: false, servers: [] }));
+  });
+
+  it('sanitizes MCP failure details before they can reach the renderer', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+
+    const refresh = client.refreshMcpRuntimeStatus();
+    reply(child, { id: 1, result: { data: [{
+      name: 'sensitive-error', authStatus: 'oAuth', tools: [],
+      error: 'token=super-secret /Users/alice/.codex/config.toml',
+    }, {
+      name: 'sensitive-reason', authStatus: 'oAuth', tools: [],
+      failureReason: 'postgres://alice:secret@example.invalid/sai',
+    }] } });
+
+    await expect(refresh).resolves.toEqual({ available: true, servers: [
+      { name: 'sensitive-error', lifecycle: 'available', authentication: 'authenticated', toolCount: 0, failureReason: 'MCP server reported a failure' },
+      { name: 'sensitive-reason', lifecycle: 'available', authentication: 'authenticated', toolCount: 0, failureReason: 'MCP server reported a failure' },
+    ] });
   });
 
   it('rejects pending requests after malformed protocol data', async () => {
