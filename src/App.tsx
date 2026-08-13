@@ -5870,7 +5870,11 @@ export default function App() {
               transition={{ duration: 0.15, ease: [0.2, 0.8, 0.2, 1] }}
               style={{ overflow: 'hidden' }}
             >
-              <McpSidebar />
+              <McpSidebar
+                provider={activeSession.aiProvider ?? aiProvider}
+                projectPath={projectPath}
+                scope={activeSession.id}
+              />
             </motion.div>
           )}
           {sidebarOpen === 'swarm' && (

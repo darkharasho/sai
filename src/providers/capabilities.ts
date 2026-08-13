@@ -55,7 +55,9 @@ const CAPABILITIES: Record<AIProvider, ProviderCapabilities> = {
     supportsImages: true,
     supportsTerminalScope: true,
     supportsMultiScope: true,
-    hasMcp: false,
+    // Codex exposes a read-only App Server MCP runtime view. It does not
+    // reuse Claude's install/configuration controls.
+    hasMcp: true,
     hasPlugins: false,
   },
   kimi: {
