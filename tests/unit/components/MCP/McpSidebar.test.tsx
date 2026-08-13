@@ -9,6 +9,7 @@ const mockSai = {
   mcpUpdate: vi.fn().mockResolvedValue({ success: true }),
   mcpGetTools: vi.fn().mockResolvedValue([]),
   codexMcpRuntimeStatus: vi.fn().mockResolvedValue({ available: true, servers: [] }),
+  codexMcpConfigGet: vi.fn().mockResolvedValue({ ok: true, snapshot: { version: 'v1', impact: 'global-user-config', servers: [] } }),
 };
 
 Object.defineProperty(window, 'sai', { value: mockSai, writable: true });
@@ -21,6 +22,7 @@ describe('McpSidebar', () => {
     mockSai.mcpList.mockResolvedValue([]);
     mockSai.mcpRegistryList.mockResolvedValue([]);
     mockSai.codexMcpRuntimeStatus.mockResolvedValue({ available: true, servers: [] });
+    mockSai.codexMcpConfigGet.mockResolvedValue({ ok: true, snapshot: { version: 'v1', impact: 'global-user-config', servers: [] } });
   });
 
   it('renders without crashing', () => {
@@ -92,6 +94,13 @@ describe('McpSidebar', () => {
     expect(queryByText('claude-only')).toBeNull();
     expect(mockSai.mcpList).not.toHaveBeenCalled();
     expect(mockSai.mcpRegistryList).not.toHaveBeenCalled();
+    expect(mockSai.codexMcpConfigGet).not.toHaveBeenCalled();
+  });
+
+  it('offers the isolated global Codex editor only when App Server MCP runtime is available', async () => {
+    const { getByText } = render(<McpSidebar provider="codex" projectPath="/repo" scope="chat-1" />);
+    await waitFor(() => expect(getByText('Global MCP configuration')).toBeTruthy());
+    expect(mockSai.codexMcpConfigGet).toHaveBeenCalledTimes(1);
   });
 
   it('does not load Claude MCP data when a persisted browse tab becomes Codex', async () => {

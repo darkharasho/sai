@@ -4,6 +4,7 @@ import McpDetail from './McpDetail';
 import McpAddServer from './McpAddServer';
 import McpRegistryDetail from './McpRegistryDetail';
 import McpIcon from './McpIcon';
+import CodexMcpConfigPanel from './CodexMcpConfigPanel';
 import SaiLogo from '../SaiLogo';
 import { DOT_MASK_URL } from '../../lib/assets';
 import type { AIProvider, McpServer, McpServerConfig, RegistryMcpServer } from '../../types';
@@ -198,7 +199,7 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
           <Server size={15} />
           <div>
             <div className="codex-mcp-title">Codex App Server MCP</div>
-            <div className="codex-mcp-subtitle">Runtime status · read-only</div>
+            <div className="codex-mcp-subtitle">Runtime status · global configuration</div>
           </div>
         </div>
         <div className="sidebar-list">
@@ -220,6 +221,11 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
               <span className={`codex-mcp-lifecycle codex-mcp-${server.lifecycle}`}>{server.lifecycle}</span>
             </div>
           ))}
+          {!codexLoading && codexRuntime?.available && (
+            <CodexMcpConfigPanel
+              available
+            />
+          )}
         </div>
         <style>{`
           .codex-mcp-header { display: flex; align-items: center; gap: 9px; padding: 13px 12px; border-bottom: 1px solid var(--border-hairline); color: var(--text); }
