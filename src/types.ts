@@ -124,6 +124,8 @@ export interface ToolCall {
   name: string;
   input: string;
   output?: string;
+  /** Output is still arriving; `output` holds the accumulated live transcript. */
+  liveOutput?: boolean;
   resultImages?: ToolResultImage[];
   startedAt?: number;
   durationMs?: number;
