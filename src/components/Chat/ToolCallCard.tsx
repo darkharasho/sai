@@ -907,11 +907,20 @@ function ToolErrorDisplay({ message }: { message: string }) {
   );
 }
 
-function BashInOut({ output, showAll, onToggleShowAll }: {
+function BashInOut({ output, live, showAll, onToggleShowAll }: {
   output?: string;
+  live: boolean;
   showAll: boolean;
   onToggleShowAll: () => void;
 }) {
+  const outputRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
+
+  useEffect(() => {
+    const el = outputRef.current;
+    if (live && el && stickToBottomRef.current) el.scrollTop = el.scrollHeight;
+  }, [live, output]);
+
   if (!output) return null;
   const parsed = parseToolError(output);
 
@@ -937,7 +946,14 @@ function BashInOut({ output, showAll, onToggleShowAll }: {
     <div className="tool-call-body bash-inout-body">
       <div className="bash-io-row bash-out-row">
         <span className="bash-io-label bash-out-label">OUT</span>
-        <div className="bash-out-lines">
+        <div
+          ref={outputRef}
+          className="bash-out-lines"
+          onScroll={(event) => {
+            const el = event.currentTarget;
+            stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+          }}
+        >
           {visibleLines.map((line, i) => (
             <div key={i} className="bash-out-line">
               <span className="bash-out-bullet">•</span>
@@ -1155,6 +1171,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             {isBash && (
               <BashInOut
                 output={toolCall.output}
+                live={toolCall.liveOutput === true}
                 showAll={showAllOutput}
                 onToggleShowAll={() => setShowAllOutput(prev => !prev)}
               />
