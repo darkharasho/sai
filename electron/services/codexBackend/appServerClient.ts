@@ -114,7 +114,7 @@ const MCP_CONFIG_ENV = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
 const MCP_CONFIG_ENV_REFERENCE = /^\$\{?[A-Za-z_][A-Za-z0-9_]{0,127}\}?$/;
 const SENSITIVE_KEY = /(token|secret|password|authorization|cookie|credential|api[_-]?key)/i;
 const SENSITIVE_VALUE = /(?:bearer\s+|basic\s+|api[_-]?key|token|secret|password|sk-[a-z0-9])/i;
-const SENSITIVE_LITERAL = /(?:^|[\s:='\"])(?:bearer|basic)\s+\S+|(?:^|[-_?&\s])(?:access[_-]?token|token|secret|password|credential|api[_-]?key|authorization)(?:\s*[:=]\s*|\s+)\S+|(?:^|[\s:='\"])(?:sk-[a-z0-9][\w-]*)/i;
+const SENSITIVE_LITERAL = /(?:^|[\s:='\"])(?:bearer|basic)\s+\S+|(?:^|[-_?&\s])(?:access[_-]?token|token|secret|password|credential|api[_-]?key|authorization)(?:\s*[:=]\s*|\s+)\S+|(?:^|\s)--?(?:auth|authorization|access[_-]?token|token|secret|password|credential|api[_-]?key)\s*=\s*\S+|(?:^|[\s:='\"])(?:sk-[a-z0-9][\w-]*)/i;
 
 /**
  * App Server error text may include command output, configuration, or secrets.
@@ -152,7 +152,10 @@ function safeConnectionText(value: unknown): string | undefined {
 
 function safeHttpConnectionUrl(value: unknown): string | undefined {
   const url = safeConfigText(value);
-  if (!url) return undefined;
+  // Fragments never participate in an HTTP request to an MCP server and can
+  // easily hide credentials from the visible endpoint. Do not retain any,
+  // including an otherwise empty trailing `#` fragment marker.
+  if (!url || url.includes('#')) return undefined;
   try {
     const parsed = new URL(url);
     if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return undefined;

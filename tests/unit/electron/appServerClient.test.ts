@@ -212,7 +212,7 @@ describe('AppServerClient', () => {
     const read = client.readUserMcpConfig();
     reply(child, { id: 1, result: { layers: [{ layer: 'user', version: 'v1', config: {
       mcp_servers: {
-        stdioSecret: { command: 'npx', args: ['--token=literal-secret-value', 'server'] },
+        httpFragment: { url: 'https://example.test/mcp#literal-secret-value' },
       },
     } }] } });
 
@@ -224,9 +224,15 @@ describe('AppServerClient', () => {
   it('rejects sensitive stdio and HTTP values before staging a config write', () => {
     expect(normalizeUserMcpConfigServer('stdio-command', { command: 'Bearer literal-secret-value', args: [] })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('stdio-args', { command: 'npx', args: ['--credential=literal-secret-value'] })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('stdio-auth', { command: 'npx', args: ['--auth=literal-secret-value'] })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('stdio-token', { command: 'npx', args: ['--token=literal-secret-value'] })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('stdio-password', { command: 'npx', args: ['--password=literal-secret-value'] })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('stdio-api-key', { command: 'npx', args: ['--api-key=literal-secret-value'] })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('url-userinfo', { url: 'https://user:literal-secret-value@example.test/mcp' })).toBeUndefined();
     expect(normalizeUserMcpConfigServer('url-query', { url: 'https://example.test/mcp?access_token=literal-secret-value' })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('url-fragment', { url: 'https://example.test/mcp#literal-secret-value' })).toBeUndefined();
     expect(validateUserMcpConfigServers([{ name: 'write-secret', transport: 'http', url: 'https://example.test/mcp?token=literal-secret-value' }])).toBeUndefined();
+    expect(validateUserMcpConfigServers([{ name: 'write-auth', transport: 'stdio', command: 'npx', args: ['--auth=literal-secret-value'] }])).toBeUndefined();
 
     expect(normalizeUserMcpConfigServer('safe-stdio', { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '/repo'] })).toEqual({
       name: 'safe-stdio', transport: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '/repo'],
@@ -247,7 +253,7 @@ describe('AppServerClient', () => {
     await expect(client.writeUserMcpConfig('other', [])).rejects.toMatchObject({ code: 'invalid' });
     await expect(client.writeUserMcpConfig('v1', [{ name: 'unsafe', transport: 'http', url: 'file:///tmp/a' } as never])).rejects.toMatchObject({ code: 'invalid' });
     await expect(client.writeUserMcpConfig('v1', [{
-      name: 'unsafe-secret', transport: 'stdio', command: 'npx', args: ['--token=literal-secret-value'],
+      name: 'unsafe-secret', transport: 'stdio', command: 'npx', args: ['--auth=literal-secret-value'],
     }])).rejects.toMatchObject({ code: 'invalid' });
     expect(child.stdin.write).toHaveBeenCalledTimes(3); // initialize, initialized, config/read only
     expect(child.stdin.write.mock.calls.map(([line]) => line).join('')).not.toContain('literal-secret-value');
