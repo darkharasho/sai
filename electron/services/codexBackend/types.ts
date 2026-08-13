@@ -65,10 +65,46 @@ const MCP_CONFIG_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/;
 const MCP_CONFIG_ENV = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
 const MCP_CONFIG_ENV_REFERENCE = /^\$\{?[A-Za-z_][A-Za-z0-9_]{0,127}\}?$/;
 const MCP_CONFIG_SENSITIVE = /(?:token|secret|password|credential|authorization|bearer|api[-_]?key)/i;
-const MCP_CONFIG_SENSITIVE_ARG = /^(?:-e(?:=|$|[A-Za-z_])|-H(?:=|$|\S)|-(?:a|p|u)(?:=|:|$|\S)|--(?:token|secret|password|credential|authorization|bearer|api[-_]?key)(?:[=:]|$))/i;
+const MCP_CONFIG_SHORT_VALUE_CARRIER = /^(?:-e(?:=|$|[A-Za-z_])|-H(?:=|$|\S)|-(?:a|p|u)(?:=|:|$|\S))/i;
+const MCP_CONFIG_LONG_OPTION = /^--([A-Za-z0-9][A-Za-z0-9_-]*)(?:[=:]|$)/;
+const MCP_CONFIG_SENSITIVE_NAME_PARTS = [
+  'token', 'secret', 'key', 'auth', 'credential', 'password', 'cookie',
+  'session', 'signature', 'sig', 'code', 'user', 'bearer', 'oauth', 'env', 'header',
+] as const;
+const MCP_CONFIG_SENSITIVE_LITERAL = /(?:^|[\s:='\"])(?:bearer|basic)\s+\S+|(?:^|[-_?&\s])(?:access[_-]?token|token|secret|password|credential|api[_-]?key|authorization)(?:\s*[:=]\s*|\s+)\S+|(?:^|\s)--?(?:auth|authorization|access[_-]?token|token|secret|password|credential|api[_-]?key)\s*=\s*\S+|(?:^|[\s:='\"])(?:sk-[a-z0-9][\w-]*)/i;
 
 function isSafeMcpConfigText(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= MCP_CONFIG_MAX_TEXT;
+}
+
+function isSensitiveMcpConfigCarrierName(value: string): boolean {
+  const normalized = value.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return MCP_CONFIG_SENSITIVE_NAME_PARTS.some((part) => normalized.includes(part));
+}
+
+function isSafeMcpConnectionText(value: unknown): value is string {
+  return isSafeMcpConfigText(value) && !MCP_CONFIG_SENSITIVE_LITERAL.test(value);
+}
+
+function isSafeMcpConnectionArgs(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length <= MCP_CONFIG_MAX_ARGS && value.every((arg) => {
+    if (!isSafeMcpConnectionText(arg)) return false;
+    const longOption = MCP_CONFIG_LONG_OPTION.exec(arg);
+    return !MCP_CONFIG_SHORT_VALUE_CARRIER.test(arg)
+      && !(longOption && isSensitiveMcpConfigCarrierName(longOption[1]!));
+  });
+}
+
+function isSafeMcpHttpUrl(value: unknown): value is string {
+  if (!isSafeMcpConfigText(value) || value.includes('#')) return false;
+  try {
+    const parsed = new URL(value);
+    if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password) return false;
+    return [...parsed.searchParams].every(([key, queryValue]) =>
+      !isSensitiveMcpConfigCarrierName(key) && !MCP_CONFIG_SENSITIVE_LITERAL.test(queryValue));
+  } catch {
+    return false;
+  }
 }
 
 function isMcpConfigReferences(value: unknown, keys: (key: string) => boolean): value is Record<string, string> {
@@ -77,36 +113,38 @@ function isMcpConfigReferences(value: unknown, keys: (key: string) => boolean): 
   return entries.length <= 32 && entries.every(([key, text]) => keys(key) && isSafeMcpConfigText(text) && MCP_CONFIG_ENV_REFERENCE.test(text));
 }
 
-/** Repeated Electron-boundary validation for the small editable connection subset. */
-export function isCodexMcpConfigWriteRequest(value: unknown): value is CodexMcpConfigWriteRequest {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const input = value as Record<string, unknown>;
-  if (Object.keys(input).length !== 3 || input.confirmationToken !== CODEX_MCP_CONFIG_CONFIRMATION_TOKEN
-    || !isSafeMcpConfigText(input.expectedVersion) || !Array.isArray(input.servers) || input.servers.length > MCP_CONFIG_MAX_SERVERS) return false;
+/** Shared connection policy for App Server and the renderer-facing IPC boundary. */
+export function isCodexMcpConfigServers(value: unknown): value is CodexMcpConfigServer[] {
+  if (!Array.isArray(value) || value.length > MCP_CONFIG_MAX_SERVERS) return false;
   const names = new Set<string>();
-  return input.servers.every((server) => {
+  return value.every((server) => {
     if (!server || typeof server !== 'object' || Array.isArray(server)) return false;
     const item = server as Record<string, unknown>;
     if (!isSafeMcpConfigText(item.name) || !MCP_CONFIG_NAME.test(item.name) || names.has(item.name)) return false;
     names.add(item.name);
     if (item.transport === 'stdio') {
-      if (!['name', 'transport', 'command', 'args'].every((key) => key in item)
-        || !Object.keys(item).every((key) => ['name', 'transport', 'command', 'args', 'env'].includes(key))
-        || !isSafeMcpConfigText(item.command) || !Array.isArray(item.args) || item.args.length > MCP_CONFIG_MAX_ARGS
-        || !item.args.every((arg) => isSafeMcpConfigText(arg) && !MCP_CONFIG_SENSITIVE_ARG.test(arg))) return false;
-      return item.env === undefined || isMcpConfigReferences(item.env, (key) => MCP_CONFIG_ENV.test(key));
+      return ['name', 'transport', 'command', 'args'].every((key) => key in item)
+        && Object.keys(item).every((key) => ['name', 'transport', 'command', 'args', 'env'].includes(key))
+        && isSafeMcpConnectionText(item.command)
+        && isSafeMcpConnectionArgs(item.args)
+        && (item.env === undefined || isMcpConfigReferences(item.env, (key) => MCP_CONFIG_ENV.test(key)));
     }
     if (item.transport === 'http') {
-      if (!Object.keys(item).every((key) => ['name', 'transport', 'url', 'httpHeaders'].includes(key))
-        || !isSafeMcpConfigText(item.url)) return false;
-      try {
-        const parsed = new URL(item.url);
-        if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password || parsed.hash) return false;
-      } catch { return false; }
-      return item.httpHeaders === undefined || isMcpConfigReferences(item.httpHeaders, (key) => !MCP_CONFIG_SENSITIVE.test(key));
+      return Object.keys(item).every((key) => ['name', 'transport', 'url', 'httpHeaders'].includes(key))
+        && isSafeMcpHttpUrl(item.url)
+        && (item.httpHeaders === undefined || isMcpConfigReferences(item.httpHeaders, (key) => !MCP_CONFIG_SENSITIVE.test(key)));
     }
     return false;
   });
+}
+
+/** Repeated Electron-boundary validation for the small editable connection subset. */
+export function isCodexMcpConfigWriteRequest(value: unknown): value is CodexMcpConfigWriteRequest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const input = value as Record<string, unknown>;
+  if (Object.keys(input).length !== 3 || input.confirmationToken !== CODEX_MCP_CONFIG_CONFIRMATION_TOKEN
+    || !isSafeMcpConfigText(input.expectedVersion)) return false;
+  return isCodexMcpConfigServers(input.servers);
 }
 export type CodexPermission = 'auto' | 'read-only' | 'full-access';
 export type CodexReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';

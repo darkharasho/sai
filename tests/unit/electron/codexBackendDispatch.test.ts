@@ -624,6 +624,34 @@ describe('Codex IPC dispatch', () => {
     await expect(mocks.ipcMain.invoke('codex:mcpConfig:get')).resolves.toEqual({ ok: false, code: 'host-error' });
   });
 
+  it.each([
+    {
+      label: 'credential-bearing URL query aliases',
+      server: { name: 'remote', transport: 'http', url: 'https://mcp.example.test/rpc?access_token=literal-secret' },
+    },
+    {
+      label: 'credential-shaped long command options',
+      server: { name: 'local', transport: 'stdio', command: 'node', args: ['serve', '--client-key', 'literal-secret'] },
+    },
+    {
+      label: 'split header carriers',
+      server: { name: 'headers', transport: 'stdio', command: 'node', args: ['serve', '-H', 'Authorization: Bearer literal-secret'] },
+    },
+  ])('does not expose future backend MCP config snapshots with $label', async ({ server }) => {
+    const backend = backendStub();
+    backend.getMcpConfig = vi.fn().mockResolvedValue({ ok: true, snapshot: {
+      version: 'v1', impact: 'global-user-config', servers: [server],
+    } });
+    __setCodexBackendForTests(backend);
+    setCodexBackendMode('app-server');
+    registerCodexHandlers();
+
+    const result = await mocks.ipcMain.invoke('codex:mcpConfig:get');
+
+    expect(result).toEqual({ ok: false, code: 'host-error' });
+    expect(JSON.stringify(result)).not.toContain('literal-secret');
+  });
+
   it('does not expose malformed MCP status data from a backend to the renderer', async () => {
     const backend = backendStub();
     backend.getMcpRuntimeStatus = vi.fn().mockResolvedValue({

@@ -2,7 +2,7 @@ import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import path from 'node:path';
 import { enrichedEnv } from '../shellEnv';
 import { resolveBundledCodex } from './bundledModels';
-import type { CodexMcpConfigServer, CodexMcpConfigSnapshot, CodexMcpRuntimeServerStatus, CodexMcpRuntimeStatus } from './types';
+import { isCodexMcpConfigServers, type CodexMcpConfigServer, type CodexMcpConfigSnapshot, type CodexMcpRuntimeServerStatus, type CodexMcpRuntimeStatus } from './types';
 
 export interface AppServerNotification {
   jsonrpc: '2.0';
@@ -267,7 +267,7 @@ export function validateUserMcpConfigServers(value: unknown): CodexMcpConfigServ
     names.add(normalized.name);
     servers.push(normalized);
   }
-  return servers;
+  return isCodexMcpConfigServers(servers) ? servers : undefined;
 }
 
 function userConfigSnapshot(result: unknown): CodexMcpConfigSnapshot | undefined {
@@ -285,7 +285,10 @@ function userConfigSnapshot(result: unknown): CodexMcpConfigSnapshot | undefined
     if (!server) return undefined;
     servers.push(server);
   }
-  return { version: user.version, impact: 'global-user-config', servers: servers.sort((a, b) => a.name.localeCompare(b.name)) };
+  const sorted = servers.sort((a, b) => a.name.localeCompare(b.name));
+  return isCodexMcpConfigServers(sorted)
+    ? { version: user.version, impact: 'global-user-config', servers: sorted }
+    : undefined;
 }
 
 function configError(error: unknown): AppServerMcpConfigError {
