@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
-import { AppServerClient, AppServerProtocolError } from '../../../electron/services/codexBackend/appServerClient';
+import { AppServerClient, AppServerProtocolError, normalizeUserMcpConfigServer, validateUserMcpConfigServers } from '../../../electron/services/codexBackend/appServerClient';
 
 function fakeChild() {
   const child = new EventEmitter() as EventEmitter & {
@@ -151,6 +151,93 @@ describe('AppServerClient', () => {
       { id: 99, error: { code: -32601, message: 'Unsupported App Server request in preview' } },
     ]);
     expect(outgoing.every((message) => !Object.hasOwn(message, 'jsonrpc'))).toBe(true);
+  });
+
+  it('uses typed config host calls only after the standard handshake', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+
+    const read = client.readUserMcpConfig();
+    expect(JSON.parse(child.stdin.write.mock.calls.at(-1)[0])).toEqual({
+      id: 1, method: 'config/read', params: { includeLayers: true },
+    });
+    reply(child, { id: 1, result: { layers: [{ layer: 'user', version: 'v1', config: { mcp_servers: {} } }] } });
+    await expect(read).resolves.toEqual({ version: 'v1', impact: 'global-user-config', servers: [] });
+
+    const write = client.writeUserMcpConfig('v1', [{ name: 'local', transport: 'stdio', command: 'npx', args: ['-y', 'server'] }]);
+    expect(JSON.parse(child.stdin.write.mock.calls.at(-1)[0])).toEqual({
+      id: 2,
+      method: 'config/batchWrite',
+      params: {
+        edits: [{ keyPath: 'mcp_servers', value: { local: { command: 'npx', args: ['-y', 'server'] } }, mergeStrategy: 'replace' }],
+        expectedVersion: 'v1',
+        reloadUserConfig: true,
+      },
+    });
+    reply(child, { id: 2, result: {} });
+    await expect(write).resolves.toBeUndefined();
+    const reload = client.reloadMcpServers();
+    expect(JSON.parse(child.stdin.write.mock.calls.at(-1)[0])).toEqual({ id: 3, method: 'config/mcpServer/reload', params: {} });
+    reply(child, { id: 3, result: {} });
+    await expect(reload).resolves.toBeUndefined();
+  });
+
+  it('filters config reads to a versioned User layer and rejects unsafe connection records', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+    const read = client.readUserMcpConfig();
+    reply(child, { id: 1, result: {
+      layers: [
+        { layer: 'workspace', version: 'workspace-version', config: { mcp_servers: { ignored: { command: 'bad' } } } },
+        { layer: 'user', version: 'user-version', config: { mcp_servers: { local: { command: 'npx', args: ['-y', 'server'], env: { PORT: '$PORT' } } } } },
+      ],
+    } });
+    await expect(read).resolves.toEqual({ version: 'user-version', impact: 'global-user-config', servers: [{
+      name: 'local', transport: 'stdio', command: 'npx', args: ['-y', 'server'], env: { PORT: '$PORT' },
+    }] });
+
+    expect(normalizeUserMcpConfigServer('bad', { command: 'npx', env: { API_TOKEN: 'literal-token' } })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('bad', { url: 'https://example.test', headers: { Authorization: 'Bearer abc' } })).toBeUndefined();
+    expect(normalizeUserMcpConfigServer('bad', { command: 'npx', extra: true })).toBeUndefined();
+    expect(validateUserMcpConfigServers([{ name: 'same', transport: 'stdio', command: 'npx', args: [] }, { name: 'same', transport: 'http', url: 'https://example.test' }])).toBeUndefined();
+  });
+
+  it('does not submit stale or invalid MCP config snapshots', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+    const read = client.readUserMcpConfig();
+    reply(child, { id: 1, result: { layers: [{ layer: 'user', version: 'v1', config: { mcp_servers: {} } }] } });
+    await read;
+
+    await expect(client.writeUserMcpConfig('other', [])).rejects.toMatchObject({ code: 'invalid' });
+    await expect(client.writeUserMcpConfig('v1', [{ name: 'unsafe', transport: 'http', url: 'file:///tmp/a' } as never])).rejects.toMatchObject({ code: 'invalid' });
+    expect(child.stdin.write).toHaveBeenCalledTimes(3); // initialize, initialized, config/read only
+  });
+
+  it('invalidates the User config snapshot when the App Server connection fails', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+    const read = client.readUserMcpConfig();
+    reply(child, { id: 1, result: { layers: [{ layer: 'user', version: 'v1', config: { mcp_servers: {} } }] } });
+    await read;
+
+    child.emit('exit', 1, null);
+    await expect(client.writeUserMcpConfig('v1', [])).rejects.toMatchObject({ code: 'unavailable' });
+    expect(child.stdin.write).toHaveBeenCalledTimes(3);
+  });
+
+  it('maps host configuration errors to a coarse error without echoing host text', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+    const read = client.readUserMcpConfig();
+    reply(child, { id: 1, error: { code: -32001, message: 'config contains secret sk-live-should-not-leak' } });
+
+    await expect(read).rejects.toMatchObject({ code: 'host-error', message: 'Codex MCP configuration is unavailable' });
   });
 
   it('rejects business requests until initialization has completed', () => {

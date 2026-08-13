@@ -1,5 +1,6 @@
 import {
   AppServerClient,
+  AppServerMcpConfigError,
   AppServerUnavailableError,
   type AppServerClientTransport,
   type AppServerNotification,
@@ -9,7 +10,7 @@ import {
 import { mapAppServerEvent } from './appServerEventMap';
 import { SAI_SWARM_CAPABILITY_PROBE, SAI_SWARM_DYNAMIC_TOOLS } from './appServerDynamicTools';
 import { dispatchSaiSwarmDynamicTool, dynamicToolResponse, validateSaiSwarmDynamicToolCall } from './dynamicToolBridge';
-import { isCodexUserInputResponse, normalizeCodexModelOption, codexScope, codexScopeKey, type CodexAppServerPreviewStatus, type CodexApprovalDecision, type CodexApprovalMetadata, type CodexApprovalResult, type CodexBackend, type CodexMcpElicitationDecision, type CodexMcpElicitationForm, type CodexMcpElicitationUrl, type CodexMcpRuntimeStatus, type CodexModelResult, type CodexSendArgs, type CodexSessionKind, type CodexStartArgs, type CodexUserInputAnswers, type CodexUserInputQuestion, type CodexUserInputResponse } from './types';
+import { isCodexUserInputResponse, normalizeCodexModelOption, codexScope, codexScopeKey, type CodexAppServerPreviewStatus, type CodexApprovalDecision, type CodexApprovalMetadata, type CodexApprovalResult, type CodexBackend, type CodexMcpConfigResult, type CodexMcpConfigServer, type CodexMcpElicitationDecision, type CodexMcpElicitationForm, type CodexMcpElicitationUrl, type CodexMcpRuntimeStatus, type CodexModelResult, type CodexSendArgs, type CodexSessionKind, type CodexStartArgs, type CodexUserInputAnswers, type CodexUserInputQuestion, type CodexUserInputResponse } from './types';
 import type { SaiEnvelope } from './sdkEventMap';
 import { getOrCreate as getOrCreateWorkspace } from '../workspace';
 import type { SaiToolDispatch } from '../saiToolBridge';
@@ -518,6 +519,29 @@ export class AppServerBackend implements CodexBackend {
     }
   }
 
+  /** Owns only the standard App Server's global User configuration layer. */
+  async getMcpConfig(): Promise<CodexMcpConfigResult> {
+    try {
+      const client = await this.ensureClient({ kind: 'chat' } as ScopeRuntime);
+      return { ok: true, snapshot: await client.readUserMcpConfig() };
+    } catch (error) {
+      return { ok: false, code: this.mcpConfigErrorCode(error) };
+    }
+  }
+
+  async replaceMcpConfig(expectedVersion: string, servers: CodexMcpConfigServer[]): Promise<CodexMcpConfigResult> {
+    try {
+      const client = await this.ensureClient({ kind: 'chat' } as ScopeRuntime);
+      // One atomic table replacement, then reload and a fresh User snapshot.
+      // Version conflicts and host errors deliberately have no retry path.
+      await client.writeUserMcpConfig(expectedVersion, servers);
+      await client.reloadMcpServers();
+      return { ok: true, snapshot: await client.readUserMcpConfig() };
+    } catch (error) {
+      return { ok: false, code: this.mcpConfigErrorCode(error) };
+    }
+  }
+
   /**
    * Swarm is only safe to advertise after an isolated experimental client has
    * accepted SAI's exact Dynamic Tool catalogue. A handshake/model list alone
@@ -656,6 +680,12 @@ export class AppServerBackend implements CodexBackend {
     this.clients.clear();
     this.clientStarts.clear();
     this.mcpStatusScopeOwners.clear();
+  }
+
+  private mcpConfigErrorCode(error: unknown): Extract<CodexMcpConfigResult, { ok: false }>['code'] {
+    if (error instanceof AppServerMcpConfigError) return error.code;
+    if (error instanceof AppServerUnavailableError) return 'unavailable';
+    return 'host-error';
   }
 
   private runtimeFor(projectPath: string, scope: string): ScopeRuntime {

@@ -35,6 +35,9 @@ function harness() {
     onFailure: vi.fn((listener) => { failures.add(listener); return () => failures.delete(listener); }),
     getMcpRuntimeStatus: vi.fn(() => ({ available: true, servers: [] })),
     refreshMcpRuntimeStatus: vi.fn(async () => ({ available: true, servers: [] })),
+    readUserMcpConfig: vi.fn(async () => ({ version: 'v1', impact: 'global-user-config' as const, servers: [] })),
+    writeUserMcpConfig: vi.fn(async () => undefined),
+    reloadMcpServers: vi.fn(async () => undefined),
     destroy: vi.fn(),
   };
   const emitted: Array<Record<string, unknown>> = [];
@@ -83,6 +86,35 @@ async function settle(): Promise<void> {
 }
 
 describe('AppServerBackend', () => {
+  it('reads only the standard client and writes once before reload and fresh read', async () => {
+    const h = harness();
+    h.client.readUserMcpConfig = vi.fn()
+      .mockResolvedValueOnce({ version: 'v1', impact: 'global-user-config', servers: [] })
+      .mockResolvedValueOnce({ version: 'v2', impact: 'global-user-config', servers: [{ name: 'local', transport: 'stdio', command: 'npx', args: [] }] });
+
+    await expect(h.backend.getMcpConfig()).resolves.toEqual({
+      ok: true, snapshot: { version: 'v1', impact: 'global-user-config', servers: [] },
+    });
+    await expect(h.backend.replaceMcpConfig('v1', [{ name: 'local', transport: 'stdio', command: 'npx', args: [] }])).resolves.toEqual({
+      ok: true, snapshot: { version: 'v2', impact: 'global-user-config', servers: [{ name: 'local', transport: 'stdio', command: 'npx', args: [] }] },
+    });
+    expect(h.client.writeUserMcpConfig).toHaveBeenCalledTimes(1);
+    expect(h.client.writeUserMcpConfig).toHaveBeenCalledWith('v1', [{ name: 'local', transport: 'stdio', command: 'npx', args: [] }]);
+    expect(h.client.reloadMcpServers).toHaveBeenCalledTimes(1);
+    expect(h.client.readUserMcpConfig).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry an MCP config version conflict', async () => {
+    const h = harness();
+    const { AppServerMcpConfigError } = await import('../../../electron/services/codexBackend/appServerClient');
+    h.client.writeUserMcpConfig = vi.fn(async () => { throw new AppServerMcpConfigError('conflict'); });
+
+    await expect(h.backend.replaceMcpConfig('v1', [])).resolves.toEqual({ ok: false, code: 'conflict' });
+    expect(h.client.writeUserMcpConfig).toHaveBeenCalledOnce();
+    expect(h.client.reloadMcpServers).not.toHaveBeenCalled();
+    expect(h.client.readUserMcpConfig).not.toHaveBeenCalled();
+  });
+
   it('refreshes MCP runtime state from the client that owns the requested scope', async () => {
     const makeClient = (name: string): AppServerClientTransport => ({
       failureReason: undefined,

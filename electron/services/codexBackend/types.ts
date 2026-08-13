@@ -32,6 +32,22 @@ export interface CodexMcpRuntimeStatus {
   reason?: string;
   servers: CodexMcpRuntimeServerStatus[];
 }
+
+/** A bounded, renderer-safe MCP server definition from the User config layer. */
+export type CodexMcpConfigServer =
+  | { name: string; transport: 'stdio'; command: string; args: string[]; env?: Record<string, string> }
+  | { name: string; transport: 'http'; url: string; headers?: Record<string, string> };
+
+/** This snapshot is intentionally limited to the global User config layer. */
+export interface CodexMcpConfigSnapshot {
+  version: string;
+  impact: 'global-user-config';
+  servers: CodexMcpConfigServer[];
+}
+
+export type CodexMcpConfigResult =
+  | { ok: true; snapshot: CodexMcpConfigSnapshot }
+  | { ok: false; code: 'unavailable' | 'invalid' | 'conflict' | 'host-error' };
 export type CodexPermission = 'auto' | 'read-only' | 'full-access';
 export type CodexReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 
@@ -247,6 +263,9 @@ export interface CodexBackend {
   getModels(forceRefresh?: boolean): Promise<CodexModelResult>;
   /** Read-only App Server MCP runtime state; SDK support is added by its bridge slice. */
   getMcpRuntimeStatus?(projectPath?: string, scope?: string): Promise<CodexMcpRuntimeStatus>;
+  /** App Server-only global User MCP configuration bridge. */
+  getMcpConfig?(): Promise<CodexMcpConfigResult>;
+  replaceMcpConfig?(expectedVersion: string, servers: CodexMcpConfigServer[]): Promise<CodexMcpConfigResult>;
   /** App Server exposes this only after its experimental Swarm bridge probes cleanly. */
   getSwarmStatus?(): Promise<CodexAppServerPreviewStatus>;
   approve(projectPath: string, scope: string | undefined, requestHandle: string, decision: CodexApprovalDecision): CodexApprovalResult;

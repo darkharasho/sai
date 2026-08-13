@@ -2,7 +2,7 @@ import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import path from 'node:path';
 import { enrichedEnv } from '../shellEnv';
 import { resolveBundledCodex } from './bundledModels';
-import type { CodexMcpRuntimeServerStatus, CodexMcpRuntimeStatus } from './types';
+import type { CodexMcpConfigServer, CodexMcpConfigSnapshot, CodexMcpRuntimeServerStatus, CodexMcpRuntimeStatus } from './types';
 
 export interface AppServerNotification {
   jsonrpc: '2.0';
@@ -42,6 +42,14 @@ export class AppServerUnavailableError extends AppServerProtocolError {
   }
 }
 
+/** Coarse, secret-safe configuration error for callers outside the protocol. */
+export class AppServerMcpConfigError extends Error {
+  constructor(readonly code: 'unavailable' | 'invalid' | 'conflict' | 'host-error') {
+    super(code === 'conflict' ? 'Codex MCP configuration changed elsewhere' : 'Codex MCP configuration is unavailable');
+    this.name = 'AppServerMcpConfigError';
+  }
+}
+
 export interface AppServerClientTransport {
   readonly failureReason: string | undefined;
   start(): Promise<void>;
@@ -55,6 +63,9 @@ export interface AppServerClientTransport {
   getMcpRuntimeStatus(): CodexMcpRuntimeStatus;
   /** Refreshes the snapshot through App Server after its handshake completes. */
   refreshMcpRuntimeStatus(): Promise<CodexMcpRuntimeStatus>;
+  readUserMcpConfig(): Promise<CodexMcpConfigSnapshot>;
+  writeUserMcpConfig(expectedVersion: string, servers: CodexMcpConfigServer[]): Promise<void>;
+  reloadMcpServers(): Promise<void>;
   destroy(): void;
 }
 
@@ -94,6 +105,15 @@ const MCP_STATUS_MAX_CURSOR_LENGTH = 512;
 const MCP_STATUS_MAX_TEXT_LENGTH = 512;
 const MCP_STATUS_MAX_TOOLS = 10_000;
 const MCP_RUNTIME_UNAVAILABLE_REASON = 'Codex App Server MCP status is unavailable';
+const MCP_CONFIG_MAX_SERVERS = 64;
+const MCP_CONFIG_MAX_ARGS = 64;
+const MCP_CONFIG_MAX_FIELDS = 32;
+const MCP_CONFIG_MAX_TEXT = 2_048;
+const MCP_CONFIG_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/;
+const MCP_CONFIG_ENV = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
+const MCP_CONFIG_ENV_REFERENCE = /^\$\{?[A-Za-z_][A-Za-z0-9_]{0,127}\}?$/;
+const SENSITIVE_KEY = /(token|secret|password|authorization|cookie|credential|api[_-]?key)/i;
+const SENSITIVE_VALUE = /(?:bearer\s+|basic\s+|api[_-]?key|token|secret|password|sk-[a-z0-9])/i;
 
 /**
  * App Server error text may include command output, configuration, or secrets.
@@ -114,6 +134,112 @@ function messageText(error: JsonRpcError): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function safeConfigText(value: unknown, max = MCP_CONFIG_MAX_TEXT): string | undefined {
+  return typeof value === 'string' && value.length > 0 && value.length <= max ? value : undefined;
+}
+
+function safeConfigMap(value: unknown, keyPattern: RegExp, rejectSensitiveKeys: boolean): Record<string, string> | undefined {
+  if (!isRecord(value) || Object.keys(value).length > MCP_CONFIG_MAX_FIELDS) return undefined;
+  const result: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    const text = safeConfigText(raw);
+    if (!keyPattern.test(key) || !text || (rejectSensitiveKeys && SENSITIVE_KEY.test(key)) || SENSITIVE_VALUE.test(text)) return undefined;
+    result[key] = text;
+  }
+  return result;
+}
+
+function safeConfigEnv(value: unknown): Record<string, string> | undefined {
+  if (!isRecord(value) || Object.keys(value).length > MCP_CONFIG_MAX_FIELDS) return undefined;
+  const result: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    const text = safeConfigText(raw);
+    // Values must be references, never literal credentials. A sensitive
+    // variable name is allowed because it is not the secret itself.
+    if (!MCP_CONFIG_ENV.test(key) || !text || !MCP_CONFIG_ENV_REFERENCE.test(text)) return undefined;
+    result[key] = text;
+  }
+  return result;
+}
+
+/** Parse only the deliberately narrow MCP connection shapes SAI can edit. */
+export function normalizeUserMcpConfigServer(name: unknown, value: unknown): CodexMcpConfigServer | undefined {
+  if (typeof name !== 'string' || !MCP_CONFIG_NAME.test(name) || !isRecord(value)) return undefined;
+  const keys = Object.keys(value);
+  if (keys.length > MCP_CONFIG_MAX_FIELDS) return undefined;
+  if (typeof value.command === 'string') {
+    if (keys.some((key) => key !== 'command' && key !== 'args' && key !== 'env')) return undefined;
+    const command = safeConfigText(value.command);
+    const args = value.args === undefined ? [] : Array.isArray(value.args) && value.args.length <= MCP_CONFIG_MAX_ARGS
+      ? value.args.map((arg) => safeConfigText(arg)).filter((arg): arg is string => Boolean(arg)) : undefined;
+    if (!command || !args || args.length !== (Array.isArray(value.args) ? value.args.length : 0)) return undefined;
+    const env = value.env === undefined ? undefined : safeConfigEnv(value.env);
+    if (value.env !== undefined && !env) return undefined;
+    return { name, transport: 'stdio', command, args, ...(env && Object.keys(env).length ? { env } : {}) };
+  }
+  if (typeof value.url === 'string') {
+    if (keys.some((key) => key !== 'url' && key !== 'headers')) return undefined;
+    const url = safeConfigText(value.url);
+    if (!url) return undefined;
+    try { if (!['http:', 'https:'].includes(new URL(url).protocol)) return undefined; } catch { return undefined; }
+    const headers = value.headers === undefined ? undefined : safeConfigMap(value.headers, /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/, true);
+    if (value.headers !== undefined && !headers) return undefined;
+    return { name, transport: 'http', url, ...(headers && Object.keys(headers).length ? { headers } : {}) };
+  }
+  return undefined;
+}
+
+export function validateUserMcpConfigServers(value: unknown): CodexMcpConfigServer[] | undefined {
+  if (!Array.isArray(value) || value.length > MCP_CONFIG_MAX_SERVERS) return undefined;
+  const names = new Set<string>();
+  const servers: CodexMcpConfigServer[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry) || typeof entry.name !== 'string' || names.has(entry.name)) return undefined;
+    const item = entry;
+    const source = item.transport === 'stdio'
+      ? { command: item.command, args: item.args, ...(item.env === undefined ? {} : { env: item.env }) }
+      : item.transport === 'http'
+        ? { url: item.url, ...(item.headers === undefined ? {} : { headers: item.headers }) }
+        : undefined;
+    const normalized = source ? normalizeUserMcpConfigServer(item.name, source) : undefined;
+    if (!normalized) return undefined;
+    names.add(normalized.name);
+    servers.push(normalized);
+  }
+  return servers;
+}
+
+function userConfigSnapshot(result: unknown): CodexMcpConfigSnapshot | undefined {
+  if (!isRecord(result)) return undefined;
+  const body = result;
+  const layers = Array.isArray(body?.layers) ? body.layers : [];
+  const user = layers.find((layer) => isRecord(layer) && layer.layer === 'user');
+  if (!isRecord(user) || typeof user.version !== 'string' || user.version.length === 0 || !isRecord(user.config)) return undefined;
+  const table = user.config.mcp_servers;
+  if (table === undefined) return { version: user.version, impact: 'global-user-config', servers: [] };
+  if (!isRecord(table) || Object.keys(table).length > MCP_CONFIG_MAX_SERVERS) return undefined;
+  const servers: CodexMcpConfigServer[] = [];
+  for (const [name, entry] of Object.entries(table)) {
+    const server = normalizeUserMcpConfigServer(name, entry);
+    if (!server) return undefined;
+    servers.push(server);
+  }
+  return { version: user.version, impact: 'global-user-config', servers: servers.sort((a, b) => a.name.localeCompare(b.name)) };
+}
+
+function configError(error: unknown): AppServerMcpConfigError {
+  const text = error instanceof Error ? error.message : '';
+  if (/version|conflict|409/i.test(text)) return new AppServerMcpConfigError('conflict');
+  return new AppServerMcpConfigError('host-error');
+}
+
+function configTable(servers: CodexMcpConfigServer[]): Record<string, unknown> {
+  return Object.fromEntries(servers.map((server) => [server.name, server.transport === 'stdio'
+    ? { command: server.command, args: server.args, ...(server.env ? { env: server.env } : {}) }
+    : { url: server.url, ...(server.headers ? { headers: server.headers } : {}) },
+  ]));
 }
 
 function isJsonRpcError(value: unknown): value is JsonRpcError {
@@ -205,6 +331,7 @@ export class AppServerClient implements AppServerClientTransport {
   private readonly pendingServerRequests = new Map<string | number, PendingServerRequest>();
   private readonly failureListeners = new Set<(error: AppServerUnavailableError) => void>();
   private readonly mcpRuntimeStatuses = new Map<string, CodexMcpRuntimeServerStatus>();
+  private userMcpConfigSnapshot: CodexMcpConfigSnapshot | undefined;
   private child: ChildProcess | undefined;
   private startPromise: Promise<void> | undefined;
   private nextId = 0;
@@ -348,6 +475,41 @@ export class AppServerClient implements AppServerClientTransport {
     this.mcpRuntimeStatuses.clear();
     for (const [name, status] of statuses) this.mcpRuntimeStatuses.set(name, status);
     return this.getMcpRuntimeStatus();
+  }
+
+  async readUserMcpConfig(): Promise<CodexMcpConfigSnapshot> {
+    try {
+      const snapshot = userConfigSnapshot(await this.request<unknown>('config/read', { includeLayers: true }));
+      if (!snapshot) throw new AppServerMcpConfigError('unavailable');
+      this.userMcpConfigSnapshot = snapshot;
+      return snapshot;
+    } catch (error) {
+      if (error instanceof AppServerMcpConfigError) throw error;
+      throw configError(error);
+    }
+  }
+
+  async writeUserMcpConfig(expectedVersion: string, servers: CodexMcpConfigServer[]): Promise<void> {
+    if (this.failure || !this.initialized) throw new AppServerMcpConfigError('unavailable');
+    const normalized = validateUserMcpConfigServers(servers);
+    if (!normalized || !safeConfigText(expectedVersion, 512) || this.userMcpConfigSnapshot?.version !== expectedVersion) {
+      throw new AppServerMcpConfigError('invalid');
+    }
+    try {
+      await this.request('config/batchWrite', {
+        edits: [{ keyPath: 'mcp_servers', value: configTable(normalized), mergeStrategy: 'replace' }],
+        expectedVersion,
+        reloadUserConfig: true,
+      });
+      this.userMcpConfigSnapshot = undefined;
+    } catch (error) {
+      throw configError(error);
+    }
+  }
+
+  async reloadMcpServers(): Promise<void> {
+    try { await this.request('config/mcpServer/reload', {}); }
+    catch (error) { throw configError(error); }
   }
 
   destroy(): void {
@@ -546,6 +708,7 @@ export class AppServerClient implements AppServerClientTransport {
       : new AppServerUnavailableError(error.message);
     this.failure = unavailable;
     this.mcpRuntimeStatuses.clear();
+    this.userMcpConfigSnapshot = undefined;
     this.initialized = false;
     this.clearInitializationTimeout();
     for (const pending of this.pending.values()) pending.reject(unavailable);
