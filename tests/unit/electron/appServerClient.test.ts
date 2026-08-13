@@ -509,6 +509,23 @@ describe('AppServerClient', () => {
     await expect(client.writeUserMcpConfig('v1', [])).rejects.toMatchObject({ code: 'invalid' });
   });
 
+  it('does not authorize a write when a newer overlapping config read fails before an older read returns', async () => {
+    const child = fakeChild();
+    const { client } = createClient(child);
+    await start(client, child);
+
+    const olderRead = client.readUserMcpConfig();
+    const newerRead = client.readUserMcpConfig();
+    reply(child, { id: 2, error: { code: -32001, message: 'newer config read failed' } });
+    await expect(newerRead).rejects.toMatchObject({ code: 'host-error' });
+
+    reply(child, { id: 1, result: { layers: [{ layer: 'user', version: 'v1', config: { mcp_servers: {} } }] } });
+    await expect(olderRead).resolves.toEqual({ version: 'v1', impact: 'global-user-config', servers: [] });
+
+    await expect(client.writeUserMcpConfig('v1', [])).rejects.toMatchObject({ code: 'invalid' });
+    expect(child.stdin.write).toHaveBeenCalledTimes(4); // initialize, initialized, both reads
+  });
+
   it('invalidates the User config snapshot when the App Server connection fails', async () => {
     const child = fakeChild();
     const { client } = createClient(child);

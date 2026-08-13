@@ -392,6 +392,7 @@ export class AppServerClient implements AppServerClientTransport {
   private readonly failureListeners = new Set<(error: AppServerUnavailableError) => void>();
   private readonly mcpRuntimeStatuses = new Map<string, CodexMcpRuntimeServerStatus>();
   private userMcpConfigSnapshot: CodexMcpConfigSnapshot | undefined;
+  private userMcpConfigReadGeneration = 0;
   private child: ChildProcess | undefined;
   private startPromise: Promise<void> | undefined;
   private nextId = 0;
@@ -540,11 +541,12 @@ export class AppServerClient implements AppServerClientTransport {
   async readUserMcpConfig(): Promise<CodexMcpConfigSnapshot> {
     // Snapshots authorize exactly one write. Clear an old snapshot before the
     // host read begins, so a failed/late refresh cannot reuse stale config.
+    const generation = ++this.userMcpConfigReadGeneration;
     this.userMcpConfigSnapshot = undefined;
     try {
       const snapshot = userConfigSnapshot(await this.request<unknown>('config/read', { includeLayers: true }));
       if (!snapshot) throw new AppServerMcpConfigError('unavailable');
-      this.userMcpConfigSnapshot = snapshot;
+      if (generation === this.userMcpConfigReadGeneration) this.userMcpConfigSnapshot = snapshot;
       return snapshot;
     } catch (error) {
       if (error instanceof AppServerMcpConfigError) throw error;
@@ -774,6 +776,7 @@ export class AppServerClient implements AppServerClientTransport {
       : new AppServerUnavailableError(error.message);
     this.failure = unavailable;
     this.mcpRuntimeStatuses.clear();
+    this.userMcpConfigReadGeneration += 1;
     this.userMcpConfigSnapshot = undefined;
     this.initialized = false;
     this.clearInitializationTimeout();
