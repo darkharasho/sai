@@ -1055,7 +1055,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
           </div>
         )}
 
-        {claudeEffort !== undefined && onClaudeEffortChange && (
+        {aiProvider === 'claude' && claudeEffort !== undefined && onClaudeEffortChange && (
           <div className="settings-row">
             <div className="settings-row-info">
               <div className="settings-row-name">Claude effort</div>
