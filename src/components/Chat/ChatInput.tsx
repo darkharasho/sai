@@ -952,12 +952,12 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
           <div className="chat-placeholder" onClick={() => textareaRef.current?.focus()}>
             {!isStreaming && (
               <span className="chat-placeholder-icon" style={{
-                maskImage: `url('${aiProvider === 'codex' ? 'svg/codex.svg' : aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : aiProvider === 'kimi' ? 'svg/kimi.svg' : 'svg/claude.svg'}')`,
-                WebkitMaskImage: `url('${aiProvider === 'codex' ? 'svg/codex.svg' : aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : aiProvider === 'kimi' ? 'svg/kimi.svg' : 'svg/claude.svg'}')`,
+                maskImage: `url('${aiProvider === 'codex' ? 'svg/codex.svg' : aiProvider === 'gemini' ? 'svg/antigravity.svg' : aiProvider === 'kimi' ? 'svg/kimi.svg' : 'svg/claude.svg'}')`,
+                WebkitMaskImage: `url('${aiProvider === 'codex' ? 'svg/codex.svg' : aiProvider === 'gemini' ? 'svg/antigravity.svg' : aiProvider === 'kimi' ? 'svg/kimi.svg' : 'svg/claude.svg'}')`,
                 backgroundColor: 'var(--text-muted)',
               }} />
             )}
-            <span>{awaitingQuestion && aiProvider === 'claude' ? 'Type to answer, or use the buttons above…' : isStreaming ? 'Queue another message...' : `Message ${aiProvider === 'codex' ? 'Codex' : aiProvider === 'gemini' ? 'Gemini' : aiProvider === 'kimi' ? 'Kimi' : 'Claude'}...`}</span>
+            <span>{awaitingQuestion && aiProvider === 'claude' ? 'Type to answer, or use the buttons above…' : isStreaming ? 'Queue another message...' : `Message ${aiProvider === 'codex' ? 'Codex' : aiProvider === 'gemini' ? 'Antigravity' : aiProvider === 'kimi' ? 'Kimi' : 'Claude'}...`}</span>
           </div>
         )}
         <textarea

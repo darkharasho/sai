@@ -1,7 +1,7 @@
 import { spawn, ChildProcess } from 'node:child_process';
 
 export interface AcpClientOptions {
-  /** Executable to spawn, e.g. 'gemini' or 'kimi'. */
+  /** Executable to spawn, e.g. 'kimi'. */
   command: string;
   /** Arguments, e.g. ['--acp'] or ['acp']. */
   args: string[];

@@ -27,6 +27,8 @@ export interface SwarmRunnerDeps {
   claudeSend: ProviderSend;
   codexStart?: ProviderStart;
   codexSend?: ProviderSend;
+  antigravityStart?: ProviderStart;
+  antigravitySend?: ProviderSend;
 }
 
 /**
@@ -51,6 +53,13 @@ export function codexPermissionForPolicy(policy: ApprovalPolicy): 'auto' | 'full
   return policy === 'auto' ? 'full-access' : 'auto';
 }
 
+/** Antigravity's non-interactive permission modes. */
+export function antigravityApprovalForPolicy(policy: ApprovalPolicy): 'default' | 'auto_edit' | 'yolo' {
+  if (policy === 'auto') return 'yolo';
+  if (policy === 'auto-read') return 'auto_edit';
+  return 'default';
+}
+
 /**
  * Resolve the cwd a swarm task should run in. Prefers the materialized
  * worktree path when available, otherwise falls back to the project root —
@@ -62,8 +71,9 @@ export function cwdForTask(task: Pick<SwarmTask, 'worktreePath' | 'workspaceId' 
 
 /**
  * Kick off a swarm task by starting the provider's per-scope process and
- * sending the task prompt as the first message. Claude and Codex workers use
- * their scoped IPC bridges; other providers remain unsupported.
+ * sending the task prompt as the first message. Claude, Codex, and
+ * Antigravity workers use their scoped IPC bridges; other providers remain
+ * unsupported.
  *
  * Returns true if the task was actually dispatched, false if the provider
  * is unsupported (caller can decide whether to mark the task failed).
@@ -95,6 +105,23 @@ export async function runSwarmTask(task: SwarmTask, deps: SwarmRunnerDeps): Prom
       task.prompt,
       undefined,
       codexPermissionForPolicy(task.approvalPolicy),
+      undefined,
+      task.model,
+      task.sessionId,
+    );
+    return true;
+  }
+
+  if (task.provider === 'gemini') {
+    if (!deps.antigravityStart || !deps.antigravitySend) return false;
+    const projectPath = task.workspaceId;
+    const scopeCwd = cwdForTask(task);
+    await deps.antigravityStart(projectPath, task.sessionId, 'task', undefined, scopeCwd);
+    deps.antigravitySend(
+      projectPath,
+      task.prompt,
+      undefined,
+      antigravityApprovalForPolicy(task.approvalPolicy),
       undefined,
       task.model,
       task.sessionId,

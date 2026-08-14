@@ -90,7 +90,7 @@ function formatRelative(ts: number): string {
 const PROVIDER_OPTIONS: { id: AIProvider; label: string; svg: string; color: string }[] = [
   { id: 'claude', label: 'Claude', svg: 'svg/claude.svg', color: '#e27b4a' },
   { id: 'codex', label: 'Codex', svg: 'svg/codex.svg', color: '#fff' },
-  { id: 'gemini', label: 'Gemini CLI', svg: 'svg/Google-gemini-icon.svg', color: '#4285f4' },
+  { id: 'gemini', label: 'Antigravity CLI', svg: 'svg/antigravity.svg', color: '#4285f4' },
   { id: 'kimi', label: 'Kimi CLI', svg: 'svg/kimi.svg', color: '#fff' },
 ];
 
@@ -122,7 +122,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const claudeModelRef = useRef<HTMLDivElement>(null);
   const [claudeEffortOpen, setClaudeEffortOpen] = useState(false);
   const claudeEffortRef = useRef<HTMLDivElement>(null);
-  const [geminiDefaultModel, setGeminiDefaultModel] = useState('auto-gemini-3');
+  const [geminiDefaultModel, setGeminiDefaultModel] = useState('');
   const [geminiDefaultApprovalMode, setGeminiDefaultApprovalMode] = useState<'default' | 'auto_edit' | 'yolo' | 'plan'>('default');
   const [geminiDefaultConversationMode, setGeminiDefaultConversationMode] = useState<'planning' | 'fast'>('planning');
   const [kimiDefaultModel, setKimiDefaultModel] = useState('kimi-k3');
@@ -572,11 +572,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     const sai = window.sai;
     if (enabled) {
       const snapshot = await sai.settingsGet('gemini', {});
-      const lowTokenModel = geminiAvailableModels.some(model => model.id === 'gemini-2.5-flash-lite')
-        ? 'gemini-2.5-flash-lite'
-        : geminiAvailableModels.some(model => model.id === 'gemini-2.5-flash')
-          ? 'gemini-2.5-flash'
-          : geminiDefaultModel;
+      const lowTokenModel = geminiAvailableModels[0]?.id || geminiDefaultModel;
       await sai.settingsSet('geminiLowTokenModeSnapshot', snapshot);
       await sai.settingsSet('gemini', { ...snapshot, model: lowTokenModel, conversationMode: 'fast' });
       setGeminiDefaultModel(lowTokenModel);
@@ -1503,11 +1499,11 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
 
   const renderGeminiPage = () => (
     <section className="settings-section">
-      <div className="settings-section-label">Gemini</div>
+      <div className="settings-section-label">Antigravity</div>
       <div className="settings-row settings-row-spaced">
         <div className="settings-row-info">
           <div className="settings-row-name">Low token mode</div>
-          <div className="settings-row-desc">Use Gemini 2.5 Flash Lite (or Flash when Lite is unavailable) and Fast conversation mode. Turning it off restores your previous Gemini defaults.</div>
+          <div className="settings-row-desc">Use Antigravity's first available model and Fast mode. Turning it off restores your previous Antigravity defaults.</div>
         </div>
         <button className={`settings-toggle${geminiLowTokenMode ? ' on' : ''}`} onClick={() => { void handleGeminiLowTokenModeChange(!geminiLowTokenMode); }} role="switch" aria-checked={geminiLowTokenMode}><span className="settings-toggle-thumb" /></button>
       </div>
@@ -1515,7 +1511,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
         <div className="settings-row">
           <div className="settings-row-info">
             <div className="settings-row-name">Default model</div>
-            <div className="settings-row-desc">Pre-selected model when starting a new Gemini session</div>
+            <div className="settings-row-desc">Pre-selected model when starting a new Antigravity session</div>
           </div>
           <select
             className="settings-select"
@@ -1531,7 +1527,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       <div className="settings-row">
         <div className="settings-row-info">
           <div className="settings-row-name">Default approval mode</div>
-          <div className="settings-row-desc">How Gemini handles file edits and tool calls</div>
+          <div className="settings-row-desc">How Antigravity handles file edits and tool calls</div>
         </div>
         <select
           className="settings-select"
@@ -1738,7 +1734,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
                     height: 14,
                   }}
                 />
-                <span>{p.id.charAt(0).toUpperCase() + p.id.slice(1)}</span>
+                <span>{p.label}</span>
               </button>
             ))}
             <button

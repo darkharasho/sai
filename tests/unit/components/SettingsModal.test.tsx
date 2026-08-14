@@ -529,7 +529,7 @@ describe('SettingsModal', () => {
     const sidebar = document.querySelector('.settings-sidebar')!;
     expect(sidebar.textContent).toContain('Claude');
     expect(sidebar.textContent).toContain('Codex');
-    expect(sidebar.textContent).toContain('Gemini');
+    expect(sidebar.textContent).toContain('Antigravity CLI');
   });
 
   it('shows General page by default with Workspaces section', () => {
@@ -566,14 +566,14 @@ describe('SettingsModal', () => {
     fireEvent.click(screen.getByText('Codex'));
     expect(await screen.findByText('Low token mode')).toBeTruthy();
 
-    fireEvent.click(screen.getByText('Gemini'));
+    fireEvent.click(screen.getByText('Antigravity CLI'));
     expect(await screen.findByText('Low token mode')).toBeTruthy();
 
-    fireEvent.click(screen.getByText('Kimi'));
+    fireEvent.click(screen.getByText('Kimi CLI'));
     expect(await screen.findByText(/no lower-token preset/i)).toBeTruthy();
   });
 
-  it('applies Gemini low-token defaults from its provider page', async () => {
+  it('applies Antigravity low-token defaults from its provider page', async () => {
     const mock = createMockSai();
     mock.settingsGet = makeSettingsGetMock();
     mock.geminiModels.mockResolvedValue({
@@ -587,13 +587,13 @@ describe('SettingsModal', () => {
     const onSettingChange = vi.fn();
     render(<SettingsModal onClose={vi.fn()} onSettingChange={onSettingChange} />);
 
-    fireEvent.click(screen.getByText('Gemini'));
+    fireEvent.click(screen.getByText('Antigravity CLI'));
     const lowTokenRow = await screen.findByText('Low token mode');
     fireEvent.click(lowTokenRow.closest('.settings-row')!.querySelector('.settings-toggle')!);
 
     await waitFor(() => {
       expect(mock.settingsSet).toHaveBeenCalledWith('geminiLowTokenMode', true);
-      expect(onSettingChange).toHaveBeenCalledWith('geminiModel', 'gemini-2.5-flash-lite');
+      expect(onSettingChange).toHaveBeenCalledWith('geminiModel', 'gemini-3.1-pro');
       expect(onSettingChange).toHaveBeenCalledWith('geminiConversationMode', 'fast');
     });
   });
@@ -621,9 +621,9 @@ describe('SettingsModal', () => {
     });
   });
 
-  it('shows Gemini page when Gemini nav is clicked', async () => {
+  it('shows Antigravity page when its nav item is clicked', async () => {
     render(<SettingsModal {...defaultProps} />);
-    const geminiNav = screen.getByText('Gemini');
+    const geminiNav = screen.getByText('Antigravity CLI');
     fireEvent.click(geminiNav);
     await waitFor(() => {
       expect(screen.getByText('Default approval mode')).toBeTruthy();

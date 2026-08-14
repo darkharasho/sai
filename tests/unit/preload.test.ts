@@ -206,9 +206,9 @@ describe('window.sai.provider routing', () => {
       );
     });
 
-    it('routes gemini to gemini:start', () => {
+    it('routes Antigravity to the scoped gemini:start compatibility bridge', () => {
       exposed.provider.start('gemini', '/proj', { metaPreamble: 'meta' });
-      expect(invoke).toHaveBeenCalledWith('gemini:start', '/proj', 'meta');
+      expect(invoke).toHaveBeenCalledWith('gemini:start', '/proj', undefined, undefined, undefined, undefined, 'meta');
     });
 
     it('routes codex to codex:start', () => {

@@ -22,9 +22,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 const {
   mockIpcMain,
   workspaceState,
-  mockEnsureGeminiTransport,
-  mockEnsureGeminiCommitSession,
-  mockPromptGeminiText,
+  mockPromptAntigravityOneShot,
   mockEnsureKimiTransport,
   mockEnsureKimiCommitSession,
   mockPromptKimiText,
@@ -139,9 +137,7 @@ const {
   return {
     mockIpcMain,
     workspaceState,
-    mockEnsureGeminiTransport: vi.fn().mockResolvedValue(undefined),
-    mockEnsureGeminiCommitSession: vi.fn().mockResolvedValue('gemini-commit-session'),
-    mockPromptGeminiText: vi.fn().mockResolvedValue('gemini commit message'),
+    mockPromptAntigravityOneShot: vi.fn().mockResolvedValue('antigravity commit message'),
     mockEnsureKimiTransport: vi.fn().mockResolvedValue(undefined),
     mockEnsureKimiCommitSession: vi.fn().mockResolvedValue('kimi-commit-session'),
     mockPromptKimiText: vi.fn().mockResolvedValue('kimi commit message'),
@@ -172,9 +168,7 @@ vi.mock('@electron/services/notify', () => ({
 }));
 
 vi.mock('@electron/services/gemini', () => ({
-  ensureGeminiTransport: mockEnsureGeminiTransport,
-  ensureGeminiCommitSession: mockEnsureGeminiCommitSession,
-  promptGeminiText: mockPromptGeminiText,
+  promptAntigravityOneShot: mockPromptAntigravityOneShot,
 }));
 
 vi.mock('@electron/services/kimi', () => ({
@@ -280,9 +274,7 @@ beforeEach(() => {
   vi.mocked(spawn).mockImplementation(defaultSpawnImpl as any);
 
   win = createMockBrowserWindow();
-  mockEnsureGeminiTransport.mockResolvedValue(undefined);
-  mockEnsureGeminiCommitSession.mockResolvedValue('gemini-commit-session');
-  mockPromptGeminiText.mockResolvedValue('gemini commit message');
+  mockPromptAntigravityOneShot.mockResolvedValue('antigravity commit message');
 
   // Reset ipcMain mock state and re-register handlers
   mockIpcMain._handlers.clear();
@@ -1282,39 +1274,22 @@ describe('claude:generateCommitMessage', () => {
     expect(capturedArgs).toContain('codex-mini');
   });
 
-  it('uses a hidden Gemini ACP session for commit generation', async () => {
+  it('uses Antigravity print mode for commit generation', async () => {
     mockSpawnForCommit({});
     const result = await mockIpcMain._invoke('claude:generateCommitMessage', '/my/project', 'gemini');
 
-    expect(result).toBe('gemini commit message');
-    expect(mockEnsureGeminiTransport).toHaveBeenCalled();
-    expect(mockEnsureGeminiCommitSession).toHaveBeenCalled();
-    expect(mockPromptGeminiText).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({
-        scope: 'commit',
-        prompt: expect.stringContaining('Generate a concise commit message for this diff'),
-        model: 'gemini-2.5-flash',
-        approvalMode: 'plan',
-      }),
+    expect(result).toBe('antigravity commit message');
+    expect(mockPromptAntigravityOneShot).toHaveBeenCalledWith(
+      '/my/project',
+      expect.stringContaining('Generate a concise commit message for this diff'),
     );
   });
 
-  it('does not reuse the active Gemini chat session for commit generation', async () => {
+  it('does not reuse the active Antigravity chat session for commit generation', async () => {
     mockSpawnForCommit({});
-    mockEnsureGeminiCommitSession.mockResolvedValueOnce('gemini-hidden-commit');
-
     await mockIpcMain._invoke('claude:generateCommitMessage', '/my/project', 'gemini');
 
-    expect(mockPromptGeminiText).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({
-        sessionId: 'gemini-hidden-commit',
-        scope: 'commit',
-      }),
-    );
+    expect(mockPromptAntigravityOneShot).toHaveBeenCalledOnce();
   });
 
   it('uses a hidden Kimi ACP session for commit generation', async () => {

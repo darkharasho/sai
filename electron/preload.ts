@@ -137,7 +137,7 @@ contextBridge.exposeInMainWorld('sai', {
       if (provider === 'claude') {
         return ipcRenderer.invoke('claude:start', cwd, opts.scope, opts.kind, opts.orchestratorContext, opts.scopeCwd, opts.metaPreamble);
       } else if (provider === 'gemini') {
-        return ipcRenderer.invoke('gemini:start', cwd, opts.metaPreamble);
+        return ipcRenderer.invoke('gemini:start', cwd, opts.scope, opts.kind, opts.orchestratorContext, opts.scopeCwd, opts.metaPreamble);
       } else if (provider === 'kimi') {
         return ipcRenderer.invoke('kimi:start', cwd, opts.metaPreamble);
       } else {

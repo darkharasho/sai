@@ -104,6 +104,8 @@ export interface AcpWorkspaceState {
   chatSessionId: string | undefined;
   commitSessionId: string | undefined;
   terminalSessions: Map<string, string>;
+  /** Per-scope cwd for providers whose turns are one-shot processes. */
+  terminalCwds: Map<string, string>;
   activeRequestId: string | undefined;
   availability: 'available' | 'disabled';
   lastError?: string;
@@ -118,7 +120,7 @@ export interface AcpWorkspaceState {
   metaPreamble?: string;
 }
 
-/** Back-compat alias — the Gemini state shape is now the shared ACP provider state. */
+/** Legacy state shape retained while persisted provider identifiers are migrated. */
 export type WorkspaceGemini = AcpWorkspaceState;
 
 export interface Workspace {
@@ -221,6 +223,7 @@ function newAcpState(projectPath: string): AcpWorkspaceState {
     chatSessionId: undefined,
     commitSessionId: undefined,
     terminalSessions: new Map(),
+    terminalCwds: new Map(),
     activeRequestId: undefined,
     availability: 'available',
     lastError: undefined,
@@ -286,6 +289,7 @@ function resetAcpState(state: AcpWorkspaceState, safeSend: (channel: string, ...
   state.chatSessionId = undefined;
   state.commitSessionId = undefined;
   state.terminalSessions.clear();
+  state.terminalCwds.clear();
   state.activeRequestId = undefined;
   state.availability = 'available';
   state.lastError = undefined;
@@ -337,7 +341,7 @@ export function suspend(projectPath: string, win: BrowserWindow): void {
   }
   ws.codex.busy = false;
 
-  // Reset ACP providers (Gemini, Kimi)
+  // Reset providers that keep an ACP-shaped workspace state (Antigravity, Kimi)
   resetAcpState(ws.gemini, safeSend, ws.projectPath);
   resetAcpState(ws.kimi, safeSend, ws.projectPath);
 

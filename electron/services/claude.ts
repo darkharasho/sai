@@ -9,7 +9,7 @@ import * as os from 'node:os';
 import { enrichedEnv, withNodeMemoryCap } from './shellEnv';
 import { notifyCompletion, notifyApproval, notifyQuestion, notifyPlanReview } from './notify';
 import { extractCodexCommitMessage } from './commit-message-parser';
-import { ensureGeminiCommitSession, ensureGeminiTransport, promptGeminiText } from './gemini';
+import { promptAntigravityOneShot } from './gemini';
 import { ensureKimiTransport, ensureKimiCommitSession, promptKimiText } from './kimi';
 import * as swarmMcpHost from './swarmMcpHost';
 import { writeSwarmMcpConfig } from './swarmMcpConfig';
@@ -32,7 +32,7 @@ export { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE };
 
 const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
 
-// On Windows, CLI tools like `claude`, `codex`, `gemini`, and even `git` are
+// On Windows, CLI tools like `claude`, `codex`, `agy`, and even `git` are
 // typically shipped as `.cmd`/`.ps1` shims. Node's spawn won't resolve those
 // without shell: true, so requests fail with ENOENT.
 const IS_WIN = process.platform === 'win32';
@@ -1478,18 +1478,7 @@ export async function generateCommitMessageImpl(cwd: string, aiProvider?: string
 
   if (aiProvider === 'gemini') {
     try {
-      const geminiWs = getOrCreate(effectiveCwd);
-      geminiWs.gemini.cwd = effectiveCwd;
-      await ensureGeminiTransport(mainWin!, geminiWs);
-      const sessionId = await ensureGeminiCommitSession(mainWin!, geminiWs);
-      const result = await promptGeminiText(mainWin!, geminiWs, {
-        sessionId,
-        scope: 'commit',
-        prompt: commitPrompt,
-        approvalMode: 'plan',
-        model: 'gemini-2.5-flash',
-      });
-      return result.trim();
+      return (await promptAntigravityOneShot(effectiveCwd, commitPrompt)).trim();
     } catch {
       return '';
     }
@@ -1557,8 +1546,7 @@ export async function generateTitleImpl(cwd: string, userMessage: string, aiProv
     cmd = 'codex';
     args = ['exec', '-q', '--json', '-m', 'codex-mini', titlePrompt];
   } else if (aiProvider === 'gemini') {
-    cmd = 'gemini';
-    args = ['-p', titlePrompt, '--output-format', 'text', '-m', 'flash'];
+    return (await promptAntigravityOneShot(effectiveCwd, titlePrompt)).replace(/^["']|["']$/g, '').trim();
   } else {
     cmd = 'claude';
     args = ['-p', titlePrompt, '--output-format', 'text', '--max-turns', '1', '--model', 'haiku'];

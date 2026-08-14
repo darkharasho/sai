@@ -3,7 +3,7 @@ import type { AIProvider } from '../../types';
 const COMMAND_LABELS: Record<AIProvider, string> = {
   claude: 'Claude Skills',
   codex: 'Codex Commands',
-  gemini: 'Gemini Commands',
+  gemini: 'Antigravity Commands',
   kimi: 'Kimi Commands',
 };
 

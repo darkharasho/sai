@@ -3,6 +3,7 @@ import {
   runSwarmTask,
   permModeForPolicy,
   codexPermissionForPolicy,
+  antigravityApprovalForPolicy,
   cwdForTask,
 } from '@/lib/swarmTaskRunner';
 import type { SwarmTask } from '@/types';
@@ -36,6 +37,8 @@ function makeDeps() {
     claudeSend: vi.fn(),
     codexStart: vi.fn().mockResolvedValue(undefined),
     codexSend: vi.fn(),
+    antigravityStart: vi.fn().mockResolvedValue(undefined),
+    antigravitySend: vi.fn(),
   };
 }
 
@@ -67,6 +70,14 @@ describe('codexPermissionForPolicy', () => {
   });
   it('maps always-ask → auto', () => {
     expect(codexPermissionForPolicy('always-ask')).toBe('auto');
+  });
+});
+
+describe('antigravityApprovalForPolicy', () => {
+  it('maps Swarm policies to Antigravity CLI modes', () => {
+    expect(antigravityApprovalForPolicy('auto')).toBe('yolo');
+    expect(antigravityApprovalForPolicy('auto-read')).toBe('auto_edit');
+    expect(antigravityApprovalForPolicy('always-ask')).toBe('default');
   });
 });
 
@@ -159,6 +170,19 @@ describe('runSwarmTask', () => {
     expect(deps.codexSend.mock.calls[0][3]).toBe('full-access');
   });
 
+  it('starts an Antigravity task in its scoped worktree conversation', async () => {
+    const task = makeTask({ provider: 'gemini', model: 'antigravity-pro', approvalPolicy: 'auto-read', worktreePath: '/tmp/wt' });
+    const deps = makeDeps();
+
+    const dispatched = await runSwarmTask(task, deps);
+
+    expect(dispatched).toBe(true);
+    expect(deps.antigravityStart).toHaveBeenCalledWith('/tmp/project', 'session-1', 'task', undefined, '/tmp/wt');
+    expect(deps.antigravitySend).toHaveBeenCalledWith(
+      '/tmp/project', 'create hello.txt with hi', undefined, 'auto_edit', undefined, 'antigravity-pro', 'session-1',
+    );
+  });
+
   it('returns false without IPC when Codex bridges are unavailable', async () => {
     const task = makeTask({ provider: 'codex' });
     const deps = makeClaudeDeps();
@@ -170,7 +194,7 @@ describe('runSwarmTask', () => {
     expect(deps.claudeSend).not.toHaveBeenCalled();
   });
 
-  it.each(['gemini', 'kimi'] as const)('returns false and skips IPC for unsupported provider %s', async (provider) => {
+  it.each(['kimi'] as const)('returns false and skips IPC for unsupported provider %s', async (provider) => {
     const task = makeTask({ provider });
     const deps = makeDeps();
 

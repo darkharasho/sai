@@ -18,7 +18,7 @@
 
 ## Stop context-switching. Start shipping.
 
-SAI is a desktop code editor built from the ground up around AI. No plugins. No bolt-on copilots. Just a seamless environment where you chat with Claude, Codex, or Gemini, edit code, run commands, and manage Git — all without ever leaving the window.
+SAI is a desktop code editor built from the ground up around AI. No plugins. No bolt-on copilots. Just a seamless environment where you chat with Claude, Codex, or Antigravity, edit code, run commands, and manage Git — all without ever leaving the window.
 
 Open a project, pick your provider, ask it to build a feature, and watch it happen in real time. Review diffs, stage changes, commit — done. That's SAI.
 
@@ -43,7 +43,7 @@ Group N projects into a single named workspace that behaves like a regular proje
 <img src="public/img/meta.png" alt="SAI Meta workspace 'AI Dev Tools' with two repos (sai, tai) in the Git sidebar, each with their own commit/push/pull controls" width="1400" />
 
 ### Bring your preferred AI CLI
-Use Claude, Codex CLI, or Gemini CLI in the chat panel and switch providers from Settings at any time. SAI keeps provider-specific models, approval controls, and conversation preferences separate, so swapping backends does not mean rebuilding your setup.
+Use Claude, Codex CLI, or Antigravity CLI in the chat panel and switch providers from Settings at any time. SAI keeps provider-specific models, approval controls, and conversation preferences separate, so swapping backends does not mean rebuilding your setup.
 
 ### Multi-project workspaces
 Keep multiple projects open in one app window and jump between them from the workspace switcher. Active workspaces show live status, background completions surface as notifications, and idle projects can be suspended automatically or manually to free resources.
@@ -108,7 +108,7 @@ SAI supports multiple chat backends. Install and authenticate the CLI for whiche
 
 - **Claude** — [Claude CLI](https://docs.anthropic.com/en/docs/claude-code)
 - **Codex** — [Codex CLI](https://developers.openai.com/codex/cli)
-- **Gemini** — [Gemini CLI](https://geminicli.com/)
+- **Antigravity** — [Antigravity CLI](https://antigravity.google/product/antigravity-cli)
 
 You can switch providers any time from `Settings → AI Provider → Chat provider`.
 

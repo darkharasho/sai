@@ -8,14 +8,14 @@ import { notifyCompletion } from './notify';
 import { createAcpClient, type AcpClient } from './acp';
 
 export interface AcpProviderConfig {
-  key: 'gemini' | 'kimi';        // IPC channel prefix AND Workspace slot name
-  displayName: string;           // 'Gemini' | 'Kimi' — user-facing copy + notifyCompletion
-  label: string;                 // 'Gemini ACP' | 'Kimi ACP' — must match acp client label
+  key: 'kimi';                   // IPC channel prefix AND Workspace slot name
+  displayName: string;           // User-facing copy + notifyCompletion
+  label: string;                 // Must match the ACP client label
   command: string;
   args: string[];
   models: { id: string; name: string }[];
   defaultModel: string;
-  /** Model substituted when conversationMode === 'fast' (Gemini only). */
+  /** Model substituted when conversationMode === 'fast'. */
   fastModel?: string;
   /** Extra sentence appended to transport-failure errors (install/login guidance). */
   installHint?: string;
@@ -249,7 +249,7 @@ export function acpContentToToolResult(content: any[] | undefined): string | any
 
 // Map ACP tool_call `kind` values to Claude-equivalent tool names so that
 // ChatPanel's icon/type inference (which checks block.name) works. Handles both
-// the Gemini dialect (read_file, run_shell_command, …) and the ACP-standard
+// legacy ACP dialect (read_file, run_shell_command, …) and the ACP-standard
 // kinds kimi-cli emits (read, edit, execute, …).
 function acpKindToName(kind: string | undefined, title: string | undefined): string {
   switch (kind) {

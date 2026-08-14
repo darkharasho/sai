@@ -288,7 +288,7 @@ export default function App() {
     available: false,
     reason: 'Codex Swarm requires the App Server preview backend selected and its Dynamic Tools bridge ready.',
   });
-  const [geminiModel, setGeminiModel] = useState('auto-gemini-3');
+  const [geminiModel, setGeminiModel] = useState('');
   const [geminiModels, setGeminiModels] = useState<{ id: string; name: string }[]>([]);
   const [geminiApprovalMode, setGeminiApprovalMode] = useState<GeminiApprovalMode>('default');
   const [geminiConversationMode, setGeminiConversationMode] = useState<GeminiConversationMode>('planning');
@@ -1150,6 +1150,10 @@ export default function App() {
           claudeSend: sai.claudeSend,
           codexStart: sai.codexStart,
           codexSend: sai.codexSend,
+          antigravityStart: (projectPath, scope, kind, orchestratorContext, scopeCwd) =>
+            sai.provider.start('gemini', projectPath, { scope, kind, orchestratorContext, scopeCwd }),
+          antigravitySend: (projectPath, message, imagePaths, approvalMode, _effort, model, scope) =>
+            sai.provider.send('gemini', projectPath, message, { imagePaths, approvalMode, model, scope }),
         },
       );
       if (!dispatched) {
@@ -2375,7 +2379,7 @@ export default function App() {
     setModelChoice(claudeModels.find(m => m.recommended)?.id ?? claudeModels[0].id);
   }, [claudeModels, modelChoice]);
 
-  // Prefetch Gemini models (hardcoded) at startup
+  // Fetch the authenticated Antigravity model catalogue at startup.
   useEffect(() => {
     (window.sai as any).geminiModels?.().then((result: { models: { id: string; name: string }[]; defaultModel: string }) => {
       if (result?.models?.length) setGeminiModels(result.models);
@@ -4461,7 +4465,7 @@ export default function App() {
 
   const renderPanel = (panel: PanelId) => {
     const isOpen = expanded.includes(panel);
-    const providerSvg = aiProvider === 'codex' ? 'svg/codex.svg' : aiProvider === 'gemini' ? 'svg/Google-gemini-icon.svg' : aiProvider === 'kimi' ? 'svg/kimi.svg' : 'svg/claude.svg';
+    const providerSvg = aiProvider === 'codex' ? 'svg/codex.svg' : aiProvider === 'gemini' ? 'svg/antigravity.svg' : aiProvider === 'kimi' ? 'svg/kimi.svg' : 'svg/claude.svg';
     const providerColor = aiProvider === 'codex' ? 'var(--text)' : aiProvider === 'gemini' ? '#4285f4' : aiProvider === 'kimi' ? 'var(--text)' : '#e27b4a';
     const icon = panel === 'chat'
       ? <span className="accordion-provider-icon" style={{

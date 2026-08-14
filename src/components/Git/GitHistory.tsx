@@ -33,7 +33,7 @@ interface DiffLine {
 const PROVIDER_LABELS = {
   claude: 'Claude',
   codex: 'Codex',
-  gemini: 'Gemini',
+  gemini: 'Antigravity',
   kimi: 'Kimi',
 } as const;
 
