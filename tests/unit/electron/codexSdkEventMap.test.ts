@@ -833,6 +833,38 @@ describe('mapCodexSdkEvent', () => {
     expect(localContext).toEqual(contextBefore);
   });
 
+  it('maps raw Responses API tool frames emitted by compatible Codex CLI builds', () => {
+    const call = {
+      type: 'response_item',
+      payload: {
+        type: 'function_call', id: 'item-1', call_id: 'call-1',
+        name: 'exec', arguments: '{"cmd":"pwd"}',
+      },
+    } as unknown as ThreadEvent;
+    const result = {
+      type: 'response_item',
+      payload: {
+        type: 'function_call_output', call_id: 'call-1', output: ' /repo\\n',
+      },
+    } as unknown as ThreadEvent;
+
+    expect(mapCodexSdkEvent(call, ctx)).toEqual([toolUse('call-1', 'exec', { cmd: 'pwd' })]);
+    expect(mapCodexSdkEvent(result, ctx)).toEqual([toolResult('call-1', ' /repo\\n')]);
+  });
+
+  it('maps raw custom tool calls and preserves malformed input as text', () => {
+    const event = {
+      type: 'response_item',
+      payload: {
+        type: 'custom_tool_call', call_id: 'custom-1', name: 'apply_patch', input: '*** Begin Patch',
+      },
+    } as unknown as ThreadEvent;
+
+    expect(mapCodexSdkEvent(event, ctx)).toEqual([
+      toolUse('custom-1', 'apply_patch', { input: '*** Begin Patch' }),
+    ]);
+  });
+
   it('ignores an unknown top-level event', () => {
     expect(mapCodexSdkEvent({ type: 'future.event' } as unknown as ThreadEvent, ctx)).toEqual([]);
   });

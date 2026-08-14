@@ -146,6 +146,42 @@ function toolErrorContent(content: ToolResultContent): ToolResultContent {
   ];
 }
 
+/**
+ * `codex exec --experimental-json` normally emits the SDK's `item.*` frames.
+ * Some bundled CLI builds additionally (or, during a protocol transition,
+ * instead) emit raw Responses API `response_item` frames.  Treat those as a
+ * compatibility input rather than dropping their tool activity on the floor.
+ */
+function rawResponseItem(event: unknown, ctx: CodexMapContext): SaiEnvelope[] | null {
+  if (!event || typeof event !== 'object') return null;
+  const record = event as Record<string, unknown>;
+  if (record.type !== 'response_item' || !record.payload || typeof record.payload !== 'object') return null;
+  const payload = record.payload as Record<string, unknown>;
+  const itemType = payload.type;
+  const callId = typeof payload.call_id === 'string' ? payload.call_id
+    : typeof payload.id === 'string' ? payload.id : undefined;
+  if (!callId) return [];
+
+  const input = (value: unknown): unknown => {
+    if (typeof value !== 'string') return value ?? {};
+    try { return JSON.parse(value); } catch { return { input: value }; }
+  };
+  const output = (value: unknown): string => {
+    if (typeof value === 'string') return value;
+    return value === undefined ? '' : stableJson(value);
+  };
+
+  if (itemType === 'function_call' || itemType === 'custom_tool_call') {
+    const name = typeof payload.name === 'string' && payload.name.trim()
+      ? payload.name : 'tool';
+    return [toolUse(callId, name, input(payload.arguments ?? payload.input), ctx)];
+  }
+  if (itemType === 'function_call_output' || itemType === 'custom_tool_call_output') {
+    return [toolResult(callId, output(payload.output), false, ctx)];
+  }
+  return [];
+}
+
 function normalizeTodos(item: Extract<ThreadItem, { type: 'todo_list' }>) {
   const valid = (Array.isArray(item.items) ? item.items : []).filter(
     (todo): todo is { text: string; completed: boolean } =>
@@ -309,6 +345,8 @@ export function mapCodexSdkEvent(
   event: ThreadEvent,
   ctx: CodexMapContext,
 ): SaiEnvelope[] {
+  const rawResponse = rawResponseItem(event, ctx);
+  if (rawResponse !== null) return rawResponse;
   switch (event.type) {
     case 'thread.started':
       return [{
