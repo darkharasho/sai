@@ -100,7 +100,7 @@ describe('McpSidebar', () => {
   it('offers the isolated global Codex editor only when App Server MCP runtime is available', async () => {
     const { getByText } = render(<McpSidebar provider="codex" projectPath="/repo" scope="chat-1" />);
     await waitFor(() => expect(getByText('Global MCP configuration')).toBeTruthy());
-    expect(mockSai.codexMcpConfigGet).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mockSai.codexMcpConfigGet).toHaveBeenCalledTimes(1));
   });
 
   it('does not load Claude MCP data when a persisted browse tab becomes Codex', async () => {
