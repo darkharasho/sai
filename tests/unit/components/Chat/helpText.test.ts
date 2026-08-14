@@ -9,9 +9,10 @@ describe('buildHelpMessage', () => {
     expect(text).not.toContain('Claude Skills');
   });
 
-  it('uses provider-specific wording for Gemini sessions with no commands', () => {
+  it('uses the Antigravity command label for Gemini sessions with no commands', () => {
     const text = buildHelpMessage('gemini', []);
-    expect(text).toContain('**Gemini Commands:**');
+    expect(text).toContain('**Available Commands**');
+    expect(text).toContain('**Antigravity Commands:**');
     expect(text).toContain('No custom commands loaded');
   });
 });
