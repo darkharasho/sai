@@ -1822,7 +1822,7 @@ describe('SdkBackend', () => {
   });
 
   it('(38) feature settings flow into SDK options and a settings change respawns the session', async () => {
-    const settings: Record<string, unknown> = { claudeShowReasoning: true, claudeMaxBudgetUsd: 5, claude1MContext: true };
+    const settings: Record<string, unknown> = { claudeShowReasoning: true, claudeMaxBudgetUsd: 5, claude1MContext: true, claudeAgentProgressSummaries: false };
     mockReadSaiSetting.mockImplementation((key: string) => settings[key]);
     const fakeQuery1 = makeFakeQuery([], { hang: true });
     const fakeQuery2 = makeFakeQuery([], { hang: true });
@@ -1842,7 +1842,7 @@ describe('SdkBackend', () => {
     expect(opts.maxBudgetUsd).toBe(5);
     expect(opts.betas).toEqual(['context-1m-2025-08-07']);
     expect(opts.promptSuggestions).toBe(true);
-    expect(opts.agentProgressSummaries).toBe(true);
+    expect(opts.agentProgressSummaries).toBeUndefined();
 
     // Toggling a feature setting respawns the session on the next send.
     settings.claudeShowReasoning = false;
