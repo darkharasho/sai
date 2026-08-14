@@ -1269,6 +1269,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
       // Tool results come back as user messages with tool_result content blocks
       if (msg.type === 'user' && Array.isArray(msg.message?.content)) {
+        const resultTurnSeq = msg.turnSeq ?? turnSeqRef.current;
         const results: Array<{ tool_use_id: string; output: string; images?: import('../../types').ToolResultImage[]; partial: boolean }> = [];
         for (const block of msg.message.content) {
           if (block.type === 'tool_result' && block.tool_use_id) {
@@ -1286,7 +1287,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
                 let updated = false;
                 const now = Date.now();
                 const newToolCalls = msg.toolCalls.map(tc => {
-                  const result = results.find(r => r.tool_use_id === tc.id);
+                  const result = tc.turnSeq === resultTurnSeq
+                    ? results.find(r => r.tool_use_id === tc.id)
+                    : undefined;
                   if (result) {
                     // Never let a delayed progress notification reopen or
                     // overwrite a settled tool card.
@@ -1331,6 +1334,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
         const textParts: string[] = [];
         const tools: ToolCall[] = [];
+        const toolTurnSeq = msg.turnSeq ?? turnSeqRef.current;
 
         for (const block of msg.message.content) {
           if (block.type === 'text' && block.text) {
@@ -1339,6 +1343,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           if (block.type === 'tool_use') {
             tools.push({
               id: block.id,
+              turnSeq: toolTurnSeq,
               type: block.name?.includes('Edit') || block.name === 'Write' ? 'file_edit' :
                     block.name?.includes('Bash') ? 'terminal_command' :
                     block.name?.includes('Glob') || block.name?.includes('Grep') || block.name === 'ToolSearch' ? 'file_search' :
@@ -1435,25 +1440,25 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             markStreamingActive();
             return;
           }
-          // Codex re-emits TodoWrite (and, in principle, any tool) with the SAME
-          // tool-use id on every item.updated frame so its card updates in place
-          // instead of piling up duplicate transcript entries — see
-          // codexSdkEventMap's todoSnapshot(), which reuses item.id verbatim
-          // across item.started/item.updated. Claude's tool-use ids are unique
-          // per call, so this split is always a no-op for Claude (all tools land
-          // in newTools below, exactly as before).
-          const existingToolIds = new Set<string>();
+          // Codex's SDK wraps each turn in a fresh `codex exec` process, whose
+          // item IDs start at item_0 again. Scope upserts to the turn: TodoWrite
+          // can update in place within one turn, while item_0 in a later turn
+          // must create a new transcript card.
+          const existingToolKeys = new Set<string>();
           for (const m of messagesRef.current) {
-            if (m.toolCalls) for (const tc of m.toolCalls) if (tc.id) existingToolIds.add(tc.id);
+            if (m.toolCalls) for (const tc of m.toolCalls) {
+              if (tc.id) existingToolKeys.add(`${tc.turnSeq ?? ''}:${tc.id}`);
+            }
           }
-          const updateTools = tools.filter(t => t.id && existingToolIds.has(t.id));
-          const newTools = tools.filter(t => !t.id || !existingToolIds.has(t.id));
+          const toolKey = (tool: ToolCall) => `${tool.turnSeq ?? ''}:${tool.id ?? ''}`;
+          const updateTools = tools.filter(t => t.id && existingToolKeys.has(toolKey(t)));
+          const newTools = tools.filter(t => !t.id || !existingToolKeys.has(toolKey(t)));
           if (updateTools.length > 0) {
             setMessages(prev => prev.map(m => {
               if (m.role !== 'assistant' || !m.toolCalls) return m;
               let touched = false;
               const nextToolCalls = m.toolCalls.map(tc => {
-                const update = updateTools.find(u => u.id === tc.id);
+                const update = updateTools.find(u => u.id === tc.id && u.turnSeq === tc.turnSeq);
                 if (!update) return tc;
                 touched = true;
                 return { ...tc, input: update.input };

@@ -554,6 +554,70 @@ describe('SettingsModal', () => {
     fireEvent.click(claudeNav);
     await waitFor(() => {
       expect(screen.getByText('Auto-compact context')).toBeTruthy();
+      expect(screen.getByText('Low token mode')).toBeTruthy();
+    });
+  });
+
+  it('keeps Low token mode out of Editor and places provider-specific presets on provider pages', async () => {
+    render(<SettingsModal {...defaultProps} />);
+    fireEvent.click(screen.getByText('Editor'));
+    expect(screen.queryByText('Low token mode')).toBeNull();
+
+    fireEvent.click(screen.getByText('Codex'));
+    expect(await screen.findByText('Low token mode')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('Gemini'));
+    expect(await screen.findByText('Low token mode')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('Kimi'));
+    expect(await screen.findByText(/no lower-token preset/i)).toBeTruthy();
+  });
+
+  it('applies Gemini low-token defaults from its provider page', async () => {
+    const mock = createMockSai();
+    mock.settingsGet = makeSettingsGetMock();
+    mock.geminiModels.mockResolvedValue({
+      models: [
+        { id: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro' },
+        { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite' },
+      ],
+      defaultModel: 'gemini-3.1-pro',
+    });
+    installMockSai(mock);
+    const onSettingChange = vi.fn();
+    render(<SettingsModal onClose={vi.fn()} onSettingChange={onSettingChange} />);
+
+    fireEvent.click(screen.getByText('Gemini'));
+    const lowTokenRow = await screen.findByText('Low token mode');
+    fireEvent.click(lowTokenRow.closest('.settings-row')!.querySelector('.settings-toggle')!);
+
+    await waitFor(() => {
+      expect(mock.settingsSet).toHaveBeenCalledWith('geminiLowTokenMode', true);
+      expect(onSettingChange).toHaveBeenCalledWith('geminiModel', 'gemini-2.5-flash-lite');
+      expect(onSettingChange).toHaveBeenCalledWith('geminiConversationMode', 'fast');
+    });
+  });
+
+  it('applies the lowest supported Codex reasoning effort from its provider page', async () => {
+    const mock = createMockSai();
+    mock.settingsGet = vi.fn((key: string, fallback: unknown) => Promise.resolve(
+      key === 'codex' ? { model: 'gpt-5', permission: 'auto', effort: 'high' } : fallback,
+    ));
+    mock.codexModels.mockResolvedValue({
+      models: [{ id: 'gpt-5', name: 'GPT-5', supportedReasoningEfforts: ['minimal', 'high'] }],
+      defaultModel: 'gpt-5',
+    });
+    installMockSai(mock);
+    const onSettingChange = vi.fn();
+    render(<SettingsModal onClose={vi.fn()} onSettingChange={onSettingChange} />);
+
+    fireEvent.click(screen.getByText('Codex'));
+    const lowTokenRow = await screen.findByText('Low token mode');
+    fireEvent.click(lowTokenRow.closest('.settings-row')!.querySelector('.settings-toggle')!);
+
+    await waitFor(() => {
+      expect(mock.settingsSet).toHaveBeenCalledWith('codexLowTokenMode', true);
+      expect(onSettingChange).toHaveBeenCalledWith('codexEffort', 'minimal');
     });
   });
 

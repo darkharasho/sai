@@ -2404,5 +2404,46 @@ describe('ChatPanel', () => {
       expect(allToolCalls.filter((tc: any) => tc.id === 'todo-1').length).toBe(1);
       expect(allToolCalls.filter((tc: any) => tc.id === 'todo-2').length).toBe(1);
     });
+
+    it('creates a new card when the Codex SDK reuses an item id in a later turn', async () => {
+      const onMessagesChange = vi.fn();
+      const props = { ...baseProps(), aiProvider: 'codex' as const, onMessagesChange };
+      render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+      const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (m: any) => void;
+
+      await act(async () => {
+        handler({ type: 'streaming_start', projectPath: '/project', scope: 'chat', turnSeq: 1 });
+        handler({
+          type: 'assistant', projectPath: '/project', scope: 'chat', turnSeq: 1,
+          message: { content: [{ type: 'tool_use', id: 'item_0', name: 'Bash', input: { command: 'pwd' } }] },
+        });
+        handler({
+          type: 'user', projectPath: '/project', scope: 'chat', turnSeq: 1,
+          message: { content: [{ type: 'tool_result', tool_use_id: 'item_0', content: '/project' }] },
+        });
+        handler({
+          type: 'streaming_start', projectPath: '/project', scope: 'chat', turnSeq: 2,
+        });
+        handler({
+          type: 'assistant', projectPath: '/project', scope: 'chat', turnSeq: 2,
+          message: { content: [{ type: 'tool_use', id: 'item_0', name: 'Bash', input: { command: 'git status' } }] },
+        });
+        handler({
+          type: 'user', projectPath: '/project', scope: 'chat', turnSeq: 2,
+          message: { content: [{ type: 'tool_result', tool_use_id: 'item_0', content: 'On branch main' }] },
+        });
+      });
+
+      await waitFor(() => {
+        const messages = onMessagesChange.mock.calls.at(-1)![0];
+        const calls = messages.flatMap((message: any) => message.toolCalls ?? []);
+        expect(calls).toEqual(expect.arrayContaining([
+          expect.objectContaining({ id: 'item_0', turnSeq: 1, input: expect.stringContaining('pwd'), output: '/project' }),
+          expect.objectContaining({ id: 'item_0', turnSeq: 2, input: expect.stringContaining('git status'), output: 'On branch main' }),
+        ]));
+        expect(calls).toHaveLength(2);
+      });
+    });
   });
 });

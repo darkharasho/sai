@@ -94,6 +94,11 @@ const PROVIDER_OPTIONS: { id: AIProvider; label: string; svg: string; color: str
   { id: 'kimi', label: 'Kimi CLI', svg: 'svg/kimi.svg', color: '#fff' },
 ];
 
+function lowestCodexEffort(model: CodexModelOption | undefined): CodexEffort | undefined {
+  const supported = effortsForCodexModel(model);
+  return ALL_CODEX_EFFORTS.find(effort => supported.includes(effort));
+}
+
 export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew, onHistoryRetentionChange, claudeModel, onClaudeModelChange, claudeEffort, onClaudeEffortChange, claudeModels = [] }: Props) {
   const [suspendTimeout, setSuspendTimeout] = useState<number>(DEFAULT_TIMEOUT);
   const [editorFontSize, setEditorFontSize] = useState(13);
@@ -105,6 +110,8 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [claudeMaxBudgetUsd, setClaudeMaxBudgetUsd] = useState(0);
   const [claude1MContext, setClaude1MContext] = useState(false);
   const [lowTokenMode, setLowTokenMode] = useState(false);
+  const [codexLowTokenMode, setCodexLowTokenMode] = useState(false);
+  const [geminiLowTokenMode, setGeminiLowTokenMode] = useState(false);
   const [providerOpen, setProviderOpen] = useState(false);
   const providerRef = useRef<HTMLDivElement>(null);
   const [commitMessageProvider, setCommitMessageProvider] = useState<AIProvider>('claude');
@@ -283,6 +290,8 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.settingsGet('claudeMaxBudgetUsd', 0).then((v: number) => setClaudeMaxBudgetUsd(Number(v) || 0));
     window.sai.settingsGet('claude1MContext', false).then((v: boolean) => setClaude1MContext(!!v));
     window.sai.settingsGet('lowTokenMode', false).then((v: boolean) => setLowTokenMode(!!v));
+    window.sai.settingsGet('codexLowTokenMode', false).then((v: boolean) => setCodexLowTokenMode(!!v));
+    window.sai.settingsGet('geminiLowTokenMode', false).then((v: boolean) => setGeminiLowTokenMode(!!v));
     window.sai.settingsGet('commitMessageProvider', 'claude').then((v: string) => {
       if (isAIProvider(v)) setCommitMessageProvider(v);
     });
@@ -522,6 +531,75 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     }
   };
 
+  const handleCodexLowTokenModeChange = async (enabled: boolean) => {
+    const sai = window.sai;
+    if (enabled) {
+      const snapshot = await sai.settingsGet('codex', {});
+      const model = codexAvailableModels.find(option => option.id === codexDefaultModel);
+      const effort = lowestCodexEffort(model);
+      await sai.settingsSet('codexLowTokenModeSnapshot', snapshot);
+      if (effort) {
+        codexSettingsRevision.current += 1;
+        codexSettingsTouchedRef.current.add('effort');
+        codexSettingsRef.current = { ...codexSettingsRef.current, effort };
+        setCodexDefaultEffort(effort);
+        await sai.settingsSet('codex', codexSettingsRef.current);
+        onSettingChange?.('codexEffort', effort);
+      }
+      await sai.settingsSet('codexLowTokenMode', true);
+      setCodexLowTokenMode(true);
+      return;
+    }
+
+    const snapshot = await sai.settingsGet('codexLowTokenModeSnapshot', null);
+    if (snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)) {
+      const restored = snapshot as { model?: string; permission?: 'auto' | 'read-only' | 'full-access'; effort?: CodexEffort };
+      codexSettingsRevision.current += 1;
+      codexSettingsRef.current = restored;
+      if (restored.model) setCodexDefaultModel(restored.model);
+      if (restored.permission) setCodexDefaultPermission(restored.permission);
+      if (restored.effort) setCodexDefaultEffort(restored.effort);
+      await sai.settingsSet('codex', restored);
+      if (restored.model) onSettingChange?.('codexModel', restored.model);
+      if (restored.permission) onSettingChange?.('codexPermission', restored.permission);
+      if (restored.effort) onSettingChange?.('codexEffort', restored.effort);
+    }
+    await sai.settingsSet('codexLowTokenMode', false);
+    setCodexLowTokenMode(false);
+  };
+
+  const handleGeminiLowTokenModeChange = async (enabled: boolean) => {
+    const sai = window.sai;
+    if (enabled) {
+      const snapshot = await sai.settingsGet('gemini', {});
+      const lowTokenModel = geminiAvailableModels.some(model => model.id === 'gemini-2.5-flash-lite')
+        ? 'gemini-2.5-flash-lite'
+        : geminiAvailableModels.some(model => model.id === 'gemini-2.5-flash')
+          ? 'gemini-2.5-flash'
+          : geminiDefaultModel;
+      await sai.settingsSet('geminiLowTokenModeSnapshot', snapshot);
+      await sai.settingsSet('gemini', { ...snapshot, model: lowTokenModel, conversationMode: 'fast' });
+      setGeminiDefaultModel(lowTokenModel);
+      setGeminiDefaultConversationMode('fast');
+      onSettingChange?.('geminiModel', lowTokenModel);
+      onSettingChange?.('geminiConversationMode', 'fast');
+      await sai.settingsSet('geminiLowTokenMode', true);
+      setGeminiLowTokenMode(true);
+      return;
+    }
+
+    const snapshot = await sai.settingsGet('geminiLowTokenModeSnapshot', null);
+    if (snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)) {
+      const restored = snapshot as { model?: string; approvalMode?: 'default' | 'auto_edit' | 'yolo' | 'plan'; conversationMode?: 'planning' | 'fast' };
+      await sai.settingsSet('gemini', restored);
+      if (restored.model) { setGeminiDefaultModel(restored.model); onSettingChange?.('geminiModel', restored.model); }
+      if (restored.approvalMode) { setGeminiDefaultApprovalMode(restored.approvalMode); onSettingChange?.('geminiApprovalMode', restored.approvalMode); }
+      if (restored.conversationMode) { setGeminiDefaultConversationMode(restored.conversationMode); onSettingChange?.('geminiConversationMode', restored.conversationMode); }
+    }
+    await sai.settingsSet('geminiLowTokenMode', false);
+    setGeminiLowTokenMode(false);
+  };
+
   const handleClaudeMaxBudgetChange = (value: number) => {
     setClaudeMaxBudgetUsd(value);
     window.sai.settingsSet('claudeMaxBudgetUsd', value);
@@ -723,10 +801,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
         </select>
       </div>
 
-      <div className="settings-row settings-row-spaced">
-        <div className="settings-row-info"><div className="settings-row-name">Low token mode</div><div className="settings-row-desc">Temporarily applies Sonnet/medium and cost-saving Claude and Swarm defaults. Turning it off restores your saved settings.</div></div>
-        <button className={`settings-toggle${lowTokenMode ? ' on' : ''}`} onClick={() => { void handleLowTokenModeChange(!lowTokenMode); }} role="switch" aria-checked={lowTokenMode}><span className="settings-toggle-thumb" /></button>
-      </div>
       <div className="settings-row settings-row-spaced">
         <div className="settings-row-info">
           <div className="settings-row-name">Minimap</div>
@@ -1235,6 +1309,13 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       <div className="settings-divider" />
 
       <div className="settings-section-label">Claude</div>
+      <div className="settings-row settings-row-spaced">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Low token mode</div>
+          <div className="settings-row-desc">Use Sonnet with medium effort, compact context sooner, and disable extra Claude output. Turning it off restores your saved Claude and Swarm defaults.</div>
+        </div>
+        <button className={`settings-toggle${lowTokenMode ? ' on' : ''}`} onClick={() => { void handleLowTokenModeChange(!lowTokenMode); }} role="switch" aria-checked={lowTokenMode}><span className="settings-toggle-thumb" /></button>
+      </div>
       <div className="settings-row">
         <div className="settings-row-info">
           <div className="settings-row-name">Backend</div>
@@ -1339,6 +1420,13 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     return (
     <section className="settings-section">
       <div className="settings-section-label">Codex</div>
+      <div className="settings-row settings-row-spaced">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Low token mode</div>
+          <div className="settings-row-desc">Keep your selected model and use its lowest supported reasoning effort. Turning it off restores your previous Codex defaults.</div>
+        </div>
+        <button className={`settings-toggle${codexLowTokenMode ? ' on' : ''}`} onClick={() => { void handleCodexLowTokenModeChange(!codexLowTokenMode); }} role="switch" aria-checked={codexLowTokenMode}><span className="settings-toggle-thumb" /></button>
+      </div>
       <div className="settings-row">
         <div className="settings-row-info">
           <div className="settings-row-name">Backend</div>
@@ -1416,6 +1504,13 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const renderGeminiPage = () => (
     <section className="settings-section">
       <div className="settings-section-label">Gemini</div>
+      <div className="settings-row settings-row-spaced">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Low token mode</div>
+          <div className="settings-row-desc">Use Gemini 2.5 Flash Lite (or Flash when Lite is unavailable) and Fast conversation mode. Turning it off restores your previous Gemini defaults.</div>
+        </div>
+        <button className={`settings-toggle${geminiLowTokenMode ? ' on' : ''}`} onClick={() => { void handleGeminiLowTokenModeChange(!geminiLowTokenMode); }} role="switch" aria-checked={geminiLowTokenMode}><span className="settings-toggle-thumb" /></button>
+      </div>
       {geminiAvailableModels.length > 0 && (
         <div className="settings-row">
           <div className="settings-row-info">
@@ -1469,6 +1564,12 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const renderKimiPage = () => (
     <section className="settings-section">
       <div className="settings-section-label">Kimi</div>
+      <div className="settings-row settings-row-spaced">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Low token mode</div>
+          <div className="settings-row-desc">Kimi CLI currently exposes only Kimi K3, so there is no lower-token preset to apply yet.</div>
+        </div>
+      </div>
       <div className="settings-row">
         <div className="settings-row-info">
           <div className="settings-row-name">Default model</div>

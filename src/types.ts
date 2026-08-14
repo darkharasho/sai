@@ -120,6 +120,8 @@ export interface GitHubWatcherSnapshot {
 
 export interface ToolCall {
   id?: string;
+  /** Turn-local identity for providers whose raw tool item IDs restart on each turn. */
+  turnSeq?: number;
   type: 'file_edit' | 'terminal_command' | 'file_read' | 'file_search' | 'web_fetch' | 'todo' | 'agent' | 'notebook' | 'question' | 'plan' | 'worktree' | 'skill' | 'schedule' | 'task' | 'mcp' | 'other';
   name: string;
   input: string;
