@@ -1,8 +1,11 @@
 import { emitChatMessage, getMainWin } from '../claude';
+import path from 'node:path';
 import { notifyCompletion } from '../notify';
 import { registerWorkspaceBackendHooks } from '../workspace';
+import * as swarmMcpHost from '../swarmMcpHost';
 import { fetchBundledCodexModels } from './bundledModels';
 import { AppServerBackend } from './appServerBackend';
+import { buildCodexChatMcpConfig } from './chatMcpConfig';
 import { SdkCodexBackend } from './sdkBackend';
 import { CODEX_MCP_CONFIG_CONFIRMATION_TOKEN, codexScopeKey, isCodexMcpConfigWriteRequest, type CodexAppServerPreviewStatus, type CodexApprovalDecision, type CodexApprovalResult, type CodexBackend, type CodexBackendMode, type CodexMcpConfigResult, type CodexMcpConfigServer, type CodexMcpElicitationDecision, type CodexMcpRuntimeStatus, type CodexModelResult, type CodexSendArgs, type CodexStartArgs, type CodexUserInputResponse } from './types';
 
@@ -87,6 +90,12 @@ interface AppServerPreviewBackend extends CodexBackend {
   readonly previewStatus: CodexAppServerPreviewStatus;
 }
 
+function codexMcpServerScriptPath(): string {
+  // vite-electron emits the main bundle and swarm-mcp-server bundle together
+  // in development and packaged builds.
+  return path.join(__dirname, 'swarm-mcp-server.js');
+}
+
 function makeSdkBackend(): CodexBackend {
   return new SdkCodexBackend({
     emit: emitChatMessage,
@@ -94,6 +103,16 @@ function makeSdkBackend(): CodexBackend {
     notifyCompletion: (projectPath, info) => {
       const win = getMainWin();
       if (win) notifyCompletion(win, projectPath, info);
+    },
+    buildChatMcpConfig: (workspace) => {
+      const handle = swarmMcpHost.start();
+      return buildCodexChatMcpConfig({
+        socketPath: handle.socketPath,
+        secret: handle.secret,
+        workspace,
+        mcpServerScriptPath: codexMcpServerScriptPath(),
+        electronExecPath: process.execPath,
+      });
     },
   });
 }

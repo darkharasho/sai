@@ -44,6 +44,8 @@ export interface SdkCodexBackendDeps {
   getEnv?: () => NodeJS.ProcessEnv;
   registerWorkspace?: (projectPath: string) => void;
   notifyCompletion?: (projectPath: string, info: { provider: string; summary?: string }) => void;
+  /** Creates the private SAI chat MCP configuration for one workspace. */
+  buildChatMcpConfig?: (workspace: string) => NonNullable<CodexOptions['config']>;
 }
 
 interface ScopeMeta {
@@ -105,6 +107,7 @@ export class SdkCodexBackend implements CodexBackend {
   private readonly getEnv: () => NodeJS.ProcessEnv;
   private readonly registerWorkspace: (projectPath: string) => void;
   private readonly notifyCompletion: (projectPath: string, info: { provider: string; summary?: string }) => void;
+  private readonly buildChatMcpConfig?: (workspace: string) => NonNullable<CodexOptions['config']>;
 
   constructor(deps: SdkCodexBackendDeps = {}) {
     this.createClient = deps.createClient ?? ((options) => {
@@ -121,6 +124,7 @@ export class SdkCodexBackend implements CodexBackend {
       try { getOrCreateWorkspace(projectPath); } catch { /* isolated tests or shutdown */ }
     });
     this.notifyCompletion = deps.notifyCompletion ?? (() => undefined);
+    this.buildChatMcpConfig = deps.buildChatMcpConfig;
   }
 
   start(args: CodexStartArgs): void {
@@ -173,6 +177,7 @@ export class SdkCodexBackend implements CodexBackend {
       model: args.model,
       metaPreamble: runtime.metaPreamble,
       additionalDirectories: runtime.additionalDirectories,
+      clientConfig: runtime.kind === 'chat' ? this.buildChatMcpConfig?.(runtime.cwd) : undefined,
     });
     const configIdentity = JSON.stringify({ thread: built.thread, client: built.clientConfig });
     const active: ActiveTurn = {

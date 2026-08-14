@@ -79,7 +79,10 @@ interface FakeHarness {
   timeline: string[];
 }
 
-function harness(streams: Array<AsyncGenerator<ThreadEvent> | Error> = []): FakeHarness {
+function harness(
+  streams: Array<AsyncGenerator<ThreadEvent> | Error> = [],
+  deps: Pick<ConstructorParameters<typeof SdkCodexBackend>[0], 'buildChatMcpConfig'> = {},
+): FakeHarness {
   const emitted: Array<Record<string, unknown>> = [];
   const clients: FakeHarness['clients'] = [];
   const runs: FakeHarness['runs'] = [];
@@ -120,6 +123,7 @@ function harness(streams: Array<AsyncGenerator<ThreadEvent> | Error> = []): Fake
       getEnv: () => ({ PATH: '/bin', EMPTY: undefined, TOKEN: 'secret' }),
       registerWorkspace,
       notifyCompletion,
+      ...deps,
     }),
     emitted,
     clients,
@@ -137,6 +141,30 @@ async function settle(): Promise<void> {
 }
 
 describe('SdkCodexBackend', () => {
+  it('injects SAI chat MCP configuration only for chat scopes', async () => {
+    const buildChatMcpConfig = vi.fn(() => ({
+      mcp_servers: { sai: { command: '/electron', args: ['/app/swarm-mcp-server.js'] } },
+      developer_instructions: 'Use SAI chat tools.',
+    }));
+    const h = harness([], { buildChatMcpConfig });
+
+    h.backend.start({ projectPath: '/chat', scope: 'chat', kind: 'chat' });
+    h.backend.send({ projectPath: '/chat', scope: 'chat', message: 'hello' });
+    await settle();
+
+    expect(buildChatMcpConfig).toHaveBeenCalledWith('/chat');
+    expect(h.clients[0]?.options.config).toMatchObject({
+      mcp_servers: { sai: { command: '/electron', args: ['/app/swarm-mcp-server.js'] } },
+      developer_instructions: 'Use SAI chat tools.',
+    });
+
+    h.backend.start({ projectPath: '/task', scope: 'task', kind: 'task' });
+    h.backend.send({ projectPath: '/task', scope: 'task', message: 'hello' });
+    await settle();
+
+    expect(buildChatMcpConfig).toHaveBeenCalledTimes(1);
+    expect(h.clients[1]?.options.config).toEqual({});
+  });
   it('returns typed unsupported results for App Server-only input requests', () => {
     const h = harness();
 

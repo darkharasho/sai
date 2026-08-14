@@ -26,6 +26,8 @@ export interface CodexSdkOptionInput {
   model?: string;
   metaPreamble?: string;
   additionalDirectories?: readonly string[];
+  /** Process-scoped configuration supplied by SAI (for example its chat MCP server). */
+  clientConfig?: NonNullable<CodexOptions['config']>;
 }
 
 export interface BuiltCodexSdkOptions {
@@ -69,12 +71,15 @@ export function buildCodexSdkOptions(input: CodexSdkOptionInput): BuiltCodexSdkO
     thread.additionalDirectories = [...input.additionalDirectories];
   }
 
-  return {
-    thread,
-    clientConfig: input.metaPreamble
-      ? { developer_instructions: input.metaPreamble }
-      : {},
-  };
+  const clientConfig = { ...(input.clientConfig ?? {}) };
+  const suppliedInstructions = typeof clientConfig.developer_instructions === 'string'
+    ? clientConfig.developer_instructions.trim()
+    : '';
+  const metaPreamble = input.metaPreamble?.trim() ?? '';
+  const developerInstructions = [suppliedInstructions, metaPreamble].filter(Boolean).join('\n\n');
+  if (developerInstructions) clientConfig.developer_instructions = developerInstructions;
+
+  return { thread, clientConfig };
 }
 
 export function buildCodexInput(message: string, imagePaths?: string[]): Input {

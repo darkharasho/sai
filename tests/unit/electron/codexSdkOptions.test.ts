@@ -61,6 +61,22 @@ describe('buildCodexSdkOptions', () => {
     }).clientConfig).toEqual({ developer_instructions: 'Projects live under /meta' });
   });
 
+  it('preserves SAI client configuration and appends a meta preamble to its guidance', () => {
+    const result = buildCodexSdkOptions({
+      cwd: '/repo',
+      metaPreamble: 'Projects live under /meta',
+      clientConfig: {
+        mcp_servers: { sai: { command: '/Electron', args: ['/app/server.js'] } },
+        developer_instructions: 'Use SAI tools when appropriate.',
+      },
+    });
+
+    expect(result.clientConfig).toEqual({
+      mcp_servers: { sai: { command: '/Electron', args: ['/app/server.js'] } },
+      developer_instructions: 'Use SAI tools when appropriate.\n\nProjects live under /meta',
+    });
+  });
+
   it('returns an empty client config without a meta preamble', () => {
     expect(buildCodexSdkOptions({ cwd: '/repo' }).clientConfig).toEqual({});
     expect(buildCodexSdkOptions({ cwd: '/repo', metaPreamble: '' }).clientConfig).toEqual({});
