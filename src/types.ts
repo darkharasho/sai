@@ -503,6 +503,8 @@ export interface SwarmTask {
   prompt: string;
   provider: AIProvider;
   model: string;
+  /** Claude effort selected when this task was queued. */
+  effort?: EffortLevel;
   approvalPolicy: ApprovalPolicy;
   status: SwarmTaskStatus;
   branch: string;

@@ -77,6 +77,7 @@ import { applyQuestionEvent, questionWorkspaces, questionSessionIdsFor, scopeKey
 import { mergeSessionRefresh } from './lib/sessionRefresh';
 import { turnEndIsStale } from './lib/turnSeqGuard';
 import { resolveClaudeConfig, setWorkspaceOverride, sanitizeOverrideMap, type ClaudeOverrideMap } from './lib/claudeWorkspaceConfig';
+import { resolveSwarmClaudeConfig } from './lib/swarmClaudeConfig';
 import type { WaitMeta } from '../electron/services/waitClassifier';
 import { WAKEUP_GRACE_MS } from '../electron/services/waitClassifier';
 
@@ -1001,6 +1002,13 @@ export default function App() {
             .catch(() => { /* best-effort */ });
           const orchSessionId2 = orchestratorSessionIdByWsRef.current.get(ws);
           if (orchSessionId2) {
+            const config = resolveSwarmClaudeConfig({
+              orchestratorModel: isModelChoice(swarmSettingsRef.current.orchestratorModel)
+                ? swarmSettingsRef.current.orchestratorModel
+                : null,
+              fallbackModel: modelChoice,
+              effort: effortLevel,
+            });
             const lines: string[] = [];
             lines.push(`[swarm-status] batch complete.`);
             lines.push(`  totals: ${totalTasks} task(s) in ${Math.round(durationMs / 1000)}s`);
@@ -1012,8 +1020,8 @@ export default function App() {
                 lines.join('\n'),
                 undefined,
                 'default',
-                undefined,
-                undefined,
+                config.effort,
+                config.model,
                 orchSessionId2,
               );
             } catch { /* best-effort */ }
@@ -1233,7 +1241,7 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProjectPath, swarmTasksByWs]);
 
-  async function spawnSwarmTask(input: { prompt: string; provider: AIProvider; model: string; approvalPolicy: ApprovalPolicy; projectPath?: string; projectLinkName?: string }): Promise<SwarmTask> {
+  async function spawnSwarmTask(input: { prompt: string; provider: AIProvider; model: string; effort?: EffortLevel; approvalPolicy: ApprovalPolicy; projectPath?: string; projectLinkName?: string }): Promise<SwarmTask> {
     if (!activeProjectPath) throw new Error('no active workspace');
     const id = crypto.randomUUID();
     const sessionId = crypto.randomUUID();
@@ -1279,6 +1287,7 @@ export default function App() {
       prompt: input.prompt,
       provider: input.provider,
       model: input.model,
+      effort: input.effort ?? effortLevel,
       approvalPolicy: input.approvalPolicy,
       status: 'queued',
       branch,
@@ -1350,6 +1359,7 @@ export default function App() {
       const cfg = swarmSettingsRef.current;
       const provider = (i.provider as AIProvider) ?? cfg.defaultTaskProvider ?? aiProvider;
       const model = i.model ?? (cfg.defaultTaskModel || undefined) ?? modelChoice;
+      const effort = effortLevel;
       const approvalPolicy = (i.approvalPolicy as ApprovalPolicy) ?? cfg.defaultApprovalPolicy ?? 'auto-read';
       let projectPath: string | undefined;
       let projectLinkName: string | undefined;
@@ -1368,6 +1378,7 @@ export default function App() {
         prompt: i.prompt,
         provider,
         model,
+        effort,
         approvalPolicy,
         projectPath,
         projectLinkName,
@@ -2915,6 +2926,13 @@ export default function App() {
               // prompt teaches it to reply only when action is required.
               const orchSessionId = orchestratorSessionIdByWsRef.current.get(msg.projectPath);
               if (orchSessionId) {
+                const config = resolveSwarmClaudeConfig({
+                  orchestratorModel: isModelChoice(swarmSettingsRef.current.orchestratorModel)
+                    ? swarmSettingsRef.current.orchestratorModel
+                    : null,
+                  fallbackModel: modelChoice,
+                  effort: effortLevel,
+                });
                 const outcome = statusPatch.status === 'done' ? 'completed' : 'failed';
                 const lines: string[] = [];
                 lines.push(`[swarm-status] task ${patchedTask.title.replace(/[\r\n]+/g, ' ').slice(0, 80)} ${outcome}.`);
@@ -2962,8 +2980,8 @@ export default function App() {
                     lines.join('\n'),
                     undefined,
                     'default',
-                    undefined,
-                    undefined,
+                    config.effort,
+                    config.model,
                     orchSessionId,
                   );
                 } catch { /* best-effort */ }

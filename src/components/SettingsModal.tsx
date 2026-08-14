@@ -101,8 +101,10 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [aiProvider, setAiProvider] = useState<AIProvider>('claude');
   const [claudeBackend, setClaudeBackend] = useState<'cli' | 'sdk'>('sdk');
   const [claudeShowReasoning, setClaudeShowReasoning] = useState(false);
+  const [claudeAgentProgressSummaries, setClaudeAgentProgressSummaries] = useState(true);
   const [claudeMaxBudgetUsd, setClaudeMaxBudgetUsd] = useState(0);
   const [claude1MContext, setClaude1MContext] = useState(false);
+  const [lowTokenMode, setLowTokenMode] = useState(false);
   const [providerOpen, setProviderOpen] = useState(false);
   const providerRef = useRef<HTMLDivElement>(null);
   const [commitMessageProvider, setCommitMessageProvider] = useState<AIProvider>('claude');
@@ -277,8 +279,10 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if (v === 'cli' || v === 'sdk') setClaudeBackend(v);
     });
     window.sai.settingsGet('claudeShowReasoning', false).then((v: boolean) => setClaudeShowReasoning(!!v));
+    window.sai.settingsGet('claudeAgentProgressSummaries', true).then((v: boolean) => setClaudeAgentProgressSummaries(v !== false));
     window.sai.settingsGet('claudeMaxBudgetUsd', 0).then((v: number) => setClaudeMaxBudgetUsd(Number(v) || 0));
     window.sai.settingsGet('claude1MContext', false).then((v: boolean) => setClaude1MContext(!!v));
+    window.sai.settingsGet('lowTokenMode', false).then((v: boolean) => setLowTokenMode(!!v));
     window.sai.settingsGet('commitMessageProvider', 'claude').then((v: string) => {
       if (isAIProvider(v)) setCommitMessageProvider(v);
     });
@@ -476,6 +480,46 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     setClaudeShowReasoning(value);
     window.sai.settingsSet('claudeShowReasoning', value);
     onSettingChange?.('claudeShowReasoning', value);
+  };
+
+  const handleClaudeAgentProgressSummariesChange = (value: boolean) => {
+    setClaudeAgentProgressSummaries(value);
+    window.sai.settingsSet('claudeAgentProgressSummaries', value);
+    onSettingChange?.('claudeAgentProgressSummaries', value);
+  };
+
+  const handleLowTokenModeChange = async (enabled: boolean) => {
+    const sai = window.sai;
+    if (enabled) {
+      const snapshot = await Promise.all([
+        sai.settingsGet('claude', {}), sai.settingsGet('claudeShowReasoning', false),
+        sai.settingsGet('claudeAgentProgressSummaries', true), sai.settingsGet('autoCompactThreshold', 0),
+        sai.settingsGet('swarm.concurrencyCap', 5), sai.settingsGet('swarm.orchestratorModel', ''),
+        sai.settingsGet('swarm.defaultTaskModel', ''), sai.settingsGet('claudeMaxBudgetUsd', 0),
+      ]);
+      await sai.settingsSet('lowTokenModeSnapshot', snapshot);
+      await Promise.all([
+        sai.settingsSet('claude', { ...snapshot[0], model: 'sonnet', effort: 'medium', workspaceOverrides: {} }),
+        sai.settingsSet('claudeShowReasoning', false), sai.settingsSet('claudeAgentProgressSummaries', false),
+        sai.settingsSet('autoCompactThreshold', 60), sai.settingsSet('swarm.concurrencyCap', 1),
+        sai.settingsSet('swarm.orchestratorModel', 'sonnet'), sai.settingsSet('swarm.defaultTaskModel', 'sonnet'),
+        sai.settingsSet('claudeMaxBudgetUsd', 0), sai.settingsSet('lowTokenMode', true),
+      ]);
+      onClaudeModelChange?.('sonnet'); onClaudeEffortChange?.('medium');
+      setClaudeShowReasoning(false); setClaudeAgentProgressSummaries(false); setClaudeMaxBudgetUsd(0); setLowTokenMode(true);
+    } else {
+      const snapshot = await sai.settingsGet('lowTokenModeSnapshot', null) as unknown[] | null;
+      if (!Array.isArray(snapshot) || snapshot.length !== 8) return;
+      const [claude, reasoning, progress, compact, cap, orchestrator, taskModel, budget] = snapshot;
+      await Promise.all([
+        sai.settingsSet('claude', claude), sai.settingsSet('claudeShowReasoning', reasoning), sai.settingsSet('claudeAgentProgressSummaries', progress),
+        sai.settingsSet('autoCompactThreshold', compact), sai.settingsSet('swarm.concurrencyCap', cap), sai.settingsSet('swarm.orchestratorModel', orchestrator),
+        sai.settingsSet('swarm.defaultTaskModel', taskModel), sai.settingsSet('claudeMaxBudgetUsd', budget), sai.settingsSet('lowTokenMode', false),
+      ]);
+      const c = claude as { model?: ModelChoice; effort?: EffortLevel };
+      if (c.model) onClaudeModelChange?.(c.model); if (c.effort) onClaudeEffortChange?.(c.effort);
+      setClaudeShowReasoning(!!reasoning); setClaudeAgentProgressSummaries(progress !== false); setClaudeMaxBudgetUsd(Number(budget) || 0); setLowTokenMode(false);
+    }
   };
 
   const handleClaudeMaxBudgetChange = (value: number) => {
@@ -679,6 +723,10 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
         </select>
       </div>
 
+      <div className="settings-row settings-row-spaced">
+        <div className="settings-row-info"><div className="settings-row-name">Low token mode</div><div className="settings-row-desc">Temporarily applies Sonnet/medium and cost-saving Claude and Swarm defaults. Turning it off restores your saved settings.</div></div>
+        <button className={`settings-toggle${lowTokenMode ? ' on' : ''}`} onClick={() => { void handleLowTokenModeChange(!lowTokenMode); }} role="switch" aria-checked={lowTokenMode}><span className="settings-toggle-thumb" /></button>
+      </div>
       <div className="settings-row settings-row-spaced">
         <div className="settings-row-info">
           <div className="settings-row-name">Minimap</div>
@@ -1152,6 +1200,22 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             Browse
           </button>
         </div>
+      </div>
+      <div className="settings-row settings-row-spaced">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Subagent progress summaries</div>
+          <div className="settings-row-desc">Generate periodic AI summaries while subagents run. Disable to avoid this extra model usage. SDK backend only.</div>
+        </div>
+        <button
+          className={`settings-toggle${claudeAgentProgressSummaries ? ' on' : ''}`}
+          onClick={() => handleClaudeAgentProgressSummariesChange(!claudeAgentProgressSummaries)}
+          role="switch"
+          aria-checked={claudeAgentProgressSummaries}
+          disabled={claudeBackend !== 'sdk'}
+          style={claudeBackend !== 'sdk' ? { opacity: 0.4, pointerEvents: 'none' } : undefined}
+        >
+          <span className="settings-toggle-thumb" />
+        </button>
       </div>
       <div className="settings-row">
         <div className="settings-row-info">

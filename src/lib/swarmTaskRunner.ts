@@ -78,7 +78,7 @@ export async function runSwarmTask(task: SwarmTask, deps: SwarmRunnerDeps): Prom
     const scopeCwd = cwdForTask(task);
     const permMode = permModeForPolicy(task.approvalPolicy);
     await deps.claudeStart(projectPath, task.sessionId, 'task', undefined, scopeCwd);
-    deps.claudeSend(projectPath, task.prompt, undefined, permMode, undefined, task.model, task.sessionId);
+    deps.claudeSend(projectPath, task.prompt, undefined, permMode, task.effort, task.model, task.sessionId);
     return true;
   }
 

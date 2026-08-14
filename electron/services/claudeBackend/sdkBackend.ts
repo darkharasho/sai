@@ -947,7 +947,7 @@ export class SdkBackend implements ClaudeBackend {
       maxBudgetUsd: Number(readSaiSetting('claudeMaxBudgetUsd')) || undefined,
       oneMContext: readSaiSetting('claude1MContext') === true,
       promptSuggestions: kind === 'chat',
-      agentProgressSummaries: true,
+      agentProgressSummaries: readSaiSetting('claudeAgentProgressSummaries') !== false,
       stopHook,
       preToolUseHook: sudoHook,
     });
@@ -1443,6 +1443,7 @@ function readSdkFeatureKey(): string {
     readSaiSetting('claudeShowReasoning') === true ? '1' : '0',
     String(Number(readSaiSetting('claudeMaxBudgetUsd')) || 0),
     readSaiSetting('claude1MContext') === true ? '1' : '0',
+    readSaiSetting('claudeAgentProgressSummaries') !== false ? '1' : '0',
   ].join('|');
 }
 

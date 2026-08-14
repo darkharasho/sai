@@ -16,6 +16,7 @@ function makeTask(overrides: Partial<SwarmTask> = {}): SwarmTask {
     prompt: 'create hello.txt with hi',
     provider: 'claude',
     model: 'claude-sonnet',
+    effort: 'medium',
     approvalPolicy: 'always-ask',
     status: 'streaming',
     branch: 'feat/x',
@@ -94,7 +95,7 @@ describe('runSwarmTask', () => {
       'create hello.txt with hi',
       undefined,
       'default',
-      undefined,
+      'medium',
       'claude-sonnet',
       'session-1',
     );
