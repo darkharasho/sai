@@ -9,8 +9,13 @@
   --bg-hover: #21292f;
   --bg-elevated: #1c2027;
   --border: #1e2228;
-  --accent: #c7910c;
-  --accent-hover: #f5b832;
+  --accent: #d4a017;
+  --accent-hover: #f0b820;
+  --accent-2: #d4770c;
+  --accent-3: #e35535;
+  --accent-dim: rgba(212, 160, 23, 0.12);
+  --accent-rgb: 212, 160, 23;
+  --border-accent: rgba(212, 160, 23, 0.35);
   --text: #bec6d0;
   --text-secondary: #a0acbb;
   --text-muted: #5a6a7a;

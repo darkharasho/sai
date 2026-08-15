@@ -169,7 +169,6 @@ export default function StreamingAssistantHead({ streaming, content, durationMs,
         mode={isStatic ? 'static' : driver.chainMode}
         size={16}
         className="chat-msg-dot chat-msg-sai"
-        color="#c7913b"
       />
       <div className="chat-msg-body">
         {showClock && (

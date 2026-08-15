@@ -6,7 +6,8 @@ import KeybindingsPage from './Settings/KeybindingsPage';
 import SwarmSettings from './Settings/SwarmSettings';
 import RemoteSettings from './Settings/RemoteSettings';
 import IntegrationsPage from './Settings/IntegrationsPage';
-import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, getActiveHighlightTheme, setActiveHighlightTheme, getShikiHighlighter, type HighlightThemeId } from '../themes';
+import { THEMES, applyTheme, setAccent, getActiveAccentId, type ThemeId, HIGHLIGHT_THEMES, getActiveHighlightTheme, setActiveHighlightTheme, getShikiHighlighter, type HighlightThemeId } from '../themes';
+import { ACCENTS, isAccentId, type AccentId } from '../accents';
 import { ALL_CODEX_EFFORTS, effortsForCodexModel, normalizeCodexEffort } from '../lib/codexEffort';
 
 const EFFORT_OPTIONS: { id: EffortLevel; label: string }[] = [
@@ -153,6 +154,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [lastSynced, setLastSynced] = useState<number | null>(null);
   const [isAuthed, setIsAuthed] = useState(false);
   const [theme, setTheme] = useState<ThemeId>('default');
+  const [accent, setAccentState] = useState<AccentId>(getActiveAccentId());
   const [highlightTheme, setHighlightTheme] = useState<HighlightThemeId>('monokai');
   const [roundedCorners, setRoundedCorners] = useState(false);
   const [overlayEnabled, setOverlayEnabled] = useState(false);
@@ -273,6 +275,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.settingsGet('theme', 'default').then((v: string) => {
       const id = v as ThemeId;
       if (THEMES.some(t => t.id === id)) setTheme(id);
+      setAccentState(getActiveAccentId());
     });
     window.sai.settingsGet('highlightTheme', 'monokai').then((v: string) => {
       if (HIGHLIGHT_THEMES.some(t => t.id === v)) setHighlightTheme(v as HighlightThemeId);
@@ -353,9 +356,14 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if ('sidebarWidth' in remote) setSidebarWidth(remote.sidebarWidth);
       if ('autoCompactThreshold' in remote) setAutoCompactThreshold(remote.autoCompactThreshold);
       if ('subprocessMemoryCapMB' in remote) setSubprocessMemoryCapMB(remote.subprocessMemoryCapMB);
+      if ('accent' in remote && isAccentId(remote.accent)) {
+        setAccentState(remote.accent);
+        setAccent(remote.accent);
+      }
       if ('theme' in remote && THEMES.some(t => t.id === remote.theme)) {
         setTheme(remote.theme);
         applyTheme(remote.theme);
+        setAccentState(getActiveAccentId());
       }
       if ('highlightTheme' in remote && HIGHLIGHT_THEMES.some(t => t.id === remote.highlightTheme)) {
         setHighlightTheme(remote.highlightTheme);
@@ -426,8 +434,17 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const handleThemeChange = (id: ThemeId) => {
     setTheme(id);
     applyTheme(id);
+    // A theme switch can change the resolved accent when none was picked.
+    setAccentState(getActiveAccentId());
     window.sai.settingsSet('theme', id);
     onSettingChange?.('theme', id);
+  };
+
+  const handleAccentChange = (id: AccentId) => {
+    setAccentState(id);
+    setAccent(id);
+    window.sai.settingsSet('accent', id);
+    onSettingChange?.('accent', id);
   };
 
   const handleRoundedCornersChange = (value: boolean) => {
@@ -879,6 +896,27 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
               </div>
               <div className="theme-card-label">{t.label}</div>
               {theme === t.id && <Check size={12} className="theme-check" />}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <div className="settings-divider" />
+
+      <section className="settings-section">
+        <div className="settings-section-label">Accent</div>
+        <div className="accent-row">
+          {ACCENTS.map(a => (
+            <button
+              key={a.id}
+              className={`accent-swatch${accent === a.id ? ' active' : ''}`}
+              style={{ background: a.base }}
+              title={a.label}
+              aria-label={a.label}
+              aria-pressed={accent === a.id}
+              onClick={() => handleAccentChange(a.id)}
+            >
+              {accent === a.id && <Check size={13} strokeWidth={3} />}
             </button>
           ))}
         </div>
@@ -2089,6 +2127,31 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             top: 4px;
             right: 4px;
             color: var(--accent);
+          }
+          .accent-row {
+            display: flex;
+            gap: 10px;
+          }
+          .accent-swatch {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            border: 2px solid transparent;
+            box-shadow: 0 0 0 1px var(--border);
+            cursor: pointer;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #0c0f11;
+            transition: transform 0.12s, box-shadow 0.15s;
+          }
+          .accent-swatch:hover {
+            transform: scale(1.08);
+          }
+          .accent-swatch.active {
+            border-color: var(--bg-primary);
+            box-shadow: 0 0 0 2px var(--accent);
           }
           .highlight-preview {
             margin-top: 12px;

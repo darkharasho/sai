@@ -397,7 +397,7 @@ export default function BriefPane(props: BriefPaneProps) {
     border: brief.ready ? 'none' : '1px solid var(--border-subtle)',
     background: brief.ready ? 'var(--accent)' : 'var(--surface-3)',
     color: brief.ready ? '#000' : canCreate ? 'var(--text)' : 'var(--text-muted)',
-    boxShadow: brief.ready ? '0 0 18px rgba(212,160,23,.25)' : 'none',
+    boxShadow: brief.ready ? '0 0 18px rgba(var(--accent-rgb), .25)' : 'none',
     opacity: canCreate ? 1 : 0.5,
   };
 

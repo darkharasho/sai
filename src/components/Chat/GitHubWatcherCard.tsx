@@ -89,7 +89,7 @@ function phaseOf(args: { run: RunState | null; error: string | null }): Phase {
 const PHASE_THEME: Record<Phase, { color: string; label: string; Icon: React.ComponentType<{ size?: number }> }> = {
   pending:     { color: 'var(--text-muted, #8a9099)',  label: 'Connecting',  Icon: Clock },
   queued:      { color: 'var(--text-muted, #8a9099)',  label: 'Queued',      Icon: Clock },
-  in_progress: { color: 'var(--accent, #c7910c)',       label: 'Running',     Icon: CircleDot },
+  in_progress: { color: 'var(--accent)',       label: 'Running',     Icon: CircleDot },
   success:     { color: '#3fb950',                      label: 'Success',     Icon: CheckCircle2 },
   failure:     { color: '#f85149',                      label: 'Failed',      Icon: XCircle },
   cancelled:   { color: 'var(--text-muted, #8a9099)',  label: 'Cancelled',   Icon: MinusCircle },
@@ -303,7 +303,7 @@ function mergeWithWorkflow(live: JobState[], defs: WorkflowJobDef[]): JobState[]
 }
 
 function jobIcon(j: JobState): { Icon: React.ComponentType<{ size?: number }>; color: string; live: boolean } {
-  if (j.status === 'in_progress') return { Icon: CircleDot, color: 'var(--accent, #c7910c)', live: true };
+  if (j.status === 'in_progress') return { Icon: CircleDot, color: 'var(--accent)', live: true };
   if (j.status === 'waiting') return { Icon: Circle, color: 'var(--text-muted, #8a9099)', live: false };
   if (j.status === 'queued') return { Icon: Clock, color: 'var(--text-muted, #8a9099)', live: false };
   if (j.status === 'completed') {

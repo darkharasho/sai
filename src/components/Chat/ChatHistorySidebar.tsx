@@ -549,7 +549,7 @@ export default function ChatHistorySidebar({
           background: var(--accent-dim);
         }
         .history-card-active:hover {
-          background: rgba(212,160,23,0.18);
+          background: rgba(var(--accent-rgb), 0.18);
         }
         .chat-history-card-header {
           display: flex;

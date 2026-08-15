@@ -35,9 +35,10 @@ function TerminalInstance({ tabUid, projectPath, visible, onTerminalReady }: Ter
       cursorBlink: true,
     });
 
-    // Apply saved theme
+    // Apply saved theme. Always re-read: even on the default theme the palette
+    // moves with the active accent (cursor + selection).
     window.sai.settingsGet('theme', 'default').then((v: string) => {
-      if (v !== 'default') xterm.options.theme = getTerminalTheme(v as ThemeId);
+      xterm.options.theme = getTerminalTheme(v as ThemeId);
     });
 
     const fit = new FitAddon();
@@ -583,7 +584,7 @@ export default function TerminalPanel({
         .terminal-tab-rename-input {
           flex: 1;
           background: var(--bg-input, #1a1f24);
-          border: 1px solid var(--accent, #c7910c);
+          border: 1px solid var(--accent);
           color: var(--text);
           font-size: 11px;
           padding: 1px 4px;

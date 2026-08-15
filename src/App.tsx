@@ -31,7 +31,8 @@ import { queueSaveSession } from './lib/sessionSaveQueue';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval, EffortLevel, CodexEffort, CodexModelOption, ModelChoice, ClaudeModelOption, AIProvider } from './types';
 import type { MetaWorkspaceListItem, MetaWorkspaceRuntime } from './types';
 import { isAIProvider } from './types';
-import { THEMES, applyTheme, type ThemeId, HIGHLIGHT_THEMES, setActiveHighlightTheme, type HighlightThemeId } from './themes';
+import { THEMES, applyTheme, setAccent, bootstrapAppearance, type ThemeId, HIGHLIGHT_THEMES, setActiveHighlightTheme, type HighlightThemeId } from './themes';
+import { isAccentId } from './accents';
 import ApprovalBanner from './components/ApprovalBanner';
 import { MessageSquare, TerminalSquare, Code2, ChevronRight, MessageCirclePlus } from 'lucide-react';
 import { IncludedProjectsControl } from './components/MetaWorkspace/IncludedProjectsControl';
@@ -2146,9 +2147,7 @@ export default function App() {
     });
     window.sai.settingsGet('editorFontSize', 13).then(guard((v: number) => setEditorFontSize(v)));
     window.sai.settingsGet('editorMinimap', true).then(guard((v: boolean) => setEditorMinimap(v)));
-    window.sai.settingsGet('theme', 'default').then((v: string) => {
-      if (v !== 'default' && THEMES.some(t => t.id === v)) applyTheme(v as ThemeId);
-    });
+    void bootstrapAppearance();
     window.sai.settingsGet('roundedCorners', false).then((v: boolean) => {
       document.documentElement.classList.toggle('rounded-corners', !!v);
     });
@@ -2249,6 +2248,7 @@ export default function App() {
       if ('editorFontSize' in remote) setEditorFontSize(remote.editorFontSize);
       if ('editorMinimap' in remote) setEditorMinimap(remote.editorMinimap);
       if ('sidebarWidth' in remote) document.documentElement.style.setProperty('--sidebar-width', `${remote.sidebarWidth}px`);
+      if ('accent' in remote && isAccentId(remote.accent)) setAccent(remote.accent);
       if ('theme' in remote && THEMES.some(t => t.id === remote.theme)) applyTheme(remote.theme as ThemeId);
       if ('roundedCorners' in remote) document.documentElement.classList.toggle('rounded-corners', !!remote.roundedCorners);
       if ('highlightTheme' in remote && HIGHLIGHT_THEMES.some(t => t.id === remote.highlightTheme)) setActiveHighlightTheme(remote.highlightTheme as HighlightThemeId);

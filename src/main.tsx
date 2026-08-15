@@ -16,7 +16,11 @@ if (window.location.pathname.startsWith('/render-host') || params.has('render-ho
   // Focus-overlay window: minimal tree, no StrictMode (the view drives
   // window-level mouse-event state through main; double-invoked effects
   // would flap setIgnoreMouseEvents).
-  import('./components/Overlay/OverlayView').then(({ OverlayView }) => {
+  // The overlay is its own window, so it has to load the saved accent/theme
+  // itself — App's bootstrap never runs here.
+  import('./components/Overlay/OverlayView').then(async ({ OverlayView }) => {
+    const { bootstrapAppearance } = await import('./themes');
+    await bootstrapAppearance().catch(() => { /* fall back to the CSS defaults */ });
     ReactDOM.createRoot(root).render(<OverlayView />);
   });
 } else if (import.meta.env.DEV && window.location.pathname.startsWith('/test-harness')) {

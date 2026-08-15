@@ -1,8 +1,19 @@
 import type { ITheme } from '@xterm/xterm';
+import { applyAccent, getAccent, isAccentId, resolveAccentId, type AccentId } from './accents';
 
 export type ThemeId = 'default' | 'midnight' | 'steel';
 
-export const THEMES: { id: ThemeId; label: string; vars: Record<string, string>; terminal: ITheme; titleBar: { color: string; symbolColor: string } }[] = [
+export interface Theme {
+  id: ThemeId;
+  label: string;
+  vars: Record<string, string>;
+  /** Accent used when the user hasn't picked one explicitly. */
+  defaultAccent: AccentId;
+  terminal: ITheme;
+  titleBar: { color: string; symbolColor: string };
+}
+
+export const THEMES: Theme[] = [
   {
     id: 'default',
     label: 'Default',
@@ -14,12 +25,11 @@ export const THEMES: { id: ThemeId; label: string; vars: Record<string, string>;
       '--bg-hover': '#21292f',
       '--bg-elevated': '#1c2027',
       '--border': '#1e2228',
-      '--accent': '#c7910c',
-      '--accent-hover': '#f5b832',
       '--text': '#bec6d0',
       '--text-secondary': '#a0acbb',
       '--text-muted': '#5a6a7a',
     },
+    defaultAccent: 'gold',
     terminal: {
       background: '#0e1114',
       foreground: '#bec6d0',
@@ -49,12 +59,11 @@ export const THEMES: { id: ThemeId; label: string; vars: Record<string, string>;
       '--bg-hover': '#2a2735',
       '--bg-elevated': '#211e2a',
       '--border': '#282432',
-      '--accent': '#a07ee8',
-      '--accent-hover': '#b99af0',
       '--text': '#ccc8d8',
       '--text-secondary': '#a8a0b8',
       '--text-muted': '#605878',
     },
+    defaultAccent: 'violet',
     terminal: {
       background: '#110f17',
       foreground: '#ccc8d8',
@@ -84,12 +93,11 @@ export const THEMES: { id: ThemeId; label: string; vars: Record<string, string>;
       '--bg-hover': '#5c5f68',
       '--bg-elevated': '#4c4f58',
       '--border': '#5a5d66',
-      '--accent': '#4da6d4',
-      '--accent-hover': '#6bbce0',
       '--text': '#e0e0e6',
       '--text-secondary': '#b8b8c4',
       '--text-muted': '#85859a',
     },
+    defaultAccent: 'azure',
     terminal: {
       background: '#40434c',
       foreground: '#e0e0e6',
@@ -110,23 +118,80 @@ export const THEMES: { id: ThemeId; label: string; vars: Record<string, string>;
   },
 ];
 
+let _activeTheme: ThemeId = 'default';
+/** The user's explicit accent choice; null means "follow the theme's default". */
+let _explicitAccent: AccentId | null = null;
+
+export function getActiveTheme(): ThemeId {
+  return _activeTheme;
+}
+
+/** The accent currently painted on :root, after resolving theme fallback. */
+export function getActiveAccentId(): AccentId {
+  const theme = THEMES.find(th => th.id === _activeTheme);
+  return resolveAccentId(_explicitAccent, theme?.defaultAccent);
+}
+
 export function applyTheme(id: ThemeId) {
   const t = THEMES.find(th => th.id === id);
   if (!t) return;
+  _activeTheme = id;
   const root = document.documentElement;
   for (const [prop, val] of Object.entries(t.vars)) {
     root.style.setProperty(prop, val);
   }
-  window.dispatchEvent(new CustomEvent('sai-theme-change', { detail: { id, terminal: t.terminal } }));
+  applyAccent(getActiveAccentId());
+  emitThemeChange();
   window.sai?.setTitleBarOverlay?.(t.titleBar.color, t.titleBar.symbolColor);
+}
+
+/** Set the accent. Pass null to fall back to the active theme's default. */
+export function setAccent(id: AccentId | null) {
+  _explicitAccent = id;
+  applyAccent(getActiveAccentId());
+  emitThemeChange();
+  window.dispatchEvent(new CustomEvent('sai-accent-change', { detail: { id: getActiveAccentId() } }));
+}
+
+/**
+ * Load the saved appearance and paint it. Every window that renders SAI chrome
+ * calls this — the main app and the focus overlay both, or the overlay would
+ * sit on the CSS defaults and stay gold.
+ *
+ * Accent lands before the theme: applyTheme() resolves the accent itself, so
+ * the reverse order would repaint with the theme default and stomp the user's
+ * explicit choice.
+ */
+export async function bootstrapAppearance(): Promise<void> {
+  const settingsGet = window.sai?.settingsGet;
+  if (!settingsGet) return;
+  const [accent, theme] = await Promise.all([
+    settingsGet('accent', null),
+    settingsGet('theme', 'default'),
+  ]);
+  if (isAccentId(accent)) setAccent(accent);
+  if (theme !== 'default' && THEMES.some(t => t.id === theme)) applyTheme(theme as ThemeId);
+}
+
+/** Tell the terminal and the editor that app colors moved. */
+function emitThemeChange() {
+  window.dispatchEvent(new CustomEvent('sai-theme-change', {
+    detail: { id: _activeTheme, terminal: getTerminalTheme(_activeTheme) },
+  }));
   // Re-apply Monaco theme with new app colors
   buildMonacoThemeData(_activeHighlightTheme).then(data => {
     window.dispatchEvent(new CustomEvent('sai-monaco-theme', { detail: data }));
-  });
+  }).catch(() => { /* highlighter unavailable — editor keeps its current theme */ });
 }
 
+/**
+ * The theme's terminal palette with the active accent driving the cursor and
+ * selection. ANSI `yellow` stays yellow — it's semantic, not accent.
+ */
 export function getTerminalTheme(id: ThemeId): ITheme {
-  return THEMES.find(th => th.id === id)?.terminal ?? THEMES[0].terminal;
+  const base = THEMES.find(th => th.id === id)?.terminal ?? THEMES[0].terminal;
+  const accent = getAccent(getActiveAccentId());
+  return { ...base, cursor: accent.base, selectionBackground: `${accent.base}44` };
 }
 
 // ─── Code highlight themes ────────────────────────────────────��─────────────

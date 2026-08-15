@@ -76,7 +76,7 @@
   flex-wrap: wrap;
   padding: 8px 12px;
   background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
-  border-bottom: 1px solid rgba(212, 160, 23, 0.45);
+  border-bottom: 1px solid rgba(var(--accent-rgb), 0.45);
   font-size: 12px;
   color: var(--text);
 }
@@ -149,7 +149,7 @@
 .sai-rc__codebtn {
   background: var(--surface-2);
   color: var(--accent);
-  border: 1px solid rgba(212, 160, 23, 0.45);
+  border: 1px solid rgba(var(--accent-rgb), 0.45);
 }
 .sai-rc__codebtn:hover { background: var(--surface-3); border-color: var(--accent); }
 .sai-rc[data-expanded="true"] .sai-rc__codebtn { background: var(--surface-4); border-color: var(--accent); }

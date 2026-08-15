@@ -1593,7 +1593,7 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
           bottom: 0;
           border-radius: 12px 12px 0 0;
           padding: 2px 2px 0 2px;
-          background: linear-gradient(135deg, var(--accent) 0%, var(--orange) 20%, var(--red) 50%, var(--orange) 80%, var(--accent) 100%);
+          background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 20%, var(--accent-3) 50%, var(--accent-2) 80%, var(--accent) 100%);
           background-size: 300% 300%;
           /* steps(): background-position isn't compositable, so a continuous
              sweep re-rasters this masked ring every vsync forever and pins the
@@ -1674,7 +1674,7 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
           inset: -2px;
           border-radius: calc(var(--radius-md) + 2px);
           padding: 2px;
-          background: linear-gradient(135deg, var(--accent) 0%, var(--orange) 20%, var(--red) 50%, var(--orange) 80%, var(--accent) 100%);
+          background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 20%, var(--accent-3) 50%, var(--accent-2) 80%, var(--accent) 100%);
           background-size: 300% 300%;
           /* steps(): see .context-chip::before — continuous background-position
              animation re-rasters every frame and pins the viz compositor. */

@@ -117,7 +117,7 @@ const ANCHOR = 1000;
 export default function SaiLogo({
   mode = 'static',
   size = 24,
-  color = '#c7913b',
+  color = 'var(--accent)',
   className,
   ariaLabel,
 }: SaiLogoProps) {

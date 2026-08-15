@@ -8,7 +8,7 @@ type Phase = GithubWatcherSnapshotShape['phase'];
 const PHASE_THEME: Record<Phase, { color: string; label: string; Icon: React.ComponentType<{ size?: number }> }> = {
   pending:     { color: '#8a9099', label: 'Connecting',  Icon: Clock },
   queued:      { color: '#8a9099', label: 'Queued',      Icon: Clock },
-  in_progress: { color: '#c7910c', label: 'Running',     Icon: CircleDot },
+  in_progress: { color: 'var(--accent)', label: 'Running',     Icon: CircleDot },
   success:     { color: '#3fb950', label: 'Success',     Icon: CheckCircle2 },
   failure:     { color: '#f85149', label: 'Failed',      Icon: XCircle },
   cancelled:   { color: '#8a9099', label: 'Cancelled',   Icon: MinusCircle },
@@ -35,7 +35,7 @@ interface RunShape {
 }
 
 function jobIcon(job: JobShape): { color: string; Icon: React.ComponentType<{ size?: number }> } {
-  if (job.status === 'in_progress') return { color: '#c7910c', Icon: CircleDot };
+  if (job.status === 'in_progress') return { color: 'var(--accent)', Icon: CircleDot };
   if (job.status === 'queued' || job.status === 'waiting') return { color: '#8a9099', Icon: Clock };
   if (job.status === 'completed') {
     if (job.conclusion === 'success') return { color: '#3fb950', Icon: CheckCircle2 };

@@ -105,7 +105,7 @@ export function OverlayView() {
       >
         <div className="overlay-card overlay-idle">
           <div className="overlay-status-row" style={{ border: 'none', margin: 0, padding: 0 }}>
-            <SaiLogo mode="static" size={16} color="#c7913b" className="overlay-thinking" />
+            <SaiLogo mode="static" size={16} className="overlay-thinking" />
             <span className="overlay-focus-name">all caught up</span>
           </div>
         </div>
@@ -164,9 +164,9 @@ export function OverlayView() {
           {!idle && (
           <div className="overlay-status-row">
             {isWorking(focusRow.state)
-              ? <SaiLogo mode={driver.chainMode} size={16} color="#c7913b" className="overlay-thinking" />
+              ? <SaiLogo mode={driver.chainMode} size={16} className="overlay-thinking" />
               : focusRow.state === 'done'
-                ? <SaiLogo mode="static" size={16} color="#c7913b" className="overlay-thinking" />
+                ? <SaiLogo mode="static" size={16} className="overlay-thinking" />
                 : <WorkspaceSquircle state={focusRow.state} />}
             <span className="overlay-focus-name">{focusRow.name}</span>
             {focusRow.state !== 'done' && focusRow.state !== 'alive' && (

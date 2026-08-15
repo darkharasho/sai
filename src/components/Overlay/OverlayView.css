@@ -112,7 +112,7 @@
 }
 .overlay-focus-name { font-weight: 600; }
 .overlay-focus-state {
-  color: var(--accent, #c7913b);
+  color: var(--accent);
   font-family: 'Departure Mono', 'Geist Mono', ui-monospace, monospace;
   font-size: 11px;
   letter-spacing: 0.4px;

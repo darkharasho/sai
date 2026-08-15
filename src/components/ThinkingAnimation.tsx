@@ -24,7 +24,7 @@ export default function ThinkingAnimation({ color, hint }: ThinkingAnimationProp
     <div className="thinking-wrap">
       <div className="thinking-animation" style={color ? { color } : undefined}>
         {saiAnimationEnabled
-          ? <SaiLogo mode={chainMode} size={18} className="thinking-icon" color={color || '#c7913b'} />
+          ? <SaiLogo mode={chainMode} size={18} className="thinking-icon" color={color} />
           : <Icon size={16} className="thinking-icon" style={color ? { color } : undefined} />}
         {saiAnimationEnabled && (
           <span className="thinking-clock">[{clockText}]</span>

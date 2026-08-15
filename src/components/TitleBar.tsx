@@ -872,9 +872,9 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           font-weight: 700;
           font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           letter-spacing: 0.5px;
-          color: #c7910c;
-          background: rgba(199, 145, 12, 0.12);
-          border: 1px solid rgba(199, 145, 12, 0.35);
+          color: var(--accent);
+          background: var(--accent-dim);
+          border: 1px solid var(--border-accent);
           border-radius: 8px;
           padding: 1px 8px;
         }
