@@ -116,6 +116,7 @@ export interface MockSai {
   selectFolder: ReturnType<typeof vi.fn>;
   selectFile: ReturnType<typeof vi.fn>;
   getRecentProjects: ReturnType<typeof vi.fn>;
+  homeDir: ReturnType<typeof vi.fn>;
   openRecentProject: ReturnType<typeof vi.fn>;
   openExternal: ReturnType<typeof vi.fn>;
 
@@ -270,6 +271,7 @@ export function createMockSai(): MockSai {
     selectFolder: vi.fn().mockResolvedValue(undefined),
     selectFile: vi.fn().mockResolvedValue(undefined),
     getRecentProjects: vi.fn().mockResolvedValue([]),
+    homeDir: vi.fn().mockResolvedValue({ path: '/var/home/tester', aliases: ['/home/tester', '/var/home/tester'] }),
     openRecentProject: vi.fn().mockResolvedValue(undefined),
     openExternal: vi.fn().mockResolvedValue(undefined),
 

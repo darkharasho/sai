@@ -399,6 +399,8 @@ export interface SaiSearchApi {
 
 declare global {
   interface SaiBridge extends Record<string, any> {
+    /** Canonical home directory plus every alias spelling (symlinked homes). */
+    homeDir?: () => Promise<{ path: string; aliases: string[] }>;
     metaWorkspaceList?: () => Promise<any[]>;
     metaWorkspaceCreate?: (input: any) => Promise<any>;
     metaWorkspaceUpdate?: (id: string, patch: any) => Promise<any>;

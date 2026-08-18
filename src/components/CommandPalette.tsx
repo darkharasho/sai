@@ -4,6 +4,7 @@ import { fuzzyMatch } from '../utils/fuzzyMatch';
 import { basename } from '../utils/pathUtils';
 import SaiLogo from './SaiLogo';
 import { WorkspaceSquircle, StatusSlot } from './shared/WorkspaceSquircle';
+import { HOME_WORKSPACE_NAME, isHomeWorkspace } from '../lib/homeWorkspace';
 
 type PaletteMode = 'files' | 'commands' | 'grep' | 'sessions';
 
@@ -94,6 +95,10 @@ function highlightFilename(name: string, indices: number[]) {
   if (buf) chars.push(inHighlight ? <mark key="end">{buf}</mark> : buf);
   return <>{chars}</>;
 }
+
+/** The Home workspace reads as "Home", not as the home folder's basename. */
+const workspaceLabel = (projectPath: string): string =>
+  isHomeWorkspace(projectPath) ? HOME_WORKSPACE_NAME : basename(projectPath);
 
 export default function CommandPalette({
   open, onClose, fileIndex, slashCommands, workspaces,
@@ -192,7 +197,7 @@ export default function CommandPalette({
     const lq = query.toLowerCase();
     if (!lq) return workspaces;
     return workspaces.filter(w => {
-      const name = basename(w.projectPath);
+      const name = workspaceLabel(w.projectPath);
       return name.toLowerCase().includes(lq) || w.projectPath.toLowerCase().includes(lq);
     });
   }, [mode, query, workspaces]);
@@ -369,7 +374,7 @@ export default function CommandPalette({
           )}
 
           {mode === 'sessions' && sessionResults.map((w, i) => {
-            const name = basename(w.projectPath);
+            const name = workspaceLabel(w.projectPath);
             const isActive = w.status === 'active' || w.status === undefined;
             return (
               <div

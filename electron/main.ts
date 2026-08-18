@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, Menu, MenuItem, screen, clipboard, Notification, protocol } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { RemoteModule } from './services/remote';
@@ -705,6 +706,17 @@ function createWindow() {
 
   ipcMain.on('app:setBadgeCount', (_event, count: number) => {
     app.setBadgeCount(count);
+  });
+
+  // The Home workspace roots at $HOME. Report the realpath plus every spelling
+  // that can reach the renderer: on this class of distro /home/<user> is a
+  // symlink to /var/home/<user>, and workspace paths arrive in both forms, so
+  // identity has to be alias-aware rather than string-equal.
+  ipcMain.handle('app:homeDir', () => {
+    const raw = os.homedir();
+    let real = raw;
+    try { real = fs.realpathSync(raw); } catch { /* keep raw */ }
+    return { path: real, aliases: [...new Set([raw, real])] };
   });
 
   ipcMain.on('workspace:setActive', (_event, projectPath: string) => {

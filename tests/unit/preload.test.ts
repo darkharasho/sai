@@ -287,3 +287,11 @@ describe('window.sai.provider routing', () => {
     });
   });
 });
+
+describe('electron preload bridge — home directory', () => {
+  it('exposes homeDir and forwards it to the app:homeDir channel', () => {
+    expect(typeof exposed.homeDir).toBe('function');
+    exposed.homeDir();
+    expect(invoke).toHaveBeenCalledWith('app:homeDir');
+  });
+});

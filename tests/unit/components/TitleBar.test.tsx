@@ -21,6 +21,7 @@ vi.mock('../../../src/components/SettingsModal', () => ({
 }));
 
 import TitleBar from '../../../src/components/TitleBar';
+import { resetHomeInfo } from '../../../src/lib/homeWorkspace';
 
 const defaultProps = {
   projectPath: '/home/user/my-project',
@@ -290,5 +291,100 @@ describe('TitleBar status chip (audit 2026-06-11)', () => {
       const row = container.querySelector('[data-path="/ws/asking"]');
       expect(row?.querySelector('.ws-sq-question')).toBeTruthy();
     });
+  });
+});
+
+describe('TitleBar Home workspace', () => {
+  const HOME = '/var/home/tester';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetHomeInfo();
+  });
+
+  const openPicker = async (props: Record<string, unknown> = {}) => {
+    const { container } = render(<TitleBar {...defaultProps} {...props} />);
+    fireEvent.click(container.querySelector('.project-selector') as HTMLElement);
+    await waitFor(() => {
+      expect(screen.getByTestId('home-workspace-row')).toBeTruthy();
+    });
+    return container;
+  };
+
+  it('pins a Home row at the top of the picker even with no workspaces', async () => {
+    installMockSai();
+    const container = await openPicker();
+
+    const row = screen.getByTestId('home-workspace-row');
+    expect(row.textContent).toContain('Home');
+    // Pinned means first: it precedes any section heading in the DOM.
+    const items = Array.from(container.querySelectorAll('.workspace-item, .dropdown-label'));
+    expect(items[0]).toBe(row);
+  });
+
+  it('activates the home directory when the pinned row is clicked', async () => {
+    const onProjectChange = vi.fn();
+    installMockSai();
+    await openPicker({ onProjectChange });
+
+    fireEvent.click(screen.getByTestId('home-workspace-row'));
+    expect(onProjectChange).toHaveBeenCalledWith(HOME);
+  });
+
+  it('is permanent — no suspend/close overflow on the Home row', async () => {
+    const mock = createMockSai();
+    mock.workspaceGetAll.mockResolvedValue([
+      { projectPath: HOME, status: 'active', lastActivity: Date.now() },
+    ]);
+    installMockSai(mock);
+    const container = await openPicker();
+
+    const wrapper = container.querySelector('[data-path="' + HOME + '"]') as HTMLElement;
+    expect(wrapper.querySelector('.workspace-overflow-btn')).toBeNull();
+  });
+
+  it('dedupes home out of the Active list rather than showing it twice', async () => {
+    const mock = createMockSai();
+    mock.workspaceGetAll.mockResolvedValue([
+      { projectPath: HOME, status: 'active', lastActivity: Date.now() },
+      { projectPath: '/var/home/tester/code/app', status: 'active', lastActivity: Date.now() },
+    ]);
+    installMockSai(mock);
+    const container = await openPicker();
+
+    expect(container.querySelectorAll('[data-path="' + HOME + '"]').length).toBe(1);
+    expect(screen.queryByText('tester')).toBeNull();
+    expect(screen.getByText('app')).toBeTruthy();
+  });
+
+  it('dedupes an aliased (symlinked) home path out of the recent list', async () => {
+    const mock = createMockSai();
+    mock.workspaceGetAll.mockResolvedValue([
+      { projectPath: '/home/tester', status: 'recent', lastActivity: 0 },
+    ]);
+    installMockSai(mock);
+    const container = await openPicker();
+
+    expect(container.querySelector('[data-path="/home/tester"]')).toBeNull();
+    expect(screen.queryByText('/home/tester')).toBeNull();
+    expect(screen.getAllByTestId('home-workspace-row').length).toBe(1);
+  });
+
+  it('carries the workspace status squircle like any other workspace', async () => {
+    installMockSai();
+    const container = await openPicker({ busyWorkspaces: new Set([HOME]) });
+
+    const row = container.querySelector('[data-path="' + HOME + '"]') as HTMLElement;
+    expect(row.querySelector('.ws-sq-busy')).toBeTruthy();
+  });
+
+  it('labels the title bar "Home" instead of the home folder basename', async () => {
+    installMockSai();
+    const { container } = render(<TitleBar {...defaultProps} projectPath={HOME} />);
+    await waitFor(() => {
+      const selector = container.querySelector('.project-selector');
+      expect(selector?.textContent).toContain('Home');
+    });
+    expect(container.querySelector('.project-selector')?.textContent).not.toContain('tester');
   });
 });

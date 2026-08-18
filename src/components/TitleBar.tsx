@@ -7,7 +7,8 @@ import GitHubCloneModal from './GitHubCloneModal';
 import SettingsModal from './SettingsModal';
 import { CreateMetaWorkspaceModal } from './MetaWorkspace/CreateMetaWorkspaceModal';
 import { ManageMetaWorkspaceModal } from './MetaWorkspace/ManageMetaWorkspaceModal';
-import { LogOut, Settings, ChevronDown, FolderOpen, FolderPlus, Layers, Pencil, Search, X, LockOpen } from 'lucide-react';
+import { LogOut, Settings, ChevronDown, FolderOpen, FolderPlus, Layers, Pencil, Search, X, LockOpen, Home } from 'lucide-react';
+import { HOME_WORKSPACE_NAME, isHomeWorkspace, loadHomeInfo } from '../lib/homeWorkspace';
 import { basename } from '../utils/pathUtils';
 import SaiLogo from './SaiLogo';
 import { DOT_MASK_URL } from '../lib/assets';
@@ -69,6 +70,7 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
   const ghDropRef = useRef<HTMLDivElement>(null);
   const [showCreateMeta, setShowCreateMeta] = useState(false);
   const [manageMeta, setManageMeta] = useState<MetaWorkspaceListItem | null>(null);
+  const [homePath, setHomePath] = useState<string | null>(null);
   const [recentProjects, setRecentProjects] = useState<string[]>([]);
   const [recentQuery, setRecentQuery] = useState('');
   const [recentFocused, setRecentFocused] = useState(false);
@@ -100,7 +102,19 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
     return () => { unsubSync(); unsubMax?.(); sudoMounted = false; unsubSudo(); };
   }, []);
 
-  const projectName = activeMetaRuntime ? activeMetaRuntime.meta.name : (projectPath ? basename(projectPath) : 'No Project');
+  // Home is a permanent fixture, so resolve it once on mount rather than
+  // per-open. isHomeWorkspace() reads the same cache the rest of the app does.
+  useEffect(() => {
+    let alive = true;
+    void loadHomeInfo().then(info => { if (alive && info) setHomePath(info.path); });
+    return () => { alive = false; };
+  }, []);
+
+  const isHome = !!homePath && isHomeWorkspace(projectPath);
+  const projectName = activeMetaRuntime
+    ? activeMetaRuntime.meta.name
+    : isHome ? HOME_WORKSPACE_NAME
+    : (projectPath ? basename(projectPath) : 'No Project');
 
   useEffect(() => {
     if (open) {
@@ -269,6 +283,8 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
         <button className="project-selector" onClick={() => setOpen(!open)}>
           {activeMetaRuntime ? (
             <><Layers size={12} className="titlebar-meta-icon" /><span>{projectName}</span></>
+          ) : isHome ? (
+            <><Home size={12} className="titlebar-home-icon" /><span>{projectName}</span></>
           ) : projectName} ▾
           {(() => {
             const metaRoots = new Set((metaWorkspaces || []).map(m => m.syntheticRoot));
@@ -349,13 +365,48 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
             })()}
             {pickerTab === 'projects' && (() => {
               const metaRoots = new Set((metaWorkspaces || []).map(m => m.syntheticRoot));
-              const projectList = workspaceList.filter(w => !metaRoots.has(w.projectPath));
+              // Home has its own pinned row below — drop every spelling of it
+              // from the project sections so it never appears twice.
+              const projectList = workspaceList.filter(w => !metaRoots.has(w.projectPath) && !isHomeWorkspace(w.projectPath));
               const active = projectList.filter(w => w.status === 'active');
               const suspended = projectList.filter(w => w.status === 'suspended');
               const recent = projectList.filter(w => w.status === 'recent');
 
               return (
                 <>
+                  {homePath && (
+                    <div className="workspace-row-wrapper home-row-wrapper" data-path={homePath}>
+                      <button
+                        className={`dropdown-item workspace-item home-workspace-item ${isHome ? 'active' : ''}`}
+                        data-testid="home-workspace-row"
+                        onClick={() => { onProjectChange(homePath); setOpen(false); }}
+                      >
+                        <StatusSlot>
+                          <WorkspaceSquircle
+                            state={
+                              approvalWorkspaces?.has(homePath) ? 'approval'
+                              : awaitingQuestionWorkspaces?.has(homePath) ? 'question'
+                              : busyWorkspaces?.has(homePath) ? 'busy'
+                              : completedWorkspaces?.has(homePath) ? 'done'
+                              : isHome ? 'alive'
+                              : 'inactive'
+                            }
+                            title={
+                              approvalWorkspaces?.has(homePath) ? 'Approval needed'
+                              : awaitingQuestionWorkspaces?.has(homePath) ? 'Waiting for your answer'
+                              : busyWorkspaces?.has(homePath) ? 'Working...'
+                              : completedWorkspaces?.has(homePath) ? 'Response complete'
+                              : undefined
+                            }
+                          />
+                        </StatusSlot>
+                        <Home size={13} className="home-workspace-icon" />
+                        <span className="dropdown-item-name">{HOME_WORKSPACE_NAME}</span>
+                        {approvalWorkspaces?.has(homePath) && <span className="workspace-approval-label">Approval needed</span>}
+                        <span className="dropdown-item-path">{homePath}</span>
+                      </button>
+                    </div>
+                  )}
                   {active.length > 0 && (
                     <>
                       <div className="dropdown-label">Active</div>
@@ -877,6 +928,16 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           border: 1px solid var(--border-accent);
           border-radius: 8px;
           padding: 1px 8px;
+        }
+        .home-workspace-icon {
+          color: var(--accent);
+          flex-shrink: 0;
+          margin-right: 1px;
+        }
+        .home-row-wrapper { margin-bottom: 2px; }
+        .titlebar-home-icon {
+          color: var(--accent);
+          flex-shrink: 0;
         }
         .titlebar-meta-icon {
           color: var(--accent);

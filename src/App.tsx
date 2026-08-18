@@ -30,6 +30,7 @@ import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbPa
 import { queueSaveSession } from './lib/sessionSaveQueue';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval, EffortLevel, CodexEffort, CodexModelOption, ModelChoice, ClaudeModelOption, AIProvider } from './types';
 import type { MetaWorkspaceListItem, MetaWorkspaceRuntime } from './types';
+import { loadHomeInfo } from './lib/homeWorkspace';
 import { isAIProvider } from './types';
 import { THEMES, applyTheme, setAccent, bootstrapAppearance, type ThemeId, HIGHLIGHT_THEMES, setActiveHighlightTheme, type HighlightThemeId } from './themes';
 import { isAccentId } from './accents';
@@ -1874,6 +1875,11 @@ export default function App() {
   }, [activeProjectPath]);
 
   const [paletteWorkspaces, setPaletteWorkspaces] = useState<{ projectPath: string; status?: string; lastActivity?: number }[]>([]);
+
+  // Resolve $HOME once at startup so isHomeWorkspace() answers correctly
+  // everywhere (title bar, picker, command palette) without each caller
+  // waiting on its own round trip.
+  useEffect(() => { void loadHomeInfo(); }, []);
 
   useEffect(() => {
     let cancelled = false;
