@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { Sparkles } from 'lucide-react';
 import { SPRING, useReducedMotionTransition } from './motion';
@@ -46,8 +46,6 @@ export default function ReasoningBlock({ text, live, quiet, startedAt, durationM
   const grow = useSeedGrow(seedGrow);
   const growTransition = useReducedMotionTransition(SPRING.pop);
   const [elapsed, setElapsed] = useState(0);
-  const [peekOverflows, setPeekOverflows] = useState(false);
-  const peekRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!live) return;
@@ -57,17 +55,6 @@ export default function ReasoningBlock({ text, live, quiet, startedAt, durationM
     const t = setInterval(tick, 100);
     return () => clearInterval(t);
   }, [live, startedAt]);
-
-  // Keep the peek window pinned to the newest thought as text streams in, and
-  // only mask the top edge once older lines actually scroll under it — while
-  // the peek is still growing the first lines should read at full strength.
-  useEffect(() => {
-    if (!live) return;
-    const el = peekRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-    setPeekOverflows(el.scrollHeight > el.clientHeight + 1);
-  }, [live, text]);
 
   const label = live
     ? 'Reasoning'
@@ -110,7 +97,7 @@ export default function ReasoningBlock({ text, live, quiet, startedAt, durationM
         )}
       </div>
       {live && (
-        <div className={`rsn-peek${peekOverflows ? ' rsn-peek--masked' : ''}`} ref={peekRef}>
+        <div className="rsn-peek">
           <div className="rsn-peek-text">
             {text.split(/(\s+)/).map((part, i) =>
               /^\s+$/.test(part) ? part : <span key={i} className="rsn-w">{part}</span>
@@ -174,15 +161,9 @@ export default function ReasoningBlock({ text, live, quiet, startedAt, durationM
         .rsn--open .rsn-chev { transform: rotate(90deg); }
         .rsn-peek {
           position: relative;
-          /* Grows naturally with the streamed text up to ~10 lines, then the
-             newest lines stay pinned (auto-scroll) under the gradient mask. */
-          max-height: 220px;
-          overflow: hidden;
+          /* Uncapped: the peek grows with the streamed text and the chat's own
+             scroller follows it, so nothing is hidden while thinking. */
           padding: 0 14px 10px 34px;
-        }
-        .rsn-peek--masked {
-          -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 30px);
-          mask-image: linear-gradient(180deg, transparent 0, #000 30px);
         }
         .rsn-peek-text {
           font-size: 13px;
