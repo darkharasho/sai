@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyTurnEnd, isSchedulingTool, isBackgroundLaunch, isAsyncLaunchResult } from '@electron/services/waitClassifier';
+import { classifyTurnEnd, isSchedulingTool, isBackgroundLaunch, isAsyncLaunchResult, countLiveBackgroundTasks, isTerminalTaskStatus } from '@electron/services/waitClassifier';
 
 describe('isSchedulingTool', () => {
   it('recognizes ScheduleWakeup and CronCreate', () => {
@@ -116,5 +116,56 @@ describe('isAsyncLaunchResult', () => {
     expect(isAsyncLaunchResult([{ type: 'text', text: 'done' }])).toBe(false);
     expect(isAsyncLaunchResult(undefined)).toBe(false);
     expect(isAsyncLaunchResult(null)).toBe(false);
+  });
+});
+
+describe('countLiveBackgroundTasks', () => {
+  // The Stop hook's background_tasks is documented as "in-flight" work, but
+  // BackgroundTaskSummary.status is a free-form string and live payloads have
+  // been seen carrying settled entries. Counting the raw array length seeds a
+  // background wait that nothing can ever revoke, so terminal entries are
+  // filtered out at the boundary.
+  it('counts running/pending/backgrounded entries', () => {
+    expect(countLiveBackgroundTasks([
+      { id: 'a', type: 'subagent', status: 'running' },
+      { id: 'b', type: 'shell', status: 'pending' },
+      { id: 'c', type: 'shell', status: 'backgrounded' },
+    ])).toBe(3);
+  });
+  it('excludes settled entries', () => {
+    expect(countLiveBackgroundTasks([
+      { id: 'a', status: 'running' },
+      { id: 'b', status: 'completed' },
+      { id: 'c', status: 'failed' },
+      { id: 'd', status: 'stopped' },
+      { id: 'e', status: 'killed' },
+    ])).toBe(1);
+  });
+  it('is status-case-insensitive', () => {
+    expect(countLiveBackgroundTasks([{ id: 'a', status: 'Completed' }])).toBe(0);
+  });
+  it('counts entries with an unknown or missing status as live (conservative)', () => {
+    expect(countLiveBackgroundTasks([{ id: 'a' }, { id: 'b', status: 'weird' }])).toBe(2);
+  });
+  it('returns null when the runtime sent no ledger', () => {
+    expect(countLiveBackgroundTasks(undefined)).toBeNull();
+    expect(countLiveBackgroundTasks(null)).toBeNull();
+    expect(countLiveBackgroundTasks('nope')).toBeNull();
+  });
+  it('returns 0 for an empty ledger (authoritative "nothing in flight")', () => {
+    expect(countLiveBackgroundTasks([])).toBe(0);
+  });
+});
+
+describe('isTerminalTaskStatus', () => {
+  it('recognizes the SDK task_updated / task_notification terminal statuses', () => {
+    for (const s of ['completed', 'failed', 'stopped', 'killed']) {
+      expect(isTerminalTaskStatus(s)).toBe(true);
+    }
+  });
+  it('treats live and unknown statuses as non-terminal', () => {
+    for (const s of ['running', 'pending', 'paused', 'backgrounded', 'whatever', undefined, null]) {
+      expect(isTerminalTaskStatus(s)).toBe(false);
+    }
   });
 });

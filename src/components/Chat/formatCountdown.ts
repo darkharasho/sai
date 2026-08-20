@@ -19,3 +19,14 @@ export function formatWakeTime(nowMs: number, secondsRemaining: number): string 
   if (h === 0) h = 12;
   return `resumes ${h}:${String(m).padStart(2, '0')}${ampm}`;
 }
+
+/** Open-ended elapsed time: '45s' → '2m 05s' → '2h 11m'. Used by waits with no
+ *  known end (background work), where the only honest number is how long it has
+ *  been going. */
+export function formatElapsed(secondsElapsed: number): string {
+  const s = Math.max(0, Math.floor(secondsElapsed));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${String(s % 60).padStart(2, '0')}s`;
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
+}

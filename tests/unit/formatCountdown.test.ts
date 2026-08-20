@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatCountdown, formatWakeTime } from '@/components/Chat/formatCountdown';
+import { formatCountdown, formatWakeTime, formatElapsed } from '@/components/Chat/formatCountdown';
 
 describe('formatCountdown', () => {
   it('live MM:SS under an hour', () => {
@@ -27,5 +27,26 @@ describe('formatWakeTime', () => {
   it('handles midnight rollover to 12-hour am', () => {
     const now = new Date('2026-06-30T23:59:00').getTime();
     expect(formatWakeTime(now, 120)).toBe('resumes 12:01am');
+  });
+});
+
+describe('formatElapsed', () => {
+  // A background wait has no countdown — the pill showed only "Waiting on
+  // background work", which is indistinguishable from a hang. Elapsed time
+  // makes a stuck wait visible even if one ever slips past the backstop.
+  it('counts seconds under a minute', () => {
+    expect(formatElapsed(0)).toBe('0s');
+    expect(formatElapsed(45)).toBe('45s');
+  });
+  it('switches to m:ss at a minute', () => {
+    expect(formatElapsed(60)).toBe('1m 00s');
+    expect(formatElapsed(125)).toBe('2m 05s');
+  });
+  it('switches to h:mm at an hour', () => {
+    expect(formatElapsed(3600)).toBe('1h 00m');
+    expect(formatElapsed(7860)).toBe('2h 11m');
+  });
+  it('clamps negatives (clock skew) to zero', () => {
+    expect(formatElapsed(-5)).toBe('0s');
   });
 });

@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { AlarmClock } from 'lucide-react';
 import type { WaitMeta } from '../../../electron/services/waitClassifier';
-import { formatCountdown, formatWakeTime } from './formatCountdown';
+import { formatCountdown, formatWakeTime, formatElapsed } from './formatCountdown';
 
 interface Props {
   wait: WaitMeta;
@@ -15,11 +15,13 @@ export default function WaitingIndicator({ wait, startedAtMs, onCancel }: Props)
   const [nowMs, setNowMs] = useState(() => Date.now());
   const isScheduled = wait.kind === 'scheduled' && typeof wait.resumeInSeconds === 'number';
 
+  // Both kinds tick: scheduled counts down to its wake time, background counts
+  // UP — an open-ended wait with no visible clock reads exactly like a hang.
   useEffect(() => {
-    if (!isScheduled) return;
+    if (wait.kind === 'none') return;
     const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [isScheduled]);
+  }, [wait.kind]);
 
   if (wait.kind === 'none') return null;
 
@@ -42,6 +44,11 @@ export default function WaitingIndicator({ wait, startedAtMs, onCancel }: Props)
       )}
       {!isScheduled && typeof wait.taskCount === 'number' && wait.taskCount > 0 && (
         <span className="sai-waiting-tasks">{wait.taskCount} task{wait.taskCount === 1 ? '' : 's'} running</span>
+      )}
+      {!isScheduled && (
+        <span className="sai-waiting-count" title="Time spent waiting on background work">
+          {formatElapsed((nowMs - startedAtMs) / 1000)}
+        </span>
       )}
       <button className="sai-waiting-cancel" onClick={onCancel}>Cancel</button>
       <style>{`

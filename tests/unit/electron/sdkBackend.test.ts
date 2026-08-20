@@ -78,6 +78,7 @@ vi.mock('../../../electron/services/notify', () => ({
 
 // Import after mocks are set up
 import { SdkBackend } from '../../../electron/services/claudeBackend/sdkBackend';
+import { BACKGROUND_WAIT_SETTLE_MS, BACKGROUND_WAIT_IDLE_MS } from '../../../electron/services/waitClassifier';
 
 // fs mock — mockReadFileSync is overridden per-test that needs it; others leave it as-is
 const { mockReadFileSync } = vi.hoisted(() => ({
@@ -2207,5 +2208,145 @@ describe('SdkBackend', () => {
     const done = emits.find(e => e.type === 'done') as any;
     expect(done.wait?.kind).toBe('background');
     expect(notify.completion).not.toHaveBeenCalled();
+  });
+
+  // ── Background-wait lifecycle: the runtime's task frames are the only signal
+  //    that can CLOSE a background wait. Entry is a turn-end snapshot; without
+  //    an exit condition the pill ("Waiting on background work"), the busy slot
+  //    and the workspace spinner pin forever when the resume never comes
+  //    (user report 2026-08-19: caught repeatedly, looks in-progress for hours).
+
+  /** Run a turn that ends in a background wait (Stop-hook ledger = `tasks`),
+   *  then feed `after` frames (task lifecycle) on the still-live query. */
+  async function runBackgroundWaitTurn(tasks: unknown, after: any[] = []) {
+    let capturedOptions: any = null;
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((r) => { release = r; });
+
+    const frames = [
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu-1', name: 'Agent', input: { description: 'reviewer', prompt: 'review' } }] } },
+      { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu-1', content: [{ type: 'text', text: 'Async agent launched successfully.' }] }] } },
+      { type: 'result', stop_reason: 'end_turn', terminal_reason: 'completed', num_turns: 1, duration_ms: 10 },
+    ];
+
+    async function* gen() {
+      for (const msg of frames) {
+        if (msg.type === 'result') {
+          const stopHooks = capturedOptions?.hooks?.Stop?.flatMap((m: any) => m.hooks) ?? [];
+          for (const h of stopHooks) {
+            await h(
+              { hook_event_name: 'Stop', stop_hook_active: false, ...(tasks !== undefined ? { background_tasks: tasks } : {}) },
+              undefined,
+              { signal: new AbortController().signal },
+            );
+          }
+        }
+        yield msg;
+      }
+      for (const msg of after) yield msg;
+      await gate; // stay live like a real waiting session
+    }
+    const iterator = gen();
+    const fakeQuery: any = {
+      interrupt: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn(() => release?.()),
+      [Symbol.asyncIterator]() { return iterator; },
+    };
+    const queryFn = vi.fn((args: { prompt: any; options: any }) => {
+      capturedOptions = args.options;
+      return fakeQuery;
+    });
+    const backend = new SdkBackend({
+      queryFn,
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+      notify: makeNotifySpy(),
+    });
+    await collectUntilDone(backend, emits, { projectPath: PROJECT, message: 'go', scope: SCOPE, permMode: 'bypass' });
+    await new Promise((r) => setTimeout(r, 30)); // let the trailing frames drain
+    return { backend, fakeQuery };
+  }
+
+  const TASK_DONE = (id: string) => ({ type: 'system', subtype: 'task_notification', task_id: id, status: 'completed', output_file: '/tmp/o', summary: 'done', session_id: 's' });
+  const TASK_START = (id: string) => ({ type: 'system', subtype: 'task_started', task_id: id, description: 'reviewer', session_id: 's' });
+
+  it('(51) the last live task settling closes the background wait with an unstick done', async () => {
+    const { backend } = await runBackgroundWaitTurn(
+      [{ id: 't-1', type: 'subagent', status: 'running', description: 'reviewer' }],
+      [TASK_START('t-1'), TASK_DONE('t-1')],
+    );
+    // The wait is still open inside the settle window — a real resume normally
+    // lands here, and clearing early would race it.
+    backend._sweepOnce(Date.now());
+    expect(emits.filter(e => e.type === 'done' && e.wait == null)).toHaveLength(0);
+
+    backend._sweepOnce(Date.now() + BACKGROUND_WAIT_SETTLE_MS + 1_000);
+    const clearing = emits.filter(e => e.type === 'done' && e.wait == null);
+    expect(clearing).toHaveLength(1);
+    expect(clearing[0].turnSeq).toBeNull(); // never stale-droppable
+    backend.destroy();
+  });
+
+  it('(52) a background wait stays open while any task is still live', async () => {
+    const { backend } = await runBackgroundWaitTurn(
+      [{ id: 't-1', status: 'running' }, { id: 't-2', status: 'running' }],
+      [TASK_START('t-1'), TASK_START('t-2'), TASK_DONE('t-1')],
+    );
+    backend._sweepOnce(Date.now() + BACKGROUND_WAIT_SETTLE_MS + 1_000);
+    expect(emits.filter(e => e.type === 'done' && e.wait == null)).toHaveLength(0);
+    backend.destroy();
+  });
+
+  it('(53) a Stop-hook ledger holding only settled entries never opens a wait', async () => {
+    const { backend } = await runBackgroundWaitTurn([
+      { id: 't-1', type: 'subagent', status: 'completed', description: 'reviewer' },
+    ]);
+    const done = emits.find(e => e.type === 'done') as any;
+    expect(done.wait?.kind ?? 'none').toBe('none');
+    backend.destroy();
+  });
+
+  it('(54) a background wait with no task activity self-closes at the idle backstop', async () => {
+    // Blind ledger: the runtime emitted no task frames at all (older runtime,
+    // or the ledger entry leaked), so drain-to-zero can never fire.
+    const { backend } = await runBackgroundWaitTurn([{ id: 't-1', status: 'running' }]);
+    backend._sweepOnce(Date.now() + BACKGROUND_WAIT_IDLE_MS - 60_000);
+    expect(emits.filter(e => e.type === 'done' && e.wait == null)).toHaveLength(0);
+
+    backend._sweepOnce(Date.now() + BACKGROUND_WAIT_IDLE_MS + 1_000);
+    const clearing = emits.filter(e => e.type === 'done' && e.wait == null);
+    expect(clearing).toHaveLength(1);
+    expect(clearing[0].turnSeq).toBeNull();
+    backend.destroy();
+  });
+
+  it('(55) reconcileScope closes a settled background wait instead of re-asserting it', async () => {
+    const { backend } = await runBackgroundWaitTurn(
+      [{ id: 't-1', status: 'running' }],
+      [TASK_START('t-1'), TASK_DONE('t-1')],
+    );
+    const before = emits.length;
+    backend._nowForTest = () => Date.now() + BACKGROUND_WAIT_SETTLE_MS + 1_000;
+    backend.reconcileScope(PROJECT, SCOPE);
+    const after = emits.slice(before).filter(e => e.type === 'done');
+    expect(after).toHaveLength(1);
+    expect(after[0].wait).toBeUndefined();
+    backend.destroy();
+  });
+
+  it('(56) a resume beats the settle window: streaming_start re-arms and no clearing done fires', async () => {
+    const { backend } = await runBackgroundWaitTurn(
+      [{ id: 't-1', status: 'running' }],
+      [
+        TASK_START('t-1'),
+        TASK_DONE('t-1'),
+        // The runtime wakes the model with the task's output.
+        { type: 'assistant', message: { content: [{ type: 'text', text: 'reviewer finished' }] } },
+      ],
+    );
+    backend._sweepOnce(Date.now() + BACKGROUND_WAIT_SETTLE_MS + 1_000);
+    expect(emits.filter(e => e.type === 'done' && e.wait == null)).toHaveLength(0);
+    expect(emits.some(e => e.type === 'streaming_start' && e.turnSeq === 2)).toBe(true);
+    backend.destroy();
   });
 });

@@ -35,6 +35,42 @@ export interface ClassifyInput {
  *  abandoned (drop the pill, stop deferring the idle sweep). */
 export const WAKEUP_GRACE_MS = 60_000;
 
+/** Grace after the live task ledger drains to empty before a background wait
+ *  is closed. The runtime normally re-invokes the model within a tick of the
+ *  last task_notification; this window keeps that ordinary resume from being
+ *  raced by our own clearing done. */
+export const BACKGROUND_WAIT_SETTLE_MS = 15_000;
+
+/** Backstop for a background wait the task ledger cannot see (CLI backend,
+ *  older runtime, or a ledger entry that leaked). A genuinely running task
+ *  emits task_progress/task_updated frames, so silence this long means the
+ *  resume is never coming. Long enough not to cut off a real backgrounded
+ *  build or test run. */
+export const BACKGROUND_WAIT_IDLE_MS = 10 * 60_000;
+
+/** Task statuses that mean the work is over (SDKTaskUpdatedMessage.patch.status
+ *  and SDKTaskNotificationMessage.status). BackgroundTaskSummary.status is a
+ *  free-form string, so anything unrecognized counts as live — over-waiting is
+ *  recoverable (the idle backstop closes it), under-waiting silently drops a
+ *  pending resume. */
+const TERMINAL_TASK_STATUSES = new Set(['completed', 'failed', 'stopped', 'killed', 'cancelled', 'canceled']);
+
+export function isTerminalTaskStatus(status: unknown): boolean {
+  return typeof status === 'string' && TERMINAL_TASK_STATUSES.has(status.toLowerCase());
+}
+
+/**
+ * Live entries in a Stop-hook `background_tasks` ledger, or null when the
+ * runtime sent no ledger at all. Never count the raw array length: a settled
+ * entry that lingers there classifies the turn as a background wait, and a
+ * background wait entered on a task that is already over can never be revoked
+ * by a resume that will never come.
+ */
+export function countLiveBackgroundTasks(tasks: unknown): number | null {
+  if (!Array.isArray(tasks)) return null;
+  return tasks.filter((t) => !isTerminalTaskStatus((t as { status?: unknown } | null)?.status)).length;
+}
+
 const SCHEDULING_TOOLS = new Set(['ScheduleWakeup', 'CronCreate']);
 
 export function isSchedulingTool(toolName: string): boolean {

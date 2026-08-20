@@ -26,7 +26,7 @@ import type { StartArgs, CompactArgs } from './claudeBackend/types';
 import { getClaudeBackend, getClaudeBackendSetting } from './claudeBackend';
 export { touchActivity, getOrCreate as getOrCreateWorkspace } from './workspace';
 import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASKS_NUDGE } from './chatNudges';
-import { classifyTurnEnd, isSchedulingTool, isBackgroundLaunch, isAsyncLaunchResult, WAKEUP_GRACE_MS, type WaitMeta } from './waitClassifier';
+import { classifyTurnEnd, isSchedulingTool, isBackgroundLaunch, isAsyncLaunchResult, WAKEUP_GRACE_MS, type WaitMeta, countLiveBackgroundTasks } from './waitClassifier';
 import { getSudoAskpassHelperPath, getSudoBroker, getSudoSession, lockSudo } from './sudo';
 export { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE };
 
@@ -570,7 +570,7 @@ function ensureProcess(
             sawBackgroundLaunch: claude.sawBackgroundLaunch,
             sawAsyncLaunchResult: claude.sawAsyncLaunchResult,
             wakeupResumeInSeconds: claude.wakeupResumeInSeconds,
-            taskCount: Array.isArray(msg.background_tasks) ? msg.background_tasks.length : null,
+            taskCount: countLiveBackgroundTasks(msg.background_tasks),
           });
           claude.busy = false;
           claude.streaming = false;
