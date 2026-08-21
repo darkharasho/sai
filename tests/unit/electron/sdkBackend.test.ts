@@ -2167,13 +2167,38 @@ describe('SdkBackend', () => {
     expect(notify.completion).not.toHaveBeenCalled();
   });
 
-  it('(48) Stop-hook empty background_tasks is a real end — the authoritative zero overrides the launch sniff', async () => {
-    // The async-launch tool_result IS in the frames, but the ledger says the
-    // launched task already finished before the turn ended.
+  // Live probe 2026-08-21: a backgrounded task that SETTLES before the turn
+  // ends leaves the Stop ledger empty — and its settling is exactly what makes
+  // the runtime re-invoke the model (task_notification → fresh init → another
+  // result). Reading that empty ledger as a real end fired the "has finished"
+  // desktop notification while the chat kept working. The wait is safe to open:
+  // the drain+settle closer (51) revokes it if no resume lands.
+  it('(48) Stop-hook empty background_tasks after a launch is a wait, not an end — the task settled mid-turn', async () => {
     const { notify } = await runTurnWithStopHook([]);
+    const done = emits.find(e => e.type === 'done') as any;
+    expect(done.wait?.kind).toBe('background');
+    expect(notify.completion).not.toHaveBeenCalled();
+  });
+
+  it('(48b) an ordinary turn — nothing launched, empty ledger — still ends and notifies', async () => {
+    const { notify } = await runTurnWithStopHook([], [
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'here you go' }] } },
+      { type: 'result', stop_reason: 'end_turn', terminal_reason: 'completed', num_turns: 1, duration_ms: 100 },
+    ]);
     const done = emits.find(e => e.type === 'done') as any;
     expect(done.wait?.kind ?? 'none').toBe('none');
     expect(notify.completion).toHaveBeenCalledTimes(1);
+  });
+
+  it('(48c) a task settling mid-turn is a wait even when the resume turn launched nothing', async () => {
+    const { notify } = await runTurnWithStopHook([], [
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'still going' }] } },
+      { type: 'system', subtype: 'task_notification', task_id: 't-9', status: 'completed', session_id: 's' },
+      { type: 'result', stop_reason: 'end_turn', terminal_reason: 'completed', num_turns: 1, duration_ms: 100 },
+    ]);
+    const done = emits.find(e => e.type === 'done') as any;
+    expect(done.wait?.kind).toBe('background');
+    expect(notify.completion).not.toHaveBeenCalled();
   });
 
   it('(49) no Stop-hook ledger: the async-launch tool_result sniff still classifies a background wait', async () => {
@@ -2218,7 +2243,12 @@ describe('SdkBackend', () => {
 
   /** Run a turn that ends in a background wait (Stop-hook ledger = `tasks`),
    *  then feed `after` frames (task lifecycle) on the still-live query. */
-  async function runBackgroundWaitTurn(tasks: unknown, after: any[] = []) {
+  async function runBackgroundWaitTurn(
+    tasks: unknown,
+    after: any[] = [],
+    opts: { scope?: string; kind?: 'chat' | 'task' | 'orchestrator' } = {},
+  ) {
+    const scope = opts.scope ?? SCOPE;
     let capturedOptions: any = null;
     let release: (() => void) | null = null;
     const gate = new Promise<void>((r) => { release = r; });
@@ -2256,15 +2286,17 @@ describe('SdkBackend', () => {
       capturedOptions = args.options;
       return fakeQuery;
     });
+    const notify = makeNotifySpy();
     const backend = new SdkBackend({
       queryFn,
       emit: (p) => emits.push(p),
       resolveClaudePath: () => undefined,
-      notify: makeNotifySpy(),
+      notify,
     });
-    await collectUntilDone(backend, emits, { projectPath: PROJECT, message: 'go', scope: SCOPE, permMode: 'bypass' });
+    if (opts.kind) backend.start({ projectPath: PROJECT, scope, scopeCwd: PROJECT, kind: opts.kind });
+    await collectUntilDone(backend, emits, { projectPath: PROJECT, message: 'go', scope, permMode: 'bypass' });
     await new Promise((r) => setTimeout(r, 30)); // let the trailing frames drain
-    return { backend, fakeQuery };
+    return { backend, fakeQuery, notify, scope };
   }
 
   const TASK_DONE = (id: string) => ({ type: 'system', subtype: 'task_notification', task_id: id, status: 'completed', output_file: '/tmp/o', summary: 'done', session_id: 's' });
@@ -2297,12 +2329,17 @@ describe('SdkBackend', () => {
     backend.destroy();
   });
 
-  it('(53) a Stop-hook ledger holding only settled entries never opens a wait', async () => {
+  it('(53) a Stop-hook ledger holding only settled entries opens a wait that self-closes', async () => {
+    // Settled entries count as no live work, but the launch sniff still says a
+    // task ran and finished this turn — so a resume is expected. It must not
+    // read as a completion (no notification); the settle window ends it.
     const { backend } = await runBackgroundWaitTurn([
       { id: 't-1', type: 'subagent', status: 'completed', description: 'reviewer' },
     ]);
     const done = emits.find(e => e.type === 'done') as any;
-    expect(done.wait?.kind ?? 'none').toBe('none');
+    expect(done.wait?.kind).toBe('background');
+    backend._sweepOnce(Date.now() + BACKGROUND_WAIT_IDLE_MS + 1_000);
+    expect(emits.filter(e => e.type === 'done' && e.wait == null)).toHaveLength(1);
     backend.destroy();
   });
 
@@ -2347,6 +2384,46 @@ describe('SdkBackend', () => {
     backend._sweepOnce(Date.now() + BACKGROUND_WAIT_SETTLE_MS + 1_000);
     expect(emits.filter(e => e.type === 'done' && e.wait == null)).toHaveLength(0);
     expect(emits.some(e => e.type === 'streaming_start' && e.turnSeq === 2)).toBe(true);
+    backend.destroy();
+  });
+
+  // A wait that closes itself IS the turn end for the user — the runtime just
+  // never sent one. Without this the "has finished" notification is simply lost
+  // for every turn that ends in background work, which is the whole reason the
+  // classifier now prefers a wait over a premature completion.
+  it('(57) closing a background wait fires the turn-end completion notification', async () => {
+    const { backend, notify } = await runBackgroundWaitTurn(
+      [{ id: 't-1', status: 'running' }],
+      [TASK_START('t-1'), TASK_DONE('t-1')],
+    );
+    backend._sweepOnce(Date.now());
+    expect(notify.completion).not.toHaveBeenCalled(); // still inside the settle window
+
+    backend._sweepOnce(Date.now() + BACKGROUND_WAIT_SETTLE_MS + 1_000);
+    expect(notify.completion).toHaveBeenCalledTimes(1);
+    expect(notify.completion.mock.calls[0][0]).toBe(PROJECT);
+    backend.destroy();
+  });
+
+  it('(58) a resume before the settle window means no clearing notification', async () => {
+    const { backend, notify } = await runBackgroundWaitTurn(
+      [{ id: 't-1', status: 'running' }],
+      [TASK_START('t-1'), TASK_DONE('t-1'), { type: 'assistant', message: { content: [{ type: 'text', text: 'reviewer finished' }] } }],
+    );
+    backend._sweepOnce(Date.now() + BACKGROUND_WAIT_SETTLE_MS + 1_000);
+    expect(notify.completion).not.toHaveBeenCalled();
+    backend.destroy();
+  });
+
+  it('(59) a task-kind scope closing a wait stays silent (same gate as the result path)', async () => {
+    const { backend, notify } = await runBackgroundWaitTurn(
+      [{ id: 't-1', status: 'running' }],
+      [TASK_START('t-1'), TASK_DONE('t-1')],
+      { scope: 'swarm-task-1', kind: 'task' },
+    );
+    backend._sweepOnce(Date.now() + BACKGROUND_WAIT_SETTLE_MS + 1_000);
+    expect(emits.filter(e => e.type === 'done' && e.wait == null)).toHaveLength(1);
+    expect(notify.completion).not.toHaveBeenCalled();
     backend.destroy();
   });
 });

@@ -23,6 +23,12 @@ export interface ClassifyInput {
    *  background_requested, no background_tasks field), so the launch itself is the
    *  only positive signal that a resume is coming. */
   sawBackgroundLaunch?: boolean;
+  /** True if a background task the session was tracking reached a terminal
+   *  status during this turn (system task_updated/task_notification). A task
+   *  finishing is what makes the runtime re-invoke the model, so a turn that
+   *  ends right after one is a wait — even when the ledger is empty and
+   *  nothing new launched (resume turns launch nothing). */
+  sawTaskSettled?: boolean;
   /** True if a tool_result reporting an async launch arrived this turn. The
    *  runtime can background a launch the INPUT never asked for (live transcript
    *  2026-07-05: an Agent tool_use with no run_in_background flag came back
@@ -135,23 +141,28 @@ export function classifyTurnEnd(input: ClassifyInput): WaitMeta {
   if (input.terminalReason === 'completed' && input.sawSchedulingTool) {
     return { kind: 'scheduled', resumeInSeconds: input.wakeupResumeInSeconds ?? null, taskCount: null };
   }
-  // The runtime reported its in-flight ledger at stop time (SDK Stop hook):
-  // authoritative in BOTH directions. >0 is a wait regardless of what (if
-  // anything) launched this turn — covers launches the input sniff can't see
-  // and resume turns that launch nothing new. An explicit 0 means any launch
-  // sniffed this turn already finished, so the sniff rules below must not fire.
+  // The runtime reported in-flight work at stop time (SDK Stop hook): >0 is a
+  // wait regardless of what (if anything) launched this turn — it covers
+  // launches the input sniff can't see and resume turns that launch nothing
+  // new. Never on aborted/error reasons, where the turn ended for real.
   const endedNaturally = input.terminalReason === 'completed' || input.terminalReason == null;
-  if (typeof input.taskCount === 'number') {
-    if (endedNaturally && input.taskCount > 0) {
-      return { kind: 'background', resumeInSeconds: null, taskCount: input.taskCount };
-    }
-    return { kind: 'none', resumeInSeconds: null, taskCount: null };
+  if (typeof input.taskCount === 'number' && endedNaturally && input.taskCount > 0) {
+    return { kind: 'background', resumeInSeconds: null, taskCount: input.taskCount };
   }
-  // No ledger (CLI backend / older runtime): a turn that launched background
-  // work and then ended 'completed' is a wait — the runtime will re-invoke the
-  // model when the task finishes (the CLI does NOT tag this case
-  // background_requested — see sawBackgroundLaunch above).
-  if (input.terminalReason === 'completed' && (input.sawBackgroundLaunch || input.sawAsyncLaunchResult)) {
+  // An EMPTY ledger is not a real end on its own. background_tasks is a
+  // snapshot of what is still running; it says nothing about a resume already
+  // queued. When work launched this turn (or a tracked task settled during it)
+  // and the ledger is already empty, the task finished mid-turn — which is
+  // precisely what makes the runtime re-invoke the model (live probe
+  // 2026-08-21: backgrounded `echo hi` settled before the turn ended, Stop
+  // reported [], then task_notification + a fresh init/result followed).
+  // Calling that 'none' fired the turn-end desktop notification with the chat
+  // still working. Over-waiting is recoverable — the drain+settle closer
+  // revokes a wait no resume answers — so these signals win over the zero.
+  if (
+    input.terminalReason === 'completed'
+    && (input.sawBackgroundLaunch || input.sawAsyncLaunchResult || input.sawTaskSettled)
+  ) {
     return { kind: 'background', resumeInSeconds: null, taskCount: null };
   }
   return { kind: 'none', resumeInSeconds: null, taskCount: null };

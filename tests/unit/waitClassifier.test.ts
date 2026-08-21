@@ -83,9 +83,28 @@ describe('classifyTurnEnd', () => {
     expect(classifyTurnEnd({ terminalReason: 'completed', sawSchedulingTool: false, taskCount: 0 }).kind).toBe('none');
     expect(classifyTurnEnd({ terminalReason: 'completed', sawSchedulingTool: false, taskCount: null }).kind).toBe('none');
   });
-  it('an authoritative zero overrides the launch sniff (the launched task already finished)', () => {
-    expect(classifyTurnEnd({ terminalReason: 'completed', sawSchedulingTool: false, sawBackgroundLaunch: true, taskCount: 0 }).kind).toBe('none');
-    expect(classifyTurnEnd({ terminalReason: 'completed', sawSchedulingTool: false, sawAsyncLaunchResult: true, taskCount: 0 }).kind).toBe('none');
+  // A launch sniffed this turn whose ledger is ALREADY empty means the task
+  // finished DURING the turn — and a task finishing is exactly what makes the
+  // runtime re-invoke the model (live probe 2026-08-21: a backgrounded
+  // `echo hi` settled before the turn ended, Stop reported background_tasks
+  // [], and a task_notification + fresh init/result followed). Treating that
+  // zero as a real end fires the "has finished" desktop notification while the
+  // chat is still working. Over-waiting is recoverable — the drain+settle
+  // closer revokes a wait no resume answers — so the launch sniff wins.
+  it('a zero ledger does NOT override the launch sniff (the task settled mid-turn; a resume is coming)', () => {
+    expect(classifyTurnEnd({ terminalReason: 'completed', sawSchedulingTool: false, sawBackgroundLaunch: true, taskCount: 0 }).kind).toBe('background');
+    expect(classifyTurnEnd({ terminalReason: 'completed', sawSchedulingTool: false, sawAsyncLaunchResult: true, taskCount: 0 }).kind).toBe('background');
+  });
+  it('a zero ledger still ends the turn when nothing launched and no task settled', () => {
+    expect(classifyTurnEnd({ terminalReason: 'completed', sawSchedulingTool: false, taskCount: 0 }).kind).toBe('none');
+  });
+  // Resume turns launch nothing new, so the sniff is blind to a SECOND task
+  // that settles during them; the session's task ledger is the signal.
+  it('classifies a turn in which a background task settled as a background wait', () => {
+    expect(classifyTurnEnd({ terminalReason: 'completed', sawSchedulingTool: false, sawTaskSettled: true, taskCount: 0 }).kind).toBe('background');
+  });
+  it('a settled task on an aborted turn stays a real end', () => {
+    expect(classifyTurnEnd({ terminalReason: 'aborted_streaming', sawSchedulingTool: false, sawTaskSettled: true, taskCount: 0 }).kind).toBe('none');
   });
   it('async-launch tool_result sniff classifies background when no ledger exists', () => {
     expect(classifyTurnEnd({ terminalReason: 'completed', sawSchedulingTool: false, sawAsyncLaunchResult: true }))

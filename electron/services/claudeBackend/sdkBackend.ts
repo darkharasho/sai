@@ -129,6 +129,11 @@ interface ScopeSession {
    *  the "in progress" UI it implies) pins forever when the resume never comes.
    *  Spans turns — background tasks outlive the turn that launched them. */
   liveTasks: Map<string, string>;
+  /** A tracked background task reached a terminal status during the CURRENT
+   *  turn. Per-turn (cleared by _resetWaitTracking): a task finishing is what
+   *  makes the runtime re-invoke the model, so a turn ending right after one
+   *  is a wait even though the ledger is now empty and nothing new launched. */
+  sawTaskSettled: boolean;
   /** Any task-lifecycle frame seen in this session. False means the ledger is
    *  blind (older runtime / no frames), so drain-to-zero proves nothing and
    *  only the idle backstop may close a wait. */
@@ -827,6 +832,7 @@ export class SdkBackend implements ClaudeBackend {
     session.sawSchedulingTool = false;
     session.sawBackgroundLaunch = false;
     session.sawAsyncLaunchResult = false;
+    session.sawTaskSettled = false;
     session.stopBackgroundTaskCount = null;
     session.wakeupResumeInSeconds = null;
     session.pendingWakeup = false;
@@ -1061,6 +1067,7 @@ export class SdkBackend implements ClaudeBackend {
       pendingBackgroundResume: false,
       wakeupDeadline: null,
       liveTasks: new Map(),
+      sawTaskSettled: false,
       sawTaskFrames: false,
       lastTaskEventAt: Date.now(),
       backgroundSettleAt: null,
@@ -1155,13 +1162,16 @@ export class SdkBackend implements ClaudeBackend {
           break;
         case 'task_updated': {
           const status = (m.patch as { status?: unknown } | undefined)?.status;
-          if (isTerminalTaskStatus(status)) session.liveTasks.delete(id);
-          else if (typeof status === 'string') session.liveTasks.set(id, status);
+          if (isTerminalTaskStatus(status)) {
+            session.liveTasks.delete(id);
+            session.sawTaskSettled = true;
+          } else if (typeof status === 'string') session.liveTasks.set(id, status);
           break;
         }
         case 'task_notification':
           // Always terminal ('completed' | 'failed' | 'stopped').
           session.liveTasks.delete(id);
+          session.sawTaskSettled = true;
           break;
       }
     }
@@ -1222,6 +1232,11 @@ export class SdkBackend implements ClaudeBackend {
       scope: session._scopeName,
       turnSeq: null,
     });
+    // This close IS the turn end for the user — the runtime never sent one, so
+    // the result path's notification never fired. Same chat-kind gate as there
+    // (task/orchestrator scopes have their own opt-in path in the renderer).
+    // No duration/turns/cost: there is no result frame to read them from.
+    if (session.kind === 'chat') this._notify.completion(session._projectPath, { provider: 'Claude' });
     return true;
   }
 
@@ -1295,6 +1310,7 @@ export class SdkBackend implements ClaudeBackend {
               sawSchedulingTool: session.sawSchedulingTool,
               sawBackgroundLaunch: session.sawBackgroundLaunch,
               sawAsyncLaunchResult: session.sawAsyncLaunchResult,
+              sawTaskSettled: session.sawTaskSettled,
               wakeupResumeInSeconds: session.wakeupResumeInSeconds,
               // The Stop hook's ledger (stashed just before this frame) is the
               // authoritative in-flight count; result-frame background_tasks is
